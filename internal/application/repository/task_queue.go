@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -23,8 +24,8 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 }
 
 // Enqueue inserts a single op. Callers must populate TenantID/TaskType/
-// Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
-// EnqueuedAt is filled with the DB-side default if left zero.
+// Scope/ScopeID/Op (Payload optional). ID and FailCount default to zero;
+// EnqueuedAt is normalized in the repository if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
 	if op == nil {
 		return errors.New("task pending ops: nil op")
@@ -40,6 +41,9 @@ func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPe
 		// default but explicit "{}" keeps the row uniform regardless of
 		// driver-level default handling.
 		op.Payload = []byte("{}")
+	}
+	if op.EnqueuedAt.IsZero() {
+		op.EnqueuedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(op).Error
 }
@@ -93,7 +97,7 @@ func (r *taskPendingOpsRepository) PeekBatch(
 // (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
 // runs in one transaction:
 //
-//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//   - PostgreSQL / MySQL: we lock the ANCHOR row (earliest eligible id) of each
 //     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
 //     uniquely represents its key, SKIP LOCKED hands concurrent claimers
 //     DISJOINT key sets — a key whose anchor is already locked by another
@@ -118,14 +122,15 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	if limit > 1000 {
 		limit = 1000
 	}
-	now := time.Now()
+	staleBefore = staleBefore.UTC()
+	now := time.Now().UTC()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if NewDialect(tx).SupportsSkipLocked() {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
@@ -145,8 +150,8 @@ WHERE id IN (
 			)
 	) anchors WHERE anchors.rn = 1
 )
-ORDER BY id ASC
-LIMIT ?
+	ORDER BY id ASC
+	LIMIT ?
 FOR UPDATE SKIP LOCKED`
 			if err := tx.Raw(anchorSQL,
 				taskType, scope, scopeID, staleBefore,
@@ -229,13 +234,39 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the
-// new value. We use UPDATE ... RETURNING so the read+write happens in
-// one round trip and races between concurrent IncrFailCount callers
-// resolve to monotonic counts.
+// new value. PostgreSQL uses UPDATE ... RETURNING; MySQL takes a row lock and
+// performs the read/update inside one transaction. Both keep concurrent calls
+// monotonic.
 //
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if NewDialect(r.db).IsMySQL() {
+		var newCount int
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var current types.TaskPendingOp
+			err := tx.Select("fail_count").
+				Where("id = ?", id).
+				Clauses(clause.Locking{Strength: "UPDATE"}).
+				First(&current).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			newCount = current.FailCount + 1
+			return tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				Update("fail_count", newCount).Error
+		})
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
+
 	var newCount int
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
@@ -315,6 +346,9 @@ func (r *taskDeadLetterRepository) Insert(ctx context.Context, dl *types.TaskDea
 	}
 	if len(dl.Payload) == 0 {
 		dl.Payload = []byte("{}")
+	}
+	if dl.FailedAt.IsZero() {
+		dl.FailedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(dl).Error
 }

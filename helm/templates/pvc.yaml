@@ -6,7 +6,7 @@ Persistent Volume Claims for stateful components.
 */}}
 
 {{/* PostgreSQL PVC */}}
-{{- if and .Values.postgresql.enabled .Values.postgresql.persistence.enabled (not .Values.postgresql.persistence.existingClaim) }}
+{{- if and .Values.postgresql.enabled .Values.database.managed (eq (lower .Values.database.driver) "postgres") .Values.postgresql.persistence.enabled (not .Values.postgresql.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -20,6 +20,25 @@ spec:
   resources:
     requests:
       storage: {{ .Values.postgresql.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
+{{/* MySQL PVC */}}
+{{- if and .Values.mysql.enabled .Values.database.managed (eq (lower .Values.database.driver) "mysql") .Values.mysql.persistence.enabled (not .Values.mysql.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mysql.persistence.size }}
   {{- include "weknora.storageClass" . | nindent 2 }}
 ---
 {{- end }}
@@ -58,6 +77,25 @@ spec:
   resources:
     requests:
       storage: {{ .Values.neo4j.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
+{{/* Qdrant PVC */}}
+{{- if and .Values.qdrant.enabled .Values.qdrant.persistence.enabled (not .Values.qdrant.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "vector-store" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.qdrant.persistence.size }}
   {{- include "weknora.storageClass" . | nindent 2 }}
 ---
 {{- end }}

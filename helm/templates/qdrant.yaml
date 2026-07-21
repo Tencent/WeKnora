@@ -1,0 +1,110 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+Qdrant vector database Deployment and Service.
+*/}}
+{{- if .Values.qdrant.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "vector-store" "context" .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "vector-store" "context" .) | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "vector-store" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: qdrant
+          image: {{ printf "%s:%s" .Values.qdrant.image.repository .Values.qdrant.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          {{- with .Values.qdrant.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 6333
+              name: http
+              protocol: TCP
+            - containerPort: 6334
+              name: grpc
+              protocol: TCP
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+          resources:
+            {{- toYaml .Values.qdrant.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+      volumes:
+        - name: qdrant-data
+          {{- if .Values.qdrant.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.qdrant.persistence.existingClaim | default (printf "%s-qdrant" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.qdrant.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.qdrant.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.qdrant.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "vector-store" "context" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "vector-store" "context" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 6334
+      targetPort: grpc
+      protocol: TCP
+{{- end }}

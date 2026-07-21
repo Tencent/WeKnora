@@ -10,7 +10,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // MCPToolApprovalRepository implements interfaces.MCPToolApprovalRepository.
@@ -53,9 +52,9 @@ func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uin
 }
 
 // Upsert creates or updates the approval flag for a tool atomically.
-// Uses ON CONFLICT against the (tenant_id, service_id, tool_name) unique index
-// so concurrent writers don't race the prior SELECT-then-INSERT path into
-// duplicate-key 500s.
+// Uses a dialect-aware upsert against the
+// (tenant_id, service_id, tool_name) unique index so concurrent writers don't
+// race the prior SELECT-then-INSERT path into duplicate-key 500s.
 func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPToolApproval) error {
 	if row == nil {
 		return errors.New("row is nil")
@@ -68,17 +67,12 @@ func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPTo
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = now
 	}
-	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "tenant_id"},
-			{Name: "service_id"},
-			{Name: "tool_name"},
-		},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"require_approval": row.RequireApproval,
-			"updated_at":       now,
-		}),
-	}).Create(row).Error
+	err := r.db.WithContext(ctx).
+		Clauses(NewDialect(r.db).Upsert(
+			[]string{"tenant_id", "service_id", "tool_name"},
+			[]string{"require_approval", "updated_at"},
+		)).
+		Create(row).Error
 	if err != nil {
 		return fmt.Errorf("upsert mcp tool approval: %w", err)
 	}

@@ -1,51 +1,69 @@
 package repository
 
 import (
+	"strings"
+
 	"gorm.io/gorm"
 )
+
+type jsonModelReference struct {
+	column string
+	path   []string
+}
+
+func scopeJSONModelReferences(
+	db *gorm.DB,
+	modelID string,
+	directColumns []string,
+	jsonReferences []jsonModelReference,
+) *gorm.DB {
+	dialect := NewDialect(db)
+	conditions := make([]string, 0, len(directColumns)+len(jsonReferences))
+	args := make([]interface{}, 0, len(directColumns)+len(jsonReferences))
+
+	for _, column := range directColumns {
+		conditions = append(conditions, dialect.QuoteIdentifier(column)+" = ?")
+		args = append(args, modelID)
+	}
+	for _, reference := range jsonReferences {
+		expr := dialect.JSONText(reference.column, reference.path...)
+		conditions = append(conditions, expr.SQL+" = ?")
+		args = append(args, expr.Args...)
+		args = append(args, modelID)
+	}
+	return db.Where(strings.Join(conditions, " OR "), args...)
+}
 
 // scopeKnowledgeBasesByModelID filters knowledge_bases rows that reference
 // modelID in any model-binding field.
 func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
-		return db.Where(
-			"embedding_model_id = ? OR summary_model_id = ? OR "+
-				"image_processing_config->>'model_id' = ? OR "+
-				"vlm_config->>'model_id' = ? OR "+
-				"asr_config->>'model_id' = ? OR "+
-				"wiki_config->>'synthesis_model_id' = ?",
-			modelID, modelID, modelID, modelID, modelID, modelID,
-		)
-	}
-	return db.Where(
-		"embedding_model_id = ? OR summary_model_id = ? OR "+
-			"json_extract(image_processing_config, '$.model_id') = ? OR "+
-			"json_extract(vlm_config, '$.model_id') = ? OR "+
-			"json_extract(asr_config, '$.model_id') = ? OR "+
-			"json_extract(wiki_config, '$.synthesis_model_id') = ?",
-		modelID, modelID, modelID, modelID, modelID, modelID,
+	return scopeJSONModelReferences(
+		db,
+		modelID,
+		[]string{"embedding_model_id", "summary_model_id"},
+		[]jsonModelReference{
+			{column: "image_processing_config", path: []string{"model_id"}},
+			{column: "vlm_config", path: []string{"model_id"}},
+			{column: "asr_config", path: []string{"model_id"}},
+			{column: "wiki_config", path: []string{"synthesis_model_id"}},
+		},
 	)
 }
 
 // scopeCustomAgentsByModelID filters custom_agents rows whose config JSON
 // references modelID in any model-binding field.
 func scopeCustomAgentsByModelID(db *gorm.DB, modelID string) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
-		return db.Where(
-			"config->>'model_id' = ? OR config->>'rerank_model_id' = ? OR "+
-				"config->>'vlm_model_id' = ? OR config->>'asr_model_id' = ? OR "+
-				"config->>'query_understand_model_id' = ? OR "+
-				"config->'question_suggestions'->'follow_ups'->>'model_id' = ?",
-			modelID, modelID, modelID, modelID, modelID, modelID,
-		)
-	}
-	return db.Where(
-		"json_extract(config, '$.model_id') = ? OR "+
-			"json_extract(config, '$.rerank_model_id') = ? OR "+
-			"json_extract(config, '$.vlm_model_id') = ? OR "+
-			"json_extract(config, '$.asr_model_id') = ? OR "+
-			"json_extract(config, '$.query_understand_model_id') = ? OR "+
-			"json_extract(config, '$.question_suggestions.follow_ups.model_id') = ?",
-		modelID, modelID, modelID, modelID, modelID, modelID,
+	return scopeJSONModelReferences(
+		db,
+		modelID,
+		nil,
+		[]jsonModelReference{
+			{column: "config", path: []string{"model_id"}},
+			{column: "config", path: []string{"rerank_model_id"}},
+			{column: "config", path: []string{"vlm_model_id"}},
+			{column: "config", path: []string{"asr_model_id"}},
+			{column: "config", path: []string{"query_understand_model_id"}},
+			{column: "config", path: []string{"question_suggestions", "follow_ups", "model_id"}},
+		},
 	)
 }

@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -95,6 +95,11 @@ type MigrationOptions struct {
 	// parsing a URL-based DSN, which avoids breakage when the path contains
 	// spaces (e.g. macOS "Application Support").
 	SQLiteDBPath string
+
+	// MySQLDSN is a native go-sql-driver/mysql DSN. When set, migrations
+	// use a database instance instead of the mysql:// URL parser, preserving
+	// passwords containing '%' and other URL-significant characters.
+	MySQLDSN string
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
@@ -104,7 +109,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	logger.Infof(ctx, "Starting database migration...")
 
 	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
+	switch {
+	case opts.MySQLDSN != "" || strings.HasPrefix(dsn, "mysql://"):
+		migrationsPath = "file://migrations/mysql"
+	case strings.HasPrefix(dsn, "sqlite3://"):
 		migrationsPath = "file://migrations/sqlite"
 	}
 
@@ -129,6 +137,30 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+	} else if opts.MySQLDSN != "" {
+		sqlDB, err := sql.Open("mysql", opts.MySQLDSN)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to open mysql db for migration: %v", err)
+			wrapped := fmt.Errorf("failed to open mysql db for migration: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		driver, err := mysqlmigrate.WithInstance(sqlDB, &mysqlmigrate.Config{})
+		if err != nil {
+			sqlDB.Close()
+			logger.Errorf(ctx, "Failed to create mysql migrate driver: %v", err)
+			wrapped := fmt.Errorf("failed to create mysql migrate driver: %w", err)
+			setMigrationState(0, false, wrapped.Error(), false)
+			return wrapped
+		}
+		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "mysql", driver)
+		if err != nil {
+			sqlDB.Close()
+			logger.Errorf(ctx, "Failed to create mysql migrate instance: %v", err)
+			wrapped := fmt.Errorf("failed to create mysql migrate instance: %w", err)
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
@@ -296,31 +328,4 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 	logger.Infof(ctx, "Successfully forced migration to version %d, migration will be retried", forceVersion)
 	return nil
-}
-
-// GetMigrationVersion returns the current migration version
-func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
-
-	migrationsPath := "file://migrations/versioned"
-
-	m, err := migrate.New(migrationsPath, dbURL)
-	if err != nil {
-		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
-	}
-	defer m.Close()
-
-	version, dirty, err := m.Version()
-	if err != nil {
-		return 0, false, err
-	}
-
-	return version, dirty, nil
 }

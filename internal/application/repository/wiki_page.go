@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -29,10 +31,22 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	length := NewDialect(r.db).JSONLength("category_path")
+	return "CASE WHEN " + length.SQL + " > 0 THEN 0 ELSE 1 END ASC"
+}
+
+func (r *wikiPageRepository) sourceRefPredicate(
+	sourceKnowledgeID string,
+	likePattern string,
+) (string, []interface{}, error) {
+	dialect := NewDialect(r.db)
+	exact, err := dialect.JSONArrayContainsString("source_refs", sourceKnowledgeID)
+	if err != nil {
+		return "", nil, err
 	}
-	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	args := append([]interface{}{}, exact.Args...)
+	args = append(args, likePattern)
+	return "(" + exact.SQL + " OR " + dialect.CastText("source_refs") + " LIKE ?)", args, nil
 }
 
 // Create inserts a new wiki page record
@@ -165,12 +179,30 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		dialect := NewDialect(r.db)
+		like := "%" + escapeLikePattern(req.Query) + "%"
+		if dialect.IsPostgres() {
+			// Keep PostgreSQL's indexed full-text search. Other business
+			// databases use portable case-insensitive LIKE predicates.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				like,
+			)
+		} else {
+			aliasesLike := dialect.CaseInsensitiveLikeExpr(
+				SQLExpression{SQL: dialect.CastText("aliases")},
+				like,
+			)
+			args := []interface{}{like, like}
+			args = append(args, aliasesLike.Args...)
+			query = query.Where(
+				"("+dialect.CaseInsensitiveLike("title")+" OR "+
+					dialect.CaseInsensitiveLike("content")+" OR "+
+					aliasesLike.SQL+")",
+				args...,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -185,12 +217,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("depth = ?", *req.CategoryDepth)
 	}
 	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
-		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
-				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
-			} else {
-				query = query.Where("category_path = ?", string(encoded))
-			}
+		if expr, err := NewDialect(r.db).JSONEquals("category_path", []string(wantPath)); err == nil {
+			query = query.Where(expr.SQL, expr.Args...)
 		}
 	}
 
@@ -311,11 +339,6 @@ func (r *wikiPageRepository) ListByTypeLight(
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
 	// Build the JSON needle safely so arbitrary IDs cannot break out of the
 	// quoted string (e.g. ids containing quotes or backslashes).
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
-	}
-
 	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
 	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
 	prefix, err := json.Marshal(sourceKnowledgeID + "|")
@@ -331,14 +354,14 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
 	// with %…% to match anywhere in the serialized JSON array.
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+	predicate, args, err := r.sourceRefPredicate(sourceKnowledgeID, likePattern)
+	if err != nil {
+		return nil, fmt.Errorf("build source ref predicate: %w", err)
+	}
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ? AND "+predicate, append([]interface{}{kbID}, args...)...).
 		Find(&pages).Error; err != nil {
 		return nil, err
 	}
@@ -355,10 +378,6 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // containment branch and idx_wiki_pages_source_refs_text for the legacy
 // text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
-	}
 	prefix, err := json.Marshal(sourceKnowledgeID + "|")
 	if err != nil {
 		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
@@ -368,15 +387,15 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 		prefixStr = prefixStr[:len(prefixStr)-1]
 	}
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+	predicate, args, err := r.sourceRefPredicate(sourceKnowledgeID, likePattern)
+	if err != nil {
+		return nil, fmt.Errorf("build source ref predicate: %w", err)
+	}
 
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ? AND "+predicate, append([]interface{}{kbID}, args...)...).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
 	}
@@ -645,13 +664,6 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if kid == "" {
 			continue
 		}
-		needle, err := json.Marshal([]string{kid})
-		if err != nil {
-			return nil, fmt.Errorf("marshal kid needle: %w", err)
-		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
-
 		prefix, err := json.Marshal(kid + "|")
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid prefix: %w", err)
@@ -660,8 +672,15 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		predicate, predicateArgs, err := r.sourceRefPredicate(
+			kid,
+			"%"+escapeLikePattern(prefixStr)+"%",
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build source ref predicate: %w", err)
+		}
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
 	}
 	if len(clauses) == 0 {
 		return nil, nil
@@ -825,17 +844,12 @@ func (r *wikiPageRepository) ListByTypeRecent(
 	return entries, nil
 }
 
-// FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
+// FindSimilarPages returns likely entity/concept merge candidates. PostgreSQL
+// keeps its pg_trgm path; MySQL and SQLite use a bounded title/alias LIKE
+// prefilter and leave final similarity decisions to the existing Go pipeline.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
-// limit is clamped to [1, 50]. Pages whose title similarity is below
-// 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// limit is clamped to [1, 50].
 func (r *wikiPageRepository) FindSimilarPages(
 	ctx context.Context,
 	kbID string,
@@ -859,14 +873,32 @@ func (r *wikiPageRepository) FindSimilarPages(
 	q := strings.ToLower(strings.TrimSpace(query))
 
 	var rows []types.WikiPageLite
-	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
-			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
-		Limit(limit).
-		Scan(&rows).Error; err != nil {
+	db := r.db.WithContext(ctx).Model(&types.WikiPage{})
+	dialect := NewDialect(r.db)
+	if dialect.IsPostgres() {
+		db = db.
+			Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
+				kbID, pageTypes, types.WikiPageStatusArchived, q).
+			Order("sim DESC")
+	} else {
+		like := "%" + escapeLikePattern(q) + "%"
+		aliasesLike := dialect.CaseInsensitiveLikeExpr(
+			SQLExpression{SQL: dialect.CastText("aliases")},
+			like,
+		)
+		args := []interface{}{kbID, pageTypes, types.WikiPageStatusArchived, like}
+		args = append(args, aliasesLike.Args...)
+		db = db.
+			Select("slug, title, page_type, status, aliases, out_links").
+			Where(
+				"knowledge_base_id = ? AND page_type IN ? AND status <> ? AND ("+
+					dialect.CaseInsensitiveLike("title")+" OR "+aliasesLike.SQL+")",
+				args...,
+			).
+			Order("title ASC")
+	}
+	if err := db.Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*types.WikiPageLite, len(rows))
@@ -957,8 +989,8 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+// Search performs case-insensitive regular expression search on wiki pages
+// within a knowledge base.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -980,27 +1012,92 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	dialect := NewDialect(r.db)
+	if !dialect.IsPostgres() && !dialect.IsMySQL() {
+		return r.searchPagesInApplication(ctx, kbID, query, limit)
+	}
+	titleRegex := dialect.CaseInsensitiveRegex("title")
+	slugRegex := dialect.CaseInsensitiveRegex("slug")
+	summaryRegex := dialect.CaseInsensitiveRegex("summary")
+	contentRegex := dialect.CaseInsensitiveRegex("content")
+
 	// CASE expression is evaluated per-row during SELECT; we order by the
-	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
-	// arg rewriting quirks.
+	// alias so the DB only computes the rank once.
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN " + titleRegex + " THEN 4 " +
+		"WHEN " + slugRegex + " THEN 3 " +
+		"WHEN " + summaryRegex + " THEN 2 " +
+		"WHEN " + contentRegex + " THEN 1 " +
 		"ELSE 0 END AS match_rank"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
 		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
+		Where(
+			"knowledge_base_id = ? AND ("+
+				titleRegex+" OR "+contentRegex+" OR "+summaryRegex+" OR "+slugRegex+")",
 			kbID, query, query, query, query).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
 		Find(&pages).Error; err != nil {
 		return nil, err
+	}
+	return pages, nil
+}
+
+func (r *wikiPageRepository) searchPagesInApplication(
+	ctx context.Context,
+	kbID string,
+	query string,
+	limit int,
+) ([]*types.WikiPage, error) {
+	re, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		return nil, fmt.Errorf("invalid wiki search expression: %w", err)
+	}
+
+	var candidates []*types.WikiPage
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND status != ?", kbID, types.WikiPageStatusArchived).
+		Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+
+	type rankedPage struct {
+		page *types.WikiPage
+		rank int
+	}
+	ranked := make([]rankedPage, 0, len(candidates))
+	for _, page := range candidates {
+		rank := 0
+		switch {
+		case re.MatchString(page.Title):
+			rank = 4
+		case re.MatchString(page.Slug):
+			rank = 3
+		case re.MatchString(page.Summary):
+			rank = 2
+		case re.MatchString(page.Content):
+			rank = 1
+		}
+		if rank > 0 {
+			ranked = append(ranked, rankedPage{page: page, rank: rank})
+		}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].rank != ranked[j].rank {
+			return ranked[i].rank > ranked[j].rank
+		}
+		return ranked[i].page.UpdatedAt.After(ranked[j].page.UpdatedAt)
+	})
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+
+	pages := make([]*types.WikiPage, len(ranked))
+	for i := range ranked {
+		pages[i] = ranked[i].page
 	}
 	return pages, nil
 }
@@ -1031,10 +1128,14 @@ func (r *wikiPageRepository) CountByType(ctx context.Context, kbID string) (map[
 // CountOrphans returns the number of pages with no inbound links
 func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int64, error) {
 	var count int64
+	emptyLinks, err := NewDialect(r.db).JSONEquals("in_links", []string{})
+	if err != nil {
+		return 0, err
+	}
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", kbID).
-		Where("(in_links IS NULL OR in_links = '[]'::JSONB)").
+		Where("(in_links IS NULL OR "+emptyLinks.SQL+")", emptyLinks.Args...).
 		// Exclude index and log pages as they are naturally root pages
 		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
 		Count(&count).Error; err != nil {

@@ -58,7 +58,23 @@ log_success() {
     printf "%b\n" "${GREEN}[SUCCESS]${NC} $1"
 }
 
-# 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）
+# Validate the only supported MySQL business-primary combination.
+validate_database_retriever() {
+    local db_driver retrieve_driver
+    db_driver="$(printf '%s' "${DB_DRIVER:-postgres}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    retrieve_driver="$(printf '%s' "${RETRIEVE_DRIVER:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    case ",$retrieve_driver," in
+        *,mysql,*)
+            log_error "RETRIEVE_DRIVER=mysql is not supported"
+            return 1
+            ;;
+    esac
+    if [ "$db_driver" = "mysql" ] && [ "$retrieve_driver" != "qdrant" ]; then
+        log_error "DB_DRIVER=mysql requires RETRIEVE_DRIVER=qdrant"
+        return 1
+    fi
+}
+
 DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
 
@@ -352,6 +368,34 @@ start_docker() {
     # 读取.env文件
     source "$PROJECT_ROOT/.env"
     storage_type=${STORAGE_TYPE:-local}
+    db_driver=$(printf '%s' "${DB_DRIVER:-postgres}" | tr '[:upper:]' '[:lower:]')
+    if ! validate_database_retriever; then
+        return 1
+    fi
+    case "$db_driver" in
+        postgres)
+            db_profile=""
+            db_scale_args=""
+            ;;
+        mysql)
+            db_profile="--profile mysql"
+            db_scale_args="--scale postgres=0"
+            ;;
+        *)
+            log_error "Unsupported DB_DRIVER: ${DB_DRIVER:-}"
+            return 1
+            ;;
+    esac
+    retrieve_profiles=""
+    IFS=',' read -ra retrieve_drivers <<< "${RETRIEVE_DRIVER:-}"
+    for retrieve_driver in "${retrieve_drivers[@]}"; do
+        retrieve_driver=$(printf '%s' "$retrieve_driver" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        case "$retrieve_driver" in
+            qdrant|milvus|weaviate|doris)
+                retrieve_profiles="$retrieve_profiles --profile $retrieve_driver"
+                ;;
+        esac
+    done
     
     check_platform
     
@@ -364,11 +408,11 @@ start_docker() {
 	if [ "$NO_PULL" = true ]; then
 		# 不拉取镜像，使用本地镜像
 		log_info "跳过镜像拉取，使用本地镜像..."
-		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
+		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD $db_profile $retrieve_profiles up --build -d $db_scale_args
 	else
 		# 拉取最新镜像
 		log_info "拉取最新镜像..."
-		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --pull always -d
+		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD $db_profile $retrieve_profiles up --pull always -d $db_scale_args
 	fi
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
@@ -448,6 +492,32 @@ pull_images() {
     # 读取.env文件
     source "$PROJECT_ROOT/.env"
     storage_type=${STORAGE_TYPE:-local}
+    db_driver=$(printf '%s' "${DB_DRIVER:-postgres}" | tr '[:upper:]' '[:lower:]')
+    if ! validate_database_retriever; then
+        return 1
+    fi
+    case "$db_driver" in
+        postgres)
+            db_profile=""
+            ;;
+        mysql)
+            db_profile="--profile mysql"
+            ;;
+        *)
+            log_error "Unsupported DB_DRIVER: ${DB_DRIVER:-}"
+            return 1
+            ;;
+    esac
+    retrieve_profiles=""
+    IFS=',' read -ra retrieve_drivers <<< "${RETRIEVE_DRIVER:-}"
+    for retrieve_driver in "${retrieve_drivers[@]}"; do
+        retrieve_driver=$(printf '%s' "$retrieve_driver" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        case "$retrieve_driver" in
+            qdrant|milvus|weaviate|doris)
+                retrieve_profiles="$retrieve_profiles --profile $retrieve_driver"
+                ;;
+        esac
+    done
     
     check_platform
     
@@ -456,7 +526,7 @@ pull_images() {
     
     # 拉取所有镜像
     log_info "拉取所有服务的最新镜像..."
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD pull
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD $db_profile $retrieve_profiles pull
     if [ $? -ne 0 ]; then
         log_error "镜像拉取失败"
         return 1
@@ -751,7 +821,7 @@ else
             printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
             echo ""
             log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
-            "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
+            "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader "$db_driver" --since=10s -f
         else
             log_error "部分服务启动失败，请检查日志并修复问题"
         fi
@@ -764,7 +834,7 @@ else
         printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
         echo ""
         log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
-        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader "$db_driver" --since=10s -f
     fi
 fi
 

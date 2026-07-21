@@ -76,8 +76,8 @@ services:
       - WEKNORA_AUTH_DEFAULT_TENANT_MODE=${WEKNORA_AUTH_DEFAULT_TENANT_MODE:-}
       - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED=${WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED:-}
       - DB_DRIVER=${DB_DRIVER:-postgres}
-      - DB_HOST=${DB_HOST:-postgres}
-      - DB_PORT=${DB_PORT:-5432}
+      - DB_HOST=${DB_HOST:-}
+      - DB_PORT=${DB_PORT:-}
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
@@ -213,8 +213,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-      postgres:
-        condition: service_healthy
       docreader:
         condition: service_healthy
     networks:
@@ -323,6 +321,31 @@ services:
       start_period: 30s # 给予初始启动更多时间
     restart: unless-stopped
     # 添加停机时的优雅退出时间
+    stop_grace_period: 1m
+
+  mysql:
+    image: mysql:8.0
+    container_name: WeKnora-mysql
+    profiles:
+      - mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-change-root-password}
+      - MYSQL_DATABASE=${DB_NAME:-WeKnora}
+      - MYSQL_USER=${DB_USER:-weknora}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-change-me}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping -h 127.0.0.1 -u root --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
     stop_grace_period: 1m
 
   redis:
@@ -805,6 +828,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql-data:
   data-files:
   docreader-tmp:
   minio_data:

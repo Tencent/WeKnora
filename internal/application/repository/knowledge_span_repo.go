@@ -7,7 +7,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // KnowledgeSpanRepository persists the per-attempt span tree used by the
@@ -62,7 +61,7 @@ func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.Knowled
 		row.Attempt = 1
 	}
 	// We let GORM populate created_at/updated_at via the autoCreate /
-	// autoUpdate tags. ON CONFLICT updates only the fields that may
+	// autoUpdate tags. The dialect-aware upsert updates only the fields that may
 	// transition between calls — name/kind/parent are immutable once
 	// set so we don't list them in DoUpdates (saves a few bytes per
 	// write, and any mismatch indicates a programming error).
@@ -94,14 +93,12 @@ func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.Knowled
 	if row.Metadata != nil {
 		cols = append(cols, "metadata")
 	}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "knowledge_id"},
-			{Name: "attempt"},
-			{Name: "span_id"},
-		},
-		DoUpdates: clause.AssignmentColumns(cols),
-	}).Create(row).Error
+	return r.db.WithContext(ctx).
+		Clauses(NewDialect(r.db).Upsert(
+			[]string{"knowledge_id", "attempt", "span_id"},
+			cols,
+		)).
+		Create(row).Error
 }
 
 func (r *knowledgeSpanRepository) NextAttempt(ctx context.Context, knowledgeID string) (int, error) {

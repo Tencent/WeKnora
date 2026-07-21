@@ -23,6 +23,31 @@ services:
     restart: unless-stopped
     stop_grace_period: 1m
 
+  mysql:
+    image: mysql:8.0
+    container_name: WeKnora-mysql-dev
+    profiles:
+      - mysql
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-change-root-password}
+      - MYSQL_DATABASE=${DB_NAME:-WeKnora}
+      - MYSQL_USER=${DB_USER:-weknora}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-change-me}
+    volumes:
+      - mysql_data_dev:/var/lib/mysql
+    networks:
+      - WeKnora-network-dev
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping -h 127.0.0.1 -u root --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 1m
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis-dev
@@ -521,6 +546,7 @@ networks:
 
 volumes:
   postgres-data-dev:
+  mysql_data_dev:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:

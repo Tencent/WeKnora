@@ -152,7 +152,7 @@ func (r *messageRepository) GetMessageByRequestID(
 	return &message, nil
 }
 
-// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+// SearchMessagesByKeyword searches messages by keyword across sessions for a tenant.
 func (r *messageRepository) SearchMessagesByKeyword(
 	ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int,
 ) ([]*types.MessageWithSession, error) {
@@ -161,6 +161,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 	}
 
 	var results []*types.MessageWithSession
+	dialect := NewDialect(r.db)
 
 	query := r.db.WithContext(ctx).
 		Table("messages").
@@ -168,7 +169,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(dialect.CaseInsensitiveLike("messages.content"), "%"+escapeLikeKeyword(keyword)+"%")
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)

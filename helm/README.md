@@ -171,6 +171,15 @@ helm install weknora ./helm \
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
 
+### Business Database
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `database.driver` | Business primary database driver: `postgres` or `mysql` | `postgres` |
+| `database.host` | External database host; empty uses the managed service for the selected driver | `""` |
+| `database.port` | External database port; `0` uses `5432` or `3306` according to the driver | `0` |
+| `database.managed` | Deploy the selected business database in this chart | `true` |
+
 ### Frontend
 
 | Parameter | Description | Default |
@@ -184,11 +193,46 @@ helm install weknora ./helm \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `postgresql.enabled` | Enable PostgreSQL | `true` |
+| `postgresql.enabled` | Allow managed PostgreSQL when `database.driver=postgres` | `true` |
 | `postgresql.image.repository` | Image repository | `paradedb/paradedb` |
 | `postgresql.image.tag` | Image tag | `v0.18.9-pg17` |
 | `postgresql.persistence.enabled` | Enable persistence | `true` |
 | `postgresql.persistence.size` | PVC size | `10Gi` |
+
+### MySQL (Business Primary Only)
+
+MySQL stores transactional/business data only. It is not a retrieval backend;
+use Qdrant or another supported external retrieval system.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `mysql.enabled` | Allow managed MySQL when `database.driver=mysql` | `true` |
+| `mysql.image.repository` | Image repository | `mysql` |
+| `mysql.image.tag` | Image tag | `8.0` |
+| `mysql.persistence.enabled` | Enable persistence | `true` |
+| `mysql.persistence.size` | PVC size | `10Gi` |
+
+Managed MySQL with managed Qdrant:
+
+```bash
+helm install weknora ./helm \
+  --namespace weknora \
+  --create-namespace \
+  --set database.driver=mysql \
+  --set app.env.RETRIEVE_DRIVER=qdrant \
+  --set qdrant.enabled=true \
+  --set secrets.dbUser=weknora \
+  --set secrets.dbName=weknora \
+  --set secrets.dbPassword=<your-mysql-password> \
+  --set secrets.mysqlRootPassword=<your-mysql-root-password> \
+  --set secrets.redisPassword=<your-redis-password> \
+  --set secrets.jwtSecret=<your-jwt-secret>
+```
+
+For an external MySQL server, set `database.managed=false`,
+`database.host`, and `database.port`. For external Qdrant, leave
+`qdrant.enabled=false` and provide `QDRANT_HOST`, `QDRANT_PORT`, and optional
+TLS settings through `app.extraEnv`.
 
 ### Redis
 
@@ -214,9 +258,10 @@ helm install weknora ./helm \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `secrets.dbUser` | Database username | `postgres` |
+| `secrets.dbUser` | Business database username | `postgres` |
 | `secrets.dbPassword` | Database password | `""` (required) |
 | `secrets.dbName` | Database name | `weknora` |
+| `secrets.mysqlRootPassword` | Root password required by managed MySQL | `""` |
 | `secrets.redisPassword` | Redis password | `""` (required) |
 | `secrets.jwtSecret` | JWT signing secret | `""` (required) |
 | `secrets.existingSecret` | Use existing secret | `""` |
@@ -229,7 +274,9 @@ These map to docker-compose profiles:
 |-----------|-------------|---------|
 | `minio.enabled` | Enable MinIO storage | `false` |
 | `neo4j.enabled` | Enable Neo4j (GraphRAG) | `false` |
-| `qdrant.enabled` | Enable Qdrant vector DB | `false` |
+| `qdrant.enabled` | Deploy managed Qdrant for external retrieval | `false` |
+| `qdrant.persistence.enabled` | Enable Qdrant persistence | `true` |
+| `qdrant.persistence.size` | Qdrant PVC size | `10Gi` |
 
 ## Security Best Practices
 

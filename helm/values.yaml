@@ -50,6 +50,19 @@ serviceAccount:
 # -----------------------------------------------------------------------------
 # App (Backend API Server)
 # -----------------------------------------------------------------------------
+database:
+  # -- Business primary database driver: postgres or mysql
+  driver: postgres
+  # -- Hostname or address reachable by the app. Empty selects the managed
+  # -- service name for the active driver (postgres or mysql).
+  host: ""
+  # -- Port reachable by the app. Zero selects the driver's standard port
+  # -- (5432 for PostgreSQL, 3306 for MySQL).
+  port: 0
+  # -- Deploy the selected database inside this chart. Set false for an
+  # -- externally managed PostgreSQL/MySQL instance.
+  managed: true
+
 app:
   # -- Enable the app component
   enabled: true
@@ -88,7 +101,7 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
-    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
+    # -- Retrieval driver. database.driver=mysql requires exactly qdrant.
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3
     STORAGE_TYPE: local
@@ -282,6 +295,37 @@ postgresql:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# MySQL (business primary database)
+# -----------------------------------------------------------------------------
+mysql:
+  # -- Enable the managed MySQL deployment when database.driver=mysql
+  enabled: true
+
+  image:
+    repository: mysql
+    tag: "8.0"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    existingClaim: ""
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
 # Redis (Stream & Task Queue)
 # -----------------------------------------------------------------------------
 redis:
@@ -386,6 +430,8 @@ secrets:
   dbPassword: ""
   # -- Database name
   dbName: weknora
+  # -- MySQL root password (required when database.driver=mysql and database.managed=true)
+  mysqlRootPassword: ""
   # -- Redis username (OPTIONAL: for Redis 6.0+ ACL)
   redisUsername: ""
   # -- Redis password (REQUIRED: change in production)
@@ -409,7 +455,9 @@ secrets:
   systemAesKey: ""
 
   # -- Use existing secret instead of creating one
-  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME, REDIS_USERNAME, REDIS_PASSWORD, JWT_SECRET, TENANT_AES_KEY, SYSTEM_AES_KEY
+  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME,
+  # REDIS_USERNAME, REDIS_PASSWORD, JWT_SECRET, TENANT_AES_KEY, SYSTEM_AES_KEY.
+  # Managed MySQL additionally requires MYSQL_ROOT_PASSWORD.
   existingSecret: ""
 
 # -----------------------------------------------------------------------------
@@ -489,6 +537,19 @@ qdrant:
   image:
     repository: qdrant/qdrant
     tag: latest
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  securityContext:
+    allowPrivilegeEscalation: false
   persistence:
     enabled: true
     size: 10Gi
+    existingClaim: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

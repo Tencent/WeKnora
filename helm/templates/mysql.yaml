@@ -2,14 +2,14 @@
 Copyright 2025 Tencent
 SPDX-License-Identifier: MIT
 
-PostgreSQL (ParadeDB) Deployment and Service.
-ParadeDB provides vector search and BM25 full-text search capabilities.
+Managed MySQL business-primary database.
+MySQL stores transactional/business data only; retrieval remains external.
 */}}
-{{- if and .Values.postgresql.enabled .Values.database.managed (eq (lower .Values.database.driver) "postgres") }}
+{{- if and .Values.mysql.enabled .Values.database.managed (eq (lower .Values.database.driver) "mysql") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "weknora.fullname" . }}-postgres
+  name: {{ include "weknora.fullname" . }}-mysql
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
@@ -18,7 +18,6 @@ spec:
   selector:
     matchLabels:
       {{- include "weknora.componentSelectorLabels" (dict "component" "database" "context" .) | nindent 6 }}
-  # Use Recreate strategy for database to avoid data corruption
   strategy:
     type: Recreate
   template:
@@ -33,46 +32,49 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        - name: postgres
-          image: {{ include "weknora.postgresql.image" . }}
+        - name: mysql
+          image: {{ include "weknora.mysql.image" . }}
           imagePullPolicy: IfNotPresent
-          {{- with .Values.postgresql.securityContext }}
+          {{- with .Values.mysql.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           ports:
-            - containerPort: 5432
-              name: postgresql
+            - containerPort: 3306
+              name: mysql
               protocol: TCP
           env:
-            - name: POSTGRES_USER
+            - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
-                  key: DB_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "weknora.secretName" . }}
-                  key: DB_PASSWORD
-            - name: POSTGRES_DB
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
               valueFrom:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_PASSWORD
           volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
+            - name: mysql-data
+              mountPath: /var/lib/mysql
           resources:
-            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
           livenessProbe:
             exec:
               command:
-                - pg_isready
-                - -U
-                - postgres
+                - sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root --silent
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -80,30 +82,30 @@ spec:
           readinessProbe:
             exec:
               command:
-                - pg_isready
-                - -U
-                - postgres
-            initialDelaySeconds: 5
+                - sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root --silent
+            initialDelaySeconds: 10
             periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+            timeoutSeconds: 5
+            failureThreshold: 12
       volumes:
-        - name: postgres-data
-          {{- if .Values.postgresql.persistence.enabled }}
+        - name: mysql-data
+          {{- if .Values.mysql.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ .Values.postgresql.persistence.existingClaim | default (printf "%s-postgres" (include "weknora.fullname" .)) }}
+            claimName: {{ .Values.mysql.persistence.existingClaim | default (printf "%s-mysql" (include "weknora.fullname" .)) }}
           {{- else }}
           emptyDir: {}
           {{- end }}
-      {{- with .Values.postgresql.nodeSelector }}
+      {{- with .Values.mysql.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.postgresql.affinity }}
+      {{- with .Values.mysql.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.postgresql.tolerations }}
+      {{- with .Values.mysql.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -111,8 +113,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # Service name must be "postgres" - app references this
-  name: postgres
+  name: mysql
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
@@ -121,8 +122,8 @@ spec:
   selector:
     {{- include "weknora.componentSelectorLabels" (dict "component" "database" "context" .) | nindent 4 }}
   ports:
-    - name: postgresql
-      port: 5432
-      targetPort: postgresql
+    - name: mysql
+      port: 3306
+      targetPort: mysql
       protocol: TCP
 {{- end }}

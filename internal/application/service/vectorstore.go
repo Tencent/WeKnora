@@ -189,10 +189,10 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
-		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
+		// 1. Lock the store row on databases with row-level locking.
 		var store types.VectorStore
 		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
-		if s.isPostgres(tx) {
+		if supportsRowLock(tx) {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.First(&store).Error; err != nil {
@@ -245,13 +245,6 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 	if s.storeRegistry != nil {
 		s.storeRegistry.UnregisterByStoreID(storeID)
 	}
-}
-
-// isPostgres reports whether the active GORM dialector is PostgreSQL.
-// Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
-// SQLite would either ignore (recent versions) or fail to compile on.
-func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.
