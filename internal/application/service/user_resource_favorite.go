@@ -24,7 +24,9 @@ type userResourceFavoriteService struct {
 // validation (allowlist of resource types, non-empty resource id).
 // We keep service thin on purpose — favoriting is a non-business action
 // that doesn't need audit logging or cross-aggregate side effects.
-func NewUserResourceFavoriteService(repo interfaces.UserResourceFavoriteRepository) interfaces.UserResourceFavoriteService {
+func NewUserResourceFavoriteService(
+	repo interfaces.UserResourceFavoriteRepository,
+) interfaces.UserResourceFavoriteService {
 	return &userResourceFavoriteService{repo: repo}
 }
 

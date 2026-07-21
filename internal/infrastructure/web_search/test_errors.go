@@ -27,13 +27,15 @@ func EmptyTestResultsError(providerType string, provider any) error {
 			return fmt.Errorf("searxng returned 0 results: %s", detail)
 		}
 		return fmt.Errorf(
-			"searxng returned 0 results; verify the instance URL, JSON format in settings.yml, and upstream search engine connectivity",
+			"searxng returned 0 results; verify the instance URL, JSON format in settings.yml, " +
+				"and upstream search engine connectivity",
 		)
 	case types.WebSearchProviderTypeDuckDuckGo:
 		return fmt.Errorf("duckduckgo returned 0 results; verify network connectivity and proxy settings")
 	case types.WebSearchProviderTypeKeenable:
 		return fmt.Errorf(
-			"keenable returned 0 results; keyless requests are rate-limited, so verify network connectivity or set an API key to lift the cap",
+			"keenable returned 0 results; keyless requests are rate-limited, " +
+				"so verify network connectivity or set an API key to lift the cap",
 		)
 	default:
 		return fmt.Errorf("search returned 0 results, please verify your API key and configuration")

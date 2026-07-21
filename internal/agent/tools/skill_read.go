@@ -36,8 +36,9 @@ var readSkillTool = BaseTool{
 
 // ReadSkillInput defines the input parameters for the read_skill tool
 type ReadSkillInput struct {
-	SkillName string `json:"skill_name" jsonschema:"Name of the skill to read"`
-	FilePath  string `json:"file_path,omitempty" jsonschema:"Optional relative path to a specific file within the skill directory"`
+	SkillName string `json:"skill_name"          jsonschema:"Name of the skill to read"`
+	//nolint:lll
+	FilePath string `json:"file_path,omitempty" jsonschema:"Optional relative path to a specific file within the skill directory"`
 }
 
 // ReadSkillTool allows the agent to read skill content on demand
@@ -85,7 +86,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	var builder strings.Builder
-	var resultData = make(map[string]interface{})
+	resultData := make(map[string]interface{})
 
 	if input.FilePath != "" {
 		// Read a specific file from the skill directory
@@ -98,7 +99,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			}, nil
 		}
 
-		builder.WriteString(fmt.Sprintf("=== Skill File: %s/%s ===\n\n", input.SkillName, input.FilePath))
+		fmt.Fprintf(&builder, "=== Skill File: %s/%s ===\n\n", input.SkillName, input.FilePath)
 		builder.WriteString(content)
 
 		resultData["skill_name"] = input.SkillName
@@ -123,21 +124,22 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			files = []string{} // Non-fatal error
 		}
 
-		builder.WriteString(fmt.Sprintf("=== Skill: %s ===\n\n", skill.Name))
-		builder.WriteString(fmt.Sprintf("**Description**: %s\n\n", skill.Description))
+		fmt.Fprintf(&builder, "=== Skill: %s ===\n\n", skill.Name)
+		fmt.Fprintf(&builder, "**Description**: %s\n\n", skill.Description)
 		builder.WriteString("## Instructions\n\n")
 		builder.WriteString(skill.Instructions)
 
 		// Add available files section
 		if len(files) > 1 { // More than just SKILL.md
 			builder.WriteString("\n\n## Available Files\n\n")
+			//nolint:lll
 			builder.WriteString("The following files are available in this skill directory. Use `read_skill` with `file_path` to read them:\n\n")
 			for _, file := range files {
 				if file != skills.SkillFileName { // Don't list SKILL.md again
 					if skills.IsScript(file) {
-						builder.WriteString(fmt.Sprintf("- `%s` (script - can be executed)\n", file))
+						fmt.Fprintf(&builder, "- `%s` (script - can be executed)\n", file)
 					} else {
-						builder.WriteString(fmt.Sprintf("- `%s`\n", file))
+						fmt.Fprintf(&builder, "- `%s`\n", file)
 					}
 				}
 			}
@@ -160,6 +162,6 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 }
 
 // Cleanup releases any resources (implements Tool interface if needed)
-func (t *ReadSkillTool) Cleanup(ctx context.Context) error {
+func (t *ReadSkillTool) Cleanup(_ context.Context) error {
 	return nil
 }

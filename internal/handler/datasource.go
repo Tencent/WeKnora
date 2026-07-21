@@ -331,8 +331,10 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "connected"})
 }
 
+// ListAvailableResources implements the required interface method.
 // @Summary List available resources in data source
-// @Description List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).
+// @Description List resources available for sync in the external system. Pass parent_id to lazily load the direct
+// children of a resource (used for large hierarchical sources such as Feishu wiki).
 // @Tags DataSource
 // @Produce json
 // @Param id path string true "Data source ID"
@@ -368,8 +370,10 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	c.JSON(http.StatusOK, resources)
 }
 
+// ResolveResourceAncestors implements the required interface method.
 // @Summary Resolve resource ancestors
-// @Description Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.
+// @Description Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested)
+// resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.
 // @Tags DataSource
 // @Accept json
 // @Produce json
@@ -542,7 +546,10 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	if l := c.Query("limit"); l != "" {
 		v, err := strconv.Atoi(l)
 		if err != nil || v <= 0 || v > maxListPageSize {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be between 1 and " + strconv.Itoa(maxListPageSize)})
+			c.JSON(
+				http.StatusBadRequest,
+				gin.H{"error": "limit must be between 1 and " + strconv.Itoa(maxListPageSize)},
+			)
 			return
 		}
 		limit = v

@@ -8,7 +8,10 @@ import (
 )
 
 func TestShouldOmitRawToolOutput(t *testing.T) {
-	if !ShouldOmitRawToolOutput(ToolListKnowledgeChunks, map[string]interface{}{"display_type": "knowledge_chunks_list"}) {
+	if !ShouldOmitRawToolOutput(
+		ToolListKnowledgeChunks,
+		map[string]interface{}{"display_type": "knowledge_chunks_list"},
+	) {
 		t.Fatal("structured list_knowledge_chunks output should be omitted")
 	}
 	if !ShouldOmitRawToolOutput(ToolGrepChunks, map[string]interface{}{"display_type": "grep_results"}) {

@@ -24,7 +24,7 @@ type localFileService struct {
 const localScheme = "local://"
 
 // CheckConnectivity verifies the local storage directory exists and is accessible.
-func (s *localFileService) CheckConnectivity(ctx context.Context) error {
+func (s *localFileService) CheckConnectivity(_ context.Context) error {
 	info, err := os.Stat(s.baseDir)
 	if err != nil {
 		return fmt.Errorf("storage directory not accessible: %w", err)
@@ -80,7 +80,7 @@ func (s *localFileService) SaveFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to open source file: %v", err)
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Create destination file for writing
 	logger.Info(ctx, "Creating destination file")
@@ -89,7 +89,7 @@ func (s *localFileService) SaveFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create destination file: %v", err)
 		return "", fmt.Errorf("failed to create file: %w", err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	// Copy content from source to destination
 	logger.Info(ctx, "Copying file content")
@@ -194,13 +194,13 @@ func (s *localFileService) CopyFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	dst, err := os.Create(dstPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return "", fmt.Errorf("failed to copy file content: %w", err)
@@ -215,8 +215,21 @@ func (s *localFileService) CopyFile(ctx context.Context,
 // SaveBytes saves bytes data to a file and returns the file path
 // temp parameter is ignored for local storage (no auto-expiration support)
 // fileName 仅允许安全文件名，禁止路径遍历（如 ../../）
-func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	logger.Infof(ctx, "Saving bytes data: fileName=%s, size=%d, tenantID=%d, temp=%v", fileName, len(data), tenantID, temp)
+func (s *localFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	temp bool,
+) (string, error) {
+	logger.Infof(
+		ctx,
+		"Saving bytes data: fileName=%s, size=%d, tenantID=%d, temp=%v",
+		fileName,
+		len(data),
+		tenantID,
+		temp,
+	)
 
 	safeName, err := secutils.SafeFileName(fileName)
 	if err != nil {

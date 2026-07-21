@@ -62,8 +62,10 @@ accepted until it expires.`,
 			}
 			if len(cfg.Profiles) == 0 {
 				if active, kind := cmdutil.EnvCredential(); active {
-					return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-						"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it")
+					return cmdutil.NewError(
+						cmdutil.CodeAuthUnauthenticated,
+						"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it",
+					)
 				}
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 			}
@@ -112,8 +114,10 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 	if len(cfg.Profiles) == 0 {
 		if active, kind := cmdutil.EnvCredential(); active {
-			return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-				"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it")
+			return cmdutil.NewError(
+				cmdutil.CodeAuthUnauthenticated,
+				"authenticated via "+kind+" (stateless env credential) — nothing is stored to log out; unset "+kind+" to drop it",
+			)
 		}
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 	}

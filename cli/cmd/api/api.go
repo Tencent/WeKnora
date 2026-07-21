@@ -92,7 +92,8 @@ Examples:
 				method := resolveMethod(opts)
 				if method == http.MethodGet {
 					return cmdutil.NewFlagError(fmt.Errorf(
-						"--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview"))
+						"--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview",
+					))
 				}
 				var body any
 				if hasBody(opts) {
@@ -145,11 +146,16 @@ Examples:
 			return runAPI(c.Context(), opts, fopts, cli, method, args[0], paginate)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied via -d/--input). Any non-empty method is accepted.")
-	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Inline JSON request body (e.g. -d '{\"name\":\"x\"}'). Mutually exclusive with --input.")
-	cmd.Flags().StringVar(&opts.Input, "input", "", "Read JSON request body from file (use `-` for stdin). Mutually exclusive with -d/--data.")
-	cmd.Flags().StringArrayVarP(&opts.Fields, "field", "F", nil, "Add a key=value to a JSON object body (repeatable; e.g. -F name=foo -F enabled=true). true/false/null and numbers are typed; everything else is a string. Flat keys only. Mutually exclusive with -d/--input.")
-	cmd.Flags().Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
+	cmd.Flags().
+		StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied via -d/--input). Any non-empty method is accepted.")
+	cmd.Flags().
+		StringVarP(&opts.Data, "data", "d", "", "Inline JSON request body (e.g. -d '{\"name\":\"x\"}'). Mutually exclusive with --input.")
+	cmd.Flags().
+		StringVar(&opts.Input, "input", "", "Read JSON request body from file (use `-` for stdin). Mutually exclusive with -d/--data.")
+	cmd.Flags().
+		StringArrayVarP(&opts.Fields, "field", "F", nil, "Add a key=value to a JSON object body (repeatable; e.g. -F name=foo -F enabled=true). true/false/null and numbers are typed; everything else is a string. Flat keys only. Mutually exclusive with -d/--input.")
+	cmd.Flags().
+		Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
 	cmdutil.AddFormatFlag(cmd, apiFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -331,7 +337,14 @@ func apiRetryArgv(opts *Options, method, path string) []string {
 // When paginate is true and method is GET, all offset-based pages are
 // fetched and merged into a single {data, total} JSON response. For
 // non-GET methods paginate is silently ignored (no offset semantic).
-func runAPI(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, method, path string, paginate bool) error {
+func runAPI(
+	ctx context.Context,
+	opts *Options,
+	fopts *cmdutil.FormatOptions,
+	svc Service,
+	method, path string,
+	paginate bool,
+) error {
 	if paginate && method == http.MethodGet {
 		return runAPIPaginated(ctx, opts, fopts, svc, path)
 	}
@@ -339,7 +352,13 @@ func runAPI(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, sv
 }
 
 // runAPISingle is the original single-call implementation of runAPI.
-func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, method, path string) error {
+func runAPISingle(
+	ctx context.Context,
+	opts *Options,
+	fopts *cmdutil.FormatOptions,
+	svc Service,
+	method, path string,
+) error {
 	if method == "" {
 		return cmdutil.NewFlagError(fmt.Errorf("--method cannot be empty"))
 	}
@@ -365,7 +384,7 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 		// own; non-2xx responses still surface as resp != nil, err == nil).
 		return cmdutil.WrapHTTP(err, "%s %s", method, path)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

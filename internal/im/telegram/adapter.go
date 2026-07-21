@@ -1,3 +1,4 @@
+// Package telegram implements the Telegram Bot API IM adapter.
 package telegram
 
 import (
@@ -51,14 +52,17 @@ func NewAdapter(client *LongConnClient, botToken string) *Adapter {
 	}
 }
 
+// Platform reports the IM platform identifier for Telegram.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformTelegram
 }
 
-func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
+// HandleURLVerification reports that Telegram does not use URL verification challenges.
+func (a *Adapter) HandleURLVerification(_ *gin.Context) bool {
 	return false // Telegram does not require URL verification challenges.
 }
 
+// VerifyCallback validates the Telegram webhook secret token when configured.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.secretToken == "" {
 		return nil
@@ -72,8 +76,8 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 
 // telegramUpdate represents an incoming Telegram update (subset of fields).
 type telegramUpdate struct {
-	UpdateID int             `json:"update_id"`
-	Message  *telegramMsg    `json:"message"`
+	UpdateID int          `json:"update_id"`
+	Message  *telegramMsg `json:"message"`
 }
 
 type telegramMsg struct {
@@ -112,6 +116,7 @@ type telegramPhoto struct {
 	Height   int    `json:"height"`
 }
 
+// ParseCallback reads a Telegram webhook update and maps it to IncomingMessage.
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -213,6 +218,7 @@ func resolveChatID(incoming *im.IncomingMessage) string {
 
 // ── Send reply ──
 
+// SendReply sends a formatted text reply to the originating chat.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	chatID := resolveChatID(incoming)
 	text := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
@@ -227,19 +233,6 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 			body["message_thread_id"] = tid
 		}
 	}
-	return a.callAPI(ctx, "sendMessage", body)
-}
-
-func (a *Adapter) sendMessage(ctx context.Context, chatID, text, replyToMessageID string) error {
-	body := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "Markdown",
-	}
-	if replyToMessageID != "" {
-		body["reply_to_message_id"] = replyToMessageID
-	}
-
 	return a.callAPI(ctx, "sendMessage", body)
 }
 
@@ -282,7 +275,7 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var apiResp struct {
 		OK     bool            `json:"ok"`
@@ -311,7 +304,7 @@ const minEditInterval = 500 * time.Millisecond
 type streamState struct {
 	mu        sync.Mutex
 	content   strings.Builder
-	msgID     string    // Telegram message ID of the "thinking" message
+	msgID     string // Telegram message ID of the "thinking" message
 	chatID    string
 	lastEdit  time.Time // last successful editMessageText timestamp
 	createdAt time.Time // for orphan stream detection
@@ -356,6 +349,7 @@ func startStreamReaper() {
 	})
 }
 
+// StartStream posts an initial placeholder message and returns a stream handle.
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	chatID := resolveChatID(incoming)
 
@@ -391,7 +385,10 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+// UpdateStreamContent edits the placeholder message with the latest streamed text.
+func (a *Adapter) UpdateStreamContent(
+	ctx context.Context, _ *im.IncomingMessage, streamID string, fullContent string,
+) error {
 	if fullContent == "" {
 		return nil
 	}
@@ -423,7 +420,10 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	return nil
 }
 
-func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+// FinalizeStream commits the final formatted answer to the streaming message.
+func (a *Adapter) FinalizeStream(
+	ctx context.Context, _ *im.IncomingMessage, streamID string, finalContent string,
+) error {
 	streamsMu.Lock()
 	state, ok := streams[streamID]
 	streamsMu.Unlock()
@@ -447,11 +447,15 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	return nil
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+// SendStreamChunk appends streaming content by editing the placeholder message.
+func (a *Adapter) SendStreamChunk(
+	ctx context.Context, incoming *im.IncomingMessage, streamID string, content string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
-func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
+// EndStream removes the in-memory stream state after completion.
+func (a *Adapter) EndStream(ctx context.Context, _ *im.IncomingMessage, streamID string) error {
 	streamsMu.Lock()
 	_, ok := streams[streamID]
 	delete(streams, streamID)
@@ -467,6 +471,7 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 // ── FileDownloader implementation ──
 
+// DownloadFile fetches an attachment referenced by the incoming message.
 func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
 	if msg.FileKey == "" {
 		return nil, "", fmt.Errorf("file_key is required")
@@ -493,7 +498,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 

@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package agent
 
 import (
@@ -13,12 +14,15 @@ const agentRetrievedImageRequirementMarker = "## Retrieved Image Output Requirem
 const agentRetrievedImageSystemRequirement = `
 
 ## Retrieved Image Output Requirement
-Retrieved tool results for this turn contain Markdown images. Treat images attached to retrieved passages as relevant by default.
-- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results.
+Retrieved tool results for this turn contain Markdown images. Treat images attached to retrieved passages as
+relevant by default.
+//nolint:lll
+- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. //nolint:lll
 - Preserve the complete Markdown image syntax and URL exactly; never invent, shorten, normalize, or replace the URL.
 - Use ASCII half-width parentheses exactly as ![alt](url); never use full-width （ or ）.
 - Place each image immediately after the paragraph it supports.
-- When multiple retrieved images support different sections, distribute them across those sections instead of stopping after the first image.
+//nolint:lll
+- When multiple retrieved images support different sections, distribute them across those sections instead of stopping after the first image. //nolint:lll
 - Before finishing, silently verify that the answer contains a Markdown image whenever this requirement applies.`
 
 func stepContainsMarkdownImage(step types.AgentStep) bool {
@@ -38,7 +42,10 @@ func appendAgentRetrievedImageRequirement(messages []chat.Message) []chat.Messag
 			continue
 		}
 		if !strings.Contains(messages[i].Content, agentRetrievedImageRequirementMarker) {
-			messages[i].Content = strings.TrimRight(messages[i].Content, " \t\r\n") + agentRetrievedImageSystemRequirement
+			messages[i].Content = strings.TrimRight(
+				messages[i].Content,
+				" \t\r\n",
+			) + agentRetrievedImageSystemRequirement
 		}
 		break
 	}

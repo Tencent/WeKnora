@@ -24,14 +24,24 @@ func (m *recordingStreamSender) StartStream(_ context.Context, _ *IncomingMessag
 	return m.streamID, nil
 }
 
-func (m *recordingStreamSender) UpdateStreamContent(_ context.Context, _ *IncomingMessage, _ string, fullContent string) error {
+func (m *recordingStreamSender) UpdateStreamContent(
+	_ context.Context,
+	_ *IncomingMessage,
+	_ string,
+	fullContent string,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.chunkContents = append(m.chunkContents, fullContent)
 	return nil
 }
 
-func (m *recordingStreamSender) FinalizeStream(_ context.Context, _ *IncomingMessage, _ string, finalContent string) error {
+func (m *recordingStreamSender) FinalizeStream(
+	_ context.Context,
+	_ *IncomingMessage,
+	_ string,
+	finalContent string,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.finalContent = finalContent
@@ -73,10 +83,10 @@ func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 		t.Fatalf("UpdateStreamContent intermediate: %v", err)
 	}
 
-	final := FormatIMFinalFromParts(IMStreamParts{
-		Mode: IMStreamModeAgent,
+	final := FormatIMFinalFromParts(StreamParts{
+		Mode:       StreamModeAgent,
 		AgentInner: "分析 Civilization VI 问题\n",
-		AgentToolSteps: []IMToolStep{
+		AgentToolSteps: []ToolStep{
 			{ToolName: "grep_chunks", Success: true},
 			{ToolName: "knowledge_search", Success: true},
 		},
@@ -108,16 +118,16 @@ func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 }
 
 func TestStreamDisplayPipeline_quickQA_redGreen(t *testing.T) {
-	during := IMStreamParts{
-		Mode: IMStreamModeQuickQA,
-		PipelineToolSteps: []IMToolStep{
+	during := StreamParts{
+		Mode: StreamModeQuickQA,
+		PipelineToolSteps: []ToolStep{
 			{ToolName: "query_understand", Success: true},
 			{ToolName: "knowledge_search", Pending: true, Arguments: map[string]any{"query": "test"}},
 		},
 	}
-	done := IMStreamParts{
-		Mode: IMStreamModeQuickQA,
-		PipelineToolSteps: []IMToolStep{
+	done := StreamParts{
+		Mode: StreamModeQuickQA,
+		PipelineToolSteps: []ToolStep{
 			{ToolName: "query_understand", Success: true},
 			{ToolName: "knowledge_search", Success: true, Arguments: map[string]any{"query": "test"}},
 		},

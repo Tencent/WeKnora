@@ -31,7 +31,11 @@ func TestExitCode(t *testing.T) {
 		{"local.* prefix", NewError(CodeLocalConfigCorrupt, "x"), 1},
 		{"operation.timeout", NewError(CodeOperationTimeout, "timed out"), 124},
 		{"operation.failed → 1 (fall-through bucket)", NewError(CodeOperationFailed, "failed"), 1},
-		{"operation.cancelled → 1 (main overrides to 130 on signal-cancelled ctx)", NewError(CodeOperationCancelled, "cancelled"), 1},
+		{
+			"operation.cancelled → 1 (main overrides to 130 on signal-cancelled ctx)",
+			NewError(CodeOperationCancelled, "cancelled"),
+			1,
+		},
 		{"server.session_create_failed → 1 (workflow, not transient)", NewError(CodeSessionCreateFailed, "x"), 1},
 	}
 	for _, tc := range cases {

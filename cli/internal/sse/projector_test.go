@@ -13,8 +13,17 @@ func TestProjector_DefaultKeepsOnlyAnswerEvents(t *testing.T) {
 	p := sse.NewProjector(false, false, "kb_fallback")
 	input := []*sdk.StreamResponse{
 		{ID: "think", ResponseType: sdk.ResponseTypeThinking, Content: "hidden"},
-		{ID: "a", ResponseType: sdk.ResponseTypeAnswer, Content: "one", KnowledgeReferences: []*sdk.SearchResult{{ID: "piggyback", Content: "bulk"}}},
-		{ID: "refs", ResponseType: sdk.ResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{ID: "c1", Content: "bulk"}}},
+		{
+			ID:                  "a",
+			ResponseType:        sdk.ResponseTypeAnswer,
+			Content:             "one",
+			KnowledgeReferences: []*sdk.SearchResult{{ID: "piggyback", Content: "bulk"}},
+		},
+		{
+			ID:                  "refs",
+			ResponseType:        sdk.ResponseTypeReferences,
+			KnowledgeReferences: []*sdk.SearchResult{{ID: "c1", Content: "bulk"}},
+		},
 		{ID: "a", ResponseType: sdk.ResponseTypeAnswer, Content: "two", Done: true},
 		{ResponseType: sdk.ResponseTypeComplete, Done: true},
 	}
@@ -40,7 +49,13 @@ func TestProjector_VerboseAndReferenceIncludeBothDetailClasses(t *testing.T) {
 	input := []*sdk.AgentStreamResponse{
 		{ID: "t", ResponseType: sdk.AgentResponseTypeThinking, Content: "think"},
 		{ID: "call", ResponseType: sdk.AgentResponseTypeToolCall, Content: "search"},
-		{ID: "refs", ResponseType: sdk.AgentResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{ID: "c1", KnowledgeBaseID: "kb1", ParentChunkID: "p1", Content: "bulk"}}},
+		{
+			ID:           "refs",
+			ResponseType: sdk.AgentResponseTypeReferences,
+			KnowledgeReferences: []*sdk.SearchResult{
+				{ID: "c1", KnowledgeBaseID: "kb1", ParentChunkID: "p1", Content: "bulk"},
+			},
+		},
 		{ID: "a", ResponseType: sdk.AgentResponseTypeAnswer, Content: "answer"},
 		{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 	}
@@ -72,7 +87,11 @@ func TestProjector_ReferenceOnlyAddsIndexesWithoutExecutionTrace(t *testing.T) {
 	p := sse.NewProjector(false, true, "kb_fallback")
 	input := []*sdk.AgentStreamResponse{
 		{ID: "think", ResponseType: sdk.AgentResponseTypeThinking, Content: "hidden"},
-		{ID: "refs", ResponseType: sdk.AgentResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{ID: "c1", KnowledgeBaseID: "kb1", Content: "bulk"}}},
+		{
+			ID:                  "refs",
+			ResponseType:        sdk.AgentResponseTypeReferences,
+			KnowledgeReferences: []*sdk.SearchResult{{ID: "c1", KnowledgeBaseID: "kb1", Content: "bulk"}},
+		},
 		{ID: "answer", ResponseType: sdk.AgentResponseTypeAnswer, Content: "answer"},
 		{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 	}

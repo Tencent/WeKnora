@@ -13,28 +13,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// syncEventBus is a thread-safe recorder; the stream plugin emits from a
+// syncBus is a thread-safe recorder; the stream plugin emits from a
 // background goroutine so the test must guard concurrent appends.
-type syncEventBus struct {
+type syncBus struct {
 	mu     sync.Mutex
 	events []types.Event
 }
 
-func (b *syncEventBus) On(types.EventType, types.EventHandler) {}
+func (b *syncBus) On(types.Type, types.Handler) {}
 
-func (b *syncEventBus) Emit(_ context.Context, evt types.Event) error {
+func (b *syncBus) Emit(_ context.Context, evt types.Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.events = append(b.events, evt)
 	return nil
 }
 
-func (b *syncEventBus) finalAnswerContents() []string {
+func (b *syncBus) finalAnswerContents() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var out []string
 	for _, evt := range b.events {
-		if evt.Type != types.EventType(event.EventAgentFinalAnswer) {
+		if evt.Type != types.Type(event.EventAgentFinalAnswer) {
 			continue
 		}
 		if data, ok := evt.Data.(event.AgentFinalAnswerData); ok {
@@ -51,12 +51,12 @@ type openStreamChat struct {
 	chunks []types.StreamResponse
 }
 
-func (m *openStreamChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+func (m *openStreamChat) Chat(context.Context, []chat.Message, *chat.Options) (*types.ChatResponse, error) {
 	return nil, nil
 }
 
 func (m *openStreamChat) ChatStream(
-	context.Context, []chat.Message, *chat.ChatOptions,
+	context.Context, []chat.Message, *chat.Options,
 ) (<-chan types.StreamResponse, error) {
 	ch := make(chan types.StreamResponse, len(m.chunks))
 	for _, c := range m.chunks {
@@ -83,7 +83,7 @@ func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, err
 // than silently dropped. Without the ctx.Done() flush, "res://0" would be lost.
 func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
-	bus := &syncEventBus{}
+	bus := &syncBus{}
 	model := &openStreamChat{chunks: []types.StreamResponse{
 		// Ends with a partial alias prefix ("res://0"), so the stream decoder
 		// holds it back waiting for the rest that never arrives before cancel.
@@ -93,11 +93,11 @@ func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 	chatManage := &types.ChatManage{}
 	chatManage.SessionID = "sess-cancel"
 	chatManage.UserContent = ref // seeds the registry so res://0001 becomes a known alias
-	chatManage.EventBus = bus
+	chatManage.Bus = bus
 
 	ctx, cancel := context.WithCancel(context.Background())
 	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
-	require.Nil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
+	require.Nil(t, plugin.OnEvent(ctx, types.ChatCompletionStream, chatManage, func() *PluginError { return nil }))
 
 	// Wait until the pre-hold content has been emitted, then cancel.
 	require.Eventually(t, func() bool {

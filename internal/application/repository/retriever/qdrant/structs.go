@@ -15,7 +15,8 @@ type qdrantRepository struct {
 	initializedCollections sync.Map
 }
 
-type QdrantVectorEmbedding struct {
+// VectorEmbedding is an exported type.
+type VectorEmbedding struct {
 	Content         string    `json:"content"`
 	SourceID        string    `json:"source_id"`
 	SourceType      int       `json:"source_type"`
@@ -27,7 +28,8 @@ type QdrantVectorEmbedding struct {
 	IsEnabled       bool      `json:"is_enabled"`
 }
 
-type QdrantVectorEmbeddingWithScore struct {
-	QdrantVectorEmbedding
+// VectorEmbeddingWithScore is an exported type.
+type VectorEmbeddingWithScore struct {
+	VectorEmbedding
 	Score float64
 }

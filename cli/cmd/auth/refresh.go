@@ -63,8 +63,10 @@ refresh semantic. Rotate the key in the server UI instead.`,
 			name := cfg.CurrentProfile
 			if name == "" {
 				if active, kind := cmdutil.EnvCredential(); active {
-					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-						"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed")
+					return cmdutil.NewError(
+						cmdutil.CodeInputInvalidArgument,
+						"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed",
+					)
 				}
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 					"no active profile configured; run `weknora auth login` to set one up")
@@ -118,7 +120,13 @@ func defaultRefresher(host string) cmdutil.Refresher {
 	return sdk.NewClient(host)
 }
 
-func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, refresherFor func(host string) cmdutil.Refresher) error {
+func runRefresh(
+	ctx context.Context,
+	opts *RefreshOptions,
+	fopts *cmdutil.FormatOptions,
+	f *cmdutil.Factory,
+	refresherFor func(host string) cmdutil.Refresher,
+) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -126,8 +134,10 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.Format
 	name := cfg.CurrentProfile
 	if name == "" {
 		if active, kind := cmdutil.EnvCredential(); active {
-			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-				"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed")
+			return cmdutil.NewError(
+				cmdutil.CodeInputInvalidArgument,
+				"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed",
+			)
 		}
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 			"no active profile configured; run `weknora auth login` to set one up")

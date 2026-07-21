@@ -33,7 +33,12 @@ func (s *scriptedAskSvc) CreateSession(_ context.Context, req *sdk.CreateSession
 	return s.createResp, s.createErr
 }
 
-func (s *scriptedAskSvc) AgentQAStreamWithRequest(_ context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error {
+func (s *scriptedAskSvc) AgentQAStreamWithRequest(
+	_ context.Context,
+	sessionID string,
+	req *sdk.AgentQARequest,
+	cb sdk.AgentEventCallback,
+) error {
 	s.got.sessionID = sessionID
 	s.got.req = req
 	for _, e := range s.events {
@@ -47,12 +52,14 @@ func (s *scriptedAskSvc) AgentQAStreamWithRequest(_ context.Context, sessionID s
 func answerEvent(content string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Content: content}
 }
+
 // doneEvent is the stream's terminal frame. The real server ends an agent
 // stream with a `complete` event (it also sets Done=true on intermediate
 // frames), so the terminal is modeled as complete, not a bare answer+done.
 func doneEvent() *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeComplete, Done: true}
 }
+
 func toolCallEvent(id, name string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{
 		ResponseType: sdk.AgentResponseTypeToolCall,
@@ -60,6 +67,7 @@ func toolCallEvent(id, name string) *sdk.AgentStreamResponse {
 		Content:      name,
 	}
 }
+
 func referencesEvent(refs []*sdk.SearchResult) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{
 		ResponseType:        sdk.AgentResponseTypeReferences,

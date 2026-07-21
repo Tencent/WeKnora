@@ -45,7 +45,9 @@ func CheckSafeText(value, label string) error {
 				Code: CodeInputInvalidArgument,
 				Message: fmt.Sprintf(
 					"%s contains a disallowed control character (U+%04X at byte %d); strip control / ANSI-escape / Bidi / zero-width characters",
-					label, r, i,
+					label,
+					r,
+					i,
 				),
 			}
 		}

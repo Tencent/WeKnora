@@ -34,10 +34,12 @@ func (f *fakeCreateSvc) CreateAgent(_ context.Context, req *sdk.CreateAgentReque
 	f.createReq = req
 	return f.createResp, f.createErr
 }
+
 func (f *fakeCreateSvc) CopyAgent(_ context.Context, id string) (*sdk.Agent, error) {
 	f.copySrcID = id
 	return f.copyResp, f.copyErr
 }
+
 func (f *fakeCreateSvc) UpdateAgent(_ context.Context, id string, req *sdk.UpdateAgentRequest) (*sdk.Agent, error) {
 	f.updateCalled = true
 	f.updateID = id
@@ -83,9 +85,11 @@ func TestCreate_ConfigFile_FlagsOverrideFile(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new"}}
 	opts := &CreateOptions{
-		Name:           "Test",
-		Model:          "model-x", // override file
-		ConfigFileBody: bytes.NewBufferString(`{"agent_mode":"smart-reasoning","model_id":"model-y","temperature":0.5}`),
+		Name:  "Test",
+		Model: "model-x", // override file
+		ConfigFileBody: bytes.NewBufferString(
+			`{"agent_mode":"smart-reasoning","model_id":"model-y","temperature":0.5}`,
+		),
 		ConfigFileKind: "json",
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
@@ -145,7 +149,12 @@ func TestCreate_SystemPromptFile_ReaderRead(t *testing.T) {
 		flags:              createFlagSet{systemPromptSet: true},
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	assert.Equal(t, "You are a helpful assistant.", svc.createReq.Config.SystemPrompt, "TrimSpace removes trailing newline")
+	assert.Equal(
+		t,
+		"You are a helpful assistant.",
+		svc.createReq.Config.SystemPrompt,
+		"TrimSpace removes trailing newline",
+	)
 }
 
 func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
@@ -176,7 +185,12 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "Source prompt", svc.updateReq.Config.SystemPrompt, "source SystemPrompt must round-trip")
 	assert.Equal(t, "smart-reasoning", svc.updateReq.Config.AgentMode, "source AgentMode must round-trip")
-	assert.Equal(t, []string{"kb_src_a", "kb_src_b"}, svc.updateReq.Config.KnowledgeBases, "source KB list must round-trip when --attach-kb not passed")
+	assert.Equal(
+		t,
+		[]string{"kb_src_a", "kb_src_b"},
+		svc.updateReq.Config.KnowledgeBases,
+		"source KB list must round-trip when --attach-kb not passed",
+	)
 	assert.InDelta(t, 0.9, svc.updateReq.Config.Temperature, 0.001, "Temperature overridden")
 }
 

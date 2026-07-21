@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回腾讯混元 provider 的元数据
-func (p *HunyuanProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *HunyuanProvider) Info() Info {
+	return Info{
 		Name:        ProviderHunyuan,
 		DisplayName: "腾讯混元 Hunyuan",
 		Description: "hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.",

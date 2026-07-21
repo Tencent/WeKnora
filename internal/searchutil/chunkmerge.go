@@ -1,3 +1,4 @@
+// Package searchutil provides chunk merge helpers.
 package searchutil
 
 import (
@@ -52,8 +53,8 @@ func AppendWithOverlap(acc, next string, positionOverlap int) string {
 	}
 
 	maxK := minInt(len(accRunes), len(nextRunes))
-	if cap := maxInt(span*3, defaultSearchSpan); maxK > cap {
-		maxK = cap
+	if capLimit := maxInt(span*3, defaultSearchSpan); maxK > capLimit {
+		maxK = capLimit
 	}
 	// 重叠内容之前最多允许跳过多少前缀（即补写的表头等合成文本）。
 	headSlack := maxInt(span*2, 320)

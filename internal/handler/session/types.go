@@ -42,22 +42,37 @@ type ImageAttachment struct {
 
 // CreateKnowledgeQARequest defines the request structure for knowledge QA
 type CreateKnowledgeQARequest struct {
-	Query                 string                       `json:"query"              binding:"required"` // Query text for knowledge base search
-	KnowledgeBaseIDs      []string                     `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
-	KnowledgeIds          []string                     `json:"knowledge_ids"`                         // Selected knowledge ID for this request
-	AgentEnabled          bool                         `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
-	AgentID               string                       `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its workspace from share relation)
-	WebSearchEnabled      bool                         `json:"web_search_enabled"`                    // Whether web search is enabled for this request
-	SummaryModelID        string                       `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
-	MCPServiceIDs         []string                     `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
-	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
-	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
-	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`                       // @mentioned knowledge bases and files
-	DisableTitle          bool                         `json:"disable_title"`                         // Whether to disable auto title generation
-	Images                []ImageAttachment            `json:"images"`                                // Attached images for multimodal chat
-	AttachmentUploads     []AttachmentUpload           `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
-	AttachmentIDs         []string                     `json:"attachment_ids,omitempty"`              // Pre-uploaded session-scoped document IDs
-	Channel               string                       `json:"channel"`                               // Source channel: "web", "api", "im", etc.
+	// Query text for knowledge base search
+	Query string `json:"query" binding:"required"`
+	// Selected knowledge base ID for this request
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	KnowledgeIDs     []string `json:"knowledge_ids"` // Selected knowledge ID for this request
+	// Whether agent mode is enabled for this request
+	AgentEnabled bool `json:"agent_enabled"`
+	// Selected custom agent ID (backend resolves shared agent and its workspace from share relation)
+	AgentID string `json:"agent_id"`
+	// Whether web search is enabled for this request
+	WebSearchEnabled bool `json:"web_search_enabled"`
+	// Optional summary model ID for this request (overrides session default)
+	SummaryModelID string `json:"summary_model_id"`
+	// Per-request MCP services selected via @mention
+	MCPServiceIDs []string `json:"mcp_service_ids"`
+	// Per-request Skills selected via @mention
+	SkillNames []string `json:"skill_names"`
+	// @mentioned tag IDs (display/debug; scoped via MentionedItems)
+	TagIDs []string `json:"tag_ids"`
+	// @mentioned knowledge bases and files
+	MentionedItems []MentionedItemRequest `json:"mentioned_items"`
+	// Whether to disable auto title generation
+	DisableTitle bool `json:"disable_title"`
+	// Attached images for multimodal chat
+	Images []ImageAttachment `json:"images"`
+	// Attached files (documents, audio, etc.)
+	AttachmentUploads []AttachmentUpload `json:"attachment_uploads,omitempty"`
+	//nolint:lll
+	AttachmentIDs []string `json:"attachment_ids,omitempty"` // Pre-uploaded session-scoped document IDs
+	//nolint:lll
+	Channel               string                       `json:"channel"` // Source channel: "web", "api", "im", etc.
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 }
 
@@ -70,12 +85,15 @@ type AttachmentUpload struct {
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
 type SearchKnowledgeRequest struct {
-	Query            string                 `json:"query"              binding:"required"` // Query text to search for
-	KnowledgeBaseID  string                 `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
-	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
-	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+	Query string `json:"query"              binding:"required"` // Query text to search for
+	//nolint:lll
+	KnowledgeBaseID string `json:"knowledge_base_id"` // Single knowledge base ID (for backward compatibility)
+	// IDs of knowledge bases to search (multi-KB support)
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	KnowledgeIDs     []string `json:"knowledge_ids"` // IDs of specific knowledge (files) to search
+	// Tag IDs for filtering within a single KB
+	TagIDs         []string               `json:"tag_ids"`
+	MentionedItems []MentionedItemRequest `json:"mentioned_items"` // Optional scoped tag mentions
 }
 
 // StopSessionRequest represents the stop session request

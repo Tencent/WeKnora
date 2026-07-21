@@ -53,7 +53,7 @@ func TestEnvDurationSeconds(t *testing.T) {
 	const key = "WEKNORA_TEST_TIMEOUT_SECONDS"
 
 	t.Run("unset returns fallback", func(t *testing.T) {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 		if got := envDurationSeconds(key, 7*time.Second); got != 7*time.Second {
 			t.Fatalf("got %v", got)
 		}

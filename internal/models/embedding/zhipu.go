@@ -88,6 +88,7 @@ func (e *ZhipuEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *ZhipuEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -148,6 +149,7 @@ func (e *ZhipuEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte)
 	return nil, err
 }
 
+// BatchEmbed implements the required interface method.
 func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Create request body
 	reqBody := ZhipuEmbedRequest{
@@ -181,8 +183,9 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		// Log warning if length is outside valid range [1, 8192]
 		if textLen == 0 || textLen > 8192 {
 			hasInvalidLength = true
-			logger.GetLogger(ctx).Errorf("ZhipuEmbedder BatchEmbed input[%d]: INVALID length=%d (must be [1, 8192]), preview=%s",
-				i, textLen, textPreview)
+			logger.GetLogger(ctx).
+				Errorf("ZhipuEmbedder BatchEmbed input[%d]: INVALID length=%d (must be [1, 8192]), preview=%s",
+					i, textLen, textPreview)
 		} else {
 			logger.GetLogger(ctx).Debugf("ZhipuEmbedder BatchEmbed input[%d]: length=%d, preview=%s",
 				i, textLen, textPreview)
@@ -190,7 +193,8 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 	}
 
 	if hasInvalidLength {
-		logger.GetLogger(ctx).Errorf("ZhipuEmbedder BatchEmbed: Found invalid input lengths, this will likely cause API error")
+		logger.GetLogger(ctx).
+			Errorf("ZhipuEmbedder BatchEmbed: Found invalid input lengths, this will likely cause API error")
 	}
 
 	// Send request (passing jsonData instead of constructing http.Request)
@@ -200,7 +204,7 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	// Read response
@@ -216,7 +220,8 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		logger.GetLogger(ctx).Errorf("ZhipuEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
+		logger.GetLogger(ctx).
+			Errorf("ZhipuEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
 		return nil, fmt.Errorf("BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr)
 	}
 

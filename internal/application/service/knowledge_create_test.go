@@ -24,15 +24,15 @@ type createKnowledgeFileRepoStub struct {
 }
 
 func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
-	ctx context.Context,
-	tenantID uint64,
-	kbID string,
-	params *types.KnowledgeCheckParams,
+	_ context.Context,
+	_ uint64,
+	_ string,
+	_ *types.KnowledgeCheckParams,
 ) (bool, *types.Knowledge, error) {
 	return false, nil, nil
 }
 
-func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+func (r *createKnowledgeFileRepoStub) CreateKnowledge(_ context.Context, knowledge *types.Knowledge) error {
 	r.createCalls++
 	copied := *knowledge
 	r.createdKnowledge = &copied
@@ -42,8 +42,8 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 // GetKnowledgeTags is invoked by setAndAttachKnowledgeTags after create even
 // when no tags were supplied; a fresh knowledge has none, so return empty.
 func (r *createKnowledgeFileRepoStub) GetKnowledgeTags(
-	ctx context.Context,
-	knowledgeIDs []string,
+	_ context.Context,
+	_ []string,
 ) (map[string][]*types.KnowledgeTag, error) {
 	return map[string][]*types.KnowledgeTag{}, nil
 }
@@ -55,8 +55,8 @@ type createKnowledgeFileKBServiceStub struct {
 }
 
 func (s *createKnowledgeFileKBServiceStub) GetKnowledgeBaseByID(
-	ctx context.Context,
-	id string,
+	_ context.Context,
+	_ string,
 ) (*types.KnowledgeBase, error) {
 	return s.kb, nil
 }
@@ -69,14 +69,14 @@ type createKnowledgeFileServiceStub struct {
 	deletedPath          string
 }
 
-func (s *createKnowledgeFileServiceStub) CheckConnectivity(ctx context.Context) error {
+func (s *createKnowledgeFileServiceStub) CheckConnectivity(_ context.Context) error {
 	return nil
 }
 
 func (s *createKnowledgeFileServiceStub) SaveFile(
-	ctx context.Context,
-	file *multipart.FileHeader,
-	tenantID uint64,
+	_ context.Context,
+	_ *multipart.FileHeader,
+	_ uint64,
 	knowledgeID string,
 ) (string, error) {
 	s.saveCalls++
@@ -88,30 +88,35 @@ func (s *createKnowledgeFileServiceStub) SaveFile(
 }
 
 func (s *createKnowledgeFileServiceStub) SaveBytes(
-	ctx context.Context,
-	data []byte,
-	tenantID uint64,
-	fileName string,
-	temp bool,
+	_ context.Context,
+	_ []byte,
+	_ uint64,
+	_ string,
+	_ bool,
 ) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-func (s *createKnowledgeFileServiceStub) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (s *createKnowledgeFileServiceStub) GetFile(_ context.Context, _ string) (io.ReadCloser, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (s *createKnowledgeFileServiceStub) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (s *createKnowledgeFileServiceStub) GetFileURL(_ context.Context, _ string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-func (s *createKnowledgeFileServiceStub) DeleteFile(ctx context.Context, filePath string) error {
+func (s *createKnowledgeFileServiceStub) DeleteFile(_ context.Context, filePath string) error {
 	s.deleteCalls++
 	s.deletedPath = filePath
 	return nil
 }
 
-func (s *createKnowledgeFileServiceStub) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
+func (s *createKnowledgeFileServiceStub) CopyFile(
+	_ context.Context,
+	_ string,
+	_ uint64,
+	_ string,
+) (string, error) {
 	return "", errors.New("not implemented")
 }
 
@@ -120,8 +125,8 @@ type createKnowledgeTaskEnqueuerStub struct {
 }
 
 func (s *createKnowledgeTaskEnqueuerStub) Enqueue(
-	task *asynq.Task,
-	opts ...asynq.Option,
+	_ *asynq.Task,
+	_ ...asynq.Option,
 ) (*asynq.TaskInfo, error) {
 	s.calls++
 	return &asynq.TaskInfo{ID: "task-1", Queue: "default"}, nil

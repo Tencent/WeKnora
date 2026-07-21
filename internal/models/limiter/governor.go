@@ -57,6 +57,7 @@ func GateN(ctx context.Context, modelID string, modelLimit int) func() {
 	return GateNamedN(ctx, modelID, "", modelLimit)
 }
 
+// GateNamedN acquires a named background concurrency slot for modelID/modelName.
 func GateNamedN(ctx context.Context, modelID, modelName string, modelLimit int) func() {
 	governorMu.RLock()
 	l, defaultLimit := governor, governorN
@@ -153,7 +154,11 @@ func (l *localLimiter) RuntimeStats(_ context.Context) ([]RuntimeStat, error) {
 	for modelID, sem := range l.sems {
 		tracked := l.tracked[modelID]
 		name, _ := tracked.name.Load().(string)
-		stats = append(stats, RuntimeStat{ModelID: modelID, Name: name, Active: int64(len(sem)), Waiting: tracked.waiting.Load(), Limit: int(tracked.limit.Load())})
+		stats = append(stats, RuntimeStat{
+			ModelID: modelID, Name: name,
+			Active: int64(len(sem)), Waiting: tracked.waiting.Load(),
+			Limit: int(tracked.limit.Load()),
+		})
 	}
 	sort.Slice(stats, func(i, j int) bool { return stats[i].ModelID < stats[j].ModelID })
 	return stats, nil

@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// LongCatBaseURL and related constants.
 const (
 	LongCatBaseURL = "https://api.longcat.chat/openai/v1"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回 LongCat provider 的元数据
-func (p *LongCatProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *LongCatProvider) Info() Info {
+	return Info{
 		Name:        ProviderLongCat,
 		DisplayName: "LongCat AI",
 		Description: "LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.",

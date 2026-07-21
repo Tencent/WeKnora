@@ -105,7 +105,13 @@ to the user first.`,
 			}
 			// Build a retry command from the flags the user actually passed so
 			// agents can re-invoke with -y after explicit human approval.
-			retryCmd := cmdutil.BuildRetryArgv(c, []string{"weknora", "kb", "update", id}, "name", "description", "format")
+			retryCmd := cmdutil.BuildRetryArgv(
+				c,
+				[]string{"weknora", "kb", "update", id},
+				"name",
+				"description",
+				"format",
+			)
 			if err := cmdutil.ConfirmWrite(f.Prompter(), opts.Yes, fopts.WantsJSON(), "update", "knowledge base", id, "kb.update", retryCmd); err != nil {
 				return err
 			}

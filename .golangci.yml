@@ -5,9 +5,14 @@ linters-settings:
     tab-width: 4
 linters:
   enable:
-    - lll           # 控制行宽
+    - lll
     - govet
     - revive
+  exclusions:
+    rules:
+      - path: docs/docs\.go
+        linters:
+          - lll
 formatters:
   enable:
     - gofmt

@@ -109,8 +109,11 @@ func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName 
 	}, nil
 }
 
+// GetModelName returns the configured ASR model name.
 func (s *OpenAIASR) GetModelName() string { return s.modelName }
-func (s *OpenAIASR) GetModelID() string   { return s.modelID }
+
+// GetModelID returns the configured ASR model identifier.
+func (s *OpenAIASR) GetModelID() string { return s.modelID }
 
 // DetectAudioFormat returns a file extension hint for the given audio bytes.
 func DetectAudioFormat(data []byte, fileName string) string {

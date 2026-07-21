@@ -47,7 +47,11 @@ func Compat(serverVer, cliVer string) (Level, string) {
 		return HardError, fmt.Sprintf("incompatible: client %s vs server %s - upgrade required", cliVer, serverVer)
 	}
 	if cMin > sMin {
-		return SoftWarn, fmt.Sprintf("server is older (server %s, client %s); some new features may be unavailable", serverVer, cliVer)
+		return SoftWarn, fmt.Sprintf(
+			"server is older (server %s, client %s); some new features may be unavailable",
+			serverVer,
+			cliVer,
+		)
 	}
 	return OK, ""
 }

@@ -23,7 +23,12 @@ const (
 // This is always called when images are present. VLM analysis is handled
 // separately (either in the pipeline rewrite step for RAG paths, or via
 // analyzeImageAttachments for pure chat paths with non-vision models).
-func (h *Handler) saveImageAttachments(ctx context.Context, images []ImageAttachment, tenantID uint64, storageProvider string) error {
+func (h *Handler) saveImageAttachments(
+	ctx context.Context,
+	images []ImageAttachment,
+	tenantID uint64,
+	storageProvider string,
+) error {
 	if len(images) == 0 {
 		return nil
 	}
@@ -61,7 +66,12 @@ func (h *Handler) saveImageAttachments(ctx context.Context, images []ImageAttach
 // analyzeImageAttachments runs VLM analysis on saved images and populates Caption.
 // Used as a fallback for pure chat paths where the pipeline rewrite step won't run.
 // For RAG paths, image analysis is handled in the pipeline rewrite step instead.
-func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAttachment, vlmModelID string, userQuery string) {
+func (h *Handler) analyzeImageAttachments(
+	ctx context.Context,
+	images []ImageAttachment,
+	vlmModelID string,
+	userQuery string,
+) {
 	if len(images) == 0 || vlmModelID == "" {
 		return
 	}
@@ -152,16 +162,30 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 			return svc
 		}
 		if err != nil {
-			logger.Warnf(ctx, "[image-storage] failed to resolve storage instance for provider=%s: %v", storageProvider, err)
+			logger.Warnf(
+				ctx,
+				"[image-storage] failed to resolve storage instance for provider=%s: %v",
+				storageProvider,
+				err,
+			)
 		}
 	}
 	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
 		return h.fileService
 	}
 
-	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
+	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
+		storageProvider,
+		tenant.StorageEngineConfig,
+		"",
+	)
 	if err != nil {
-		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
+		logger.Warnf(
+			ctx,
+			"[image-storage] failed to create %s file service: %v, fallback to default",
+			storageProvider,
+			err,
+		)
 		return h.fileService
 	}
 	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)

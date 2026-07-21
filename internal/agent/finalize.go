@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package agent
 
 import (
@@ -19,12 +20,14 @@ func finalAnswerImageRequirement(hasRetrievedImage bool) string {
 		return ""
 	}
 	return `
-5. Retrieved tool results contain Markdown images. Unless the user explicitly requested text-only output or every image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. Preserve its complete URL exactly. Use ASCII half-width parentheses exactly as ![alt](url) and never use full-width （ or ）. Place the image immediately after the paragraph it supports. When multiple images support different sections, distribute them across those sections instead of stopping after the first image.
+5. Retrieved tool results contain Markdown images. Unless the user explicitly requested text-only output or every
+//nolint:lll
+image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. Preserve its complete URL exactly. Use ASCII half-width parentheses exactly as ![alt](url) and never use full-width （ or ）. Place the image immediately after the paragraph it supports. When multiple images support different sections, distribute them across those sections instead of stopping after the first image.
 6. Before finishing, silently verify that the answer contains a Markdown image when requirement 5 applies.`
 }
 
-// streamFinalAnswerToEventBus streams the final answer generation through EventBus
-func (e *AgentEngine) streamFinalAnswerToEventBus(
+// streamFinalAnswerToBus streams the final answer generation through Bus
+func (e *Engine) streamFinalAnswerToBus(
 	ctx context.Context,
 	query string,
 	state *types.AgentState,
@@ -74,7 +77,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	imageRequirement := finalAnswerImageRequirement(hasRetrievedImage)
 
 	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
+	finalPrompt := fmt.Sprintf(
+		`Based on the above tool call results, generate a complete answer for the user's question.
 
 User question: %s
 
@@ -85,7 +89,10 @@ Requirements:
 4. IMPORTANT: Respond in the same language as the user's question
 %s
 
-Now generate the final answer:`, query, imageRequirement)
+Now generate the final answer:`,
+		query,
+		imageRequirement,
+	)
 
 	messages = append(messages, chat.Message{
 		Role:    "user",
@@ -97,18 +104,18 @@ Now generate the final answer:`, query, imageRequirement)
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
 
-	llmResult, err := e.streamLLMToEventBus(
+	llmResult, err := e.streamLLMToBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{Temperature: e.config.Temperature}, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
+		&chat.Options{Temperature: e.config.Temperature}, // Thinking disabled for final answer synthesis
+		func(chunk *types.StreamResponse, _ string) {
 			// Defensive filter: only emit answer content, skip thinking chunks
 			if chunk.ResponseType == types.ResponseTypeThinking {
 				return
 			}
 			if chunk.Content != "" {
 				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
+				_ = e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
@@ -133,7 +140,7 @@ Now generate the final answer:`, query, imageRequirement)
 	}
 
 	if !answerDoneEmitted {
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
 			Type:      event.EventAgentFinalAnswer,
 			SessionID: sessionID,
@@ -157,7 +164,7 @@ Now generate the final answer:`, query, imageRequirement)
 
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
-func (e *AgentEngine) handleMaxIterations(
+func (e *Engine) handleMaxIterations(
 	ctx context.Context, query string, state *types.AgentState, sessionID string,
 ) {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
@@ -166,8 +173,8 @@ func (e *AgentEngine) handleMaxIterations(
 		"max":        e.config.MaxIterations,
 	})
 
-	// Stream final answer generation through EventBus
-	if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); err != nil {
+	// Stream final answer generation through Bus
+	if err := e.streamFinalAnswerToBus(ctx, query, state, sessionID); err != nil {
 		logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),
@@ -178,7 +185,7 @@ func (e *AgentEngine) handleMaxIterations(
 }
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
-func (e *AgentEngine) emitCompletionEvent(
+func (e *Engine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
 	// Convert knowledge refs to interface{} slice for event data
@@ -187,7 +194,7 @@ func (e *AgentEngine) emitCompletionEvent(
 		knowledgeRefsInterface = append(knowledgeRefsInterface, ref)
 	}
 
-	e.eventBus.Emit(ctx, event.Event{
+	_ = e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),
 		Type:      event.EventAgentComplete,
 		SessionID: sessionID,

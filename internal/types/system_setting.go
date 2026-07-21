@@ -23,29 +23,29 @@ import (
 // (and the AsXxx helpers below) how to decode the raw bytes. Booleans
 // roundtrip as `true`/`false`, ints as `42`, strings as `"foo"`.
 type SystemSetting struct {
-	ID    uint64 `gorm:"primaryKey"      json:"id"`
+	ID    uint64 `gorm:"primaryKey"                             json:"id"`
 	Key   string `gorm:"type:varchar(128);uniqueIndex;not null" json:"key"`
 	Value JSON   `gorm:"type:jsonb;not null"                    json:"value"`
 	// ValueType is one of "int", "string", "bool". Service layer rejects
 	// updates whose payload type does not match; UI uses it to pick
 	// InputNumber vs Input vs Switch.
-	ValueType string `gorm:"type:varchar(16);not null"  json:"value_type"`
+	ValueType string `gorm:"type:varchar(16);not null"              json:"value_type"`
 	// Category groups settings in the management UI ("limits", "agent",
 	// "auth", ...). Free-form string so adding a new category is a
 	// data-only change.
-	Category    string `gorm:"type:varchar(32);not null"  json:"category"`
-	Description string `gorm:"type:text;not null;default:''" json:"description"`
+	Category    string `gorm:"type:varchar(32);not null"              json:"category"`
+	Description string `gorm:"type:text;not null;default:''"          json:"description"`
 	// IsSecret reserves UI affordances for P3 (mask + reveal-with-confirm).
 	// In P1 every row is is_secret=false; service Update accepts the
 	// column but does not yet enforce special handling.
-	IsSecret bool `gorm:"not null;default:false"  json:"is_secret"`
+	IsSecret bool `gorm:"not null;default:false"                 json:"is_secret"`
 	// RequiresRestart reserves UI affordances for P3 (banner "this
 	// change won't take effect until the next restart"). In P1 the
 	// only seeded key is per-request, so always false.
-	RequiresRestart bool      `gorm:"not null;default:false"  json:"requires_restart"`
-	LastModifiedBy  string    `gorm:"type:varchar(36);not null;default:''" json:"last_modified_by"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	RequiresRestart bool      `gorm:"not null;default:false"                 json:"requires_restart"`
+	LastModifiedBy  string    `gorm:"type:varchar(36);not null;default:''"   json:"last_modified_by"`
+	CreatedAt       time.Time `                                              json:"created_at"`
+	UpdatedAt       time.Time `                                              json:"updated_at"`
 
 	// Enum is populated by the service layer (NOT persisted) from the
 	// in-code registry. Empty/nil means "free-form input"; non-empty

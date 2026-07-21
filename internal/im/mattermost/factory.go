@@ -1,3 +1,4 @@
+//nolint:lll // factory closure signature
 package mattermost
 
 import (
@@ -11,7 +12,7 @@ import (
 // Only "webhook" mode is supported (outgoing webhook + REST API);
 // the default mode is "webhook" (not "websocket" like other platforms).
 func NewFactory() im.AdapterFactory {
-	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
+	return func(_ context.Context, channel *im.Channel, _ func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse mattermost credentials: %w", err)

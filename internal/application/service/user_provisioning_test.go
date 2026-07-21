@@ -23,8 +23,8 @@ func (r *provisioningUserRepo) GetUserByUsername(context.Context, string) (*type
 }
 
 func (r *provisioningUserRepo) CreateUser(_ context.Context, user *types.User) error {
-	copy := *user
-	r.created = &copy
+	copyVal := *user
+	r.created = &copyVal
 	return nil
 }
 

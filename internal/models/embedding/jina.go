@@ -34,6 +34,7 @@ func (e *JinaEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *JinaEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -57,7 +58,7 @@ type JinaEmbedResponse struct {
 
 // NewJinaEmbedder creates a new Jina embedder
 func NewJinaEmbedder(apiKey, baseURL, modelName string,
-	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
+	_ int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*JinaEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://api.jina.ai/v1"
@@ -142,6 +143,7 @@ func (e *JinaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) 
 	return nil, err
 }
 
+// BatchEmbed implements the required interface method.
 func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Create request body - Jina uses 'truncate' boolean instead of 'truncate_prompt_tokens'
 	reqBody := JinaEmbedRequest{
@@ -167,7 +169,7 @@ func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	// Read response
@@ -178,7 +180,8 @@ func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.GetLogger(ctx).Errorf("JinaEmbedder EmbedBatch API error: Http Status %s, Body: %s", resp.Status, string(body))
+		logger.GetLogger(ctx).
+			Errorf("JinaEmbedder EmbedBatch API error: Http Status %s, Body: %s", resp.Status, string(body))
 		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s", resp.Status)
 	}
 

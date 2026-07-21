@@ -256,7 +256,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 //     (multiple done events can confuse state management)
 //
 // The frontend should use 'complete' response_type to detect stream completion
-func sendCompletionEvent(c *gin.Context, requestID string) {
+func sendCompletionEvent(_ *gin.Context, _ string) {
 	// Intentionally empty - completion is signaled by the 'complete' event
 	// which is already sent before this function is called
 }
@@ -277,7 +277,15 @@ func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.Stre
 }
 
 // createUserMessage creates a user message and returns the created message.
-func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string, attribution *types.SuggestionAttribution) (*types.Message, error) {
+func (h *Handler) createUserMessage(
+	ctx context.Context,
+	sessionID, query, requestID string,
+	mentionedItems types.MentionedItems,
+	images types.MessageImages,
+	attachments types.MessageAttachments,
+	channel string,
+	attribution *types.SuggestionAttribution,
+) (*types.Message, error) {
 	return h.messageService.CreateMessage(ctx, &types.Message{
 		SessionID:        sessionID,
 		Role:             "user",
@@ -305,7 +313,7 @@ func (h *Handler) setupStreamHandler(
 	sessionID, assistantMessageID, requestID string,
 	receivedAt time.Time,
 	assistantMessage *types.Message,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) *AgentStreamHandler {
 	streamHandler := NewAgentStreamHandler(
 		ctx, sessionID, assistantMessageID, requestID, receivedAt,
@@ -315,15 +323,15 @@ func (h *Handler) setupStreamHandler(
 	return streamHandler
 }
 
-// setupStopEventHandler registers a stop event handler
-func (h *Handler) setupStopEventHandler(
-	eventBus *event.EventBus,
+// setupStopHandler registers a stop event handler
+func (h *Handler) setupStopHandler(
+	eventBus *event.Bus,
 	sessionID string,
 	sessionTenantID uint64,
 	assistantMessage *types.Message,
 	cancel context.CancelFunc,
 ) {
-	eventBus.On(event.EventStop, func(ctx context.Context, evt event.Event) error {
+	eventBus.On(event.EventStop, func(ctx context.Context, _ event.Event) error {
 		logger.Infof(ctx, "Received stop event, cancelling async operations for session: %s", sessionID)
 		cancel()
 		// Preserve whatever has been streamed so far; do not overwrite Content.
@@ -333,7 +341,11 @@ func (h *Handler) setupStopEventHandler(
 			context.WithoutCancel(ctx),
 			types.TenantIDContextKey, sessionTenantID,
 		)
-		h.completeAssistantMessage(updateCtx, assistantMessage, "") // empty query: stopped conversations are not indexed
+		h.completeAssistantMessage(
+			updateCtx,
+			assistantMessage,
+			"",
+		) // empty query: stopped conversations are not indexed
 		return nil
 	})
 }
@@ -365,7 +377,7 @@ const stopWatcherMaxDuration = 2 * time.Hour
 func (h *Handler) startStopWatcher(
 	ctx context.Context,
 	sessionID, assistantMessageID string,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) {
 	go func() {
 		watchCtx, cancel := context.WithTimeout(ctx, stopWatcherMaxDuration)
@@ -392,7 +404,7 @@ func (h *Handler) startStopWatcher(
 						logger.Infof(watchCtx,
 							"Stop watcher detected stop event, cancelling generation for session=%s, message=%s",
 							sessionID, assistantMessageID)
-						eventBus.Emit(watchCtx, event.Event{
+						_ = eventBus.Emit(watchCtx, event.Event{
 							Type:      event.EventStop,
 							SessionID: sessionID,
 							Data: event.StopData{
@@ -425,11 +437,6 @@ func (h *Handler) writeAgentQueryEvent(ctx context.Context, sessionID, assistant
 		})
 		// Non-fatal error, continue
 	}
-}
-
-// getRequestID gets the request ID from gin context
-func getRequestID(c *gin.Context) string {
-	return c.GetString(types.RequestIDContextKey.String())
 }
 
 // Helper function for type assertion with default value

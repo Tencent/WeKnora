@@ -30,7 +30,7 @@ func oauthWaitTimeout(sess *MCPOAuthSession) time.Duration {
 // MCPOAuthSession carries chat/session metadata so MCP connect and tool
 // registration can pause for in-conversation OAuth. Nil disables the prompt.
 type MCPOAuthSession struct {
-	EventBus           *event.EventBus
+	Bus                *event.Bus
 	SessionID          string
 	AssistantMessageID string
 	UserID             string
@@ -47,7 +47,7 @@ type MCPOAuthSession struct {
 
 // oauthSessionFromToolExec builds an OAuth session from per-tool execution metadata.
 func oauthSessionFromToolExec(ctx context.Context, meta *ToolExecContext) *MCPOAuthSession {
-	if meta == nil || meta.EventBus == nil {
+	if meta == nil || meta.Bus == nil {
 		return nil
 	}
 	approvalCtx := ctx
@@ -59,7 +59,7 @@ func oauthSessionFromToolExec(ctx context.Context, meta *ToolExecContext) *MCPOA
 		execTimeout = defaultMCPToolExecTimeout
 	}
 	return &MCPOAuthSession{
-		EventBus:           meta.EventBus,
+		Bus:                meta.Bus,
 		SessionID:          meta.SessionID,
 		AssistantMessageID: meta.AssistantMessageID,
 		UserID:             meta.UserID,
@@ -80,8 +80,12 @@ func (s *MCPOAuthSession) withAuthWaitTimeout(seconds int) *MCPOAuthSession {
 }
 
 // oauthSessionForRegistration builds an OAuth session for tool discovery at agent startup.
-func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, retryTimeout time.Duration) *MCPOAuthSession {
-	if sess == nil || sess.EventBus == nil {
+func oauthSessionForRegistration(
+	ctx context.Context,
+	sess *MCPOAuthSession,
+	retryTimeout time.Duration,
+) *MCPOAuthSession {
+	if sess == nil || sess.Bus == nil {
 		return nil
 	}
 	approvalCtx := sess.ApprovalCtx
@@ -98,7 +102,7 @@ func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, ret
 		requestID, _ = types.RequestIDFromContext(ctx)
 	}
 	return &MCPOAuthSession{
-		EventBus:               sess.EventBus,
+		Bus:                    sess.Bus,
 		SessionID:              sess.SessionID,
 		AssistantMessageID:     sess.AssistantMessageID,
 		UserID:                 userID,
@@ -119,12 +123,12 @@ type oauthWaiter interface {
 // authorization is required, pauses for the in-conversation prompt before retrying once.
 func getOrCreateMCPClientWithOAuthRetry(
 	ctx context.Context,
-	mcpManager *mcp.MCPManager,
+	mcpManager *mcp.Manager,
 	service *types.MCPService,
 	gate approval.MCPApproval,
 	oauthSess *MCPOAuthSession,
 	mcpToolName, toolCallID string,
-) (mcp.MCPClient, error) {
+) (mcp.Client, error) {
 	client, err := mcpManager.GetOrCreateClient(ctx, service)
 	if err == nil {
 		return client, nil
@@ -156,7 +160,7 @@ func waitForMCPOAuthAuthorization(
 		return ctx, noop, false
 	}
 	ow, ok := gate.(oauthWaiter)
-	if !ok || ow == nil || sess.EventBus == nil {
+	if !ok || ow == nil || sess.Bus == nil {
 		return ctx, noop, false
 	}
 
@@ -192,7 +196,7 @@ func waitForMCPOAuthAuthorization(
 		SessionID:          sess.SessionID,
 		AssistantMessageID: sess.AssistantMessageID,
 		RequestID:          requestID,
-		EventBus:           sess.EventBus,
+		Bus:                sess.Bus,
 		ServiceID:          service.ID,
 		ServiceName:        service.Name,
 		MCPToolName:        mcpToolName,
@@ -224,10 +228,10 @@ func emitMCPOAuthRequiredNotice(
 	tenantID uint64,
 	requestID string,
 ) {
-	if sess == nil || sess.EventBus == nil || service == nil {
+	if sess == nil || sess.Bus == nil || service == nil {
 		return
 	}
-	_ = sess.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+	_ = sess.Bus.Emit(context.WithoutCancel(ctx), event.Event{
 		ID:        "mcp-oauth-notice-" + service.ID,
 		Type:      event.EventMCPOAuthRequired,
 		SessionID: sess.SessionID,

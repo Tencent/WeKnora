@@ -84,7 +84,8 @@ func TestBuildSuggestionGenerationContextUsesCompleteTurnsWithoutRawRAGContent(t
 	if context.CurrentQuery != "current question" {
 		t.Fatalf("CurrentQuery = %q, want current question", context.CurrentQuery)
 	}
-	if !strings.Contains(context.History, "previous question") || !strings.Contains(context.History, "previous answer") {
+	if !strings.Contains(context.History, "previous question") ||
+		!strings.Contains(context.History, "previous answer") {
 		t.Fatalf("History does not contain the latest complete previous turn: %q", context.History)
 	}
 	for _, excluded := range []string{

@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,8 +20,9 @@ import (
 
 var dataAnalysisTool = BaseTool{
 	name: ToolDataAnalysis,
-	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. " +
-		"For Excel files with multiple sheets, every sheet is loaded into the same table and the source sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
+	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. " + //nolint:lll
+		"For Excel files with multiple sheets, every sheet is loaded into the same table and the sou" +
+		"rce sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
 		"If the user's question requires data statistics, convert the question into SQL and execute it.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
@@ -95,18 +97,24 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 
 	for _, col := range schema.Columns {
 		if normalizeIdentifierForMatch(col.Name) == normalizedMissing {
-			return fmt.Sprintf("Column %q does not exist. Did you mean %q? Please use the exact column name from schema.", missing, col.Name)
+			return fmt.Sprintf(
+				"Column %q does not exist. Did you mean %q? Please use the exact column name from schema.",
+				missing,
+				col.Name,
+			)
 		}
 	}
 
 	return ""
 }
 
+// DataAnalysisInput is an exported type.
 type DataAnalysisInput struct {
 	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
-	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
+	SQL         string `json:"sql"          jsonschema:"SQL to be executed on knowledge"`
 }
 
+// DataAnalysisTool is an exported type.
 type DataAnalysisTool struct {
 	BaseTool
 	knowledgeBaseService interfaces.KnowledgeBaseService
@@ -126,6 +134,7 @@ type DataAnalysisTool struct {
 	storageResolver interfaces.StorageBackendResolver
 }
 
+// NewDataAnalysisTool is an exported function.
 func NewDataAnalysisTool(
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
@@ -212,14 +221,14 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	// Replace knowledge ID with table name
-	input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
-	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.Sql, schema); len(fixes) > 0 {
+	input.SQL = strings.ReplaceAll(input.SQL, input.KnowledgeID, schema.TableName)
+	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
 		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
-		input.Sql = rewrittenSQL
+		input.SQL = rewrittenSQL
 	}
 
 	// Check if this is a read-only query
-	normalizedSQL := strings.TrimSpace(strings.ToLower(input.Sql))
+	normalizedSQL := strings.TrimSpace(strings.ToLower(input.SQL))
 	isReadOnly := strings.HasPrefix(normalizedSQL, "select") ||
 		strings.HasPrefix(normalizedSQL, "show") ||
 		strings.HasPrefix(normalizedSQL, "describe") ||
@@ -228,31 +237,37 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	if !isReadOnly {
 		// Reject modification queries
-		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.Sql)
+		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.SQL)
 		return &types.ToolResult{
 			Success: false,
-			Error:   "DuckDB tool only supports read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA). Modification operations (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) are not allowed.",
+			Error: "DuckDB tool only supports read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA)." +
+				" Modification operations (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) are not allowed.",
 		}, fmt.Errorf("modification queries are not allowed")
 	}
 
 	// Validate SQL with comprehensive security checks
 	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
-	_, validation := utils.ValidateSQL(input.Sql,
+	_, validation := utils.ValidateSQL(input.SQL,
 		utils.WithAllowedTables(schema.TableName),
 		utils.WithSingleStatement(),      // Block multiple statements
 		utils.WithNoDangerousFunctions(), // Block dangerous functions
 	)
 	if !validation.Valid {
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, validation.Errors)
+		logger.Warnf(
+			ctx,
+			"[Tool][DataAnalysis] SQL validation failed for session %s: %v",
+			t.sessionID,
+			validation.Errors,
+		)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("SQL validation failed: %v", validation.Errors),
 		}, fmt.Errorf("SQL validation failed: %v", validation.Errors)
 	}
 
-	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.Sql)
+	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.SQL)
 	// Execute single query and get results
-	results, err := t.executeSingleQuery(ctx, input.Sql)
+	results, err := t.executeSingleQuery(ctx, input.SQL)
 	if err != nil {
 		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
 			return &types.ToolResult{
@@ -266,15 +281,20 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results, input.Sql)
-	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
+	queryOutput := t.formatQueryResults(results, input.SQL)
+	logger.Infof(
+		ctx,
+		"[Tool][DataAnalysis] Completed execution query, total %d rows for session %s",
+		len(results),
+		t.sessionID,
+	)
 	return &types.ToolResult{
 		Success: true,
 		Output:  queryOutput,
 		Data: map[string]interface{}{
 			"rows":         results,
 			"row_count":    len(results),
-			"query":        input.Sql,
+			"query":        input.SQL,
 			"display_type": ToolDataAnalysis,
 			"session_id":   t.sessionID,
 		},
@@ -297,7 +317,7 @@ func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery stri
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Get column names
 	columns, err := rows.Columns()
@@ -346,8 +366,8 @@ func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query
 	var output strings.Builder
 
 	output.WriteString("=== DuckDB Query Results ===\n\n")
-	output.WriteString(fmt.Sprintf("Executed SQL: %s\n\n", query))
-	output.WriteString(fmt.Sprintf("Returned %d rows\n\n", len(results)))
+	fmt.Fprintf(&output, "Executed SQL: %s\n\n", query)
+	fmt.Fprintf(&output, "Returned %d rows\n\n", len(results))
 
 	if len(results) == 0 {
 		output.WriteString("No matching records found.\n")
@@ -356,7 +376,11 @@ func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query
 
 	output.WriteString("=== Data Details ===\n\n")
 	if len(results) > 10 {
-		output.WriteString(fmt.Sprintf("Showing all %d records. Consider using a LIMIT clause to restrict the result count for better performance.\n\n", len(results)))
+		fmt.Fprintf(
+			&output,
+			"Showing all %d records. Consider using a LIMIT clause to restrict the result count for better performance.\n\n",
+			len(results),
+		)
 	}
 
 	// Write each record as a separate JSON line
@@ -365,7 +389,7 @@ func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query
 
 		// Remove the trailing newline added by Encode
 		recordStr := strings.Trim(string(recordBytes), "\n")
-		output.WriteString(fmt.Sprintf("record %d: %s\n", i+1, recordStr))
+		fmt.Fprintf(&output, "record %d: %s\n", i+1, recordStr)
 	}
 
 	return output.String()
@@ -396,7 +420,13 @@ type ColumnInfo struct {
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
-	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
+	logger.Infof(
+		ctx,
+		"[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s",
+		filename,
+		tableName,
+		t.sessionID,
+	)
 
 	// Record the created table for cleanup. If already exists, skip creation
 	if t.recordCreatedTable(tableName) {
@@ -415,7 +445,12 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
 		}
 
-		logger.Infof(ctx, "[Tool][DataAnalysis] Successfully created table '%s' from CSV file in session %s", tableName, t.sessionID)
+		logger.Infof(
+			ctx,
+			"[Tool][DataAnalysis] Successfully created table '%s' from CSV file in session %s",
+			tableName,
+			t.sessionID,
+		)
 	}
 
 	// Get and return the table schema
@@ -442,22 +477,36 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 // Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
 // 'spatial' extension (for st_read_meta used to enumerate sheets).
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
-	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
+	logger.Infof(
+		ctx,
+		"[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s",
+		filename,
+		tableName,
+		t.sessionID,
+	)
 
 	// Record the created table for cleanup. If already exists, skip creation.
 	if t.recordCreatedTable(tableName) {
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {
-			logger.Warnf(ctx,
+			logger.Warnf(
+				ctx,
 				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
+				filename,
+				t.sessionID,
+				enumErr,
 			)
 		}
 
 		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
+			logger.Errorf(
+				ctx,
+				"[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v",
+				sheetNames,
+				err,
+			)
 			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
 		}
 
@@ -488,7 +537,7 @@ func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sheet metadata: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var names []string
 	for rows.Next() {
@@ -527,7 +576,11 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 		escSheet := sqlSingleQuoteEscape(sheetNames[0])
 		return fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
-			tableName, escSheet, excelSheetNameColumn, escFile, escSheet,
+			tableName,
+			escSheet,
+			excelSheetNameColumn,
+			escFile,
+			escSheet,
 		)
 	}
 
@@ -602,14 +655,17 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 // This hides storage-backend-specific URL schemes (local://, oss://, s3://,
 // minio://, cos://, …) behind the FileService.GetFile abstraction, so the
 // Data Analysis tool works identically across all deployments.
-func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowledge *types.Knowledge) (string, func(), error) {
+func (t *DataAnalysisTool) materializeKnowledgeFile(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) (string, func(), error) {
 	noop := func() {}
 
 	reader, err := t.resolveFileServiceForKnowledge(ctx, knowledge).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return "", noop, fmt.Errorf("failed to open file for knowledge '%s': %w", knowledge.ID, err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Preserve the file extension so DuckDB's format auto-detection still
 	// works (e.g. the CSV reader expects .csv, xlsx reader expects .xlsx).
@@ -688,7 +744,7 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get table schema: %v", err)
 		return nil, fmt.Errorf("failed to get table schema: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Parse column information
 	columns := make([]ColumnInfo, 0)
@@ -743,20 +799,22 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 	return schema, nil
 }
 
+// TableName implements the required interface method.
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
 	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
 }
 
+// Description implements the required interface method.
 // buildSchemaDescription builds a formatted schema description
 func (t *TableSchema) Description() string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Table name: %s\n", t.TableName))
-	builder.WriteString(fmt.Sprintf("Columns: %d\n", len(t.Columns)))
-	builder.WriteString(fmt.Sprintf("Rows: %d\n\n", t.RowCount))
+	fmt.Fprintf(&builder, "Table name: %s\n", t.TableName)
+	fmt.Fprintf(&builder, "Columns: %d\n", len(t.Columns))
+	fmt.Fprintf(&builder, "Rows: %d\n\n", t.RowCount)
 	builder.WriteString("Column info:\n")
 
 	for _, col := range t.Columns {
-		builder.WriteString(fmt.Sprintf("- %s (%s)\n", col.Name, col.Type))
+		fmt.Fprintf(&builder, "- %s (%s)\n", col.Name, col.Type)
 	}
 
 	return builder.String()
@@ -764,9 +822,16 @@ func (t *TableSchema) Description() string {
 
 // resolveFileServiceForKnowledge resolves a provider-specific FileService based on the knowledge file path.
 // It falls back to the injected default service when provider/config cannot be resolved.
-func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, knowledge *types.Knowledge) interfaces.FileService {
+func (t *DataAnalysisTool) resolveFileServiceForKnowledge(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) interfaces.FileService {
 	if knowledge == nil {
-		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s reason=knowledge_nil", t.sessionID)
+		logger.Warnf(
+			ctx,
+			"[Tool][DataAnalysis][storage] fallback default: session_id=%s reason=knowledge_nil",
+			t.sessionID,
+		)
 		return t.fileService
 	}
 
@@ -776,14 +841,25 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		var err error
 		kb, err = t.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
 		if err != nil {
-			logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get kb failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s err=%v",
-				t.sessionID, knowledge.ID, kbID, err)
+			logger.Warnf(
+				ctx,
+				"[Tool][DataAnalysis][storage] get kb failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s err=%v",
+				t.sessionID,
+				knowledge.ID,
+				kbID,
+				err,
+			)
 			return t.fileService
 		}
 	}
 	if kb == nil && kbID != "" {
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] kb not found, fallback default: session_id=%s knowledge_id=%s kb_id=%s",
-			t.sessionID, knowledge.ID, kbID)
+		logger.Infof(
+			ctx,
+			"[Tool][DataAnalysis][storage] kb not found, fallback default: session_id=%s knowledge_id=%s kb_id=%s",
+			t.sessionID,
+			knowledge.ID,
+			kbID,
+		)
 		return t.fileService
 	}
 
@@ -807,11 +883,18 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		if tenantID > 0 && t.tenantService != nil {
 			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, tenantID)
 			if err != nil {
-				logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get tenant failed: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
-					t.sessionID, knowledge.ID, kbID, tenantID, err)
+				logger.Warnf(
+					ctx,
+					"[Tool][DataAnalysis][storage] get tenant failed: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
+					t.sessionID,
+					knowledge.ID,
+					kbID,
+					tenantID,
+					err,
+				)
 			} else if resolvedTenant != nil {
 				tenant = resolvedTenant
-				logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved tenant from service: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+				logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved tenant from service: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d", //nolint:lll
 					t.sessionID, knowledge.ID, kbID, tenantID)
 			}
 		}
@@ -824,18 +907,41 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 			ctx, tenant, backendID, provider, t.localBaseDir,
 		)
 		if err == nil {
-			logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved storage backend: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s",
-				t.sessionID, knowledge.ID, kbID, backendID, resolvedProvider)
+			logger.Infof(
+				ctx,
+				"[Tool][DataAnalysis][storage] resolved storage backend: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s", //nolint:lll
+				t.sessionID,
+				knowledge.ID,
+				kbID,
+				backendID,
+				resolvedProvider,
+			)
 			return resolvedSvc
 		}
-		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] resolve storage backend failed, trying legacy config: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s err=%v",
-			t.sessionID, knowledge.ID, kbID, backendID, provider, err)
+		logger.Warnf(
+			ctx,
+			"[Tool][DataAnalysis][storage] resolve storage backend failed, trying legacy c"+
+				"onfig: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s err=%v",
+			t.sessionID,
+			knowledge.ID,
+			kbID,
+			backendID,
+			provider,
+			err,
+		)
 	}
 
 	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
 		hasTenantStorageConfig := tenant != nil && tenant.StorageEngineConfig != nil
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
-			t.sessionID, knowledge.ID, kbID, provider, hasTenantStorageConfig)
+		logger.Infof(
+			ctx,
+			"[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
+			t.sessionID,
+			knowledge.ID,
+			kbID,
+			provider,
+			hasTenantStorageConfig,
+		)
 		return t.fileService
 	}
 
@@ -851,12 +957,26 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 
 	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] create file service failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
-			t.sessionID, knowledge.ID, kbID, provider, err)
+		logger.Warnf(
+			ctx,
+			"[Tool][DataAnalysis][storage] create file service failed, fallback"+
+				" default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
+			t.sessionID,
+			knowledge.ID,
+			kbID,
+			provider,
+			err,
+		)
 		return t.fileService
 	}
 
-	logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved file service: session_id=%s knowledge_id=%s kb_id=%s provider=%s",
-		t.sessionID, knowledge.ID, kbID, resolvedProvider)
+	logger.Infof(
+		ctx,
+		"[Tool][DataAnalysis][storage] resolved file service: session_id=%s knowledge_id=%s kb_id=%s provider=%s",
+		t.sessionID,
+		knowledge.ID,
+		kbID,
+		resolvedProvider,
+	)
 	return resolvedSvc
 }

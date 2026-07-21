@@ -34,7 +34,7 @@ func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 	if len(result) > 0 {
 		out = map[string]interface{}{
 			"dimensions":     len(result),
-			"vector_preview": result[:min(3, len(result))],
+			"vector_preview": result[:minInt(3, len(result))],
 		}
 	}
 	gen.Finish(out, usage, err)
@@ -74,7 +74,11 @@ func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 	return result, err
 }
 
-func (l *langfuseEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
+func (l *langfuseEmbedder) BatchEmbedWithPool(
+	ctx context.Context,
+	_ Embedder,
+	texts []string,
+) ([][]float32, error) {
 	return l.inner.BatchEmbedWithPool(ctx, l, texts)
 }
 
@@ -128,7 +132,7 @@ func truncateRunes(s string, maxRunes int) string {
 	return string(r[:maxRunes]) + "..."
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

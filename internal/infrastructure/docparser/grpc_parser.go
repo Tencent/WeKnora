@@ -36,6 +36,7 @@ type GRPCDocumentReader struct {
 	addr   string
 }
 
+// NewGRPCDocumentReader is an exported function.
 func NewGRPCDocumentReader(addr string) (*GRPCDocumentReader, error) {
 	p := &GRPCDocumentReader{}
 	if addr != "" {
@@ -65,7 +66,7 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	resolver.SetDefaultScheme("dns")
 
 	start := time.Now()
-	conn, err := grpc.Dial("dns:///"+addr, opts...)
+	conn, err := grpc.NewClient("dns:///"+addr, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to docreader: %w", err)
 	}
@@ -77,6 +78,7 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	return nil
 }
 
+// Reconnect implements the required interface method.
 func (p *GRPCDocumentReader) Reconnect(addr string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -90,12 +92,14 @@ func (p *GRPCDocumentReader) Reconnect(addr string) error {
 	return p.connect(addr)
 }
 
+// IsConnected implements the required interface method.
 func (p *GRPCDocumentReader) IsConnected() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.conn != nil
 }
 
+// Close implements the required interface method.
 func (p *GRPCDocumentReader) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -121,7 +125,7 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 		FileType:    req.FileType,
 		Url:         req.URL,
 		Title:       req.Title,
-		RequestId:   req.RequestID,
+		RequestID:   req.RequestID,
 		Config: &proto.ReadConfig{
 			ParserEngine:          req.ParserEngine,
 			ParserEngineOverrides: req.ParserEngineOverrides,
@@ -228,7 +232,11 @@ func (p *GRPCDocumentReader) readUnary(
 	return result, nil
 }
 
-func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+// ListEngines implements the required interface method.
+func (p *GRPCDocumentReader) ListEngines(
+	ctx context.Context,
+	overrides map[string]string,
+) ([]types.ParserEngineInfo, error) {
 	p.mu.RLock()
 	client := p.client
 	p.mu.RUnlock()

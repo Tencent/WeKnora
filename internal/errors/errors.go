@@ -158,6 +158,7 @@ func NewValidationError(message string) *AppError {
 	}
 }
 
+// NewTenantNotFoundError is exported.
 // Tenant related errors
 func NewTenantNotFoundError() *AppError {
 	return &AppError{
@@ -195,6 +196,7 @@ func NewTenantCreationDisabledError() *AppError {
 	}
 }
 
+// NewAgentMissingThinkingModelError is exported.
 // Agent related errors
 func NewAgentMissingThinkingModelError() *AppError {
 	return &AppError{
@@ -204,6 +206,7 @@ func NewAgentMissingThinkingModelError() *AppError {
 	}
 }
 
+// NewAgentMissingAllowedToolsError is an exported function.
 func NewAgentMissingAllowedToolsError() *AppError {
 	return &AppError{
 		Code:     ErrAgentMissingAllowedTools,
@@ -212,6 +215,7 @@ func NewAgentMissingAllowedToolsError() *AppError {
 	}
 }
 
+// NewAgentInvalidMaxIterationsError is an exported function.
 func NewAgentInvalidMaxIterationsError() *AppError {
 	return &AppError{
 		Code:     ErrAgentInvalidMaxIterations,
@@ -220,6 +224,7 @@ func NewAgentInvalidMaxIterationsError() *AppError {
 	}
 }
 
+// NewAgentInvalidTemperatureError is an exported function.
 func NewAgentInvalidTemperatureError() *AppError {
 	return &AppError{
 		Code:     ErrAgentInvalidTemperature,

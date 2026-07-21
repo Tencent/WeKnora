@@ -87,8 +87,10 @@ applying the change.`,
 			return runConfigSet(c.Context(), opts, fopts, cli, kbID)
 		},
 	}
-	cmd.Flags().StringVar(&opts.ChatModel, "chat-model", "", "Chat / LLM model id or name for generation & summary (required) — see `weknora model list`")
-	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name for retrieval (required) — see `weknora model list`")
+	cmd.Flags().
+		StringVar(&opts.ChatModel, "chat-model", "", "Chat / LLM model id or name for generation & summary (required) — see `weknora model list`")
+	cmd.Flags().
+		StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name for retrieval (required) — see `weknora model list`")
 	cmdutil.AddFormatFlag(cmd, kbConfigFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, action)
@@ -125,7 +127,13 @@ func validateConfigSetFlags(opts *ConfigSetOptions) error {
 	}
 }
 
-func runConfigSet(ctx context.Context, opts *ConfigSetOptions, fopts *cmdutil.FormatOptions, svc ConfigSetService, kbID string) error {
+func runConfigSet(
+	ctx context.Context,
+	opts *ConfigSetOptions,
+	fopts *cmdutil.FormatOptions,
+	svc ConfigSetService,
+	kbID string,
+) error {
 	if err := validateConfigSetFlags(opts); err != nil {
 		return err
 	}

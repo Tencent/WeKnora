@@ -84,11 +84,11 @@ type Decision struct {
 // PendingRequest carries everything needed to block and notify the UI.
 type PendingRequest struct {
 	TenantID           uint64
-	UserID             string // owner of the session that initiated the call (used for Resolve authorization); empty disables user check
+	UserID             string // owner of the session; empty disables user check
 	SessionID          string
 	AssistantMessageID string
 	RequestID          string
-	EventBus           *event.EventBus
+	Bus                *event.Bus
 	ServiceID          string
 	ServiceName        string
 	MCPToolName        string // name on MCP server
@@ -112,7 +112,7 @@ type OAuthPendingRequest struct {
 	SessionID          string
 	AssistantMessageID string
 	RequestID          string
-	EventBus           *event.EventBus
+	Bus                *event.Bus
 	ServiceID          string
 	ServiceName        string
 	MCPToolName        string
@@ -217,9 +217,9 @@ func (g *Gate) runSubscriber() {
 	for {
 		sub := g.rdb.Subscribe(ctx, channel)
 		ch := sub.Channel()
-		// Reset backoff once we have an active subscription.
-		backoff = time.Second
 		for msg := range ch {
+			// Reset backoff once we are actively receiving messages.
+			backoff = time.Second
 			var m resolveMessage
 			if err := json.Unmarshal([]byte(msg.Payload), &m); err != nil {
 				logger.GetLogger(ctx).Warnf("mcp approval pubsub: bad payload: %v", err)
@@ -277,10 +277,7 @@ func (g *Gate) runSubscriber() {
 		// Reconnect with capped exponential backoff if Redis hiccups.
 		time.Sleep(backoff)
 		if backoff < maxBackoff {
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
+			backoff = min(backoff*2, maxBackoff)
 		}
 	}
 }
@@ -313,8 +310,8 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	if g.checker == nil {
 		return Decision{Approved: true}, nil
 	}
-	if req.EventBus == nil {
-		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
+	if req.Bus == nil {
+		return Decision{}, fmt.Errorf("tool approval: Bus is nil")
 	}
 
 	pendingID := uuid.New().String()
@@ -362,7 +359,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 		RequestID:          req.RequestID,
 	}
 
-	if err := req.EventBus.Emit(ctx, event.Event{
+	if err := req.Bus.Emit(ctx, event.Event{
 		ID:        pendingID + "-approval-required",
 		Type:      event.EventToolApprovalRequired,
 		SessionID: req.SessionID,
@@ -380,7 +377,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	defer timer.Stop()
 
 	emitResolved := func(d Decision) {
-		_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+		_ = req.Bus.Emit(context.WithoutCancel(ctx), event.Event{
 			ID:        pendingID + "-approval-resolved",
 			Type:      event.EventToolApprovalResolved,
 			SessionID: req.SessionID,
@@ -429,8 +426,8 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 	if g == nil {
 		return Decision{}, fmt.Errorf("oauth gate: nil gate")
 	}
-	if req.EventBus == nil {
-		return Decision{}, fmt.Errorf("oauth gate: EventBus is nil")
+	if req.Bus == nil {
+		return Decision{}, fmt.Errorf("oauth gate: Bus is nil")
 	}
 
 	pendingID := uuid.New().String()
@@ -460,7 +457,7 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 		timeoutSec = 1
 	}
 
-	if err := req.EventBus.Emit(ctx, event.Event{
+	if err := req.Bus.Emit(ctx, event.Event{
 		ID:        pendingID + "-mcp-oauth-required",
 		Type:      event.EventMCPOAuthRequired,
 		SessionID: req.SessionID,
@@ -487,7 +484,7 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 	}
 
 	emitResolved := func(d Decision) {
-		_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+		_ = req.Bus.Emit(context.WithoutCancel(ctx), event.Event{
 			ID:        pendingID + "-mcp-oauth-resolved",
 			Type:      event.EventMCPOAuthResolved,
 			SessionID: req.SessionID,

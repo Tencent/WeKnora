@@ -1,3 +1,4 @@
+// Package wecom provides wecom functionality.
 // WeCom Intelligent Bot long connection client.
 //
 // Protocol reference: https://developer.work.weixin.qq.com/document/path/101463
@@ -90,7 +91,7 @@ type botMessage struct {
 	} `json:"mixed"`
 	Quote *botMessage `json:"quote,omitempty"` // quoted message (optional)
 	Event struct {
-		EventType string `json:"eventtype"`
+		Type string `json:"eventtype"`
 	} `json:"event"`
 }
 
@@ -221,7 +222,7 @@ func (c *LongConnClient) Stop() {
 
 // SendReply sends a text reply through the WebSocket connection.
 // This is used by the IM service to reply to messages in long connection mode.
-func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
+func (c *LongConnClient) SendReply(_ context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	var reqID string
 	if incoming.Extra != nil {
 		reqID = incoming.Extra["req_id"]
@@ -258,7 +259,7 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 
 // StartStream begins a streaming reply session.
 // Returns a stream ID that must be used in subsequent chunk/end calls.
-func (c *LongConnClient) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
+func (c *LongConnClient) StartStream(_ context.Context, incoming *im.IncomingMessage) (string, error) {
 	if incoming.Extra == nil || incoming.Extra["req_id"] == "" {
 		return "", fmt.Errorf("missing req_id in incoming message extra")
 	}
@@ -276,7 +277,12 @@ func (c *LongConnClient) StartStream(ctx context.Context, incoming *im.IncomingM
 }
 
 // UpdateStreamContent replaces the user-visible stream text (WeCom replace protocol).
-func (c *LongConnClient) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+func (c *LongConnClient) UpdateStreamContent(
+	_ context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	fullContent string,
+) error {
 	if fullContent == "" {
 		return nil
 	}
@@ -295,12 +301,22 @@ func (c *LongConnClient) UpdateStreamContent(ctx context.Context, incoming *im.I
 }
 
 // FinalizeStream replaces the display with answer-only content before the stream ends.
-func (c *LongConnClient) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+func (c *LongConnClient) FinalizeStream(
+	ctx context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	finalContent string,
+) error {
 	return c.UpdateStreamContent(ctx, incoming, streamID, finalContent)
 }
 
 // SendStreamChunk is deprecated; kept as an alias for UpdateStreamContent.
-func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+func (c *LongConnClient) SendStreamChunk(
+	ctx context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	content string,
+) error {
 	return c.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
@@ -424,7 +440,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	}
 }
 
-func (c *LongConnClient) authenticate(ctx context.Context) error {
+func (c *LongConnClient) authenticate(_ context.Context) error {
 	authBody, _ := json.Marshal(map[string]string{
 		"bot_id": c.botID,
 		"secret": c.secret,
@@ -501,18 +517,29 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 		return
 	}
 
-	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
-		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
-		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
+	logger.Debugf(
+		ctx,
+		"[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype"+
+			"=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
+		msg.MsgID,
+		msg.MsgType,
+		msg.From.UserID,
+		msg.ChatType,
+		msg.Text.Content,
+		msg.Image.URL,
+		msg.File.URL,
+		msg.Voice.Content,
+		len(msg.Mixed.MsgItem),
+	)
 
 	// Handle server-side events (e.g. disconnected_event) before normal messages.
 	if msg.MsgType == "event" {
-		switch msg.Event.EventType {
+		switch msg.Event.Type {
 		case "disconnected_event":
 			logger.Warnf(ctx, "[WeCom] Server sent disconnected_event, closing connection to trigger reconnect")
 			c.closeConn()
 		default:
-			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", msg.Event.EventType)
+			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", msg.Event.Type)
 		}
 		return
 	}
@@ -624,8 +651,15 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 	if incoming != nil && msg.Quote != nil {
 		incoming.Quote = buildQuotedMessage(msg.Quote, msg.AiBotID)
 		if incoming.Quote != nil {
-			logger.Infof(ctx, "[WeCom] Quote detected: msgid=%s sender=%s is_bot=%v content_len=%d non_text_type=%s",
-				msg.Quote.MsgID, msg.Quote.From.UserID, incoming.Quote.IsBotMessage, len(incoming.Quote.Content), incoming.Quote.NonTextType)
+			logger.Infof(
+				ctx,
+				"[WeCom] Quote detected: msgid=%s sender=%s is_bot=%v content_len=%d non_text_type=%s",
+				msg.Quote.MsgID,
+				msg.Quote.From.UserID,
+				incoming.Quote.IsBotMessage,
+				len(incoming.Quote.Content),
+				incoming.Quote.NonTextType,
+			)
 			// Debug: log raw IDs for bot identity verification during initial rollout
 			logger.Debugf(ctx, "[WeCom] Quote identity debug: quote.from.userid=%q quote.aibotid=%q msg.aibotid=%q",
 				msg.Quote.From.UserID, msg.Quote.AiBotID, msg.AiBotID)
@@ -639,7 +673,12 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 
 // convertMixedMessage converts a WeCom mixed (text+image) message.
 // Extracts all text content for QA; if there's only images, treat as image message.
-func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
+func (c *LongConnClient) convertMixedMessage(
+	msg *botMessage,
+	chatID string,
+	chatType im.ChatType,
+	reqID string,
+) *im.IncomingMessage {
 	isGroup := chatType == im.ChatTypeGroup
 	var textParts []string
 	var firstImageURL string

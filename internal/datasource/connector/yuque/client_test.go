@@ -82,7 +82,7 @@ func TestClient_Ping_SendsAuthHeader(t *testing.T) {
 }
 
 func TestClient_Ping_401(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
 		_, _ = io.WriteString(w, `{"message":"Unauthorized"}`)
 	}))
@@ -99,7 +99,7 @@ func TestClient_Ping_401(t *testing.T) {
 }
 
 func TestClient_Ping_403WrapsInvalidCredentials(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(403)
 		_, _ = io.WriteString(w, `{"message":"Forbidden"}`)
 	}))
@@ -163,7 +163,7 @@ func TestRedactToken(t *testing.T) {
 func TestClient_429WithRetryAfter_Retries(t *testing.T) {
 	attempt := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
 		attempt++
 		if attempt == 1 {
 			// "0" is coerced to 100ms inside the client so the test stays fast.
@@ -190,7 +190,7 @@ func TestClient_429WithRetryAfter_Retries(t *testing.T) {
 func TestClient_429ExhaustsRetries(t *testing.T) {
 	attempts := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(429)
@@ -212,7 +212,7 @@ func TestClient_429ExhaustsRetries(t *testing.T) {
 func TestClient_5xxRetriesOnce(t *testing.T) {
 	attempts := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		w.WriteHeader(500)
 		_, _ = io.WriteString(w, `{"message":"internal error"}`)
@@ -238,7 +238,7 @@ func TestClient_5xxRetriesOnce(t *testing.T) {
 func TestClient_4xxNotRetried(t *testing.T) {
 	attempts := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		w.WriteHeader(400)
 		_, _ = io.WriteString(w, `{"message":"bad request"}`)
@@ -279,7 +279,7 @@ func TestClient_GetCurrentUser(t *testing.T) {
 	defer f.Close()
 	// Override the default /api/v2/user handler via a fresh mux.
 	f.mux = http.NewServeMux()
-	f.mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, r *http.Request) {
+	f.mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v2UserResponse{Data: v2User{ID: 42, Login: "alice", Name: "Alice"}})
 	})
@@ -373,11 +373,29 @@ func TestClient_ListBookDocs_Pagination(t *testing.T) {
 		switch offset {
 		case "0":
 			for i := 0; i < 100; i++ {
-				docs = append(docs, v2Doc{ID: int64(i + 1), Type: "Doc", Status: "1", Title: fmt.Sprintf("D%d", i+1), ContentUpdatedAt: "2026-04-20T00:00:00Z"})
+				docs = append(
+					docs,
+					v2Doc{
+						ID:               int64(i + 1),
+						Type:             "Doc",
+						Status:           "1",
+						Title:            fmt.Sprintf("D%d", i+1),
+						ContentUpdatedAt: "2026-04-20T00:00:00Z",
+					},
+				)
 			}
 		case "100":
 			for i := 0; i < 30; i++ {
-				docs = append(docs, v2Doc{ID: int64(i + 101), Type: "Doc", Status: "1", Title: fmt.Sprintf("D%d", i+101), ContentUpdatedAt: "2026-04-20T00:00:00Z"})
+				docs = append(
+					docs,
+					v2Doc{
+						ID:               int64(i + 101),
+						Type:             "Doc",
+						Status:           "1",
+						Title:            fmt.Sprintf("D%d", i+101),
+						ContentUpdatedAt: "2026-04-20T00:00:00Z",
+					},
+				)
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")

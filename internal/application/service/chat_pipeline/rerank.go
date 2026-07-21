@@ -30,13 +30,13 @@ func NewPluginRerank(eventManager *EventManager, modelService interfaces.ModelSe
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginRerank) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHUNK_RERANK}
+func (p *PluginRerank) ActivationEvents() []types.Type {
+	return []types.Type{types.ChunkRerank}
 }
 
 // OnEvent handles reranking events in the chat pipeline
 func (p *PluginRerank) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	if !chatManage.NeedsRetrieval() {
 		return next()
@@ -125,7 +125,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		// Single rerank call with RewriteQuery, use threshold degradation if no results
 		originalThreshold := chatManage.RerankThreshold
 		var rerankErr error
-		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+		rerankResp, rerankErr = p.rerank(
+			ctx,
+			chatManage,
+			rerankModel,
+			chatManage.RewriteQuery,
+			passages,
+			candidatesToRerank,
+		)
 
 		if rerankErr != nil {
 			// Rerank API failed — fallback to original retrieval results so the
@@ -158,7 +165,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"reason":        "no results above original threshold, retrying with lower threshold",
 			})
 			chatManage.RerankThreshold = degradedThreshold
-			rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+			rerankResp, rerankErr = p.rerank(
+				ctx,
+				chatManage,
+				rerankModel,
+				chatManage.RewriteQuery,
+				passages,
+				candidatesToRerank,
+			)
 			// Restore original threshold
 			chatManage.RerankThreshold = originalThreshold
 			if rerankErr != nil {
@@ -438,11 +452,8 @@ func safeTopScore(results []rerank.RankResult) float64 {
 // compositeScore calculates the composite score for a search result
 func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float64 {
 	sourceWeight := 1.0
-	switch strings.ToLower(sr.KnowledgeSource) {
-	case "web_search":
+	if strings.EqualFold(sr.KnowledgeSource, "web_search") {
 		sourceWeight = 0.95
-	default:
-		sourceWeight = 1.0
 	}
 	positionPrior := 1.0
 	if sr.StartAt >= 0 {
@@ -463,7 +474,7 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 func applyMMR(
 	ctx context.Context,
 	results []*types.SearchResult,
-	chatManage *types.ChatManage,
+	_ *types.ChatManage,
 	k int,
 	lambda float64,
 ) []*types.SearchResult {
@@ -477,7 +488,7 @@ func applyMMR(
 	})
 
 	// Pre-compute all token sets concurrently (CPU-bound tokenization)
-	allTokenSets := ParallelMap(results, 0, func(i int, r *types.SearchResult) map[string]struct{} {
+	allTokenSets := ParallelMap(results, 0, func(_ int, r *types.SearchResult) map[string]struct{} {
 		return searchutil.TokenizeSimple(getEnrichedPassage(ctx, r))
 	})
 

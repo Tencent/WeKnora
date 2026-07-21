@@ -280,7 +280,11 @@ func TestMergeResolvedTagKnowledgeIDs_OnlyIncludesTagScopedTargets(t *testing.T)
 	got := mergeResolvedTagKnowledgeIDs(
 		[]string{"existing-doc"},
 		types.SearchTargets{
-			{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "tag-kb", KnowledgeIDs: []string{"tag-doc-1", "tag-doc-2"}},
+			{
+				Type:            types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID: "tag-kb",
+				KnowledgeIDs:    []string{"tag-doc-1", "tag-doc-2"},
+			},
 			{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "other-kb", KnowledgeIDs: []string{"other-doc"}},
 			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "faq-kb", TagIDs: []string{"faq-tag"}},
 		},

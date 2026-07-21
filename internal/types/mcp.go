@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package types
 
 import (
@@ -14,30 +15,35 @@ import (
 // MCPTransportType represents the transport type for MCP service
 type MCPTransportType string
 
+// MCPTransportStdio and related constants.
 const (
-	MCPTransportSSE            MCPTransportType = "sse"             // Server-Sent Events
-	MCPTransportHTTPStreamable MCPTransportType = "http-streamable" // HTTP Streamable
-	MCPTransportStdio          MCPTransportType = "stdio"           // Stdio (Standard Input/Output)
+	// MCPTransportSSE connects over Server-Sent Events.
+	MCPTransportSSE MCPTransportType = "sse" // Server-Sent Events
+	// MCPTransportHTTPStreamable connects over HTTP streamable transport.
+	MCPTransportHTTPStreamable MCPTransportType = "http-streamable"
+	MCPTransportStdio          MCPTransportType = "stdio" // Stdio (Standard Input/Output)
 )
 
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
-	ID             string             `json:"id"                     gorm:"type:varchar(36);primaryKey"`
-	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
-	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
-	Description    string             `json:"description"            gorm:"type:text"`
-	Enabled        bool               `json:"enabled"                gorm:"default:true;index"`
-	TransportType  MCPTransportType   `json:"transport_type"         gorm:"type:varchar(50);not null"`
-	URL            *string            `json:"url,omitempty"          gorm:"type:varchar(512)"` // Optional: required for SSE/HTTP Streamable
+	ID            string           `json:"id"                     gorm:"type:varchar(36);primaryKey"`
+	TenantID      uint64           `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
+	Name          string           `json:"name" gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
+	Description   string           `json:"description"            gorm:"type:text"`
+	Enabled       bool             `json:"enabled"                gorm:"default:true;index"`
+	TransportType MCPTransportType `json:"transport_type"         gorm:"type:varchar(50);not null"`
+	// Required for SSE/HTTP Streamable
+	URL            *string            `json:"url,omitempty" gorm:"type:varchar(512)"`
 	Headers        MCPHeaders         `json:"headers"                gorm:"type:json"`
 	AuthConfig     *MCPAuthConfig     `json:"auth_config"            gorm:"type:json"`
 	AdvancedConfig *MCPAdvancedConfig `json:"advanced_config"        gorm:"type:json"`
-	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"`     // Required for stdio transport
-	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"`     // Environment variables for stdio
-	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"` // Whether this is a builtin MCP service (visible to all workspaces)
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
+	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"` // Required for stdio transport
+	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"` // Environment variables for stdio
+	// IsBuiltin marks a workspace-visible built-in MCP service.
+	IsBuiltin bool           `json:"is_builtin"             gorm:"default:false"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 }
 
 // MCPHeaders represents HTTP headers as a map
@@ -128,15 +134,15 @@ type MCPTool struct {
 type MCPToolApproval struct {
 	ID              string    `json:"id"               gorm:"type:varchar(36);primaryKey"`
 	TenantID        uint64    `json:"tenant_id"        gorm:"not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
-	ServiceID       string    `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"`
-	ToolName        string    `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	ServiceID       string    `json:"service_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"` //nolint:lll // long struct tag or string
+	ToolName        string    `json:"tool_name" gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
 	RequireApproval bool      `json:"require_approval" gorm:"not null;default:false"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // BeforeCreate sets ID for MCPToolApproval.
-func (m *MCPToolApproval) BeforeCreate(tx *gorm.DB) error {
+func (m *MCPToolApproval) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -166,7 +172,7 @@ type MCPTestResult struct {
 }
 
 // BeforeCreate is a GORM hook that runs before creating a new MCP service
-func (m *MCPService) BeforeCreate(tx *gorm.DB) error {
+func (m *MCPService) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -242,13 +248,15 @@ func (c *MCPAuthConfig) Scan(value interface{}) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
 		c.APIKey = plain
 	} else {
-		log.Printf("[crypto] mcp auth_config api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf(
+			"[crypto] mcp auth_config api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured",
+		)
 		c.APIKey = ""
 	}
 	if plain, ok := utils.DecryptStoredSecretLenient(c.Token); ok {
 		c.Token = plain
 	} else {
-		log.Printf("[crypto] mcp auth_config token: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf("[crypto] mcp auth_config token: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured") //nolint:lll // long struct tag or string
 		c.Token = ""
 	}
 	return nil

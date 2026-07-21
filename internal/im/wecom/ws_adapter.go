@@ -1,3 +1,4 @@
+//nolint:lll // long function signatures
 package wecom
 
 import (
@@ -34,44 +35,54 @@ func NewWSAdapter(client *LongConnClient) *WSAdapter {
 	return &WSAdapter{client: client}
 }
 
+// Platform returns the WeCom platform identifier.
 func (a *WSAdapter) Platform() im.Platform {
 	return im.PlatformWeCom
 }
 
-func (a *WSAdapter) VerifyCallback(c *gin.Context) error {
+// VerifyCallback rejects webhook verification in WebSocket mode.
+func (a *WSAdapter) VerifyCallback(_ *gin.Context) error {
 	return fmt.Errorf("WeCom bot adapter does not support webhook callbacks")
 }
 
-func (a *WSAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+// ParseCallback rejects webhook callbacks in WebSocket mode.
+func (a *WSAdapter) ParseCallback(_ *gin.Context) (*im.IncomingMessage, error) {
 	return nil, fmt.Errorf("WeCom bot adapter does not support webhook callbacks")
 }
 
-func (a *WSAdapter) HandleURLVerification(c *gin.Context) bool {
+// HandleURLVerification is a no-op in WebSocket mode.
+func (a *WSAdapter) HandleURLVerification(_ *gin.Context) bool {
 	return false
 }
 
+// SendReply sends a reply through the WebSocket client.
 func (a *WSAdapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	return a.client.SendReply(ctx, incoming, reply)
 }
 
 // ── StreamSender implementation ──
 
+// StartStream delegates to the WebSocket client.
 func (a *WSAdapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	return a.client.StartStream(ctx, incoming)
 }
 
+// UpdateStreamContent delegates to the WebSocket client.
 func (a *WSAdapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
 	return a.client.UpdateStreamContent(ctx, incoming, streamID, fullContent)
 }
 
+// FinalizeStream delegates to the WebSocket client.
 func (a *WSAdapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
 	return a.client.FinalizeStream(ctx, incoming, streamID, finalContent)
 }
 
+// SendStreamChunk delegates to the WebSocket client.
 func (a *WSAdapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
 	return a.client.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
+// EndStream delegates to the WebSocket client.
 func (a *WSAdapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	return a.client.EndStream(ctx, incoming, streamID)
 }
@@ -80,6 +91,7 @@ func (a *WSAdapter) EndStream(ctx context.Context, incoming *im.IncomingMessage,
 // WeCom aibot provides AES-256-CBC encrypted URLs for image/file/video messages.
 // Each message carries its own aeskey for decryption.
 
+// DownloadFile delegates to the WebSocket client.
 func (a *WSAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
 	if msg.FileKey == "" {
 		return nil, "", fmt.Errorf("no file URL in message")
@@ -106,7 +118,7 @@ func (a *WSAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (
 
 	// Read all encrypted content
 	encryptedData, err := io.ReadAll(reader)
-	reader.Close()
+	_ = reader.Close()
 	if err != nil {
 		return nil, "", fmt.Errorf("read encrypted file: %w", err)
 	}

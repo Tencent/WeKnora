@@ -82,7 +82,7 @@ func TestLocalLimiterCaps(t *testing.T) {
 }
 
 // TestLocalLimiterIndependentKeys verifies per-key budgets are independent.
-func TestLocalLimiterIndependentKeys(t *testing.T) {
+func TestLocalLimiterIndependentKeys(_ *testing.T) {
 	l := NewLocalLimiter()
 	ctx := context.Background()
 	ra, _ := l.Acquire(ctx, "a", 1)

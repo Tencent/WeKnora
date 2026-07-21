@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	"slices"
 )
 
 // applyFAQPostProcessing handles FAQ-specific post-processing: iterative retrieval
@@ -194,7 +194,12 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 
 		// Early stop: If we got fewer results than TopK, there are no more results to retrieve
 		if totalRetrieved < currentTopK {
-			logger.Infof(ctx, "No more results available (got %d < %d), stopping iteration", totalRetrieved, currentTopK)
+			logger.Infof(
+				ctx,
+				"No more results available (got %d < %d), stopping iteration",
+				totalRetrieved,
+				currentTopK,
+			)
 			break
 		}
 

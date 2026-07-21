@@ -14,7 +14,13 @@ import (
 type TenantMemberService interface {
 	// AddMember inserts a new active membership row. Returns an error if
 	// (user, tenant) already has an active membership.
-	AddMember(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
+	AddMember(
+		ctx context.Context,
+		userID string,
+		tenantID uint64,
+		role types.TenantRole,
+		invitedBy *string,
+	) (*types.TenantMember, error)
 
 	// EnsureOwner is an idempotent helper used by the registration flow:
 	// if the user already has an active membership in the tenant, return
@@ -35,7 +41,12 @@ type TenantMemberService interface {
 
 	// ListMembersPage lists members with pagination. Query matches email or
 	// username case-insensitively; empty query returns full tenant list slice.
-	ListMembersPage(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
+	ListMembersPage(
+		ctx context.Context,
+		tenantID uint64,
+		query string,
+		page, pageSize int,
+	) ([]*types.TenantMember, int64, error)
 
 	// HasAnyMembers reports whether the tenant has at least one active
 	// member. The auth middleware uses this to recover orphan tenants

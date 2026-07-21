@@ -11,52 +11,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type recordingEventBus struct {
+type recordingBus struct {
 	events []types.Event
 }
 
-func (b *recordingEventBus) On(types.EventType, types.EventHandler) {}
+func (b *recordingBus) On(types.Type, types.Handler) {}
 
-func (b *recordingEventBus) Emit(_ context.Context, evt types.Event) error {
+func (b *recordingBus) Emit(_ context.Context, evt types.Event) error {
 	b.events = append(b.events, evt)
 	return nil
 }
 
 func TestIsConsolidatedRetrievalStage(t *testing.T) {
 	cm := &types.ChatManage{}
-	assert.True(t, IsConsolidatedRetrievalStage(types.CHUNK_SEARCH_PARALLEL, cm))
-	assert.False(t, IsConsolidatedRetrievalStage(types.QUERY_UNDERSTAND, cm))
-	assert.False(t, IsConsolidatedRetrievalStage(types.LOAD_HISTORY, cm))
+	assert.True(t, IsConsolidatedRetrievalStage(types.ChunkSearchParallel, cm))
+	assert.False(t, IsConsolidatedRetrievalStage(types.QueryUnderstand, cm))
+	assert.False(t, IsConsolidatedRetrievalStage(types.LoadHistory, cm))
 }
 
 func TestLastConsolidatedRetrievalStage(t *testing.T) {
 	cm := &types.ChatManage{}
-	pipeline := []types.EventType{
-		types.LOAD_HISTORY,
-		types.QUERY_UNDERSTAND,
-		types.CHUNK_SEARCH_PARALLEL,
-		types.CHUNK_RERANK,
-		types.CHUNK_MERGE,
-		types.FILTER_TOP_K,
-		types.INTO_CHAT_MESSAGE,
-		types.CHAT_COMPLETION_STREAM,
+	pipeline := []types.Type{
+		types.LoadHistory,
+		types.QueryUnderstand,
+		types.ChunkSearchParallel,
+		types.ChunkRerank,
+		types.ChunkMerge,
+		types.FilterTopK,
+		types.IntoChatMessage,
+		types.ChatCompletionStream,
 	}
-	assert.Equal(t, types.FILTER_TOP_K, LastConsolidatedRetrievalStage(pipeline, cm))
+	assert.Equal(t, types.FilterTopK, LastConsolidatedRetrievalStage(pipeline, cm))
 }
 
 func TestShouldCloseRetrievalProgress(t *testing.T) {
-	last := types.FILTER_TOP_K
+	last := types.FilterTopK
 
 	// Normal completion: only the last retrieval stage closes the window.
-	assert.True(t, ShouldCloseRetrievalProgress(types.FILTER_TOP_K, last, nil))
-	assert.False(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, nil))
+	assert.True(t, ShouldCloseRetrievalProgress(types.FilterTopK, last, nil))
+	assert.False(t, ShouldCloseRetrievalProgress(types.ChunkSearchParallel, last, nil))
 
 	// ErrSearchNothing at an earlier retrieval stage must still close the
 	// window so the frontend stops spinning before the fallback answer streams.
-	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, ErrSearchNothing))
+	assert.True(t, ShouldCloseRetrievalProgress(types.ChunkSearchParallel, last, ErrSearchNothing))
 
 	// A hard error at any retrieval stage must also close the window.
-	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_RERANK, last, &PluginError{}))
+	assert.True(t, ShouldCloseRetrievalProgress(types.ChunkRerank, last, &PluginError{}))
 }
 
 func TestShouldEmitQueryUnderstandProgress(t *testing.T) {
@@ -71,10 +71,10 @@ func TestShouldEmitQueryUnderstandProgress(t *testing.T) {
 }
 
 func TestQueryUnderstandProgressEmitsToolCallAndResult(t *testing.T) {
-	bus := &recordingEventBus{}
+	bus := &recordingBus{}
 	cm := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{SessionID: "sess-1", EnableRewrite: true},
-		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineContext: types.PipelineContext{Bus: bus},
 	}
 
 	start := time.Now()
@@ -89,10 +89,10 @@ func TestQueryUnderstandProgressEmitsToolCallAndResult(t *testing.T) {
 }
 
 func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
-	bus := &recordingEventBus{}
+	bus := &recordingBus{}
 	cm := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{SessionID: "sess-1"},
-		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineContext: types.PipelineContext{Bus: bus},
 		PipelineState: types.PipelineState{
 			MergeResult: []*types.SearchResult{{ID: "r1"}, {ID: "r2"}, {ID: "r3"}},
 		},
@@ -104,8 +104,8 @@ func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
 	EndRetrievalProgress(context.Background(), cm, progress, start, nil)
 
 	require.Len(t, bus.events, 2)
-	assert.Equal(t, types.EventType(event.EventAgentToolCall), bus.events[0].Type)
-	assert.Equal(t, types.EventType(event.EventAgentToolResult), bus.events[1].Type)
+	assert.Equal(t, types.Type(event.EventAgentToolCall), bus.events[0].Type)
+	assert.Equal(t, types.Type(event.EventAgentToolResult), bus.events[1].Type)
 
 	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
 	require.True(t, ok)
@@ -122,13 +122,13 @@ func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
 }
 
 func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
-	bus := &recordingEventBus{}
+	bus := &recordingBus{}
 	cm := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
 			SessionID:        "sess-web",
 			WebSearchEnabled: true,
 		},
-		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineContext: types.PipelineContext{Bus: bus},
 		PipelineState: types.PipelineState{
 			MergeResult: []*types.SearchResult{
 				{ID: "w1", ChunkType: "web_search"},

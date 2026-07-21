@@ -34,6 +34,7 @@ func (e *AzureOpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *AzureOpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -51,7 +52,7 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 	apiVersion string, pooler EmbedderPooler,
 ) (*AzureOpenAIEmbedder, error) {
 	if baseURL == "" {
-		return nil, fmt.Errorf("Azure resource endpoint (base URL) is required")
+		return nil, fmt.Errorf("azure resource endpoint (base URL) is required")
 	}
 	if modelName == "" {
 		return nil, fmt.Errorf("deployment name (model name) is required")
@@ -81,6 +82,7 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 	}, nil
 }
 
+// Embed implements the required interface method.
 func (e *AzureOpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	for range 3 {
 		embeddings, err := e.BatchEmbed(ctx, []string{text})
@@ -94,6 +96,7 @@ func (e *AzureOpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32
 	return nil, fmt.Errorf("no embedding returned")
 }
 
+// BatchEmbed implements the required interface method.
 func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	reqBody := azureOpenAIEmbedRequest{
 		Model:          e.modelName,
@@ -117,7 +120,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -130,7 +133,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		return nil, fmt.Errorf("Azure Embedding API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, fmt.Errorf("azure embedding API error: http status %s, response: %s", resp.Status, bodyStr)
 	}
 
 	var response OpenAIEmbedResponse
@@ -186,6 +189,11 @@ func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {
 	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
+// GetModelName implements the required interface method.
 func (e *AzureOpenAIEmbedder) GetModelName() string { return e.modelName }
-func (e *AzureOpenAIEmbedder) GetDimensions() int   { return e.dimensions }
-func (e *AzureOpenAIEmbedder) GetModelID() string   { return e.modelID }
+
+// GetDimensions implements the required interface method.
+func (e *AzureOpenAIEmbedder) GetDimensions() int { return e.dimensions }
+
+// GetModelID implements the required interface method.
+func (e *AzureOpenAIEmbedder) GetModelID() string { return e.modelID }

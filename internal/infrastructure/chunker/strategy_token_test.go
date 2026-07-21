@@ -14,7 +14,11 @@ func TestEnsureDefaults_TokenLimitClampsChunkSize(t *testing.T) {
 		t.Errorf("expected ChunkSize clamped by TokenLimit, got %d", out.ChunkSize)
 	}
 	if out.ChunkOverlap >= out.ChunkSize {
-		t.Errorf("overlap should be smaller than clamped chunk size: overlap=%d size=%d", out.ChunkOverlap, out.ChunkSize)
+		t.Errorf(
+			"overlap should be smaller than clamped chunk size: overlap=%d size=%d",
+			out.ChunkOverlap,
+			out.ChunkSize,
+		)
 	}
 }
 

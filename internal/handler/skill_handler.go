@@ -45,7 +45,7 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 	skillsMetadata, err := h.skillService.ListPreloadedSkills(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to list skills: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to list skills: " + err.Error()))
 		return
 	}
 

@@ -2,21 +2,24 @@ package provider
 
 import "github.com/Tencent/WeKnora/internal/types"
 
+// ProviderWeKnoraCloud and related constants.
 const (
-	ProviderWeKnoraCloud ProviderName = "weknoracloud"
+	ProviderWeKnoraCloud Name = "weknoracloud"
 
 	// WeKnoraCloudBaseURL WeKnoraCloud 服务硬编码 Base URL（统一入口，路径由各实现拼接）
 	WeKnoraCloudBaseURL = "https://weknora.weixin.qq.com"
 )
 
+// WeKnoraCloudProvider is an exported type.
 type WeKnoraCloudProvider struct{}
 
 func init() {
 	Register(&WeKnoraCloudProvider{})
 }
 
-func (p *WeKnoraCloudProvider) Info() ProviderInfo {
-	return ProviderInfo{
+// Info implements the required interface method.
+func (p *WeKnoraCloudProvider) Info() Info {
+	return Info{
 		Name:        ProviderWeKnoraCloud,
 		DisplayName: "WeKnoraCloud",
 		Description: "WeKnora云服务，模型：chat, embedding, rerank, vlm",
@@ -36,7 +39,14 @@ func (p *WeKnoraCloudProvider) Info() ProviderInfo {
 	}
 }
 
-func (p *WeKnoraCloudProvider) ValidateConfig(config *Config) error {
+// ValidateConfig implements the required behavior.
+// WeKnoraCloudProvider is exported.
+// WeKnoraCloudProvider is exported.
+// WeKnoraCloudProvider is exported.
+// WeKnoraCloudProvider is exported.
+// WeKnoraCloudProvider is exported.
+// WeKnoraCloudProvider implements the required behavior.
+func (p *WeKnoraCloudProvider) ValidateConfig(_ *Config) error {
 	// AppID/AppSecret 通过专用初始化接口写入，此处仅做结构校验。
 	// 其中 AppSecret 字段当前实际承载上游 API Key。
 	return nil

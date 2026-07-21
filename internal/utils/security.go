@@ -447,13 +447,21 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
 	ips, err := net.LookupIP(hostname)
 	if err != nil {
-		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
+		return false, fmt.Sprintf(
+			"DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP",
+			hostname,
+		)
 	}
 
 	// Check if any resolved IP is restricted
 	for _, resolvedIP := range ips {
 		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
-			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+			return false, fmt.Sprintf(
+				"hostname %s resolves to restricted IP %s: %s",
+				hostname,
+				resolvedIP.String(),
+				reason,
+			)
 		}
 	}
 
@@ -638,7 +646,10 @@ func ValidateStdioCommand(command string) error {
 
 	// Check against whitelist
 	if !AllowedStdioCommands[baseCommand] {
-		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: uvx, npx, node, python, python3, deno, bun", baseCommand)
+		return fmt.Errorf(
+			"command '%s' is not in the allowed list. Allowed commands: uvx, npx, node, python, python3, deno, bun",
+			baseCommand,
+		)
 	}
 
 	// Additional check: command should not contain path traversal
@@ -868,7 +879,12 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 	// Validate all resolved IPs
 	for _, ipAddr := range ips {
 		if restricted, reason := isRestrictedIP(ipAddr.IP); restricted {
-			return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s (%s)", host, ipAddr.IP.String(), reason)
+			return nil, fmt.Errorf(
+				"connection blocked: %s resolves to restricted IP %s (%s)",
+				host,
+				ipAddr.IP.String(),
+				reason,
+			)
 		}
 	}
 
@@ -1018,7 +1034,10 @@ func parseSSRFWhitelistRaw(raw string) *ssrfWhitelistConfig {
 		// implement glob matching, so the entry would silently never
 		// match. Surface it loudly.
 		if strings.Contains(entry, "*") {
-			log.Printf("[ssrf-whitelist] dropping unsupported wildcard pattern %q (only \"*.\" prefix is supported)", entry)
+			log.Printf(
+				"[ssrf-whitelist] dropping unsupported wildcard pattern %q (only \"*.\" prefix is supported)",
+				entry,
+			)
 			continue
 		}
 		// Exact host or IP
@@ -1232,14 +1251,14 @@ func ValidateURLForSSRF(rawURL string) error {
 // IsSystemProxy 判断是否为系统代理
 func IsSystemProxy(host string) bool {
 	proxyCfg := httpproxy.FromEnvironment()
-	for _, proxyUrl := range []string{
+	for _, proxyURL := range []string{
 		proxyCfg.HTTPProxy,
 		proxyCfg.HTTPSProxy,
 	} {
-		if proxyUrl == "" {
+		if proxyURL == "" {
 			continue
 		}
-		if parse, err := url.Parse(proxyUrl); err == nil {
+		if parse, err := url.Parse(proxyURL); err == nil {
 			if parse.Host == host {
 				return true
 			}

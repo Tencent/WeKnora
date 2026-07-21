@@ -49,7 +49,12 @@ type TaskPendingOpsRepository interface {
 	// Claimed rows are NOT removed: the consumer must DeleteByIDs on
 	// success, or ReleaseByIDs to hand a still-retryable row back to the
 	// pool (otherwise it stays claimed until staleBefore elapses).
-	ClaimBatch(ctx context.Context, taskType, scope, scopeID string, limit int, staleBefore time.Time) ([]*types.TaskPendingOp, error)
+	ClaimBatch(
+		ctx context.Context,
+		taskType, scope, scopeID string,
+		limit int,
+		staleBefore time.Time,
+	) ([]*types.TaskPendingOp, error)
 
 	// ReleaseByIDs clears claimed_at (back to NULL) for the given rows so
 	// a claimed-but-not-consumed row becomes immediately eligible for the

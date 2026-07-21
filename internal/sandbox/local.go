@@ -33,12 +33,12 @@ func NewLocalSandbox(config *Config) *LocalSandbox {
 }
 
 // Type returns the sandbox type
-func (s *LocalSandbox) Type() SandboxType {
-	return SandboxTypeLocal
+func (s *LocalSandbox) Type() Type {
+	return TypeLocal
 }
 
 // IsAvailable checks if local sandbox is available
-func (s *LocalSandbox) IsAvailable(ctx context.Context) bool {
+func (s *LocalSandbox) IsAvailable(_ context.Context) bool {
 	// Local sandbox is always available
 	return true
 }
@@ -243,7 +243,7 @@ func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
 }
 
 // Cleanup releases any resources
-func (s *LocalSandbox) Cleanup(ctx context.Context) error {
+func (s *LocalSandbox) Cleanup(_ context.Context) error {
 	// Local sandbox doesn't need cleanup
 	return nil
 }

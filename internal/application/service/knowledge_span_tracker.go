@@ -1,27 +1,4 @@
-// Package service: span tracker.
-//
-// SpanTracker is the pipeline-facing facade for recording per-attempt
-// progress trees. It mirrors Langfuse's vocabulary (root / span /
-// generation) so the UI's mental model matches what operators already use
-// for LLM call observability.
-//
-// Lifecycle:
-//
-//	attempt := tracker.OpenAttempt(ctx, knowledgeID, langfuseTraceID)
-//	  // creates the root span; every subsequent Begin* call uses this attempt
-//
-//	stage := tracker.BeginStage(ctx, knowledgeID, attempt, types.StageDocReader, input)
-//	  // ...do work...
-//	tracker.EndSpan(ctx, stage, output)         // success
-//	tracker.FailSpan(ctx, stage, code, msg, err) // error
-//	tracker.SkipSpan(ctx, stage, reason)        // intentionally not run
-//
-//	sub := tracker.BeginSubSpan(ctx, parentSpan, "multimodal.image[0]", types.SpanKindGeneration, input)
-//	  // ...
-//
-// All operations are best-effort: a DB error is logged and swallowed so a
-// tracker hiccup never breaks the parsing pipeline. Knowledge.parse_status
-// remains the authoritative source of truth for completion.
+// Package service implements knowledge span tracking.
 package service
 
 import (
@@ -292,7 +269,13 @@ func (t *spanTracker) LatestAttempt(ctx context.Context, knowledgeID string) int
 	return n
 }
 
-func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attempt int, stage string, input types.JSONMap) *Span {
+func (t *spanTracker) BeginStage(
+	ctx context.Context,
+	knowledgeID string,
+	attempt int,
+	stage string,
+	input types.JSONMap,
+) *Span {
 	if knowledgeID == "" || stage == "" {
 		return nil
 	}
@@ -309,8 +292,8 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	var (
-		rootID    string
-		existing  *types.KnowledgeProcessingSpan
+		rootID   string
+		existing *types.KnowledgeProcessingSpan
 	)
 	for i := range rows {
 		r := rows[i]
@@ -857,6 +840,7 @@ func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {
 	return nil
 }
+
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
@@ -867,6 +851,7 @@ func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string)
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
 }
+
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}

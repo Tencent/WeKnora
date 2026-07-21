@@ -266,7 +266,8 @@ func AddKBFlag(cmd *cobra.Command) {
 // carries it, and rejecting it with exit 2 is pure friction. Accepted and
 // ignored; declared here so schema still lists it truthfully.
 func AddIgnoredKBFlag(cmd *cobra.Command) {
-	cmd.Flags().String("kb", "", "Ignored — the id argument is globally unique; accepted for symmetry with `doc list`/`doc upload` so a carried-over --kb doesn't error")
+	cmd.Flags().
+		String("kb", "", "Ignored — the id argument is globally unique; accepted for symmetry with `doc list`/`doc upload` so a carried-over --kb doesn't error")
 }
 
 // ResolveKB returns the active KB id for the running command, applying the

@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package service
 
 import (
@@ -22,8 +23,29 @@ import (
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "epub", "mhtml", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
-		"mp3", "wav", "m4a", "flac", "ogg":
+	case "pdf",
+		"txt",
+		"docx",
+		"doc",
+		"epub",
+		"mhtml",
+		"md",
+		"markdown",
+		"png",
+		"jpg",
+		"jpeg",
+		"gif",
+		"csv",
+		"xlsx",
+		"xls",
+		"pptx",
+		"ppt",
+		"json",
+		"mp3",
+		"wav",
+		"m4a",
+		"flac",
+		"ogg":
 		return true
 	default:
 		return false
@@ -54,7 +76,7 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := md5.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -76,44 +98,10 @@ func calculateStr(strList ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.KnowledgeBase) (*types.DocParserVLMConfig, error) {
-	if kb == nil {
-		return nil, nil
-	}
-	// 兼容老版本：直接使用 ModelName 和 BaseURL
-	if kb.VLMConfig.ModelName != "" && kb.VLMConfig.BaseURL != "" {
-		return &types.DocParserVLMConfig{
-			ModelName:     kb.VLMConfig.ModelName,
-			BaseURL:       kb.VLMConfig.BaseURL,
-			APIKey:        kb.VLMConfig.APIKey,
-			InterfaceType: kb.VLMConfig.InterfaceType,
-		}, nil
-	}
-
-	// 新版本：未启用或无模型ID时返回nil
-	if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
-		return nil, nil
-	}
-
-	model, err := s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
-	if err != nil {
-		return nil, err
-	}
-
-	interfaceType := model.Parameters.InterfaceType
-	if interfaceType == "" {
-		interfaceType = "openai"
-	}
-
-	return &types.DocParserVLMConfig{
-		ModelName:     model.Name,
-		BaseURL:       model.Parameters.BaseURL,
-		APIKey:        model.Parameters.APIKey,
-		InterfaceType: interfaceType,
-	}, nil
-}
-
-func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
+func (s *knowledgeService) buildStorageConfig(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+) *types.DocParserStorageConfig {
 	provider := kb.GetStorageProvider()
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	backendID := ""
@@ -121,7 +109,8 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		backendID = *kb.StorageBackendID
 	}
 	if s.storageResolver != nil && tenant != nil {
-		if backend, err := s.storageResolver.ResolveBackend(ctx, tenant, backendID, provider); err == nil && backend != nil {
+		if backend, err := s.storageResolver.ResolveBackend(ctx, tenant, backendID, provider); err == nil &&
+			backend != nil {
 			provider = backend.Provider
 			tenantCopy := *tenant
 			tenantCopy.StorageEngineConfig = backend.ToStorageEngineConfig()
@@ -137,7 +126,7 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 	// resolve via the tenant-merge path below. Listing them here keeps the fall-through
 	// intentional (instead of an unrecognised provider silently sliding past the switch).
 	// See issue #1117: provider enum was missing tos/s3/oss in this switch.
-	sc := &kb.StorageConfig
+	sc := &kb.StorageConfig //nolint:staticcheck // legacy cos_config backward compatibility
 	hasKBFull := false
 	switch provider {
 	case "cos":
@@ -149,8 +138,14 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 	}
 
 	if hasKBFull {
-		logger.Infof(ctx, "[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
-			kb.ID, provider, sc.BucketName, sc.PathPrefix)
+		logger.Infof(
+			ctx,
+			"[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
+			kb.ID,
+			provider,
+			sc.BucketName,
+			sc.PathPrefix,
+		)
 		return &types.DocParserStorageConfig{
 			Provider:        strings.ToUpper(provider),
 			Region:          sc.Region,
@@ -252,8 +247,15 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
-	logger.Infof(ctx, "[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
-		kb.ID, strings.ToLower(out.Provider), out.BucketName, out.PathPrefix, out.Endpoint)
+	logger.Infof(
+		ctx,
+		"[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
+		kb.ID,
+		strings.ToLower(out.Provider),
+		out.BucketName,
+		out.PathPrefix,
+		out.Endpoint,
+	)
 	return &out
 }
 
@@ -277,7 +279,13 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 		svc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 		if err == nil && svc != nil {
-			logger.Infof(ctx, "[storage] resolveFileService selected instance: kb=%s backend=%s provider=%s", kb.ID, backendID, resolvedProvider)
+			logger.Infof(
+				ctx,
+				"[storage] resolveFileService selected instance: kb=%s backend=%s provider=%s",
+				kb.ID,
+				backendID,
+				resolvedProvider,
+			)
 			return svc
 		}
 		if err != nil {
@@ -298,7 +306,12 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
+		logger.Errorf(
+			ctx,
+			"Failed to create %s file service from tenant config: %v, falling back to default",
+			provider,
+			err,
+		)
 		return s.fileSvc
 	}
 	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, resolvedProvider)
@@ -309,17 +322,21 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 // if the resolved provider doesn't match what the filePath implies, fall back to
 // the provider inferred from the file path. This protects historical data when
 // tenant/KB config changes but files were stored under the old provider.
-func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *types.KnowledgeBase, filePath string) interfaces.FileService {
+func (s *knowledgeService) resolveFileServiceForPath(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	filePath string,
+) interfaces.FileService {
 	if backendID, inner, ok := types.ParseStorageBackendPath(filePath); ok && s.storageResolver != nil {
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		if tenant != nil {
 			provider := types.ParseProviderScheme(inner)
 			baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-			if resolved, _, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir); err == nil {
+			resolved, _, resolveErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+			if resolveErr == nil {
 				return resolved
-			} else {
-				logger.Warnf(ctx, "[storage] failed to resolve backend from file path: backend=%s err=%v", backendID, err)
 			}
+			logger.Warnf(ctx, "[storage] failed to resolve backend from file path: backend=%s err=%v", backendID, resolveErr)
 		}
 	}
 	svc := s.resolveFileService(ctx, kb)
@@ -344,13 +361,19 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 	}
 
 	if configured != "" && configured != inferred {
-		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
-			configured, inferred, filePath)
+		logger.Warnf(
+			ctx,
+			"[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
+			configured,
+			inferred,
+			filePath,
+		)
 		return s.fileSvc
 	}
 	return svc
 }
 
+// IsImageType is an exported function.
 func IsImageType(fileType string) bool {
 	switch fileType {
 	case "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff":
@@ -384,7 +407,11 @@ func IsVideoType(fileType string) bool {
 // payloadFileName and payloadFileType are in/out pointers: if they point to an empty string,
 // the function resolves the value from Content-Disposition / URL path and writes it back.
 // It does NOT perform SSRF validation — callers are responsible for that.
-func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
+func downloadFileFromURL(
+	ctx context.Context,
+	fileURL string,
+	payloadFileName, payloadFileType *string,
+) ([]byte, error) {
 	httpClient := secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
 		Timeout:      60 * time.Second,
 		MaxRedirects: 10,
@@ -397,7 +424,7 @@ func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, p
 	if err != nil {
 		return nil, fmt.Errorf("failed to download file from URL: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("remote server returned status %d", resp.StatusCode)
@@ -427,11 +454,11 @@ func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, p
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	limiter := &io.LimitedReader{R: resp.Body, N: maxFileURLSize + 1}
 	written, err := io.Copy(tmpFile, limiter)
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// SiliconFlowBaseURL and related constants.
 const (
 	SiliconFlowBaseURL = "https://api.siliconflow.cn/v1"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回硅基流动 provider 的元数据
-func (p *SiliconFlowProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *SiliconFlowProvider) Info() Info {
+	return Info{
 		Name:        ProviderSiliconFlow,
 		DisplayName: "硅基流动 SiliconFlow",
 		Description: "deepseek-ai/DeepSeek-V3.1, etc.",

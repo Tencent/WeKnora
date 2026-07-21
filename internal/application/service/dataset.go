@@ -51,7 +51,7 @@ func (d *DatasetService) GetDatasetByID(ctx context.Context, datasetID string) (
 }
 
 // DefaultDataset loads and initializes the default dataset from parquet files
-func DefaultDataset() dataset {
+func DefaultDataset() Dataset {
 	datasetDir := "./dataset/samples"
 	queries, err := loadParquet[TextInfo](fmt.Sprintf("%s/queries.parquet", datasetDir))
 	if err != nil {
@@ -74,7 +74,7 @@ func DefaultDataset() dataset {
 		panic(err)
 	}
 
-	res := dataset{
+	res := Dataset{
 		queries: make(map[int64]string),  // qid -> question text
 		corpus:  make(map[int64]string),  // pid -> passage text
 		answers: make(map[int64]string),  // aid -> answer text
@@ -99,8 +99,9 @@ func DefaultDataset() dataset {
 	return res
 }
 
+// Dataset is exported.
 // dataset represents the in-memory dataset structure
-type dataset struct {
+type Dataset struct {
 	queries map[int64]string  // qid -> question text
 	corpus  map[int64]string  // pid -> passage text
 	answers map[int64]string  // aid -> answer text
@@ -109,7 +110,7 @@ type dataset struct {
 }
 
 // Iterate generates QA pairs from the dataset
-func (d *dataset) Iterate() []*types.QAPair {
+func (d *Dataset) Iterate() []*types.QAPair {
 	var pairs []*types.QAPair
 
 	for qid, question := range d.queries {
@@ -145,7 +146,7 @@ func (d *dataset) Iterate() []*types.QAPair {
 }
 
 // GetContextForQID retrieves context passages for a given question ID
-func (d *dataset) GetContextForQID(qid int64) ([]string, error) {
+func (d *Dataset) GetContextForQID(qid int64) ([]string, error) {
 	pids, ok := d.qrels[qid]
 	if !ok {
 		return nil, errors.New("question ID not found")
@@ -162,7 +163,7 @@ func (d *dataset) GetContextForQID(qid int64) ([]string, error) {
 }
 
 // PrintStats prints dataset statistics to the logger
-func (d *dataset) PrintStats(ctx context.Context) {
+func (d *Dataset) PrintStats(ctx context.Context) {
 	logger.Infof(ctx, "QA System Statistics:")
 	logger.Infof(ctx, "- Total queries: %d", len(d.queries))
 	logger.Infof(ctx, "- Total corpus passages: %d", len(d.corpus))
@@ -183,7 +184,7 @@ func (d *dataset) PrintStats(ctx context.Context) {
 }
 
 // PrintRandomQA prints a random question with its related passages and answer
-func (d *dataset) PrintRandomQA() error {
+func (d *Dataset) PrintRandomQA() error {
 	// Get a random qid
 	var qid int64
 	for k := range d.qas {

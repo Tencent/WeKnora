@@ -30,7 +30,10 @@ type fakeAllSvc struct {
 	resp   *sdk.ClearKnowledgeBaseContentsResponse
 }
 
-func (f *fakeAllSvc) ClearKnowledgeBaseContents(_ context.Context, kbID string) (*sdk.ClearKnowledgeBaseContentsResponse, error) {
+func (f *fakeAllSvc) ClearKnowledgeBaseContents(
+	_ context.Context,
+	kbID string,
+) (*sdk.ClearKnowledgeBaseContentsResponse, error) {
 	f.called = true
 	f.gotID = kbID
 	if f.err != nil {
@@ -80,7 +83,17 @@ func TestDelete_Success_WithForce(t *testing.T) {
 	opts := &DeleteOptions{Yes: true}
 	// Force=true short-circuits the confirm path; the prompter must not be
 	// consulted, so any value works.
-	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Answer: false}, "doc_abc"))
+	require.NoError(
+		t,
+		runDelete(
+			context.Background(),
+			opts,
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			svc,
+			&testutil.ConfirmPrompter{Answer: false},
+			"doc_abc",
+		),
+	)
 
 	assert.Equal(t, "doc_abc", svc.got)
 	assert.Equal(t, 1, svc.calls)
@@ -92,7 +105,17 @@ func TestDelete_Success_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	opts := &DeleteOptions{Yes: true}
-	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, &testutil.ConfirmPrompter{Answer: true}, "doc_abc"))
+	require.NoError(
+		t,
+		runDelete(
+			context.Background(),
+			opts,
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+			&testutil.ConfirmPrompter{Answer: true},
+			"doc_abc",
+		),
+	)
 
 	got := out.String()
 	var env struct {
@@ -108,7 +131,14 @@ func TestDelete_Success_JSON(t *testing.T) {
 func TestDelete_NotFound_404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "doc_missing")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: true},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{},
+		"doc_missing",
+	)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -119,7 +149,14 @@ func TestDelete_NotFound_404(t *testing.T) {
 func TestDelete_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 500: internal")}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "doc_x")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: true},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{},
+		"doc_x",
+	)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -133,7 +170,14 @@ func TestDelete_HTTPError_500(t *testing.T) {
 func TestDelete_ConfirmYes(t *testing.T) {
 	out, _ := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Answer: true}, "doc_abc")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: false},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{Answer: true},
+		"doc_abc",
+	)
 	require.NoError(t, err)
 	assert.Equal(t, 1, svc.calls, "user said yes ⇒ delete proceeds")
 	assert.Contains(t, out.String(), "✓")
@@ -142,7 +186,14 @@ func TestDelete_ConfirmYes(t *testing.T) {
 func TestDelete_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Answer: false}, "doc_abc")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: false},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{Answer: false},
+		"doc_abc",
+	)
 	require.Error(t, err)
 	assert.Equal(t, 0, svc.calls, "user said no ⇒ SDK must NOT be called")
 
@@ -158,7 +209,14 @@ func TestDelete_ConfirmNo(t *testing.T) {
 func TestDelete_AgentPrompterErrors(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Err: errors.New("no tty")}, "doc_abc")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: false},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{Err: errors.New("no tty")},
+		"doc_abc",
+	)
 	require.Error(t, err)
 	assert.Equal(t, 0, svc.calls)
 
@@ -174,7 +232,14 @@ func TestDelete_AgentPrompterErrors(t *testing.T) {
 func TestDelete_NoYes_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Err: errors.New("no tty")}, "doc_abc")
+	err := runDelete(
+		context.Background(),
+		&DeleteOptions{Yes: false},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{Err: errors.New("no tty")},
+		"doc_abc",
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -262,7 +327,16 @@ func TestRunMultiDelete_ConfirmBatch_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t) // non-TTY
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 2, "doc.delete", nil)
+	err := cmdutil.ConfirmDestructiveBatch(
+		&testutil.ConfirmPrompter{Answer: false},
+		false,
+		fopts.WantsJSON(),
+		"delete",
+		"document",
+		2,
+		"doc.delete",
+		nil,
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -274,7 +348,16 @@ func TestRunMultiDelete_ConfirmBatch_TTY_UserAborts(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 3, "doc.delete", nil)
+	err := cmdutil.ConfirmDestructiveBatch(
+		&testutil.ConfirmPrompter{Answer: false},
+		false,
+		fopts.WantsJSON(),
+		"delete",
+		"document",
+		3,
+		"doc.delete",
+		nil,
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -406,7 +489,15 @@ func TestDocDelete_MultiID_PartialFailure_BatchEnvelope(t *testing.T) {
 	require.Len(t, outcomes, 3)
 
 	var buf bytes.Buffer
-	require.NoError(t, cmdutil.EmitBatch(outcomes, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON, TTY: false}, &buf, cmdutil.DeletedAtNow))
+	require.NoError(
+		t,
+		cmdutil.EmitBatch(
+			outcomes,
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON, TTY: false},
+			&buf,
+			cmdutil.DeletedAtNow,
+		),
+	)
 
 	var env batchEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
@@ -460,7 +551,13 @@ func TestDocDelete_All_WithoutYes_JSONMode_ReturnsExit10(t *testing.T) {
 	_, _ = iostreams.SetForTest(t) // non-TTY
 	svc := &fakeAllSvc{}
 	opts := &DeleteOptions{All: true, KB: "kb_x", Yes: false}
-	err := runDeleteAll(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, &testutil.ConfirmPrompter{})
+	err := runDeleteAll(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -478,7 +575,13 @@ func TestDocDelete_All_WithYes_CallsClearKB(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeAllSvc{resp: &sdk.ClearKnowledgeBaseContentsResponse{DeletedCount: 17}}
 	opts := &DeleteOptions{All: true, KB: "kb_x", Yes: true}
-	err := runDeleteAll(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, &testutil.ConfirmPrompter{})
+	err := runDeleteAll(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.NoError(t, err)
 	assert.True(t, svc.called)
 	assert.Equal(t, "kb_x", svc.gotID)
@@ -498,7 +601,13 @@ func TestDocDelete_All_WithYes_TextMode(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeAllSvc{resp: &sdk.ClearKnowledgeBaseContentsResponse{DeletedCount: 5}}
 	opts := &DeleteOptions{All: true, KB: "kb_y", Yes: true}
-	err := runDeleteAll(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{})
+	err := runDeleteAll(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.NoError(t, err)
 	assert.True(t, svc.called)
 	body := out.String()
@@ -511,7 +620,13 @@ func TestDocDelete_All_TTY_UserAborts(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeAllSvc{}
 	opts := &DeleteOptions{All: true, KB: "kb_z", Yes: false}
-	err := runDeleteAll(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{Answer: false})
+	err := runDeleteAll(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{Answer: false},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -525,7 +640,13 @@ func TestDocDelete_All_ServiceError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeAllSvc{err: errors.New("HTTP error 404: not found")}
 	opts := &DeleteOptions{All: true, KB: "kb_missing", Yes: true}
-	err := runDeleteAll(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{})
+	err := runDeleteAll(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

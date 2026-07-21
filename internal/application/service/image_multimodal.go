@@ -26,7 +26,8 @@ import (
 
 const (
 	vlmOCRPrompt = "<system_prompt>\n" +
-		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
+		"You are an OCR assistant. Your task is to extract all body text con" +
+		"tent from this document image and output in pure Markdown format.\n" +
 		"</system_prompt>\n\n" +
 		"<instructions>\n" +
 		"1. Ignore headers and footers.\n" +
@@ -38,6 +39,7 @@ const (
 		"</instructions>"
 	vlmOCRScannedPDFPrompt = "<system_prompt>\n" +
 		"You are an OCR and document layout extraction assistant. The input image is a page from a scanned PDF document.\n" +
+		//nolint:lll
 		"Your task is to carefully extract all text and layout structure from the image, and output the result in pure Markdown format.\n" +
 		"</system_prompt>\n\n" +
 		"<instructions>\n" +
@@ -70,7 +72,7 @@ type ImageMultimodalService struct {
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
-	ollamaService  *ollama.OllamaService
+	ollamaService  *ollama.Service
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
 	// fileSvc is the globally configured default FileService used as a fallback
@@ -90,6 +92,7 @@ type ImageMultimodalService struct {
 	spanTracker SpanTracker
 }
 
+// NewImageMultimodalService is an exported function.
 func NewImageMultimodalService(
 	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
@@ -98,7 +101,7 @@ func NewImageMultimodalService(
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
-	ollamaService *ollama.OllamaService,
+	ollamaService *ollama.Service,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
@@ -424,7 +427,11 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
 // so they can participate in semantic search.
-func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk) {
+func (s *ImageMultimodalService) indexChunks(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	chunks []*types.Chunk,
+) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
@@ -436,8 +443,12 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	// EmbeddingModelID is intentionally empty for such KBs. The multimodal chunks
 	// themselves are already persisted in the DB above, so skipping index here is safe.
 	if !kb.NeedsEmbeddingModel() {
-		logger.Infof(ctx, "[ImageMultimodal] Vector/keyword indexing disabled for KB %s, skipping index for %d multimodal chunks",
-			kb.ID, len(chunks))
+		logger.Infof(
+			ctx,
+			"[ImageMultimodal] Vector/keyword indexing disabled for KB %s, skipping index for %d multimodal chunks",
+			kb.ID,
+			len(chunks),
+		)
 		// Still mark chunks as indexed so downstream finalization sees a consistent state.
 		for _, chunk := range chunks {
 			dbChunk, gerr := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
@@ -514,7 +525,10 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
 // supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
 // Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
+func (s *ImageMultimodalService) resolveVLM(
+	ctx context.Context,
+	kbID, knowledgeID string,
+) (vlm.VLM, types.VLMConfig, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
 		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
@@ -551,7 +565,10 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 // This mirrors the write-side fallback in knowledgeService.resolveFileService
 // and is required because images can be saved using global STORAGE_TYPE/MINIO_*
 // env vars while tenant.StorageEngineConfig.MinIO is left empty (issue #1282).
-func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
+func (s *ImageMultimodalService) resolveFileServiceForPayload(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+) interfaces.FileService {
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil || tenant == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
@@ -566,7 +583,12 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	// stored on a different backend (multi-backend / post-migration).
 	if _, isResourceRef := types.ParseResourcePath(payload.ImageURL); isResourceRef && s.resourceCatalog != nil {
 		if resource, resErr := s.resourceCatalog.Resolve(ctx, payload.ImageURL); resErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: url=%s err=%v", payload.ImageURL, resErr)
+			logger.Warnf(
+				ctx,
+				"[ImageMultimodal] resolve resource reference failed: url=%s err=%v",
+				payload.ImageURL,
+				resErr,
+			)
 		} else if resource != nil {
 			backendID = resource.StorageBackendID
 			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
@@ -575,7 +597,12 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	if provider == "" {
 		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 		if kbErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
+			logger.Warnf(
+				ctx,
+				"[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v",
+				payload.KnowledgeBaseID,
+				kbErr,
+			)
 		} else if kb != nil {
 			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
 			if backendID == "" && kb.StorageBackendID != nil {
@@ -589,12 +616,23 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
-		payload.TenantID, provider, baseDir, payload.ImageURL)
+	logger.Infof(
+		ctx,
+		"[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
+		payload.TenantID,
+		provider,
+		baseDir,
+		payload.ImageURL,
+	)
 	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 	if svcErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
-			payload.TenantID, provider, svcErr)
+		logger.Warnf(
+			ctx,
+			"[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
+			payload.TenantID,
+			provider,
+			svcErr,
+		)
 		return s.fileSvc
 	}
 	return fileSvc
@@ -607,7 +645,10 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 //   - For legacy in-flight payloads with ImageLocalPath set, it tries the local
 //     file before falling back to the URL.
 //   - For plain http(s):// URLs it uses the SSRF-safe downloader.
-func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload types.ImageMultimodalPayload) ([]byte, error) {
+func (s *ImageMultimodalService) readImageBytes(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+) ([]byte, error) {
 	_, isResourceRef := types.ParseResourcePath(payload.ImageURL)
 	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
@@ -618,7 +659,7 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 		if err != nil {
 			return nil, fmt.Errorf("file service get %s: %w", payload.ImageURL, err)
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 		data, err := io.ReadAll(reader)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", payload.ImageURL, err)
@@ -627,11 +668,12 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 	}
 
 	if payload.ImageLocalPath != "" {
-		if data, err := os.ReadFile(payload.ImageLocalPath); err == nil {
+		data, readErr := os.ReadFile(payload.ImageLocalPath)
+		if readErr == nil {
 			return data, nil
-		} else {
-			logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), falling back to URL", payload.ImageLocalPath, err)
 		}
+		logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), falling back to URL",
+			payload.ImageLocalPath, readErr)
 	}
 
 	data, err := downloadImageFromURL(payload.ImageURL)
@@ -678,7 +720,10 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 	}
 }
 
-func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Context, payload types.ImageMultimodalPayload) {
+func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+) {
 	if s.taskEnqueuer == nil {
 		return
 	}

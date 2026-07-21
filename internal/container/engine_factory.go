@@ -140,7 +140,10 @@ func isESv7(version string) bool {
 	return strings.HasPrefix(version, "7.")
 }
 
-func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV8Engine(
+	store types.VectorStore,
+	cfg *config.Config,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	client, err := elasticsearch.NewTypedClient(elasticsearch.Config{
 		Addresses: []string{cc.Addr},
@@ -154,7 +157,10 @@ func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (i
 	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
 }
 
-func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV7Engine(
+	store types.VectorStore,
+	cfg *config.Config,
+) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	client, err := esv7.NewClient(esv7.Config{
 		Addresses: []string{cc.Addr},
@@ -205,8 +211,10 @@ func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfi
 	}
 
 	milvusCfg := milvusclient.ClientConfig{
-		Address:     addr,
-		DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
+		Address: addr,
+		DialOptions: []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 5 * time.Second}),
+		},
 	}
 	if cc.Username != "" {
 		milvusCfg.Username = cc.Username

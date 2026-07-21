@@ -1,3 +1,4 @@
+// Package metric provides related functionality.
 package metric
 
 // references: https://github.com/waygo/bleu
@@ -24,26 +25,35 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// BLEUMetric is an exported type.
 type BLEUMetric struct {
 	smoothing bool
 	weights   BLEUWeight
 }
 
+// NewBLEUMetric is an exported function.
 func NewBLEUMetric(smoothing bool, weights BLEUWeight) *BLEUMetric {
 	return &BLEUMetric{smoothing: smoothing, weights: weights}
 }
 
+// Sentence is an exported type.
 type Sentence []string
 
+// BLEUWeight is an exported type.
 type BLEUWeight []float64
 
 var (
+	// BLEU1Gram is an exported constant.
 	BLEU1Gram BLEUWeight = []float64{1.0, 0.0, 0.0, 0.0}
+	// BLEU2Gram implements the required behavior.
 	BLEU2Gram BLEUWeight = []float64{0.5, 0.5, 0.0, 0.0}
+	// BLEU3Gram is exported for use by other packages.
 	BLEU3Gram BLEUWeight = []float64{0.33, 0.33, 0.33, 0.0}
+	// BLEU4Gram is exported for use by other packages.
 	BLEU4Gram BLEUWeight = []float64{0.25, 0.25, 0.25, 0.25}
 )
 
+// Compute implements the required interface method.
 func (b *BLEUMetric) Compute(metricInput *types.MetricInput) float64 {
 	candidate := splitIntoWords(splitSentences(metricInput.GeneratedTexts))
 	references := []Sentence{splitIntoWords(splitSentences(metricInput.GeneratedGT))}
@@ -134,7 +144,7 @@ func (b *BLEUMetric) modifiedPrecision(candidate Sentence, references []Sentence
 
 	clippedCounts := map[string]int{}
 	for ngram, count := range counts {
-		clippedCounts[ngram] = min(count, maxCounts[ngram])
+		clippedCounts[ngram] = minInt(count, maxCounts[ngram])
 	}
 
 	smoothingFactor := 0.0

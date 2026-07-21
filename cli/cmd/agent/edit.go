@@ -114,7 +114,8 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			opts.flags.nameSet = cmd.Flags().Changed("name")
 			opts.flags.descriptionSet = cmd.Flags().Changed("description")
 			opts.flags.modelSet = cmd.Flags().Changed("model")
-			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") || cmd.Flags().Changed("system-prompt-file")
+			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") ||
+				cmd.Flags().Changed("system-prompt-file")
 			opts.flags.agentModeSet = cmd.Flags().Changed("agent-mode")
 			opts.flags.rerankModelSet = cmd.Flags().Changed("rerank-model")
 			opts.flags.temperatureSet = cmd.Flags().Changed("temperature")
@@ -139,7 +140,10 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			if systemPromptFile != "" {
 				r, err := cmdutil.OpenInput(systemPromptFile)
 				if err != nil {
-					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
+					return cmdutil.NewError(
+						cmdutil.CodeInputInvalidArgument,
+						fmt.Sprintf("--system-prompt-file: %v", err),
+					)
 				}
 				opts.SystemPromptReader = r
 			}
@@ -251,18 +255,22 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Name, "name", "", "New agent name")
 	cmd.Flags().StringVar(&opts.Description, "description", "", `New description (use "" to clear)`)
 	cmd.Flags().StringVar(&opts.Model, "model", "", "LLM model id")
-	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
+	cmd.Flags().
+		StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
 	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
 	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
-	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
+	cmd.Flags().
+		StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
 	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
 	cmd.Flags().StringSliceVar(&opts.AddKBs, "add-kb", nil, "Attach knowledge base id (repeatable, idempotent)")
 	cmd.Flags().StringSliceVar(&opts.RemoveKBs, "remove-kb", nil, "Detach knowledge base id (repeatable, idempotent)")
-	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
+	cmd.Flags().
+		StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
 
 	// Full-replace
-	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
+	cmd.Flags().
+		StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
@@ -283,7 +291,6 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	})
 	return cmd
 }
-
 
 // editHasAnyFlag reports whether opts carries at least one surgical update
 // signal. Required-flag validation lives in runEdit (not PreRunE) so unit
@@ -412,7 +419,11 @@ func computeKBList(current, add, remove []string) []string {
 		}
 		// Sort for deterministic test output; map iteration is random.
 		sort.Strings(canceled)
-		fmt.Fprintf(iostreams.IO.Err, "warning: --add-kb and --remove-kb cancel out for: %s\n", strings.Join(canceled, ", "))
+		fmt.Fprintf(
+			iostreams.IO.Err,
+			"warning: --add-kb and --remove-kb cancel out for: %s\n",
+			strings.Join(canceled, ", "),
+		)
 	}
 
 	// Compute effective remove set (excluding canceled).

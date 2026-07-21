@@ -12,6 +12,7 @@ import (
 
 type temporaryDocumentRepository struct{ db *gorm.DB }
 
+// NewTemporaryDocumentRepository is an exported function.
 func NewTemporaryDocumentRepository(db *gorm.DB) interfaces.TemporaryDocumentRepository {
 	return &temporaryDocumentRepository{db: db}
 }
@@ -20,7 +21,11 @@ func (r *temporaryDocumentRepository) Create(ctx context.Context, document *type
 	return r.db.WithContext(ctx).Create(document).Error
 }
 
-func (r *temporaryDocumentRepository) GetByID(ctx context.Context, tenantID uint64, documentID string) (*types.TemporaryDocument, error) {
+func (r *temporaryDocumentRepository) GetByID(
+	ctx context.Context,
+	tenantID uint64,
+	documentID string,
+) (*types.TemporaryDocument, error) {
 	var document types.TemporaryDocument
 	err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, documentID).First(&document).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -29,28 +34,59 @@ func (r *temporaryDocumentRepository) GetByID(ctx context.Context, tenantID uint
 	return &document, err
 }
 
-func (r *temporaryDocumentRepository) GetScoped(ctx context.Context, tenantID uint64, sessionID, documentID string) (*types.TemporaryDocument, error) {
+func (r *temporaryDocumentRepository) GetScoped(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID, documentID string,
+) (*types.TemporaryDocument, error) {
 	var document types.TemporaryDocument
-	err := r.db.WithContext(ctx).Where("tenant_id = ? AND session_id = ? AND id = ?", tenantID, sessionID, documentID).First(&document).Error
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND session_id = ? AND id = ?", tenantID, sessionID, documentID).
+		First(&document).
+		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &document, err
 }
 
-func (r *temporaryDocumentRepository) ListScoped(ctx context.Context, tenantID uint64, sessionID string) ([]*types.TemporaryDocument, error) {
+func (r *temporaryDocumentRepository) ListScoped(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+) ([]*types.TemporaryDocument, error) {
 	var documents []*types.TemporaryDocument
-	err := r.db.WithContext(ctx).Where("tenant_id = ? AND session_id = ?", tenantID, sessionID).Order("created_at ASC").Find(&documents).Error
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND session_id = ?", tenantID, sessionID).
+		Order("created_at ASC").
+		Find(&documents).
+		Error
 	return documents, err
 }
 
-func (r *temporaryDocumentRepository) MarkProcessing(ctx context.Context, tenantID uint64, documentID string, startedAt time.Time) error {
+func (r *temporaryDocumentRepository) MarkProcessing(
+	ctx context.Context,
+	tenantID uint64,
+	documentID string,
+	startedAt time.Time,
+) error {
 	return r.db.WithContext(ctx).Model(&types.TemporaryDocument{}).
 		Where("tenant_id = ? AND id = ?", tenantID, documentID).
-		Updates(map[string]interface{}{"status": types.TemporaryDocumentStatusProcessing, "started_at": startedAt, "error_message": ""}).Error
+		Updates(map[string]interface{}{
+			"status": types.TemporaryDocumentStatusProcessing, "started_at": startedAt,
+			"error_message": "",
+		}).
+		Error
 }
 
-func (r *temporaryDocumentRepository) MarkReady(ctx context.Context, tenantID uint64, documentID, content string, chunks, imageRefs, metadata types.JSON, tokenCount, chunkCount int, readyAt time.Time) error {
+func (r *temporaryDocumentRepository) MarkReady(
+	ctx context.Context,
+	tenantID uint64,
+	documentID, content string,
+	chunks, imageRefs, metadata types.JSON,
+	tokenCount, chunkCount int,
+	readyAt time.Time,
+) error {
 	return r.db.WithContext(ctx).Model(&types.TemporaryDocument{}).
 		Where("tenant_id = ? AND id = ?", tenantID, documentID).
 		Updates(map[string]interface{}{
@@ -60,18 +96,38 @@ func (r *temporaryDocumentRepository) MarkReady(ctx context.Context, tenantID ui
 		}).Error
 }
 
-func (r *temporaryDocumentRepository) MarkFailed(ctx context.Context, tenantID uint64, documentID, message string) error {
+func (r *temporaryDocumentRepository) MarkFailed(
+	ctx context.Context,
+	tenantID uint64,
+	documentID, message string,
+) error {
 	return r.db.WithContext(ctx).Model(&types.TemporaryDocument{}).
 		Where("tenant_id = ? AND id = ?", tenantID, documentID).
 		Updates(map[string]interface{}{"status": types.TemporaryDocumentStatusFailed, "error_message": message}).Error
 }
 
-func (r *temporaryDocumentRepository) DeleteScoped(ctx context.Context, tenantID uint64, sessionID, documentID string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND session_id = ? AND id = ?", tenantID, sessionID, documentID).Delete(&types.TemporaryDocument{}).Error
+func (r *temporaryDocumentRepository) DeleteScoped(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID, documentID string,
+) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND session_id = ? AND id = ?", tenantID, sessionID, documentID).
+		Delete(&types.TemporaryDocument{}).
+		Error
 }
 
-func (r *temporaryDocumentRepository) ListExpired(ctx context.Context, before time.Time, limit int) ([]*types.TemporaryDocument, error) {
+func (r *temporaryDocumentRepository) ListExpired(
+	ctx context.Context,
+	before time.Time,
+	limit int,
+) ([]*types.TemporaryDocument, error) {
 	var documents []*types.TemporaryDocument
-	err := r.db.WithContext(ctx).Where("expires_at <= ?", before).Order("expires_at ASC").Limit(limit).Find(&documents).Error
+	err := r.db.WithContext(ctx).
+		Where("expires_at <= ?", before).
+		Order("expires_at ASC").
+		Limit(limit).
+		Find(&documents).
+		Error
 	return documents, err
 }

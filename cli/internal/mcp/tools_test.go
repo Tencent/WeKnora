@@ -74,27 +74,38 @@ func (f *fakeSvc) ListKnowledgeBases(_ context.Context) ([]sdk.KnowledgeBase, er
 	f.calls.listKBs++
 	return f.listKBs, f.listKBsErr
 }
+
 func (f *fakeSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {
 	f.calls.kbViewID = id
 	return f.getKB, f.getKBErr
 }
-func (f *fakeSvc) ListKnowledgeWithFilter(_ context.Context, kbID string, _, _ int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error) {
+
+func (f *fakeSvc) ListKnowledgeWithFilter(
+	_ context.Context,
+	kbID string,
+	_, _ int,
+	filter sdk.KnowledgeListFilter,
+) ([]sdk.Knowledge, int64, error) {
 	f.calls.docListKBID = kbID
 	f.calls.docListFilter = filter
 	return f.listDocs, f.listDocsTotal, f.listDocsErr
 }
+
 func (f *fakeSvc) GetKnowledge(_ context.Context, id string) (*sdk.Knowledge, error) {
 	f.calls.docViewID = id
 	return f.getDoc, f.getDocErr
 }
+
 func (f *fakeSvc) OpenKnowledgeFile(_ context.Context, id string) (string, io.ReadCloser, error) {
 	f.calls.openDocID = id
 	return f.openDocName, f.openDocBody, f.openDocErr
 }
+
 func (f *fakeSvc) HybridSearch(_ context.Context, kbID string, p *sdk.SearchParams) ([]*sdk.SearchResult, error) {
 	f.calls.hybridKBID, f.calls.hybridParams = kbID, p
 	return f.hybridResults, f.hybridErr
 }
+
 func (f *fakeSvc) CreateSession(_ context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error) {
 	f.calls.createSessReq = req
 	if f.createSess == nil && f.createSessErr == nil {
@@ -102,7 +113,13 @@ func (f *fakeSvc) CreateSession(_ context.Context, req *sdk.CreateSessionRequest
 	}
 	return f.createSess, f.createSessErr
 }
-func (f *fakeSvc) KnowledgeQAStream(_ context.Context, sess string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error {
+
+func (f *fakeSvc) KnowledgeQAStream(
+	_ context.Context,
+	sess string,
+	req *sdk.KnowledgeQARequest,
+	cb func(*sdk.StreamResponse) error,
+) error {
 	f.calls.kbQASess, f.calls.kbQAReq = sess, req
 	for _, e := range f.kbStreamEvents {
 		if err := cb(e); err != nil {
@@ -111,15 +128,23 @@ func (f *fakeSvc) KnowledgeQAStream(_ context.Context, sess string, req *sdk.Kno
 	}
 	return f.kbStreamErr
 }
+
 func (f *fakeSvc) ListAgents(_ context.Context) ([]sdk.Agent, error) {
 	f.calls.agentListN++
 	return f.agents, f.agentsErr
 }
+
 func (f *fakeSvc) GetAgent(_ context.Context, id string) (*sdk.Agent, error) {
 	f.calls.agentViewID = id
 	return f.agent, f.agentErr
 }
-func (f *fakeSvc) AgentQAStreamWithRequest(_ context.Context, sess string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error {
+
+func (f *fakeSvc) AgentQAStreamWithRequest(
+	_ context.Context,
+	sess string,
+	req *sdk.AgentQARequest,
+	cb sdk.AgentEventCallback,
+) error {
 	f.calls.agentSess, f.calls.agentReq = sess, req
 	for _, e := range f.agentEvents {
 		if err := cb(e); err != nil {
@@ -128,7 +153,13 @@ func (f *fakeSvc) AgentQAStreamWithRequest(_ context.Context, sess string, req *
 	}
 	return f.agentStreamErr
 }
-func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, _ ...string) ([]sdk.Chunk, int64, error) {
+
+func (f *fakeSvc) ListKnowledgeChunks(
+	_ context.Context,
+	docID string,
+	page, pageSize int,
+	_ ...string,
+) ([]sdk.Chunk, int64, error) {
 	f.calls.chunkDocID = docID
 	f.calls.chunkPage = page
 	f.calls.chunkPageSize = pageSize
@@ -196,7 +227,18 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list"}
+	want := []string{
+		"kb_list",
+		"kb_view",
+		"doc_list",
+		"doc_view",
+		"doc_download",
+		"search_chunks",
+		"chat",
+		"agent_list",
+		"session_ask",
+		"chunk_list",
+	}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -420,7 +462,12 @@ func TestTool_SearchChunks_PassesMatchCountFromLimit(t *testing.T) {
 	c, _ := newTestServer(t, svc)
 	callTool(t, c, "search_chunks", map[string]any{"kb_id": "kb_x", "query": "test", "limit": 50}, nil)
 	require.NotNil(t, svc.calls.hybridParams, "HybridSearch must be called with non-nil SearchParams")
-	assert.Equal(t, 50, svc.calls.hybridParams.MatchCount, "MCP search_chunks must thread limit into SearchParams.MatchCount")
+	assert.Equal(
+		t,
+		50,
+		svc.calls.hybridParams.MatchCount,
+		"MCP search_chunks must thread limit into SearchParams.MatchCount",
+	)
 }
 
 func TestTool_Chat_DefaultReturnsAnswerEventsOnly(t *testing.T) {
@@ -497,7 +544,13 @@ func TestMCP_SessionAskVerboseAndReferenceReturnsBothDetailClasses(t *testing.T)
 	}
 	c, _ := newTestServer(t, svc)
 	var out sessionAskOutput
-	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "tool question", "verbose": true, "reference": true}, &out)
+	callTool(
+		t,
+		c,
+		"session_ask",
+		map[string]any{"agent_id": "ag1", "query": "tool question", "verbose": true, "reference": true},
+		&out,
+	)
 	want := []string{"thinking", "tool_call", "references", "answer", "complete"}
 	if len(out.Events) != len(want) {
 		t.Fatalf("events=%+v", out.Events)
@@ -567,7 +620,10 @@ func TestTool_SessionAsk_StreamAbort(t *testing.T) {
 	c, _ := newTestServer(t, svc)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "session_ask", Arguments: map[string]any{"agent_id": "ag1", "query": "x"}})
+	res, err := c.CallTool(
+		ctx,
+		&mcpsdk.CallToolParams{Name: "session_ask", Arguments: map[string]any{"agent_id": "ag1", "query": "x"}},
+	)
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
@@ -587,7 +643,10 @@ func TestTool_Chat_StreamErrorIncludesSessionDetail(t *testing.T) {
 	c, _ := newTestServer(t, svc)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "chat", Arguments: map[string]any{"kb_id": "kb_x", "query": "q"}})
+	res, err := c.CallTool(
+		ctx,
+		&mcpsdk.CallToolParams{Name: "chat", Arguments: map[string]any{"kb_id": "kb_x", "query": "q"}},
+	)
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
@@ -696,16 +755,76 @@ func TestToolAnnotations_AllToolsHaveExpectedHints(t *testing.T) {
 		openWorld   bool
 		title       string
 	}{
-		"kb_list":       {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Bases"},
-		"kb_view":       {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "View Knowledge Base"},
-		"doc_list":      {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Documents"},
-		"doc_view":      {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "View Document"},
-		"doc_download":  {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Download Document"},
-		"search_chunks": {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Search Knowledge Chunks"},
-		"chat":          {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Chat with KB (Streaming RAG)"},
-		"agent_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Custom Agents"},
-		"session_ask":   {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Ask a Custom Agent (session ask --agent)"},
-		"chunk_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Chunks"},
+		"kb_list": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "List Knowledge Bases",
+		},
+		"kb_view": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "View Knowledge Base",
+		},
+		"doc_list": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "List Documents",
+		},
+		"doc_view": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "View Document",
+		},
+		"doc_download": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "Download Document",
+		},
+		"search_chunks": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "Search Knowledge Chunks",
+		},
+		"chat": {
+			destructive: false,
+			readOnly:    false,
+			idempotent:  false,
+			openWorld:   true,
+			title:       "Chat with KB (Streaming RAG)",
+		},
+		"agent_list": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "List Custom Agents",
+		},
+		"session_ask": {
+			destructive: false,
+			readOnly:    false,
+			idempotent:  false,
+			openWorld:   true,
+			title:       "Ask a Custom Agent (session ask --agent)",
+		},
+		"chunk_list": {
+			destructive: false,
+			readOnly:    true,
+			idempotent:  true,
+			openWorld:   false,
+			title:       "List Knowledge Chunks",
+		},
 	}
 
 	c, _ := newTestServer(t, &fakeSvc{})

@@ -144,7 +144,12 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 }
 
 // UpdateRole changes the role of an existing active membership.
-func (r *tenantMemberRepository) UpdateRole(ctx context.Context, userID string, tenantID uint64, role types.TenantRole) error {
+func (r *tenantMemberRepository) UpdateRole(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	role types.TenantRole,
+) error {
 	res := r.db.WithContext(ctx).
 		Model(&types.TenantMember{}).
 		Where("user_id = ? AND tenant_id = ?", userID, tenantID).

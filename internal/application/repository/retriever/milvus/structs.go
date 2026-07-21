@@ -18,7 +18,8 @@ type milvusRepository struct {
 	initializedCollections sync.Map
 }
 
-type MilvusVectorEmbedding struct {
+// VectorEmbedding is an exported type.
+type VectorEmbedding struct {
 	ID              string    `json:"id"`
 	Content         string    `json:"content"`
 	SourceID        string    `json:"source_id"`
@@ -31,7 +32,8 @@ type MilvusVectorEmbedding struct {
 	IsEnabled       bool      `json:"is_enabled"`
 }
 
-type MilvusVectorEmbeddingWithScore struct {
-	MilvusVectorEmbedding
+// VectorEmbeddingWithScore is an exported type.
+type VectorEmbeddingWithScore struct {
+	VectorEmbedding
 	Score float64
 }

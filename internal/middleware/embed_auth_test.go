@@ -20,33 +20,33 @@ type fakeEmbedChannelService struct {
 }
 
 func (f *fakeEmbedChannelService) Create(
-	ctx context.Context, tenantID uint64, agentID string, req *types.EmbedChannel,
+	_ context.Context, _ uint64, _ string, _ *types.EmbedChannel,
 ) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
 
 func (f *fakeEmbedChannelService) ListByAgent(
-	ctx context.Context, tenantID uint64, agentID string,
+	_ context.Context, _ uint64, _ string,
 ) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
 
 func (f *fakeEmbedChannelService) ListByTenant(
-	ctx context.Context, tenantID uint64,
+	_ context.Context, _ uint64,
 ) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
 
 func (f *fakeEmbedChannelService) Update(
-	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
-	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool,
-	defaultLocale *string, webhookURL *string, webhookSecret *string,
+	_ context.Context, _ uint64, _ string, _ *types.EmbedChannel,
+	_ *bool, _ *bool, _ *bool, _ *bool,
+	_ *string, _ *string, _ *string,
 ) (*types.EmbedChannel, error) {
 	return nil, nil
 }
 
 func (f *fakeEmbedChannelService) GetOwnedChannel(
-	ctx context.Context, tenantID uint64, id string,
+	_ context.Context, tenantID uint64, id string,
 ) (*types.EmbedChannel, error) {
 	ch := f.channels[id]
 	if ch == nil || ch.TenantID != tenantID {
@@ -55,18 +55,18 @@ func (f *fakeEmbedChannelService) GetOwnedChannel(
 	return ch, nil
 }
 
-func (f *fakeEmbedChannelService) Delete(ctx context.Context, tenantID uint64, id string) error {
+func (f *fakeEmbedChannelService) Delete(_ context.Context, _ uint64, _ string) error {
 	return nil
 }
 
 func (f *fakeEmbedChannelService) RotateToken(
-	ctx context.Context, tenantID uint64, id string,
+	_ context.Context, _ uint64, _ string,
 ) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
 
 func (f *fakeEmbedChannelService) LookupForEmbed(
-	ctx context.Context, channelID, token string,
+	_ context.Context, channelID, token string,
 ) (*types.EmbedChannel, error) {
 	ch := f.channels[channelID]
 	if ch == nil || ch.PublishToken != token {
@@ -79,7 +79,7 @@ func (f *fakeEmbedChannelService) LookupForEmbed(
 }
 
 func (f *fakeEmbedChannelService) LookupEnabledChannel(
-	ctx context.Context, channelID string,
+	_ context.Context, channelID string,
 ) (*types.EmbedChannel, error) {
 	ch := f.channels[channelID]
 	if ch == nil {
@@ -92,12 +92,12 @@ func (f *fakeEmbedChannelService) LookupEnabledChannel(
 }
 
 func (f *fakeEmbedChannelService) IssueSessionToken(
-	ctx context.Context, channelID string,
+	_ context.Context, _ string,
 ) (string, int, error) {
 	return "ems_testtoken", 1800, nil
 }
 
-func (f *fakeEmbedChannelService) ResolveSessionToken(ctx context.Context, token string) (string, error) {
+func (f *fakeEmbedChannelService) ResolveSessionToken(_ context.Context, token string) (string, error) {
 	channelID, ok := f.sessions[token]
 	if !ok {
 		return "", service.ErrEmbedTokenInvalid
@@ -106,30 +106,30 @@ func (f *fakeEmbedChannelService) ResolveSessionToken(ctx context.Context, token
 }
 
 func (f *fakeEmbedChannelService) PublicConfig(
-	ctx context.Context, ch *types.EmbedChannel,
+	_ context.Context, ch *types.EmbedChannel,
 ) types.EmbedChannelPublicConfig {
 	return types.EmbedChannelPublicConfig{ChannelID: ch.ID}
 }
 
 func (f *fakeEmbedChannelService) SuggestedQuestions(
-	ctx context.Context, ch *types.EmbedChannel, limit int,
+	_ context.Context, _ *types.EmbedChannel, _ int,
 ) ([]types.SuggestedQuestion, error) {
 	return nil, nil
 }
 
 func (f *fakeEmbedChannelService) EmbedChunk(
-	ctx context.Context, ch *types.EmbedChannel, chunkID string,
+	_ context.Context, _ *types.EmbedChannel, _ string,
 ) (*types.Chunk, error) {
 	return nil, nil
 }
 
 func (f *fakeEmbedChannelService) IssuePreviewSession(
-	ctx context.Context, tenantID uint64, channelID string,
+	_ context.Context, _ uint64, _ string,
 ) (string, int, error) {
 	return "", 0, nil
 }
 
-func (f *fakeEmbedChannelService) EmbedDisplayTitle(ctx context.Context, ch *types.EmbedChannel) string {
+func (f *fakeEmbedChannelService) EmbedDisplayTitle(_ context.Context, _ *types.EmbedChannel) string {
 	return ""
 }
 
@@ -137,51 +137,51 @@ type fakeTenantService struct {
 	tenant *types.Tenant
 }
 
-func (f *fakeTenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
+func (f *fakeTenantService) GetTenantByID(_ context.Context, _ uint64) (*types.Tenant, error) {
 	return f.tenant, nil
 }
 
-func (f *fakeTenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
+func (f *fakeTenantService) CreateTenant(_ context.Context, _ *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
 
-func (f *fakeTenantService) GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error) {
+func (f *fakeTenantService) GetTenantsByIDs(_ context.Context, _ []uint64) (map[uint64]*types.Tenant, error) {
 	return nil, nil
 }
 
-func (f *fakeTenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
+func (f *fakeTenantService) UpdateTenant(_ context.Context, _ *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
 
-func (f *fakeTenantService) DeleteTenant(ctx context.Context, id uint64) error {
+func (f *fakeTenantService) DeleteTenant(_ context.Context, _ uint64) error {
 	return nil
 }
 
-func (f *fakeTenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error) {
+func (f *fakeTenantService) ListTenants(_ context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
 
-func (f *fakeTenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, error) {
+func (f *fakeTenantService) ListAllTenants(_ context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
 
-func (f *fakeTenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error) {
+func (f *fakeTenantService) BulkSetStorageQuota(_ context.Context, _ int64) (int64, error) {
 	return 0, nil
 }
 
 func (f *fakeTenantService) SearchTenants(
-	ctx context.Context, keyword string, tenantID uint64, page, pageSize int,
+	_ context.Context, _ string, _ uint64, _, _ int,
 ) ([]*types.Tenant, int64, error) {
 	return nil, 0, nil
 }
 
 func (f *fakeTenantService) GetTenantByIDForUser(
-	ctx context.Context, tenantID uint64, userID string,
+	_ context.Context, _ uint64, _ string,
 ) (*types.Tenant, error) {
 	return f.tenant, nil
 }
 
-func (f *fakeTenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
+func (f *fakeTenantService) GetWeKnoraCloudCredentials(_ context.Context) *types.WeKnoraCloudCredentials {
 	return nil
 }
 
@@ -219,7 +219,12 @@ func TestOriginAllowed(t *testing.T) {
 		want    bool
 	}{
 		{name: "empty allow list", origin: "https://evil.com", allowed: nil, want: false},
-		{name: "exact match", origin: "https://app.example.com", allowed: []string{"https://app.example.com"}, want: true},
+		{
+			name:    "exact match",
+			origin:  "https://app.example.com",
+			allowed: []string{"https://app.example.com"},
+			want:    true,
+		},
 		{name: "wildcard star", origin: "https://any.example.com", allowed: []string{"*"}, want: true},
 		{name: "subdomain suffix", origin: "https://app.example.com", allowed: []string{"*.example.com"}, want: true},
 		{name: "missing origin", origin: "", allowed: []string{"https://app.example.com"}, want: false},

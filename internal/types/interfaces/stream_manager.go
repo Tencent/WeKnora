@@ -9,8 +9,9 @@ import (
 
 // StreamEvent represents a single event in the stream
 type StreamEvent struct {
-	ID        string                 `json:"id"`             // Unique event ID
-	Type      types.ResponseType     `json:"type"`           // Event type (thinking, tool_call, tool_result, references, complete, etc.)
+	ID string `json:"id"` // Unique event ID
+	// Event type (thinking, tool_call, tool_result, references, complete, etc.)
+	Type      types.ResponseType     `json:"type"`
 	Content   string                 `json:"content"`        // Event content (chunk for streaming events)
 	Done      bool                   `json:"done"`           // Whether this event is done
 	Timestamp time.Time              `json:"timestamp"`      // When this event occurred

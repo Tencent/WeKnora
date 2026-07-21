@@ -1,3 +1,4 @@
+// Package embedding provides related functionality.
 package embedding
 
 import (
@@ -40,6 +41,7 @@ func (e *AliyunEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *AliyunEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -98,9 +100,7 @@ func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 	// Remove trailing slash and any existing path suffix
 	baseURL = strings.TrimRight(baseURL, "/")
 	// If baseURL contains /compatible-mode/v1, strip it for multimodal API
-	if strings.Contains(baseURL, "/compatible-mode/v1") {
-		baseURL = strings.Replace(baseURL, "/compatible-mode/v1", "", 1)
-	}
+	baseURL = strings.Replace(baseURL, "/compatible-mode/v1", "", 1)
 
 	if modelName == "" {
 		return nil, fmt.Errorf("model name is required")
@@ -185,6 +185,7 @@ func (e *AliyunEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
+// BatchEmbed implements the required interface method.
 func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Build contents array from texts
 	contents := make([]AliyunContent, 0, len(texts))
@@ -215,7 +216,7 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	body, err := io.ReadAll(resp.Body)

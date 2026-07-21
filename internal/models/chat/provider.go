@@ -27,16 +27,16 @@ type authCreds struct {
 // overriding only the one or two methods that actually differ.
 type providerAdapter interface {
 	// Name is the provider this adapter handles.
-	Name() provider.ProviderName
+	Name() provider.Name
 	// Matches reports whether this adapter applies to the given model name.
 	// Used for sub-provider routing (e.g. Qwen thinking models within Aliyun,
 	// reasoning models within OpenAI). Default: true.
 	Matches(model string) bool
-	// Thinking is how this provider encodes ChatOptions.Thinking. Default: none.
+	// Thinking is how this provider encodes Options.Thinking. Default: none.
 	Thinking() ThinkingStrategy
 	// ShapeRequest applies in-place parameter quirks to the standard request
 	// (stripping unsupported fields, pinning temperature, …). Default: noop.
-	ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool)
+	ShapeRequest(req *openai.ChatCompletionRequest, opts *Options, isStream bool)
 	// TransformMessages rewrites the converted messages (e.g. downgrading
 	// multi-content to plain text). Default: identity.
 	TransformMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage
@@ -61,10 +61,10 @@ type providerAdapter interface {
 // Bearer auth, standard endpoint, no thinking, no request shaping.
 type baseProvider struct{}
 
-func (baseProvider) Name() provider.ProviderName                                    { return "" }
-func (baseProvider) Matches(string) bool                                            { return true }
-func (baseProvider) Thinking() ThinkingStrategy                                     { return noThinking{} }
-func (baseProvider) ShapeRequest(*openai.ChatCompletionRequest, *ChatOptions, bool) {}
+func (baseProvider) Name() provider.Name                                        { return "" }
+func (baseProvider) Matches(string) bool                                        { return true }
+func (baseProvider) Thinking() ThinkingStrategy                                 { return noThinking{} }
+func (baseProvider) ShapeRequest(*openai.ChatCompletionRequest, *Options, bool) {}
 func (baseProvider) TransformMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
 	return msgs
 }
@@ -82,7 +82,7 @@ func (baseProvider) InjectToolCallMetadata(map[string]any, types.ToolCallMetadat
 
 type weKnoraCloudProvider struct{ baseProvider }
 
-func (weKnoraCloudProvider) Name() provider.ProviderName { return provider.ProviderWeKnoraCloud }
+func (weKnoraCloudProvider) Name() provider.Name { return provider.ProviderWeKnoraCloud }
 
 func (weKnoraCloudProvider) Endpoint(baseURL, _ string, _ bool) string {
 	return strings.TrimRight(baseURL, "/") + "/api/v1/chat/completions"
@@ -123,8 +123,8 @@ func (weKnoraCloudProvider) TransformMessages(messages []openai.ChatCompletionMe
 
 type qwenThinkingProvider struct{ baseProvider }
 
-func (qwenThinkingProvider) Name() provider.ProviderName { return provider.ProviderAliyun }
-func (qwenThinkingProvider) Matches(model string) bool   { return provider.IsQwenThinkingModel(model) }
+func (qwenThinkingProvider) Name() provider.Name       { return provider.ProviderAliyun }
+func (qwenThinkingProvider) Matches(model string) bool { return provider.IsQwenThinkingModel(model) }
 func (qwenThinkingProvider) Thinking() ThinkingStrategy {
 	return enableThinking{alwaysSend: true, disableOnNonStream: true}
 }
@@ -135,7 +135,7 @@ func (qwenThinkingProvider) Thinking() ThinkingStrategy {
 
 type lkeapProvider struct{ baseProvider }
 
-func (lkeapProvider) Name() provider.ProviderName { return provider.ProviderLKEAP }
+func (lkeapProvider) Name() provider.Name { return provider.ProviderLKEAP }
 func (lkeapProvider) Matches(model string) bool {
 	return strings.Contains(strings.ToLower(model), "deepseek-v3")
 }
@@ -145,8 +145,8 @@ func (lkeapProvider) Thinking() ThinkingStrategy { return thinkingTypeField{} }
 
 type deepseekProvider struct{ baseProvider }
 
-func (deepseekProvider) Name() provider.ProviderName { return provider.ProviderDeepSeek }
-func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
+func (deepseekProvider) Name() provider.Name { return provider.ProviderDeepSeek }
+func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *Options, _ bool) {
 	if opts != nil && opts.ToolChoice != "" {
 		req.ToolChoice = nil
 	}
@@ -156,20 +156,20 @@ func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *Ch
 
 type genericProvider struct{ baseProvider }
 
-func (genericProvider) Name() provider.ProviderName { return provider.ProviderGeneric }
-func (genericProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
+func (genericProvider) Name() provider.Name        { return provider.ProviderGeneric }
+func (genericProvider) Thinking() ThinkingStrategy { return chatTemplateKwargs{} }
 
 type nvidiaProvider struct{ baseProvider }
 
-func (nvidiaProvider) Name() provider.ProviderName { return provider.ProviderNvidia }
-func (nvidiaProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
+func (nvidiaProvider) Name() provider.Name        { return provider.ProviderNvidia }
+func (nvidiaProvider) Thinking() ThinkingStrategy { return chatTemplateKwargs{} }
 
 // --- Gemini OpenAI compatibility: tool thought signatures live in extra_content ---
 
 type geminiProvider struct{ baseProvider }
 
-func (geminiProvider) Name() provider.ProviderName { return provider.ProviderGemini }
-func (geminiProvider) ForceRawHTTP() bool          { return true }
+func (geminiProvider) Name() provider.Name { return provider.ProviderGemini }
+func (geminiProvider) ForceRawHTTP() bool  { return true }
 func (geminiProvider) ExtractToolCallMetadata(raw json.RawMessage) types.ToolCallMetadata {
 	var tc struct {
 		ExtraContent map[string]json.RawMessage `json:"extra_content,omitempty"`
@@ -183,6 +183,7 @@ func (geminiProvider) ExtractToolCallMetadata(raw json.RawMessage) types.ToolCal
 	}
 	return types.ToolCallMetadata{"google": google}
 }
+
 func (geminiProvider) InjectToolCallMetadata(toolCall map[string]any, metadata types.ToolCallMetadata) {
 	if len(metadata) == 0 {
 		return
@@ -202,14 +203,14 @@ func (geminiProvider) InjectToolCallMetadata(toolCall map[string]any, metadata t
 
 type volcengineProvider struct{ baseProvider }
 
-func (volcengineProvider) Name() provider.ProviderName { return provider.ProviderVolcengine }
-func (volcengineProvider) Thinking() ThinkingStrategy  { return thinkingTypeField{} }
+func (volcengineProvider) Name() provider.Name        { return provider.ProviderVolcengine }
+func (volcengineProvider) Thinking() ThinkingStrategy { return thinkingTypeField{} }
 
 // --- Azure OpenAI: api-key auth (reasoning variant also strips sampling params) ---
 
 type azureProvider struct{ baseProvider }
 
-func (azureProvider) Name() provider.ProviderName { return provider.ProviderAzureOpenAI }
+func (azureProvider) Name() provider.Name { return provider.ProviderAzureOpenAI }
 func (azureProvider) Auth(req *http.Request, creds authCreds, _ []byte) {
 	req.Header.Set("api-key", creds.APIKey)
 }
@@ -219,7 +220,8 @@ type azureReasoningProvider struct{ azureProvider }
 func (azureReasoningProvider) Matches(model string) bool {
 	return provider.IsOpenAIReasoningOrGPT5Model(model)
 }
-func (azureReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+
+func (azureReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *Options, _ bool) {
 	shapeOpenAIReasoning(req)
 }
 
@@ -227,11 +229,12 @@ func (azureReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ 
 
 type openAIReasoningProvider struct{ baseProvider }
 
-func (openAIReasoningProvider) Name() provider.ProviderName { return provider.ProviderOpenAI }
+func (openAIReasoningProvider) Name() provider.Name { return provider.ProviderOpenAI }
 func (openAIReasoningProvider) Matches(model string) bool {
 	return provider.IsOpenAIReasoningOrGPT5Model(model)
 }
-func (openAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+
+func (openAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *Options, _ bool) {
 	shapeOpenAIReasoning(req)
 }
 
@@ -239,11 +242,12 @@ func (openAIReasoningProvider) ShapeRequest(req *openai.ChatCompletionRequest, _
 
 type moonshotProvider struct{ baseProvider }
 
-func (moonshotProvider) Name() provider.ProviderName { return provider.ProviderMoonshot }
+func (moonshotProvider) Name() provider.Name { return provider.ProviderMoonshot }
 func (moonshotProvider) Matches(model string) bool {
 	return provider.IsMoonshotFixedTempModel(model)
 }
-func (moonshotProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) {
+
+func (moonshotProvider) ShapeRequest(req *openai.ChatCompletionRequest, _ *Options, _ bool) {
 	// Pin temperature to 1 and drop the other sampling params, matching the
 	// pre-refactor behavior where these fields were never set for this model.
 	req.Temperature = 1
@@ -284,7 +288,7 @@ var providerRegistry = []providerAdapter{
 
 // resolveProvider returns the adapter handling the given provider+model, or
 // baseProvider{} (Bearer auth, standard endpoint, no thinking) when none matches.
-func resolveProvider(name provider.ProviderName, model string) providerAdapter {
+func resolveProvider(name provider.Name, model string) providerAdapter {
 	for _, p := range providerRegistry {
 		if p.Name() == name && p.Matches(model) {
 			return p

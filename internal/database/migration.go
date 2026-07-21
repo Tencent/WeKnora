@@ -1,3 +1,4 @@
+// Package database provides related functionality.
 package database
 
 import (
@@ -10,8 +11,10 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	// register side effects
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
+	// register file source driver
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
@@ -119,7 +122,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		}
 		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
 		if err != nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 			logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
 			wrapped := fmt.Errorf("failed to create sqlite3 migrate driver: %w", err)
 			setMigrationState(0, false, wrapped.Error(), false)
@@ -142,7 +145,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			return wrapped
 		}
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 
 	// Check current version and dirty state before migration
 	oldVersion, oldDirty, versionErr := m.Version()
@@ -208,7 +211,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 				logger.Infof(ctx, "Retrying migration after recovery...")
 				if retryErr := m.Up(); retryErr != nil && retryErr != migrate.ErrNoChange {
 					logger.Errorf(ctx, "Migration failed after recovery attempt: %v", retryErr)
-					return captureMigrationFailure(m, fmt.Errorf("migration failed after recovery attempt: %w", retryErr))
+					return captureMigrationFailure(
+						m,
+						fmt.Errorf("migration failed after recovery attempt: %w", retryErr),
+					)
 				}
 			} else {
 				// Calculate the version to force to (usually the previous version)
@@ -315,7 +321,7 @@ func GetMigrationVersion() (uint, bool, error) {
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 
 	version, dirty, err := m.Version()
 	if err != nil {

@@ -27,6 +27,7 @@ type PluginSearch struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository
 }
 
+// NewPluginSearch is an exported function.
 func NewPluginSearch(eventManager *EventManager,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
@@ -54,13 +55,13 @@ func NewPluginSearch(eventManager *EventManager,
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginSearch) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHUNK_SEARCH}
+func (p *PluginSearch) ActivationEvents() []types.Type {
+	return []types.Type{types.ChunkSearch}
 }
 
 // OnEvent handles search events in the chat pipeline
 func (p *PluginSearch) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	// Check if we have search targets or web search enabled
 	hasKBTargets := types.HasKnowledgeRetrievalScope(
@@ -181,7 +182,13 @@ func removeDuplicateResults(results []*types.SearchResult) []*types.SearchResult
 		sig := buildContentSignature(r.Content)
 		if sig != "" {
 			if firstChunk, exists := contentSig[sig]; exists {
-				logger.Debugf(context.Background(), "Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)", r.ID, firstChunk, sig)
+				logger.Debugf(
+					context.Background(),
+					"Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)",
+					r.ID,
+					firstChunk,
+					sig,
+				)
 				continue
 			}
 			contentSig[sig] = r.ID

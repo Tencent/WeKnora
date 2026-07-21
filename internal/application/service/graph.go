@@ -120,7 +120,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 
 	// Call LLM to extract entities
 	log.Debug("Calling LLM to extract entities")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	resp, err := b.chatModel.Chat(ctx, messages, &chat.Options{
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})
@@ -231,7 +231,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 
 	// Call LLM to extract relationships
 	log.Debug("Calling LLM to extract relationships")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	resp, err := b.chatModel.Chat(ctx, messages, &chat.Options{
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})
@@ -981,7 +981,7 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		// only draw if there are multiple entities or at least one relationship in the subgraph
 		if hasRelations {
 			subgraphCount++
-			sb.WriteString(fmt.Sprintf("\n  subgraph Subgraph%d\n", subgraphCount))
+			fmt.Fprintf(&sb, "\n  subgraph Subgraph%d\n", subgraphCount)
 
 			// add all entities in this subgraph
 			entitiesInComponent := make(map[string]bool)
@@ -992,7 +992,7 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				// add node definition for each entity
 				entity := b.entityMapByTitle[entityTitle]
 				if entity != nil {
-					sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, entityTitle))
+					fmt.Fprintf(&sb, "    %s[\"%s\"]\n", nodeID, entityTitle)
 				}
 			}
 
@@ -1008,8 +1008,8 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 						linkStyle = "==>"
 					}
 
-					sb.WriteString(fmt.Sprintf("    %s %s|%s| %s\n",
-						sourceID, linkStyle, rel.Description, targetID))
+					fmt.Fprintf(&sb, "    %s %s|%s| %s\n",
+						sourceID, linkStyle, rel.Description, targetID)
 				}
 			}
 
@@ -1022,9 +1022,9 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				entity := b.entityMapByTitle[entityTitle]
 				if entity != nil {
 					if entity.Frequency > 5 {
-						sb.WriteString(fmt.Sprintf("  class %s highFreq;\n", nodeID))
+						fmt.Fprintf(&sb, "  class %s highFreq;\n", nodeID)
 					} else {
-						sb.WriteString(fmt.Sprintf("  class %s entity;\n", nodeID))
+						fmt.Fprintf(&sb, "  class %s entity;\n", nodeID)
 					}
 				}
 			}

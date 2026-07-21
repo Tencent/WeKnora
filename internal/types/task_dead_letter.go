@@ -26,18 +26,18 @@ import (
 // last 24h". The table has no TTL; rows are kept until manually pruned.
 type TaskDeadLetter struct {
 	// Auto-increment row id.
-	ID int64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID int64 `json:"id"         gorm:"primaryKey;autoIncrement"`
 	// Tenant scope mirrored from the original task payload (best-effort:
 	// if the middleware can't decode the payload, this falls back to 0).
-	TenantID uint64 `json:"tenant_id" gorm:"index"`
+	TenantID uint64 `json:"tenant_id"  gorm:"index"`
 	// Task identifier (e.g. "wiki:ingest", "summary:generation").
-	TaskType string `json:"task_type" gorm:"type:varchar(64)"`
+	TaskType string `json:"task_type"  gorm:"type:varchar(64)"`
 	// Logical scope, mirrors task_pending_ops.scope. Falls back to
 	// "unknown" when the middleware doesn't recognize the task type's
 	// payload.
-	Scope string `json:"scope" gorm:"type:varchar(32)"`
+	Scope string `json:"scope"      gorm:"type:varchar(32)"`
 	// Identifier within scope, e.g. kbID for scope="knowledge_base".
-	ScopeID string `json:"scope_id" gorm:"type:varchar(64)"`
+	ScopeID string `json:"scope_id"   gorm:"type:varchar(64)"`
 	// Optional secondary identifier. Wiki ingest uses this for the
 	// knowledge_id so per-document failures cluster around the source
 	// document; other consumers can leave it empty.
@@ -45,7 +45,7 @@ type TaskDeadLetter struct {
 	// Raw task payload at the time of failure. For asynq tasks this is
 	// the verbatim asynq.Task.Payload(); for service-level dead letters
 	// the consumer chooses what to record.
-	Payload json.RawMessage `json:"payload" gorm:"type:jsonb"`
+	Payload json.RawMessage `json:"payload"    gorm:"type:jsonb"`
 	// String form of the final error. Long stack traces are kept verbatim.
 	LastError string `json:"last_error" gorm:"type:text;default:''"`
 	// Total attempt count when the dead-letter record was written.

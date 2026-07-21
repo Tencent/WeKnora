@@ -23,7 +23,11 @@ func TestValidateOpenSearchIndexConfig_BoundaryMatrix(t *testing.T) {
 		wantErr bool
 	}{
 		{"all unset (defaults)", types.IndexConfig{}, false},
-		{"valid mid-range", types.IndexConfig{HNSWM: 16, HNSWEFConstruction: 100, HNSWEFSearch: 100, KNNEngine: "lucene"}, false},
+		{
+			"valid mid-range",
+			types.IndexConfig{HNSWM: 16, HNSWEFConstruction: 100, HNSWEFSearch: 100, KNNEngine: "lucene"},
+			false,
+		},
 		{"valid faiss", types.IndexConfig{KNNEngine: "faiss"}, false},
 		{"valid boundaries", types.IndexConfig{HNSWM: 2, HNSWEFConstruction: 2, HNSWEFSearch: 1}, false},
 		{"valid upper boundaries", types.IndexConfig{HNSWM: 100, HNSWEFConstruction: 4096, HNSWEFSearch: 10000}, false},

@@ -16,14 +16,14 @@ type capturingEmbedder struct {
 	batchTexts []string
 }
 
-func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *capturingEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	e.text = text
 	return []float32{1}, nil
 }
 
 func (e *capturingEmbedder) BatchEmbedWithPool(
-	ctx context.Context,
-	model embedding.Embedder,
+	_ context.Context,
+	_ embedding.Embedder,
 	texts []string,
 ) ([][]float32, error) {
 	e.batchTexts = append([]string(nil), texts...)
@@ -38,14 +38,14 @@ type saveOnlyRepository struct {
 	interfaces.RetrieveEngineRepository
 }
 
-func (r *saveOnlyRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
+func (r *saveOnlyRepository) Save(_ context.Context, _ *types.IndexInfo, _ map[string]any) error {
 	return nil
 }
 
 func (r *saveOnlyRepository) BatchSave(
-	ctx context.Context,
-	indexInfoList []*types.IndexInfo,
-	params map[string]any,
+	_ context.Context,
+	_ []*types.IndexInfo,
+	_ map[string]any,
 ) error {
 	return nil
 }

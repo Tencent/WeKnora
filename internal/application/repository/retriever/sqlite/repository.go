@@ -1,3 +1,4 @@
+// Package sqlite implements the SQLite vector retriever.
 package sqlite
 
 import (
@@ -40,8 +41,10 @@ type sqliteRepository struct {
 	vecTables map[int]bool // tracks which vec0 tables have been created (keyed by dimension)
 }
 
+// NewSQLiteRetrieveEngineRepository is an exported function.
 func NewSQLiteRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
-	logger.GetLogger(context.Background()).Info("[SQLite] Initializing SQLite retriever engine repository with sqlite-vec")
+	logger.GetLogger(context.Background()).
+		Info("[SQLite] Initializing SQLite retriever engine repository with sqlite-vec")
 
 	if err := db.AutoMigrate(&sqliteEmbedding{}); err != nil {
 		logger.GetLogger(context.Background()).Errorf("[SQLite] Failed to auto-migrate lite_embeddings: %v", err)
@@ -64,7 +67,8 @@ func initFTS5(db *gorm.DB) {
 	db.Raw("SELECT sql FROM sqlite_master WHERE type='table' AND name='lite_embeddings_fts'").Scan(&sqlStr)
 	// If the table exists but is not contentless (i.e. uses content='lite_embeddings'), recreate it
 	if sqlStr != "" && strings.Contains(sqlStr, "content='lite_embeddings'") {
-		logger.GetLogger(context.Background()).Infof("[SQLite] Migrating FTS5 table to contentless table with manual bigram tokenization")
+		logger.GetLogger(context.Background()).
+			Infof("[SQLite] Migrating FTS5 table to contentless table with manual bigram tokenization")
 		db.Exec("DROP TABLE IF EXISTS lite_embeddings_fts")
 		sqlStr = "" // Trigger recreate
 	}
@@ -80,7 +84,8 @@ func initFTS5(db *gorm.DB) {
 			logger.GetLogger(context.Background()).Warnf("[SQLite] Failed to create FTS5 table: %v", err)
 			return
 		}
-		logger.GetLogger(context.Background()).Infof("[SQLite] Populating contentless FTS5 table from lite_embeddings with bigrams")
+		logger.GetLogger(context.Background()).
+			Infof("[SQLite] Populating contentless FTS5 table from lite_embeddings with bigrams")
 
 		// To populate, we need to read all rows and insert them via Go to apply bigram tokenization
 		type Row struct {
@@ -92,11 +97,19 @@ func initFTS5(db *gorm.DB) {
 			KnowledgeBaseID string
 		}
 		var rows []Row
-		db.Raw("SELECT id, content, source_id, chunk_id, knowledge_id, knowledge_base_id FROM lite_embeddings").Scan(&rows)
+		db.Raw("SELECT id, content, source_id, chunk_id, knowledge_id, knowledge_base_id FROM lite_embeddings").
+			Scan(&rows)
 		for _, r := range rows {
-			db.Exec(`INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) 
+			db.Exec(
+				`INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) 
 				VALUES(?, ?, ?, ?, ?, ?)`,
-				r.ID, tokenizeCJKBigram(r.Content), r.SourceID, r.ChunkID, r.KnowledgeID, r.KnowledgeBaseID)
+				r.ID,
+				tokenizeCJKBigram(r.Content),
+				r.SourceID,
+				r.ChunkID,
+				r.KnowledgeID,
+				r.KnowledgeBaseID,
+			)
 		}
 	}
 }
@@ -157,7 +170,11 @@ func (r *sqliteRepository) Save(ctx context.Context, indexInfo *types.IndexInfo,
 	return nil
 }
 
-func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) error {
+func (r *sqliteRepository) BatchSave(
+	ctx context.Context,
+	indexInfoList []*types.IndexInfo,
+	params map[string]any,
+) error {
 	if len(indexInfoList) == 0 {
 		return nil
 	}
@@ -183,7 +200,11 @@ func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types
 	return nil
 }
 
-func (r *sqliteRepository) EstimateStorageSize(_ context.Context, indexInfoList []*types.IndexInfo, _ map[string]any) int64 {
+func (r *sqliteRepository) EstimateStorageSize(
+	_ context.Context,
+	indexInfoList []*types.IndexInfo,
+	_ map[string]any,
+) int64 {
 	var total int64
 	for _, info := range indexInfoList {
 		total += int64(len(info.Content)) + 200
@@ -205,7 +226,12 @@ func (r *sqliteRepository) DeleteBySourceIDList(ctx context.Context, sourceIDLis
 	return r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Delete(&sqliteEmbedding{}).Error
 }
 
-func (r *sqliteRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, _ int, _ string) error {
+func (r *sqliteRepository) DeleteByKnowledgeIDList(
+	ctx context.Context,
+	knowledgeIDList []string,
+	_ int,
+	_ string,
+) error {
 	var rows []sqliteEmbedding
 	r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Find(&rows)
 	r.deleteRowsAndVecs(ctx, rows)
@@ -296,7 +322,10 @@ func (r *sqliteRepository) Retrieve(ctx context.Context, params types.RetrievePa
 }
 
 // --- Keywords retrieval via FTS5 ---
-func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+func (r *sqliteRepository) keywordsRetrieve(
+	ctx context.Context,
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	if params.Query == "" {
 		return nil, nil
 	}
@@ -341,7 +370,8 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		return nil, fmt.Errorf("FTS5 query failed: %w", err)
 	}
 
-	logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: query=%q, ftsQuery=%q, matched=%d rows", params.Query, ftsQuery, len(rows))
+	logger.GetLogger(ctx).
+		Infof("[SQLite] keywordsRetrieve: query=%q, ftsQuery=%q, matched=%d rows", params.Query, ftsQuery, len(rows))
 
 	items := make([]*types.IndexWithScore, len(rows))
 	for i, row := range rows {
@@ -373,7 +403,11 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		RetrieverType:       types.KeywordsRetrieverType,
 	}}, nil
 }
-func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+
+func (r *sqliteRepository) vectorRetrieve(
+	ctx context.Context,
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	if len(params.Embedding) == 0 {
 		return nil, nil
 	}
@@ -434,7 +468,8 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		return nil, fmt.Errorf("sqlite-vec query failed: %w", err)
 	}
 
-	logger.GetLogger(ctx).Infof("[SQLite] vectorRetrieve: query_dim=%d, threshold=%.4f, matched=%d rows", dim, params.Threshold, len(rows))
+	logger.GetLogger(ctx).
+		Infof("[SQLite] vectorRetrieve: query_dim=%d, threshold=%.4f, matched=%d rows", dim, params.Threshold, len(rows))
 
 	items := make([]*types.IndexWithScore, 0, len(rows))
 
@@ -442,8 +477,9 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		// cosine distance = 1 - cosine_similarity
 		score := 1 - v.Distance
 
-		logger.GetLogger(ctx).Infof("[SQLite] vectorRetrieve: #%d chunk_id=%s, distance=%.4f, score=%.4f, content_preview=%.60s",
-			i+1, v.ChunkID, v.Distance, score, v.Content)
+		logger.GetLogger(ctx).
+			Infof("[SQLite] vectorRetrieve: #%d chunk_id=%s, distance=%.4f, score=%.4f, content_preview=%.60s",
+				i+1, v.ChunkID, v.Distance, score, v.Content)
 
 		items = append(items, &types.IndexWithScore{
 			ID:              fmt.Sprintf("%d", v.Rowid),
@@ -541,7 +577,7 @@ func (r *sqliteRepository) syncFTS5Insert(_ context.Context, row *sqliteEmbeddin
 		return
 	}
 	tokenizedContent := tokenizeCJKBigram(row.Content)
-	sql := `INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)`
+	sql := `INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)` //nolint:lll
 	r.db.Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID)
 }
 

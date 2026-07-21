@@ -37,7 +37,7 @@ type ownershipCall struct {
 	tenantID uint64
 }
 
-func (f *fakeOwnership) StoreOwnedBy(ctx context.Context, storeID string, tenantID uint64) (bool, error) {
+func (f *fakeOwnership) StoreOwnedBy(_ context.Context, storeID string, tenantID uint64) (bool, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, ownershipCall{storeID: storeID, tenantID: tenantID})
 	err := f.err
@@ -69,43 +69,66 @@ func (f *fakeEngine) EngineType() types.RetrieverEngineType { return f.engineTyp
 
 func (f *fakeEngine) Support() []types.RetrieverType { return f.support }
 
-func (f *fakeEngine) Retrieve(ctx context.Context, _ types.RetrieveParams) ([]*types.RetrieveResult, error) {
+func (f *fakeEngine) Retrieve(_ context.Context, _ types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	panic("fakeEngine.Retrieve: not used in factory tests")
 }
 
-func (f *fakeEngine) Index(ctx context.Context, _ embedding.Embedder, _ *types.IndexInfo, _ []types.RetrieverType) error {
+func (f *fakeEngine) Index(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ *types.IndexInfo,
+	_ []types.RetrieverType,
+) error {
 	panic("fakeEngine.Index: not used in factory tests")
 }
 
-func (f *fakeEngine) BatchIndex(ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) error {
+func (f *fakeEngine) BatchIndex(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ []*types.IndexInfo,
+	_ []types.RetrieverType,
+) error {
 	panic("fakeEngine.BatchIndex: not used in factory tests")
 }
 
-func (f *fakeEngine) EstimateStorageSize(ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) int64 {
+func (f *fakeEngine) EstimateStorageSize(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ []*types.IndexInfo,
+	_ []types.RetrieverType,
+) int64 {
 	panic("fakeEngine.EstimateStorageSize: not used in factory tests")
 }
 
-func (f *fakeEngine) CopyIndices(ctx context.Context, _ string, _ map[string]string, _ map[string]string, _ string, _ int, _ string) error {
+func (f *fakeEngine) CopyIndices(
+	_ context.Context,
+	_ string,
+	_ map[string]string,
+	_ map[string]string,
+	_ string,
+	_ int,
+	_ string,
+) error {
 	panic("fakeEngine.CopyIndices: not used in factory tests")
 }
 
-func (f *fakeEngine) DeleteByChunkIDList(ctx context.Context, _ []string, _ int, _ string) error {
+func (f *fakeEngine) DeleteByChunkIDList(_ context.Context, _ []string, _ int, _ string) error {
 	panic("fakeEngine.DeleteByChunkIDList: not used in factory tests")
 }
 
-func (f *fakeEngine) DeleteBySourceIDList(ctx context.Context, _ []string, _ int, _ string) error {
+func (f *fakeEngine) DeleteBySourceIDList(_ context.Context, _ []string, _ int, _ string) error {
 	panic("fakeEngine.DeleteBySourceIDList: not used in factory tests")
 }
 
-func (f *fakeEngine) DeleteByKnowledgeIDList(ctx context.Context, _ []string, _ int, _ string) error {
+func (f *fakeEngine) DeleteByKnowledgeIDList(_ context.Context, _ []string, _ int, _ string) error {
 	panic("fakeEngine.DeleteByKnowledgeIDList: not used in factory tests")
 }
 
-func (f *fakeEngine) BatchUpdateChunkEnabledStatus(ctx context.Context, _ map[string]bool) error {
+func (f *fakeEngine) BatchUpdateChunkEnabledStatus(_ context.Context, _ map[string]bool) error {
 	panic("fakeEngine.BatchUpdateChunkEnabledStatus: not used in factory tests")
 }
 
-func (f *fakeEngine) BatchUpdateChunkTagID(ctx context.Context, _ map[string]string) error {
+func (f *fakeEngine) BatchUpdateChunkTagID(_ context.Context, _ map[string]string) error {
 	panic("fakeEngine.BatchUpdateChunkTagID: not used in factory tests")
 }
 
@@ -113,7 +136,11 @@ func (f *fakeEngine) BatchUpdateChunkTagID(ctx context.Context, _ map[string]str
 // pairs populated in the byStoreID map. Engine-type entries are also
 // registered so that the unbound path can resolve engines via the
 // tenant's effective engines.
-func registryWithStores(t *testing.T, stores map[string]*fakeEngine, engineTypes map[types.RetrieverEngineType]*fakeEngine) *RetrieveEngineRegistry {
+func registryWithStores(
+	t *testing.T,
+	stores map[string]*fakeEngine,
+	engineTypes map[types.RetrieverEngineType]*fakeEngine,
+) *RetrieveEngineRegistry {
 	t.Helper()
 	r := &RetrieveEngineRegistry{
 		byEngineType: map[types.RetrieverEngineType]interfaces.RetrieveEngineService{},
@@ -335,8 +362,10 @@ func TestCreateRetrieveEngineFromPayload_Bound(t *testing.T) {
 }
 
 func TestCreateRetrieveEngineFromPayload_TamperedCrossTenant(t *testing.T) {
-	esEngine := &fakeEngine{engineType: types.ElasticsearchRetrieverEngineType,
-		support: []types.RetrieverType{types.VectorRetrieverType}}
+	esEngine := &fakeEngine{
+		engineType: types.ElasticsearchRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+	}
 	registry := registryWithStores(t,
 		map[string]*fakeEngine{"store-A": esEngine}, nil)
 	// Store is owned by tenant 99, but the (possibly tampered) payload

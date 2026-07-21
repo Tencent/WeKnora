@@ -47,7 +47,8 @@ type KnowledgeBaseService interface {
 	// GetKnowledgeBasesByIDsOnly retrieves knowledge bases by IDs without tenant filter (batch).
 	GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
 
-	// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB (uses kb.TenantID).
+	// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB (uses
+	// kb.TenantID).
 	FillKnowledgeBaseCounts(ctx context.Context, kb *types.KnowledgeBase) error
 
 	// ListKnowledgeBases lists all knowledge bases under the current tenant

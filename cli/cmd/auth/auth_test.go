@@ -39,7 +39,11 @@ func TestNewCmdLogin_FlagsRegistered(t *testing.T) {
 	assert.Nil(t, cmd.Flags().Lookup("name"), "auth login must not declare --name (v0.9)")
 	// --profile is the global persistent override; local registration would
 	// silently shadow it.
-	assert.Nil(t, cmd.Flags().Lookup("profile"), "auth login must not declare a local --profile flag (use the global --profile)")
+	assert.Nil(
+		t,
+		cmd.Flags().Lookup("profile"),
+		"auth login must not declare a local --profile flag (use the global --profile)",
+	)
 }
 
 func TestNewCmdLogin_InvokesRunF(t *testing.T) {
@@ -49,13 +53,16 @@ func TestNewCmdLogin_InvokesRunF(t *testing.T) {
 	f := &cmdutil.Factory{
 		Secrets: func() (secrets.Store, error) { return store, nil },
 	}
-	cmd := NewCmdLogin(f, func(_ context.Context, opts *LoginOptions, _ *cmdutil.FormatOptions, _ *cmdutil.Factory, _ LoginService) error {
-		called = true
-		// host/profile resolve inside runLogin from the active profile;
-		// the runF seam just receives the parsed flags.
-		assert.True(t, opts.WithToken)
-		return nil
-	})
+	cmd := NewCmdLogin(
+		f,
+		func(_ context.Context, opts *LoginOptions, _ *cmdutil.FormatOptions, _ *cmdutil.Factory, _ LoginService) error {
+			called = true
+			// host/profile resolve inside runLogin from the active profile;
+			// the runF seam just receives the parsed flags.
+			assert.True(t, opts.WithToken)
+			return nil
+		},
+	)
 	cmd.SetArgs([]string{"--with-token"})
 	require.NoError(t, cmd.Execute())
 	assert.True(t, called)

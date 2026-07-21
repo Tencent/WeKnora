@@ -212,7 +212,7 @@ func TestPartialUpdateRows_FailureSurfaced(t *testing.T) {
 	repo, _, _, cleanup := newTestRepo(t)
 	defer cleanup()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"Status":   "Fail",
@@ -300,7 +300,9 @@ func TestVectorRetrieve_SQLShape_LegacyMode(t *testing.T) {
 		WithArgs("weknora", "weknora_embeddings_3").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
 
-	mock.ExpectQuery(`SELECT id, content, .*cosine_distance_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \d+`).
+	mock.ExpectQuery(
+		`SELECT id, content, .*cosine_distance_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \d+`,
+	).
 		WithArgs(true, 0.5).
 		WillReturnRows(
 			sqlmock.NewRows([]string{
@@ -375,7 +377,7 @@ func TestKeywordsRetrieve_SQLShape(t *testing.T) {
 func TestBatchUpdateChunkEnabledStatus_RewritesRows(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &dorisRepository{
 		db:            db,
@@ -387,7 +389,10 @@ func TestBatchUpdateChunkEnabledStatus_RewritesRows(t *testing.T) {
 	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings\\_%").
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("weknora_embeddings_768"))
-	mock.ExpectQuery(`SELECT id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, is_enabled, embedding FROM .*weknora_embeddings_768.* WHERE chunk_id IN`).
+	mock.ExpectQuery(
+		`SELECT id, content, source_id, source_type, chunk_id, knowledge_id, ` +
+			`knowledge_base_id, tag_id, is_enabled, embedding FROM .*weknora_embeddings_768.* WHERE chunk_id IN`,
+	).
 		WithArgs("c1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "content", "source_id", "source_type",
@@ -426,7 +431,7 @@ func TestBatchUpdateChunkEnabledStatus_LegacyModeUsesPartialUpdate(t *testing.T)
 func TestEnsureTable_DDLShape(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &dorisRepository{
 		db:             db,
@@ -442,7 +447,10 @@ func TestEnsureTable_DDLShape(t *testing.T) {
 		WithArgs("weknora", "weknora_embeddings_768").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
 	// CREATE TABLE 应包含关键属性和 Doris 支持的 inner_product ANN metric
-	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="inner_product".*DUPLICATE KEY\(id\).*BUCKETS 5.*replication_num.*=.*2`).
+	mock.ExpectExec(
+		`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="inner_product".*` +
+			`DUPLICATE KEY\(id\).*BUCKETS 5.*replication_num.*=.*2`,
+	).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	// SHOW INDEX 一次即返回 ANN 已 FINISHED
 	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
@@ -461,7 +469,7 @@ func TestEnsureTable_DDLShape(t *testing.T) {
 func TestEnsureTable_DDLShape_LegacyMode(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &dorisRepository{
 		db:             db,
@@ -475,7 +483,10 @@ func TestEnsureTable_DDLShape_LegacyMode(t *testing.T) {
 	mock.ExpectQuery(`SELECT COUNT\(1\) FROM information_schema.tables`).
 		WithArgs("weknora", "weknora_embeddings_768").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
-	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="cosine_distance".*UNIQUE KEY\(id\).*enable_unique_key_merge_on_write.*true`).
+	mock.ExpectExec(
+		`CREATE TABLE IF NOT EXISTS .*weknora_embeddings_768.*metric_type"="cosine_distance".*` +
+			`UNIQUE KEY\(id\).*enable_unique_key_merge_on_write.*true`,
+	).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SHOW INDEX FROM .*weknora_embeddings_768.*`).
 		WillReturnRows(
@@ -492,7 +503,7 @@ func TestEnsureTable_DDLShape_LegacyMode(t *testing.T) {
 func TestBatchSave_SQLShape(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &dorisRepository{
 		db:            db,
@@ -535,7 +546,7 @@ func TestBatchSave_SQLShape(t *testing.T) {
 func TestBatchSave_SQLShape_LegacyMode(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &dorisRepository{
 		db:            db,
@@ -583,7 +594,8 @@ func TestResolveCompatMode_RejectsExistingModeSwitch(t *testing.T) {
 	mock.ExpectQuery(`SHOW CREATE TABLE .*weknora_embeddings_768.*`).
 		WillReturnRows(sqlmock.NewRows([]string{"Table", "Create Table"}).AddRow(
 			"weknora_embeddings_768",
-			"CREATE TABLE `weknora_embeddings_768` (id VARCHAR(64)) ENGINE=OLAP DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 10 PROPERTIES(\"replication_num\"=\"1\")",
+			"CREATE TABLE `weknora_embeddings_768` (id VARCHAR(64)) ENGINE=OLAP DUPLICATE KEY(id) "+
+				"DISTRIBUTED BY HASH(id) BUCKETS 10 PROPERTIES(\"replication_num\"=\"1\")",
 		))
 
 	_, err := repo.resolveCompatMode(context.Background())
@@ -677,7 +689,7 @@ func TestEstimateStorageSize(t *testing.T) {
 func TestScanRetrieveRows_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mock.ExpectQuery("SELECT 1").
 		WillReturnError(errors.New("boom"))

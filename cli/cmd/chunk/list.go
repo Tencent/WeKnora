@@ -36,7 +36,12 @@ var chunkListFields = []string{
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int, chunkTypes ...string) ([]sdk.Chunk, int64, error)
+	ListKnowledgeChunks(
+		ctx context.Context,
+		knowledgeID string,
+		page, pageSize int,
+		chunkTypes ...string,
+	) ([]sdk.Chunk, int64, error)
 }
 
 type ListOptions struct {
@@ -106,7 +111,8 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
 	_ = cmd.MarkFlagRequired("doc")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more/total_count report truncation (1..10000)")
+	cmd.Flags().
+		IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more/total_count report truncation (1..10000)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmdutil.AddFormatFlag(cmd, chunkListFields...)
@@ -114,8 +120,11 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "List chunks of a specific document in stored order (admin/debug). Results come with meta.count; use --limit (1..10000) and --all-pages to paginate. Prefer 'search chunks' for RAG retrieval.",
 		RequiredFlags: []string{"--doc"},
-		Examples:      []string{"weknora chunk list --doc doc_abc --format json", "weknora chunk list --doc doc_abc --all-pages --format json"},
-		Output:        "envelope.data is an array of Chunk objects with id, chunk_index, content, is_enabled; meta.count is the returned count, meta.total_count the document's full chunk count, meta.has_more true when --limit truncated",
+		Examples: []string{
+			"weknora chunk list --doc doc_abc --format json",
+			"weknora chunk list --doc doc_abc --all-pages --format json",
+		},
+		Output: "envelope.data is an array of Chunk objects with id, chunk_index, content, is_enabled; meta.count is the returned count, meta.total_count the document's full chunk count, meta.has_more true when --limit truncated",
 	})
 	return cmd
 }
@@ -183,7 +192,11 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: output.IntPtr(len(items)), TotalCount: output.IntPtr(int(serverTotal)), HasMore: truncated}
+		meta := &output.Meta{
+			Count:      output.IntPtr(len(items)),
+			TotalCount: output.IntPtr(int(serverTotal)),
+			HasMore:    truncated,
+		}
 		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 

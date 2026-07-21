@@ -40,6 +40,7 @@ func (e *VolcengineEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *VolcengineEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -191,6 +192,7 @@ func (e *VolcengineEmbedder) doRequestWithRetry(ctx context.Context, jsonData []
 	return nil, err
 }
 
+// BatchEmbed implements the required interface method.
 func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	embeddings := make([][]float32, len(texts))
 
@@ -225,7 +227,7 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed read response error: %v", err)
 			return nil, fmt.Errorf("read response: %w", err)
@@ -234,7 +236,8 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 		if resp.StatusCode != http.StatusOK {
 			var errResp VolcengineErrorResponse
 			if json.Unmarshal(body, &errResp) == nil && errResp.Error.Message != "" {
-				logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed API error: %s - %s", errResp.Error.Code, errResp.Error.Message)
+				logger.GetLogger(ctx).
+					Errorf("VolcengineEmbedder BatchEmbed API error: %s - %s", errResp.Error.Code, errResp.Error.Message)
 				return nil, fmt.Errorf("API error: %s - %s", errResp.Error.Code, errResp.Error.Message)
 			}
 			logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed API error: Http Status %s", resp.Status)
@@ -251,7 +254,6 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 	}
 
 	return embeddings, nil
-
 }
 
 // GetModelName returns the model name

@@ -125,7 +125,7 @@ func (d *DataSource) TableName() string {
 }
 
 // BeforeCreate hook to generate UUID
-func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
+func (d *DataSource) BeforeCreate(_ *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.New().String()
 	}
@@ -189,7 +189,7 @@ func (s *SyncLog) TableName() string {
 }
 
 // BeforeCreate hook to generate UUID
-func (s *SyncLog) BeforeCreate(tx *gorm.DB) error {
+func (s *SyncLog) BeforeCreate(_ *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}
@@ -512,6 +512,7 @@ func (d *DataSource) ParseSyncResult() (*SyncResult, error) {
 	return &result, nil
 }
 
+// ParseResult implements the required interface method.
 // ParseSyncLogResult parses the result JSON from sync log
 func (s *SyncLog) ParseResult() (*SyncResult, error) {
 	if len(s.Result) == 0 {

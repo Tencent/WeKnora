@@ -18,7 +18,12 @@ type WebSearchProvider interface {
 type WebSearchService interface {
 	// Search performs a web search using the provider entity identified by providerID.
 	// If providerID is empty, it falls back to the deprecated config.Provider field for backward compatibility.
-	Search(ctx context.Context, providerID string, config *types.WebSearchConfig, query string) ([]*types.WebSearchResult, error)
+	Search(
+		ctx context.Context,
+		providerID string,
+		config *types.WebSearchConfig,
+		query string,
+	) ([]*types.WebSearchResult, error)
 	// CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base
 	// The temporary knowledge base is deleted after use. The UI will not list it due to repo filtering.
 	CompressWithRAG(ctx context.Context, sessionID string, tempKBID string, questions []string,

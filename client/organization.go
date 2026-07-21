@@ -162,7 +162,10 @@ type UserInfo struct {
 // --- Organization CRUD ---
 
 // CreateOrganization creates a new organization
-func (c *Client) CreateOrganization(ctx context.Context, req *CreateOrganizationRequest) (*OrganizationResponse, error) {
+func (c *Client) CreateOrganization(
+	ctx context.Context,
+	req *CreateOrganizationRequest,
+) (*OrganizationResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/organizations", req, nil)
 	if err != nil {
 		return nil, err
@@ -212,7 +215,11 @@ func (c *Client) GetOrganization(ctx context.Context, orgID string) (*Organizati
 }
 
 // UpdateOrganization updates an organization
-func (c *Client) UpdateOrganization(ctx context.Context, orgID string, req *UpdateOrganizationRequest) (*OrganizationResponse, error) {
+func (c *Client) UpdateOrganization(
+	ctx context.Context,
+	orgID string,
+	req *UpdateOrganizationRequest,
+) (*OrganizationResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/organizations/%s", orgID), req, nil)
 	if err != nil {
 		return nil, err
@@ -263,7 +270,11 @@ func (c *Client) SubmitJoinRequest(ctx context.Context, inviteCode, message, rol
 }
 
 // SearchOrganizations searches for discoverable organizations
-func (c *Client) SearchOrganizations(ctx context.Context, keyword string, page, pageSize int) ([]OrganizationResponse, error) {
+func (c *Client) SearchOrganizations(
+	ctx context.Context,
+	keyword string,
+	page, pageSize int,
+) ([]OrganizationResponse, error) {
 	q := url.Values{}
 	if keyword != "" {
 		q.Set("keyword", keyword)
@@ -335,7 +346,13 @@ func (c *Client) RequestRoleUpgrade(ctx context.Context, orgID, requestedRole, m
 		"requested_role": requestedRole,
 		"message":        message,
 	}
-	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/organizations/%s/request-upgrade", orgID), req, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPost,
+		fmt.Sprintf("/api/v1/organizations/%s/request-upgrade", orgID),
+		req,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -414,7 +431,13 @@ func (c *Client) ListOrgMembers(ctx context.Context, orgID string) ([]Organizati
 // UpdateMemberRole updates a member's role in an organization
 func (c *Client) UpdateMemberRole(ctx context.Context, orgID, userID, role string) error {
 	req := map[string]string{"role": role}
-	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/organizations/%s/members/%s", orgID, userID), req, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPut,
+		fmt.Sprintf("/api/v1/organizations/%s/members/%s", orgID, userID),
+		req,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -423,7 +446,13 @@ func (c *Client) UpdateMemberRole(ctx context.Context, orgID, userID, role strin
 
 // RemoveMember removes a member from an organization
 func (c *Client) RemoveMember(ctx context.Context, orgID, userID string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/api/v1/organizations/%s/members/%s", orgID, userID), nil, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodDelete,
+		fmt.Sprintf("/api/v1/organizations/%s/members/%s", orgID, userID),
+		nil,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -434,7 +463,13 @@ func (c *Client) RemoveMember(ctx context.Context, orgID, userID string) error {
 
 // ListJoinRequests lists pending join requests (admin only)
 func (c *Client) ListJoinRequests(ctx context.Context, orgID string) ([]JoinRequestResponse, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/organizations/%s/join-requests", orgID), nil, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("/api/v1/organizations/%s/join-requests", orgID),
+		nil,
+		nil,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -451,13 +486,24 @@ func (c *Client) ListJoinRequests(ctx context.Context, orgID string) ([]JoinRequ
 }
 
 // ReviewJoinRequest reviews a join request (approve/reject)
-func (c *Client) ReviewJoinRequest(ctx context.Context, orgID, requestID string, approved bool, message, role string) error {
+func (c *Client) ReviewJoinRequest(
+	ctx context.Context,
+	orgID, requestID string,
+	approved bool,
+	message, role string,
+) error {
 	req := map[string]any{
 		"approved": approved,
 		"message":  message,
 		"role":     role,
 	}
-	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/organizations/%s/join-requests/%s/review", orgID, requestID), req, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPut,
+		fmt.Sprintf("/api/v1/organizations/%s/join-requests/%s/review", orgID, requestID),
+		req,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -467,7 +513,10 @@ func (c *Client) ReviewJoinRequest(ctx context.Context, orgID, requestID string,
 // --- Knowledge base sharing ---
 
 // ShareKnowledgeBase shares a knowledge base with an organization
-func (c *Client) ShareKnowledgeBase(ctx context.Context, kbID, orgID, permission string) (*KnowledgeBaseShareResponse, error) {
+func (c *Client) ShareKnowledgeBase(
+	ctx context.Context,
+	kbID, orgID, permission string,
+) (*KnowledgeBaseShareResponse, error) {
 	req := map[string]string{
 		"organization_id": orgID,
 		"permission":      permission,
@@ -507,7 +556,13 @@ func (c *Client) ListKBShares(ctx context.Context, kbID string) ([]KnowledgeBase
 // UpdateSharePermission updates a KB share's permission
 func (c *Client) UpdateSharePermission(ctx context.Context, kbID, shareID, permission string) error {
 	req := map[string]string{"permission": permission}
-	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/knowledge-bases/%s/shares/%s", kbID, shareID), req, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPut,
+		fmt.Sprintf("/api/v1/knowledge-bases/%s/shares/%s", kbID, shareID),
+		req,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -516,7 +571,13 @@ func (c *Client) UpdateSharePermission(ctx context.Context, kbID, shareID, permi
 
 // RemoveKBShare removes a KB share
 func (c *Client) RemoveKBShare(ctx context.Context, kbID, shareID string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/api/v1/knowledge-bases/%s/shares/%s", kbID, shareID), nil, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodDelete,
+		fmt.Sprintf("/api/v1/knowledge-bases/%s/shares/%s", kbID, shareID),
+		nil,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -565,7 +626,13 @@ func (c *Client) ListAgentShares(ctx context.Context, agentID string) ([]AgentSh
 
 // RemoveAgentShare removes an agent share
 func (c *Client) RemoveAgentShare(ctx context.Context, agentID, shareID string) error {
-	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/api/v1/agents/%s/shares/%s", agentID, shareID), nil, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodDelete,
+		fmt.Sprintf("/api/v1/agents/%s/shares/%s", agentID, shareID),
+		nil,
+		nil,
+	)
 	if err != nil {
 		return err
 	}

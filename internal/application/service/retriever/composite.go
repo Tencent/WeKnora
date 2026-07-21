@@ -1,3 +1,4 @@
+// Package retriever implements composite retrieval engines.
 package retriever
 
 import (
@@ -289,7 +290,8 @@ func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDList(ctx context.Context,
 	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
 	return c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
-		if err := engineInfo.retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDList, dimension, knowledgeType); err != nil {
+		if err := engineInfo.retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDList, dimension,
+			knowledgeType); err != nil {
 			logger.GetLogger(ctx).Errorf("Repository %s failed to delete knowledge ID list: %v",
 				engineInfo.retrieveEngine.EngineType(), err)
 			return err

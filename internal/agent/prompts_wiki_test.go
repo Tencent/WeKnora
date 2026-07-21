@@ -102,14 +102,24 @@ func TestWikiChunkCitationPrompt_StablePrefixAcrossBatches(t *testing.T) {
 	}
 
 	if a[:ia] != b[:ib] {
-		t.Errorf("prompt prefix before <chunks> differs across batches — provider prefix cache will miss.\nA-prefix:\n%s\n---\nB-prefix:\n%s", a[:ia], b[:ib])
+		t.Errorf(
+			"prompt prefix before <chunks> differs across batches — provid"+
+				"er prefix cache will miss.\nA-prefix:\n%s\n---\nB-prefix:\n%s",
+			a[:ia],
+			b[:ib],
+		)
 	}
 
 	// The static rules and per-document candidate-slug block must live inside
 	// that shared prefix, not after the varying chunks.
 	for _, must := range []string{"### Primary task", "### JSON Formatting Rules", "\n<candidate_slugs>\n"} {
 		if idx := strings.Index(a, must); idx < 0 || idx > ia {
-			t.Errorf("%q must appear before <chunks> to be part of the cached prefix (idx=%d, chunks=%d)", must, idx, ia)
+			t.Errorf(
+				"%q must appear before <chunks> to be part of the cached prefix (idx=%d, chunks=%d)",
+				must,
+				idx,
+				ia,
+			)
 		}
 	}
 }

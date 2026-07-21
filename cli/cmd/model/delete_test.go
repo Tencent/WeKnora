@@ -45,7 +45,10 @@ func (f *fakeDeleteSvc) DeleteModel(_ context.Context, id string) error {
 func TestModelDelete_CallsSDKAndEmits(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	require.NoError(t, runDelete(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "model_abc"))
+	require.NoError(
+		t,
+		runDelete(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "model_abc"),
+	)
 	assert.Equal(t, "model_abc", svc.gotID)
 	var env struct {
 		OK   bool `json:"ok"`

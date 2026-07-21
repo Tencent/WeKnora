@@ -42,7 +42,9 @@ func TestAllCodes_DocumentedInAGENTS(t *testing.T) {
 		}
 	}
 	if len(missing) > 0 {
-		t.Errorf("the following error codes are registered in AllCodes() but not listed in cli/AGENTS.md \"Error code reference\" section between the ERROR_REFERENCE markers:\n  - %s\n\nAdd a row for each missing code to keep agent-facing docs in sync.",
-			strings.Join(missing, "\n  - "))
+		t.Errorf(
+			"the following error codes are registered in AllCodes() but not listed in cli/AGENTS.md \"Error code reference\" section between the ERROR_REFERENCE markers:\n  - %s\n\nAdd a row for each missing code to keep agent-facing docs in sync.",
+			strings.Join(missing, "\n  - "),
+		)
 	}
 }

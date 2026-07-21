@@ -83,7 +83,12 @@ type knowledgeBaseService interface {
 }
 
 type knowledgeService interface {
-	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
+	ListKnowledgeWithFilter(
+		ctx context.Context,
+		kbID string,
+		page, pageSize int,
+		filter sdk.KnowledgeListFilter,
+	) ([]sdk.Knowledge, int64, error)
 	GetKnowledge(ctx context.Context, knowledgeID string) (*sdk.Knowledge, error)
 	OpenKnowledgeFile(ctx context.Context, knowledgeID string) (string, io.ReadCloser, error)
 	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams) ([]*sdk.SearchResult, error)
@@ -91,20 +96,35 @@ type knowledgeService interface {
 
 type chatService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error
+	KnowledgeQAStream(
+		ctx context.Context,
+		sessionID string,
+		req *sdk.KnowledgeQARequest,
+		cb func(*sdk.StreamResponse) error,
+	) error
 }
 
 type agentService interface {
 	ListAgents(ctx context.Context) ([]sdk.Agent, error)
 	GetAgent(ctx context.Context, agentID string) (*sdk.Agent, error)
-	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+	AgentQAStreamWithRequest(
+		ctx context.Context,
+		sessionID string,
+		req *sdk.AgentQARequest,
+		cb sdk.AgentEventCallback,
+	) error
 }
 
 // chunkListService is the narrow surface chunk_list depends on. Kept
 // separate from knowledgeService because the chunk subtree is its own
 // domain on the server side (/api/v1/chunks/...).
 type chunkListService interface {
-	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int, chunkTypes ...string) ([]sdk.Chunk, int64, error)
+	ListKnowledgeChunks(
+		ctx context.Context,
+		knowledgeID string,
+		page, pageSize int,
+		chunkTypes ...string,
+	) ([]sdk.Chunk, int64, error)
 }
 
 // sessionAskService composes the two SDK methods session_ask needs
@@ -114,7 +134,12 @@ type chunkListService interface {
 // four domain interfaces - also satisfies it.
 type sessionAskService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+	AgentQAStreamWithRequest(
+		ctx context.Context,
+		sessionID string,
+		req *sdk.AgentQARequest,
+		cb sdk.AgentEventCallback,
+	) error
 }
 
 // registerTools wires the curated 10 tools onto server. Adding a tool here
@@ -205,16 +230,16 @@ func addKBView(server *mcpsdk.Server, svc knowledgeBaseService) {
 // ---- doc_list ------------------------------------------------------------
 
 type docListInput struct {
-	KBID      string `json:"kb_id" jsonschema:"knowledge base ID"`
-	Page      int    `json:"page,omitempty" jsonschema:"1-indexed page number; defaults to 1"`
-	PageSize  int    `json:"page_size,omitempty" jsonschema:"items per page (1..1000); defaults to 20"`
-	Status    string `json:"status,omitempty" jsonschema:"filter by parse status: pending | processing | completed | failed"`
-	Keyword   string `json:"keyword,omitempty" jsonschema:"server-side substring filter (case-sensitive LIKE against title / file_name); leave empty to skip"`
-	FileType  string `json:"file_type,omitempty" jsonschema:"filter by file extension (e.g. pdf, md)"`
-	Source    string `json:"source,omitempty" jsonschema:"filter by ingestion source (e.g. api, web)"`
-	TagID     string `json:"tag_id,omitempty" jsonschema:"filter by tag association"`
+	KBID      string `json:"kb_id"                jsonschema:"knowledge base ID"`
+	Page      int    `json:"page,omitempty"       jsonschema:"1-indexed page number; defaults to 1"`
+	PageSize  int    `json:"page_size,omitempty"  jsonschema:"items per page (1..1000); defaults to 20"`
+	Status    string `json:"status,omitempty"     jsonschema:"filter by parse status: pending | processing | completed | failed"`
+	Keyword   string `json:"keyword,omitempty"    jsonschema:"server-side substring filter (case-sensitive LIKE against title / file_name); leave empty to skip"`
+	FileType  string `json:"file_type,omitempty"  jsonschema:"filter by file extension (e.g. pdf, md)"`
+	Source    string `json:"source,omitempty"     jsonschema:"filter by ingestion source (e.g. api, web)"`
+	TagID     string `json:"tag_id,omitempty"     jsonschema:"filter by tag association"`
 	StartTime string `json:"start_time,omitempty" jsonschema:"include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)"`
-	EndTime   string `json:"end_time,omitempty" jsonschema:"include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)"`
+	EndTime   string `json:"end_time,omitempty"   jsonschema:"include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)"`
 }
 
 type docListOutput struct {
@@ -248,7 +273,9 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 			size = 20
 		}
 		if size > 1000 {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "page_size must be in 1..1000")), nil, nil
+			return toolErrorResult(
+				cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "page_size must be in 1..1000"),
+			), nil, nil
 		}
 		filter := sdk.KnowledgeListFilter{
 			ParseStatus: in.Status,
@@ -260,14 +287,24 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 		if in.StartTime != "" {
 			t, err := time.Parse(time.RFC3339, in.StartTime)
 			if err != nil {
-				return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("start_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.StartTime))), nil, nil
+				return toolErrorResult(
+					cmdutil.NewError(
+						cmdutil.CodeInputInvalidArgument,
+						fmt.Sprintf("start_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.StartTime),
+					),
+				), nil, nil
 			}
 			filter.StartTime = t
 		}
 		if in.EndTime != "" {
 			t, err := time.Parse(time.RFC3339, in.EndTime)
 			if err != nil {
-				return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("end_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.EndTime))), nil, nil
+				return toolErrorResult(
+					cmdutil.NewError(
+						cmdutil.CodeInputInvalidArgument,
+						fmt.Sprintf("end_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.EndTime),
+					),
+				), nil, nil
 			}
 			filter.EndTime = t
 		}
@@ -353,13 +390,21 @@ func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 		if err != nil {
 			return toolErrorResult(cmdutil.WrapHTTP(err, "open knowledge file")), nil, nil
 		}
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 		buf, err := io.ReadAll(io.LimitReader(body, maxDocDownloadBytes+1))
 		if err != nil {
 			return toolErrorResult(cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read knowledge file")), nil, nil
 		}
 		if len(buf) > maxDocDownloadBytes {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("document exceeds the %d-byte per-call cap; use search_chunks for excerpts", maxDocDownloadBytes))), nil, nil
+			return toolErrorResult(
+				cmdutil.NewError(
+					cmdutil.CodeInputInvalidArgument,
+					fmt.Sprintf(
+						"document exceeds the %d-byte per-call cap; use search_chunks for excerpts",
+						maxDocDownloadBytes,
+					),
+				),
+			), nil, nil
 		}
 		content, isBase64 := encodeDownload(buf)
 		return successResult(docDownloadOutput{
@@ -375,10 +420,10 @@ func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 // ---- search_chunks -------------------------------------------------------
 
 type searchChunksInput struct {
-	KBID             string  `json:"kb_id" jsonschema:"knowledge base ID to search"`
-	Query            string  `json:"query" jsonschema:"natural-language search query"`
-	Limit            int     `json:"limit,omitempty" jsonschema:"client-side cap on results (1..1000); defaults to 10"`
-	VectorThreshold  float64 `json:"vector_threshold,omitempty" jsonschema:"minimum vector similarity (0..1)"`
+	KBID             string  `json:"kb_id"                       jsonschema:"knowledge base ID to search"`
+	Query            string  `json:"query"                       jsonschema:"natural-language search query"`
+	Limit            int     `json:"limit,omitempty"             jsonschema:"client-side cap on results (1..1000); defaults to 10"`
+	VectorThreshold  float64 `json:"vector_threshold,omitempty"  jsonschema:"minimum vector similarity (0..1)"`
 	KeywordThreshold float64 `json:"keyword_threshold,omitempty" jsonschema:"minimum keyword score (0..1)"`
 }
 
@@ -416,7 +461,9 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 			limit = 10
 		}
 		if limit > 1000 {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "limit must be in 1..1000")), nil, nil
+			return toolErrorResult(
+				cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "limit must be in 1..1000"),
+			), nil, nil
 		}
 		results, err := svc.HybridSearch(ctx, in.KBID, &sdk.SearchParams{
 			QueryText:        in.Query,
@@ -440,11 +487,11 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 // ---- chat ----------------------------------------------------------------
 
 type chatInput struct {
-	KBID      string `json:"kb_id" jsonschema:"knowledge base ID to chat against"`
-	Query     string `json:"query" jsonschema:"user query"`
+	KBID      string `json:"kb_id"                jsonschema:"knowledge base ID to chat against"`
+	Query     string `json:"query"                jsonschema:"user query"`
 	SessionID string `json:"session_id,omitempty" jsonschema:"existing session to continue; auto-created when empty"`
-	Reference bool   `json:"reference,omitempty" jsonschema:"include indexed references"`
-	Verbose   bool   `json:"verbose,omitempty" jsonschema:"include reasoning, tools, and lifecycle events"`
+	Reference bool   `json:"reference,omitempty"  jsonschema:"include indexed references"`
+	Verbose   bool   `json:"verbose,omitempty"    jsonschema:"include reasoning, tools, and lifecycle events"`
 }
 
 type chatOutput struct {
@@ -496,10 +543,18 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 			return nil
 		})
 		if streamErr != nil {
-			return toolStreamError(cmdutil.WrapStream(streamErr, "knowledge qa stream"), sessionID, projector.AssistantMessageID()), nil, nil
+			return toolStreamError(
+				cmdutil.WrapStream(streamErr, "knowledge qa stream"),
+				sessionID,
+				projector.AssistantMessageID(),
+			), nil, nil
 		}
 		if !projector.Done() {
-			return toolStreamError(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"), sessionID, projector.AssistantMessageID()), nil, nil
+			return toolStreamError(
+				cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"),
+				sessionID,
+				projector.AssistantMessageID(),
+			), nil, nil
 		}
 		sid := projector.SessionID()
 		if sid == "" {
@@ -549,11 +604,11 @@ func addAgentList(server *mcpsdk.Server, svc agentService) {
 // ---- session_ask ---------------------------------------------------------
 
 type sessionAskInput struct {
-	AgentID   string `json:"agent_id" jsonschema:"custom agent ID"`
-	Query     string `json:"query" jsonschema:"user query"`
+	AgentID   string `json:"agent_id"             jsonschema:"custom agent ID"`
+	Query     string `json:"query"                jsonschema:"user query"`
 	SessionID string `json:"session_id,omitempty" jsonschema:"existing session to continue; auto-created when empty"`
-	Reference bool   `json:"reference,omitempty" jsonschema:"include indexed references"`
-	Verbose   bool   `json:"verbose,omitempty" jsonschema:"include reasoning, tools, and lifecycle events"`
+	Reference bool   `json:"reference,omitempty"  jsonschema:"include indexed references"`
+	Verbose   bool   `json:"verbose,omitempty"    jsonschema:"include reasoning, tools, and lifecycle events"`
 }
 
 type sessionAskOutput struct {
@@ -609,7 +664,11 @@ func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 			return toolStreamError(cmdutil.WrapStream(streamErr, "agent-chat stream"), sessionID, ""), nil, nil
 		}
 		if !projector.Done() {
-			return toolStreamError(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"), sessionID, ""), nil, nil
+			return toolStreamError(
+				cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"),
+				sessionID,
+				"",
+			), nil, nil
 		}
 		return successResult(sessionAskOutput{
 			Events:    events,
@@ -623,7 +682,7 @@ func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 // ---- chunk_list ----------------------------------------------------------
 
 type chunkListInput struct {
-	DocID string `json:"doc_id" jsonschema:"document (knowledge entry) ID"`
+	DocID string `json:"doc_id"          jsonschema:"document (knowledge entry) ID"`
 	Limit int    `json:"limit,omitempty" jsonschema:"max chunks to return (1..1000); defaults to 50"`
 }
 
@@ -667,7 +726,12 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 			limit = chunkListDefaultLimit
 		}
 		if limit > chunkListMaxLimit {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("limit must be in 1..%d", chunkListMaxLimit))), nil, nil
+			return toolErrorResult(
+				cmdutil.NewError(
+					cmdutil.CodeInputInvalidArgument,
+					fmt.Sprintf("limit must be in 1..%d", chunkListMaxLimit),
+				),
+			), nil, nil
 		}
 		chunks, total, err := svc.ListKnowledgeChunks(ctx, in.DocID, 1, limit)
 		if err != nil {

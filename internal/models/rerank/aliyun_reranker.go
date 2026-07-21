@@ -1,3 +1,4 @@
+// Package rerank provides related functionality.
 package rerank
 
 import (
@@ -27,8 +28,8 @@ func (r *AliyunReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
 
-// AliyunRerankRequest represents a request to rerank documents using Aliyun DashScope API
-type AliyunRerankRequest struct {
+// AliyunRequest represents a request to rerank documents using Aliyun DashScope API
+type AliyunRequest struct {
 	Model      string                 `json:"model"`      // Model to use for reranking
 	Input      AliyunRerankInput      `json:"input"`      // Input containing query and documents
 	Parameters AliyunRerankParameters `json:"parameters"` // Parameters for the reranking
@@ -46,8 +47,8 @@ type AliyunRerankParameters struct {
 	TopN            int  `json:"top_n"`            // Number of top results to return
 }
 
-// AliyunRerankResponse represents the response from Aliyun DashScope reranking request
-type AliyunRerankResponse struct {
+// AliyunResponse represents the response from Aliyun DashScope reranking request
+type AliyunResponse struct {
 	Output AliyunOutput `json:"output"` // Output containing results
 	Usage  AliyunUsage  `json:"usage"`  // Token usage information
 }
@@ -97,7 +98,7 @@ func NewAliyunReranker(config *RerankerConfig) (*AliyunReranker, error) {
 // Rerank performs document reranking based on relevance to the query using Aliyun DashScope API
 func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body
-	requestBody := &AliyunRerankRequest{
+	requestBody := &AliyunRequest{
 		Model: r.modelName,
 		Input: AliyunRerankInput{
 			Query:     query,
@@ -123,13 +124,13 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
 	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
-	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.baseURL, query, documents))
+	logger.Debugf(ctx, "%s", buildRequestDebug(r.modelName, r.baseURL, query, documents))
 
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
@@ -141,7 +142,7 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 		return nil, fmt.Errorf("aliyun rerank API error: Http Status: %s, Body: %s", resp.Status, string(body))
 	}
 
-	var response AliyunRerankResponse
+	var response AliyunResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}

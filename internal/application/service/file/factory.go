@@ -75,31 +75,62 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "cos":
-		if sec == nil || sec.COS == nil || sec.COS.SecretID == "" || sec.COS.SecretKey == "" || sec.COS.BucketName == "" || sec.COS.Region == "" {
+		if sec == nil || sec.COS == nil || sec.COS.SecretID == "" || sec.COS.SecretKey == "" ||
+			sec.COS.BucketName == "" ||
+			sec.COS.Region == "" {
 			return nil, p, fmt.Errorf("incomplete cos config")
 		}
 		pathPrefix := strings.TrimSpace(sec.COS.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora"
 		}
-		svc, err := NewCosFileServiceWithTempBucket(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix, sec.COS.TempBucketName, sec.COS.TempRegion)
+		svc, err := NewCosFileServiceWithTempBucket(
+			sec.COS.BucketName,
+			sec.COS.Region,
+			sec.COS.SecretID,
+			sec.COS.SecretKey,
+			pathPrefix,
+			sec.COS.TempBucketName,
+			sec.COS.TempRegion,
+		)
 		return svc, p, err
 
 	case "tos":
-		if sec == nil || sec.TOS == nil || sec.TOS.Endpoint == "" || sec.TOS.Region == "" || sec.TOS.AccessKey == "" || sec.TOS.SecretKey == "" || sec.TOS.BucketName == "" {
+		if sec == nil || sec.TOS == nil || sec.TOS.Endpoint == "" || sec.TOS.Region == "" || sec.TOS.AccessKey == "" ||
+			sec.TOS.SecretKey == "" ||
+			sec.TOS.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete tos config")
 		}
-		svc, err := NewTosFileServiceWithTempBucket(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix, sec.TOS.TempBucketName, sec.TOS.TempRegion)
+		svc, err := NewTosFileServiceWithTempBucket(
+			sec.TOS.Endpoint,
+			sec.TOS.Region,
+			sec.TOS.AccessKey,
+			sec.TOS.SecretKey,
+			sec.TOS.BucketName,
+			sec.TOS.PathPrefix,
+			sec.TOS.TempBucketName,
+			sec.TOS.TempRegion,
+		)
 		return svc, p, err
 	case "s3":
-		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" || sec.S3.SecretKey == "" || sec.S3.BucketName == "" {
+		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" ||
+			sec.S3.SecretKey == "" ||
+			sec.S3.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete s3 config")
 		}
 		pathPrefix := strings.TrimSpace(sec.S3.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
-		svc, err := NewS3FileServiceWithOptions(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix, sec.S3.ForcePathStyle)
+		svc, err := NewS3FileServiceWithOptions(
+			sec.S3.Endpoint,
+			sec.S3.AccessKey,
+			sec.S3.SecretKey,
+			sec.S3.BucketName,
+			sec.S3.Region,
+			pathPrefix,
+			sec.S3.ForcePathStyle,
+		)
 		return svc, p, err
 
 	case "obs":
@@ -144,7 +175,9 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "oss":
-		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
+		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" ||
+			sec.OSS.SecretKey == "" ||
+			sec.OSS.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete oss config")
 		}
 		pathPrefix := strings.TrimSpace(sec.OSS.PathPrefix)
@@ -168,14 +201,23 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "ks3":
-		if sec == nil || sec.KS3 == nil || sec.KS3.Endpoint == "" || sec.KS3.Region == "" || sec.KS3.AccessKey == "" || sec.KS3.SecretKey == "" || sec.KS3.BucketName == "" {
+		if sec == nil || sec.KS3 == nil || sec.KS3.Endpoint == "" || sec.KS3.Region == "" || sec.KS3.AccessKey == "" ||
+			sec.KS3.SecretKey == "" ||
+			sec.KS3.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete ks3 config")
 		}
 		pathPrefix := strings.TrimSpace(sec.KS3.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
-		svc, err := NewKS3FileService(sec.KS3.Endpoint, sec.KS3.Region, sec.KS3.AccessKey, sec.KS3.SecretKey, sec.KS3.BucketName, pathPrefix)
+		svc, err := NewKS3FileService(
+			sec.KS3.Endpoint,
+			sec.KS3.Region,
+			sec.KS3.AccessKey,
+			sec.KS3.SecretKey,
+			sec.KS3.BucketName,
+			pathPrefix,
+		)
 		return svc, p, err
 
 	default:

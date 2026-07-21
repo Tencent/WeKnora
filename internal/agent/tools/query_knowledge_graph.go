@@ -37,7 +37,8 @@ Explores relationships between entities in knowledge bases that have graph extra
 - Need exact document content → use knowledge_search
 
 ## Parameters
-- **knowledge_base_ids** (required): Array of short bN knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
+- **knowledge_base_ids** (required): Array of short bN knowledge base IDs (1-10). Only KBs with graph extraction
+configured will be effective.
 - **query** (required): Query content - can be entity name, relationship query, or concept search.
 
 ## Graph Configuration
@@ -62,7 +63,7 @@ If KB is not configured with graph, tool will return regular search results.
 // QueryKnowledgeGraphInput defines the input parameters for query knowledge graph tool
 type QueryKnowledgeGraphInput struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of short bN knowledge base IDs to query"`
-	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
+	Query            string   `json:"query"              jsonschema:"Query content (entity name or query text)"`
 }
 
 // QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships

@@ -51,7 +51,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 // returns the full tree with parent links, so any pre-existing selection is
 // already present and revealed by the picker without on-demand loading.
 func (c *Connector) ResolveResourceAncestors(
-	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	_ context.Context, _ *types.DataSourceConfig, _ []string,
 ) ([]string, error) {
 	return []string{}, nil
 }
@@ -131,7 +131,11 @@ func (c *Connector) ListResources(
 }
 
 // FetchAll performs a full sync of all documents from the specified resources.
-func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
+func (c *Connector) FetchAll(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	resourceIDs []string,
+) ([]types.FetchedItem, error) {
 	notionCfg, err := parseNotionConfig(config)
 	if err != nil {
 		return nil, err
@@ -165,7 +169,11 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 
 // FetchIncremental performs an incremental sync based on cursor state.
 // On first sync (nil cursor), delegates to FetchAll for efficiency (no discovery needed).
-func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+func (c *Connector) FetchIncremental(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	cursor *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	notionCfg, err := parseNotionConfig(config)
 	if err != nil {
 		return nil, nil, err
@@ -250,7 +258,13 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		if pg.isDatabase() {
 			// Incremental database sync: query records, diff against cursor,
 			// only fetch blocks for records whose edit time actually changed.
-			items, recordEditTimes := c.fetchDatabaseIncremental(ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
+			items, recordEditTimes := c.fetchDatabaseIncremental(
+				ctx,
+				client,
+				pg.ID,
+				prevCursor.PageEditTimes,
+				fetchVisited,
+			)
 			changedItems = append(changedItems, items...)
 			// Merge record-level edit times into the cursor
 			for rid, rt := range recordEditTimes {
@@ -304,7 +318,12 @@ func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
 
 // fetchPage fetches a single page's content and attachments.
 // If page is nil, it will be fetched from the API.
-func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool) []types.FetchedItem {
+func (c *Connector) fetchPage(
+	ctx context.Context,
+	client *notionClient,
+	page *notionPage,
+	visited map[string]bool,
+) []types.FetchedItem {
 	if page == nil {
 		return nil
 	}
@@ -414,7 +433,12 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 
 // fetchDatabase syncs each database record as an individual knowledge item (full sync).
 // Accepts either a data_source_id (from search) or database_id (from child_database blocks).
-func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id string, visited map[string]bool) []types.FetchedItem {
+func (c *Connector) fetchDatabase(
+	ctx context.Context,
+	client *notionClient,
+	id string,
+	visited map[string]bool,
+) []types.FetchedItem {
 	if visited[id] {
 		return nil
 	}
@@ -444,7 +468,13 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 
 // fetchDatabaseIncremental syncs only changed records by comparing edit times against cursor.
 // Returns fetched items and a map of record_id → edit_time for cursor update.
-func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool) ([]types.FetchedItem, map[string]time.Time) {
+func (c *Connector) fetchDatabaseIncremental(
+	ctx context.Context,
+	client *notionClient,
+	id string,
+	prevEditTimes map[string]time.Time,
+	visited map[string]bool,
+) ([]types.FetchedItem, map[string]time.Time) {
 	if visited[id] {
 		return nil, nil
 	}
@@ -493,7 +523,11 @@ func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notion
 
 // queryDatabaseRecords resolves the database ID and queries all records.
 // Returns the records, the database title, and the canonical data_source_id used for the query.
-func (c *Connector) queryDatabaseRecords(ctx context.Context, client *notionClient, id string) ([]notionPage, string, string, error) {
+func (c *Connector) queryDatabaseRecords(
+	ctx context.Context,
+	client *notionClient,
+	id string,
+) ([]notionPage, string, string, error) {
 	dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, id)
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: %v", id, err)
@@ -516,7 +550,13 @@ func (c *Connector) queryDatabaseRecords(ctx context.Context, client *notionClie
 
 // buildRecordItem converts a single database record into a FetchedItem
 // with properties as header and block content as body.
-func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, record notionPage, propNames []string, dbTitle string) *types.FetchedItem {
+func (c *Connector) buildRecordItem(
+	ctx context.Context,
+	client *notionClient,
+	record notionPage,
+	propNames []string,
+	dbTitle string,
+) *types.FetchedItem {
 	var content strings.Builder
 	title := record.Title
 	if title == "" {
@@ -526,7 +566,7 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 
 	if record.RawProperties != nil {
 		var props map[string]interface{}
-		json.Unmarshal(record.RawProperties, &props)
+		_ = json.Unmarshal(record.RawProperties, &props)
 		for _, name := range propNames {
 			if propMap, ok := props[name].(map[string]interface{}); ok {
 				val := propertyToString(propMap)
@@ -571,7 +611,13 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 }
 
 // buildDatabaseItem converts a database into a single Markdown table document.
-func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient, id string, dbTitle string, records []notionPage) *types.FetchedItem {
+func (c *Connector) buildDatabaseItem(
+	ctx context.Context,
+	client *notionClient,
+	id string,
+	dbTitle string,
+	records []notionPage,
+) *types.FetchedItem {
 	if len(records) == 0 {
 		return nil
 	}
@@ -614,7 +660,7 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 
 		if record.RawProperties != nil {
 			var props map[string]interface{}
-			json.Unmarshal(record.RawProperties, &props)
+			_ = json.Unmarshal(record.RawProperties, &props)
 			for _, name := range propNames {
 				val := ""
 				if propMap, ok := props[name].(map[string]interface{}); ok {
@@ -672,7 +718,11 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 // Returns the included pages plus the excluded set (visible pages NOT under any
 // selected root) so callers can seed `visited` for child-block recursion without
 // a second SearchPages round-trip.
-func (c *Connector) discoverAllResources(ctx context.Context, client *notionClient, resourceIDs []string) (included []notionPage, excluded map[string]bool) {
+func (c *Connector) discoverAllResources(
+	ctx context.Context,
+	client *notionClient,
+	resourceIDs []string,
+) (included []notionPage, excluded map[string]bool) {
 	allPages, err := client.SearchPages(ctx)
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to search pages for discovery: %v", err)
@@ -740,7 +790,7 @@ func resolveFileUploads(ctx context.Context, client *notionClient, blocks []noti
 	for i := range blocks {
 		if isFileBlock(blocks[i].Type) && blocks[i].RawContent != nil {
 			var file notionFile
-			json.Unmarshal(blocks[i].RawContent, &file)
+			_ = json.Unmarshal(blocks[i].RawContent, &file)
 			if file.GetFileUploadID() != "" {
 				resolved, err := client.ResolveBlock(ctx, blocks[i].ID)
 				if err != nil {
@@ -858,7 +908,7 @@ func extractPropertySchema(record notionPage) (propNames []string) {
 		var prop struct {
 			Type string `json:"type"`
 		}
-		json.Unmarshal(propRaw, &prop)
+		_ = json.Unmarshal(propRaw, &prop)
 		if prop.Type != "title" {
 			propNames = append(propNames, name)
 		}
@@ -932,7 +982,11 @@ func computeExcludedSet(visibleIDs []string, parentOf map[string]string, selecte
 // excludedSetFromListResources fetches the picker hierarchy via ListResources
 // and computes the deselected set. Used by FetchAll where no other code path
 // already has the page list in hand.
-func (c *Connector) excludedSetFromListResources(ctx context.Context, config *types.DataSourceConfig, selectedIDs []string) map[string]bool {
+func (c *Connector) excludedSetFromListResources(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	selectedIDs []string,
+) map[string]bool {
 	visible, err := c.ListResources(ctx, config, "")
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to list visible resources for exclusion: %v", err)

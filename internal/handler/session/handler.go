@@ -94,7 +94,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	var request CreateSessionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to validate session creation parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
-		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		_ = c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	createdSession, err := h.sessionService.CreateSession(ctx, createdSession)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -176,11 +176,11 @@ func (h *Handler) GetSession(c *gin.Context) {
 	if err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -201,7 +201,8 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "标题模糊搜索"
-// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
+// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack /
+// ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
@@ -215,7 +216,7 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -231,7 +232,7 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	})
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -264,7 +265,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -272,7 +273,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
-		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		_ = c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 
@@ -280,7 +281,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	var session types.Session
 	if err := c.ShouldBindJSON(&session); err != nil {
 		logger.Error(ctx, "Failed to parse session data", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -291,11 +292,11 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	if err := h.sessionService.UpdateSession(ctx, &session); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -303,7 +304,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	updatedSession, err := h.sessionService.GetSession(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -334,7 +335,7 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -342,11 +343,11 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 	if err := h.sessionService.DeleteSession(ctx, id); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -376,7 +377,7 @@ func (h *Handler) ClearSessionMessages(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -385,11 +386,11 @@ func (h *Handler) ClearSessionMessages(c *gin.Context) {
 	if err := h.messageService.ClearSessionMessages(ctx, id); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": id})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -424,14 +425,14 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	var req batchDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Invalid batch delete request: %v", err)
-		c.Error(errors.NewBadRequestError("invalid request"))
+		_ = c.Error(errors.NewBadRequestError("invalid request"))
 		return
 	}
 
 	if req.DeleteAll {
 		if err := h.sessionService.DeleteAllSessions(ctx); err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -442,7 +443,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	}
 
 	if len(req.IDs) == 0 {
-		c.Error(errors.NewBadRequestError("ids are required when delete_all is false"))
+		_ = c.Error(errors.NewBadRequestError("ids are required when delete_all is false"))
 		return
 	}
 
@@ -456,18 +457,18 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	}
 
 	if len(sanitizedIDs) == 0 {
-		c.Error(errors.NewBadRequestError("no valid session IDs provided"))
+		_ = c.Error(errors.NewBadRequestError("no valid session IDs provided"))
 		return
 	}
 
 	if err := h.sessionService.BatchDeleteSessions(ctx, sanitizedIDs); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "No visible sessions found for batch delete")
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -519,7 +520,7 @@ func (h *Handler) setSessionPinned(c *gin.Context, pinned bool) {
 	id := secutils.SanitizeForLog(rawID)
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -529,13 +530,13 @@ func (h *Handler) setSessionPinned(c *gin.Context, pinned bool) {
 			"session_id": id,
 			"pinned":     pinned,
 		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	// Zero rows means the session doesn't exist or isn't visible to this user;
 	// tell the client rather than reporting success.
 	if rows == 0 {
-		c.Error(errors.NewNotFoundError(errors.ErrSessionNotFound.Error()))
+		_ = c.Error(errors.NewNotFoundError(errors.ErrSessionNotFound.Error()))
 		return
 	}
 

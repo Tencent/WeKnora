@@ -106,7 +106,11 @@ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		}
 	}
 
-	outputMsg := fmt.Sprintf("Successfully deleted page [[%s]] and cleaned up %d incoming links.", params.Slug, updatedCount)
+	outputMsg := fmt.Sprintf(
+		"Successfully deleted page [[%s]] and cleaned up %d incoming links.",
+		params.Slug,
+		updatedCount,
+	)
 	if updatedCount > 0 {
 		outputMsg += fmt.Sprintf("\n- Affected pages: %s", strings.Join(updatedSlugs, ", "))
 	}
@@ -115,11 +119,11 @@ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Success: true,
 		Output:  outputMsg,
 		Data: map[string]interface{}{
-			"display_type":    "wiki_delete_page",
-			"slug":            params.Slug,
-			"title":           existingPage.Title,
-			"updated_count":   updatedCount,
-			"affected_pages":  updatedSlugs,
+			"display_type":   "wiki_delete_page",
+			"slug":           params.Slug,
+			"title":          existingPage.Title,
+			"updated_count":  updatedCount,
+			"affected_pages": updatedSlugs,
 		},
 	}, nil
 }

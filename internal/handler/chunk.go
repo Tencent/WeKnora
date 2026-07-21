@@ -56,7 +56,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	chunkID := secutils.SanitizeForLog(c.Param("id"))
 	if chunkID == "" {
 		logger.Error(ctx, "Chunk ID is empty")
-		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
 		return
 	}
 
@@ -67,11 +67,11 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	if err != nil {
 		if err == service.ErrChunkNotFound {
 			logger.Warnf(ctx, "Chunk not found, chunk ID: %s", chunkID)
-			c.Error(errors.NewNotFoundError("Chunk not found"))
+			_ = c.Error(errors.NewNotFoundError("Chunk not found"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -107,7 +107,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
 	if knowledgeID == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Errorf(ctx, "Failed to parse pagination parameters: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if pagination.Page < 1 {
@@ -142,7 +142,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -229,13 +229,13 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 
 	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	var req UpdateChunkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -247,7 +247,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 
 	if err := h.service.UpdateChunk(ctx, chunk); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -279,13 +279,13 @@ func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 
 	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	if err := h.service.DeleteChunk(ctx, chunk.ID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -314,13 +314,13 @@ func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
 	if knowledgeID == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
 	if err := h.service.DeleteChunksByKnowledgeID(ctx, knowledgeID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -351,7 +351,7 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 	chunkID := secutils.SanitizeForLog(c.Param("id"))
 	if chunkID == "" {
 		logger.Error(ctx, "Chunk ID is empty")
-		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
 		return
 	}
 
@@ -360,13 +360,13 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError("Question ID is required"))
+		_ = c.Error(errors.NewBadRequestError("Question ID is required"))
 		return
 	}
 
 	if err := h.service.DeleteGeneratedQuestion(ctx, chunkID, req.QuestionID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 

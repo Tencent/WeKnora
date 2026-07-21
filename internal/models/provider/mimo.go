@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回小米 Mimo provider 的元数据
-func (p *MimoProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *MimoProvider) Info() Info {
+	return Info{
 		Name:        ProviderMimo,
 		DisplayName: "小米 MiMo",
 		Description: "mimo-v2-flash",

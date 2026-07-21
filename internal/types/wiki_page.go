@@ -145,53 +145,53 @@ const (
 // a persistent, compounding knowledge artifact.
 type WikiPage struct {
 	// Unique identifier (UUID)
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                      gorm:"type:varchar(36);primaryKey"`
 	// Workspace ID for multi-workspace isolation
-	TenantID uint64 `json:"tenant_id" gorm:"index"`
+	TenantID uint64 `json:"tenant_id"               gorm:"index"`
 	// Knowledge base this page belongs to
-	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	KnowledgeBaseID string `json:"knowledge_base_id"       gorm:"type:varchar(36);index"`
 	// URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
 	// Unique within a knowledge base
-	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
+	Slug string `json:"slug"                    gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
 	// Human-readable title
-	Title string `json:"title" gorm:"type:varchar(512)"`
+	Title string `json:"title"                   gorm:"type:varchar(512)"`
 	// Page type: summary, entity, concept, index, log, synthesis, comparison
-	PageType string `json:"page_type" gorm:"type:varchar(32);index"`
+	PageType string `json:"page_type"               gorm:"type:varchar(32);index"`
 	// Page status: draft, published, archived
-	Status string `json:"status" gorm:"type:varchar(32);default:'published'"`
+	Status string `json:"status"                  gorm:"type:varchar(32);default:'published'"`
 	// Full markdown content
-	Content string `json:"content" gorm:"type:text"`
+	Content string `json:"content"                 gorm:"type:text"`
 	// One-line summary for index listing
-	Summary string `json:"summary" gorm:"type:text"`
+	Summary string `json:"summary"                 gorm:"type:text"`
 	// Alternate names, abbreviations, acronyms or translated names
-	Aliases StringArray `json:"aliases" gorm:"type:json"`
+	Aliases StringArray `json:"aliases"                 gorm:"type:json"`
 	// ParentSlug optionally points at the wiki page that should act as this
 	// page's semantic parent in the directory tree. The parent may be empty
 	// when the page is grouped only by FolderID.
-	ParentSlug string `json:"parent_slug,omitempty" gorm:"type:varchar(255);index"`
+	ParentSlug string `json:"parent_slug,omitempty"   gorm:"type:varchar(255);index"`
 	// FolderID is the single source of truth for where this page sits in the
 	// directory tree — a reference to wiki_folders.id ("" = wiki root). The
 	// CategoryPath / WikiPath / Depth fields below are denormalized caches
 	// recomputed from this folder's chain on every write so list/index/search
 	// queries don't have to join wiki_folders.
-	FolderID string `json:"folder_id,omitempty" gorm:"column:folder_id;type:varchar(36);index;default:''"`
+	FolderID string `json:"folder_id,omitempty"     gorm:"column:folder_id;type:varchar(36);index;default:''"`
 	// CategoryPath is the directory breadcrumb that groups this page in the
 	// wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
 	// folder chain identified by FolderID.
 	CategoryPath StringArray `json:"category_path,omitempty" gorm:"type:json"`
 	// WikiPath is a normalized, sortable path derived from page_type,
 	// category_path, and title. It keeps large directory listings cheap to sort.
-	WikiPath string `json:"wiki_path,omitempty" gorm:"type:varchar(1024);index"`
+	WikiPath string `json:"wiki_path,omitempty"     gorm:"type:varchar(1024);index"`
 	// Depth is len(CategoryPath), cached for filtering / display.
-	Depth int `json:"depth,omitempty" gorm:"default:0;index"`
+	Depth int `json:"depth,omitempty"         gorm:"default:0;index"`
 	// SortOrder allows generated or manually edited pages to control sibling
 	// ordering before falling back to title.
-	SortOrder int `json:"sort_order,omitempty" gorm:"default:0;index"`
+	SortOrder int `json:"sort_order,omitempty"    gorm:"default:0;index"`
 	// References to source knowledge IDs that contributed to this page.
 	// Format matches the legacy "<knowledge_id>|<doc_title>" convention used
 	// across the ingest pipeline, so retract / display code can split on `|`
 	// to recover the title. Document-level granularity.
-	SourceRefs StringArray `json:"source_refs" gorm:"type:json"`
+	SourceRefs StringArray `json:"source_refs"             gorm:"type:json"`
 	// ChunkRefs records the specific source-document chunks this page was
 	// built from — one UUID per cited chunk. Populated during ingest from
 	// the chunk-citation pass; refreshed wholesale whenever the page is
@@ -199,25 +199,25 @@ type WikiPage struct {
 	// synopses and don't carry chunk-level citations). Use this when you
 	// need to surface the underlying evidence for a wiki page, or to
 	// retract citations when a source document is deleted.
-	ChunkRefs StringArray `json:"chunk_refs" gorm:"type:json"`
+	ChunkRefs StringArray `json:"chunk_refs"              gorm:"type:json"`
 	// Slugs of pages that link TO this page (backlinks)
-	InLinks StringArray `json:"in_links" gorm:"type:json"`
+	InLinks StringArray `json:"in_links"                gorm:"type:json"`
 	// Slugs of pages this page links to (outbound links)
-	OutLinks StringArray `json:"out_links" gorm:"type:json"`
+	OutLinks StringArray `json:"out_links"               gorm:"type:json"`
 	// Arbitrary metadata (tags, categories, dates, etc.)
-	PageMetadata JSON `json:"page_metadata" gorm:"column:page_metadata;type:json"`
+	PageMetadata JSON `json:"page_metadata"           gorm:"column:page_metadata;type:json"`
 	// Version number. Incremented only when a user-visible content field
 	// (title, content, summary, page_type, status) actually changes; pure
 	// bookkeeping writes (link maintenance, same-content re-ingest, status
 	// sync from background jobs) leave it untouched so it can be used as a
 	// real "the page was edited" signal.
-	Version int `json:"version" gorm:"default:1"`
+	Version int `json:"version"                 gorm:"default:1"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last update time
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete
-	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"              gorm:"index"`
 }
 
 // TableName specifies the database table name
@@ -235,17 +235,17 @@ const WikiFolderRootID = ""
 // (ParentID, "" = root); Path is the materialized "/"-joined name chain kept
 // purely for cheap display/sort. A wiki page's placement is WikiPage.FolderID.
 type WikiFolder struct {
-	ID              string         `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TenantID        uint64         `json:"tenant_id" gorm:"index"`
+	ID              string         `json:"id"                gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64         `json:"tenant_id"         gorm:"index"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	ParentID        string         `json:"parent_id" gorm:"column:parent_id;type:varchar(36);index;default:''"`
-	Name            string         `json:"name" gorm:"type:varchar(255)"`
-	Path            string         `json:"path" gorm:"type:varchar(1024)"`
-	Depth           int            `json:"depth" gorm:"default:0"`
-	SortOrder       int            `json:"sort_order" gorm:"default:0"`
+	ParentID        string         `json:"parent_id"         gorm:"column:parent_id;type:varchar(36);index;default:''"`
+	Name            string         `json:"name"              gorm:"type:varchar(255)"`
+	Path            string         `json:"path"              gorm:"type:varchar(1024)"`
+	Depth           int            `json:"depth"             gorm:"default:0"`
+	SortOrder       int            `json:"sort_order"        gorm:"default:0"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt       gorm.DeletedAt `json:"deleted_at"        gorm:"index"`
 }
 
 // TableName specifies the database table name
@@ -288,7 +288,7 @@ type WikiFolderUpdateRequest struct {
 // ("" = root). Slug is carried in the body (not the path) because wiki slugs
 // are hierarchical ("entity/acme") and would collide with gin's catch-all.
 type WikiPageMoveRequest struct {
-	Slug     string `json:"slug" binding:"required"`
+	Slug     string `json:"slug"      binding:"required"`
 	FolderID string `json:"folder_id"`
 }
 
@@ -341,15 +341,15 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 // this struct only carries wiki-specific tunables.
 type WikiConfig struct {
 	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
-	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
+	SynthesisModelID string `yaml:"synthesis_model_id"                json:"synthesis_model_id"`
 	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
-	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
+	MaxPagesPerIngest int `yaml:"max_pages_per_ingest"              json:"max_pages_per_ingest"`
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
 	// ContentInstructions controls tone, structure and emphasis for generated
 	// summary/entity/index prose. Citation and merge rules remain system-owned.
-	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
+	ContentInstructions string `yaml:"content_instructions,omitempty"    json:"content_instructions,omitempty"`
 	// ExtractionInstructions tells candidate extraction which domain concepts
 	// to emphasize without replacing the stable JSON/citation protocol.
 	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
@@ -547,18 +547,18 @@ type WikiStats struct {
 // WikiPageIssue represents an issue flagged on a specific wiki page.
 // These issues are typically identified by agents or linters and stored for review.
 type WikiPageIssue struct {
-	ID                    string         `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TenantID              uint64         `json:"tenant_id" gorm:"index"`
-	KnowledgeBaseID       string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	Slug                  string         `json:"slug" gorm:"type:varchar(255);index"`
-	IssueType             string         `json:"issue_type" gorm:"type:varchar(50)"`
-	Description           string         `json:"description" gorm:"type:text"`
+	ID                    string         `json:"id"                      gorm:"type:varchar(36);primaryKey"`
+	TenantID              uint64         `json:"tenant_id"               gorm:"index"`
+	KnowledgeBaseID       string         `json:"knowledge_base_id"       gorm:"type:varchar(36);index"`
+	Slug                  string         `json:"slug"                    gorm:"type:varchar(255);index"`
+	IssueType             string         `json:"issue_type"              gorm:"type:varchar(50)"`
+	Description           string         `json:"description"             gorm:"type:text"`
 	SuspectedKnowledgeIDs StringArray    `json:"suspected_knowledge_ids" gorm:"type:json"`
-	Status                string         `json:"status" gorm:"type:varchar(20);default:'pending';index"`
-	ReportedBy            string         `json:"reported_by" gorm:"type:varchar(100)"`
+	Status                string         `json:"status"                  gorm:"type:varchar(20);default:'pending';index"`
+	ReportedBy            string         `json:"reported_by"             gorm:"type:varchar(100)"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
-	DeletedAt             gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt             gorm.DeletedAt `json:"deleted_at"              gorm:"index"`
 }
 
 // TableName specifies the database table name

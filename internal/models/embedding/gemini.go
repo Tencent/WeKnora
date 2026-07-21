@@ -60,6 +60,7 @@ type geminiEmbedding struct {
 	Values []float32 `json:"values"`
 }
 
+// NewGeminiEmbedder is an exported function.
 func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*GeminiEmbedder, error) {
@@ -74,9 +75,7 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 	}
 
 	baseURL = strings.TrimRight(baseURL, "/")
-	if strings.HasSuffix(baseURL, "/openai") {
-		baseURL = strings.TrimSuffix(baseURL, "/openai")
-	}
+	baseURL = strings.TrimSuffix(baseURL, "/openai")
 
 	timeout := 60 * time.Second
 
@@ -98,14 +97,17 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 	}, nil
 }
 
+// SetCustomHeaders implements the required interface method.
 func (e *GeminiEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *GeminiEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
 
+// Embed implements the required interface method.
 func (e *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	embeddings, err := e.BatchEmbed(ctx, []string{text})
 	if err != nil {
@@ -117,6 +119,7 @@ func (e *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 	return embeddings[0], nil
 }
 
+// BatchEmbed implements the required interface method.
 func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -151,7 +154,7 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -165,8 +168,9 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		logger.GetLogger(ctx).Errorf("GeminiEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
-		return nil, fmt.Errorf("Gemini BatchEmbed API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		logger.GetLogger(ctx).
+			Errorf("GeminiEmbedder BatchEmbed API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
+		return nil, fmt.Errorf("gemini batch embed API error: http status %s, response: %s", resp.Status, bodyStr)
 	}
 
 	var response geminiBatchEmbedResponse
@@ -175,7 +179,11 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 	if len(response.Embeddings) != len(texts) {
-		return nil, fmt.Errorf("Gemini BatchEmbed returned %d embeddings for %d inputs", len(response.Embeddings), len(texts))
+		return nil, fmt.Errorf(
+			"gemini BatchEmbed returned %d embeddings for %d inputs",
+			len(response.Embeddings),
+			len(texts),
+		)
 	}
 
 	embeddings := make([][]float32, 0, len(response.Embeddings))
@@ -227,14 +235,17 @@ func (e *GeminiEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
+// GetModelName implements the required interface method.
 func (e *GeminiEmbedder) GetModelName() string {
 	return e.modelName
 }
 
+// GetDimensions implements the required interface method.
 func (e *GeminiEmbedder) GetDimensions() int {
 	return e.dimensions
 }
 
+// GetModelID implements the required interface method.
 func (e *GeminiEmbedder) GetModelID() string {
 	return e.modelID
 }

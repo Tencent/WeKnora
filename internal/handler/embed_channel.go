@@ -36,6 +36,7 @@ type EmbedChannelHandler struct {
 	redis             *redis.Client
 }
 
+// NewEmbedChannelHandler is an exported function.
 func NewEmbedChannelHandler(
 	embedSvc interfaces.EmbedChannelService,
 	sessionService interfaces.SessionService,
@@ -126,6 +127,7 @@ func validateAllowedOrigins(origins []string) error {
 	return nil
 }
 
+// CreateEmbedChannel implements the required interface method.
 func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -181,6 +183,7 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	})
 }
 
+// ListEmbedChannels implements the required interface method.
 func (h *EmbedChannelHandler) ListEmbedChannels(c *gin.Context) {
 	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -212,6 +215,7 @@ func embedChannelsResponse(rows []*types.EmbedChannel) []gin.H {
 	return data
 }
 
+// UpdateEmbedChannel implements the required interface method.
 func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -249,7 +253,19 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	if req.AgentID != nil {
 		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
-	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
+	ch, err := h.embedSvc.Update(
+		c.Request.Context(),
+		tenantID,
+		channelID,
+		update,
+		req.Enabled,
+		req.ShowSuggestedQuestions,
+		req.AllowWebSearch,
+		req.AllowFileUpload,
+		req.DefaultLocale,
+		req.WebhookURL,
+		req.WebhookSecret,
+	)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -257,6 +273,7 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": embedChannelResponse(ch, "")})
 }
 
+// DeleteEmbedChannel implements the required interface method.
 func (h *EmbedChannelHandler) DeleteEmbedChannel(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -267,6 +284,7 @@ func (h *EmbedChannelHandler) DeleteEmbedChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// RotateEmbedToken implements the required interface method.
 func (h *EmbedChannelHandler) RotateEmbedToken(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -278,6 +296,7 @@ func (h *EmbedChannelHandler) RotateEmbedToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": embedChannelResponse(ch, token)})
 }
 
+// IssuePreviewSession implements the required interface method.
 func (h *EmbedChannelHandler) IssuePreviewSession(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -299,6 +318,7 @@ func (h *EmbedChannelHandler) IssuePreviewSession(c *gin.Context) {
 	})
 }
 
+// ExchangeEmbedSession implements the required interface method.
 func (h *EmbedChannelHandler) ExchangeEmbedSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	ch, ok := middleware.EmbedChannelFromContext(ctx)
@@ -333,6 +353,7 @@ func (h *EmbedChannelHandler) ExchangeEmbedSession(c *gin.Context) {
 	})
 }
 
+// GetEmbedConfig implements the required interface method.
 func (h *EmbedChannelHandler) GetEmbedConfig(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -342,6 +363,7 @@ func (h *EmbedChannelHandler) GetEmbedConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.embedSvc.PublicConfig(c.Request.Context(), ch)})
 }
 
+// GetEmbedChunk implements the required interface method.
 func (h *EmbedChannelHandler) GetEmbedChunk(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -372,6 +394,7 @@ func (h *EmbedChannelHandler) GetEmbedChunk(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": chunk})
 }
 
+// GetEmbedSuggestedQuestions implements the required interface method.
 func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -403,6 +426,7 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"questions": questions}})
 }
 
+// CreateEmbedSession implements the required interface method.
 func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	ch, ok := middleware.EmbedChannelFromContext(ctx)
@@ -437,14 +461,17 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": gin.H{"id": created.ID, "sig": sig}})
 }
 
+// EmbedKnowledgeChat implements the required interface method.
 func (h *EmbedChannelHandler) EmbedKnowledgeChat(c *gin.Context) {
 	h.delegateEmbedChat(c, false)
 }
 
+// EmbedAgentChat implements the required interface method.
 func (h *EmbedChannelHandler) EmbedAgentChat(c *gin.Context) {
 	h.delegateEmbedChat(c, true)
 }
 
+// EmbedLoadMessages implements the required interface method.
 func (h *EmbedChannelHandler) EmbedLoadMessages(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -452,6 +479,7 @@ func (h *EmbedChannelHandler) EmbedLoadMessages(c *gin.Context) {
 	h.messageHandler.LoadMessages(c)
 }
 
+// EmbedStopSession implements the required interface method.
 func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -459,6 +487,7 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	h.sessionHandler.StopSession(c)
 }
 
+// EmbedEnsureMessageSuggestions implements the required interface method.
 func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -473,6 +502,7 @@ func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
 	h.suggestionHandler.Ensure(c)
 }
 
+// EmbedGetMessageSuggestions implements the required interface method.
 func (h *EmbedChannelHandler) EmbedGetMessageSuggestions(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -487,6 +517,7 @@ func (h *EmbedChannelHandler) EmbedGetMessageSuggestions(c *gin.Context) {
 	h.suggestionHandler.Get(c)
 }
 
+// EmbedRecordSuggestionEvent implements the required interface method.
 func (h *EmbedChannelHandler) EmbedRecordSuggestionEvent(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -498,6 +529,7 @@ func (h *EmbedChannelHandler) EmbedRecordSuggestionEvent(c *gin.Context) {
 	h.suggestionHandler.RecordEvent(c)
 }
 
+// EmbedResolveMCPOAuth implements the required interface method.
 func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -509,6 +541,7 @@ func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
 	h.mcpOAuthHandler.ResolveMCPOAuth(c)
 }
 
+// EmbedCancelMCPOAuth implements the required interface method.
 func (h *EmbedChannelHandler) EmbedCancelMCPOAuth(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -520,6 +553,7 @@ func (h *EmbedChannelHandler) EmbedCancelMCPOAuth(c *gin.Context) {
 	h.mcpOAuthHandler.CancelMCPOAuth(c)
 }
 
+// EmbedMCPOAuthAuthorizeURL implements the required interface method.
 func (h *EmbedChannelHandler) EmbedMCPOAuthAuthorizeURL(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -531,6 +565,7 @@ func (h *EmbedChannelHandler) EmbedMCPOAuthAuthorizeURL(c *gin.Context) {
 	h.mcpOAuthHandler.AuthorizeURL(c)
 }
 
+// EmbedMCPOAuthStatus implements the required interface method.
 func (h *EmbedChannelHandler) EmbedMCPOAuthStatus(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -542,6 +577,7 @@ func (h *EmbedChannelHandler) EmbedMCPOAuthStatus(c *gin.Context) {
 	h.mcpOAuthHandler.Status(c)
 }
 
+// EmbedResolveToolApproval implements the required interface method.
 func (h *EmbedChannelHandler) EmbedResolveToolApproval(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return

@@ -96,12 +96,17 @@ to stop after one page.`,
 		UsedFor:       "Find chat sessions by title or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
 		RequiredFlags: []string{"<query> (positional)"},
 		Examples:      []string{`weknora search sessions "onboarding" --format json`},
-		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+		Output:        "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
 	})
 	return cmd
 }
 
-func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, fopts *cmdutil.FormatOptions, svc SessionsSearchService) error {
+func runSessionsSearch(
+	ctx context.Context,
+	opts *SessionsSearchOptions,
+	fopts *cmdutil.FormatOptions,
+	svc SessionsSearchService,
+) error {
 	if opts.PageSize < 1 || opts.PageSize > sessionsMaxPageSize {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			fmt.Sprintf("--page-size must be in 1..%d, got %d", sessionsMaxPageSize, opts.PageSize))

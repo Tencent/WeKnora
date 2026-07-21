@@ -42,11 +42,22 @@ func TestLogout_CurrentProfile(t *testing.T) {
 	cfg := &config.Config{
 		CurrentProfile: "prod",
 		Profiles: map[string]config.Profile{
-			"prod":    {Host: "https://prod", TokenRef: store.Ref("prod", "access"), RefreshRef: store.Ref("prod", "refresh")},
+			"prod": {
+				Host:       "https://prod",
+				TokenRef:   store.Ref("prod", "access"),
+				RefreshRef: store.Ref("prod", "refresh"),
+			},
 			"staging": {Host: "https://staging", APIKeyRef: store.Ref("staging", "api_key")},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
+	require.NoError(
+		t,
+		runLogout(
+			&LogoutOptions{Yes: true},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			newLogoutFactory(t, cfg, store),
+		),
+	)
 
 	assert.Equal(t, "prod", cfg.CurrentProfile, "active profile stays selected — logout clears creds, not the profile")
 	require.Contains(t, cfg.Profiles, "prod", "profile stays registered after logout")
@@ -83,7 +94,14 @@ func TestLogout_ActiveProfileViaOverride(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: store.Ref("staging", "api_key")},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
+	require.NoError(
+		t,
+		runLogout(
+			&LogoutOptions{Yes: true},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			newLogoutFactory(t, cfg, store),
+		),
+	)
 
 	require.Contains(t, cfg.Profiles, "staging", "target profile stays registered (creds cleared, not removed)")
 	assert.Empty(t, cfg.Profiles["staging"].APIKeyRef, "target's credential ref cleared")
@@ -101,7 +119,14 @@ func TestLogout_All(t *testing.T) {
 			"staging": {Host: "https://staging"},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{All: true, Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
+	require.NoError(
+		t,
+		runLogout(
+			&LogoutOptions{All: true, Yes: true},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			newLogoutFactory(t, cfg, store),
+		),
+	)
 
 	// --all clears every profile's credentials but keeps the profiles registered.
 	require.NotEmpty(t, cfg.Profiles, "profiles stay registered after logout --all")
@@ -117,7 +142,11 @@ func TestLogout_NoProfiles(t *testing.T) {
 	isolateConfig(t)
 	_, _ = iostreams.SetForTest(t)
 	cfg := &config.Config{}
-	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(
+		&LogoutOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		newLogoutFactory(t, cfg, secrets.NewMemStore()),
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -133,7 +162,11 @@ func TestLogout_ActiveProfileMissing(t *testing.T) {
 		CurrentProfile: "ghost", // points at a non-existent entry
 		Profiles:       map[string]config.Profile{"prod": {Host: "https://prod"}},
 	}
-	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(
+		&LogoutOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		newLogoutFactory(t, cfg, secrets.NewMemStore()),
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -146,7 +179,11 @@ func TestLogout_NoCurrentNoFlag(t *testing.T) {
 	cfg := &config.Config{
 		Profiles: map[string]config.Profile{"prod": {Host: "https://prod"}},
 	}
-	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(
+		&LogoutOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		newLogoutFactory(t, cfg, secrets.NewMemStore()),
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

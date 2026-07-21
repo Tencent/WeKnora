@@ -1,3 +1,4 @@
+//nolint:lll // long startup log line
 package runtime
 
 import (
@@ -24,7 +25,7 @@ import (
 // Call once at the start of main(), before container.BuildContainer.
 func SilenceGinRouteSpam() {
 	var count int64
-	gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
+	gin.DebugPrintRouteFunc = func(_, _, _ string, _ int) {
 		atomic.AddInt64(&count, 1)
 	}
 	// gin.DebugPrintFunc handles non-route debug lines (e.g. "Listening

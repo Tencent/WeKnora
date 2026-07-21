@@ -20,7 +20,9 @@ var (
 // from the queue library's Go enum.
 type RuntimeTaskState string
 
+// RuntimeTaskActive and related constants.
 const (
+	// RuntimeTaskPending means the task is waiting in the queue.
 	RuntimeTaskPending   RuntimeTaskState = "pending"
 	RuntimeTaskActive    RuntimeTaskState = "active"
 	RuntimeTaskScheduled RuntimeTaskState = "scheduled"
@@ -29,6 +31,7 @@ const (
 	RuntimeTaskCompleted RuntimeTaskState = "completed"
 )
 
+// Valid reports whether the runtime task state is recognized.
 func (s RuntimeTaskState) Valid() bool {
 	switch s {
 	case RuntimeTaskPending, RuntimeTaskActive, RuntimeTaskScheduled,
@@ -43,7 +46,9 @@ func (s RuntimeTaskState) Valid() bool {
 // renders only these actions instead of inferring safety from the state.
 type RuntimeTaskAction string
 
+// RuntimeTaskActionRunNow and related constants.
 const (
+	// RuntimeTaskActionCancel requests cancellation of a queue task.
 	RuntimeTaskActionCancel RuntimeTaskAction = "cancel"
 	RuntimeTaskActionRunNow RuntimeTaskAction = "run_now"
 	RuntimeTaskActionDelete RuntimeTaskAction = "delete"
@@ -90,6 +95,7 @@ type RuntimeTaskPage struct {
 	HasMore    bool
 }
 
+// Allows reports whether the task exposes the given operator action.
 func (t RuntimeTaskInfo) Allows(action RuntimeTaskAction) bool {
 	for _, allowed := range t.AllowedActions {
 		if allowed == action {

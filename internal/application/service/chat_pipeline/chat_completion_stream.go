@@ -32,14 +32,14 @@ func NewPluginChatCompletionStream(eventManager *EventManager,
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginChatCompletionStream) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHAT_COMPLETION_STREAM}
+func (p *PluginChatCompletionStream) ActivationEvents() []types.Type {
+	return []types.Type{types.ChatCompletionStream}
 }
 
 // OnEvent handles streaming chat completion events
 // It prepares the chat model, messages, and initiates streaming response
 func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	pipelineInfo(ctx, "Stream", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
@@ -67,14 +67,14 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "user_message", map[string]interface{}{
 		"content": chatMessages[len(chatMessages)-1].Content,
 	})
-	// EventBus is required for event-driven streaming
-	if chatManage.EventBus == nil {
+	// Bus is required for event-driven streaming
+	if chatManage.Bus == nil {
 		pipelineError(ctx, "Stream", "eventbus_missing", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
-		return ErrModelCall.WithError(errors.New("EventBus is required for streaming"))
+		return ErrModelCall.WithError(errors.New("bus is required for streaming"))
 	}
-	eventBus := chatManage.EventBus
+	eventBus := chatManage.Bus
 
 	pipelineInfo(ctx, "Stream", "eventbus_ready", map[string]interface{}{
 		"session_id": chatManage.SessionID,
@@ -122,9 +122,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			if !thinkingOpen {
 				return
 			}
-			eventBus.Emit(ctx, types.Event{
+			_ = eventBus.Emit(ctx, types.Event{
 				ID:        thinkingID,
-				Type:      types.EventType(event.EventAgentThought),
+				Type:      types.Type(event.EventAgentThought),
 				SessionID: chatManage.SessionID,
 				Data: event.AgentThoughtData{
 					Done: true,
@@ -143,7 +143,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			if thinkingTail != "" {
 				_ = eventBus.Emit(ctx, types.Event{
 					ID:        thinkingID,
-					Type:      types.EventType(event.EventAgentThought),
+					Type:      types.Type(event.EventAgentThought),
 					SessionID: chatManage.SessionID,
 					Data:      event.AgentThoughtData{Content: thinkingTail},
 				})
@@ -152,7 +152,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			if answerTail != "" {
 				_ = eventBus.Emit(ctx, types.Event{
 					ID:        answerID,
-					Type:      types.EventType(event.EventAgentFinalAnswer),
+					Type:      types.Type(event.EventAgentFinalAnswer),
 					SessionID: chatManage.SessionID,
 					Data:      event.AgentFinalAnswerData{Content: answerTail},
 				})
@@ -184,9 +184,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						"session_id": chatManage.SessionID,
 						"error":      response.Content,
 					})
-					eventBus.Emit(ctx, types.Event{
+					_ = eventBus.Emit(ctx, types.Event{
 						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
-						Type:      types.EventType(event.EventError),
+						Type:      types.Type(event.EventError),
 						SessionID: chatManage.SessionID,
 						Data: event.ErrorData{
 							Error:     response.Content,
@@ -201,9 +201,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					response.Content = thinkingRefExpander.Feed(thinkingDecoder.Feed(response.Content))
 					if response.Content != "" {
 						thinkingOpen = true
-						eventBus.Emit(ctx, types.Event{
+						_ = eventBus.Emit(ctx, types.Event{
 							ID:        thinkingID,
-							Type:      types.EventType(event.EventAgentThought),
+							Type:      types.Type(event.EventAgentThought),
 							SessionID: chatManage.SessionID,
 							Data: event.AgentThoughtData{
 								Content: response.Content,
@@ -220,9 +220,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				if response.ResponseType == types.ResponseTypeAnswer {
 					response.Content = answerRefExpander.Feed(answerDecoder.Feed(response.Content))
 					closeThinking()
-					eventBus.Emit(ctx, types.Event{
+					_ = eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
-						Type:      types.EventType(event.EventAgentFinalAnswer),
+						Type:      types.Type(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
 							Content: response.Content,

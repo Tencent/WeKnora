@@ -21,7 +21,7 @@ import (
 func (s *sessionService) AgentQA(
 	ctx context.Context,
 	req *types.QARequest,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) error {
 	sessionID := req.Session.ID
 	sessionJSON, err := json.Marshal(req.Session)
@@ -38,14 +38,21 @@ func (s *sessionService) AgentQA(
 
 	// Resolve retrieval tenant using shared helper
 	agentTenantID := s.resolveRetrievalTenantID(ctx, req)
-	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
-		sessionID, agentTenantID, req.Query, string(sessionJSON))
+	logger.Infof(
+		ctx,
+		"Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+		sessionID,
+		agentTenantID,
+		req.Query,
+		string(sessionJSON),
+	)
 
 	var tenantInfo *types.Tenant
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
 		tenantInfo, _ = v.(*types.Tenant)
 	}
-	// When agent belongs to another tenant (shared agent), use agent's tenant for KB/model scope; load tenantInfo if needed
+	// When agent belongs to another tenant (shared agent), use agent's tenant for KB/model scope; load tenantInfo if
+	// needed
 	if tenantInfo == nil || tenantInfo.ID != agentTenantID {
 		if s.tenantService != nil {
 			if agentTenant, err := s.tenantService.GetTenantByID(ctx, agentTenantID); err == nil && agentTenant != nil {
@@ -105,7 +112,11 @@ func (s *sessionService) AgentQA(
 		// agentRequiresRerankModel() below already lets it pass.
 		rerankModelID := req.CustomAgent.Config.RerankModelID
 		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
+			logger.Warnf(
+				ctx,
+				"No rerank model configured for custom agent %s, but knowledge_search tool is enabled",
+				req.CustomAgent.ID,
+			)
 			return errors.New("rerank model is not configured: please set rerank_model_id on the agent")
 		}
 
@@ -115,6 +126,7 @@ func (s *sessionService) AgentQA(
 			return fmt.Errorf("failed to get rerank model: %w", err)
 		}
 	} else {
+		//nolint:lll
 		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
 	}
 
@@ -140,9 +152,9 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
-	// Create agent engine with EventBus
+	// Create agent engine with Bus
 	logger.Info(ctx, "Creating agent engine")
-	engine, err := s.agentService.CreateAgentEngine(
+	engine, err := s.agentService.CreateEngine(
 		ctx,
 		agentConfig,
 		summaryModel,
@@ -171,6 +183,7 @@ func (s *sessionService) AgentQA(
 		logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
 	} else if req.ImageDescription != "" {
 		agentQuery = req.Query + "\n\n[用户上传图片内容]\n" + req.ImageDescription
+		//nolint:lll
 		logger.Infof(ctx, "Agent model does not support vision, appending image description (%d chars)", len(req.ImageDescription))
 	}
 	if req.QuotedContext != "" {
@@ -189,12 +202,13 @@ func (s *sessionService) AgentQA(
 	// so multi-turn history stays clean and is not skewed by stale @mention scope.
 
 	// Execute agent with streaming (asynchronously)
-	// Events will be emitted to EventBus and handled by the Handler layer
+	// Events will be emitted to Bus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
+	//nolint:lll
 	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
 		logger.Errorf(ctx, "Agent execution failed: %v", err)
-		// Emit error event to the EventBus used by this agent
-		eventBus.Emit(ctx, event.Event{
+		// Emit error event to the Bus used by this agent
+		_ = eventBus.Emit(ctx, event.Event{
 			Type:      event.EventError,
 			SessionID: sessionID,
 			Data: event.ErrorData{
@@ -204,7 +218,7 @@ func (s *sessionService) AgentQA(
 			},
 		})
 	}
-	// Return empty - events will be handled by Handler via EventBus subscription
+	// Return empty - events will be handled by Handler via Bus subscription
 	return nil
 }
 
@@ -270,8 +284,14 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.SystemPrompt = customAgent.Config.SystemPrompt
 	}
 
-	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
-		agentConfig.MaxIterations, agentConfig.Temperature, agentConfig.AllowedTools, agentConfig.WebSearchEnabled)
+	logger.Infof(
+		ctx,
+		"Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
+		agentConfig.MaxIterations,
+		agentConfig.Temperature,
+		agentConfig.AllowedTools,
+		agentConfig.WebSearchEnabled,
+	)
 
 	// Set web search max results from tenant config if not set (default: 5)
 	if agentConfig.WebSearchMaxResults == 0 {
@@ -283,7 +303,8 @@ func (s *sessionService) buildAgentConfig(
 
 	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
 	if agentConfig.WebSearchProviderID == "" {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
+		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil &&
+			defaultProvider != nil {
 			agentConfig.WebSearchProviderID = defaultProvider.ID
 		}
 	}
@@ -303,7 +324,13 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(
+		ctx,
+		agentTenantID,
+		agentConfig.KnowledgeBases,
+		agentConfig.KnowledgeIDs,
+		req.TagScopes,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
@@ -407,7 +434,12 @@ func applyPerRequestMCPScope(
 		return
 	}
 	mentioned := dedupPreservingOrder(requested)
-	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	effective, mode := resolvePerRequestMCPScope(
+		mentioned,
+		agentPresetMCPs,
+		agentConfig.MCPSelectionMode,
+		isSharedAgent,
+	)
 	if len(effective) == 0 {
 		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
 			requested, agentPresetMCPs, isSharedAgent)
@@ -536,5 +568,4 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
-
 }

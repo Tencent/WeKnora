@@ -118,7 +118,7 @@ func TestStoreKindLabel(t *testing.T) {
 func TestMultiStoreRetrieveTimeout(t *testing.T) {
 	// Not Parallel — mutates a process-global env var.
 	t.Setenv("MULTI_STORE_RETRIEVE_TIMEOUT_SEC", "")
-	os.Unsetenv("MULTI_STORE_RETRIEVE_TIMEOUT_SEC")
+	_ = os.Unsetenv("MULTI_STORE_RETRIEVE_TIMEOUT_SEC")
 	if got := multiStoreRetrieveTimeout(); got != defaultMultiStoreRetrieveTimeout {
 		t.Errorf("default: want %v, got %v", defaultMultiStoreRetrieveTimeout, got)
 	}
@@ -247,7 +247,7 @@ type fakeModelSvcForKeys struct {
 	interfaces.ModelService
 }
 
-func (f *fakeModelSvcForKeys) GetModelByID(ctx context.Context, id string) (*types.Model, error) {
+func (f *fakeModelSvcForKeys) GetModelByID(_ context.Context, id string) (*types.Model, error) {
 	if m, ok := f.byID[id]; ok {
 		return m, nil
 	}
@@ -368,7 +368,10 @@ func (f *fakeRetrieveEngineService) EngineType() types.RetrieverEngineType {
 
 func (f *fakeRetrieveEngineService) Support() []types.RetrieverType { return f.support }
 
-func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.RetrieveParams) ([]*types.RetrieveResult, error) {
+func (f *fakeRetrieveEngineService) Retrieve(
+	ctx context.Context,
+	p types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	f.retrieveCalls.Add(1)
 	if f.sleep > 0 {
 		select {
@@ -387,30 +390,61 @@ func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.Retrie
 	}}, nil
 }
 
-func (f *fakeRetrieveEngineService) Index(context.Context, embedding.Embedder, *types.IndexInfo, []types.RetrieverType) error {
+func (f *fakeRetrieveEngineService) Index(
+	context.Context,
+	embedding.Embedder,
+	*types.IndexInfo,
+	[]types.RetrieverType,
+) error {
 	panic("unused")
 }
-func (f *fakeRetrieveEngineService) BatchIndex(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) error {
+
+func (f *fakeRetrieveEngineService) BatchIndex(
+	context.Context,
+	embedding.Embedder,
+	[]*types.IndexInfo,
+	[]types.RetrieverType,
+) error {
 	panic("unused")
 }
-func (f *fakeRetrieveEngineService) EstimateStorageSize(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) int64 {
+
+func (f *fakeRetrieveEngineService) EstimateStorageSize(
+	context.Context,
+	embedding.Embedder,
+	[]*types.IndexInfo,
+	[]types.RetrieverType,
+) int64 {
 	panic("unused")
 }
-func (f *fakeRetrieveEngineService) CopyIndices(context.Context, string, map[string]string, map[string]string, string, int, string) error {
+
+func (f *fakeRetrieveEngineService) CopyIndices(
+	context.Context,
+	string,
+	map[string]string,
+	map[string]string,
+	string,
+	int,
+	string,
+) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByChunkIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteBySourceIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByKnowledgeIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkEnabledStatus(context.Context, map[string]bool) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkTagID(context.Context, map[string]string) error {
 	panic("unused")
 }
@@ -427,12 +461,17 @@ type fakeFanoutRegistry struct {
 }
 
 func (r *fakeFanoutRegistry) Register(interfaces.RetrieveEngineService) error { return nil }
-func (r *fakeFanoutRegistry) GetRetrieveEngineService(types.RetrieverEngineType) (interfaces.RetrieveEngineService, error) {
+
+func (r *fakeFanoutRegistry) GetRetrieveEngineService(
+	types.RetrieverEngineType,
+) (interfaces.RetrieveEngineService, error) {
 	return nil, stderrors.New("not used in fan-out tests")
 }
+
 func (r *fakeFanoutRegistry) GetAllRetrieveEngineServices() []interfaces.RetrieveEngineService {
 	return nil
 }
+
 func (r *fakeFanoutRegistry) GetByStoreID(id string) (interfaces.RetrieveEngineService, error) {
 	if svc, ok := r.byStore[id]; ok {
 		return svc, nil
@@ -662,7 +701,12 @@ func TestRetrieveFromStores_KeywordPassthroughOnMixed(t *testing.T) {
 	}
 	groups := []*storeGroup{
 		{Engine: buildBoundComposite(t, fakeES), BaseParams: vectorParams("q"), TopK: 50, KBIDs: []string{"kb-es"}},
-		{Engine: buildBoundComposite(t, fakePGKW), BaseParams: []types.RetrieveParams{{Query: "q", TopK: 50, RetrieverType: types.KeywordsRetrieverType}}, TopK: 50, KBIDs: []string{"kb-pg"}},
+		{
+			Engine:     buildBoundComposite(t, fakePGKW),
+			BaseParams: []types.RetrieveParams{{Query: "q", TopK: 50, RetrieverType: types.KeywordsRetrieverType}},
+			TopK:       50,
+			KBIDs:      []string{"kb-pg"},
+		},
 	}
 	s := &knowledgeBaseService{}
 	res, err := s.retrieveFromStores(context.Background(), groups, retriever.EngineAwareNormalizer{})

@@ -88,7 +88,13 @@ func (s *knowledgeTagService) ListTags(
 		callerTenantRole := types.TenantRoleFromContext(ctx)
 
 		// Check whether the caller's tenant has at least viewer permission via org sharing.
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(
+			ctx,
+			kbID,
+			tenantID,
+			callerTenantRole,
+			types.OrgRoleViewer,
+		)
 		if err != nil || !hasPermission {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}
@@ -226,7 +232,13 @@ func (s *knowledgeTagService) UpdateTag(
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
 // For document-type knowledge bases, also deletes all knowledge files under this tag.
 // When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
-func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, excludeIDs []string) error {
+func (s *knowledgeTagService) DeleteTag(
+	ctx context.Context,
+	id string,
+	force bool,
+	contentOnly bool,
+	excludeIDs []string,
+) error {
 	if id == "" {
 		return werrors.NewBadRequestError("标签ID不能为空")
 	}
@@ -261,7 +273,16 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 
 		// Enqueue async index deletion task for the deleted chunks
 		if len(deletedIDs) > 0 {
-			s.enqueueIndexDeleteTask(ctx, tenantID, kb.ID, kb.EmbeddingModelID, string(kb.Type), deletedIDs, tenantInfo.GetEffectiveEngines(), kb.VectorStoreID)
+			s.enqueueIndexDeleteTask(
+				ctx,
+				tenantID,
+				kb.ID,
+				kb.EmbeddingModelID,
+				string(kb.Type),
+				deletedIDs,
+				tenantInfo.GetEffectiveEngines(),
+				kb.VectorStoreID,
+			)
 		}
 
 		logger.Infof(ctx, "Deleted %d chunks under tag %s", len(deletedIDs), tag.ID)
@@ -300,7 +321,13 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 			logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 			return werrors.NewInternalServerError("删除标签下的文档失败")
 		}
-		logger.Infof(ctx, "Enqueued knowledge list delete task %s for %d knowledge files under tag %s", info.ID, len(knowledgeIDs), tag.ID)
+		logger.Infof(
+			ctx,
+			"Enqueued knowledge list delete task %s for %d knowledge files under tag %s",
+			info.ID,
+			len(knowledgeIDs),
+			tag.ID,
+		)
 		return nil
 	}
 
@@ -392,7 +419,12 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
-	logger.Infof(ctx, "Processing index delete task for %d chunks in KB %s", len(payload.ChunkIDs), payload.KnowledgeBaseID)
+	logger.Infof(
+		ctx,
+		"Processing index delete task for %d chunks in KB %s",
+		len(payload.ChunkIDs),
+		payload.KnowledgeBaseID,
+	)
 
 	// Create retrieve engine.
 	// The factory verifies the payload's tenant owns the bound store, so a
@@ -405,7 +437,13 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 	)
 	if errors.Is(err, retriever.ErrVectorStoreForbidden) ||
 		errors.Is(err, retriever.ErrVectorStoreNotFound) {
-		logger.Errorf(ctx, "Index delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
+		logger.Errorf(
+			ctx,
+			"Index delete task aborted: %v (tenant=%d, kb=%s)",
+			err,
+			payload.TenantID,
+			payload.KnowledgeBaseID,
+		)
 		return asynq.SkipRetry
 	}
 	if err != nil {
@@ -444,7 +482,11 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 }
 
 // FindOrCreateTagByName finds a tag by name or creates it if not exists.
-func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID string, name string) (*types.KnowledgeTag, error) {
+func (s *knowledgeTagService) FindOrCreateTagByName(
+	ctx context.Context,
+	kbID string,
+	name string,
+) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
 		return nil, werrors.NewBadRequestError("知识库ID和标签名称不能为空")

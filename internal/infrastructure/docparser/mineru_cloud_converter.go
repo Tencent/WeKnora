@@ -62,7 +62,13 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		return &types.ReadResult{Error: "no file content provided"}, nil
 	}
 
-	logger.Infof(context.Background(), "[MinerUCloud] Parsing file=%s size=%d via %s", req.FileName, len(content), c.baseURL)
+	logger.Infof(
+		context.Background(),
+		"[MinerUCloud] Parsing file=%s size=%d via %s",
+		req.FileName,
+		len(content),
+		c.baseURL,
+	)
 
 	ext := filepath.Ext(req.FileName)
 	if ext == "" && req.FileType != "" {
@@ -129,7 +135,12 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 		return "", "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/file-urls/batch", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/file-urls/batch",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return "", "", fmt.Errorf("create request: %w", err)
 	}
@@ -141,7 +152,7 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 	if err != nil {
 		return "", "", fmt.Errorf("HTTP request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -159,7 +170,12 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 		return "", "", fmt.Errorf("API returned no file_urls")
 	}
 
-	logger.Infof(context.Background(), "[MinerUCloud] batch apply ok: batch_id=%s, urls=%d", result.Data.BatchID, len(result.Data.FileURLs))
+	logger.Infof(
+		context.Background(),
+		"[MinerUCloud] batch apply ok: batch_id=%s, urls=%d",
+		result.Data.BatchID,
+		len(result.Data.FileURLs),
+	)
 	return result.Data.BatchID, result.Data.FileURLs[0], nil
 }
 
@@ -174,7 +190,7 @@ func (c *MinerUCloudReader) uploadFile(ctx context.Context, uploadURL string, co
 	if err != nil {
 		return fmt.Errorf("PUT upload: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("PUT upload status %d", resp.StatusCode)
@@ -261,7 +277,11 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 	return "", nil, fmt.Errorf("MinerU Cloud task timed out after %d polls", pollCount)
 }
 
-func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string, headers map[string]string) ([]extractResultItem, error) {
+func (c *MinerUCloudReader) fetchBatchStatus(
+	ctx context.Context,
+	batchID string,
+	headers map[string]string,
+) ([]extractResultItem, error) {
 	url := fmt.Sprintf("%s/extract-results/batch/%s", c.baseURL, batchID)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -276,7 +296,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -298,7 +318,11 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	// Dump the raw extract_result JSON for debugging
 	rawExtract := string(pollResp.Data.ExtractResult)
 	if len(rawExtract) > 4000 {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
+		logger.Infof(
+			context.Background(),
+			"[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...",
+			rawExtract[:4000],
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
 	}
@@ -328,7 +352,10 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 
 // extractDoneResult extracts markdown and images from a completed batch item.
 // Prefers inline markdown/content fields; falls back to downloading full_zip_url.
-func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractResultItem) (string, []types.ImageRef, error) {
+func (c *MinerUCloudReader) extractDoneResult(
+	_ context.Context,
+	item *extractResultItem,
+) (string, []types.ImageRef, error) {
 	text := firstNonEmpty(item.Markdown, item.Content, item.Text)
 	if text != "" {
 		logger.Infof(context.Background(), "[MinerUCloud] parsed (inline), length=%d", len(text))
@@ -344,7 +371,12 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 		return "", nil, fmt.Errorf("extract zip: %w", err)
 	}
 
-	logger.Infof(context.Background(), "[MinerUCloud] parsed (zip), markdown=%d chars, images=%d", len(md), len(imageRefs))
+	logger.Infof(
+		context.Background(),
+		"[MinerUCloud] parsed (zip), markdown=%d chars, images=%d",
+		len(md),
+		len(imageRefs),
+	)
 	return md, imageRefs, nil
 }
 
@@ -361,7 +393,7 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("download zip: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("download zip status %d", resp.StatusCode)
 	}
@@ -408,7 +440,8 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	seen := map[string]bool{}
 	for _, match := range imgRefPattern.FindAllStringSubmatch(mdText, -1) {
 		imgPath := match[1]
-		if strings.HasPrefix(imgPath, "http://") || strings.HasPrefix(imgPath, "https://") || strings.HasPrefix(imgPath, "data:") {
+		if strings.HasPrefix(imgPath, "http://") || strings.HasPrefix(imgPath, "https://") ||
+			strings.HasPrefix(imgPath, "data:") {
 			continue
 		}
 		if seen[imgPath] {
@@ -467,7 +500,7 @@ func readZipEntry(f *zip.File) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	data, err := io.ReadAll(rc)
 	if err != nil {
 		return "", err
@@ -480,7 +513,7 @@ func readZipEntryBytes(f *zip.File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	return io.ReadAll(rc)
 }
 
@@ -508,7 +541,7 @@ func PingMinerUCloud(apiKey string) (bool, string) {
 	if err != nil {
 		return false, fmt.Sprintf("MinerU Cloud 不可达: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return false, "MinerU Cloud API Key 无效"

@@ -28,7 +28,13 @@ func (f *fakeUpdateSvc) GetModel(_ context.Context, _ string) (*sdk.Model, error
 func (f *fakeUpdateSvc) UpdateModel(_ context.Context, id string, req *sdk.UpdateModelRequest) (*sdk.Model, error) {
 	f.gotID = id
 	f.gotReq = req
-	return &sdk.Model{ID: id, Name: req.Name, DisplayName: req.DisplayName, Parameters: req.Parameters, IsDefault: req.IsDefault}, nil
+	return &sdk.Model{
+		ID:          id,
+		Name:        req.Name,
+		DisplayName: req.DisplayName,
+		Parameters:  req.Parameters,
+		IsDefault:   req.IsDefault,
+	}, nil
 }
 
 func baseModel() *sdk.Model {
@@ -45,7 +51,10 @@ func TestModelUpdate_SurgicalOverlay(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUpdateSvc{cur: baseModel()}
 	opts := &UpdateOptions{DisplayName: "new-display", flags: modelUpdateFlags{displayName: true}}
-	require.NoError(t, runUpdate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "mdl_x", nil))
+	require.NoError(
+		t,
+		runUpdate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "mdl_x", nil),
+	)
 
 	require.NotNil(t, svc.gotReq)
 	assert.Equal(t, "mdl_x", svc.gotID, "id preserved (in-place update)")
@@ -66,7 +75,10 @@ func TestModelUpdate_RotateKeyAndBaseURL(t *testing.T) {
 		StdinReader: strings.NewReader("NEW-KEY\n"),
 		flags:       modelUpdateFlags{baseURL: true},
 	}
-	require.NoError(t, runUpdate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "mdl_x", nil))
+	require.NoError(
+		t,
+		runUpdate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "mdl_x", nil),
+	)
 	assert.Equal(t, "http://new", svc.gotReq.Parameters["base_url"])
 	assert.Equal(t, "NEW-KEY", svc.gotReq.Parameters["api_key"], "rotated key read from stdin")
 }

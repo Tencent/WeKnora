@@ -142,10 +142,10 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		if len(kb.Capabilities) > 0 {
 			capsAttr = fmt.Sprintf(" capabilities=\"%s\"", strings.Join(kb.Capabilities, ","))
 		}
-		b.WriteString(fmt.Sprintf("<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\"%s>\n",
-			kb.ID, kb.Name, kbType, kb.DocCount, capsAttr))
+		fmt.Fprintf(&b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\"%s>\n",
+			kb.ID, kb.Name, kbType, kb.DocCount, capsAttr)
 		if kb.Description != "" {
-			b.WriteString(fmt.Sprintf("<description>%s</description>\n", kb.Description))
+			fmt.Fprintf(&b, "<description>%s</description>\n", kb.Description)
 		}
 
 		if len(kb.RecentDocs) > 0 {
@@ -159,12 +159,12 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 					if question == "" {
 						question = doc.FileName
 					}
-					b.WriteString(fmt.Sprintf("<faq chunk_id=\"%s\" knowledge_id=\"%s\" created_at=\"%s\">\n",
-						doc.ChunkID, doc.KnowledgeID, doc.CreatedAt))
-					b.WriteString(fmt.Sprintf("<question>%s</question>\n", question))
+					fmt.Fprintf(&b, "<faq chunk_id=\"%s\" knowledge_id=\"%s\" created_at=\"%s\">\n",
+						doc.ChunkID, doc.KnowledgeID, doc.CreatedAt)
+					fmt.Fprintf(&b, "<question>%s</question>\n", question)
 					if len(doc.FAQAnswers) > 0 {
 						for _, ans := range doc.FAQAnswers {
-							b.WriteString(fmt.Sprintf("<answer>%s</answer>\n", ans))
+							fmt.Fprintf(&b, "<answer>%s</answer>\n", ans)
 						}
 					}
 					b.WriteString("</faq>\n")
@@ -181,12 +181,12 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 						docName = doc.FileName
 					}
 					fileSize := formatFileSize(doc.FileSize)
-					b.WriteString(fmt.Sprintf("<document knowledge_id=\"%s\" type=\"%s\" file_size=\"%s\" created_at=\"%s\">\n",
-						doc.KnowledgeID, doc.Type, fileSize, doc.CreatedAt))
-					b.WriteString(fmt.Sprintf("<name>%s</name>\n", docName))
+					fmt.Fprintf(&b, "<document knowledge_id=\"%s\" type=\"%s\" file_size=\"%s\" created_at=\"%s\">\n",
+						doc.KnowledgeID, doc.Type, fileSize, doc.CreatedAt)
+					fmt.Fprintf(&b, "<name>%s</name>\n", docName)
 					if doc.Description != "" {
 						summary := formatDocSummary(doc.Description, 120)
-						b.WriteString(fmt.Sprintf("<summary>%s</summary>\n", summary))
+						fmt.Fprintf(&b, "<summary>%s</summary>\n", summary)
 					}
 					b.WriteString("</document>\n")
 				}
@@ -219,7 +219,8 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 		if len(knowledgeBases) == 0 {
 			replacement = "(no knowledge bases bound to this session)"
 		} else {
-			replacement = "(see `<bound_knowledge_bases>` inside the user message's `<runtime_context>` for the current bound KB list and their capabilities)"
+			replacement = "(see `<bound_knowledge_bases>` inside the user message's `<runtim" +
+				"e_context>` for the current bound KB list and their capabilities)"
 		}
 		result = strings.ReplaceAll(result, "{{knowledge_bases}}", replacement)
 	}
@@ -241,23 +242,37 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
 	builder.WriteString("#### Skill Matching Protocol (MANDATORY)\n\n")
 	builder.WriteString("Before responding to ANY user query, follow this checklist:\n\n")
 	builder.WriteString("1. **SCAN**: Read each skill's description and trigger conditions below\n")
-	builder.WriteString("2. **MATCH**: Check if the user's intent matches ANY skill's triggers (keywords, scenarios, or task types)\n")
-	builder.WriteString("3. **LOAD**: If a match is found, call `read_skill(skill_name=\"...\")` BEFORE generating your response\n")
-	builder.WriteString("4. **APPLY**: Follow the skill's instructions to provide a higher-quality, structured response\n\n")
+	builder.WriteString(
+		"2. **MATCH**: Check if the user's intent matches ANY skill's triggers (keywords, scenarios, or task types)\n",
+	)
+	builder.WriteString(
+		"3. **LOAD**: If a match is found, call `read_skill(skill_name=\"...\")` BEFORE generating your response\n",
+	)
+	builder.WriteString(
+		"4. **APPLY**: Follow the skill's instructions to provide a higher-quality, structured response\n\n",
+	)
 
-	builder.WriteString("**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n")
+	builder.WriteString(
+		"**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n",
+	)
 
 	builder.WriteString("#### Available Skills\n\n")
 	for i, skill := range skillsMetadata {
-		builder.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, skill.Name))
-		builder.WriteString(fmt.Sprintf("   %s\n\n", skill.Description))
+		fmt.Fprintf(&builder, "%d. **%s**\n", i+1, skill.Name)
+		fmt.Fprintf(&builder, "   %s\n\n", skill.Description)
 	}
 
 	builder.WriteString("#### Tool Reference\n\n")
 	builder.WriteString("- `read_skill(skill_name)`: Load full skill instructions (MUST call before using a skill)\n")
-	builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
-	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
-	builder.WriteString("  - `args`: Command-line arguments (only use `--file` if you have an actual file path in the skill directory)\n")
+	builder.WriteString(
+		"- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n",
+	)
+	builder.WriteString(
+		"  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n",
+	)
+	builder.WriteString(
+		"  - `args`: Command-line arguments (only use `--file` if you have an actual file path in the skill directory)\n",
+	)
 
 	return builder.String()
 }
@@ -357,7 +372,8 @@ func BuildSystemPromptWithOptions(
 // with mode "pure". Returns empty string if config is nil or template not found.
 func GetPureAgentSystemPrompt(cfg *config.Config) string {
 	if cfg != nil && cfg.PromptTemplates != nil {
-		if t := config.DefaultTemplateByMode(cfg.PromptTemplates.AgentSystemPrompt, "pure"); t != nil && t.Content != "" {
+		if t := config.DefaultTemplateByMode(cfg.PromptTemplates.AgentSystemPrompt, "pure"); t != nil &&
+			t.Content != "" {
 			return t.Content
 		}
 	}
@@ -369,7 +385,8 @@ func GetPureAgentSystemPrompt(cfg *config.Config) string {
 // with mode "rag". Returns empty string if config is nil or template not found.
 func GetProgressiveRAGSystemPrompt(cfg *config.Config) string {
 	if cfg != nil && cfg.PromptTemplates != nil {
-		if t := config.DefaultTemplateByMode(cfg.PromptTemplates.AgentSystemPrompt, "rag"); t != nil && t.Content != "" {
+		if t := config.DefaultTemplateByMode(cfg.PromptTemplates.AgentSystemPrompt, "rag"); t != nil &&
+			t.Content != "" {
 			return t.Content
 		}
 	}

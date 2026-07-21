@@ -11,7 +11,9 @@ import (
 // NewFactory returns an im.AdapterFactory for WeChat channels (iLink bot).
 // WeChat only supports a long-polling mode, so there is no mode branch.
 func NewFactory() im.AdapterFactory {
-	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
+	return func(_ context.Context, channel *im.Channel,
+		msgHandler func(context.Context, *im.IncomingMessage) error,
+	) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse wechat credentials: %w", err)

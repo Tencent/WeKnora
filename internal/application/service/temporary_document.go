@@ -84,6 +84,7 @@ var markdownImagePattern = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
 var temporaryDocumentExtensions = map[string]struct{}{
 	".docx": {}, ".doc": {}, ".pdf": {}, ".ppt": {}, ".pptx": {}, ".epub": {}, ".mhtml": {},
 	".xlsx": {}, ".xls": {},
+	//nolint:lll
 	".md": {}, ".markdown": {}, ".txt": {}, ".csv": {}, ".json": {}, ".xml": {}, ".yaml": {}, ".yml": {}, ".log": {}, ".html": {},
 	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".bmp": {}, ".tiff": {}, ".webp": {},
 	".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {}, ".aac": {},
@@ -104,6 +105,7 @@ type temporaryDocumentService struct {
 	taskEnqueuer    interfaces.TaskEnqueuer
 }
 
+// NewTemporaryDocumentService is an exported function.
 func NewTemporaryDocumentService(
 	repo interfaces.TemporaryDocumentRepository,
 	fileService interfaces.FileService,
@@ -237,11 +239,19 @@ func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenant
 	return false
 }
 
-func (s *temporaryDocumentService) Get(ctx context.Context, tenantID uint64, sessionID, documentID string) (*types.TemporaryDocument, error) {
+func (s *temporaryDocumentService) Get(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID, documentID string,
+) (*types.TemporaryDocument, error) {
 	return s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
 }
 
-func (s *temporaryDocumentService) OpenFile(ctx context.Context, tenantID uint64, sessionID, documentID string) (io.ReadCloser, string, error) {
+func (s *temporaryDocumentService) OpenFile(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID, documentID string,
+) (io.ReadCloser, string, error) {
 	document, err := s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
 	if err != nil {
 		return nil, "", err
@@ -256,7 +266,11 @@ func (s *temporaryDocumentService) OpenFile(ctx context.Context, tenantID uint64
 	return file, document.FileName, nil
 }
 
-func (s *temporaryDocumentService) List(ctx context.Context, tenantID uint64, sessionID string) ([]*types.TemporaryDocument, error) {
+func (s *temporaryDocumentService) List(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+) ([]*types.TemporaryDocument, error) {
 	return s.repo.ListScoped(ctx, tenantID, sessionID)
 }
 
@@ -337,12 +351,15 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 		chunker.ApproxTokenCount(content, lang), len(chunks), time.Now())
 }
 
-func (s *temporaryDocumentService) parse(ctx context.Context, document *types.TemporaryDocument) (string, []types.TemporaryDocumentImage, map[string]string, error) {
+func (s *temporaryDocumentService) parse(
+	ctx context.Context,
+	document *types.TemporaryDocument,
+) (string, []types.TemporaryDocumentImage, map[string]string, error) {
 	file, err := s.fileService.GetFile(ctx, document.ResourceRef)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("open source file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, secutils.GetMaxFileSizeMB()*1024*1024+1))
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read source file: %w", err)
@@ -381,7 +398,8 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 		FileContent: data, FileName: document.FileName, FileType: strings.TrimPrefix(ext, "."),
 		ParserEngine: parserEngine,
 	}
-	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
+	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil &&
+		tenant.ParserEngineConfig != nil {
 		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
 	}
 	var result *types.ReadResult
@@ -412,7 +430,7 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 		} else {
 			result.MarkdownContent = updated
 			for _, image := range stored {
-				images = append(images, types.TemporaryDocumentImage{OriginalRef: image.OriginalRef, URL: image.ServingURL, MimeType: image.MimeType})
+				images = append(images, types.TemporaryDocumentImage{OriginalRef: image.OriginalRef, URL: image.ServingURL, MimeType: image.MimeType}) //nolint:lll
 				if s.resourceCatalog != nil {
 					_ = s.resourceCatalog.Bind(ctx, image.ServingURL, "temporary_document", document.ID, "extracted_image")
 				}
@@ -583,7 +601,13 @@ func approxTextContentRunes(md string) int {
 	return len([]rune(strings.TrimSpace(stripped)))
 }
 
-func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantID uint64, sessionID string, documentIDs []string, query string) (*types.TemporaryDocumentPromptResult, error) {
+func (s *temporaryDocumentService) ResolveForPrompt(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+	documentIDs []string,
+	query string,
+) (*types.TemporaryDocumentPromptResult, error) {
 	result := &types.TemporaryDocumentPromptResult{}
 	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
 		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
@@ -636,7 +660,11 @@ func selectTemporaryDocumentContent(document *types.TemporaryDocument, query str
 	return selectTemporaryDocumentContentWithBudget(document, query, temporaryDocumentPromptBudget)
 }
 
-func selectTemporaryDocumentContentWithBudget(document *types.TemporaryDocument, query string, budget int) (string, int, int) {
+func selectTemporaryDocumentContentWithBudget(
+	document *types.TemporaryDocument,
+	query string,
+	budget int,
+) (string, int, int) {
 	var chunks []types.TemporaryDocumentChunk
 	_ = json.Unmarshal(document.Chunks, &chunks)
 	if budget <= 0 {
@@ -697,7 +725,13 @@ func selectTemporaryDocumentContentWithBudget(document *types.TemporaryDocument,
 // Embedded interface methods forward to the original service.
 type temporarySaveFileService struct{ interfaces.FileService }
 
-func (s temporarySaveFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
+func (s temporarySaveFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	_ bool,
+) (string, error) {
 	return s.FileService.SaveBytes(ctx, data, tenantID, fileName, true)
 }
 
@@ -705,7 +739,9 @@ func temporaryDocumentQueryTerms(query string) []string {
 	query = strings.ToLower(strings.TrimSpace(query))
 	seen := make(map[string]struct{})
 	var terms []string
-	for _, field := range strings.FieldsFunc(query, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) }) {
+	for _, field := range strings.FieldsFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	}) {
 		if len([]rune(field)) < 2 {
 			continue
 		}

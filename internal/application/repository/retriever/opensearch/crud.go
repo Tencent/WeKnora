@@ -337,12 +337,14 @@ func (r *Repository) DeleteByChunkIDList(
 	return r.deleteByList(ctx, chunkIDs, dim, "chunk_id")
 }
 
+// DeleteBySourceIDList implements the required interface method.
 func (r *Repository) DeleteBySourceIDList(
 	ctx context.Context, sourceIDs []string, dim int, _ string,
 ) error {
 	return r.deleteByList(ctx, sourceIDs, dim, "source_id")
 }
 
+// DeleteByKnowledgeIDList implements the required interface method.
 func (r *Repository) DeleteByKnowledgeIDList(
 	ctx context.Context, knowledgeIDs []string, dim int, _ string,
 ) error {

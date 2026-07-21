@@ -233,8 +233,8 @@ func runtimeTaskTime(value time.Time) *time.Time {
 	if value.IsZero() {
 		return nil
 	}
-	copy := value
-	return &copy
+	copyVal := value
+	return &copyVal
 }
 
 func runtimePayloadTime(value int64) *time.Time {
@@ -599,7 +599,7 @@ func (a *asynqTaskInspector) ListRuntimeTasks(
 }
 
 func (a *asynqTaskInspector) GetRuntimeTask(
-	ctx context.Context, queue, taskID string,
+	_ context.Context, queue, taskID string,
 ) (*types.RuntimeTaskInfo, bool, error) {
 	if a == nil || a.inspector == nil {
 		return nil, false, nil
@@ -649,7 +649,7 @@ func (a *asynqTaskInspector) DeleteRuntimeTask(ctx context.Context, queue, taskI
 	return true, a.inspector.DeleteTask(queue, taskID)
 }
 
-func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
+func (a *asynqTaskInspector) ForceDeleteRuntimeTask(_ context.Context, queue, taskID string) (bool, error) {
 	if a == nil || a.inspector == nil {
 		return false, nil
 	}
@@ -657,7 +657,7 @@ func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, 
 }
 
 func (a *asynqTaskInspector) WorkerServerStats(
-	ctx context.Context,
+	_ context.Context,
 ) ([]types.WorkerServerStat, bool, error) {
 	if a == nil || a.inspector == nil {
 		return nil, false, nil
@@ -870,7 +870,7 @@ type noopTaskInspector struct{}
 func NewNoopTaskInspector() interfaces.TaskInspector { return noopTaskInspector{} }
 
 func (noopTaskInspector) CancelTasksForKnowledge(
-	ctx context.Context, knowledgeID string,
+	_ context.Context, _ string,
 ) (int, int, error) {
 	return 0, 0, nil
 }
@@ -879,7 +879,7 @@ func (noopTaskInspector) CancelTasksForKnowledge(
 // executors never enqueue, so there is no backlog to protect against and
 // the housekeeping sweep's span/updated_at checks stay authoritative.
 func (noopTaskInspector) HasQueuedTasksForKnowledge(
-	ctx context.Context, knowledgeID string,
+	_ context.Context, _ string,
 ) (bool, error) {
 	return false, nil
 }
@@ -888,13 +888,13 @@ func (noopTaskInspector) HasQueuedTasksForKnowledge(
 // asynq backend to inspect, so the runtime dashboard renders an
 // "unavailable in this deployment" state instead of an empty table.
 func (noopTaskInspector) QueueStats(
-	ctx context.Context,
+	_ context.Context,
 ) ([]types.QueueStat, bool, error) {
 	return nil, false, nil
 }
 
 func (noopTaskInspector) WorkerServerStats(
-	ctx context.Context,
+	_ context.Context,
 ) ([]types.WorkerServerStat, bool, error) {
 	return nil, false, nil
 }

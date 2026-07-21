@@ -6,8 +6,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
-const langfuseRerankPreviewDocs = 8
-const langfuseRerankMaxScores = 50
+const (
+	langfuseRerankPreviewDocs = 8
+	langfuseRerankMaxScores   = 50
+)
 
 // langfuseReranker wraps a Reranker and reports each rerank call as a
 // Langfuse generation observation. Rerankers don't return token usage, but
@@ -41,10 +43,10 @@ func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents [
 			"documents_preview": previewDocs(documents, langfuseRerankPreviewDocs),
 		},
 		Metadata: map[string]interface{}{
-			"model_id":        l.inner.GetModelID(),
-			"num_queries":     1,
-			"total_chars":     totalChars,
-			"avg_doc_chars":   avgDocChars(documents),
+			"model_id":      l.inner.GetModelID(),
+			"num_queries":   1,
+			"total_chars":   totalChars,
+			"avg_doc_chars": avgDocChars(documents),
 		},
 	})
 

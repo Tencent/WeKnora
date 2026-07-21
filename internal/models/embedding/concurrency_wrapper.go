@@ -46,7 +46,7 @@ func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 // the raw embedder. The wait for each slot is held only around the actual
 // per-sub-batch provider round-trip.
 func (w *concurrencyEmbedder) BatchEmbedWithPool(
-	ctx context.Context, model Embedder, texts []string,
+	ctx context.Context, _ Embedder, texts []string,
 ) ([][]float32, error) {
 	return w.inner.BatchEmbedWithPool(ctx, w, texts)
 }

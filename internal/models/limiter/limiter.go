@@ -181,7 +181,11 @@ func (l *redisLimiter) RuntimeStats(ctx context.Context) ([]RuntimeStat, error) 
 			return true
 		}
 		name, _ := tracked.name.Load().(string)
-		stats = append(stats, RuntimeStat{ModelID: modelID, Name: name, Active: active, Waiting: tracked.waiting.Load(), Limit: int(tracked.limit.Load())})
+		stats = append(stats, RuntimeStat{
+			ModelID: modelID, Name: name,
+			Active: active, Waiting: tracked.waiting.Load(),
+			Limit: int(tracked.limit.Load()),
+		})
 		return true
 	})
 	sort.Slice(stats, func(i, j int) bool { return stats[i].ModelID < stats[j].ModelID })

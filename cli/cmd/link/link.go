@@ -213,7 +213,10 @@ func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) 
 		return "", "", cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	if len(kbs) == 0 {
-		return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound, "no knowledge bases visible to active profile; create one first")
+		return "", "", cmdutil.NewError(
+			cmdutil.CodeKBNotFound,
+			"no knowledge bases visible to active profile; create one first",
+		)
 	}
 	fmt.Fprintln(iostreams.IO.Err, "Available knowledge bases:")
 	for _, kb := range kbs {

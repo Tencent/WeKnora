@@ -14,6 +14,7 @@ type batchEmbedder struct {
 	pool *ants.Pool
 }
 
+// NewBatchEmbedder is an exported function.
 func NewBatchEmbedder(pool *ants.Pool) EmbedderPooler {
 	return &batchEmbedder{pool: pool}
 }

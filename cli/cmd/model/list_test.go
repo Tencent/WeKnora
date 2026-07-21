@@ -24,7 +24,13 @@ func (f *fakeListSvc) ListModels(_ context.Context) ([]sdk.Model, error) {
 func TestModelList_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{models: []sdk.Model{
-		{ID: "m1", DisplayName: "GPT-X", Type: sdk.ModelTypeKnowledgeQA, Source: sdk.ModelSourceOpenAI, IsDefault: true},
+		{
+			ID:          "m1",
+			DisplayName: "GPT-X",
+			Type:        sdk.ModelTypeKnowledgeQA,
+			Source:      sdk.ModelSourceOpenAI,
+			IsDefault:   true,
+		},
 		{ID: "m2", Name: "bge", Type: sdk.ModelTypeEmbedding, Source: sdk.ModelSourceLocal},
 	}}
 	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc); err != nil {
@@ -112,13 +118,18 @@ func TestModelList_SourceFilter(t *testing.T) {
 // TestModelList_InvalidEnum: a typo'd --type / --source is rejected up front
 // (input.invalid_argument) instead of silently returning an empty set.
 func TestModelList_InvalidEnum(t *testing.T) {
-	for _, tc := range []struct{ name string; opts ListOptions }{
+	for _, tc := range []struct {
+		name string
+		opts ListOptions
+	}{
 		{"type", ListOptions{Type: "bogus", Limit: 30}},
 		{"source", ListOptions{Source: "bogus", Limit: 30}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _ = iostreams.SetForTest(t)
-			svc := &fakeListSvc{models: []sdk.Model{{ID: "m1", Type: sdk.ModelTypeEmbedding, Source: sdk.ModelSourceLocal}}}
+			svc := &fakeListSvc{
+				models: []sdk.Model{{ID: "m1", Type: sdk.ModelTypeEmbedding, Source: sdk.ModelSourceLocal}},
+			}
 			err := runList(context.Background(), &tc.opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 			var typed *cmdutil.Error
 			if !errors.As(err, &typed) || typed.Code != cmdutil.CodeInputInvalidArgument {
@@ -159,7 +170,12 @@ func TestModelList_Limit_TruncatesAndSignals(t *testing.T) {
 // typed validation, consistent with kb/session list.
 func TestModelList_BadLimit_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: 99999}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &fakeListSvc{})
+	err := runList(
+		context.Background(),
+		&ListOptions{Limit: 99999},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		&fakeListSvc{},
+	)
 	if err == nil {
 		t.Fatal("--limit 99999 must be rejected")
 	}

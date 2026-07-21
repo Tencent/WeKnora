@@ -81,7 +81,7 @@ func (r *LKEAPReranker) Rerank(ctx context.Context, query string, documents []st
 	req.Docs = common.StringPtrs(documents)
 	req.Model = common.StringPtr(r.modelName)
 
-	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, LKEAPRerankEndpoint, query, documents))
+	logger.Debugf(ctx, "%s", buildRequestDebug(r.modelName, LKEAPRerankEndpoint, query, documents))
 
 	resp, err := r.client.RunRerankWithContext(ctx, req)
 	if err != nil {

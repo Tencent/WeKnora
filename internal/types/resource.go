@@ -22,24 +22,24 @@ const (
 // is deliberately internal: API responses, persisted rich text and LLM prompts
 // use resource://<handle> instead.
 type StoredResource struct {
-	ID               string         `json:"id" gorm:"type:varchar(36);primaryKey"`
-	Handle           string         `json:"handle" gorm:"type:varchar(22);not null;uniqueIndex"`
-	TenantID         uint64         `json:"tenant_id" gorm:"not null;index"`
+	ID               string         `json:"id"                           gorm:"type:varchar(36);primaryKey"`
+	Handle           string         `json:"handle"                       gorm:"type:varchar(22);not null;uniqueIndex"`
+	TenantID         uint64         `json:"tenant_id"                    gorm:"not null;index"`
 	StorageBackendID string         `json:"storage_backend_id,omitempty" gorm:"type:varchar(36);index"`
-	Provider         string         `json:"provider" gorm:"type:varchar(32);not null"`
-	PhysicalPath     string         `json:"-" gorm:"type:text;not null"`
-	LocationHash     string         `json:"-" gorm:"type:varchar(64);not null"`
-	Kind             string         `json:"kind" gorm:"type:varchar(32);not null;default:'file'"`
-	MimeType         string         `json:"mime_type,omitempty" gorm:"type:varchar(255);not null;default:''"`
-	OriginalName     string         `json:"original_name,omitempty" gorm:"type:varchar(1024);not null;default:''"`
-	Size             int64          `json:"size" gorm:"not null;default:0"`
-	ContentHash      string         `json:"content_hash,omitempty" gorm:"type:varchar(64);not null;default:''"`
+	Provider         string         `json:"provider"                     gorm:"type:varchar(32);not null"`
+	PhysicalPath     string         `json:"-"                            gorm:"type:text;not null"`
+	LocationHash     string         `json:"-"                            gorm:"type:varchar(64);not null"`
+	Kind             string         `json:"kind"                         gorm:"type:varchar(32);not null;default:'file'"`
+	MimeType         string         `json:"mime_type,omitempty"          gorm:"type:varchar(255);not null;default:''"`
+	OriginalName     string         `json:"original_name,omitempty"      gorm:"type:varchar(1024);not null;default:''"`
+	Size             int64          `json:"size"                         gorm:"not null;default:0"`
+	ContentHash      string         `json:"content_hash,omitempty"       gorm:"type:varchar(64);not null;default:''"`
 	Lifecycle        string         `json:"lifecycle" gorm:"type:varchar(16);not null;default:'persistent'"`
 	ExpiresAt        *time.Time     `json:"expires_at,omitempty"`
-	State            string         `json:"state" gorm:"type:varchar(16);not null;default:'active'"`
+	State            string         `json:"state"                        gorm:"type:varchar(16);not null;default:'active'"`
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
-	DeletedAt        gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt        gorm.DeletedAt `json:"deleted_at"                   gorm:"index"`
 }
 
 // TableName returns the resource registry table name.
@@ -64,12 +64,12 @@ func (r *StoredResource) BeforeCreate(_ *gorm.DB) error {
 
 // ResourceBinding connects a resource to a domain object that owns or uses it.
 type ResourceBinding struct {
-	ID         string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID         string    `json:"id"          gorm:"type:varchar(36);primaryKey"`
 	ResourceID string    `json:"resource_id" gorm:"type:varchar(36);not null;index"`
-	TenantID   uint64    `json:"tenant_id" gorm:"not null;index"`
-	OwnerType  string    `json:"owner_type" gorm:"type:varchar(32);not null"`
-	OwnerID    string    `json:"owner_id" gorm:"type:varchar(64);not null"`
-	Relation   string    `json:"relation" gorm:"type:varchar(32);not null;default:'attachment'"`
+	TenantID   uint64    `json:"tenant_id"   gorm:"not null;index"`
+	OwnerType  string    `json:"owner_type"  gorm:"type:varchar(32);not null"`
+	OwnerID    string    `json:"owner_id"    gorm:"type:varchar(64);not null"`
+	Relation   string    `json:"relation"    gorm:"type:varchar(32);not null;default:'attachment'"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -86,11 +86,11 @@ func (b *ResourceBinding) BeforeCreate(_ *gorm.DB) error {
 
 // ResourceAccessGrant is a revocable, expiring read capability.
 type ResourceAccessGrant struct {
-	ID          string     `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TokenHash   string     `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
-	ResourceID  string     `json:"resource_id" gorm:"type:varchar(36);not null;index"`
-	AccessScope string     `json:"access_scope" gorm:"type:varchar(16);not null;default:'read'"`
-	ExpiresAt   time.Time  `json:"expires_at" gorm:"not null;index"`
+	ID          string     `json:"id"                   gorm:"type:varchar(36);primaryKey"`
+	TokenHash   string     `json:"-"                    gorm:"type:varchar(64);not null;uniqueIndex"`
+	ResourceID  string     `json:"resource_id"          gorm:"type:varchar(36);not null;index"`
+	AccessScope string     `json:"access_scope"         gorm:"type:varchar(16);not null;default:'read'"`
+	ExpiresAt   time.Time  `json:"expires_at"           gorm:"not null;index"`
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 }

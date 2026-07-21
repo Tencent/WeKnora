@@ -19,7 +19,7 @@ func TestStripThinkBlocks(t *testing.T) {
 			want:  "The answer is 42.",
 		},
 		{
-			name: "multiline think with tools",
+			name:  "multiline think with tools",
 			input: "<think>\n让我先搜索知识库\n正在调用 搜索关键词...\n搜索关键词：「文明」\n</think>\n\n文明6是一款策略游戏。",
 			want:  "文明6是一款策略游戏。",
 		},
@@ -116,8 +116,8 @@ func TestFormatIMDisplayContent_final_ragPipelineHidden(t *testing.T) {
 }
 
 func TestFormatIMAgentIntermediate_answerFirstBeforeTools(t *testing.T) {
-	parts := IMStreamParts{
-		Mode:       IMStreamModeAgent,
+	parts := StreamParts{
+		Mode:       StreamModeAgent,
 		LiveAnswer: "好的，让我先搜索知识库。",
 	}
 	got := FormatIMIntermediateFromParts(parts, true)
@@ -130,10 +130,10 @@ func TestFormatIMAgentIntermediate_answerFirstBeforeTools(t *testing.T) {
 }
 
 func TestFormatIMAgentIntermediate_retractIntoThinkOnTools(t *testing.T) {
-	parts := IMStreamParts{
-		Mode: IMStreamModeAgent,
+	parts := StreamParts{
+		Mode:       StreamModeAgent,
 		AgentInner: "好的，让我先搜索知识库。\n",
-		AgentToolSteps: []IMToolStep{
+		AgentToolSteps: []ToolStep{
 			{ToolName: "grep_chunks", Pending: true},
 			{ToolName: "knowledge_search", Success: true, Arguments: map[string]any{"query": "文明6"}},
 		},
@@ -154,10 +154,10 @@ func TestFormatIMAgentIntermediate_retractIntoThinkOnTools(t *testing.T) {
 }
 
 func TestFormatIMAgentIntermediate_newAnswerAfterTools(t *testing.T) {
-	parts := IMStreamParts{
-		Mode: IMStreamModeAgent,
+	parts := StreamParts{
+		Mode:       StreamModeAgent,
 		AgentInner: "好的，让我搜索\n",
-		AgentToolSteps: []IMToolStep{
+		AgentToolSteps: []ToolStep{
 			{ToolName: "knowledge_search", Success: true, Arguments: map[string]any{"query": "文明6"}},
 		},
 		LiveAnswer: "根据检索结果，文明6是…",
@@ -175,10 +175,10 @@ func TestFormatIMAgentIntermediate_newAnswerAfterTools(t *testing.T) {
 }
 
 func TestBuildIMStreamRaw_agentInProgress_mergesToolsAndNarrativeIntoThink(t *testing.T) {
-	parts := IMStreamParts{
-		Mode:       IMStreamModeAgent,
+	parts := StreamParts{
+		Mode:       StreamModeAgent,
 		AgentInner: "用户又问文明6\n",
-		AgentToolSteps: []IMToolStep{
+		AgentToolSteps: []ToolStep{
 			{ToolName: "grep_chunks", Pending: true},
 			{ToolName: "knowledge_search", Success: true},
 		},
@@ -194,9 +194,9 @@ func TestBuildIMStreamRaw_agentInProgress_mergesToolsAndNarrativeIntoThink(t *te
 }
 
 func TestFormatIMQuickQA_separatesPipelineAndThinking(t *testing.T) {
-	parts := IMStreamParts{
-		Mode: IMStreamModeQuickQA,
-		PipelineToolSteps: []IMToolStep{
+	parts := StreamParts{
+		Mode: StreamModeQuickQA,
+		PipelineToolSteps: []ToolStep{
 			{ToolName: "query_understand", Pending: true},
 			{ToolName: "knowledge_search", Success: true, Arguments: map[string]any{"query": "文明6"}},
 		},
@@ -222,9 +222,9 @@ func TestFormatIMQuickQA_separatesPipelineAndThinking(t *testing.T) {
 }
 
 func TestFormatIMQuickQA_collapsesToAnswerWhenStreaming(t *testing.T) {
-	parts := IMStreamParts{
-		Mode: IMStreamModeQuickQA,
-		PipelineToolSteps: []IMToolStep{
+	parts := StreamParts{
+		Mode: StreamModeQuickQA,
+		PipelineToolSteps: []ToolStep{
 			{ToolName: "query_understand", Success: true},
 			{ToolName: "knowledge_search", Success: true},
 		},
@@ -237,10 +237,10 @@ func TestFormatIMQuickQA_collapsesToAnswerWhenStreaming(t *testing.T) {
 }
 
 func TestFormatIMFinalFromParts_agentAnswerOnly(t *testing.T) {
-	parts := IMStreamParts{
-		Mode: IMStreamModeAgent,
+	parts := StreamParts{
+		Mode:       StreamModeAgent,
 		AgentInner: "好的，让我搜索\n",
-		AgentToolSteps: []IMToolStep{
+		AgentToolSteps: []ToolStep{
 			{ToolName: "grep_chunks", Pending: true},
 			{ToolName: "knowledge_search", Success: true},
 		},
@@ -257,12 +257,12 @@ func TestFormatIMFinalFromParts_agentAnswerOnly(t *testing.T) {
 }
 
 func TestFormatIMFinalFromParts_usesAnswerOnly(t *testing.T) {
-	parts := IMStreamParts{
-		Mode:           IMStreamModeQuickQA,
-		PipelineToolSteps: []IMToolStep{{ToolName: "query_understand", Success: true}},
-		ReasoningInner: "推理中",
-		AgentToolSteps: []IMToolStep{{ToolName: "grep_chunks", Pending: true}},
-		Answer:         "文明6是一款策略游戏。",
+	parts := StreamParts{
+		Mode:              StreamModeQuickQA,
+		PipelineToolSteps: []ToolStep{{ToolName: "query_understand", Success: true}},
+		ReasoningInner:    "推理中",
+		AgentToolSteps:    []ToolStep{{ToolName: "grep_chunks", Pending: true}},
+		Answer:            "文明6是一款策略游戏。",
 	}
 	got := FormatIMFinalFromParts(parts)
 	if got != "文明6是一款策略游戏。" {

@@ -61,7 +61,7 @@ func (m *MemoryStreamManager) getStream(sessionID, messageID string) *memoryStre
 
 // AppendEvent appends a single event to the stream
 func (m *MemoryStreamManager) AppendEvent(
-	ctx context.Context,
+	_ context.Context,
 	sessionID, messageID string,
 	event interfaces.StreamEvent,
 ) error {
@@ -85,7 +85,7 @@ func (m *MemoryStreamManager) AppendEvent(
 // GetEvents gets events starting from offset
 // Returns: events slice, next offset, error
 func (m *MemoryStreamManager) GetEvents(
-	ctx context.Context,
+	_ context.Context,
 	sessionID, messageID string,
 	fromOffset int,
 ) ([]interfaces.StreamEvent, int, error) {

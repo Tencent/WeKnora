@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// StorageBackendService is an exported type.
 type StorageBackendService struct {
 	repo            interfaces.StorageBackendRepository
 	db              *gorm.DB
@@ -50,6 +51,7 @@ func NewStorageBackendServiceWithResources(
 	return NewStorageBackendService(repo, db, catalog)
 }
 
+// Create implements the required interface method.
 func (s *StorageBackendService) Create(ctx context.Context, backend *types.StorageBackend) error {
 	if err := backend.Validate(); err != nil {
 		return err
@@ -58,7 +60,8 @@ func (s *StorageBackendService) Create(ctx context.Context, backend *types.Stora
 		return err
 	}
 	if err := s.Test(ctx, backend); err != nil {
-		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
+		return apperrors.NewBadRequestError("storage connection test failed").
+			WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	backend.CreatedAt, backend.UpdatedAt = time.Now(), time.Now()
 	if err := s.repo.Create(ctx, backend); err != nil {
@@ -70,6 +73,7 @@ func (s *StorageBackendService) Create(ctx context.Context, backend *types.Stora
 	return nil
 }
 
+// Update implements the required interface method.
 func (s *StorageBackendService) Update(ctx context.Context, incoming *types.StorageBackend) error {
 	existing, err := s.repo.GetByID(ctx, incoming.TenantID, incoming.ID)
 	if err != nil {
@@ -84,18 +88,21 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 	incoming.Provider = existing.Provider
 	incoming.Config = incoming.Config.MergeSecrets(existing.Config)
 	if incoming.Config.LocationKey(existing.Provider) != existing.Config.LocationKey(existing.Provider) {
-		return apperrors.NewBadRequestError("endpoint, region, bucket and path prefix are immutable; use storage migration instead")
+		return apperrors.NewBadRequestError(
+			"endpoint, region, bucket and path prefix are immutable; use storage migration instead",
+		)
 	}
 	if incoming.Status == "" {
 		incoming.Status = existing.Status
 	}
 	if incoming.Status == types.StorageBackendStatusDisabled && existing.Status != types.StorageBackendStatusDisabled {
 		var references int64
-		if err := s.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID).Count(&references).Error; err != nil {
+		if err := s.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", incoming.TenantID, incoming.ID).Count(&references).Error; err != nil { //nolint:lll
 			return err
 		}
 		if references == 0 {
-			if err := s.db.WithContext(ctx).Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", incoming.TenantID, incoming.ID).Count(&references).Error; err != nil {
+			if err := s.db.WithContext(ctx).Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?",
+				incoming.TenantID, incoming.ID).Count(&references).Error; err != nil {
 				return err
 			}
 		}
@@ -122,17 +129,19 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		return err
 	}
 	if err := s.Test(ctx, incoming); err != nil {
-		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
+		return apperrors.NewBadRequestError("storage connection test failed").
+			WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	incoming.UpdatedAt = time.Now()
 	return s.repo.Update(ctx, incoming)
 }
 
+// Delete implements the required interface method.
 func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -145,18 +154,20 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 			return apperrors.NewBadRequestError("environment storage backend is read-only")
 		}
 		var defaultCount int64
-		if err := tx.Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", tenantID, id).Count(&defaultCount).Error; err != nil {
+		if err := tx.Model(&types.Tenant{}).Where("id = ? AND default_storage_backend_id = ?", tenantID, id).Count(&defaultCount).Error; err != nil { //nolint:lll
 			return err
 		}
 		if defaultCount > 0 {
 			return apperrors.NewBadRequestError("default storage backend cannot be deleted")
 		}
 		var kbCount int64
-		if err := tx.Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", tenantID, id).Count(&kbCount).Error; err != nil {
+		if err := tx.Model(&types.KnowledgeBase{}).Where("tenant_id = ? AND storage_backend_id = ?", tenantID, id).Count(&kbCount).Error; err != nil { //nolint:lll
 			return err
 		}
 		if kbCount > 0 {
-			return apperrors.NewBadRequestError(fmt.Sprintf("storage backend still has %d knowledge base(s) bound to it", kbCount))
+			return apperrors.NewBadRequestError(
+				fmt.Sprintf("storage backend still has %d knowledge base(s) bound to it", kbCount),
+			)
 		}
 		var resourceCount int64
 		if err := tx.Model(&types.StoredResource{}).
@@ -165,20 +176,25 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 			return err
 		}
 		if resourceCount > 0 {
-			return apperrors.NewBadRequestError(fmt.Sprintf("storage backend still has %d active resource(s)", resourceCount))
+			return apperrors.NewBadRequestError(
+				fmt.Sprintf("storage backend still has %d active resource(s)", resourceCount),
+			)
 		}
 		if backend.LegacyAlias {
-			return apperrors.NewBadRequestError("legacy storage backend cannot be deleted while old file paths may reference it")
+			return apperrors.NewBadRequestError(
+				"legacy storage backend cannot be deleted while old file paths may reference it",
+			)
 		}
 		return tx.Delete(&backend).Error
 	})
 }
 
+// SetDefault implements the required interface method.
 func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -194,6 +210,7 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 	})
 }
 
+// Test implements the required interface method.
 func (s *StorageBackendService) Test(ctx context.Context, backend *types.StorageBackend) error {
 	if err := backend.Validate(); err != nil {
 		return err
@@ -238,7 +255,15 @@ func (s *StorageBackendService) Test(ctx context.Context, backend *types.Storage
 	case "tos":
 		return filesvc.CheckTosConnectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
 	case "s3":
-		return filesvc.CheckS3ConnectivityWithOptions(ctx, c.Endpoint, c.AccessKeyID, c.SecretAccessKey, c.BucketName, c.Region, c.ForcePathStyle)
+		return filesvc.CheckS3ConnectivityWithOptions(
+			ctx,
+			c.Endpoint,
+			c.AccessKeyID,
+			c.SecretAccessKey,
+			c.BucketName,
+			c.Region,
+			c.ForcePathStyle,
+		)
 	case "oss":
 		return filesvc.CheckOssConnectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
 	case "ks3":
@@ -250,7 +275,12 @@ func (s *StorageBackendService) Test(ctx context.Context, backend *types.Storage
 	}
 }
 
-func (s *StorageBackendService) ResolveBackend(ctx context.Context, tenant *types.Tenant, backendID, provider string) (*types.StorageBackend, error) {
+// ResolveBackend implements the required interface method.
+func (s *StorageBackendService) ResolveBackend(
+	ctx context.Context,
+	tenant *types.Tenant,
+	backendID, provider string,
+) (*types.StorageBackend, error) {
 	if tenant == nil {
 		return nil, fmt.Errorf("workspace context missing")
 	}
@@ -281,13 +311,22 @@ func (s *StorageBackendService) ResolveBackend(ctx context.Context, tenant *type
 	return nil, nil
 }
 
-func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *types.Tenant, backendID, provider, localBaseDir string) (interfaces.FileService, string, error) {
+// ResolveFileService implements the required interface method.
+func (s *StorageBackendService) ResolveFileService(
+	ctx context.Context,
+	tenant *types.Tenant,
+	backendID, provider, localBaseDir string,
+) (interfaces.FileService, string, error) {
 	backend, err := s.ResolveBackend(ctx, tenant, backendID, provider)
 	if err != nil {
 		return nil, "", err
 	}
 	if backend != nil {
-		inner, provider, err := filesvc.NewFileServiceFromStorageConfig(backend.Provider, backend.ToStorageEngineConfig(), localBaseDir)
+		inner, provider, err := filesvc.NewFileServiceFromStorageConfig(
+			backend.Provider,
+			backend.ToStorageEngineConfig(),
+			localBaseDir,
+		)
 		if err != nil {
 			return nil, provider, err
 		}

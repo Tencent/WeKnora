@@ -11,15 +11,15 @@ import (
 // response bodies, with the APIKey field removed by construction. Credential
 // presence is exposed via the /credentials subresource.
 type WebSearchProviderResponse struct {
-	ID          string                             `json:"id"`
-	TenantID    uint64                             `json:"tenant_id"`
-	Name        string                             `json:"name"`
-	Provider    types.WebSearchProviderType        `json:"provider"`
-	Description string                             `json:"description"`
-	Parameters  WebSearchProviderParametersDTO     `json:"parameters"`
-	IsDefault   bool                               `json:"is_default"`
-	CreatedAt   time.Time                          `json:"created_at"`
-	UpdatedAt   time.Time                          `json:"updated_at"`
+	ID          string                         `json:"id"`
+	TenantID    uint64                         `json:"tenant_id"`
+	Name        string                         `json:"name"`
+	Provider    types.WebSearchProviderType    `json:"provider"`
+	Description string                         `json:"description"`
+	Parameters  WebSearchProviderParametersDTO `json:"parameters"`
+	IsDefault   bool                           `json:"is_default"`
+	CreatedAt   time.Time                      `json:"created_at"`
+	UpdatedAt   time.Time                      `json:"updated_at"`
 	// Per-field "configured?" map. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 }
@@ -65,7 +65,11 @@ func NewWebSearchProviderResponse(ctx context.Context, e *types.WebSearchProvide
 	}
 }
 
-func NewWebSearchProviderResponses(ctx context.Context, es []*types.WebSearchProviderEntity) []*WebSearchProviderResponse {
+// NewWebSearchProviderResponses is an exported function.
+func NewWebSearchProviderResponses(
+	ctx context.Context,
+	es []*types.WebSearchProviderEntity,
+) []*WebSearchProviderResponse {
 	out := make([]*WebSearchProviderResponse, 0, len(es))
 	for _, e := range es {
 		out = append(out, NewWebSearchProviderResponse(ctx, e))

@@ -76,7 +76,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 					}
 
 					// Acknowledge the event
-					c.client.Ack(*evt.Request)
+					_ = c.client.Ack(*evt.Request)
 
 					// Handle the event
 					c.handleEvent(ctx, eventsAPIEvent, evt.Request.Payload)
@@ -88,7 +88,11 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 	return c.client.RunContext(ctx)
 }
 
-func (c *LongConnClient) handleEvent(ctx context.Context, eventsAPIEvent slackevents.EventsAPIEvent, rawPayload json.RawMessage) {
+func (c *LongConnClient) handleEvent(
+	ctx context.Context,
+	eventsAPIEvent slackevents.EventsAPIEvent,
+	rawPayload json.RawMessage,
+) {
 	logger.Infof(ctx, "[Slack] Received event type: %s", eventsAPIEvent.Type)
 	switch eventsAPIEvent.Type {
 	case slackevents.CallbackEvent:
@@ -112,7 +116,7 @@ func (c *LongConnClient) handleEvent(ctx context.Context, eventsAPIEvent slackev
 			}
 			c.processMessage(ctx, ev.User, ev.Channel, ev.Text, threadTs, im.ChatTypeGroup, files)
 		case *slackevents.MessageEvent:
-			logger.Infof(ctx, "[Slack] MessageEvent: user=%s channel=%s text=%s subtype=%s bot_id=%s", ev.User, ev.Channel, ev.Text, ev.SubType, ev.BotID)
+			logger.Infof(ctx, "[Slack] MessageEvent: user=%s channel=%s text=%s subtype=%s bot_id=%s", ev.User, ev.Channel, ev.Text, ev.SubType, ev.BotID) //nolint:lll
 			if ev.BotID != "" {
 				return
 			}
@@ -139,7 +143,12 @@ func (c *LongConnClient) handleEvent(ctx context.Context, eventsAPIEvent slackev
 	}
 }
 
-func (c *LongConnClient) processMessage(ctx context.Context, user, channel, text, ts string, chatType im.ChatType, files []slack.File) {
+func (c *LongConnClient) processMessage(
+	ctx context.Context,
+	user, channel, text, ts string,
+	chatType im.ChatType,
+	files []slack.File,
+) {
 	incoming := parseIncomingMessage(user, channel, text, ts, chatType, files)
 
 	if err := c.handler(ctx, incoming); err != nil {

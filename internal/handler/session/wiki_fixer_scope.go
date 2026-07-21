@@ -13,7 +13,12 @@ type wikiFixerKBLookup interface {
 }
 
 type wikiFixerKBSharePermission interface {
-	CheckTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole) (types.OrgMemberRole, bool, error)
+	CheckTenantKBPermission(
+		ctx context.Context,
+		kbID string,
+		callerTenantID uint64,
+		callerTenantRole types.TenantRole,
+	) (types.OrgMemberRole, bool, error)
 }
 
 func (h *Handler) resolveWikiFixerTenantScope(
@@ -53,7 +58,12 @@ func resolveBuiltinWikiFixerTenantScope(
 	kbID := kbIDs[0]
 	kb, err := kbLookup.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
-		logger.Warnf(ctx, "wiki fixer: failed to resolve KB %s for shared scope: %v", secutils.SanitizeForLog(kbID), err)
+		logger.Warnf(
+			ctx,
+			"wiki fixer: failed to resolve KB %s for shared scope: %v",
+			secutils.SanitizeForLog(kbID),
+			err,
+		)
 		return agent, 0
 	}
 	if kb == nil {
@@ -66,7 +76,12 @@ func resolveBuiltinWikiFixerTenantScope(
 
 	permission, isShared, err := kbShare.CheckTenantKBPermission(ctx, kb.ID, currentTenantID, callerTenantRole)
 	if err != nil {
-		logger.Warnf(ctx, "wiki fixer: failed to check shared KB %s permission: %v", secutils.SanitizeForLog(kb.ID), err)
+		logger.Warnf(
+			ctx,
+			"wiki fixer: failed to check shared KB %s permission: %v",
+			secutils.SanitizeForLog(kb.ID),
+			err,
+		)
 		return agent, 0
 	}
 	if !isShared || !permission.HasPermission(types.OrgRoleEditor) {
@@ -75,6 +90,11 @@ func resolveBuiltinWikiFixerTenantScope(
 
 	scopedAgent := *agent
 	scopedAgent.TenantID = kb.TenantID
-	logger.Infof(ctx, "wiki fixer: using shared KB source tenant %d for KB %s", kb.TenantID, secutils.SanitizeForLog(kb.ID))
+	logger.Infof(
+		ctx,
+		"wiki fixer: using shared KB source tenant %d for KB %s",
+		kb.TenantID,
+		secutils.SanitizeForLog(kb.ID),
+	)
 	return &scopedAgent, kb.TenantID
 }

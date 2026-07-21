@@ -24,7 +24,12 @@ func prepareMessagesWithReferences(
 	}
 	messages := prepareMessagesWithHistory(chatManage)
 	if len(messages) > 0 {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+		messages[0].Content = strings.TrimRight(
+			messages[0].Content,
+			" \t\r\n",
+		) + llmreference.ProtocolPrompt(
+			citationsEnabled,
+		)
 	}
 	if len(chatManage.MergeResult) == 0 || len(messages) == 0 {
 		return messages, refs
@@ -87,7 +92,11 @@ func prepareMessagesWithReferences(
 	replaced := false
 	for _, index := range []int{0, last} {
 		if chatManage.RenderedContexts != "" && strings.Contains(messages[index].Content, chatManage.RenderedContexts) {
-			messages[index].Content = strings.ReplaceAll(messages[index].Content, chatManage.RenderedContexts, modelContexts)
+			messages[index].Content = strings.ReplaceAll(
+				messages[index].Content,
+				chatManage.RenderedContexts,
+				modelContexts,
+			)
 			replaced = true
 		}
 	}

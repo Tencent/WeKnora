@@ -34,7 +34,7 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 	go func() {
 		if currentVersion == "unknown" || currentVersion == "" {
 			if showUpToDate {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.InfoDialog,
 					Title:         "Check for Updates",
 					Message:       "Unable to determine the current version. Cannot check for updates.",
@@ -68,7 +68,7 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 		if err != nil {
 			logger.Warnf(context.Background(), "Check update failed: %v", err)
 			if showUpToDate {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Check Update Failed",
 					Message:       fmt.Sprintf("Failed to connect to GitHub to check for updates:\n%v", err),
@@ -78,7 +78,7 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 			}
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Warnf(context.Background(), "GitHub API returned status code: %d", resp.StatusCode)
@@ -87,7 +87,7 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 				if resp.StatusCode == 403 {
 					msg = "GitHub API rate limit exceeded. Please try again later."
 				}
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Check Update Failed",
 					Message:       msg,
@@ -119,7 +119,11 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 					return
 				}
 
-				msg := fmt.Sprintf("A new version of WeKnora Lite is available!\n\nCurrent version: %s\nLatest version: %s\n\nWould you like to download it now?", currentVersion, latestVersion)
+				msg := fmt.Sprintf(
+					"A new version of WeKnora Lite is available!\n\nCurrent version: %s\nLatest version: %s\n\n"+
+						"Would you like to download it now?",
+					currentVersion, latestVersion,
+				)
 				choice, _ := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.InfoDialog,
 					Title:         "Update Available",
@@ -140,10 +144,13 @@ func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, 
 		}
 
 		if showUpToDate {
-			wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-				Type:          wailsruntime.InfoDialog,
-				Title:         "Up to Date",
-				Message:       fmt.Sprintf("You are using the latest version of WeKnora Lite.\n\nCurrent version: %s", currentVersion),
+			_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				Type:  wailsruntime.InfoDialog,
+				Title: "Up to Date",
+				Message: fmt.Sprintf(
+					"You are using the latest version of WeKnora Lite.\n\nCurrent version: %s",
+					currentVersion,
+				),
 				Buttons:       []string{"OK"},
 				DefaultButton: "OK",
 			})
@@ -173,7 +180,10 @@ func findBestAsset(assets []githubAsset, goos, goarch string) (string, string) {
 	// 1. Try to match both OS and Arch
 	for _, asset := range assets {
 		name := strings.ToLower(asset.Name)
-		if strings.Contains(name, osKeyword) && (strings.Contains(name, archKeyword) || strings.Contains(name, "universal") || strings.Contains(name, "aarch64")) {
+		if strings.Contains(name, osKeyword) &&
+			(strings.Contains(name, archKeyword) ||
+				strings.Contains(name, "universal") ||
+				strings.Contains(name, "aarch64")) {
 			return asset.BrowserDownloadURL, asset.Name
 		}
 	}
@@ -207,7 +217,7 @@ func findBestAsset(assets []githubAsset, goos, goarch string) (string, string) {
 	return "", ""
 }
 
-func downloadAndInstall(ctx context.Context, url string, filename string, currentVersion string, latestVersion string, silent bool) {
+func downloadAndInstall(ctx context.Context, url string, filename string, _ string, latestVersion string, silent bool) {
 	tempDir := os.TempDir()
 	savePath := filepath.Join(tempDir, filename)
 
@@ -217,7 +227,7 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 		if err != nil {
 			logger.Warnf(context.Background(), "Download failed: %v", err)
 			if !silent {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Download Failed",
 					Message:       fmt.Sprintf("Failed to download the update:\n%v", err),
@@ -227,12 +237,12 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 			}
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Warnf(context.Background(), "Download failed, server returned status: %d", resp.StatusCode)
 			if !silent {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Download Failed",
 					Message:       fmt.Sprintf("Server returned status: %d", resp.StatusCode),
@@ -247,7 +257,7 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 		if err != nil {
 			logger.Warnf(context.Background(), "Failed to create file for download: %v", err)
 			if !silent {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Save Failed",
 					Message:       fmt.Sprintf("Failed to save the update file:\n%v", err),
@@ -257,13 +267,13 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 			}
 			return
 		}
-		defer out.Close()
+		defer func() { _ = out.Close() }()
 
 		_, err = io.Copy(out, resp.Body)
 		if err != nil {
 			logger.Warnf(context.Background(), "Error occurred during download copying: %v", err)
 			if !silent {
-				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+				_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 					Type:          wailsruntime.ErrorDialog,
 					Title:         "Download Error",
 					Message:       fmt.Sprintf("An error occurred while downloading:\n%v", err),
@@ -278,9 +288,13 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 
 		// Prompt user to restart
 		choice, _ := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-			Type:          wailsruntime.InfoDialog,
-			Title:         "Update Ready",
-			Message:       fmt.Sprintf("WeKnora Lite %s has been downloaded successfully.\n\nWould you like to restart and install the new version now?", latestVersion),
+			Type:  wailsruntime.InfoDialog,
+			Title: "Update Ready",
+			Message: fmt.Sprintf(
+				"WeKnora Lite %s has been downloaded successfully.\n\n"+
+					"Would you like to restart and install the new version now?",
+				latestVersion,
+			),
 			Buttons:       []string{"Restart Now", "Later"},
 			DefaultButton: "Restart Now",
 		})
@@ -327,10 +341,10 @@ start /wait "" "%s" /S
 start "" "%s"
 del "%%~f0"
 `, savePath, execPath)
-		os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+		_ = os.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 
 		cmd := exec.Command("cmd.exe", "/C", "start", "/b", scriptPath)
-		cmd.Start()
+		_ = cmd.Start()
 		wailsruntime.Quit(ctx)
 
 	} else if runtime.GOOS == "darwin" {
@@ -339,33 +353,33 @@ del "%%~f0"
 				execPath, err := os.Executable()
 				if err != nil {
 					logger.Warnf(context.Background(), "Failed to get executable path: %v", err)
-					exec.Command("open", savePath).Start()
+					_ = exec.Command("open", savePath).Start()
 					wailsruntime.Quit(ctx)
 					return
 				}
 
 				appBundlePath := filepath.Dir(filepath.Dir(filepath.Dir(execPath)))
 				if !strings.HasSuffix(appBundlePath, ".app") {
-					exec.Command("open", savePath).Start()
+					_ = exec.Command("open", savePath).Start()
 					wailsruntime.Quit(ctx)
 					return
 				}
 
 				mountPoint := filepath.Join(os.TempDir(), "WeKnoraUpdateMount")
-				os.MkdirAll(mountPoint, 0755)
+				_ = os.MkdirAll(mountPoint, 0o755)
 
 				cmdMount := exec.Command("hdiutil", "attach", savePath, "-mountpoint", mountPoint, "-nobrowse", "-quiet")
 				if err := cmdMount.Run(); err != nil {
 					logger.Warnf(context.Background(), "Failed to mount dmg: %v", err)
-					exec.Command("open", savePath).Start()
+					_ = exec.Command("open", savePath).Start()
 					wailsruntime.Quit(ctx)
 					return
 				}
 
 				entries, err := os.ReadDir(mountPoint)
 				if err != nil {
-					exec.Command("hdiutil", "detach", mountPoint, "-force").Run()
-					exec.Command("open", savePath).Start()
+					_ = exec.Command("hdiutil", "detach", mountPoint, "-force").Run()
+					_ = exec.Command("open", savePath).Start()
 					wailsruntime.Quit(ctx)
 					return
 				}
@@ -379,8 +393,8 @@ del "%%~f0"
 				}
 
 				if newAppPath == "" {
-					exec.Command("hdiutil", "detach", mountPoint, "-force").Run()
-					exec.Command("open", savePath).Start()
+					_ = exec.Command("hdiutil", "detach", mountPoint, "-force").Run()
+					_ = exec.Command("open", savePath).Start()
 					wailsruntime.Quit(ctx)
 					return
 				}
@@ -397,17 +411,17 @@ open "%s"
 rm "$0"
 `, appBundlePath, newAppPath, appDir, appBundlePath, newAppPath, appDir, mountPoint, appBundlePath)
 
-				os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+				_ = os.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 
-				exec.Command("bash", scriptPath).Start()
+				_ = exec.Command("bash", scriptPath).Start()
 				wailsruntime.Quit(ctx)
 			}()
 		} else {
-			exec.Command("open", savePath).Start()
+			_ = exec.Command("open", savePath).Start()
 			wailsruntime.Quit(ctx)
 		}
 	} else {
-		exec.Command("xdg-open", savePath).Start()
+		_ = exec.Command("xdg-open", savePath).Start()
 		wailsruntime.Quit(ctx)
 	}
 }

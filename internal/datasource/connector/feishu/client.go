@@ -30,13 +30,14 @@ type Client struct {
 	tokenExpAt time.Time
 }
 
-type wikiNodeListFailure struct {
-	Node wikiNode
+// WikiNodeListFailure is exported for use by other packages.
+type WikiNodeListFailure struct {
+	Node WikiNode
 	Err  error
 }
 
 type partialWikiNodeListError struct {
-	Failures []wikiNodeListFailure
+	Failures []WikiNodeListFailure
 }
 
 func (e *partialWikiNodeListError) Error() string {
@@ -86,7 +87,7 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -111,8 +112,13 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	if len(result.TenantAccessToken) < suffixLen {
 		suffixLen = len(result.TenantAccessToken)
 	}
-	logger.Infof(ctx, "[Feishu] got tenant_access_token: %s...%s expire=%ds",
-		result.TenantAccessToken[:prefixLen], result.TenantAccessToken[len(result.TenantAccessToken)-suffixLen:], result.Expire)
+	logger.Infof(
+		ctx,
+		"[Feishu] got tenant_access_token: %s...%s expire=%ds",
+		result.TenantAccessToken[:prefixLen],
+		result.TenantAccessToken[len(result.TenantAccessToken)-suffixLen:],
+		result.Expire,
+	)
 
 	return c.tokenCache, nil
 }
@@ -147,7 +153,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if err != nil {
 		return fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read body once for logging + decoding
 	respBody, err := io.ReadAll(resp.Body)
@@ -180,8 +186,8 @@ func truncate(s string, maxLen int) string {
 }
 
 // ListWikiSpaces returns all wiki spaces accessible to the app.
-func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
-	var allSpaces []wikiSpace
+func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
+	var allSpaces []WikiSpace
 	pageToken := ""
 
 	for {
@@ -199,7 +205,12 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
 			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
-		logger.Infof(ctx, "[Feishu] ListWikiSpaces: got %d spaces, has_more=%v", len(resp.Data.Items), resp.Data.HasMore)
+		logger.Infof(
+			ctx,
+			"[Feishu] ListWikiSpaces: got %d spaces, has_more=%v",
+			len(resp.Data.Items),
+			resp.Data.HasMore,
+		)
 		for i, s := range resp.Data.Items {
 			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name=%q visibility=%s", i, s.SpaceID, s.Name, s.Visibility)
 		}
@@ -218,8 +229,8 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
 
 // ListWikiNodes returns all nodes (documents) under a wiki space.
 // If parentNodeToken is empty, returns top-level nodes.
-func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]wikiNode, error) {
-	var allNodes []wikiNode
+func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
+	var allNodes []WikiNode
 	pageToken := ""
 
 	for {
@@ -259,15 +270,15 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 }
 
 // GetWikiNode returns metadata for a single wiki node.
-func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (wikiNode, error) {
+func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (WikiNode, error) {
 	path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(nodeToken))
 
 	var resp wikiNodeInfoResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return wikiNode{}, fmt.Errorf("get wiki node: %w", err)
+		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
-		return wikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
+		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	node := resp.Data.Node
@@ -279,18 +290,18 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 
 // ListAllWikiNodesRecursive recursively lists all nodes under a wiki space.
 // It walks the tree depth-first to discover all nested documents.
-func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]wikiNode, error) {
+func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]WikiNode, error) {
 	// Start with top-level nodes
 	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
 	if err != nil {
 		return nil, err
 	}
 
-	var allNodes []wikiNode
-	var failures []wikiNodeListFailure
-	var walk func(nodes []wikiNode)
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
 
-	walk = func(nodes []wikiNode) {
+	walk = func(nodes []WikiNode) {
 		for _, node := range nodes {
 			allNodes = append(allNodes, node)
 
@@ -299,7 +310,7 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
 				if err != nil {
 					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-					failures = append(failures, wikiNodeListFailure{
+					failures = append(failures, WikiNodeListFailure{
 						Node: node,
 						Err:  wrappedErr,
 					})
@@ -321,7 +332,7 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 }
 
 // ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
-func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]wikiNode, error) {
+func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]WikiNode, error) {
 	if nodeToken == "" {
 		return c.ListAllWikiNodesRecursive(ctx, spaceID)
 	}
@@ -333,12 +344,12 @@ func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string,
 
 	nodes, err := c.listWikiNodeDescendants(ctx, spaceID, root)
 	if err != nil {
-		return append([]wikiNode{root}, nodes...), err
+		return append([]WikiNode{root}, nodes...), err
 	}
-	return append([]wikiNode{root}, nodes...), nil
+	return append([]WikiNode{root}, nodes...), nil
 }
 
-func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, root wikiNode) ([]wikiNode, error) {
+func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, root WikiNode) ([]WikiNode, error) {
 	if !root.HasChild {
 		return nil, nil
 	}
@@ -349,18 +360,18 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
 			spaceID, root.NodeToken, err)
 		return nil, &partialWikiNodeListError{
-			Failures: []wikiNodeListFailure{{
+			Failures: []WikiNodeListFailure{{
 				Node: root,
 				Err:  wrappedErr,
 			}},
 		}
 	}
 
-	var allNodes []wikiNode
-	var failures []wikiNodeListFailure
-	var walk func(nodes []wikiNode)
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
 
-	walk = func(nodes []wikiNode) {
+	walk = func(nodes []WikiNode) {
 		for _, node := range nodes {
 			allNodes = append(allNodes, node)
 			if !node.HasChild {
@@ -370,7 +381,7 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
 			if err != nil {
 				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-				failures = append(failures, wikiNodeListFailure{
+				failures = append(failures, WikiNodeListFailure{
 					Node: node,
 					Err:  wrappedErr,
 				})
@@ -566,11 +577,17 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("download request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+		logger.Errorf(
+			ctx,
+			"[Feishu] download GET %s → status=%d body=%s",
+			path,
+			resp.StatusCode,
+			truncate(string(body), 500),
+		)
 		return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
 	}
 

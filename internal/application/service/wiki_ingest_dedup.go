@@ -60,22 +60,6 @@ type dedupSurface struct {
 	nameGramSets []map[string]struct{}
 }
 
-// countEntityConceptPages returns how many of the given pages are
-// entity- or concept-typed. Used only for logging the prefilter's
-// reduction ratio.
-func countEntityConceptPages(pages []*types.WikiPage) int {
-	n := 0
-	for _, p := range pages {
-		if p == nil {
-			continue
-		}
-		if p.PageType == types.WikiPageTypeEntity || p.PageType == types.WikiPageTypeConcept {
-			n++
-		}
-	}
-	return n
-}
-
 // selectDedupCandidatePages returns the subset of allPages plausibly
 // related to at least one of newItems. Non-entity/concept pages are
 // dropped unconditionally. The returned slice preserves the input order

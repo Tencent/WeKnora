@@ -41,37 +41,38 @@ func StripThinkBlocks(content string) string {
 	return trimIMOuterWhitespace(cleaned)
 }
 
-// IMStreamMode distinguishes agent reasoning from quick-QA RAG pipeline display.
-type IMStreamMode int
+// StreamMode distinguishes agent reasoning from quick-QA RAG pipeline display.
+type StreamMode int
 
+// StreamModeAgent and related constants.
 const (
-	IMStreamModeAgent IMStreamMode = iota
-	IMStreamModeQuickQA
+	StreamModeAgent StreamMode = iota
+	StreamModeQuickQA
 )
 
-// IMStreamParts separates stream content for IM display.
-type IMStreamParts struct {
-	Mode IMStreamMode
+// StreamParts separates stream content for IM display.
+type StreamParts struct {
+	Mode StreamMode
 
 	// Quick-QA (RagPipelineProgress on Web):
-	PipelineToolSteps []IMToolStep // query_understand / knowledge_search rows
-	ReasoningInner    string       // model reasoning_content — separate "思考" section
+	PipelineToolSteps []ToolStep // query_understand / knowledge_search rows
+	ReasoningInner    string     // model reasoning_content — separate "思考" section
 
 	// Agent (AgentStreamDisplay on Web):
-	AgentInner     string       // retracted preambles + thoughts ("思考过程")
-	AgentToolSteps []IMToolStep // tool progress lines (one row per tool_call_id)
-	LiveAnswer     string       // optimistic answer stream before tools retract it
+	AgentInner     string     // retracted preambles + thoughts ("思考过程")
+	AgentToolSteps []ToolStep // tool progress lines (one row per tool_call_id)
+	LiveAnswer     string     // optimistic answer stream before tools retract it
 
 	Answer string // final answer (complete / knowledge QA)
 }
 
-func agentThinkContent(parts IMStreamParts) string {
-	toolLines := renderIMToolSteps(parts.AgentToolSteps, FormatIMToolLine)
+func agentThinkContent(parts StreamParts) string {
+	toolLines := renderToolSteps(parts.AgentToolSteps, FormatIMToolLine)
 	return mergeIMNarrativeAndTools(parts.AgentInner, toolLines)
 }
 
-func quickQAPipelineContent(parts IMStreamParts) string {
-	return renderIMToolSteps(parts.PipelineToolSteps, FormatIMRagPipelineLine)
+func quickQAPipelineContent(parts StreamParts) string {
+	return renderToolSteps(parts.PipelineToolSteps, FormatIMRagPipelineLine)
 }
 
 // RAGThinkingStyle matches Web RagPipelineProgress thinking row (agent.think).
@@ -93,7 +94,7 @@ func WrapThinkBlock(inner string) string {
 }
 
 // BuildIMAgentStreamRaw assembles agent-mode raw content.
-func BuildIMAgentStreamRaw(parts IMStreamParts, agentInProgress bool) string {
+func BuildIMAgentStreamRaw(parts StreamParts, agentInProgress bool) string {
 	thinkTagged := WrapThinkBlock(agentThinkContent(parts))
 	if agentInProgress || strings.TrimSpace(parts.Answer) == "" {
 		return thinkTagged
@@ -107,7 +108,7 @@ func BuildIMAgentStreamRaw(parts IMStreamParts, agentInProgress bool) string {
 // formatIMAgentIntermediate mirrors Web AgentStreamDisplay:
 // stream answer text first; when tools run, retract into "思考过程";
 // once tools exist, keep the think block visible above the streaming answer.
-func formatIMAgentIntermediate(parts IMStreamParts) string {
+func formatIMAgentIntermediate(parts StreamParts) string {
 	think := strings.TrimSpace(agentThinkContent(parts))
 	live := strings.TrimSpace(parts.LiveAnswer)
 
@@ -124,7 +125,7 @@ func formatIMAgentIntermediate(parts IMStreamParts) string {
 // formatIMQuickQAIntermediate mirrors Web RagPipelineProgress:
 // pipeline steps as plain lines, model reasoning in a separate "思考" block,
 // and once answer starts streaming the progress collapses to answer-only preview.
-func formatIMQuickQAIntermediate(parts IMStreamParts) string {
+func formatIMQuickQAIntermediate(parts StreamParts) string {
 	if answer := strings.TrimSpace(parts.Answer); answer != "" {
 		return answer
 	}
@@ -140,8 +141,8 @@ func formatIMQuickQAIntermediate(parts IMStreamParts) string {
 }
 
 // FormatIMIntermediateFromParts formats in-progress IM stream display.
-func FormatIMIntermediateFromParts(parts IMStreamParts, agentInProgress bool) string {
-	if parts.Mode == IMStreamModeQuickQA {
+func FormatIMIntermediateFromParts(parts StreamParts, agentInProgress bool) string {
+	if parts.Mode == StreamModeQuickQA {
 		return formatIMQuickQAIntermediate(parts)
 	}
 	_ = agentInProgress
@@ -149,7 +150,7 @@ func FormatIMIntermediateFromParts(parts IMStreamParts, agentInProgress bool) st
 }
 
 // FormatIMFinalFromParts returns the final replace frame (answer-only for all modes).
-func FormatIMFinalFromParts(parts IMStreamParts) string {
+func FormatIMFinalFromParts(parts StreamParts) string {
 	answer := strings.TrimSpace(parts.Answer)
 	if answer != "" {
 		return answer

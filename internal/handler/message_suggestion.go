@@ -13,22 +13,26 @@ import (
 	"gorm.io/gorm"
 )
 
+// MessageSuggestionHandler is an exported type.
 type MessageSuggestionHandler struct {
 	service interfaces.MessageSuggestionService
 }
 
+// NewMessageSuggestionHandler is an exported function.
 func NewMessageSuggestionHandler(service interfaces.MessageSuggestionService) *MessageSuggestionHandler {
 	return &MessageSuggestionHandler{service: service}
 }
 
+// EnsureMessageSuggestionsRequest is an exported type.
 type EnsureMessageSuggestionsRequest struct {
 	Regenerate bool `json:"regenerate"`
 }
 
+// SuggestionEventRequest is an exported type.
 type SuggestionEventRequest struct {
 	SuggestionSetID string `json:"suggestion_set_id" binding:"required"`
 	QuestionID      string `json:"question_id"`
-	EventType       string `json:"event_type" binding:"required"`
+	Type            string `json:"event_type"        binding:"required"`
 }
 
 // Ensure godoc
@@ -49,7 +53,7 @@ func (h *MessageSuggestionHandler) Ensure(c *gin.Context) {
 	var request EnsureMessageSuggestionsRequest
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&request); err != nil {
-			c.Error(apperrors.NewBadRequestError("invalid request body"))
+			_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
 			return
 		}
 	}
@@ -115,7 +119,7 @@ func messageSuggestionSessionID(c *gin.Context) string {
 func (h *MessageSuggestionHandler) RecordEvent(c *gin.Context) {
 	var request SuggestionEventRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.Error(apperrors.NewBadRequestError("invalid request body"))
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
 		return
 	}
 	err := h.service.RecordEvent(
@@ -123,7 +127,7 @@ func (h *MessageSuggestionHandler) RecordEvent(c *gin.Context) {
 		secutils.SanitizeForLog(c.Param("session_id")),
 		strings.TrimSpace(request.SuggestionSetID),
 		strings.TrimSpace(request.QuestionID),
-		strings.TrimSpace(request.EventType),
+		strings.TrimSpace(request.Type),
 	)
 	if err != nil {
 		h.writeError(c, err)
@@ -135,16 +139,16 @@ func (h *MessageSuggestionHandler) RecordEvent(c *gin.Context) {
 func (h *MessageSuggestionHandler) writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		c.Error(apperrors.NewNotFoundError("suggestions not found"))
+		_ = c.Error(apperrors.NewNotFoundError("suggestions not found"))
 	case strings.Contains(err.Error(), "completed assistant"):
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 	case strings.Contains(err.Error(), "invalid suggestion event"),
 		strings.Contains(err.Error(), "requires question_id"),
 		strings.Contains(err.Error(), "does not belong"),
 		strings.Contains(err.Error(), "not allowed"):
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 	default:
 		logger.Error(c.Request.Context(), "message suggestion operation failed", err)
-		c.Error(apperrors.NewInternalServerError("message suggestion operation failed"))
+		_ = c.Error(apperrors.NewInternalServerError("message suggestion operation failed"))
 	}
 }

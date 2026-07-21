@@ -65,7 +65,8 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Session id to load messages from")
 	_ = cmd.MarkFlagRequired("session")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum messages to return — server-side page size (1..1000)")
-	cmd.Flags().StringVar(&opts.Before, "before", "", "Only messages created before this RFC3339 timestamp (time-cursor pagination)")
+	cmd.Flags().
+		StringVar(&opts.Before, "before", "", "Only messages created before this RFC3339 timestamp (time-cursor pagination)")
 	cmdutil.AddFormatFlag(cmd, messageListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "List messages in a session. Use the assistant message id from the latest turn to chain follow-ups (session ask), or --before <oldest created_at> to page further back.",

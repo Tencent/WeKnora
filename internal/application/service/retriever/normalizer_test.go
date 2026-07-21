@@ -231,7 +231,7 @@ func TestEngineAwareNormalizer_OpenSearchNilCtx_DoesNotPanic(t *testing.T) {
 		}
 	}()
 	_ = EngineAwareNormalizer{}.Normalize(
-		nil, 1.0, types.VectorRetrieverType,
+		nil, 1.0, types.VectorRetrieverType, //nolint:staticcheck // verify nil ctx does not panic
 		types.OpenSearchRetrieverEngineType,
 	)
 }
@@ -263,7 +263,7 @@ func TestEngineAwareNormalizer_NilCtx_DoesNotPanic(t *testing.T) {
 		}
 	}()
 	_ = EngineAwareNormalizer{}.Normalize(
-		nil, 0.5, types.VectorRetrieverType,
+		nil, 0.5, types.VectorRetrieverType, //nolint:staticcheck // verify nil ctx does not panic
 		types.RetrieverEngineType("nosuch"),
 	)
 }
@@ -325,6 +325,6 @@ func TestClamp01(t *testing.T) {
 // catches accidental breakage of the ScoreNormalizer interface via the
 // package-scope var assertion in normalizer.go. The runtime body is a
 // no-op; failure would surface at build time.
-func TestEngineAwareNormalizer_InterfaceSatisfied(t *testing.T) {
+func TestEngineAwareNormalizer_InterfaceSatisfied(_ *testing.T) {
 	var _ ScoreNormalizer = EngineAwareNormalizer{}
 }

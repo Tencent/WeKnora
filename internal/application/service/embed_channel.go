@@ -18,11 +18,16 @@ import (
 const embedTokenBytes = 32
 
 var (
+	// ErrEmbedChannelNotFound is an exported constant.
 	ErrEmbedChannelNotFound = errors.New("embed channel not found")
-	ErrEmbedTokenInvalid    = errors.New("embed publish token is invalid")
+	// ErrEmbedTokenInvalid implements the required behavior.
+	ErrEmbedTokenInvalid = errors.New("embed publish token is invalid")
+	// ErrEmbedChannelDisabled is exported for use by other packages.
 	ErrEmbedChannelDisabled = errors.New("embed channel is disabled")
-	ErrEmbedChunkNotFound   = errors.New("embed chunk not found")
-	ErrEmbedChunkForbidden  = errors.New("embed chunk not accessible")
+	// ErrEmbedChunkNotFound is exported for use by other packages.
+	ErrEmbedChunkNotFound = errors.New("embed chunk not found")
+	// ErrEmbedChunkForbidden is a sentinel error.
+	ErrEmbedChunkForbidden = errors.New("embed chunk not accessible")
 )
 
 type embedChannelService struct {
@@ -32,6 +37,7 @@ type embedChannelService struct {
 	redis        *redis.Client
 }
 
+// NewEmbedChannelService is an exported function.
 func NewEmbedChannelService(
 	repo interfaces.EmbedChannelRepository,
 	agentService interfaces.CustomAgentService,
@@ -365,7 +371,11 @@ func (s *embedChannelService) resolveKnowledgeBaseIDs(ctx context.Context, ch *t
 	return nil
 }
 
-func (s *embedChannelService) ensureAgentOwned(ctx context.Context, tenantID uint64, agentID string) (*types.CustomAgent, error) {
+func (s *embedChannelService) ensureAgentOwned(
+	ctx context.Context,
+	tenantID uint64,
+	agentID string,
+) (*types.CustomAgent, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return nil, apperrors.NewBadRequestError("agent_id is required")

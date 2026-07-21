@@ -40,7 +40,13 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		}
 	}
 
-	logger.Infof(ctx, "Creating web search provider: tenant=%d, name=%s, type=%s", provider.TenantID, provider.Name, provider.Provider)
+	logger.Infof(
+		ctx,
+		"Creating web search provider: tenant=%d, name=%s, type=%s",
+		provider.TenantID,
+		provider.Name,
+		provider.Provider,
+	)
 	return s.repo.Create(ctx, provider)
 }
 

@@ -224,7 +224,7 @@ func (c *Consolidator) summarizeWithRetry(
 		resp, err := c.chatModel.Chat(summarizeCtx, []chat.Message{
 			{Role: "system", Content: consolidationSystemPrompt},
 			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
+		}, &chat.Options{
 			Temperature: 0.3, // low temperature for factual summarization
 			MaxTokens:   2000,
 		})
@@ -260,22 +260,22 @@ func (c *Consolidator) buildConsolidationPrompt(messages []chat.Message) string 
 	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
-			sb.WriteString(fmt.Sprintf("**User**: %s\n\n", truncateForPrompt(msg.Content, 2000)))
+			fmt.Fprintf(&sb, "**User**: %s\n\n", truncateForPrompt(msg.Content, 2000))
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				names := make([]string, len(msg.ToolCalls))
 				for i, tc := range msg.ToolCalls {
 					names[i] = tc.Function.Name
 				}
-				sb.WriteString(fmt.Sprintf("**Assistant** [called tools: %s]: %s\n\n",
-					strings.Join(names, ", "), truncateForPrompt(msg.Content, 1000)))
+				fmt.Fprintf(&sb, "**Assistant** [called tools: %s]: %s\n\n",
+					strings.Join(names, ", "), truncateForPrompt(msg.Content, 1000))
 			} else {
-				sb.WriteString(fmt.Sprintf("**Assistant**: %s\n\n",
-					truncateForPrompt(msg.Content, 2000)))
+				fmt.Fprintf(&sb, "**Assistant**: %s\n\n",
+					truncateForPrompt(msg.Content, 2000))
 			}
 		case "tool":
-			sb.WriteString(fmt.Sprintf("**Tool [%s]**: %s\n\n",
-				msg.Name, truncateForPrompt(msg.Content, 1000)))
+			fmt.Fprintf(&sb, "**Tool [%s]**: %s\n\n",
+				msg.Name, truncateForPrompt(msg.Content, 1000))
 		}
 	}
 
@@ -291,20 +291,20 @@ func (c *Consolidator) rawArchive(messages []chat.Message) string {
 		content := truncateForPrompt(msg.Content, 500)
 		switch msg.Role {
 		case "user":
-			sb.WriteString(fmt.Sprintf("- User: %s\n", content))
+			fmt.Fprintf(&sb, "- User: %s\n", content)
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				names := make([]string, len(msg.ToolCalls))
 				for j, tc := range msg.ToolCalls {
 					names[j] = tc.Function.Name
 				}
-				sb.WriteString(fmt.Sprintf("- Assistant [tools: %s]: %s\n",
-					strings.Join(names, ","), content))
+				fmt.Fprintf(&sb, "- Assistant [tools: %s]: %s\n",
+					strings.Join(names, ","), content)
 			} else {
-				sb.WriteString(fmt.Sprintf("- Assistant: %s\n", content))
+				fmt.Fprintf(&sb, "- Assistant: %s\n", content)
 			}
 		case "tool":
-			sb.WriteString(fmt.Sprintf("- Tool[%s]: %s\n", msg.Name, content))
+			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, content)
 		}
 	}
 

@@ -55,7 +55,7 @@ func (p *OllamaProvider) Search(
 	ctx context.Context,
 	query string,
 	maxResults int,
-	includeDate bool,
+	_ bool,
 ) ([]*types.WebSearchResult, error) {
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
@@ -112,7 +112,7 @@ func (p *OllamaProvider) doSearch(ctx context.Context, req *http.Request) ([]*ty
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

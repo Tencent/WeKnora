@@ -229,8 +229,8 @@ func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
 
 		imgInfo, found := imageInfoMap[imgURL]
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
-		b.WriteString(fmt.Sprintf("<image_original>%s</image_original>\n", match[0]))
+		fmt.Fprintf(&b, "<image url=\"%s\">\n", imgURL)
+		fmt.Fprintf(&b, "<image_original>%s</image_original>\n", match[0])
 		if found && imgInfo != nil {
 			b.WriteString(BuildImageInfoXML(imgInfo))
 		}
@@ -363,10 +363,10 @@ func BuildImageInfoMarkdownWithURL(url string, img *types.ImageInfo) string {
 func BuildImageInfoXML(img *types.ImageInfo) string {
 	var b strings.Builder
 	if img.Caption != "" {
-		b.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", img.Caption))
+		fmt.Fprintf(&b, "<image_caption>%s</image_caption>\n", img.Caption)
 	}
 	if img.OCRText != "" {
-		b.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", img.OCRText))
+		fmt.Fprintf(&b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
 	}
 	return b.String()
 }

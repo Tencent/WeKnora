@@ -13,22 +13,28 @@ const DefaultMaxContextTokens = 200000
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
-	MaxIterations  int      `json:"max_iterations"`          // Maximum number of ReAct iterations
-	AllowedTools   []string `json:"allowed_tools"`           // List of allowed tool names
-	Temperature    float64  `json:"temperature"`             // LLM temperature for agent
-	KnowledgeBases []string `json:"knowledge_bases"`         // Accessible knowledge base IDs
-	KnowledgeIDs   []string `json:"knowledge_ids"`           // Accessible knowledge IDs (individual documents)
-	SystemPrompt   string   `json:"system_prompt,omitempty"` // Unified system prompt (uses web_search_status placeholder for dynamic behavior)
+	MaxIterations  int      `json:"max_iterations"`  // Maximum number of ReAct iterations
+	AllowedTools   []string `json:"allowed_tools"`   // List of allowed tool names
+	Temperature    float64  `json:"temperature"`     // LLM temperature for agent
+	KnowledgeBases []string `json:"knowledge_bases"` // Accessible knowledge base IDs
+	KnowledgeIDs   []string `json:"knowledge_ids"`   // Accessible knowledge IDs (individual documents)
+	// Unified system prompt (uses web_search_status placeholder for dynamic behavior)
+	SystemPrompt string `json:"system_prompt,omitempty"`
 	// Deprecated: Use SystemPrompt instead. Kept for backward compatibility during migration.
-	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
-	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
-	UseCustomSystemPrompt   bool          `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
-	WebSearchEnabled        bool          `json:"web_search_enabled"`                   // Whether web search tool is enabled
-	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
-	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
-	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
-	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
+	SystemPromptWebEnabled string `json:"system_prompt_web_enabled,omitempty"`
+	// Deprecated: Custom prompt when web search is disabled
+	SystemPromptWebDisabled string `json:"system_prompt_web_disabled,omitempty"`
+	// Whether to use custom system prompt instead of default
+	UseCustomSystemPrompt bool `json:"use_custom_system_prompt"`
+	WebSearchEnabled      bool `json:"web_search_enabled"`
+	// Maximum number of web search results (default: 5)
+	WebSearchMaxResults int `json:"web_search_max_results"`
+	// WebSearchProviderEntity ID (resolved from agent config)
+	WebSearchProviderID string `json:"web_search_provider_id,omitempty"`
+	MultiTurnEnabled    bool   `json:"multi_turn_enabled"`
+	// Number of history turns to keep in context
+	HistoryTurns  int           `json:"history_turns"`
+	SearchTargets SearchTargets `json:"-"` // Pre-computed unified search targets (runtime only)
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
@@ -85,7 +91,8 @@ type SessionAgentConfig struct {
 	AgentModeEnabled bool     `json:"agent_mode_enabled"` // Whether agent mode is enabled for this session
 	WebSearchEnabled bool     `json:"web_search_enabled"` // Whether web search is enabled for this session
 	KnowledgeBases   []string `json:"knowledge_bases"`    // Accessible knowledge base IDs for this session
-	KnowledgeIDs     []string `json:"knowledge_ids"`      // Accessible knowledge IDs (individual documents) for this session
+	// KnowledgeIDs lists individual document IDs accessible in this session.
+	KnowledgeIDs []string `json:"knowledge_ids"`
 }
 
 // Value implements driver.Valuer interface for AgentConfig
@@ -191,13 +198,15 @@ type ToolResult struct {
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
-	ID               string                 `json:"id"`                          // Function call ID from LLM
-	Name             string                 `json:"name"`                        // Tool name
-	Args             map[string]interface{} `json:"args"`                        // Tool arguments
-	Result           *ToolResult            `json:"result"`                      // Execution result (contains Output)
-	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
-	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
-	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
+	ID     string                 `json:"id"`     // Function call ID from LLM
+	Name   string                 `json:"name"`   // Tool name
+	Args   map[string]interface{} `json:"args"`   // Tool arguments
+	Result *ToolResult            `json:"result"` // Execution result (contains Output)
+	// Agent's reflection on this tool call result (if enabled)
+	Reflection string `json:"reflection,omitempty"`
+	Duration   int64  `json:"duration"` // Execution time in milliseconds
+	// Provider-specific tool-call state for replay
+	ProviderMetadata ToolCallMetadata `json:"provider_metadata,omitempty"`
 }
 
 // AgentStep represents one iteration of the ReAct loop

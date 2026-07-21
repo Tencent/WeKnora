@@ -82,13 +82,13 @@ func NewPluginSearchParallel(
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginSearchParallel) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHUNK_SEARCH_PARALLEL}
+func (p *PluginSearchParallel) ActivationEvents() []types.Type {
+	return []types.Type{types.ChunkSearchParallel}
 }
 
 // OnEvent handles parallel search events - runs chunk search and entity search concurrently
 func (p *PluginSearchParallel) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	// Intent-based skip: query-understand step determined KB retrieval is unnecessary
 	if !chatManage.NeedsRetrieval() {
@@ -117,7 +117,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		{
 			Name: "chunk_search",
 			Run: func() *PluginError {
-				err := p.searchPlugin.OnEvent(ctx, types.CHUNK_SEARCH, chunkCM, noop)
+				err := p.searchPlugin.OnEvent(ctx, types.ChunkSearch, chunkCM, noop)
 				pipelineInfo(ctx, "SearchParallel", "chunk_search_done", map[string]interface{}{
 					"result_count": len(chunkCM.SearchResult),
 					"has_error":    err != nil && err != ErrSearchNothing,
@@ -137,7 +137,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 					})
 					return nil
 				}
-				err := p.searchEntityPlugin.OnEvent(ctx, types.ENTITY_SEARCH, entityCM, noop)
+				err := p.searchEntityPlugin.OnEvent(ctx, types.EntitySearch, entityCM, noop)
 				pipelineInfo(ctx, "SearchParallel", "entity_search_done", map[string]interface{}{
 					"result_count": len(entityCM.SearchResult),
 					"has_error":    err != nil && err != ErrSearchNothing,

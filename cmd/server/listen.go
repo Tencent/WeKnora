@@ -21,7 +21,14 @@ func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.
 			if delay > 3*time.Second {
 				delay = 3 * time.Second
 			}
-			logger.Warnf(context.Background(), "Port %s in use, retrying in %v... (%d/%d)", addr, delay, i+1, maxRetries)
+			logger.Warnf(
+				context.Background(),
+				"Port %s in use, retrying in %v... (%d/%d)",
+				addr,
+				delay,
+				i+1,
+				maxRetries,
+			)
 			time.Sleep(delay)
 		}
 	}

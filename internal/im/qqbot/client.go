@@ -14,6 +14,7 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// Client is an exported type.
 type Client struct {
 	appID        string
 	clientSecret string
@@ -26,6 +27,7 @@ type Client struct {
 	expiresAt   time.Time
 }
 
+// NewClient is an exported function.
 func NewClient(appID, clientSecret, apiBaseURL, gatewayURL string) (*Client, error) {
 	appID = strings.TrimSpace(appID)
 	clientSecret = strings.TrimSpace(clientSecret)
@@ -58,6 +60,7 @@ func NewClient(appID, clientSecret, apiBaseURL, gatewayURL string) (*Client, err
 	}, nil
 }
 
+// GatewayURL implements the required interface method.
 func (c *Client) GatewayURL(ctx context.Context) (string, error) {
 	if c.gatewayURL != "" {
 		return c.gatewayURL, nil
@@ -84,7 +87,10 @@ func validateHTTPAPIBaseURL(raw string) error {
 		return fmt.Errorf("invalid qqbot api_base_url: must use http or https")
 	}
 	if err := secutils.ValidateURLForSSRF(raw); err != nil {
-		return fmt.Errorf("invalid qqbot api_base_url: %w (for private deployments, add the hostname to SSRF_WHITELIST)", err)
+		return fmt.Errorf(
+			"invalid qqbot api_base_url: %w (for private deployments, add the hostname to SSRF_WHITELIST)",
+			err,
+		)
 	}
 	return nil
 }
@@ -111,11 +117,13 @@ func validateGatewayURL(raw string) error {
 	return nil
 }
 
+// SendC2CMessage implements the required interface method.
 func (c *Client) SendC2CMessage(ctx context.Context, openID, content, msgID string) error {
 	path := fmt.Sprintf("/v2/users/%s/messages", openID)
 	return c.sendText(ctx, path, content, msgID)
 }
 
+// SendGroupMessage implements the required interface method.
 func (c *Client) SendGroupMessage(ctx context.Context, groupOpenID, content, msgID string) error {
 	path := fmt.Sprintf("/v2/groups/%s/messages", groupOpenID)
 	return c.sendText(ctx, path, content, msgID)
@@ -160,7 +168,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("qqbot api %s %s failed: %s", method, url, resp.Status)
@@ -174,6 +182,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 	return nil
 }
 
+// AccessToken implements the required interface method.
 func (c *Client) AccessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	if c.accessToken != "" && time.Until(c.expiresAt) > time.Minute {

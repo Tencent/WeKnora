@@ -71,7 +71,15 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 func TestCreate_HintsWhenNoEmbeddingModel(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
-	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NoError(
+		t,
+		runCreate(
+			context.Background(),
+			&CreateOptions{Name: "n"},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		),
+	)
 	var env struct {
 		Meta struct {
 			Hint string `json:"hint"`
@@ -85,7 +93,15 @@ func TestCreate_HintsWhenNoEmbeddingModel(t *testing.T) {
 func TestCreate_NoHintWhenEmbeddingModelBound(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n", EmbeddingModelID: "emb_1"}}
-	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n", EmbeddingModel: "emb_1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NoError(
+		t,
+		runCreate(
+			context.Background(),
+			&CreateOptions{Name: "n", EmbeddingModel: "emb_1"},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		),
+	)
 	var env struct {
 		Meta *struct {
 			Hint string `json:"hint"`
@@ -125,7 +141,12 @@ func TestCreate_NameRequired(t *testing.T) {
 func TestCreate_NameWhitespaceOnly(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(
+		context.Background(),
+		&CreateOptions{Name: "   "},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+	)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -136,7 +157,12 @@ func TestCreate_NameWhitespaceOnly(t *testing.T) {
 func TestCreate_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 500: internal")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(
+		context.Background(),
+		&CreateOptions{Name: "x"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+	)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -147,7 +173,12 @@ func TestCreate_HTTPError_500(t *testing.T) {
 func TestCreate_HTTPError_409Conflict(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 409: name exists")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(
+		context.Background(),
+		&CreateOptions{Name: "dup"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+	)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error

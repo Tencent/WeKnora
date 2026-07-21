@@ -31,7 +31,7 @@ const (
 // 关键字段：Status 应为 "Success" 或 "Publish Timeout"（后者表示数据已写入但发布事务超时，
 // 仍视为成功）。其它状态都视为失败。
 type streamLoadResponse struct {
-	TxnId                  int64  `json:"TxnId"`
+	TxnID                  int64  `json:"TxnId"`
 	Label                  string `json:"Label"`
 	Status                 string `json:"Status"`
 	Message                string `json:"Message"`
@@ -122,7 +122,7 @@ func (r *dorisRepository) streamLoadOnce(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("stream load HTTP: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -220,7 +220,7 @@ func (r *dorisRepository) BatchUpdateChunkEnabledStatus(ctx context.Context,
 		chunkIDs = append(chunkIDs, id)
 	}
 
-	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *VectorEmbedding) bool {
 		enabled, ok := chunkStatusMap[row.ChunkID]
 		if !ok || row.IsEnabled == enabled {
 			return false
@@ -250,7 +250,7 @@ func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
 		chunkIDs = append(chunkIDs, id)
 	}
 
-	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *VectorEmbedding) bool {
 		tagID, ok := chunkTagMap[row.ChunkID]
 		if !ok || row.TagID == tagID {
 			return false
@@ -262,7 +262,7 @@ func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
 
 func (r *dorisRepository) rewriteChunkRows(ctx context.Context,
 	chunkIDs []string,
-	mutate func(*DorisVectorEmbedding) bool,
+	mutate func(*VectorEmbedding) bool,
 	action string,
 ) error {
 	if len(chunkIDs) == 0 {
@@ -280,7 +280,7 @@ func (r *dorisRepository) rewriteChunkRows(ctx context.Context,
 			return fmt.Errorf("load chunk rows from %s: %w", table, err)
 		}
 
-		updated := make([]*DorisVectorEmbedding, 0, len(rows))
+		updated := make([]*VectorEmbedding, 0, len(rows))
 		for _, row := range rows {
 			if !mutate(row) {
 				continue
@@ -368,7 +368,7 @@ func (r *dorisRepository) batchUpdateChunkTagIDLegacy(ctx context.Context,
 
 func (r *dorisRepository) loadRowsByChunkIDs(ctx context.Context,
 	table string, chunkIDs []string,
-) ([]*DorisVectorEmbedding, error) {
+) ([]*VectorEmbedding, error) {
 	if len(chunkIDs) == 0 {
 		return nil, nil
 	}

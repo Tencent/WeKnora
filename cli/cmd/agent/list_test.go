@@ -176,7 +176,12 @@ func TestList_NoTruncation_OmitsHasMore(t *testing.T) {
 
 func TestList_Limit_Zero_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: 0}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &fakeListSvc{items: makeAgents(7)})
+	err := runList(
+		context.Background(),
+		&ListOptions{Limit: 0},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		&fakeListSvc{items: makeAgents(7)},
+	)
 	if err == nil {
 		t.Fatal("expected error for --limit 0")
 	}
@@ -191,7 +196,12 @@ func TestList_Limit_Zero_Rejected(t *testing.T) {
 
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: makeAgents(2)})
+	err := runList(
+		context.Background(),
+		&ListOptions{Limit: -1},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		&fakeListSvc{items: makeAgents(2)},
+	)
 	if err == nil {
 		t.Fatal("expected error for negative --limit")
 	}

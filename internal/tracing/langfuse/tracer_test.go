@@ -247,10 +247,18 @@ func TestStartGeneration_AutoRootExported(t *testing.T) {
 		t.Fatal("generation span was not exported")
 	}
 	if generation.SpanContext.TraceID() != root.SpanContext.TraceID() {
-		t.Errorf("generation trace id %s != root trace id %s", generation.SpanContext.TraceID(), root.SpanContext.TraceID())
+		t.Errorf(
+			"generation trace id %s != root trace id %s",
+			generation.SpanContext.TraceID(),
+			root.SpanContext.TraceID(),
+		)
 	}
 	if generation.Parent.SpanID() != root.SpanContext.SpanID() {
-		t.Errorf("generation parent %s != root span %s (dangling parent)", generation.Parent.SpanID(), root.SpanContext.SpanID())
+		t.Errorf(
+			"generation parent %s != root span %s (dangling parent)",
+			generation.Parent.SpanID(),
+			root.SpanContext.SpanID(),
+		)
 	}
 }
 

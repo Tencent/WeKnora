@@ -38,12 +38,19 @@ func (s *sessionService) resolveKnowledgeBases(
 		// When using a shared agent, restrict @mentions to the agent's allowed KB scope
 		// to prevent users from injecting KB/knowledge IDs outside the agent's configured range.
 		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
-			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
+			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(
+				ctx,
+				customAgent,
+				req.Session.TenantID,
+				kbIDs,
+				knowledgeIDs,
+			)
 			req.TagScopes = s.restrictTagScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.TagScopes)
 		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
 		knowledgeIDs = nil
+		//nolint:lll
 		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else if customAgent != nil {
 		kbIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, req.Session.TenantID)
@@ -79,7 +86,11 @@ func (s *sessionService) restrictTagScopesToAgentScope(
 			filtered = append(filtered, scope)
 			continue
 		}
-		logger.Warnf(ctx, "Blocking @mentioned tag scope for KB %s: not in shared agent's allowed scope", scope.KnowledgeBaseID)
+		logger.Warnf(
+			ctx,
+			"Blocking @mentioned tag scope for KB %s: not in shared agent's allowed scope",
+			scope.KnowledgeBaseID,
+		)
 	}
 	return filtered
 }
@@ -109,7 +120,11 @@ func (s *sessionService) resolveChatModelID(
 		}
 		model, err := s.modelService.GetModelByID(ctx, configuredModelID)
 		if err != nil || model == nil || model.Type != types.ModelTypeKnowledgeQA {
-			return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredModelID, customAgent.ID)
+			return "", fmt.Errorf(
+				"configured chat model %s is unavailable for agent %s",
+				configuredModelID,
+				customAgent.ID,
+			)
 		}
 	}
 

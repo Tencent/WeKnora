@@ -16,11 +16,11 @@ type fakeChat struct{ id string }
 func (f *fakeChat) GetModelName() string { return f.id }
 func (f *fakeChat) GetModelID() string   { return f.id }
 
-func (f *fakeChat) Chat(ctx context.Context, _ []Message, _ *ChatOptions) (*types.ChatResponse, error) {
+func (f *fakeChat) Chat(_ context.Context, _ []Message, _ *Options) (*types.ChatResponse, error) {
 	return &types.ChatResponse{}, nil
 }
 
-func (f *fakeChat) ChatStream(ctx context.Context, _ []Message, _ *ChatOptions) (<-chan types.StreamResponse, error) {
+func (f *fakeChat) ChatStream(ctx context.Context, _ []Message, _ *Options) (<-chan types.StreamResponse, error) {
 	ch := make(chan types.StreamResponse)
 	go func() {
 		defer close(ch)

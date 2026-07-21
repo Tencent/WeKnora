@@ -23,7 +23,7 @@ import (
 func (s *sessionService) KnowledgeQA(
 	ctx context.Context,
 	req *types.QARequest,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) error {
 	logger.Infof(
 		ctx,
@@ -143,7 +143,7 @@ func (s *sessionService) KnowledgeQA(
 			QuotedContext:    req.QuotedContext,
 		},
 		PipelineContext: types.PipelineContext{
-			EventBus:      eventBus.AsEventBusInterface(),
+			Bus:           eventBus.AsBusInterface(),
 			MessageID:     req.AssistantMessageID,
 			UserMessageID: req.UserMessageID,
 		},
@@ -161,7 +161,7 @@ func (s *sessionService) KnowledgeQA(
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
 
-	var pipeline []types.EventType
+	var pipeline []types.Type
 	if !needsRAG {
 		// Pure chat — no retrieval needed.
 		userContent := req.Query
@@ -178,22 +178,22 @@ func (s *sessionService) KnowledgeQA(
 		chatManage.UserContent = userContent
 
 		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.CHAT_COMPLETION_STREAM).
+			AddIf(hasHistory, types.LoadHistory).
+			Add(types.ChatCompletionStream).
 			Build()
 	} else {
 		// RAG — dynamically assemble based on feature flags.
 		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.QUERY_UNDERSTAND).
-			Add(types.CHUNK_SEARCH_PARALLEL).
-			Add(types.CHUNK_RERANK).
-			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
-			Add(types.CHUNK_MERGE).
-			Add(types.FILTER_TOP_K).
-			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
-			Add(types.INTO_CHAT_MESSAGE).
-			Add(types.CHAT_COMPLETION_STREAM).
+			AddIf(hasHistory, types.LoadHistory).
+			Add(types.QueryUnderstand).
+			Add(types.ChunkSearchParallel).
+			Add(types.ChunkRerank).
+			AddIf(req.WebSearchEnabled, types.WebFetch).
+			Add(types.ChunkMerge).
+			Add(types.FilterTopK).
+			AddIf(chatManage.DataAnalysisEnabled, types.DataAnalysis).
+			Add(types.IntoChatMessage).
+			Add(types.ChatCompletionStream).
 			Build()
 	}
 
@@ -233,7 +233,7 @@ func (s *sessionService) KnowledgeQA(
 // 4. First knowledge base's SummaryModelID
 func (s *sessionService) selectChatModelID(
 	ctx context.Context,
-	session *types.Session,
+	_ *types.Session,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 ) (string, error) {
@@ -344,7 +344,11 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 			if capFilter.IsEmpty() {
 				return true
 			}
-			return tools.KBSatisfiesAgentRequirements(kb.Capabilities(), customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
+			return tools.KBSatisfiesAgentRequirements(
+				kb.Capabilities(),
+				customAgent.Config.AgentMode,
+				customAgent.Config.AllowedTools,
+			)
 		}
 
 		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
@@ -406,7 +410,11 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
 		return kbIDs
 	case "selected":
-		logger.Infof(ctx, "KBSelectionMode=selected: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
+		logger.Infof(
+			ctx,
+			"KBSelectionMode=selected: using %d configured knowledge bases",
+			len(customAgent.Config.KnowledgeBases),
+		)
 		return customAgent.Config.KnowledgeBases
 	case "none":
 		logger.Infof(ctx, "KBSelectionMode=none: no knowledge bases configured")
@@ -414,7 +422,11 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	default:
 		// Default to "selected" behavior for backward compatibility
 		if len(customAgent.Config.KnowledgeBases) > 0 {
-			logger.Infof(ctx, "KBSelectionMode not set: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
+			logger.Infof(
+				ctx,
+				"KBSelectionMode not set: using %d configured knowledge bases",
+				len(customAgent.Config.KnowledgeBases),
+			)
 		}
 		return customAgent.Config.KnowledgeBases
 	}
@@ -424,8 +436,9 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 // tenantID is the retrieval scope: session.TenantID or effective tenant from shared agent (set by handler).
 // This is called once at the request entry point to avoid repeated queries later in the pipeline.
 // Logic:
-//   - For each knowledgeBaseID: resolve actual TenantID (own, org-shared, or in retrieval-tenant scope for shared agent)
-//   - For each knowledgeID: find its knowledgeBaseID; if the KB is already in the list, skip; otherwise add SearchTargetTypeKnowledge
+// - For each knowledgeBaseID: resolve actual TenantID (own, org-shared, or in retrieval-tenant scope for shared agent)
+// - For each knowledgeID: find its knowledgeBaseID; if the KB is already in the list, skip; otherwise add
+// SearchTargetTypeKnowledge
 func (s *sessionService) buildSearchTargets(
 	ctx context.Context,
 	tenantID uint64,
@@ -556,7 +569,11 @@ func (s *sessionService) buildSearchTargets(
 
 		useDocumentTagResolution := kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ
 		if kb == nil {
-			logger.Warnf(ctx, "Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution", kbID)
+			logger.Warnf(
+				ctx,
+				"Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution",
+				kbID,
+			)
 		}
 		if useDocumentTagResolution {
 			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
@@ -656,7 +673,7 @@ func intersectStrings(left []string, right []string) []string {
 
 // KnowledgeQAByEvent processes knowledge QA through a series of events in the pipeline
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
-	chatManage *types.ChatManage, eventList []types.EventType,
+	chatManage *types.ChatManage, eventList []types.Type,
 ) error {
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
@@ -690,7 +707,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		// visually exceeds its parent.
 		stageCtx := ctx
 		var stageSpan *langfuse.Span
-		if eventType != types.CHAT_COMPLETION_STREAM {
+		if eventType != types.ChatCompletionStream {
 			stageCtx, stageSpan = langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 				Name: "pipeline." + string(eventType),
 				Metadata: map[string]interface{}{
@@ -699,7 +716,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 				},
 			})
 		}
-		if eventType == types.QUERY_UNDERSTAND && chatpipeline.ShouldEmitQueryUnderstandProgress(chatManage) {
+		if eventType == types.QueryUnderstand && chatpipeline.ShouldEmitQueryUnderstandProgress(chatManage) {
 			understandStart = stageStart
 			understandProgress = chatpipeline.BeginQueryUnderstandProgress(stageCtx, chatManage)
 		}
@@ -711,11 +728,11 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		// them while the connection is still open. Previously references were
 		// emitted after the pipeline returned — by then the `complete` event had
 		// already closed the stream, so the frontend only saw citations on refresh.
-		if eventType == types.CHAT_COMPLETION_STREAM {
+		if eventType == types.ChatCompletionStream {
 			emitKnowledgeReferencesEvent(ctx, chatManage)
 		}
 		err := s.eventManager.Trigger(stageCtx, eventType, chatManage)
-		if understandProgress != nil && eventType == types.QUERY_UNDERSTAND {
+		if understandProgress != nil && eventType == types.QueryUnderstand {
 			chatpipeline.EndQueryUnderstandProgress(stageCtx, chatManage, understandProgress, understandStart, err)
 			understandProgress = nil
 		}
@@ -801,8 +818,14 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
-	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
-		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), query)
+	logger.Infof(
+		ctx,
+		"Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		len(tagScopes),
+		query,
+	)
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
@@ -873,11 +896,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
-	searchEvents := []types.EventType{
-		types.CHUNK_SEARCH, // Vector search
-		types.CHUNK_RERANK, // Rerank search results
-		types.CHUNK_MERGE,  // Merge search results
-		types.FILTER_TOP_K, // Filter top K results
+	searchEvents := []types.Type{
+		types.ChunkSearch, // Vector search
+		types.ChunkRerank, // Rerank search results
+		types.ChunkMerge,  // Merge search results
+		types.FilterTopK,  // Filter top K results
 	}
 
 	logger.Infof(ctx, "Trigger search event list: %v", searchEvents)
@@ -948,9 +971,9 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 		return
 	}
 
-	// Check if EventBus is available for streaming
-	if chatManage.EventBus == nil {
-		logger.Warnf(ctx, "EventBus not available for streaming fallback, falling back to fixed response")
+	// Check if Bus is available for streaming
+	if chatManage.Bus == nil {
+		logger.Warnf(ctx, "Bus not available for streaming fallback, falling back to fixed response")
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}
@@ -965,7 +988,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 
 	// Prepare chat options
 	thinking := false
-	opt := &chat.ChatOptions{
+	opt := &chat.Options{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		MaxCompletionTokens: chatManage.SummaryConfig.MaxCompletionTokens,
 		Thinking:            &thinking,
@@ -998,9 +1021,17 @@ func prepareFallbackMessages(
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
 	refs := llmreference.NewRegistry(citationsEnabled)
 	if len(messages) > 0 && messages[0].Role == "system" {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+		messages[0].Content = strings.TrimRight(
+			messages[0].Content,
+			" \t\r\n",
+		) + llmreference.ProtocolPrompt(
+			citationsEnabled,
+		)
 	} else {
-		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled))}}, messages...)
+		messages = append([]chat.Message{{
+			Role:    "system",
+			Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled)),
+		}}, messages...)
 	}
 	return refs.EncodeMessages(messages), refs
 }
@@ -1138,7 +1169,7 @@ func (s *sessionService) consumeFallbackStream(
 	sourceRefs *llmreference.Registry,
 ) {
 	fallbackID := generateEventID("fallback")
-	eventBus := chatManage.EventBus
+	eventBus := chatManage.Bus
 	var finalContent string
 	streamCompleted := false
 	refExpander := llmreference.NewStreamExpander(sourceRefs)
@@ -1153,7 +1184,7 @@ func (s *sessionService) consumeFallbackStream(
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
-				Type:      types.EventType(event.EventAgentFinalAnswer),
+				Type:      types.Type(event.EventAgentFinalAnswer),
 				SessionID: chatManage.SessionID,
 				Data: event.AgentFinalAnswerData{
 					Content:    response.Content,
@@ -1187,13 +1218,13 @@ func (s *sessionService) consumeFallbackStream(
 // Must run before CHAT_COMPLETION_STREAM so the event arrives while the
 // connection is still open (complete closes the stream).
 func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatManage) {
-	if chatManage == nil || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
+	if chatManage == nil || chatManage.Bus == nil || len(chatManage.MergeResult) == 0 {
 		return
 	}
 	logger.Infof(ctx, "Emitting references event with %d results (pre-answer)", len(chatManage.MergeResult))
-	if err := chatManage.EventBus.Emit(ctx, types.Event{
+	if err := chatManage.Bus.Emit(ctx, types.Event{
 		ID:        generateEventID("references"),
-		Type:      types.EventType(event.EventAgentReferences),
+		Type:      types.Type(event.EventAgentReferences),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentReferencesData{
 			References: chatManage.MergeResult,
@@ -1205,7 +1236,7 @@ func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatMan
 
 // emitFallbackAnswer emits fallback answer event
 func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *types.ChatManage, content string) {
-	if chatManage.EventBus == nil {
+	if chatManage.Bus == nil {
 		return
 	}
 	if !chatManage.CitationsEnabled() {
@@ -1213,9 +1244,9 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 	}
 
 	fallbackID := generateEventID("fallback")
-	if err := chatManage.EventBus.Emit(ctx, types.Event{
+	if err := chatManage.Bus.Emit(ctx, types.Event{
 		ID:        fallbackID,
-		Type:      types.EventType(event.EventAgentFinalAnswer),
+		Type:      types.Type(event.EventAgentFinalAnswer),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentFinalAnswerData{
 			Content:    content,
@@ -1238,7 +1269,8 @@ func (s *sessionService) resolveWebSearchProviderID(ctx context.Context, req *ty
 	}
 	// 2. Tenant default
 	if s.webSearchProviderRepo != nil {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantID); err == nil && defaultProvider != nil {
+		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantID); err == nil &&
+			defaultProvider != nil {
 			return defaultProvider.ID
 		}
 	}

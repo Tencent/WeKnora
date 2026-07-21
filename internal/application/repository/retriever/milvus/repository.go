@@ -36,14 +36,17 @@ const (
 	fieldContentSparse    = "content_sparse"
 )
 
-var (
-	allFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
-		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
-)
+var allFields = []string{
+	fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
+	fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding,
+}
 
 // NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
-func NewMilvusRetrieveEngineRepository(client *client.Client, indexCfg *types.IndexConfig) interfaces.RetrieveEngineRepository {
+func NewMilvusRetrieveEngineRepository(
+	client *client.Client,
+	indexCfg *types.IndexConfig,
+) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Milvus] Initializing Milvus retriever engine repository")
 
@@ -166,12 +169,21 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 
 		indexOpts := make([]client.CreateIndexOption, 0)
 		// hnsw index for embedding field
-		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(m.metricType, 16, 128)))
-		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldContentSparse, index.NewAutoIndex(entity.BM25)))
+		indexOpts = append(
+			indexOpts,
+			client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(m.metricType, 16, 128)),
+		)
+		indexOpts = append(
+			indexOpts,
+			client.NewCreateIndexOption(collectionName, fieldContentSparse, index.NewAutoIndex(entity.BM25)),
+		)
 		// Create payload indexes for filtering
 		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled}
 		for _, fieldName := range indexFields {
-			indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldName, index.NewAutoIndex(entity.IP)))
+			indexOpts = append(
+				indexOpts,
+				client.NewCreateIndexOption(collectionName, fieldName, index.NewAutoIndex(entity.IP)),
+			)
 		}
 
 		// Create collection
@@ -221,7 +233,7 @@ func (m *milvusRepository) EstimateStorageSize(ctx context.Context,
 ) int64 {
 	var totalStorageSize int64
 	for _, embedding := range indexInfoList {
-		embeddingDB := toMilvusVectorEmbedding(embedding, params)
+		embeddingDB := toVectorEmbedding(embedding, params)
 		totalStorageSize += m.calculateStorageSize(embeddingDB)
 	}
 	logger.GetLogger(ctx).Infof(
@@ -238,7 +250,7 @@ func (m *milvusRepository) Save(ctx context.Context,
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Milvus] Saving index for chunk ID: %s", embedding.ChunkID)
 
-	embeddingDB := toMilvusVectorEmbedding(embedding, additionalParams)
+	embeddingDB := toVectorEmbedding(embedding, additionalParams)
 	if len(embeddingDB.Embedding) == 0 {
 		err := fmt.Errorf("empty embedding vector for chunk ID: %s", embedding.ChunkID)
 		log.Errorf("[Milvus] %v", err)
@@ -253,7 +265,7 @@ func (m *milvusRepository) Save(ctx context.Context,
 	collectionName := m.getCollectionName(dimension)
 
 	embeddingDB.ID = uuid.New().String()
-	opts := createUpsert(collectionName, []*MilvusVectorEmbedding{embeddingDB})
+	opts := createUpsert(collectionName, []*VectorEmbedding{embeddingDB})
 
 	_, err := m.client.Upsert(ctx, opts)
 	if err != nil {
@@ -281,7 +293,7 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 	embeddingsByDimension := make(map[int][]*types.IndexInfo)
 
 	for _, embedding := range embeddingList {
-		embeddingDB := toMilvusVectorEmbedding(embedding, additionalParams)
+		embeddingDB := toVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
 			log.Warnf("[Milvus] Skipping empty embedding for chunk ID: %s", embedding.ChunkID)
 			continue
@@ -306,10 +318,10 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 
 		collectionName := m.getCollectionName(dimension)
 		n := len(embeddings)
-		embeddingDBList := make([]*MilvusVectorEmbedding, 0, n)
+		embeddingDBList := make([]*VectorEmbedding, 0, n)
 
 		for _, embedding := range embeddings {
-			embeddingDB := toMilvusVectorEmbedding(embedding, additionalParams)
+			embeddingDB := toVectorEmbedding(embedding, additionalParams)
 			embeddingDB.ID = uuid.New().String()
 			embeddingDBList = append(embeddingDBList, embeddingDB)
 		}
@@ -328,7 +340,12 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 }
 
 // DeleteByChunkIDList removes points from the collection based on chunk IDs
-func (m *milvusRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
+func (m *milvusRepository) DeleteByChunkIDList(
+	ctx context.Context,
+	chunkIDList []string,
+	dimension int,
+	_ string,
+) error {
 	log := logger.GetLogger(ctx)
 	if len(chunkIDList) == 0 {
 		log.Warn("[Milvus] Empty chunk ID list provided for deletion, skipping")
@@ -352,7 +369,7 @@ func (m *milvusRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 
 // DeleteByKnowledgeIDList removes points from the collection based on knowledge IDs
 func (m *milvusRepository) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int, knowledgeType string,
+	knowledgeIDList []string, dimension int, _ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(knowledgeIDList) == 0 {
@@ -377,7 +394,7 @@ func (m *milvusRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 // DeleteBySourceIDList removes points from the collection based on source IDs
 func (m *milvusRepository) DeleteBySourceIDList(ctx context.Context,
-	sourceIDList []string, dimension int, knowledgeType string,
+	sourceIDList []string, dimension int, _ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(sourceIDList) == 0 {
@@ -467,10 +484,10 @@ func (m *milvusRepository) updateChunkEnabledStatusInCollection(
 		return err
 	}
 
-	upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+	upsertEmbeddings := make([]*VectorEmbedding, 0, len(embeddings))
 	for _, embedding := range embeddings {
 		embedding.IsEnabled = enabled
-		upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
+		upsertEmbeddings = append(upsertEmbeddings, &embedding.VectorEmbedding)
 	}
 	if len(upsertEmbeddings) == 0 {
 		return nil
@@ -483,8 +500,13 @@ func (m *milvusRepository) updateChunkEnabledStatusInCollection(
 	return nil
 }
 
-func (m *milvusRepository) searchByFilter(ctx context.Context, collectionName string, filter *universalFilterCondition, limit, offset *int) ([]*MilvusVectorEmbeddingWithScore, int, error) {
-	params, err := m.filter.Convert(filter)
+func (m *milvusRepository) searchByFilter(
+	ctx context.Context,
+	collectionName string,
+	filter *universalFilterCondition,
+	limit, offset *int,
+) ([]*VectorEmbeddingWithScore, int, error) {
+	params, err := m.Convert(filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -554,10 +576,10 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 				log.Warnf("[Milvus] Failed to search chunks in %s: %v", collectionName, err)
 				continue
 			}
-			upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+			upsertEmbeddings := make([]*VectorEmbedding, 0, len(embeddings))
 			for _, embedding := range embeddings {
 				embedding.TagID = tagID
-				upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
+				upsertEmbeddings = append(upsertEmbeddings, &embedding.VectorEmbedding)
 			}
 			if len(upsertEmbeddings) > 0 {
 				req := createUpsert(collectionName, upsertEmbeddings)
@@ -620,7 +642,7 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 	if len(filters) == 0 {
 		return "", nil, nil
 	}
-	f, err := m.filter.Convert(&universalFilterCondition{
+	f, err := m.Convert(&universalFilterCondition{
 		Operator: operatorAnd,
 		Value:    filters,
 	})
@@ -683,7 +705,11 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		ann.WithRadius(params.Threshold)
 		sp = &ann
 	}
-	searchOption := client.NewSearchOption(collectionName, params.TopK, []entity.Vector{entity.FloatVector(params.Embedding)})
+	searchOption := client.NewSearchOption(
+		collectionName,
+		params.TopK,
+		[]entity.Vector{entity.FloatVector(params.Embedding)},
+	)
 	searchOption.WithANNSField(fieldEmbedding)
 	if sp != nil {
 		searchOption.WithAnnParam(sp)
@@ -708,7 +734,7 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 	var results []*types.IndexWithScore
 	for i, set := range sets {
 		set.Score = scores[i]
-		results = append(results, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
+		results = append(results, fromVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
 	}
 	if len(results) == 0 {
 		log.Warnf("[Milvus] No vector matches found that meet threshold %.4f", params.Threshold)
@@ -769,7 +795,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 		}
 		for _, set := range sets {
 			set.Score = 1.0
-			allResults = append(allResults, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
+			allResults = append(allResults, fromVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
 		}
 	}
 
@@ -794,7 +820,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
-	knowledgeType string,
+	_ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof(
@@ -829,7 +855,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 		if len(sourceEmbeddings) == 0 {
 			break
 		}
-		targetEmbeddings := make([]*MilvusVectorEmbedding, 0, len(sourceEmbeddings))
+		targetEmbeddings := make([]*VectorEmbedding, 0, len(sourceEmbeddings))
 		for _, sourceEmbedding := range sourceEmbeddings {
 			sourceChunkID := sourceEmbedding.ChunkID
 			sourceKnowledgeID := sourceEmbedding.KnowledgeID
@@ -854,7 +880,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 			} else {
 				targetSourceID = uuid.New().String()
 			}
-			targetEmbedding := &MilvusVectorEmbedding{
+			targetEmbedding := &VectorEmbedding{
 				ID:              uuid.New().String(),
 				Content:         sourceEmbedding.Content,
 				SourceID:        targetSourceID,
@@ -904,7 +930,7 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 	}
 }
 
-func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding) int64 {
+func (m *milvusRepository) calculateStorageSize(embedding *VectorEmbedding) int64 {
 	// Payload fields
 	payloadSizeBytes := int64(0)
 	payloadSizeBytes += int64(len(embedding.Content))         // content string
@@ -915,8 +941,8 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 	payloadSizeBytes += 8                                     // source_type int64
 
 	// Vector storage and index
-	var vectorSizeBytes int64 = 0
-	var indexBytes int64 = 0
+	var vectorSizeBytes int64
+	var indexBytes int64
 	if embedding.Embedding != nil {
 		dimensions := int64(len(embedding.Embedding))
 		vectorSizeBytes = dimensions * 4
@@ -935,9 +961,12 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 	return totalSizeBytes
 }
 
-// toMilvusVectorEmbedding converts IndexInfo to Milvus format
-func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string]interface{}) *MilvusVectorEmbedding {
-	vector := &MilvusVectorEmbedding{
+// toVectorEmbedding converts IndexInfo to Milvus format
+func toVectorEmbedding(
+	embedding *types.IndexInfo,
+	additionalParams map[string]interface{},
+) *VectorEmbedding {
+	vector := &VectorEmbedding{
 		Content:         embedding.Content,
 		SourceID:        embedding.SourceID,
 		SourceType:      int(embedding.SourceType),
@@ -955,9 +984,9 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 	return vector
 }
 
-// fromMilvusVectorEmbedding converts Milvus result to IndexWithScore domain model
-func fromMilvusVectorEmbedding(id string,
-	embedding *MilvusVectorEmbeddingWithScore,
+// fromVectorEmbedding converts Milvus result to IndexWithScore domain model
+func fromVectorEmbedding(id string,
+	embedding *VectorEmbeddingWithScore,
 	matchType types.MatchType,
 ) *types.IndexWithScore {
 	return &types.IndexWithScore{
@@ -974,7 +1003,7 @@ func fromMilvusVectorEmbedding(id string,
 	}
 }
 
-func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) client.UpsertOption {
+func createUpsert(collectionName string, embeddings []*VectorEmbedding) client.UpsertOption {
 	ids := make([]string, 0, len(embeddings))
 	embeddingsData := make([][]float32, 0, len(embeddings))
 	contents := make([]string, 0, len(embeddings))
@@ -1013,8 +1042,8 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 	return opt
 }
 
-func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWithScore, []float64, error) {
-	var results []*MilvusVectorEmbeddingWithScore
+func convertResultSet(resultSet []client.ResultSet) ([]*VectorEmbeddingWithScore, []float64, error) {
+	var results []*VectorEmbeddingWithScore
 	var scores []float64
 	if len(resultSet) == 0 {
 		return results, scores, nil
@@ -1028,9 +1057,9 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 	for _, score := range set.Scores {
 		scores = append(scores, float64(score))
 	}
-	docs := make([]*MilvusVectorEmbeddingWithScore, 0, resultLen)
+	docs := make([]*VectorEmbeddingWithScore, 0, resultLen)
 	for i := 0; i < resultLen; i++ {
-		docs = append(docs, &MilvusVectorEmbeddingWithScore{})
+		docs = append(docs, &VectorEmbeddingWithScore{})
 	}
 	for _, field := range allFields {
 		columns := set.GetColumn(field)

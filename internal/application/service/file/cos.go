@@ -51,13 +51,15 @@ func newCosClient(bucketName, region, secretID, secretKey string) (*cosFileServi
 }
 
 // NewCosFileService creates a new COS file service instance
-func NewCosFileService(bucketName, region, secretId, secretKey, cosPathPrefix string) (interfaces.FileService, error) {
-	return NewCosFileServiceWithTempBucket(bucketName, region, secretId, secretKey, cosPathPrefix, "", "")
+func NewCosFileService(bucketName, region, secretID, secretKey, cosPathPrefix string) (interfaces.FileService, error) {
+	return NewCosFileServiceWithTempBucket(bucketName, region, secretID, secretKey, cosPathPrefix, "", "")
 }
 
 // NewCosFileServiceWithTempBucket creates a new COS file service instance with optional temp bucket
-func NewCosFileServiceWithTempBucket(bucketName, region, secretId, secretKey, cosPathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	svc, err := newCosClient(bucketName, region, secretId, secretKey)
+func NewCosFileServiceWithTempBucket(
+	bucketName, region, secretID, secretKey, cosPathPrefix, tempBucketName, tempRegion string,
+) (interfaces.FileService, error) {
+	svc, err := newCosClient(bucketName, region, secretID, secretKey)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func NewCosFileServiceWithTempBucket(bucketName, region, secretId, secretKey, co
 		}
 		svc.tempClient = cos.NewClient(&cos.BaseURL{BucketURL: tempU}, &http.Client{
 			Transport: &cos.AuthorizationTransport{
-				SecretID:  secretId,
+				SecretID:  secretID,
 				SecretKey: secretKey,
 			},
 		})
@@ -113,7 +115,7 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	_, err = s.client.Object.Put(ctx, objectName, src, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to COS: %w", err)
@@ -122,8 +124,8 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 }
 
 // GetFile retrieves a file from COS storage by its path URL
-func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.ReadCloser, error) {
-	objectName, err := s.parseCosObjectName(filePathUrl)
+func (s *cosFileService) GetFile(ctx context.Context, filePathURL string) (io.ReadCloser, error) {
+	objectName, err := s.parseCosObjectName(filePathURL)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +209,13 @@ func (s *cosFileService) CopyFile(ctx context.Context,
 // SaveBytes saves bytes data to COS
 // If temp is true and temp bucket is configured, saves to temp bucket (with lifecycle auto-expiration)
 // Otherwise saves to main bucket
-func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *cosFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	temp bool,
+) (string, error) {
 	safeName, err := utils.SafeFileName(fileName)
 	if err != nil {
 		return "", fmt.Errorf("invalid file name: %w", err)
@@ -245,7 +253,15 @@ func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 			return "", fmt.Errorf("invalid file path: %w", err)
 		}
 		// Generate presigned URL (valid for 24 hours)
-		presignedURL, err := s.tempClient.Object.GetPresignedURL(ctx, http.MethodGet, objectName, s.tempClient.GetCredential().SecretID, s.tempClient.GetCredential().SecretKey, 24*time.Hour, nil)
+		presignedURL, err := s.tempClient.Object.GetPresignedURL(
+			ctx,
+			http.MethodGet,
+			objectName,
+			s.tempClient.GetCredential().SecretID,
+			s.tempClient.GetCredential().SecretKey,
+			24*time.Hour,
+			nil,
+		)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate presigned URL for temp bucket: %w", err)
 		}
@@ -260,7 +276,15 @@ func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 		return "", fmt.Errorf("invalid file path: %w", err)
 	}
 	// Generate presigned URL (valid for 24 hours)
-	presignedURL, err := s.client.Object.GetPresignedURL(ctx, http.MethodGet, objectName, s.client.GetCredential().SecretID, s.client.GetCredential().SecretKey, 24*time.Hour, nil)
+	presignedURL, err := s.client.Object.GetPresignedURL(
+		ctx,
+		http.MethodGet,
+		objectName,
+		s.client.GetCredential().SecretID,
+		s.client.GetCredential().SecretKey,
+		24*time.Hour,
+		nil,
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
 	}

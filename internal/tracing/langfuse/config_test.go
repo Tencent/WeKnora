@@ -71,7 +71,11 @@ func TestConfigValidate(t *testing.T) {
 		{"disabled is always valid", Config{Enabled: false}, false},
 		{"enabled without host fails", Config{Enabled: true, PublicKey: "pk", SecretKey: "sk"}, true},
 		{"enabled without keys fails", Config{Enabled: true, Host: "https://x"}, true},
-		{"enabled with all fields passes", Config{Enabled: true, Host: "https://x", PublicKey: "pk", SecretKey: "sk"}, false},
+		{
+			"enabled with all fields passes",
+			Config{Enabled: true, Host: "https://x", PublicKey: "pk", SecretKey: "sk"},
+			false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

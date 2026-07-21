@@ -23,11 +23,11 @@ type BuiltinAgentI18n struct {
 
 // BuiltinAgentEntry is one entry in the builtin_agents list in YAML.
 type BuiltinAgentEntry struct {
-	ID        string                       `yaml:"id"`
-	Avatar    string                       `yaml:"avatar"`
-	IsBuiltin bool                         `yaml:"is_builtin"`
-	I18n      map[string]BuiltinAgentI18n  `yaml:"i18n"`
-	Config    CustomAgentConfig            `yaml:"config"`
+	ID        string                      `yaml:"id"`
+	Avatar    string                      `yaml:"avatar"`
+	IsBuiltin bool                        `yaml:"is_builtin"`
+	I18n      map[string]BuiltinAgentI18n `yaml:"i18n"`
+	Config    CustomAgentConfig           `yaml:"config"`
 }
 
 // builtinAgentsFile is the top-level YAML structure.

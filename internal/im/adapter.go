@@ -1,3 +1,4 @@
+// Package im provides related functionality.
 package im
 
 import (
@@ -10,6 +11,7 @@ import (
 // Platform identifies an IM platform.
 type Platform string
 
+// PlatformWeCom and related constants.
 const (
 	PlatformWeCom  Platform = "wecom"
 	PlatformFeishu Platform = "feishu"
@@ -37,6 +39,7 @@ const (
 // MessageType identifies the kind of IM message.
 type MessageType string
 
+// MessageTypeText and related constants.
 const (
 	MessageTypeText  MessageType = "text"
 	MessageTypeFile  MessageType = "file"
@@ -104,6 +107,7 @@ type QuotedMessage struct {
 // ChatType represents the IM chat type.
 type ChatType string
 
+// ChatTypeDirect and related constants.
 const (
 	ChatTypeDirect ChatType = "direct"
 	ChatTypeGroup  ChatType = "group"

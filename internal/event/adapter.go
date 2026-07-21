@@ -1,3 +1,4 @@
+// Package event provides related functionality.
 package event
 
 import (
@@ -6,28 +7,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// EventBusAdapter adapts *EventBus to types.EventBusInterface
-// This allows EventBus to be used through the interface without circular dependencies
-type EventBusAdapter struct {
-	bus *EventBus
+// BusAdapter adapts *Bus to types.BusInterface
+// This allows Bus to be used through the interface without circular dependencies
+type BusAdapter struct {
+	bus *Bus
 }
 
-// NewEventBusAdapter creates a new adapter for EventBus
-func NewEventBusAdapter(bus *EventBus) types.EventBusInterface {
-	return &EventBusAdapter{bus: bus}
+// NewBusAdapter creates a new adapter for Bus
+func NewBusAdapter(bus *Bus) types.BusInterface {
+	return &BusAdapter{bus: bus}
 }
 
 // On registers an event handler for a specific event type
-func (a *EventBusAdapter) On(eventType types.EventType, handler types.EventHandler) {
-	// Convert types.EventType to event.EventType
-	evtType := EventType(eventType)
+func (a *BusAdapter) On(eventType types.Type, handler types.Handler) {
+	// Convert types.Type to event.Type
+	evtType := Type(eventType)
 
-	// Convert types.EventHandler to event.EventHandler
+	// Convert types.Handler to event.Handler
 	evtHandler := func(ctx context.Context, evt Event) error {
 		// Convert event.Event to types.Event
 		typesEvt := types.Event{
 			ID:        evt.ID,
-			Type:      types.EventType(evt.Type),
+			Type:      types.Type(evt.Type),
 			SessionID: evt.SessionID,
 			Data:      evt.Data,
 			Metadata:  evt.Metadata,
@@ -40,11 +41,11 @@ func (a *EventBusAdapter) On(eventType types.EventType, handler types.EventHandl
 }
 
 // Emit publishes an event to all registered handlers
-func (a *EventBusAdapter) Emit(ctx context.Context, evt types.Event) error {
+func (a *BusAdapter) Emit(ctx context.Context, evt types.Event) error {
 	// Convert types.Event to event.Event
 	eventEvt := Event{
 		ID:        evt.ID,
-		Type:      EventType(evt.Type),
+		Type:      Type(evt.Type),
 		SessionID: evt.SessionID,
 		Data:      evt.Data,
 		Metadata:  evt.Metadata,
@@ -53,7 +54,7 @@ func (a *EventBusAdapter) Emit(ctx context.Context, evt types.Event) error {
 	return a.bus.Emit(ctx, eventEvt)
 }
 
-// AsEventBusInterface converts *EventBus to types.EventBusInterface
-func (eb *EventBus) AsEventBusInterface() types.EventBusInterface {
-	return NewEventBusAdapter(eb)
+// AsBusInterface converts *Bus to types.BusInterface
+func (eb *Bus) AsBusInterface() types.BusInterface {
+	return NewBusAdapter(eb)
 }

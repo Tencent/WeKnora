@@ -15,7 +15,11 @@ import (
 // The HTTP adapter is always created (needed for SendReply in both modes);
 // "websocket" mode additionally runs a long-connection event stream.
 func NewFactory(region Region) im.AdapterFactory {
-	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
+	return func(
+		_ context.Context,
+		channel *im.Channel,
+		msgHandler func(context.Context, *im.IncomingMessage) error,
+	) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse %s credentials: %w", region.Platform, err)

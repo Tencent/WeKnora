@@ -99,7 +99,7 @@ func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatComplet
 // （OpenAI o-series / GPT-5 改用 max_completion_tokens、Moonshot 固定温度等）
 // 由对应的 providerAdapter.ShapeRequest 在事后施加，见 provider.go。
 func (c *RemoteAPIChat) BuildChatCompletionRequest(
-	messages []Message, opts *ChatOptions, isStream bool,
+	messages []Message, opts *Options, isStream bool,
 ) openai.ChatCompletionRequest {
 	req := openai.ChatCompletionRequest{
 		Model:    c.modelName,
@@ -234,7 +234,9 @@ func (c *RemoteAPIChat) buildProviderOpenAIRequest(
 	return out, nil
 }
 
-func (c *RemoteAPIChat) shapeProviderRequest(body any, req openai.ChatCompletionRequest, messages []Message) (any, error) {
+func (c *RemoteAPIChat) shapeProviderRequest(
+	body any, req openai.ChatCompletionRequest, messages []Message,
+) (any, error) {
 	if !c.adapter.ForceRawHTTP() {
 		return body, nil
 	}

@@ -134,7 +134,12 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 	requestID := uuid.New().String()
 	headers := utils.Sign(v.appID, v.apiKey, requestID, string(bodyBytes))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.baseURL+weKnoraCloudVLMPath, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		v.baseURL+weKnoraCloudVLMPath,
+		bytes.NewReader(bodyBytes),
+	)
 	if err != nil {
 		return "", fmt.Errorf("weknoracloud VLM: create request: %w", err)
 	}
@@ -154,7 +159,7 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 	if err != nil {
 		return "", fmt.Errorf("weknoracloud VLM: do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -184,5 +189,8 @@ func (v *WeKnoraCloudVLM) effectiveModelName() string {
 	return v.modelName
 }
 
+// GetModelName implements the required interface method.
 func (v *WeKnoraCloudVLM) GetModelName() string { return v.modelName }
-func (v *WeKnoraCloudVLM) GetModelID() string   { return v.modelID }
+
+// GetModelID implements the required interface method.
+func (v *WeKnoraCloudVLM) GetModelID() string { return v.modelID }

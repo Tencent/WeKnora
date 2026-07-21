@@ -20,6 +20,7 @@ import (
 // Values mirror the keys of `types.KBCapabilities`.
 type KBCapability string
 
+// CapVector and related constants.
 const (
 	CapVector  KBCapability = "vector"
 	CapKeyword KBCapability = "keyword"
@@ -208,11 +209,11 @@ func KBSatisfiesAgentRequirements(caps types.KBCapabilities, agentMode string, a
 	return false
 }
 
-// ToolsConsumeFiles reports whether any tool in the allowed-tools list can
+// ConsumeFiles reports whether any tool in the allowed-tools list can
 // use user-provided file references. Used to gate the `@file` listing in
 // the chat input (and potentially SearchKnowledge defensively on the
 // backend). An empty allowed-tools list is treated as "unknown → permissive".
-func ToolsConsumeFiles(allowedTools []string) bool {
+func ConsumeFiles(allowedTools []string) bool {
 	if len(allowedTools) == 0 {
 		return true
 	}

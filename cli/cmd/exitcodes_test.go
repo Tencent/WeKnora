@@ -95,5 +95,10 @@ func TestExitCodes_HelpOutput(t *testing.T) {
 	require.NoError(t, root.Execute())
 
 	got := out.String()
-	assert.Contains(t, got, "Exit codes and the agent action for each", "help output must contain the Long description header")
+	assert.Contains(
+		t,
+		got,
+		"Exit codes and the agent action for each",
+		"help output must contain the Long description header",
+	)
 }

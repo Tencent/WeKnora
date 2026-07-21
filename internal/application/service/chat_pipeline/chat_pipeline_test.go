@@ -11,13 +11,13 @@ import (
 // Define a test Plugin implementation
 type testPlugin struct {
 	name          string
-	events        []types.EventType
+	events        []types.Type
 	shouldError   bool
 	errorToReturn *PluginError
 }
 
-func (p *testPlugin) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+func (p *testPlugin) OnEvent(_ context.Context,
+	_ types.Type, _ *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	if p.shouldError {
 		return p.errorToReturn
@@ -28,7 +28,7 @@ func (p *testPlugin) OnEvent(ctx context.Context,
 	return err
 }
 
-func (p *testPlugin) ActivationEvents() []types.EventType {
+func (p *testPlugin) ActivationEvents() []types.Type {
 	return p.events
 }
 
@@ -36,7 +36,7 @@ func TestTrigger(t *testing.T) {
 	// Prepare test data
 	ctx := context.Background()
 	chatManage := &types.ChatManage{}
-	testEvent := types.EventType("test_event")
+	testEvent := types.Type("test_event")
 
 	// Test scenario 1: No plugins registered
 	t.Run("NoPluginsRegistered", func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTrigger(t *testing.T) {
 		manager := &EventManager{}
 		plugin := &testPlugin{
 			name:   "test_plugin",
-			events: []types.EventType{testEvent},
+			events: []types.Type{testEvent},
 		}
 		manager.Register(plugin)
 
@@ -67,11 +67,11 @@ func TestTrigger(t *testing.T) {
 		manager := &EventManager{}
 		plugin1 := &testPlugin{
 			name:   "plugin1",
-			events: []types.EventType{testEvent},
+			events: []types.Type{testEvent},
 		}
 		plugin2 := &testPlugin{
 			name:   "plugin2",
-			events: []types.EventType{testEvent},
+			events: []types.Type{testEvent},
 		}
 		manager.Register(plugin1)
 		manager.Register(plugin2)
@@ -88,7 +88,7 @@ func TestTrigger(t *testing.T) {
 		expectedErr := &PluginError{Description: "test error"}
 		plugin := &testPlugin{
 			name:          "error_plugin",
-			events:        []types.EventType{testEvent},
+			events:        []types.Type{testEvent},
 			shouldError:   true,
 			errorToReturn: expectedErr,
 		}
@@ -106,11 +106,11 @@ func TestTrigger(t *testing.T) {
 		expectedErr := &PluginError{Description: "test error"}
 		plugin1 := &testPlugin{
 			name:   "plugin1",
-			events: []types.EventType{testEvent},
+			events: []types.Type{testEvent},
 		}
 		plugin2 := &testPlugin{
 			name:          "plugin2",
-			events:        []types.EventType{testEvent},
+			events:        []types.Type{testEvent},
 			shouldError:   true,
 			errorToReturn: expectedErr,
 		}

@@ -6,7 +6,9 @@ import (
 	"strings"
 )
 
+// PrincipalAPITenant and related constants.
 const (
+	// PrincipalWebUser identifies an authenticated WeKnora web user.
 	PrincipalWebUser         = "web_user"
 	PrincipalAPITenant       = "api_tenant"
 	PrincipalAPIExternalUser = "api_external_user"
@@ -33,6 +35,7 @@ type Principal struct {
 	ID   string
 }
 
+// Normalize trims whitespace from the principal type and ID.
 func (p Principal) Normalize() Principal {
 	return Principal{
 		Type: strings.TrimSpace(p.Type),
@@ -40,11 +43,13 @@ func (p Principal) Normalize() Principal {
 	}
 }
 
+// Valid reports whether the principal has a non-empty type and ID.
 func (p Principal) Valid() bool {
 	p = p.Normalize()
 	return p.Type != "" && p.ID != ""
 }
 
+// StorageID returns the canonical persisted principal key.
 func (p Principal) StorageID() string {
 	p = p.Normalize()
 	if !p.Valid() {
@@ -53,6 +58,7 @@ func (p Principal) StorageID() string {
 	return p.Type + ":" + p.ID
 }
 
+// WithPrincipal stores the caller principal on the context.
 func WithPrincipal(ctx context.Context, principal Principal) context.Context {
 	principal = principal.Normalize()
 	if !principal.Valid() {
@@ -61,6 +67,7 @@ func WithPrincipal(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, PrincipalContextKey, principal)
 }
 
+// PrincipalFromContext reads the caller principal from the context.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	if ctx == nil {
 		return Principal{}, false
@@ -74,6 +81,7 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return Principal{}, false
 }
 
+// WithEmbedVisitorID stores the anonymous embed visitor ID on the context.
 func WithEmbedVisitorID(ctx context.Context, visitorID string) context.Context {
 	visitorID = strings.TrimSpace(visitorID)
 	if visitorID == "" {
@@ -82,6 +90,7 @@ func WithEmbedVisitorID(ctx context.Context, visitorID string) context.Context {
 	return context.WithValue(ctx, EmbedVisitorContextKey, visitorID)
 }
 
+// EmbedVisitorIDFromContext returns the anonymous embed visitor ID, if present.
 func EmbedVisitorIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""

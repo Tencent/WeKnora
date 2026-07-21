@@ -48,7 +48,7 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	// so we must pre-assign SeqIDs manually (safe: single connection).
 	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
 	// races under concurrent inserts.
-	if db.Dialector.Name() == "sqlite" {
+	if db.Name() == "sqlite" {
 		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
 			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
 		}
@@ -87,6 +87,7 @@ func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*typ
 // GetChunkBySeqID retrieves a chunk by its seq_id and tenant ID
 func (r *chunkRepository) GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error) {
 	var chunk types.Chunk
+	//nolint:lll
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND seq_id = ?", tenantID, seqID).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrChunkNotFound
@@ -185,7 +186,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 			// FAQ type: search based on searchField
 			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
+			isPostgres := db.Name() == "postgres"
 
 			switch searchField {
 			case "standard_question":
@@ -377,7 +378,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	isPostgres := r.db.Name() == "postgres"
 
 	var sql string
 	if isPostgres {
@@ -438,7 +439,8 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 		if end > len(ids) {
 			end = len(ids)
 		}
-		if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).Delete(&types.Chunk{}).Error; err != nil {
+		if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID,
+			ids[i:end]).Delete(&types.Chunk{}).Error; err != nil {
 			return err
 		}
 	}
@@ -474,7 +476,12 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 }
 
 // MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
-func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error {
+func (r *chunkRepository) MoveChunksByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	targetKBID string,
+) error {
 	return r.db.WithContext(ctx).Model(&types.Chunk{}).
 		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
 		Update("knowledge_base_id", targetKBID).Error
@@ -482,7 +489,13 @@ func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID 
 
 // DeleteChunksByTagID deletes all chunks with the specified tag ID
 // Returns the IDs of deleted chunks for index cleanup
-func (r *chunkRepository) DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error) {
+func (r *chunkRepository) DeleteChunksByTagID(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagID string,
+	excludeIDs []string,
+) ([]string, error) {
 	// Build exclude set for O(1) lookup
 	excludeSet := make(map[string]struct{}, len(excludeIDs))
 	for _, id := range excludeIDs {
@@ -811,7 +824,7 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 	}
 
 	nowFunc := "NOW()"
-	if r.db.Dialector.Name() == "sqlite" {
+	if r.db.Name() == "sqlite" {
 		nowFunc = "datetime('now')"
 	}
 	sql := fmt.Sprintf(`
@@ -977,7 +990,7 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	query := r.db.WithContext(ctx).
 		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
-			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended))
+			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended)) //nolint:lll
 	var scopeClauses []string
 	var scopeArgs []interface{}
 	if len(kbIDs) > 0 {
@@ -995,7 +1008,7 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	query = query.Where("("+strings.Join(scopeClauses, " OR ")+")", scopeArgs...)
 
 	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
+	if r.db.Name() == "mysql" {
 		orderClause = "RAND()"
 	}
 
@@ -1041,7 +1054,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
+	if r.db.Name() == "mysql" {
 		orderClause = "RAND()"
 	}
 
@@ -1049,7 +1062,8 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	switch r.db.Name() {
 	case "postgres":
 		if err := baseQuery.
-			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
+			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_l" +
+				"ength(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
 			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {

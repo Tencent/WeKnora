@@ -100,7 +100,7 @@ func TestLanguageLocaleName(t *testing.T) {
 }
 
 func TestMCPOAuthNonInteractive(t *testing.T) {
-	if IsMCPOAuthNonInteractive(nil) {
+	if IsMCPOAuthNonInteractive(nil) { //nolint:staticcheck // verify nil ctx is not marked non-interactive
 		t.Fatal("nil context should not be non-interactive")
 	}
 	if IsMCPOAuthNonInteractive(context.Background()) {

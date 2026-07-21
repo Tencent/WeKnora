@@ -18,14 +18,14 @@ type stubChat struct {
 	err      error
 }
 
-func (s *stubChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (s *stubChat) Chat(_ context.Context, _ []chat.Message, _ *chat.Options) (*types.ChatResponse, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 	return &types.ChatResponse{Content: s.response}, nil
 }
 
-func (s *stubChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (s *stubChat) ChatStream(context.Context, []chat.Message, *chat.Options) (<-chan types.StreamResponse, error) {
 	return nil, nil
 }
 

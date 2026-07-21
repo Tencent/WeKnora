@@ -35,8 +35,8 @@ func NewWebSearchProviderHandler(
 
 // CreateProviderRequest defines the request body for creating a provider
 type CreateProviderRequest struct {
-	Name        string                            `json:"name" binding:"required"`
-	Provider    types.WebSearchProviderType       `json:"provider" binding:"required"`
+	Name        string                            `json:"name"        binding:"required"`
+	Provider    types.WebSearchProviderType       `json:"provider"    binding:"required"`
 	Description string                            `json:"description"`
 	Parameters  types.WebSearchProviderParameters `json:"parameters"`
 	IsDefault   bool                              `json:"is_default"`
@@ -87,7 +87,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 	var req CreateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Warnf(ctx, "Invalid create provider request: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	if err := h.service.CreateProvider(ctx, provider); err != nil {
 		logger.Warnf(ctx, "Failed to create web search provider: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -128,7 +128,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 	providers, err := h.repo.List(ctx, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list web search providers: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 
 	var req UpdateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -256,7 +256,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 
 	if err := h.service.UpdateProvider(ctx, provider); err != nil {
 		logger.Warnf(ctx, "Failed to update web search provider %s: %v", id, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -301,7 +301,7 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 
 	if err := h.service.DeleteProvider(ctx, tenantID, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete web search provider %s: %v", id, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -366,7 +366,7 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 
 // TestProviderRequest defines the body for testing raw credentials
 type TestProviderRequest struct {
-	Provider   string                            `json:"provider" binding:"required"`
+	Provider   string                            `json:"provider"   binding:"required"`
 	Parameters types.WebSearchProviderParameters `json:"parameters"`
 }
 
@@ -389,7 +389,7 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 
 	var req TestProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -409,7 +409,11 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 // confusing error). Reject it up front with an actionable message so the
 // user knows they should type a real key or test against the saved config
 // via /test instead.
-func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) error {
+func (h *WebSearchProviderHandler) doTestSearch(
+	ctx context.Context,
+	providerType string,
+	params types.WebSearchProviderParameters,
+) error {
 	logger.Infof(ctx, "[WebSearch][Test] testing provider type=%s", providerType)
 	searchProvider, err := h.registry.CreateProvider(providerType, params)
 	if err != nil {

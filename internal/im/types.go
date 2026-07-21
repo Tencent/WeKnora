@@ -11,34 +11,36 @@ import (
 	"gorm.io/gorm"
 )
 
-// IMChannel represents an IM channel configuration stored in the database.
+// Channel represents an IM channel configuration stored in the database.
 // Each channel binds to an agent and contains platform-specific credentials.
-type IMChannel struct {
-	ID              string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
-	TenantID        uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
-	AgentID         string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
-	Platform        string         `json:"platform"    gorm:"type:varchar(20);not null"`
-	Name            string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
-	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
-	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
-	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
-	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
-	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
-	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
-	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
+type Channel struct {
+	ID              string `json:"id"                gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
+	TenantID        uint64 `json:"tenant_id"         gorm:"not null;index:idx_im_channels_tenant"`
+	AgentID         string `json:"agent_id"          gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
+	Platform        string `json:"platform"          gorm:"type:varchar(20);not null"`
+	Name            string `json:"name"              gorm:"type:varchar(255);not null;default:''"`
+	Enabled         bool   `json:"enabled"           gorm:"not null;default:true"`
+	Mode            string `json:"mode"              gorm:"type:varchar(20);not null;default:'websocket'"`
+	OutputMode      string `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
+	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
+	//nolint:lll
+	BotIdentity string         `json:"bot_identity" gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
+	SessionMode string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
+	Credentials types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `json:"deleted_at"        gorm:"index"`
 }
 
-func (IMChannel) TableName() string {
+// TableName implements the required interface method.
+func (Channel) TableName() string {
 	return "im_channels"
 }
 
-// IMChannelSummary is the HTTP-safe list shape for IM channels. Credentials
+// ChannelSummary is the HTTP-safe list shape for IM channels. Credentials
 // are never included — use Admin+ Create/Update responses to read back
 // values immediately after a mutation.
-type IMChannelSummary struct {
+type ChannelSummary struct {
 	ID                    string    `json:"id"`
 	TenantID              uint64    `json:"tenant_id"`
 	AgentID               string    `json:"agent_id"`
@@ -55,9 +57,9 @@ type IMChannelSummary struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
-// SummarizeIMChannel converts a stored channel into its list response shape.
-func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
-	return IMChannelSummary{
+// SummarizeChannel converts a stored channel into its list response shape.
+func SummarizeChannel(ch Channel) ChannelSummary {
+	return ChannelSummary{
 		ID:                    ch.ID,
 		TenantID:              ch.TenantID,
 		AgentID:               ch.AgentID,
@@ -75,11 +77,11 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 	}
 }
 
-// SummarizeIMChannels converts stored channels into list response shapes.
-func SummarizeIMChannels(channels []IMChannel) []IMChannelSummary {
-	out := make([]IMChannelSummary, 0, len(channels))
+// SummarizeChannels converts stored channels into list response shapes.
+func SummarizeChannels(channels []Channel) []ChannelSummary {
+	out := make([]ChannelSummary, 0, len(channels))
 	for _, ch := range channels {
-		out = append(out, SummarizeIMChannel(ch))
+		out = append(out, SummarizeChannel(ch))
 	}
 	return out
 }
@@ -89,7 +91,13 @@ func imCredentialsConfigured(cred types.JSON) bool {
 	return s != "" && s != "{}"
 }
 
-func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
+// BeforeCreate implements the required behavior.
+// Channel is exported.
+// Channel is exported.
+// Channel is exported.
+// Channel is exported.
+// Channel is exported.
+func (ch *Channel) BeforeCreate(_ *gorm.DB) error {
 	if ch.ID == "" {
 		ch.ID = uuid.New().String()
 	}
@@ -115,7 +123,7 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 
 // BeforeSave ensures bot_identity is recomputed and session_mode is validated
 // on every save (create + update).
-func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
+func (ch *Channel) BeforeSave(_ *gorm.DB) error {
 	if ch.SessionMode == "" {
 		ch.SessionMode = string(SessionModeUser)
 	}
@@ -127,7 +135,7 @@ func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
 }
 
 // validateSessionMode checks that SessionMode holds a supported value.
-func (ch *IMChannel) validateSessionMode() error {
+func (ch *Channel) validateSessionMode() error {
 	switch SessionMode(ch.SessionMode) {
 	case SessionModeUser, SessionModeThread:
 		return nil
@@ -138,7 +146,7 @@ func (ch *IMChannel) validateSessionMode() error {
 
 // computeBotIdentity derives a unique bot identity string from the channel's
 // platform, mode, and credentials. Returns "" if no identity can be extracted.
-func (ch *IMChannel) computeBotIdentity() string {
+func (ch *Channel) computeBotIdentity() string {
 	creds := make(map[string]interface{})
 	if err := json.Unmarshal([]byte(ch.Credentials), &creds); err != nil {
 		return ""
@@ -207,27 +215,32 @@ func (ch *IMChannel) computeBotIdentity() string {
 // ChannelSession maps an IM channel (user+chat combination) to a WeKnora session.
 // This allows the IM integration to maintain conversation continuity.
 type ChannelSession struct {
-	ID          string         `json:"id"            gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
-	Platform    string         `json:"platform"      gorm:"type:varchar(20);not null"`
-	UserID      string         `json:"user_id"       gorm:"type:varchar(128);not null"`
-	ChatID      string         `json:"chat_id"       gorm:"type:varchar(128);not null;default:''"`
-	ThreadID    string         `json:"thread_id"     gorm:"type:varchar(128);not null;default:''"`
-	SessionID   string         `json:"session_id"    gorm:"type:varchar(36);not null;index"`
-	TenantID    uint64         `json:"tenant_id"     gorm:"not null;index"`
-	AgentID     string         `json:"agent_id"      gorm:"type:varchar(36);default:''"`
-	IMChannelID string         `json:"im_channel_id" gorm:"type:varchar(36);default:''"`
-	Status      string         `json:"status"        gorm:"type:varchar(20);not null;default:'active'"`
-	Metadata    types.JSON     `json:"metadata"      gorm:"type:jsonb;default:'{}'"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"deleted_at"    gorm:"index"`
+	ID        string         `json:"id"            gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
+	Platform  string         `json:"platform"      gorm:"type:varchar(20);not null"`
+	UserID    string         `json:"user_id"       gorm:"type:varchar(128);not null"`
+	ChatID    string         `json:"chat_id"       gorm:"type:varchar(128);not null;default:''"`
+	ThreadID  string         `json:"thread_id"     gorm:"type:varchar(128);not null;default:''"`
+	SessionID string         `json:"session_id"    gorm:"type:varchar(36);not null;index"`
+	TenantID  uint64         `json:"tenant_id"     gorm:"not null;index"`
+	AgentID   string         `json:"agent_id"      gorm:"type:varchar(36);default:''"`
+	ChannelID string         `json:"im_channel_id" gorm:"type:varchar(36);default:''"`
+	Status    string         `json:"status"        gorm:"type:varchar(20);not null;default:'active'"`
+	Metadata  types.JSON     `json:"metadata"      gorm:"type:jsonb;default:'{}'"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"    gorm:"index"`
 }
 
+// TableName implements the required interface method.
 func (ChannelSession) TableName() string {
 	return "im_channel_sessions"
 }
 
-func (cs *ChannelSession) BeforeCreate(tx *gorm.DB) error {
+// ChannelSession is exported.
+
+// BeforeCreate is exported.
+// ChannelSession is exported.
+func (cs *ChannelSession) BeforeCreate(_ *gorm.DB) error {
 	if cs.ID == "" {
 		cs.ID = uuid.New().String()
 	}

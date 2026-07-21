@@ -117,7 +117,8 @@ func newCmdResolve(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.Reject, "reject", false, "Reject the pending tool call instead of approving")
 	cmd.Flags().StringVar(&opts.Reason, "reason", "", "Reason recorded with the decision")
-	cmd.Flags().StringVar(&opts.ModifiedArgs, "modified-args", "", "Replace tool call arguments on approve (JSON object; conflicts with --reject)")
+	cmd.Flags().
+		StringVar(&opts.ModifiedArgs, "modified-args", "", "Replace tool call arguments on approve (JSON object; conflicts with --reject)")
 	cmdutil.AddFormatFlag(cmd, resolveFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, "session.tool_approval.resolve")
@@ -193,13 +194,21 @@ func validateModifiedArgs(opts *ResolveOptions) (json.RawMessage, error) {
 	return json.RawMessage(opts.ModifiedArgs), nil
 }
 
-func runResolve(ctx context.Context, opts *ResolveOptions, fopts *cmdutil.FormatOptions, svc ResolveService, p prompt.Prompter) error {
+func runResolve(
+	ctx context.Context,
+	opts *ResolveOptions,
+	fopts *cmdutil.FormatOptions,
+	svc ResolveService,
+	p prompt.Prompter,
+) error {
 	modified, err := validateModifiedArgs(opts)
 	if err != nil {
 		return err
 	}
 	decision := decisionOf(opts.Reject)
-	retryCmd := append([]string{"weknora", "session", "tool-approval", "resolve", opts.PendingID}, retryArgOf(opts.Reject)...)
+	retryCmd := append(
+		[]string{"weknora", "session", "tool-approval", "resolve", opts.PendingID},
+		retryArgOf(opts.Reject)...)
 	retryCmd = append(retryCmd, "-y")
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), decision, "tool call", opts.PendingID, "session.tool_approval.resolve", retryCmd); err != nil {
 		return err
@@ -212,7 +221,11 @@ func runResolve(ctx context.Context, opts *ResolveOptions, fopts *cmdutil.Format
 		return cmdutil.WrapHTTP(err, "resolve tool approval %s", opts.PendingID)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, resolveResult{PendingID: opts.PendingID, Decision: decision, Resolved: true}, nil)
+		return fopts.Emit(
+			iostreams.IO.Out,
+			resolveResult{PendingID: opts.PendingID, Decision: decision, Resolved: true},
+			nil,
+		)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ %s tool call %s\n", decisionPastTense(decision), opts.PendingID)
 	return nil

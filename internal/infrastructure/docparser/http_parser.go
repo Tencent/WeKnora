@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// PathRead and related constants.
 const (
 	PathRead        = "/read"
 	PathListEngines = "/list-engines"
@@ -61,6 +62,7 @@ type HTTPDocumentReader struct {
 	client  *http.Client
 }
 
+// NewHTTPDocumentReader is an exported function.
 func NewHTTPDocumentReader(baseURL string) (*HTTPDocumentReader, error) {
 	p := &HTTPDocumentReader{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
@@ -85,6 +87,7 @@ func (p *HTTPDocumentReader) base() string {
 	return p.baseURL
 }
 
+// Reconnect implements the required interface method.
 func (p *HTTPDocumentReader) Reconnect(addr string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -93,12 +96,14 @@ func (p *HTTPDocumentReader) Reconnect(addr string) error {
 	return nil
 }
 
+// IsConnected implements the required interface method.
 func (p *HTTPDocumentReader) IsConnected() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.baseURL != ""
 }
 
+// Close implements the required interface method.
 func (p *HTTPDocumentReader) Close() error { return nil }
 
 type httpListEnginesRequest struct {
@@ -117,7 +122,11 @@ type httpListEnginesResponse struct {
 	Engines []httpParserEngineInfo `json:"engines"`
 }
 
-func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+// ListEngines implements the required interface method.
+func (p *HTTPDocumentReader) ListEngines(
+	ctx context.Context,
+	overrides map[string]string,
+) ([]types.ParserEngineInfo, error) {
 	base := p.base()
 	if base == "" {
 		return nil, errNotConnected
@@ -139,7 +148,7 @@ func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	if err != nil {
 		return nil, fmt.Errorf("http list-engines failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("http list-engines status %d: %s", resp.StatusCode, string(respBytes))
@@ -218,7 +227,7 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("http read failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))

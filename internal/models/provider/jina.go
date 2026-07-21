@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// JinaBaseURL and related constants.
 const (
 	JinaBaseURL = "https://api.jina.ai/v1"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回 Jina AI provider 的元数据
-func (p *JinaProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *JinaProvider) Info() Info {
+	return Info{
 		Name:        ProviderJina,
 		DisplayName: "Jina",
 		Description: "jina-clip-v1, jina-embeddings-v2-base-zh, etc.",

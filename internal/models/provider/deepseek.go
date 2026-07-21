@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回 DeepSeek provider 的元数据
-func (p *DeepSeekProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *DeepSeekProvider) Info() Info {
+	return Info{
 		Name:        ProviderDeepSeek,
 		DisplayName: "DeepSeek",
 		Description: "deepseek-chat, deepseek-reasoner, etc.",

@@ -12,9 +12,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// MCPManager manages MCP client connections
-type MCPManager struct {
-	clients   map[string]MCPClient // cacheKey -> client
+// Manager manages MCP client connections
+type Manager struct {
+	clients   map[string]Client // cacheKey -> client
 	clientsMu sync.RWMutex
 	oauthRepo interfaces.MCPOAuthRepository
 	ctx       context.Context
@@ -23,11 +23,11 @@ type MCPManager struct {
 
 // NewMCPManager creates a new MCP manager. oauthRepo is used to wire per-user
 // OAuth token stores for OAuth-enabled MCP services.
-func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
+func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	manager := &MCPManager{
-		clients:   make(map[string]MCPClient),
+	manager := &Manager{
+		clients:   make(map[string]Client),
 		oauthRepo: oauthRepo,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -55,7 +55,7 @@ func cacheKey(service *types.MCPService, principal types.Principal) string {
 //
 // For OAuth-enabled services the connection is keyed per principal (derived from
 // ctx) so each identity connects with its own token.
-func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPService) (MCPClient, error) {
+func (m *Manager) GetOrCreateClient(ctx context.Context, service *types.MCPService) (Client, error) {
 	// Check if service is enabled
 	if !service.Enabled {
 		return nil, fmt.Errorf("MCP service %s is not enabled", service.Name)
@@ -63,14 +63,16 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 
 	// Stdio transport is disabled for security reasons
 	if service.TransportType == types.MCPTransportStdio {
-		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
+		return nil, fmt.Errorf(
+			"stdio transport is disabled for security reasons; " +
+				"please use SSE or HTTP Streamable transport instead",
+		)
 	}
 
 	var tenantID uint64
 	var principal types.Principal
 	if service.AuthConfig.IsOAuth() {
 		tenantID, _ = types.TenantIDFromContext(ctx)
-		principal, _ = types.PrincipalFromContext(ctx)
 		principal = types.MCPOAuthPrincipalFromContext(ctx)
 		if !principal.Valid() {
 			return nil, fmt.Errorf("principal context is required to connect to OAuth MCP service %s", service.Name)
@@ -129,7 +131,7 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 }
 
 // initializeClient handles the shared initialization flow with timeout enforcement.
-func (m *MCPManager) initializeClient(service *types.MCPService, client MCPClient, errPrefix string) error {
+func (m *Manager) initializeClient(service *types.MCPService, client Client, errPrefix string) error {
 	initTimeout := 30 * time.Second
 	if service.AdvancedConfig != nil && service.AdvancedConfig.Timeout > 0 {
 		initTimeout = time.Duration(service.AdvancedConfig.Timeout) * time.Second
@@ -142,7 +144,7 @@ func (m *MCPManager) initializeClient(service *types.MCPService, client MCPClien
 	defer initCancel()
 
 	if _, err := client.Initialize(initCtx); err != nil {
-		client.Disconnect()
+		_ = client.Disconnect()
 		if errPrefix == "" {
 			errPrefix = "failed to initialize MCP client"
 		}
@@ -153,7 +155,7 @@ func (m *MCPManager) initializeClient(service *types.MCPService, client MCPClien
 }
 
 // GetClient gets an existing client
-func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
+func (m *Manager) GetClient(serviceID string) (Client, bool) {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 
@@ -164,7 +166,7 @@ func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
 // CloseClient closes and removes all cached connections for a service. For
 // OAuth services this spans every per-principal connection (keys are prefixed with
 // the service ID).
-func (m *MCPManager) CloseClient(serviceID string) error {
+func (m *Manager) CloseClient(serviceID string) error {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
 
@@ -184,7 +186,7 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 }
 
 // CloseAll closes all clients
-func (m *MCPManager) CloseAll() {
+func (m *Manager) CloseAll() {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
 
@@ -194,18 +196,18 @@ func (m *MCPManager) CloseAll() {
 		}
 	}
 
-	m.clients = make(map[string]MCPClient)
+	m.clients = make(map[string]Client)
 	logger.GetLogger(m.ctx).Info("All MCP clients closed")
 }
 
 // Shutdown gracefully shuts down the manager
-func (m *MCPManager) Shutdown() {
+func (m *Manager) Shutdown() {
 	m.cancel()
 	m.CloseAll()
 }
 
 // cleanupIdleConnections periodically cleans up disconnected clients
-func (m *MCPManager) cleanupIdleConnections() {
+func (m *Manager) cleanupIdleConnections() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
@@ -220,7 +222,7 @@ func (m *MCPManager) cleanupIdleConnections() {
 }
 
 // removeDisconnectedClients removes clients that are no longer connected
-func (m *MCPManager) removeDisconnectedClients() {
+func (m *Manager) removeDisconnectedClients() {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
 
@@ -233,7 +235,7 @@ func (m *MCPManager) removeDisconnectedClients() {
 }
 
 // GetActiveClients returns the number of active clients
-func (m *MCPManager) GetActiveClients() int {
+func (m *Manager) GetActiveClients() int {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 
@@ -247,7 +249,7 @@ func (m *MCPManager) GetActiveClients() int {
 }
 
 // ListActiveServices returns IDs of services with active connections
-func (m *MCPManager) ListActiveServices() []string {
+func (m *Manager) ListActiveServices() []string {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 

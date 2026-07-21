@@ -19,21 +19,34 @@ type stubKBRepoForModelDelete struct {
 func (s *stubKBRepoForModelDelete) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) error {
 	return nil
 }
+
 func (s *stubKBRepoForModelDelete) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
-func (s *stubKBRepoForModelDelete) GetKnowledgeBaseByIDAndTenant(context.Context, string, uint64) (*types.KnowledgeBase, error) {
+
+func (s *stubKBRepoForModelDelete) GetKnowledgeBaseByIDAndTenant(
+	context.Context,
+	string,
+	uint64,
+) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (s *stubKBRepoForModelDelete) GetKnowledgeBaseByIDs(context.Context, []string) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (s *stubKBRepoForModelDelete) ListKnowledgeBases(context.Context) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
-func (s *stubKBRepoForModelDelete) ListKnowledgeBasesByTenantID(context.Context, uint64) ([]*types.KnowledgeBase, error) {
+
+func (s *stubKBRepoForModelDelete) ListKnowledgeBasesByTenantID(
+	context.Context,
+	uint64,
+) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (s *stubKBRepoForModelDelete) UpdateKnowledgeBase(context.Context, *types.KnowledgeBase) error {
 	return nil
 }
@@ -41,12 +54,15 @@ func (s *stubKBRepoForModelDelete) DeleteKnowledgeBase(context.Context, string) 
 func (s *stubKBRepoForModelDelete) CountByVectorStoreID(context.Context, *gorm.DB, uint64, string) (int64, error) {
 	return 0, nil
 }
+
 func (s *stubKBRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
 	return s.count, nil
 }
+
 func (s *stubKBRepoForModelDelete) SetUserKBPin(context.Context, uint64, string, string, bool) (*time.Time, error) {
 	return nil, nil
 }
+
 func (s *stubKBRepoForModelDelete) ListUserKBPinIDs(context.Context, uint64, string) (map[string]time.Time, error) {
 	return nil, nil
 }
@@ -58,12 +74,15 @@ type stubAgentRepoForModelDelete struct {
 func (s *stubAgentRepoForModelDelete) CreateAgent(context.Context, *types.CustomAgent) error {
 	return nil
 }
+
 func (s *stubAgentRepoForModelDelete) GetAgentByID(context.Context, string, uint64) (*types.CustomAgent, error) {
 	return nil, nil
 }
+
 func (s *stubAgentRepoForModelDelete) ListAgentsByTenantID(context.Context, uint64) ([]*types.CustomAgent, error) {
 	return nil, nil
 }
+
 func (s *stubAgentRepoForModelDelete) UpdateAgent(context.Context, *types.CustomAgent) error {
 	return nil
 }
@@ -85,21 +104,30 @@ func (s *stubModelRepoForDelete) GetByID(_ context.Context, _ uint64, id string)
 	}
 	return nil, nil
 }
-func (s *stubModelRepoForDelete) List(context.Context, uint64, types.ModelType, types.ModelSource) ([]*types.Model, error) {
+
+func (s *stubModelRepoForDelete) List(
+	context.Context,
+	uint64,
+	types.ModelType,
+	types.ModelSource,
+) ([]*types.Model, error) {
 	return nil, nil
 }
+
 func (s *stubModelRepoForDelete) Update(_ context.Context, model *types.Model) error {
 	if s.update != nil {
 		return s.update(model)
 	}
 	return nil
 }
+
 func (s *stubModelRepoForDelete) Delete(_ context.Context, _ uint64, id string) error {
 	if s.delete != nil {
 		return s.delete(id)
 	}
 	return nil
 }
+
 func (s *stubModelRepoForDelete) ClearDefaultByType(context.Context, uint, types.ModelType, string) error {
 	return nil
 }

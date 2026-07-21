@@ -31,14 +31,14 @@ func fakeNotion() (*httptest.Server, *Config) {
 	mux.HandleFunc("/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			w.WriteHeader(401)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  401,
 				"code":    "unauthorized",
 				"message": "API token is invalid.",
 			})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"object": "user",
 			"id":     "bot-user-id",
 			"type":   "bot",
@@ -47,8 +47,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// POST /v1/search — return pages and databases
-	mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/search", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"object": "list",
 			"results": []interface{}{
 				map[string]interface{}{
@@ -85,8 +85,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// GET /v1/blocks/{id}/children — return blocks
-	mux.HandleFunc("/v1/blocks/page-1/children", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/blocks/page-1/children", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"object": "list",
 			"results": []interface{}{
 				map[string]interface{}{
@@ -120,8 +120,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// GET /v1/pages/{id}
-	mux.HandleFunc("/v1/pages/page-1", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/pages/page-1", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":               "page-1",
 			"object":           "page",
 			"url":              "https://notion.so/Page-1",
@@ -140,8 +140,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// GET /v1/databases/{id} — returns container with data_sources array (2025-09-03+)
-	mux.HandleFunc("/v1/databases/db-1", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/databases/db-1", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":               "db-1",
 			"object":           "database",
 			"url":              "https://notion.so/DB-1",
@@ -158,7 +158,7 @@ func fakeNotion() (*httptest.Server, *Config) {
 	// GET /v1/data_sources/{id} — returns schema/properties
 	mux.HandleFunc("/v1/data_sources/ds-1", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":     "ds-1",
 				"object": "data_source",
 				"properties": map[string]interface{}{
@@ -172,8 +172,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// POST /v1/data_sources/{id}/query — return database records (2025-09-03+)
-	mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/data_sources/ds-1/query", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"object": "list",
 			"results": []interface{}{
 				map[string]interface{}{
@@ -205,8 +205,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	// GET /v1/pages/record-1 — direct fetch of a database row (single-select case).
 	// fetchPage must recognize both database_id (older responses) and
 	// data_source_id (2025-09-03+) as a record and route to buildRecordItem.
-	mux.HandleFunc("/v1/pages/record-1", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/pages/record-1", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":               "record-1",
 			"object":           "page",
 			"url":              "https://notion.so/Record-1",
@@ -229,8 +229,8 @@ func fakeNotion() (*httptest.Server, *Config) {
 	})
 
 	// GET /v1/blocks/record-1/children — empty blocks for database record
-	mux.HandleFunc("/v1/blocks/record-1/children", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+	mux.HandleFunc("/v1/blocks/record-1/children", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"object":      "list",
 			"results":     []interface{}{},
 			"has_more":    false,

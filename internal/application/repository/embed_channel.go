@@ -13,6 +13,7 @@ type embedChannelRepository struct {
 	db *gorm.DB
 }
 
+// NewEmbedChannelRepository is an exported function.
 func NewEmbedChannelRepository(db *gorm.DB) interfaces.EmbedChannelRepository {
 	return &embedChannelRepository{db: db}
 }

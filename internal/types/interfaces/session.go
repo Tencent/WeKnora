@@ -54,18 +54,30 @@ type SessionService interface {
 	// GenerateTitleAsync generates a title for the session asynchronously
 	// It emits an event when the title is generated
 	// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
-	GenerateTitleAsync(ctx context.Context, session *types.Session, userQuery string, modelID string, eventBus *event.EventBus)
+	GenerateTitleAsync(
+		ctx context.Context,
+		session *types.Session,
+		userQuery string,
+		modelID string,
+		eventBus *event.Bus,
+	)
 	// KnowledgeQA performs knowledge-based question answering.
 	// Events are emitted through eventBus (references, answer chunks, completion).
-	KnowledgeQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
+	KnowledgeQA(ctx context.Context, req *types.QARequest, eventBus *event.Bus) error
 	// KnowledgeQAByEvent performs knowledge-based question answering by event
-	KnowledgeQAByEvent(ctx context.Context, chatManage *types.ChatManage, eventList []types.EventType) error
+	KnowledgeQAByEvent(ctx context.Context, chatManage *types.ChatManage, eventList []types.Type) error
 	// SearchKnowledge performs knowledge-based search, without summarization
 	// knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 	// knowledgeIDs: list of specific knowledge (file) IDs to search
-	SearchKnowledge(ctx context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string) ([]*types.SearchResult, error)
+	SearchKnowledge(
+		ctx context.Context,
+		knowledgeBaseIDs []string,
+		knowledgeIDs []string,
+		tagScopes []types.TagScope,
+		query string,
+	) ([]*types.SearchResult, error)
 	// AgentQA performs agent-based question answering with conversation history and streaming support.
-	AgentQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
+	AgentQA(ctx context.Context, req *types.QARequest, eventBus *event.Bus) error
 }
 
 // SessionRepository defines the session repository interface
@@ -84,7 +96,12 @@ type SessionRepository interface {
 	// GetByTenantID gets all sessions visible to the tenant/user scope.
 	GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error)
 	// GetPagedByTenantID gets paged sessions visible to the tenant/user scope.
-	GetPagedByTenantID(ctx context.Context, tenantID uint64, userID string, page *types.Pagination) ([]*types.Session, int64, error)
+	GetPagedByTenantID(
+		ctx context.Context,
+		tenantID uint64,
+		userID string,
+		page *types.Pagination,
+	) ([]*types.Session, int64, error)
 	// QueryPaged lists sessions with filters, user-scoped ownership and pin-aware ordering.
 	QueryPaged(ctx context.Context, q *types.SessionListQuery) ([]*types.SessionListItem, int64, error)
 	// Update updates a session visible to the tenant/user scope.
@@ -94,7 +111,13 @@ type SessionRepository interface {
 	// UpdateLastRequestState persists the most recent input-bar state for a
 	// session (agent, model, KB scope, etc.) so the chat UI can restore it
 	// when the session is reopened. Scope rules match Update.
-	UpdateLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
+	UpdateLastRequestState(
+		ctx context.Context,
+		tenantID uint64,
+		userID string,
+		sessionID string,
+		state *types.SessionLastRequestState,
+	) (int64, error)
 	// SetPinned pins or unpins a session row scoped by tenant.
 	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
 	// Returns the number of rows affected; 0 means the session doesn't exist or is

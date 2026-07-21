@@ -133,7 +133,13 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
 	}
-	allowed, err := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+	allowed, err := searchTargetsAllowKnowledgeID(
+		ctx,
+		t.searchTargets,
+		knowledge.ID,
+		knowledge.KnowledgeBaseID,
+		t.knowledgeService,
+	)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -168,7 +174,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "") //nolint:lll
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -198,8 +204,12 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		return &types.ToolResult{
 			Success: false,
 			Error: fmt.Sprintf(
-				"offset %d is out of range: document has only %d chunks (valid offset range: 0..%d). Retry with offset=%d (or any value < %d).",
-				offset, totalChunks, totalChunks-1, suggestedOffset, totalChunks,
+				"offset %d is out of range: document has only %d chunks (valid offset range: 0..%d). Retry with offset=%d (or any value < %d).", //nolint:lll
+				offset,
+				totalChunks,
+				totalChunks-1,
+				suggestedOffset,
+				totalChunks,
 			),
 			Data: map[string]interface{}{
 				"knowledge_id":     knowledgeID,
@@ -217,7 +227,12 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		for _, c := range chunks {
 			chunkIDs = append(chunkIDs, c.ID)
 		}
-		infoMap := searchutil.CollectImageInfoByChunkIDs(ctx, t.chunkService.GetRepository(), effectiveTenantID, chunkIDs)
+		infoMap := searchutil.CollectImageInfoByChunkIDs(
+			ctx,
+			t.chunkService.GetRepository(),
+			effectiveTenantID,
+			chunkIDs,
+		)
 		for _, c := range chunks {
 			if c.ImageInfo == "" {
 				if merged, ok := infoMap[c.ID]; ok {
@@ -309,7 +324,13 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 			Error:   fmt.Sprintf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
 	}
-	allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+	allowed, scopeErr := searchTargetsAllowKnowledgeID(
+		ctx,
+		t.searchTargets,
+		chunk.KnowledgeID,
+		chunk.KnowledgeBaseID,
+		t.knowledgeService,
+	)
 	if scopeErr != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -327,7 +348,12 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	if chunk.ImageInfo == "" {
 		effectiveTenantID := t.searchTargets.GetTenantIDForKB(chunk.KnowledgeBaseID)
 		if effectiveTenantID > 0 {
-			infoMap := searchutil.CollectImageInfoByChunkIDs(ctx, t.chunkService.GetRepository(), effectiveTenantID, []string{chunk.ID})
+			infoMap := searchutil.CollectImageInfoByChunkIDs(
+				ctx,
+				t.chunkService.GetRepository(),
+				effectiveTenantID,
+				[]string{chunk.ID},
+			)
 			if merged, ok := infoMap[chunk.ID]; ok {
 				chunk.ImageInfo = merged
 			}

@@ -234,10 +234,10 @@ func TestParseMajorMinor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			maj, min := parseMajorMinor(tc.in)
-			if maj != tc.wantMaj || min != tc.wantMinor {
+			maj, minor := parseMajorMinor(tc.in)
+			if maj != tc.wantMaj || minor != tc.wantMinor {
 				t.Errorf("parseMajorMinor(%q): want (%d, %d), got (%d, %d)",
-					tc.in, tc.wantMaj, tc.wantMinor, maj, min)
+					tc.in, tc.wantMaj, tc.wantMinor, maj, minor)
 			}
 		})
 	}
@@ -704,10 +704,13 @@ func TestInspectBulkResponse_TotalCount(t *testing.T) {
 		"errors": true,
 		"items": [
 			{"index": {"_id": "c1", "status": 201}},
-			{"index": {"_id": "c2", "status": 400, "error": {"type": "mapper_parsing_exception", "reason": "secret-content-snippet"}}},
-			{"index": {"_id": "c3", "status": 400, "error": {"type": "mapper_parsing_exception", "reason": "another-secret"}}},
+			{"index": {"_id": "c2", "status": 400, "error": {
+				"type": "mapper_parsing_exception", "reason": "secret-content-snippet"}}},
+			{"index": {"_id": "c3", "status": 400, "error": {
+				"type": "mapper_parsing_exception", "reason": "another-secret"}}},
 			{"index": {"_id": "c4", "status": 201}},
-			{"index": {"_id": "c5", "status": 400, "error": {"type": "version_conflict_engine_exception", "reason": "another-secret"}}},
+			{"index": {"_id": "c5", "status": 400, "error": {
+				"type": "version_conflict_engine_exception", "reason": "another-secret"}}},
 			{"index": {"_id": "c6", "status": 201}},
 			{"index": {"_id": "c7", "status": 201}}
 		]
@@ -735,7 +738,7 @@ func TestInspectBulkResponse_TotalCount(t *testing.T) {
 // ============================================================================
 
 func versionHandler(distribution, number string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"version":{"distribution":%q,"number":%q}}`, distribution, number)
 	}
@@ -814,7 +817,7 @@ func TestProbeVersion_HandlesPreReleaseSuffix(t *testing.T) {
 // ============================================================================
 
 func pluginsHandler(rows []osapi.CatPluginResp) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(rows)
 	}
@@ -895,7 +898,7 @@ func TestEnsureReady_NilCtx_Rejected(t *testing.T) {
 		once:    make(map[int]*sync.Once),
 		initErr: make(map[int]error),
 	}
-	err := r.ensureReady(nil, 768) //nolint:staticcheck — explicit nil ctx test
+	err := r.ensureReady(nil, 768) //nolint:staticcheck // explicit nil ctx test
 	if err == nil || !strings.Contains(err.Error(), "non-nil ctx") {
 		t.Errorf("nil ctx: want error about non-nil ctx, got %v", err)
 	}
@@ -945,9 +948,12 @@ func TestEnsureReady_ConcurrentCallers_SingleCreate(t *testing.T) {
 	repo := &Repository{
 		client:    newTestClient(t, ts.URL),
 		baseIndex: "weknora_test",
-		cfg:       internalCfg{shards: 1, replicas: 0, knnEngine: "lucene", hnswM: 16, hnswEFConstruction: 100, efSearch: 100},
-		once:      make(map[int]*sync.Once),
-		initErr:   make(map[int]error),
+		cfg: internalCfg{
+			shards: 1, replicas: 0, knnEngine: "lucene",
+			hnswM: 16, hnswEFConstruction: 100, efSearch: 100,
+		},
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
 	}
 
 	var wg sync.WaitGroup
@@ -974,9 +980,12 @@ func TestEnsureReady_PerDimensionIsolation(t *testing.T) {
 	repo := &Repository{
 		client:    newTestClient(t, ts.URL),
 		baseIndex: "weknora_test",
-		cfg:       internalCfg{shards: 1, replicas: 0, knnEngine: "lucene", hnswM: 16, hnswEFConstruction: 100, efSearch: 100},
-		once:      make(map[int]*sync.Once),
-		initErr:   make(map[int]error),
+		cfg: internalCfg{
+			shards: 1, replicas: 0, knnEngine: "lucene",
+			hnswM: 16, hnswEFConstruction: 100, efSearch: 100,
+		},
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
 	}
 
 	for _, dim := range []int{768, 1024, 1536} {
@@ -1009,7 +1018,8 @@ func (h *errorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.indexPutsAttempted.Add(1)
 		w.WriteHeader(h.statusForIndexPut)
 		// Write a minimal OS error response so wrapTransport can parse it.
-		errBody := `{"error":{"type":"server_error","reason":"simulated"},"status":` + fmt.Sprintf("%d", h.statusForIndexPut) + `}`
+		errBody := `{"error":{"type":"server_error","reason":"simulated"},"status":` +
+			fmt.Sprintf("%d", h.statusForIndexPut) + `}`
 		_, _ = w.Write([]byte(errBody))
 	default:
 		w.WriteHeader(http.StatusOK)
@@ -1026,9 +1036,12 @@ func TestEnsureReady_TransientError_NotCached(t *testing.T) {
 	repo := &Repository{
 		client:    newTestClient(t, ts.URL),
 		baseIndex: "weknora_test",
-		cfg:       internalCfg{shards: 1, replicas: 0, knnEngine: "lucene", hnswM: 16, hnswEFConstruction: 100, efSearch: 100},
-		once:      make(map[int]*sync.Once),
-		initErr:   make(map[int]error),
+		cfg: internalCfg{
+			shards: 1, replicas: 0, knnEngine: "lucene",
+			hnswM: 16, hnswEFConstruction: 100, efSearch: 100,
+		},
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
 	}
 
 	// First call fails with transient 5xx.

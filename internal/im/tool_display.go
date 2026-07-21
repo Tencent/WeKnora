@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// IMToolStep tracks one tool invocation for IM display (mirrors Web agent stream events).
-type IMToolStep struct {
+// ToolStep tracks one tool invocation for IM display (mirrors Web agent stream events).
+type ToolStep struct {
 	ToolCallID string
 	ToolName   string
 	Pending    bool
@@ -206,14 +206,14 @@ func imGetGrepPatterns(args any) []string {
 	return nil
 }
 
-func imGetWebSearchQuery(step IMToolStep) string {
+func imGetWebSearchQuery(step ToolStep) string {
 	if q := imGetQueryText(step.Arguments); q != "" {
 		return q
 	}
 	return imGetQueryText(step.Data)
 }
 
-func imGetGrepPatternsFromStep(step IMToolStep) []string {
+func imGetGrepPatternsFromStep(step ToolStep) []string {
 	if patterns := imGetGrepPatterns(step.Arguments); len(patterns) > 0 {
 		return patterns
 	}
@@ -241,7 +241,7 @@ func imAppendPatternsTitle(base string, patterns []string) string {
 }
 
 // FormatIMToolLine formats one agent tool step (no emoji; aligned with Web getToolTitle).
-func FormatIMToolLine(step IMToolStep) string {
+func FormatIMToolLine(step ToolStep) string {
 	title := imAgentToolTitle(step)
 	if title == "" {
 		return ""
@@ -256,7 +256,7 @@ func FormatIMToolLine(step IMToolStep) string {
 }
 
 // FormatIMRagPipelineLine formats quick-QA RAG pipeline steps (Web RagPipelineProgress).
-func FormatIMRagPipelineLine(step IMToolStep) string {
+func FormatIMRagPipelineLine(step ToolStep) string {
 	toolName := step.ToolName
 	query := imGetQueryText(step.Arguments)
 	if query == "" {
@@ -301,7 +301,7 @@ func FormatIMRagPipelineLine(step IMToolStep) string {
 	}
 }
 
-func imAgentToolTitle(step IMToolStep) string {
+func imAgentToolTitle(step ToolStep) string {
 	if step.Pending {
 		switch step.ToolName {
 		case "image_analysis":
@@ -357,7 +357,7 @@ func imAgentToolTitle(step IMToolStep) string {
 	return imToolStatusDescription(step)
 }
 
-func imToolStatusDescription(step IMToolStep) string {
+func imToolStatusDescription(step ToolStep) string {
 	success := step.Success
 	toolName := step.ToolName
 
@@ -422,7 +422,7 @@ func imToolStatusDescription(step IMToolStep) string {
 	}
 }
 
-func imToolHeaderSummary(step IMToolStep) string {
+func imToolHeaderSummary(step ToolStep) string {
 	if step.Pending || !step.Success {
 		return ""
 	}
@@ -457,7 +457,7 @@ func imToolHeaderSummary(step IMToolStep) string {
 	return ""
 }
 
-func imToolResultSummary(step IMToolStep) string {
+func imToolResultSummary(step ToolStep) string {
 	if step.Pending || !step.Success {
 		return ""
 	}
@@ -481,7 +481,7 @@ const (
 	imRetrievalSourceMixed     = "mixed"
 )
 
-func imRetrievalSearchSource(step IMToolStep) string {
+func imRetrievalSearchSource(step ToolStep) string {
 	if source := imSearchSourceFromData(step.Data); source != "" {
 		return source
 	}
@@ -667,7 +667,7 @@ func formatIMOptionalInt(n int, raw any) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func renderIMToolSteps(steps []IMToolStep, format func(IMToolStep) string) string {
+func renderToolSteps(steps []ToolStep, format func(ToolStep) string) string {
 	if len(steps) == 0 {
 		return ""
 	}
@@ -696,12 +696,12 @@ func mergeIMNarrativeAndTools(narrative string, toolLines string) string {
 	}
 }
 
-func upsertIMToolStep(steps *[]IMToolStep, index map[string]int, id string, update func(*IMToolStep)) {
+func upsertToolStep(steps *[]ToolStep, index map[string]int, id string, update func(*ToolStep)) {
 	if i, ok := index[id]; ok {
 		update(&(*steps)[i])
 		return
 	}
-	step := IMToolStep{ToolCallID: id}
+	step := ToolStep{ToolCallID: id}
 	update(&step)
 	index[id] = len(*steps)
 	*steps = append(*steps, step)

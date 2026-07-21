@@ -33,7 +33,8 @@ func TestParseGatewayPayloadC2CMessage(t *testing.T) {
 	if msg == nil {
 		t.Fatal("expected message")
 	}
-	if msg.Platform != im.PlatformQQBot || msg.ChatType != im.ChatTypeDirect || msg.UserID != "user-openid" || msg.Content != "hello" {
+	if msg.Platform != im.PlatformQQBot || msg.ChatType != im.ChatTypeDirect || msg.UserID != "user-openid" ||
+		msg.Content != "hello" {
 		t.Fatalf("unexpected message: %#v", msg)
 	}
 	if msg.Extra[extraKeyMessageID] != "msg-1" || msg.Extra[extraKeyChatKind] != "c2c" {
@@ -60,7 +61,8 @@ func TestParseGatewayPayloadGroupMessage(t *testing.T) {
 	if msg == nil {
 		t.Fatal("expected message")
 	}
-	if msg.ChatType != im.ChatTypeGroup || msg.ChatID != "group-openid" || msg.UserID != "member-openid" || msg.Content != "group hello" {
+	if msg.ChatType != im.ChatTypeGroup || msg.ChatID != "group-openid" || msg.UserID != "member-openid" ||
+		msg.Content != "group hello" {
 		t.Fatalf("unexpected message: %#v", msg)
 	}
 }

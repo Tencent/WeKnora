@@ -27,7 +27,12 @@ type fakeListSvc struct {
 	gotBefore *time.Time
 }
 
-func (s *fakeListSvc) LoadMessages(_ context.Context, sessionID string, limit int, before *time.Time) ([]sdk.Message, error) {
+func (s *fakeListSvc) LoadMessages(
+	_ context.Context,
+	sessionID string,
+	limit int,
+	before *time.Time,
+) ([]sdk.Message, error) {
 	s.gotSessID, s.gotLimit, s.gotBefore = sessionID, limit, before
 	return s.items, s.err
 }
@@ -58,7 +63,12 @@ func TestRunList_BeforeParsedAsRFC3339(t *testing.T) {
 
 func TestRunList_BadBeforeIsInvalidArgument(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{SessionID: "s1", Limit: 20, Before: "yesterday"}, jsonOpts(), &fakeListSvc{})
+	err := runList(
+		context.Background(),
+		&ListOptions{SessionID: "s1", Limit: 20, Before: "yesterday"},
+		jsonOpts(),
+		&fakeListSvc{},
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "RFC3339")
 	var cliErr *cmdutil.Error
@@ -68,7 +78,10 @@ func TestRunList_BadBeforeIsInvalidArgument(t *testing.T) {
 
 func TestRunList_EmptyIsJSONArrayNotNull(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	require.NoError(t, runList(context.Background(), &ListOptions{SessionID: "s1", Limit: 20}, jsonOpts(), &fakeListSvc{}))
+	require.NoError(
+		t,
+		runList(context.Background(), &ListOptions{SessionID: "s1", Limit: 20}, jsonOpts(), &fakeListSvc{}),
+	)
 	assert.Contains(t, out.String(), `"data":[]`)
 }
 

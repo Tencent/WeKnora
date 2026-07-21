@@ -28,25 +28,27 @@ func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
 
+// NvidiaRerankDocument is an exported type.
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
 }
 
-// NvidiaRerankRequest represents a Jina rerank request
+// NvidiaRequest represents a Jina rerank request
 // Note: Jina does NOT support truncate_prompt_tokens parameter
-type NvidiaRerankRequest struct {
+type NvidiaRequest struct {
 	Model     string                 `json:"model"`    // Model to use for reranking
 	Query     NvidiaRerankDocument   `json:"query"`    // Query text to compare documents against
 	Documents []NvidiaRerankDocument `json:"passages"` // List of document texts to rerank
 }
 
+// NvidiaRankResult is an exported type.
 type NvidiaRankResult struct {
 	Index          int     `json:"index"`
 	RelevanceScore float64 `json:"logit"`
 }
 
-// NvidiaRerankResponse represents the response from a Jina reranking request
-type NvidiaRerankResponse struct {
+// NvidiaResponse represents the response from a Jina reranking request
+type NvidiaResponse struct {
 	Model   string             `json:"model"`    // Model used for reranking
 	Results []NvidiaRankResult `json:"rankings"` // Ranked results with relevance scores
 }
@@ -74,7 +76,7 @@ func NewNvidiaReranker(config *RerankerConfig) (*NvidiaReranker, error) {
 // Rerank performs document reranking based on relevance to the query
 func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body - Jina does NOT use truncate_prompt_tokens
-	requestBody := &NvidiaRerankRequest{
+	requestBody := &NvidiaRequest{
 		Model:     r.modelName,
 		Query:     NvidiaRerankDocument{Text: query},
 		Documents: make([]NvidiaRerankDocument, len(documents)),
@@ -107,7 +109,7 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
@@ -120,7 +122,7 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 		return nil, fmt.Errorf("Rerank API error: Http Status: %s", resp.Status)
 	}
 
-	var response NvidiaRerankResponse
+	var response NvidiaResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}

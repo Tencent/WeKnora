@@ -86,7 +86,13 @@ type MessageRepository interface {
 	// GetFirstMessageOfUser gets the first message of a user
 	GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error)
 	// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
-	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
+	SearchMessagesByKeyword(
+		ctx context.Context,
+		tenantID uint64,
+		keyword string,
+		sessionIDs []string,
+		limit int,
+	) ([]*types.MessageWithSession, error)
 	// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by their request IDs (used to fetch Q&A pair partners)

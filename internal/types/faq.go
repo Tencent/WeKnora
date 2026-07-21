@@ -255,7 +255,7 @@ type FAQEntry struct {
 type FAQEntryPayload struct {
 	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
 	ID                *int64          `json:"id,omitempty"`
-	StandardQuestion  string          `json:"standard_question"    binding:"required"`
+	StandardQuestion  string          `json:"standard_question"         binding:"required"`
 	SimilarQuestions  []string        `json:"similar_questions"`
 	NegativeQuestions []string        `json:"negative_questions"`
 	Answers           []string        `json:"answers"`
@@ -266,7 +266,9 @@ type FAQEntryPayload struct {
 	IsRecommended     *bool           `json:"is_recommended,omitempty"`
 }
 
+// FAQBatchModeReplace and related constants.
 const (
+	// FAQBatchModeAppend appends imported FAQ entries to existing rows.
 	FAQBatchModeAppend  = "append"
 	FAQBatchModeReplace = "replace"
 )
@@ -317,7 +319,7 @@ type FAQDryRunResult struct {
 
 // FAQSearchRequest FAQ检索请求参数
 type FAQSearchRequest struct {
-	QueryText            string  `json:"query_text"             binding:"required"`
+	QueryText            string  `json:"query_text"              binding:"required"`
 	VectorThreshold      float64 `json:"vector_threshold"`
 	MatchCount           int     `json:"match_count"`
 	FirstPriorityTagIDs  []int64 `json:"first_priority_tag_ids"`  // 第一优先级标签ID列表，限定命中范围，优先级最高
@@ -364,7 +366,8 @@ const (
 )
 
 // FAQImportProgress represents the progress of an FAQ import task stored in Redis
-// When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
+// When Status is "completed", the result fields (SkippedCount, ImportMode,
+// ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
 	TaskID             string              `json:"task_id"`                        // UUID for the import task
 	KBID               string              `json:"kb_id"`                          // Knowledge Base ID
@@ -542,7 +545,7 @@ func NormalizeQuestion(q string) string {
 	q = strings.ToLower(q)
 
 	// 3. 去除首尾标点符号
-	q = strings.Trim(q, `？。，；、：""！?.,;!:'""`)
+	q = strings.Trim(q, `？。，；、："！?.,;!:'`)
 
 	// 4. 繁体转简体
 	q = toSimplified(q)

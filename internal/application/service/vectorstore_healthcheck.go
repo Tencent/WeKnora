@@ -83,13 +83,17 @@ func testElasticsearchConnection(ctx context.Context, config types.ConnectionCon
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.Warnf(ctx, "Elasticsearch connection test failed: %v", err)
-		return "", errors.NewBadRequestError("failed to connect to elasticsearch: connection refused or authentication failed")
+		return "", errors.NewBadRequestError(
+			"failed to connect to elasticsearch: connection refused or authentication failed",
+		)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Warnf(ctx, "Elasticsearch connection test returned status %d", resp.StatusCode)
-		return "", errors.NewBadRequestError("failed to connect to elasticsearch: authentication failed or server error")
+		return "", errors.NewBadRequestError(
+			"failed to connect to elasticsearch: authentication failed or server error",
+		)
 	}
 
 	// Parse version from response: {"version": {"number": "7.10.1"}, ...}
@@ -124,11 +128,13 @@ func testPostgresConnection(ctx context.Context, config types.ConnectionConfig) 
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create postgres connection: invalid configuration")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.PingContext(testCtx); err != nil {
 		logger.Warnf(ctx, "Postgres connection test failed: %v", err)
-		return "", errors.NewBadRequestError("failed to connect to postgres: connection refused or authentication failed")
+		return "", errors.NewBadRequestError(
+			"failed to connect to postgres: connection refused or authentication failed",
+		)
 	}
 
 	// Detect version
@@ -159,7 +165,7 @@ func testQdrantConnection(ctx context.Context, config types.ConnectionConfig) (s
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create qdrant client: invalid configuration")
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	result, err := client.HealthCheck(testCtx)
 	if err != nil {
@@ -189,7 +195,7 @@ func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (s
 		logger.Warnf(ctx, "Milvus connection test failed: %v", err)
 		return "", errors.NewBadRequestError("failed to connect to milvus: connection refused or server unreachable")
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	return "", nil
 }
@@ -204,13 +210,17 @@ func testTencentVectorDBConnection(ctx context.Context, config types.ConnectionC
 	})
 	if err != nil {
 		logger.Warnf(ctx, "Tencent VectorDB connection test failed: %v", err)
-		return "", errors.NewBadRequestError("failed to connect to tencent vectordb: connection refused or authentication failed")
+		return "", errors.NewBadRequestError(
+			"failed to connect to tencent vectordb: connection refused or authentication failed",
+		)
 	}
 	defer client.Close()
 
 	if _, err := client.ListDatabase(testCtx); err != nil {
 		logger.Warnf(ctx, "Tencent VectorDB list database failed: %v", err)
-		return "", errors.NewBadRequestError("failed to connect to tencent vectordb: authentication failed or server error")
+		return "", errors.NewBadRequestError(
+			"failed to connect to tencent vectordb: authentication failed or server error",
+		)
 	}
 	return "", nil
 }
@@ -299,7 +309,7 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create doris connection: invalid configuration")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.PingContext(testCtx); err != nil {
 		logger.Warnf(ctx, "Doris connection test failed: %v", err)
@@ -330,7 +340,9 @@ func testOpenSearchConnection(ctx context.Context, config types.ConnectionConfig
 	if err := openSearchRepo.TestConnection(testCtx, &config); err != nil {
 		logger.Warnf(ctx, "OpenSearch connection test failed: %v", err)
 		return "", errors.NewBadRequestError(
-			"failed to connect to opensearch: check address, credentials, version (>= 2.4), and that the k-NN plugin is installed")
+			//nolint:lll
+			"failed to connect to opensearch: check address, credentials, version (>= 2.4), and that the k-NN plugin is installed",
+		)
 	}
 	// Version is detected during the probe but not surfaced here; lazy index
 	// creation re-validates on first use.

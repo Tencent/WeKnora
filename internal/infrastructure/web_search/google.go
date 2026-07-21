@@ -59,7 +59,7 @@ func (p *GoogleProvider) Search(
 	ctx context.Context,
 	query string,
 	maxResults int,
-	includeDate bool,
+	_ bool,
 ) ([]*types.WebSearchResult, error) {
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")

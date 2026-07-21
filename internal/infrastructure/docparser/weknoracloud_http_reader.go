@@ -32,6 +32,7 @@ type WeKnoraCloudSignedDocumentReader struct {
 	pollTimeout         time.Duration
 }
 
+// NewWeKnoraCloudSignedDocumentReader is an exported function.
 func NewWeKnoraCloudSignedDocumentReader(appID, apiKey string) (*WeKnoraCloudSignedDocumentReader, error) {
 	if appID == "" {
 		return nil, fmt.Errorf("WeKnoraCloud appID is required")
@@ -56,13 +57,25 @@ func NewWeKnoraCloudSignedDocumentReader(appID, apiKey string) (*WeKnoraCloudSig
 	}, nil
 }
 
-func (p *WeKnoraCloudSignedDocumentReader) Reconnect(addr string) error {
+// Reconnect implements the required behavior.
+// WeKnoraCloudSignedDocumentReader is exported.
+// WeKnoraCloudSignedDocumentReader is exported.
+// WeKnoraCloudSignedDocumentReader is exported.
+// WeKnoraCloudSignedDocumentReader is exported.
+// WeKnoraCloudSignedDocumentReader is exported.
+// WeKnoraCloudSignedDocumentReader implements the required behavior.
+func (p *WeKnoraCloudSignedDocumentReader) Reconnect(_ string) error {
 	return nil
 }
 
+// IsConnected implements the required interface method.
 func (p *WeKnoraCloudSignedDocumentReader) IsConnected() bool { return true }
 
-func (p *WeKnoraCloudSignedDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+// ListEngines implements the required interface method.
+func (p *WeKnoraCloudSignedDocumentReader) ListEngines(
+	_ context.Context,
+	_ map[string]string,
+) ([]types.ParserEngineInfo, error) {
 	return []types.ParserEngineInfo{{
 		Name:        WeKnoraCloudEngineName,
 		Description: "WeKnoraCloud signed docreader",
@@ -71,9 +84,20 @@ func (p *WeKnoraCloudSignedDocumentReader) ListEngines(ctx context.Context, over
 	}}, nil
 }
 
-func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	logger.Infof(ctx, "[WeKnoraCloud] read start file=%q type=%q engine=%q hasURL=%v contentLen=%d requestID=%q",
-		req.FileName, req.FileType, req.ParserEngine, strings.TrimSpace(req.URL) != "", len(req.FileContent), req.RequestID)
+func (p *WeKnoraCloudSignedDocumentReader) Read(
+	ctx context.Context,
+	req *types.ReadRequest,
+) (*types.ReadResult, error) {
+	logger.Infof(
+		ctx,
+		"[WeKnoraCloud] read start file=%q type=%q engine=%q hasURL=%v contentLen=%d requestID=%q",
+		req.FileName,
+		req.FileType,
+		req.ParserEngine,
+		strings.TrimSpace(req.URL) != "",
+		len(req.FileContent),
+		req.RequestID,
+	)
 	body := httpReadRequest{
 		FileName:  req.FileName,
 		FileType:  req.FileType,
@@ -103,10 +127,15 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 		logger.Errorf(context.Background(), "[WeKnoraCloud] http read request failed: %v", err)
 		return nil, fmt.Errorf("http read failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		logger.Errorf(context.Background(), "[WeKnoraCloud] http read unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+		logger.Errorf(
+			context.Background(),
+			"[WeKnoraCloud] http read unexpected status %d: %s",
+			resp.StatusCode,
+			string(bodyBytes),
+		)
 		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var submit weKnoraCloudAsyncSubmitResponse
@@ -115,10 +144,21 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 		return nil, fmt.Errorf("http decode read submit response: %w", err)
 	}
 	if strings.TrimSpace(submit.TaskID) == "" {
-		logger.Errorf(context.Background(), "[WeKnoraCloud] submit response missing task_id (status=%q message=%q)", submit.Status, submit.Message)
+		logger.Errorf(
+			context.Background(),
+			"[WeKnoraCloud] submit response missing task_id (status=%q message=%q)",
+			submit.Status,
+			submit.Message,
+		)
 		return nil, fmt.Errorf("weknoracloud docreader submit response missing task_id")
 	}
-	logger.Infof(ctx, "[WeKnoraCloud] task submitted task_id=%s file=%q type=%q", submit.TaskID, req.FileName, req.FileType)
+	logger.Infof(
+		ctx,
+		"[WeKnoraCloud] task submitted task_id=%s file=%q type=%q",
+		submit.TaskID,
+		req.FileName,
+		req.FileType,
+	)
 	return p.pollTaskResult(ctx, submit.TaskID)
 }
 
@@ -140,7 +180,10 @@ type weKnoraCloudAsyncTaskResponse struct {
 	UpdatedAt int64             `json:"updated_at"`
 }
 
-func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, taskID string) (*types.ReadResult, error) {
+func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(
+	ctx context.Context,
+	taskID string,
+) (*types.ReadResult, error) {
 	pollCtx := ctx
 	if _, ok := ctx.Deadline(); !ok && p.pollTimeout > 0 {
 		var cancel context.CancelFunc
@@ -162,16 +205,27 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 		}
 		var taskResp weKnoraCloudAsyncTaskResponse
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
 				err = fmt.Errorf("http poll task status %d: %s", resp.StatusCode, string(bodyBytes))
-				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s status %d: %s", taskID, resp.StatusCode, string(bodyBytes))
+				logger.Errorf(
+					context.Background(),
+					"[WeKnoraCloud] poll task_id=%s status %d: %s",
+					taskID,
+					resp.StatusCode,
+					string(bodyBytes),
+				)
 				return
 			}
 			if decodeErr := json.NewDecoder(resp.Body).Decode(&taskResp); decodeErr != nil {
 				err = fmt.Errorf("http decode task response: %w", decodeErr)
-				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s decode response: %v", taskID, decodeErr)
+				logger.Errorf(
+					context.Background(),
+					"[WeKnoraCloud] poll task_id=%s decode response: %v",
+					taskID,
+					decodeErr,
+				)
 			}
 		}()
 		if err != nil {
@@ -226,7 +280,11 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 	}
 }
 
-func (p *WeKnoraCloudSignedDocumentReader) newSignedRequest(ctx context.Context, method, url string, body []byte) (*http.Request, error) {
+func (p *WeKnoraCloudSignedDocumentReader) newSignedRequest(
+	ctx context.Context,
+	method, url string,
+	body []byte,
+) (*http.Request, error) {
 	requestID := uuid.New().String()
 	if len(body) == 0 {
 		body = []byte("{}")

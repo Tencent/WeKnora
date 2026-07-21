@@ -857,7 +857,8 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// If no SQL rewriting is enabled, return original SQL
-	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter && !validator.enableSearchScopeFilter {
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter &&
+		!validator.enableSearchScopeFilter {
 		return sql, validationResult, nil
 	}
 
@@ -937,6 +938,7 @@ var (
 	reSQLTailClause   = regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
 )
 
+// InjectAndConditions is an exported function.
 func InjectAndConditions(sql, filter string) string {
 	filter = strings.TrimSpace(filter)
 	if filter == "" {
@@ -1066,7 +1068,10 @@ func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map
 		conditions = append(conditions, fmt.Sprintf("%s.knowledge_base_id IN (%s)", alias, kbList))
 		if len(v.searchScopeKnowledgeIDs) > 0 {
 			quotedKIDs := quoteStringSlice(v.searchScopeKnowledgeIDs)
-			conditions = append(conditions, fmt.Sprintf("%s.knowledge_id IN (%s)", alias, strings.Join(quotedKIDs, ", ")))
+			conditions = append(
+				conditions,
+				fmt.Sprintf("%s.knowledge_id IN (%s)", alias, strings.Join(quotedKIDs, ", ")),
+			)
 		}
 	}
 
@@ -1125,8 +1130,11 @@ func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
 			))
 		case len(scope.TagIDs) > 0:
 			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))", //nolint:lll
+				alias,
+				kbID,
+				alias,
+				strings.Join(quoteStringSlice(scope.TagIDs), ", "),
 			))
 		default:
 			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
@@ -1150,8 +1158,11 @@ func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
 			))
 		case len(scope.TagIDs) > 0:
 			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))", //nolint:lll
+				alias,
+				kbID,
+				alias,
+				strings.Join(quoteStringSlice(scope.TagIDs), ", "),
 			))
 		default:
 			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
@@ -1229,7 +1240,9 @@ var (
 		description string
 	}{
 		{
-			pattern:     regexp.MustCompile(`(^|\s|\()(1\s*=\s*0|0\s*=\s*1|'1'\s*=\s*'0'|"1"\s*=\s*"0")(\s|\)|$|and|or)`),
+			pattern: regexp.MustCompile(
+				`(^|\s|\()(1\s*=\s*0|0\s*=\s*1|'1'\s*=\s*'0'|"1"\s*=\s*"0")(\s|\)|$|and|or)`,
+			),
 			description: "Always-false condition '1=0' or similar",
 		},
 		{
@@ -1389,7 +1402,11 @@ func (v *sqlValidator) validateSelectStmt(stmt *pg_query.SelectStmt, result *SQL
 }
 
 // validateFromItem validates a FROM clause item
-func (v *sqlValidator) validateFromItem(node *pg_query.Node, tables map[string]string, result *SQLValidationResult) error {
+func (v *sqlValidator) validateFromItem(
+	node *pg_query.Node,
+	tables map[string]string,
+	result *SQLValidationResult,
+) error {
 	if node == nil {
 		return nil
 	}
@@ -1455,7 +1472,11 @@ func (v *sqlValidator) validateFromItem(node *pg_query.Node, tables map[string]s
 // validateSubquery validates a SELECT statement nested in a FROM subquery.
 // It reuses the FROM-item and expression validators so RangeFunction and
 // dangerous function checks apply recursively to arbitrarily nested subqueries.
-func (v *sqlValidator) validateSubquery(node *pg_query.Node, tables map[string]string, result *SQLValidationResult) error {
+func (v *sqlValidator) validateSubquery(
+	node *pg_query.Node,
+	tables map[string]string,
+	result *SQLValidationResult,
+) error {
 	if node == nil {
 		return nil
 	}
@@ -1953,7 +1974,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	// JsonFuncExpr (JSON_VALUE / JSON_QUERY / JSON_EXISTS(...)) - PG17 SQL/JSON node.
 	// Attack: SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') FROM table
 	if jfe := node.GetJsonFuncExpr(); jfe != nil {
-		if err := v.validateJsonValueExpr(jfe.ContextItem, result); err != nil {
+		if err := v.validateJSONValueExpr(jfe.ContextItem, result); err != nil {
 			return err
 		}
 		if err := v.validateNode(jfe.Pathspec, result); err != nil {
@@ -1964,31 +1985,31 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 				return err
 			}
 		}
-		if err := v.validateJsonBehavior(jfe.OnEmpty, result); err != nil {
+		if err := v.validateJSONBehavior(jfe.OnEmpty, result); err != nil {
 			return err
 		}
-		if err := v.validateJsonBehavior(jfe.OnError, result); err != nil {
+		if err := v.validateJSONBehavior(jfe.OnError, result); err != nil {
 			return err
 		}
 	}
 
 	// JsonParseExpr (JSON(...)) - PG17 SQL/JSON node.
 	if jpe := node.GetJsonParseExpr(); jpe != nil {
-		if err := v.validateJsonValueExpr(jpe.Expr, result); err != nil {
+		if err := v.validateJSONValueExpr(jpe.Expr, result); err != nil {
 			return err
 		}
 	}
 
 	// JsonSerializeExpr (JSON_SERIALIZE(...)) - PG17 SQL/JSON node.
 	if jse := node.GetJsonSerializeExpr(); jse != nil {
-		if err := v.validateJsonValueExpr(jse.Expr, result); err != nil {
+		if err := v.validateJSONValueExpr(jse.Expr, result); err != nil {
 			return err
 		}
 	}
 
 	// JsonTable (JSON_TABLE(...)) - PG17 SQL/JSON node.
 	if jt := node.GetJsonTable(); jt != nil {
-		if err := v.validateJsonValueExpr(jt.ContextItem, result); err != nil {
+		if err := v.validateJSONValueExpr(jt.ContextItem, result); err != nil {
 			return err
 		}
 		for _, arg := range jt.Passing {
@@ -2001,7 +2022,7 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 				return err
 			}
 		}
-		if err := v.validateJsonBehavior(jt.OnError, result); err != nil {
+		if err := v.validateJSONBehavior(jt.OnError, result); err != nil {
 			return err
 		}
 	}
@@ -2124,11 +2145,11 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 	}
 }
 
-// validateJsonValueExpr validates a JsonValueExpr, which appears as a concrete
+// validateJSONValueExpr validates a JsonValueExpr, which appears as a concrete
 // (non-Node) field on several PG17 SQL/JSON expression nodes. Its RawExpr /
 // FormattedExpr children can hold arbitrary expressions (including FuncCalls),
 // so they must be recursed into.
-func (v *sqlValidator) validateJsonValueExpr(jve *pg_query.JsonValueExpr, result *SQLValidationResult) error {
+func (v *sqlValidator) validateJSONValueExpr(jve *pg_query.JsonValueExpr, result *SQLValidationResult) error {
 	if jve == nil {
 		return nil
 	}
@@ -2138,9 +2159,9 @@ func (v *sqlValidator) validateJsonValueExpr(jve *pg_query.JsonValueExpr, result
 	return v.validateNode(jve.FormattedExpr, result)
 }
 
-// validateJsonBehavior validates the ON EMPTY / ON ERROR behavior of a PG17
+// validateJSONBehavior validates the ON EMPTY / ON ERROR behavior of a PG17
 // SQL/JSON function. The DEFAULT branch can carry an arbitrary expression.
-func (v *sqlValidator) validateJsonBehavior(jb *pg_query.JsonBehavior, result *SQLValidationResult) error {
+func (v *sqlValidator) validateJSONBehavior(jb *pg_query.JsonBehavior, result *SQLValidationResult) error {
 	if jb == nil {
 		return nil
 	}

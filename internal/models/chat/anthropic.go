@@ -1,3 +1,4 @@
+// Package chat provides LLM chat model adapters and shared request types.
 package chat
 
 import (
@@ -17,6 +18,7 @@ import (
 
 const anthropicVersion = "2023-06-01"
 
+// AnthropicChat implements Chat against the Anthropic Messages API.
 type AnthropicChat struct {
 	modelName     string
 	modelID       string
@@ -86,14 +88,15 @@ type anthropicStreamEvent struct {
 	} `json:"error,omitempty"`
 }
 
-func NewAnthropicChat(config *ChatConfig) (*AnthropicChat, error) {
+// NewAnthropicChat constructs an Anthropic-backed chat client from config.
+func NewAnthropicChat(config *Config) (*AnthropicChat, error) {
 	if config.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(config.BaseURL); err != nil {
 			return nil, fmt.Errorf("baseURL SSRF check failed: %w", err)
 		}
 	}
 	if strings.TrimSpace(config.APIKey) == "" {
-		return nil, fmt.Errorf("Anthropic provider: API key is required")
+		return nil, fmt.Errorf("anthropic provider: API key is required")
 	}
 
 	baseURL := strings.TrimRight(config.BaseURL, "/")
@@ -110,7 +113,8 @@ func NewAnthropicChat(config *ChatConfig) (*AnthropicChat, error) {
 	}, nil
 }
 
-func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+// Chat performs a non-streaming completion via the Anthropic API.
+func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Options) (*types.ChatResponse, error) {
 	reqBody := c.buildRequest(messages, opts)
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -138,7 +142,7 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -173,7 +177,10 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	return result, nil
 }
 
-func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+// ChatStream performs a streaming completion via the Anthropic API.
+func (c *AnthropicChat) ChatStream(
+	ctx context.Context, messages []Message, opts *Options,
+) (<-chan types.StreamResponse, error) {
 	reqBody := c.buildRequest(messages, opts)
 	reqBody.Stream = true
 	jsonData, err := json.Marshal(reqBody)
@@ -202,7 +209,7 @@ func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -211,10 +218,12 @@ func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts
 	return streamChan, nil
 }
 
+// GetModelName returns the configured Anthropic model display name.
 func (c *AnthropicChat) GetModelName() string {
 	return c.modelName
 }
 
+// GetModelID returns the configured Anthropic model identifier.
 func (c *AnthropicChat) GetModelID() string {
 	return c.modelID
 }
@@ -248,7 +257,7 @@ func isAnthropicVersionedBaseURL(baseURL string) bool {
 	return strings.HasSuffix(path, "/v1") || strings.HasSuffix(path, "/v1beta")
 }
 
-func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anthropicRequest {
+func (c *AnthropicChat) buildRequest(messages []Message, opts *Options) anthropicRequest {
 	req := anthropicRequest{
 		Model:     c.modelName,
 		MaxTokens: 1024,
@@ -385,9 +394,11 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 	}, nil
 }
 
-func processAnthropicStream(ctx context.Context, model string, resp *http.Response, streamChan chan types.StreamResponse) {
+func processAnthropicStream(
+	ctx context.Context, model string, resp *http.Response, streamChan chan types.StreamResponse,
+) {
 	defer close(streamChan)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	sseReader := NewSSEReader(resp.Body)
 	var usage *types.TokenUsage
@@ -447,7 +458,11 @@ func processAnthropicStream(ctx context.Context, model string, resp *http.Respon
 			return
 		}
 		if streamEvent.Message != nil {
-			usage = mergeAnthropicUsage(usage, streamEvent.Message.Usage.InputTokens, streamEvent.Message.Usage.OutputTokens)
+			usage = mergeAnthropicUsage(
+				usage,
+				streamEvent.Message.Usage.InputTokens,
+				streamEvent.Message.Usage.OutputTokens,
+			)
 		}
 		if streamEvent.Delta != nil {
 			if streamEvent.Delta.StopReason != "" {

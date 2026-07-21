@@ -12,7 +12,7 @@ import (
 func ptrBool(b bool) *bool { return &b }
 
 // TestThinkingStrategy_NilThinking verifies the strategies that defer to the
-// model default emit nothing when ChatOptions.Thinking is unset.
+// model default emit nothing when Options.Thinking is unset.
 func TestThinkingStrategy_NilThinking(t *testing.T) {
 	req := openai.ChatCompletionRequest{Model: "test"}
 	strategies := []ThinkingStrategy{
@@ -35,7 +35,7 @@ func TestEnableThinking_QwenSemantics(t *testing.T) {
 	req := openai.ChatCompletionRequest{Model: "qwen3-32b"}
 
 	t.Run("non-stream forces false even when requested true", func(t *testing.T) {
-		custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, false)
+		custom, raw := s.Apply(&req, &Options{Thinking: ptrBool(true)}, false)
 		require.True(t, raw)
 		qwen, ok := custom.(QwenChatCompletionRequest)
 		require.True(t, ok)
@@ -44,7 +44,7 @@ func TestEnableThinking_QwenSemantics(t *testing.T) {
 	})
 
 	t.Run("stream honors requested true", func(t *testing.T) {
-		custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+		custom, raw := s.Apply(&req, &Options{Thinking: ptrBool(true)}, true)
 		require.True(t, raw)
 		qwen := custom.(QwenChatCompletionRequest)
 		require.NotNil(t, qwen.EnableThinking)
@@ -66,7 +66,7 @@ func TestEnableThinking_ExtraConfigSemantics(t *testing.T) {
 	s := enableThinking{}
 	req := openai.ChatCompletionRequest{Model: "qwen3"}
 
-	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	custom, raw := s.Apply(&req, &Options{Thinking: ptrBool(true)}, true)
 	require.True(t, raw)
 	qwen := custom.(QwenChatCompletionRequest)
 	require.NotNil(t, qwen.EnableThinking)
@@ -81,14 +81,14 @@ func TestThinkingTypeField(t *testing.T) {
 	s := thinkingTypeField{}
 	req := openai.ChatCompletionRequest{Model: "ds-v3"}
 
-	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	custom, raw := s.Apply(&req, &Options{Thinking: ptrBool(false)}, true)
 	require.True(t, raw)
 	typed, ok := custom.(ThinkingChatCompletionRequest)
 	require.True(t, ok)
 	require.NotNil(t, typed.Thinking)
 	assert.Equal(t, "disabled", typed.Thinking.Type)
 
-	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	custom, raw = s.Apply(&req, &Options{Thinking: ptrBool(true)}, true)
 	require.True(t, raw)
 	assert.Equal(t, "enabled", custom.(ThinkingChatCompletionRequest).Thinking.Type)
 }
@@ -97,7 +97,7 @@ func TestChatTemplateKwargs(t *testing.T) {
 	s := chatTemplateKwargs{}
 	req := openai.ChatCompletionRequest{Model: "vllm"}
 
-	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	custom, raw := s.Apply(&req, &Options{Thinking: ptrBool(true)}, true)
 	require.True(t, raw)
 	out, ok := custom.(*openai.ChatCompletionRequest)
 	require.True(t, ok)
@@ -127,16 +127,16 @@ func TestParseThinkingOverride(t *testing.T) {
 }
 
 func TestEffectiveThinkingControl(t *testing.T) {
-	assert.Equal(t, "enable_thinking", EffectiveThinkingControl(&ChatConfig{
+	assert.Equal(t, "enable_thinking", EffectiveThinkingControl(&Config{
 		Provider:  "aliyun",
 		ModelName: "qwen3-32b",
 	}))
-	assert.Equal(t, "chat_template_kwargs", EffectiveThinkingControl(&ChatConfig{
+	assert.Equal(t, "chat_template_kwargs", EffectiveThinkingControl(&Config{
 		Provider:    "generic",
 		ModelName:   "qwen3",
 		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "chat_template_kwargs"},
 	}))
-	assert.Equal(t, "none", EffectiveThinkingControl(&ChatConfig{
+	assert.Equal(t, "none", EffectiveThinkingControl(&Config{
 		Provider:    "generic",
 		ModelName:   "qwen3",
 		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "none"},

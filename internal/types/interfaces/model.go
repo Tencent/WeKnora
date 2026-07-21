@@ -3,10 +3,10 @@ package interfaces
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -33,17 +33,17 @@ type ModelService interface {
 	// "api_key" or "app_secret". Clearing an already-empty field is a no-op.
 	ClearModelCredential(ctx context.Context, id, field string) error
 	// GetEmbeddingModel gets an embedding model
-	GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error)
+	GetEmbeddingModel(ctx context.Context, modelID string) (embedding.Embedder, error)
 	// GetEmbeddingModelForTenant gets an embedding model for a specific tenant (for cross-tenant sharing)
-	GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error)
+	GetEmbeddingModelForTenant(ctx context.Context, modelID string, tenantID uint64) (embedding.Embedder, error)
 	// GetRerankModel gets a rerank model
-	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
+	GetRerankModel(ctx context.Context, modelID string) (rerank.Reranker, error)
 	// GetChatModel gets a chat model
-	GetChatModel(ctx context.Context, modelId string) (chat.Chat, error)
+	GetChatModel(ctx context.Context, modelID string) (chat.Chat, error)
 	// GetVLMModel gets a vision language model
-	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
+	GetVLMModel(ctx context.Context, modelID string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
-	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	GetASRModel(ctx context.Context, modelID string) (asr.ASR, error)
 }
 
 // ModelRepository defines the model repository interface

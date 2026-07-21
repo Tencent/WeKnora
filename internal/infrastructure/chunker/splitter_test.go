@@ -349,7 +349,7 @@ func TestSplitText_LargeChineseDocument(t *testing.T) {
 	// Simulate a real document with paragraphs of Chinese text.
 	var sb strings.Builder
 	for i := 0; i < 100; i++ {
-		sb.WriteString(fmt.Sprintf("第%d段：这是一段用于测试的中文内容，包含各种常见的汉字和标点符号。", i))
+		fmt.Fprintf(&sb, "第%d段：这是一段用于测试的中文内容，包含各种常见的汉字和标点符号。", i)
 		sb.WriteString("\n\n")
 	}
 	text := sb.String()
@@ -831,7 +831,7 @@ func TestSplitText_RestoreTextNoTable(t *testing.T) {
 	// Plain Chinese text without any tables — baseline restoration check.
 	var sb strings.Builder
 	for i := 0; i < 30; i++ {
-		sb.WriteString(fmt.Sprintf("第%d段：这是一段用于测试的中文内容，包含各种标点符号。", i))
+		fmt.Fprintf(&sb, "第%d段：这是一段用于测试的中文内容，包含各种标点符号。", i)
 		sb.WriteString("\n\n")
 	}
 	text := sb.String()

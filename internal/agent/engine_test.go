@@ -32,12 +32,16 @@ type mockChat struct {
 func (m *mockChat) ChatStream(
 	_ context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	_ *chat.Options,
 ) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.callCount >= len(m.responses) {
-		return nil, fmt.Errorf("unexpected ChatStream call #%d (only %d responses prepared)", m.callCount, len(m.responses))
+		return nil, fmt.Errorf(
+			"unexpected ChatStream call #%d (only %d responses prepared)",
+			m.callCount,
+			len(m.responses),
+		)
 	}
 	resp := m.responses[m.callCount]
 	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
@@ -58,7 +62,7 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 		{ResponseType: types.ResponseTypeAnswer, Content: "001)", Done: true},
 	}}}}
 	engine := newTestEngine(t, model)
-	result, err := engine.streamLLMToEventBus(
+	result, err := engine.streamLLMToBus(
 		context.Background(),
 		[]chat.Message{{Role: "tool", Content: "source=" + ref}},
 		nil,
@@ -81,12 +85,12 @@ func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
 		KnowledgeBaseID: "kb-1",
 		DocumentTitle:   "Doc",
 	})
-	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+	result, err := engine.streamLLMToBus(context.Background(), nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, `answer <kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`, result.Content)
 }
 
-func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.Options) (*types.ChatResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -98,12 +102,6 @@ func (m *mockChat) GetModelID() string   { return "mock-id" }
 // ---------------------------------------------------------------------------
 
 type testEngineOption func(*types.AgentConfig)
-
-func withMaxIterations(n int) testEngineOption {
-	return func(cfg *types.AgentConfig) {
-		cfg.MaxIterations = n
-	}
-}
 
 func withCitationsEnabled(enabled bool) testEngineOption {
 	return func(cfg *types.AgentConfig) {
@@ -122,7 +120,7 @@ func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
-func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
+func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *Engine {
 	t.Helper()
 	cfg := &types.AgentConfig{
 		MaxIterations: 10,
@@ -131,17 +129,17 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	engine := NewAgentEngine(
+	engine := NewEngine(
 		cfg,
 		chatModel,
 		nil,
-		event.NewEventBus(),
+		event.NewBus(),
 		nil,
 		nil,
 		"test-session",
 		"",
 	)
-	require.NotNil(t, engine, "NewAgentEngine returned nil (agenttoken.NewEstimator failed?)")
+	require.NotNil(t, engine, "NewEngine returned nil (agenttoken.NewEstimator failed?)")
 	return engine
 }
 
@@ -162,8 +160,8 @@ func emptyTools() []chat.Tool {
 
 func TestExecuteLoop_EmptyContentWithStop_ShouldNotCompleteWithEmpty(t *testing.T) {
 	// Simulate: LLM returns empty content with no tool calls (natural stop).
-	// The stream closes with no content chunks → streamLLMToEventBus returns fullContent="".
-	// streamThinkingToEventBus wraps it as ChatResponse{Content:"", FinishReason:"stop"}.
+	// The stream closes with no content chunks → streamLLMToBus returns fullContent="".
+	// streamThinkingToBus wraps it as ChatResponse{Content:"", FinishReason:"stop"}.
 	// analyzeResponse() returns verdict{isDone:true, finalAnswer:""} → BUG: empty answer.
 	//
 	// Prepare 3 responses for initial attempt + 2 retries (after fix).
@@ -240,10 +238,10 @@ func TestExecuteLoop_EmptyThenNonEmpty_ShouldRetryAndComplete(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TC5: FinishReason propagation through streamThinkingToEventBus
+// TC5: FinishReason propagation through streamThinkingToBus
 // ---------------------------------------------------------------------------
 
-func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
+func TestStreamThinkingToBus_PropagatesFinishReason(t *testing.T) {
 	tests := []struct {
 		name         string
 		finishReason string
@@ -270,7 +268,7 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 			msgs := []chat.Message{{Role: "user", Content: "test"}}
 			tools := []chat.Tool{}
 
-			resp, err := engine.streamThinkingToEventBus(ctx, msgs, tools, 0, "sess-1")
+			resp, err := engine.streamThinkingToBus(ctx, msgs, tools, 0, "sess-1")
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wantReason, resp.FinishReason)
@@ -278,13 +276,13 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 	}
 }
 
-// TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately is the
+// TestStreamThinkingToBus_RoutesReasoningAndAnswerSeparately is the
 // regression guard for the "answer first shows under Thinking, then jumps to
 // the answer area" UX bug. A natural-stop response that carries reasoning in
 // the dedicated reasoning channel (ResponseTypeThinking) plus plain answer
 // content (ResponseTypeAnswer) must route the reasoning to thought events and
 // the answer live to final-answer events — never the reverse.
-func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.T) {
+func TestStreamThinkingToBus_RoutesReasoningAndAnswerSeparately(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
@@ -311,7 +309,7 @@ func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.
 		return nil
 	})
 
-	resp, err := engine.streamThinkingToEventBus(context.Background(),
+	resp, err := engine.streamThinkingToBus(context.Background(),
 		emptyMessages(), emptyTools(), 0, "sess-1")
 	require.NoError(t, err)
 
@@ -321,11 +319,11 @@ func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.
 	assert.NotEmpty(t, resp.AnswerEventID, "AnswerEventID must identify the live answer stream")
 }
 
-// TestStreamThinkingToEventBus_SplitsInlineThinkBlock verifies that models which
+// TestStreamThinkingToBus_SplitsInlineThinkBlock verifies that models which
 // embed reasoning inline as <think>…</think> in the content channel still have
 // their reasoning routed to thought events and only the real answer streamed to
 // the final-answer area.
-func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
+func TestStreamThinkingToBus_SplitsInlineThinkBlock(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
@@ -352,7 +350,7 @@ func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
 		return nil
 	})
 
-	_, err := engine.streamThinkingToEventBus(context.Background(),
+	_, err := engine.streamThinkingToBus(context.Background(),
 		emptyMessages(), emptyTools(), 0, "sess-1")
 	require.NoError(t, err)
 
@@ -422,7 +420,7 @@ func TestExecuteLoop_EndTurnTerminates(t *testing.T) {
 	assert.Equal(t, 1, mock.callCount, "end_turn must end the loop after the first model call")
 }
 
-func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
+func TestStreamFinalAnswerToBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
@@ -442,7 +440,7 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	})
 
 	state := &types.AgentState{}
-	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+	err := engine.streamFinalAnswerToBus(context.Background(), "test query", state, "sess-1")
 
 	require.NoError(t, err)
 	require.Len(t, finalAnswerEvents, 2)

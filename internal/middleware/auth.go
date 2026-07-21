@@ -199,7 +199,12 @@ func Auth(
 				}
 
 				if targetTenantID == 0 {
-					targetTenantID = resolveFirstMembershipTarget(c.Request.Context(), user, memberService, tenantService)
+					targetTenantID = resolveFirstMembershipTarget(
+						c.Request.Context(),
+						user,
+						memberService,
+						tenantService,
+					)
 					crossTenantSwitch = targetTenantID != user.TenantID
 				}
 
@@ -229,7 +234,14 @@ func Auth(
 				}
 
 				// 解析当前空间内的角色 (issue #1303)
-				role, ok := resolveTenantRole(c.Request.Context(), memberService, user, targetTenantID, crossTenantSwitch, cfg)
+				role, ok := resolveTenantRole(
+					c.Request.Context(),
+					memberService,
+					user,
+					targetTenantID,
+					crossTenantSwitch,
+					cfg,
+				)
 				if !ok {
 					// 强制 RBAC 时，缺少 active membership 即拒绝；fail-open 路径已在
 					// resolveTenantRole 内部处理。
@@ -448,7 +460,11 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
 		}, nil
 	case types.APIPrincipalModeSignedToken:
-		externalUserID, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
+		externalUserID, err := verifyExternalUserJWT(
+			header.Get(defaultExternalUserTokenHeader),
+			tenantID,
+			cfg.HMACSecret,
+		)
 		if err != nil || externalUserID == "" {
 			logger.Warnf(ctx, "invalid external user token for tenant=%d: %v", tenantID, err)
 			return types.Principal{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
@@ -654,18 +670,18 @@ func resolveTenantRole(
 	if isHomeTenant {
 		hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
 		if anyErr == nil && !hasAny {
-			if _, e := memberService.AddMember(
+			_, promoteErr := memberService.AddMember(
 				ctx, user.ID, targetTenantID, types.TenantRoleOwner, nil,
-			); e == nil {
+			)
+			if promoteErr == nil {
 				logger.Infof(ctx,
 					"[audit] Auto-promoted user %s to Owner of orphan tenant %d (home_tenant=true)",
 					user.ID, targetTenantID,
 				)
 				return types.TenantRoleOwner, true
-			} else {
-				logger.Warnf(ctx, "Failed to auto-promote user %s in tenant %d: %v",
-					user.ID, targetTenantID, e)
 			}
+			logger.Warnf(ctx, "Failed to auto-promote user %s in tenant %d: %v",
+				user.ID, targetTenantID, promoteErr)
 		}
 	}
 

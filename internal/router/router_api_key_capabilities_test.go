@@ -270,12 +270,23 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
-	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
-	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
+	RegisterMCPServiceRoutes(
+		v1,
+		&handler.MCPServiceHandler{},
+		&handler.MCPCredentialsHandler{},
+		&handler.MCPOAuthHandler{},
+		g,
+	)
+	RegisterWebSearchProviderRoutes(
+		v1,
+		&handler.WebSearchProviderHandler{},
+		&handler.WebSearchProviderCredentialsHandler{},
+		g,
+	)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
-	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
+	RegisterChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
 
@@ -316,7 +327,14 @@ func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterTenantRoutes(v1, &handler.TenantHandler{}, &handler.TenantMemberHandler{}, &handler.TenantInvitationHandler{}, nil, g)
+	RegisterTenantRoutes(
+		v1,
+		&handler.TenantHandler{},
+		&handler.TenantMemberHandler{},
+		&handler.TenantInvitationHandler{},
+		nil,
+		g,
+	)
 
 	cases := []struct {
 		method string
@@ -516,9 +534,9 @@ func mustLookupAPIKeyPolicy(
 	return policy
 }
 
-func policyHasCapability(policy middleware.APIKeyRoutePolicy, cap types.APIKeyCapability) bool {
+func policyHasCapability(policy middleware.APIKeyRoutePolicy, capability types.APIKeyCapability) bool {
 	for _, got := range policy.Capabilities {
-		if got == cap {
+		if got == capability {
 			return true
 		}
 	}

@@ -89,7 +89,13 @@ to the user first.`,
 			}
 			// Build a retry command from the flags the user actually passed so
 			// agents can re-invoke with -y after explicit human approval.
-			retryCmd := cmdutil.BuildRetryArgv(c, []string{"weknora", "doc", "update", id}, "title", "description", "format")
+			retryCmd := cmdutil.BuildRetryArgv(
+				c,
+				[]string{"weknora", "doc", "update", id},
+				"title",
+				"description",
+				"format",
+			)
 			if err := cmdutil.ConfirmWrite(f.Prompter(), opts.Yes, fopts.WantsJSON(), "update", "document", id, "doc.update", retryCmd); err != nil {
 				return err
 			}
@@ -125,7 +131,13 @@ func errNoUpdateFlag() error {
 	}
 }
 
-func runUpdate(ctx context.Context, opts *UpdateOptions, fopts *cmdutil.FormatOptions, svc UpdateService, id string) error {
+func runUpdate(
+	ctx context.Context,
+	opts *UpdateOptions,
+	fopts *cmdutil.FormatOptions,
+	svc UpdateService,
+	id string,
+) error {
 	if opts.Title == nil && opts.Description == nil {
 		return errNoUpdateFlag()
 	}

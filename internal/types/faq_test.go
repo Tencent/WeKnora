@@ -31,8 +31,11 @@ func TestCalculateFAQContentHash_NormalizeIsApplied(t *testing.T) {
 	hashFromSanitized := CalculateFAQContentHash(sanitized)
 
 	if hashFromNormalized != hashFromSanitized {
-		t.Errorf("Hash mismatch between write and read paths:\n  write (normalized first): %s\n  read  (sanitized only):   %s",
-			hashFromNormalized, hashFromSanitized)
+		t.Errorf(
+			"Hash mismatch between write and read paths:\n  write (normalized first): %s\n  read  (sanitized only):   %s",
+			hashFromNormalized,
+			hashFromSanitized,
+		)
 	}
 }
 
@@ -69,8 +72,13 @@ func TestCalculateFAQContentHash_ConsistentViaSetFAQMetadata(t *testing.T) {
 	readHash := CalculateFAQContentHash(readMeta)
 
 	if chunk.ContentHash != readHash {
-		t.Errorf("Hash mismatch between SetFAQMetadata and direct CalculateFAQContentHash:\n  SetFAQMetadata:           %s\n  CalculateFAQContentHash:  %s",
-			chunk.ContentHash, readHash)
+		t.Errorf(
+			"Hash mismatch between SetFAQMetadata and direct CalculateFAQContentHash:\n"+
+				"  SetFAQMetadata:           %s\n"+
+				"  CalculateFAQContentHash:  %s",
+			chunk.ContentHash,
+			readHash,
+		)
 	}
 }
 
@@ -99,7 +107,7 @@ func TestCalculateFAQContentHash_TraditionalSimplifiedInvariant(t *testing.T) {
 		Answers:          []string{"请联系客服"},
 	}
 	meta2 := &FAQChunkMetadata{
-		StandardQuestion: "如何退款", // simplified
+		StandardQuestion: "如何退款",            // simplified
 		Answers:          []string{"請聯繫客服"}, // traditional in answers — answers only sanitize, not normalize
 	}
 

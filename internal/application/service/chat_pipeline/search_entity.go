@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// PluginSearchEntity is exported.
 // PluginSearch implements search functionality for chat pipeline
 type PluginSearchEntity struct {
 	graphRepo     interfaces.RetrieveGraphRepository
@@ -34,13 +35,13 @@ func NewPluginSearchEntity(
 }
 
 // ActivationEvents returns the list of event types this plugin responds to
-func (p *PluginSearchEntity) ActivationEvents() []types.EventType {
-	return []types.EventType{types.ENTITY_SEARCH}
+func (p *PluginSearchEntity) ActivationEvents() []types.Type {
+	return []types.Type{types.EntitySearch}
 }
 
 // OnEvent processes triggered events
 func (p *PluginSearchEntity) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	entity := chatManage.Entity
 	if len(entity) == 0 {

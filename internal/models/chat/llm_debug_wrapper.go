@@ -19,14 +19,16 @@ type debugChat struct {
 func (d *debugChat) GetModelName() string { return d.inner.GetModelName() }
 func (d *debugChat) GetModelID() string   { return d.inner.GetModelID() }
 
-func (d *debugChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (d *debugChat) Chat(ctx context.Context, messages []Message, opts *Options) (*types.ChatResponse, error) {
 	callStart := time.Now()
 	resp, err := d.inner.Chat(ctx, messages, opts)
 	logLLMDebugCall(ctx, d.inner.GetModelName(), messages, opts, resp, err, time.Since(callStart))
 	return resp, err
 }
 
-func (d *debugChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+func (d *debugChat) ChatStream(
+	ctx context.Context, messages []Message, opts *Options,
+) (<-chan types.StreamResponse, error) {
 	callStart := time.Now()
 	ch, err := d.inner.ChatStream(ctx, messages, opts)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// OpenRouterBaseURL and related constants.
 const (
 	OpenRouterBaseURL = "https://openrouter.ai/api/v1"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回 OpenRouter provider 的元数据
-func (p *OpenRouterProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *OpenRouterProvider) Info() Info {
+	return Info{
 		Name:        ProviderOpenRouter,
 		DisplayName: "OpenRouter",
 		Description: "openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.",

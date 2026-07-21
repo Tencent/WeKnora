@@ -21,8 +21,8 @@ func init() {
 }
 
 // Info 返回 MiniMax provider 的元数据
-func (p *MiniMaxProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *MiniMaxProvider) Info() Info {
+	return Info{
 		Name:        ProviderMiniMax,
 		DisplayName: "MiniMax",
 		Description: "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.",

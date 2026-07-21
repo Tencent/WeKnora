@@ -23,8 +23,8 @@ func init() {
 }
 
 // Info 返回智谱 AI provider 的元数据
-func (p *ZhipuProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *ZhipuProvider) Info() Info {
+	return Info{
 		Name:        ProviderZhipu,
 		DisplayName: "智谱 BigModel",
 		Description: "glm-4.7, embedding-3, rerank, etc.",

@@ -85,17 +85,17 @@ const (
 // rows are created when an admin adds the user to another tenant.
 type TenantMember struct {
 	// Surrogate primary key.
-	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID uint64 `json:"id"                   gorm:"primaryKey;autoIncrement"`
 	// UserID references users.id. Together with TenantID forms the logical
 	// key enforced by the partial unique index uniq_user_tenant.
-	UserID string `json:"user_id" gorm:"type:varchar(36);not null;index"`
+	UserID string `json:"user_id"              gorm:"type:varchar(36);not null;index"`
 	// TenantID references tenants.id.
-	TenantID uint64 `json:"tenant_id" gorm:"not null;index"`
+	TenantID uint64 `json:"tenant_id"            gorm:"not null;index"`
 	// Role held by the user inside this tenant.
-	Role TenantRole `json:"role" gorm:"type:varchar(20);not null;default:'contributor'"`
+	Role TenantRole `json:"role"                 gorm:"type:varchar(20);not null;default:'contributor'"`
 	// Status controls whether this membership is honoured by the auth
 	// middleware; see TenantMemberStatus constants.
-	Status TenantMemberStatus `json:"status" gorm:"type:varchar(20);not null;default:'active'"`
+	Status TenantMemberStatus `json:"status"               gorm:"type:varchar(20);not null;default:'active'"`
 	// InvitedBy records the user ID of the admin who created this row via
 	// an invitation flow. Nil for rows created by self-service registration.
 	InvitedBy *string `json:"invited_by,omitempty" gorm:"type:varchar(36)"`
@@ -103,7 +103,7 @@ type TenantMember struct {
 	JoinedAt  time.Time      `json:"joined_at"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"           gorm:"index"`
 }
 
 // TableName binds TenantMember to the tenant_members table.

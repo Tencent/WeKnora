@@ -42,6 +42,7 @@ const (
 // ChunkStatus 定义了不同状态的 Chunk
 type ChunkStatus int
 
+// ChunkStatusDefault and related constants.
 const (
 	ChunkStatusDefault ChunkStatus = 0
 	// ChunkStatusStored 表示已存储的 Chunk
@@ -101,7 +102,7 @@ type ImageInfo struct {
 // VideoInfo 表示与 Chunk 关联的视频信息
 type VideoInfo struct {
 	// 视频URL
-	URL string `json:"url"          gorm:"type:text"`
+	URL string `json:"url" gorm:"type:text"`
 }
 
 // Chunk represents a document chunk
@@ -166,7 +167,7 @@ type Chunk struct {
 	// heading breadcrumb) that the indexing pipeline prepends to Content
 	// when generating embeddings. NOT persisted — populated by the chunker
 	// during initial splitting and discarded after indexing.
-	ContextHeader string `json:"-" gorm:"-"`
+	ContextHeader string `json:"-"                        gorm:"-"`
 }
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended

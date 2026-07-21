@@ -20,11 +20,11 @@ import (
 type OllamaChat struct {
 	modelName     string
 	modelID       string
-	ollamaService *ollama.OllamaService
+	ollamaService *ollama.Service
 }
 
 // NewOllamaChat 创建 Ollama 聊天实例
-func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*OllamaChat, error) {
+func NewOllamaChat(config *Config, ollamaService *ollama.Service) (*OllamaChat, error) {
 	return &OllamaChat{
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
@@ -74,7 +74,7 @@ func resolveImageForOllama(imageURL string) ollamaapi.ImageData {
 		if err != nil {
 			return nil
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		data, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
 		if err != nil {
 			return nil
@@ -85,7 +85,7 @@ func resolveImageForOllama(imageURL string) ollamaapi.ImageData {
 }
 
 // buildChatRequest 构建聊天请求参数
-func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isStream bool) *ollamaapi.ChatRequest {
+func (c *OllamaChat) buildChatRequest(messages []Message, opts *Options, isStream bool) *ollamaapi.ChatRequest {
 	// 设置流式标志
 	streamFlag := isStream
 
@@ -123,7 +123,7 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 }
 
 // Chat 进行非流式聊天
-func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *Options) (*types.ChatResponse, error) {
 	// 确保模型可用
 	if err := c.ensureModelAvailable(ctx); err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 func (c *OllamaChat) ChatStream(
 	ctx context.Context,
 	messages []Message,
-	opts *ChatOptions,
+	opts *Options,
 ) (<-chan types.StreamResponse, error) {
 	// 确保模型可用
 	if err := c.ensureModelAvailable(ctx); err != nil {
@@ -322,26 +322,6 @@ func (c *OllamaChat) toolFrom(tools []Tool) ollamaapi.Tools {
 		})
 	}
 	return ollamaTools
-}
-
-// toolTo 将 Ollama 的 Tool 转换为本模块的 Tool
-func (c *OllamaChat) toolTo(ollamaTools ollamaapi.Tools) []Tool {
-	if len(ollamaTools) == 0 {
-		return nil
-	}
-	tools := make([]Tool, 0, len(ollamaTools))
-	for _, tool := range ollamaTools {
-		paramsBytes, _ := json.Marshal(tool.Function.Parameters)
-		tools = append(tools, Tool{
-			Type: tool.Type,
-			Function: FunctionDef{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-				Parameters:  paramsBytes,
-			},
-		})
-	}
-	return tools
 }
 
 // toolCallFrom 将本模块的 ToolCall 转换为 Ollama 的 ToolCall

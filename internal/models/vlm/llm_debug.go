@@ -24,7 +24,15 @@ func (d *debugVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string
 func (d *debugVLM) GetModelName() string { return d.inner.GetModelName() }
 func (d *debugVLM) GetModelID() string   { return d.inner.GetModelID() }
 
-func logVLMDebug(ctx context.Context, model string, imgBytes [][]byte, prompt string, response string, callErr error, dur time.Duration) {
+func logVLMDebug(
+	ctx context.Context,
+	model string,
+	imgBytes [][]byte,
+	prompt string,
+	response string,
+	callErr error,
+	dur time.Duration,
+) {
 	if !logger.LLMDebugEnabled() {
 		return
 	}
@@ -37,12 +45,12 @@ func logVLMDebug(ctx context.Context, model string, imgBytes [][]byte, prompt st
 
 	// Input section
 	var inputBuf strings.Builder
-	inputBuf.WriteString(fmt.Sprintf("Images: count=%d", len(imgBytes)))
+	fmt.Fprintf(&inputBuf, "Images: count=%d", len(imgBytes))
 	totalSize := 0
 	for _, img := range imgBytes {
 		totalSize += len(img)
 	}
-	inputBuf.WriteString(fmt.Sprintf(", total_size=%d bytes\n\n", totalSize))
+	fmt.Fprintf(&inputBuf, ", total_size=%d bytes\n\n", totalSize)
 	inputBuf.WriteString("[prompt]\n")
 	inputBuf.WriteString(prompt)
 	inputBuf.WriteString("\n")

@@ -77,7 +77,8 @@ stdout.`,
 			return runDownload(c.Context(), opts, fopts, cli, args[0])
 		},
 	}
-	cmd.Flags().StringVarP(&opts.Output, "output", "O", "", `Output path; "-" for stdout. Defaults to the server-suggested filename.`)
+	cmd.Flags().
+		StringVarP(&opts.Output, "output", "O", "", `Output path; "-" for stdout. Defaults to the server-suggested filename.`)
 	cmd.Flags().BoolVar(&opts.Clobber, "clobber", false, "Overwrite the output file if it already exists")
 	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, downloadFields...)
@@ -93,12 +94,18 @@ stdout.`,
 	return cmd
 }
 
-func runDownload(ctx context.Context, opts *DownloadOptions, fopts *cmdutil.FormatOptions, svc DownloadService, id string) error {
+func runDownload(
+	ctx context.Context,
+	opts *DownloadOptions,
+	fopts *cmdutil.FormatOptions,
+	svc DownloadService,
+	id string,
+) error {
 	suggested, body, err := svc.OpenKnowledgeFile(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "download %s", id)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	dest, err := resolveDownloadDest(opts, suggested)
 	if err != nil {

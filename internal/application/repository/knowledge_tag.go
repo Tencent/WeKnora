@@ -68,7 +68,8 @@ func (r *knowledgeRepository) GetKnowledgeTags(
 	var rows []relationWithTag
 	if err := r.db.WithContext(ctx).
 		Table("knowledge_tag_relations AS ktr").
-		Select("ktr.knowledge_id, kt.id, kt.seq_id, kt.tenant_id, kt.knowledge_base_id, kt.name, kt.color, kt.sort_order, kt.created_at, kt.updated_at").
+		Select("ktr.knowledge_id, kt.id, kt.seq_id, kt.tenant_id, kt.knowledge_base"+
+			"_id, kt.name, kt.color, kt.sort_order, kt.created_at, kt.updated_at").
 		Joins("JOIN knowledge_tags AS kt ON ktr.tag_id = kt.id").
 		Where("ktr.knowledge_id IN (?)", knowledgeIDs).
 		Find(&rows).Error; err != nil {

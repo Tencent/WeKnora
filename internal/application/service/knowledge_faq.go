@@ -44,7 +44,13 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		callerTenantRole := types.TenantRoleFromContext(ctx)
 
 		// Check if the caller's tenant has at least viewer permission via org sharing.
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(
+			ctx,
+			kbID,
+			tenantID,
+			callerTenantRole,
+			types.OrgRoleViewer,
+		)
 		if err != nil || !hasPermission {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}
@@ -77,7 +83,16 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 
 	chunkType := []types.ChunkType{types.ChunkTypeFAQ}
 	chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
-		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagID, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
+		ctx,
+		effectiveTenantID,
+		faqKnowledge.ID,
+		page,
+		chunkType,
+		tagID,
+		keyword,
+		searchField,
+		sortOrder,
+		types.KnowledgeTypeFAQ,
 	)
 	if err != nil {
 		return nil, err
@@ -431,7 +446,7 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 				}
 				if len(sourceIDsToDelete) > 0 {
 					logger.Debugf(ctx, "UpdateFAQEntry: incremental delete %d obsolete source IDs", len(sourceIDsToDelete))
-					if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
+					if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil { //nolint:lll
 						logger.Warnf(ctx, "UpdateFAQEntry: failed to delete obsolete source IDs: %v", delErr)
 					}
 				}
@@ -1593,7 +1608,11 @@ func buildFAQKnowledgeTitle(kbName string) string {
 	return name
 }
 
-func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase, tagSeqIDMap map[string]int64) (*types.FAQEntry, error) {
+func (s *knowledgeService) chunkToFAQEntry(
+	chunk *types.Chunk,
+	kb *types.KnowledgeBase,
+	tagSeqIDMap map[string]int64,
+) (*types.FAQEntry, error) {
 	meta, err := chunk.FAQMetadata()
 	if err != nil {
 		return nil, err
@@ -1636,11 +1655,11 @@ func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.Knowled
 
 func buildFAQChunkContent(meta *types.FAQChunkMetadata, mode types.FAQIndexMode) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Q: %s\n", meta.StandardQuestion))
+	fmt.Fprintf(&builder, "Q: %s\n", meta.StandardQuestion)
 	if len(meta.SimilarQuestions) > 0 {
 		builder.WriteString("Similar Questions:\n")
 		for _, q := range meta.SimilarQuestions {
-			builder.WriteString(fmt.Sprintf("- %s\n", q))
+			fmt.Fprintf(&builder, "- %s\n", q)
 		}
 	}
 	// 负例不应该包含在 Content 中，因为它们不应该被索引
@@ -1648,7 +1667,7 @@ func buildFAQChunkContent(meta *types.FAQChunkMetadata, mode types.FAQIndexMode)
 	if mode == types.FAQIndexModeQuestionAnswer && len(meta.Answers) > 0 {
 		builder.WriteString("Answers:\n")
 		for _, ans := range meta.Answers {
-			builder.WriteString(fmt.Sprintf("- %s\n", ans))
+			fmt.Fprintf(&builder, "- %s\n", ans)
 		}
 	}
 	return builder.String()
@@ -1759,7 +1778,11 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name
 // If no tag is specified, creates or finds the "未分类" tag
 // Returns the internal UUID of the tag
-func (s *knowledgeService) resolveTagID(ctx context.Context, kbID string, payload *types.FAQEntryPayload) (string, error) {
+func (s *knowledgeService) resolveTagID(
+	ctx context.Context,
+	kbID string,
+	payload *types.FAQEntryPayload,
+) (string, error) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	// 如果提供了 tag_id (seq_id)，优先使用 tag_id
@@ -1836,7 +1859,7 @@ func buildFAQIndexContent(meta *types.FAQChunkMetadata, mode types.FAQIndexMode)
 
 // buildFAQIndexInfoList 构建FAQ索引信息列表，支持分别索引模式
 func (s *knowledgeService) buildFAQIndexInfoList(
-	ctx context.Context,
+	_ context.Context,
 	kb *types.KnowledgeBase,
 	chunk *types.Chunk,
 ) ([]*types.IndexInfo, error) {

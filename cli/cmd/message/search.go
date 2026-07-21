@@ -65,8 +65,10 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			return runSearch(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return — server-side limit (1..1000; default 20 mirrors the server default)")
-	cmd.Flags().StringVar(&opts.Mode, "mode", "", "Search mode: keyword | vector | hybrid (omit for server default: hybrid)")
+	cmd.Flags().
+		IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return — server-side limit (1..1000; default 20 mirrors the server default)")
+	cmd.Flags().
+		StringVar(&opts.Mode, "mode", "", "Search mode: keyword | vector | hybrid (omit for server default: hybrid)")
 	cmd.Flags().StringArrayVar(&opts.SessionIDs, "session", nil, "Restrict search to these session ids (repeatable)")
 	cmdutil.AddFormatFlag(cmd, messageSearchFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -137,7 +139,14 @@ func runSearch(ctx context.Context, opts *SearchOptions, fopts *cmdutil.FormatOp
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SESSION ID\tQUERY\tANSWER\tSCORE")
 	for _, it := range items {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%.2f\n", it.SessionID, text.OneLine(40, it.QueryContent), text.OneLine(40, it.AnswerContent), it.Score)
+		fmt.Fprintf(
+			tw,
+			"%s\t%s\t%s\t%.2f\n",
+			it.SessionID,
+			text.OneLine(40, it.QueryContent),
+			text.OneLine(40, it.AnswerContent),
+			it.Score,
+		)
 	}
 	return tw.Flush()
 }

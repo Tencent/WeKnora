@@ -38,7 +38,8 @@ var webFetchTool = BaseTool{
 - Return summary result and original content fragment
 
 ## When to Use
-- **MANDATORY**: After web_search returns results, if content is truncated or incomplete, use web_fetch to get full page content
+- **MANDATORY**: After web_search returns results, if content is truncated or incomplete, use web_fetch to get
+full page content
 - When web_search snippet is insufficient for answering the question`,
 	schema: utils.GenerateSchema[WebFetchInput](),
 }
@@ -50,7 +51,7 @@ type WebFetchInput struct {
 
 // WebFetchItem represents a single web fetch task
 type WebFetchItem struct {
-	URL    string `json:"url" jsonschema:"Short wN web page ID from web_search results"`
+	URL    string `json:"url"    jsonschema:"Short wN web page ID from web_search results"`
 	Prompt string `json:"prompt" jsonschema:"Prompt for analyzing the fetched web page content"`
 }
 
@@ -128,10 +129,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 		i := idx
 		item := input.Items[i]
 
-		params := webFetchParams{
-			URL:    item.URL,
-			Prompt: item.Prompt,
-		}
+		params := webFetchParams(item)
 
 		go func(index int, p webFetchParams) {
 			defer wg.Done()
@@ -176,11 +174,11 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 			if firstErr == nil {
 				firstErr = fmt.Errorf("fetch item %d returned nil", idx)
 			}
-			builder.WriteString(fmt.Sprintf("#%d: No result (internal error)\n\n", idx+1))
+			fmt.Fprintf(&builder, "#%d: No result (internal error)\n\n", idx+1)
 			continue
 		}
 
-		builder.WriteString(fmt.Sprintf("#%d:\n%s", idx+1, res.output))
+		fmt.Fprintf(&builder, "#%d:\n%s", idx+1, res.output)
 		if !strings.HasSuffix(res.output, "\n") {
 			builder.WriteString("\n")
 		}
@@ -233,20 +231,6 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 			return ""
 		}(),
 	}, nil
-}
-
-// parseParams parses the parameters for a web fetch item
-func (t *WebFetchTool) parseParams(item interface{}) webFetchParams {
-	params := webFetchParams{}
-	if m, ok := item.(map[string]interface{}); ok {
-		if v, ok := m["url"].(string); ok {
-			params.URL = strings.TrimSpace(v)
-		}
-		if v, ok := m["prompt"].(string); ok {
-			params.Prompt = strings.TrimSpace(v)
-		}
-	}
-	return params
 }
 
 // validateAndResolve validates parameters and resolves the host to a single public IP (DNS pinning).
@@ -308,7 +292,8 @@ func (t *WebFetchTool) validateAndResolve(p webFetchParams) (*validatedParams, e
 	}, nil
 }
 
-// executeFetch executes a web fetch item. displayURL is the URL shown to the user (e.g. original); vp.URL is the normalized URL we fetch.
+// executeFetch executes a web fetch item. displayURL is the URL shown to the user (e.g. original); vp.URL is the
+// normalized URL we fetch.
 func (t *WebFetchTool) executeFetch(
 	ctx context.Context,
 	vp *validatedParams,
@@ -366,7 +351,8 @@ func (t *WebFetchTool) processWithLLM(ctx context.Context, params webFetchParams
 		return "", fmt.Errorf("chat model not available for web_fetch")
 	}
 
-	systemMessage := "You are an intelligent assistant skilled at reading web page content. Answer the user's request based on the provided web page text. Never fabricate information that does not appear in the text."
+	systemMessage := "You are an intelligent assistant skilled at reading web page content. Answer the user's request b" +
+		"ased on the provided web page text. Never fabricate information that does not appear in the text."
 	userTemplate := `User request:
 %s
 
@@ -384,7 +370,7 @@ Web page content:
 		},
 	}
 
-	response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	response, err := t.chatModel.Chat(ctx, messages, &chat.Options{
 		Temperature: 0.3,
 		MaxTokens:   1024,
 	})
@@ -398,8 +384,8 @@ Web page content:
 // buildOutputText builds the output text for a web fetch item
 func (t *WebFetchTool) buildOutputText(params webFetchParams, content string, summary string, summaryErr error) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
-	builder.WriteString(fmt.Sprintf("Prompt: %s\n", params.Prompt))
+	fmt.Fprintf(&builder, "URL: %s\n", params.URL)
+	fmt.Fprintf(&builder, "Prompt: %s\n", params.Prompt)
 
 	if summaryErr == nil && summary != "" {
 		builder.WriteString("Summary:\n")
@@ -436,7 +422,8 @@ func (t *WebFetchTool) fetchHTMLContent(ctx context.Context, vp *validatedParams
 	return html, "http", nil
 }
 
-// fetchWithChromedp fetches the HTML content with Chromedp. Uses host-resolver-rules to pin host to vp.PinnedIP (DNS rebinding protection).
+// fetchWithChromedp fetches the HTML content with Chromedp. Uses host-resolver-rules to pin host to vp.PinnedIP (DNS
+// rebinding protection).
 func (t *WebFetchTool) fetchWithChromedp(ctx context.Context, vp *validatedParams) (string, error) {
 	logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取开始 url=%s", vp.URL)
 
@@ -485,7 +472,7 @@ func (t *WebFetchTool) fetchWithHTTP(ctx context.Context, vp *validatedParams) (
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("request failed with status %d %s", resp.StatusCode, resp.Status)
@@ -535,7 +522,7 @@ func (t *WebFetchTool) convertHTMLToText(html string) string {
 	doc.Find("script, style, nav, footer, header").Remove()
 
 	var markdown strings.Builder
-	doc.Find("body").Each(func(i int, body *goquery.Selection) {
+	doc.Find("body").Each(func(_ int, body *goquery.Selection) {
 		t.processNode(body, &markdown)
 	})
 
@@ -546,7 +533,7 @@ func (t *WebFetchTool) convertHTMLToText(html string) string {
 
 // processNode processes a node in the HTML content
 func (t *WebFetchTool) processNode(s *goquery.Selection, markdown *strings.Builder) {
-	s.Contents().Each(func(i int, node *goquery.Selection) {
+	s.Contents().Each(func(_ int, node *goquery.Selection) {
 		nodeName := goquery.NodeName(node)
 
 		switch nodeName {
@@ -629,14 +616,14 @@ func (t *WebFetchTool) processNode(s *goquery.Selection, markdown *strings.Build
 		case "table":
 			markdown.WriteString("\n")
 			node.Find("tr").Each(func(idx int, tr *goquery.Selection) {
-				tr.Find("th, td").Each(func(i int, cell *goquery.Selection) {
+				tr.Find("th, td").Each(func(_ int, cell *goquery.Selection) {
 					markdown.WriteString("| ")
 					markdown.WriteString(strings.TrimSpace(cell.Text()))
 					markdown.WriteString(" ")
 				})
 				markdown.WriteString("|\n")
 				if idx == 0 {
-					tr.Find("th").Each(func(i int, _ *goquery.Selection) {
+					tr.Find("th").Each(func(_ int, _ *goquery.Selection) {
 						markdown.WriteString("|---")
 					})
 					markdown.WriteString("|\n")

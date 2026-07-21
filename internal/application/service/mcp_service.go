@@ -18,14 +18,14 @@ import (
 // mcpServiceService implements MCPServiceService interface
 type mcpServiceService struct {
 	mcpServiceRepo interfaces.MCPServiceRepository
-	mcpManager     *mcp.MCPManager
+	mcpManager     *mcp.Manager
 	oauthRepo      interfaces.MCPOAuthRepository
 }
 
 // NewMCPServiceService creates a new MCP service service
 func NewMCPServiceService(
 	mcpServiceRepo interfaces.MCPServiceRepository,
-	mcpManager *mcp.MCPManager,
+	mcpManager *mcp.Manager,
 	oauthRepo interfaces.MCPOAuthRepository,
 ) interfaces.MCPServiceService {
 	return &mcpServiceService{
@@ -39,7 +39,9 @@ func NewMCPServiceService(
 func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types.MCPService) error {
 	// Stdio transport is disabled for security reasons
 	if service.TransportType == types.MCPTransportStdio {
-		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
+		return fmt.Errorf(
+			"stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead",
+		)
 	}
 
 	// Set default advanced config if not provided
@@ -139,7 +141,9 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 
 	// Stdio transport is disabled for security reasons
 	if finalTransportType == types.MCPTransportStdio {
-		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
+		return fmt.Errorf(
+			"stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead",
+		)
 	}
 
 	// Store old enabled state BEFORE any updates
@@ -300,15 +304,15 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// 1. Service is now disabled (need to close connection)
 	// 2. Critical configuration changed (need to reconnect with new config)
 	if !existing.Enabled {
-		s.mcpManager.CloseClient(service.ID)
+		_ = s.mcpManager.CloseClient(service.ID)
 		logger.GetLogger(ctx).Infof("MCP service disabled, connection closed: %s (ID: %s)", name, service.ID)
 	} else if configChanged {
-		s.mcpManager.CloseClient(service.ID)
+		_ = s.mcpManager.CloseClient(service.ID)
 		logger.GetLogger(ctx).Infof("MCP service config changed, connection closed: %s (ID: %s)", name, service.ID)
 	} else if oldEnabled != existing.Enabled && existing.Enabled {
 		// Service was just enabled (was disabled, now enabled)
 		// Close any existing connection to ensure clean state
-		s.mcpManager.CloseClient(service.ID)
+		_ = s.mcpManager.CloseClient(service.ID)
 		logger.GetLogger(ctx).Infof("MCP service enabled, existing connection closed: %s (ID: %s)", name, service.ID)
 	}
 
@@ -333,7 +337,7 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 	}
 
 	// Close client connection
-	s.mcpManager.CloseClient(id)
+	_ = s.mcpManager.CloseClient(id)
 
 	if err := s.mcpServiceRepo.Delete(ctx, tenantID, id); err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to delete MCP service: %v", err)
@@ -407,7 +411,7 @@ func (s *mcpServiceService) TestMCPService(
 	if err := client.Connect(testCtx); err != nil {
 		return mcpTestFailure(err, "Connection failed"), nil
 	}
-	defer client.Disconnect()
+	defer func() { _ = client.Disconnect() }()
 
 	// Initialize
 	initResult, err := client.Initialize(testCtx)
@@ -521,7 +525,7 @@ func (s *mcpServiceService) UpdateMCPCredentials(
 	}
 
 	// Credential changed → recycle client so the next call reconnects.
-	s.mcpManager.CloseClient(id)
+	_ = s.mcpManager.CloseClient(id)
 	logger.GetLogger(ctx).Infof(
 		"MCP credentials updated, connection closed: %s (ID: %s)",
 		secutils.SanitizeForLog(existing.Name), id,
@@ -572,7 +576,7 @@ func (s *mcpServiceService) ClearMCPCredential(
 		return fmt.Errorf("failed to update MCP service: %w", err)
 	}
 
-	s.mcpManager.CloseClient(id)
+	_ = s.mcpManager.CloseClient(id)
 	logger.GetLogger(ctx).Infof(
 		"MCP credential cleared by user: id=%s field=%s, connection closed",
 		secutils.SanitizeForLog(id), field,

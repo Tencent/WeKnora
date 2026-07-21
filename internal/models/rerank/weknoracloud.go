@@ -54,13 +54,13 @@ func NewWeKnoraCloudReranker(config *RerankerConfig) (*WeKnoraCloudReranker, err
 	}, nil
 }
 
-type weKnoraCloudRerankRequest struct {
+type weKnoraCloudRequest struct {
 	Model     string   `json:"model"`
 	Query     string   `json:"query"`
 	Documents []string `json:"documents"`
 }
 
-type weKnoraCloudRerankResponse struct {
+type weKnoraCloudResponse struct {
 	Results []struct {
 		Index          int     `json:"index"`
 		RelevanceScore float64 `json:"relevance_score"`
@@ -70,8 +70,9 @@ type weKnoraCloudRerankResponse struct {
 	} `json:"results"`
 }
 
+// Rerank implements the required interface method.
 func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
-	reqBody := weKnoraCloudRerankRequest{
+	reqBody := weKnoraCloudRequest{
 		Model:     r.effectiveModelName(),
 		Query:     query,
 		Documents: documents,
@@ -84,7 +85,12 @@ func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documen
 	requestID := uuid.New().String()
 	headers := utils.Sign(r.appID, r.apiKey, requestID, string(bodyBytes))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+weKnoraCloudRerankPath, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		r.baseURL+weKnoraCloudRerankPath,
+		bytes.NewReader(bodyBytes),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud reranker: create request: %w", err)
 	}
@@ -97,7 +103,7 @@ func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documen
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud reranker: do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -107,7 +113,7 @@ func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documen
 		return nil, fmt.Errorf("weknoracloud reranker: status %d: %s", resp.StatusCode, string(respBytes))
 	}
 
-	var rerankResp weKnoraCloudRerankResponse
+	var rerankResp weKnoraCloudResponse
 	if err := json.Unmarshal(respBytes, &rerankResp); err != nil {
 		return nil, fmt.Errorf("weknoracloud reranker: unmarshal: %w", err)
 	}
@@ -130,5 +136,8 @@ func (r *WeKnoraCloudReranker) effectiveModelName() string {
 	return r.modelName
 }
 
+// GetModelName implements the required interface method.
 func (r *WeKnoraCloudReranker) GetModelName() string { return r.modelName }
-func (r *WeKnoraCloudReranker) GetModelID() string   { return r.modelID }
+
+// GetModelID implements the required interface method.
+func (r *WeKnoraCloudReranker) GetModelID() string { return r.modelID }

@@ -16,7 +16,11 @@ type PluginMerge struct {
 }
 
 // NewPluginMerge creates and registers a new PluginMerge instance
-func NewPluginMerge(eventManager *EventManager, chunkRepo interfaces.ChunkRepository, chunkService interfaces.ChunkService) *PluginMerge {
+func NewPluginMerge(
+	eventManager *EventManager,
+	chunkRepo interfaces.ChunkRepository,
+	chunkService interfaces.ChunkService,
+) *PluginMerge {
 	res := &PluginMerge{
 		chunkRepo:    chunkRepo,
 		chunkService: chunkService,
@@ -26,8 +30,8 @@ func NewPluginMerge(eventManager *EventManager, chunkRepo interfaces.ChunkReposi
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginMerge) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHUNK_MERGE}
+func (p *PluginMerge) ActivationEvents() []types.Type {
+	return []types.Type{types.ChunkMerge}
 }
 
 // OnEvent processes the CHUNK_MERGE event to merge search result chunks.
@@ -42,7 +46,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //     7.5. Re-merge overlapping ranges introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	if !chatManage.NeedsRetrieval() {
 		return next()
@@ -146,7 +150,10 @@ func (p *PluginMerge) injectHistoryResults(
 
 // groupAndMergeOverlapping groups chunks by KnowledgeID + ChunkType, then merges
 // overlapping ranges within each group using mergeOverlappingChunks.
-func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*types.SearchResult) []*types.SearchResult {
+func (p *PluginMerge) groupAndMergeOverlapping(
+	ctx context.Context,
+	results []*types.SearchResult,
+) []*types.SearchResult {
 	// Group by KnowledgeID → ChunkType
 	knowledgeGroup := make(map[string]map[string][]*types.SearchResult)
 	for _, chunk := range results {

@@ -24,6 +24,7 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// OnDeadLetter is exported.
 // Middleware returns an asynq.MiddlewareFunc that records dead-lettered
 // tasks. It is safe to install before any other asynq middleware: the
 // inner handler's return value is forwarded verbatim, so every layer
@@ -227,15 +228,15 @@ func inferScope(p payloadProbe) (string, string) {
 // truncateError prevents a single runaway stack trace from inflating
 // the dead-letter table beyond the disk capacity reasonably allotted
 // to it.
-func truncateError(s string, max int) string {
-	if max <= 0 || len(s) <= max {
+func truncateError(s string, limit int) string {
+	if limit <= 0 || len(s) <= limit {
 		return s
 	}
 	const suffix = "...(truncated)"
-	if max <= len(suffix) {
-		return s[:max]
+	if limit <= len(suffix) {
+		return s[:limit]
 	}
-	return s[:max-len(suffix)] + suffix
+	return s[:limit-len(suffix)] + suffix
 }
 
 // formatUint inlines strconv.FormatUint without importing strconv just

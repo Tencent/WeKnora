@@ -25,7 +25,9 @@ func TestAppendCustomPromptInstructions(t *testing.T) {
 
 func TestValidateKnowledgeBasePromptInstructions(t *testing.T) {
 	kb := &KnowledgeBase{
-		ChunkingConfig: ChunkingConfig{TableMetadataInstructions: strings.Repeat("a", MaxCustomPromptInstructionsLength+1)},
+		ChunkingConfig: ChunkingConfig{
+			TableMetadataInstructions: strings.Repeat("a", MaxCustomPromptInstructionsLength+1),
+		},
 	}
 	if err := ValidateKnowledgeBasePromptInstructions(kb); err == nil {
 		t.Fatal("expected length validation error")

@@ -62,7 +62,8 @@ func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_ids":["kb-uuid-1"],"url":"https://example.com/page","chunk_id":"chunk-uuid-1"}`,
+		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_ids":["kb-uuid-1"],`+
+			`"url":"https://example.com/page","chunk_id":"chunk-uuid-1"}`,
 		calls[0].Function.Arguments,
 	)
 }
@@ -117,7 +118,8 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 	require.NotContains(t, encoded[0].Content, "chunk-real")
 	require.NotContains(t, encoded[0].Content, "https://example.com")
 	require.Equal(t,
-		`<kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" /> <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
+		`<kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" /> `+
+			`<web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
 		registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`),
 	)
 }
@@ -205,7 +207,10 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 			"total_chunks":    int64(1),
 			"fetched_chunks":  1,
 			"chunks": []map[string]interface{}{
-				{"chunk_id": "chunk-uuid-1", "knowledge_id": "knowledge-uuid-1", "knowledge_base": "kb-uuid-1", "chunk_index": 3, "content": "deep content"},
+				{
+					"chunk_id": "chunk-uuid-1", "knowledge_id": "knowledge-uuid-1",
+					"knowledge_base": "kb-uuid-1", "chunk_index": 3, "content": "deep content",
+				},
 			},
 		},
 	}
@@ -284,9 +289,14 @@ func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
 	require.Contains(t, output, `<knowledge_base_id>b1</knowledge_base_id>`)
 	require.Contains(t, output, `knowledge_id="d1"`)
 
-	toolCalls := []types.LLMToolCall{{Function: types.FunctionCall{Arguments: `{"knowledge_id":"d1","knowledge_base_id":"b1"}`}}}
+	toolCalls := []types.LLMToolCall{{
+		Function: types.FunctionCall{Arguments: `{"knowledge_id":"d1","knowledge_base_id":"b1"}`},
+	}}
 	registry.DecodeToolCalls(toolCalls)
-	require.JSONEq(t, `{"knowledge_id":"doc-real-id","knowledge_base_id":"kb-real-id"}`, toolCalls[0].Function.Arguments)
+	require.JSONEq(t,
+		`{"knowledge_id":"doc-real-id","knowledge_base_id":"kb-real-id"}`,
+		toolCalls[0].Function.Arguments,
+	)
 }
 
 func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {

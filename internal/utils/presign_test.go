@@ -101,7 +101,10 @@ func TestValidateKBScopedStoragePath(t *testing.T) {
 
 	// storage://<backendID>/ wrapped paths must resolve to the same tenant/exports scope.
 	assert.NoError(t, ValidateKBScopedStoragePath("storage://backend-a/local://10008/exports/img.jpg", tenantID))
-	assert.NoError(t, ValidateKBScopedStoragePath("storage://backend-a/cos://bucket/ap-test/10008/exports/a.png", tenantID))
+	assert.NoError(
+		t,
+		ValidateKBScopedStoragePath("storage://backend-a/cos://bucket/ap-test/10008/exports/a.png", tenantID),
+	)
 
 	assert.Error(t, ValidateKBScopedStoragePath("local://10008/knowledge-id/123.pdf", tenantID))
 	assert.Error(t, ValidateKBScopedStoragePath("local://9999/exports/img.jpg", tenantID))

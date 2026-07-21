@@ -86,14 +86,14 @@ var ErrDuplicateURL = errors.New("URL already exists")
 // KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
 // When nil, the server uses the knowledge base defaults only.
 type KnowledgeProcessOverrides struct {
-	ParserEngineRules        []ParserEngineRule            `json:"parser_engine_rules,omitempty"`
-	ChunkingConfig           *ChunkingConfig               `json:"chunking_config,omitempty"`
-	EnableMultimodel         *bool                         `json:"enable_multimodel,omitempty"`
-	VLMConfig                *VLMConfig                    `json:"vlm_config,omitempty"`
-	ASRConfig                *ASRConfig                    `json:"asr_config,omitempty"`
-	QuestionGenerationConfig *QuestionGenerationConfig     `json:"question_generation_config,omitempty"`
-	GraphEnabled             *bool                         `json:"graph_enabled,omitempty"`
-	ExtractConfig            *ExtractConfig                `json:"extract_config,omitempty"`
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
+	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
+	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`
+	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
+	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
+	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
+	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
 }
 
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
@@ -105,8 +105,14 @@ type KnowledgeProcessOverrides struct {
 //   - customFileName: Optional custom file name (useful for folder uploads with path)
 //   - channel: Optional ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web"
 //   - processConfig: Optional parse config overrides (serialized as process_config form field)
-func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
-	knowledgeBaseID string, filePath string, metadata map[string]string, enableMultimodel *bool, customFileName string, channel string,
+func (c *Client) CreateKnowledgeFromFile(
+	ctx context.Context,
+	knowledgeBaseID string,
+	filePath string,
+	metadata map[string]string,
+	enableMultimodel *bool,
+	customFileName string,
+	channel string,
 	processConfig *KnowledgeProcessOverrides,
 ) (*Knowledge, error) {
 	// Open the local file
@@ -114,7 +120,7 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get file information
 	fileInfo, err := file.Stat()
@@ -201,7 +207,7 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse the response
 	var response KnowledgeResponse
@@ -409,7 +415,7 @@ func (c *Client) DownloadKnowledgeFile(ctx context.Context, knowledgeID string, 
 	if err != nil {
 		return err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	out, err := os.Create(destPath)
 	if err != nil {
@@ -527,7 +533,7 @@ func (c *Client) ReparseKnowledge(ctx context.Context, knowledgeID string) (*Kno
 //   - pending      — task has not started
 //   - processing   — DocReader / chunking / embedding stage
 //   - finalizing   — primary parse done, enrichment subtasks (summary,
-//                    question generation, graph extract) still running
+//     question generation, graph extract) still running
 //
 // Returns an error when the knowledge is in a terminal state
 // (completed, failed) or already being deleted.
@@ -711,7 +717,11 @@ type BatchUpdateKnowledgeTagsRequest struct {
 }
 
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.
-func (c *Client) CreateManualKnowledge(ctx context.Context, knowledgeBaseID string, request *CreateManualKnowledgeRequest) (*Knowledge, error) {
+func (c *Client) CreateManualKnowledge(
+	ctx context.Context,
+	knowledgeBaseID string,
+	request *CreateManualKnowledgeRequest,
+) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/manual", knowledgeBaseID)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
@@ -727,7 +737,11 @@ func (c *Client) CreateManualKnowledge(ctx context.Context, knowledgeBaseID stri
 }
 
 // UpdateManualKnowledge updates a manual Markdown knowledge entry.
-func (c *Client) UpdateManualKnowledge(ctx context.Context, knowledgeID string, request *UpdateManualKnowledgeRequest) (*Knowledge, error) {
+func (c *Client) UpdateManualKnowledge(
+	ctx context.Context,
+	knowledgeID string,
+	request *UpdateManualKnowledgeRequest,
+) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge/manual/%s", knowledgeID)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, request, nil)
 	if err != nil {
@@ -750,7 +764,13 @@ type FilterKnowledgeResponse struct {
 }
 
 // FilterKnowledge searches/filters knowledge entries across knowledge bases
-func (c *Client) FilterKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string, agentID string) ([]Knowledge, bool, error) {
+func (c *Client) FilterKnowledge(
+	ctx context.Context,
+	keyword string,
+	offset, limit int,
+	fileTypes []string,
+	agentID string,
+) ([]Knowledge, bool, error) {
 	queryParams := url.Values{}
 	if keyword != "" {
 		queryParams.Set("keyword", keyword)

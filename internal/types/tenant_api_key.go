@@ -15,26 +15,27 @@ import (
 // authentication lookup; APIKey is stored encrypted when SYSTEM_AES_KEY is set
 // and returned by owner-only management APIs.
 type TenantAPIKey struct {
-	ID               uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	TenantID         uint64      `json:"tenant_id" gorm:"not null;index"`
-	Name             string      `json:"name" gorm:"type:varchar(128);not null"`
-	KeyHash          string      `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
-	APIKey           string      `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
-	FullAccess       bool        `json:"full_access" gorm:"not null;default:false"`
-	KnowledgeBaseIDs StringArray `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	ID               uint64      `json:"id"                     gorm:"primaryKey;autoIncrement"`
+	TenantID         uint64      `json:"tenant_id"              gorm:"not null;index"`
+	Name             string      `json:"name"                   gorm:"type:varchar(128);not null"`
+	KeyHash          string      `json:"-"                      gorm:"type:varchar(64);not null;uniqueIndex"`
+	APIKey           string      `json:"api_key"                gorm:"column:api_key;type:text;not null;default:''"`
+	FullAccess       bool        `json:"full_access"            gorm:"not null;default:false"`
+	KnowledgeBaseIDs StringArray `json:"knowledge_base_ids"     gorm:"type:jsonb;not null;default:'[]'"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
 	// (KnowledgeBaseIDs) still applies on top where a route targets knowledge
 	// bases.
-	Capabilities StringArray `json:"capabilities" gorm:"type:jsonb;not null;default:'[]'"`
+	Capabilities StringArray `json:"capabilities"           gorm:"type:jsonb;not null;default:'[]'"`
 	LastUsedAt   *time.Time  `json:"last_used_at,omitempty"`
 	ExpiresAt    *time.Time  `json:"expires_at,omitempty"`
-	RevokedAt    *time.Time  `json:"revoked_at,omitempty" gorm:"index"`
+	RevokedAt    *time.Time  `json:"revoked_at,omitempty"   gorm:"index"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
+// TableName returns the GORM table name for tenant API keys.
 func (TenantAPIKey) TableName() string {
 	return "tenant_api_keys"
 }
@@ -192,6 +193,7 @@ func NormalizeAPIKeyCapabilities(in StringArray) StringArray {
 	return out
 }
 
+// BeforeSave encrypts the API key before persisting it to the database.
 func (k *TenantAPIKey) BeforeSave(tx *gorm.DB) error {
 	if key := utils.GetAESKey(); key != nil && k.APIKey != "" {
 		encrypted, err := utils.EncryptAESGCM(k.APIKey, key)
@@ -206,7 +208,8 @@ func (k *TenantAPIKey) BeforeSave(tx *gorm.DB) error {
 	return nil
 }
 
-func (k *TenantAPIKey) AfterFind(tx *gorm.DB) error {
+// AfterFind implements the required interface method.
+func (k *TenantAPIKey) AfterFind(_ *gorm.DB) error {
 	decrypted, err := utils.DecryptStoredSecret(k.APIKey)
 	if err != nil {
 		return fmt.Errorf("decrypt tenant_api_keys.api_key (id=%d): %w", k.ID, err)
@@ -223,10 +226,12 @@ type TenantAPIKeyScope struct {
 	Capabilities     StringArray
 }
 
+// WithTenantAPIKeyScope stores the normalized API key scope on the context.
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
 	return context.WithValue(ctx, TenantAPIKeyScopeContextKey, scope.Normalize())
 }
 
+// TenantAPIKeyScopeFromContext returns the API key scope attached to ctx, if any.
 func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool) {
 	if ctx == nil {
 		return TenantAPIKeyScope{}, false
@@ -238,6 +243,7 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 	return scope.Normalize(), true
 }
 
+// Normalize returns a copy with deduplicated KB IDs and normalized capabilities.
 func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 	return TenantAPIKeyScope{
 		KeyID:            s.KeyID,
@@ -261,6 +267,7 @@ func (s TenantAPIKeyScope) HasCapability(c APIKeyCapability) bool {
 	return false
 }
 
+// AllowsKnowledgeBase reports whether kbID is within the key's KB allow-list.
 func (s TenantAPIKeyScope) AllowsKnowledgeBase(kbID string) bool {
 	kbID = strings.TrimSpace(kbID)
 	if kbID == "" {
@@ -278,10 +285,12 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBase(kbID string) bool {
 	return false
 }
 
+// IsKnowledgeBaseRestricted reports whether the scope limits access to specific KBs.
 func (s TenantAPIKeyScope) IsKnowledgeBaseRestricted() bool {
 	return len(s.Normalize().KnowledgeBaseIDs) > 0
 }
 
+// AllowsKnowledgeBases reports whether every kbID in kbIDs is within the allow-list.
 func (s TenantAPIKeyScope) AllowsKnowledgeBases(kbIDs []string) bool {
 	s = s.Normalize()
 	if len(s.KnowledgeBaseIDs) == 0 {

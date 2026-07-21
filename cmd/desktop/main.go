@@ -139,8 +139,19 @@ window.open=function(url){
 };
 })();`
 
-// wailsThemeSyncJS：与 index.html 首屏一致，在 DomReady 再跑一遍，覆盖 Ctrl+R 后 runtime 就绪时机
-const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_theme')||'light';if(t==='system')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var bg=t==='dark'?'#181818':'#eee';document.documentElement.setAttribute('theme-mode',t);document.documentElement.style.background=bg;document.documentElement.style.minHeight='100%';document.documentElement.style.colorScheme=t==='dark'?'dark':'light';if(document.body){document.body.style.background=bg;document.body.style.minHeight='100%';}var w=window.runtime;if(!w)return;if(t==='dark'){if(w.WindowSetDarkTheme)w.WindowSetDarkTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(24,24,24,255);}else{if(w.WindowSetLightTheme)w.WindowSetLightTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(238,238,238,255);}}catch(e){}})()`
+// wailsThemeSyncJS mirrors index.html first paint; rerun on DomReady after Ctrl+R
+// once the Wails runtime is available.
+const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_theme')||'light';` +
+	`if(t==='system')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';` +
+	`var bg=t==='dark'?'#181818':'#eee';document.documentElement.setAttribute('theme-mode',t);` +
+	`document.documentElement.style.background=bg;document.documentElement.style.minHeight='100%';` +
+	`document.documentElement.style.colorScheme=t==='dark'?'dark':'light';` +
+	`if(document.body){document.body.style.background=bg;document.body.style.minHeight='100%';}` +
+	`var w=window.runtime;if(!w)return;` +
+	`if(t==='dark'){if(w.WindowSetDarkTheme)w.WindowSetDarkTheme();` +
+	`if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(24,24,24,255);}` +
+	`else{if(w.WindowSetLightTheme)w.WindowSetLightTheme();` +
+	`if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(238,238,238,255);}}catch(e){}})()`
 
 const weknoraGitHubRepoURL = "https://github.com/Tencent/WeKnora"
 
@@ -221,7 +232,7 @@ func main() {
 				<-app.shutdownCh
 				logger.Infof(context.Background(), "Wails shutting down, stopping Go backend...")
 
-				listener.Close()
+				_ = listener.Close()
 				shutdownTimeout := cfg.Server.ShutdownTimeout
 				if shutdownTimeout == 0 {
 					shutdownTimeout = 30 * time.Second
@@ -230,7 +241,7 @@ func main() {
 				defer cancel()
 
 				if err := server.Shutdown(shutdownCtx); err != nil {
-					server.Close()
+					_ = server.Close()
 				}
 				resourceCleaner.Cleanup(shutdownCtx)
 			}()
@@ -243,13 +254,17 @@ func main() {
 				app.shutdownCh <- struct{}{} // trigger shutdown
 			}()
 
-			logger.Infof(context.Background(), "Server is running at %s (proxy -> %s)", tcpAddr.String(), app.backendURL)
+			logger.Infof(
+				context.Background(),
+				"Server is running at %s (proxy -> %s)",
+				tcpAddr.String(),
+				app.backendURL,
+			)
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 				return fmt.Errorf("server error: %v", err)
 			}
 			return nil
 		})
-
 		if err != nil {
 			serverErrCh <- err
 			logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
@@ -268,9 +283,14 @@ func main() {
 			return
 		}
 		choice, err := wailsruntime.MessageDialog(app.ctx, wailsruntime.MessageDialogOptions{
-			Type:          wailsruntime.InfoDialog,
-			Title:         "WeKnora Lite",
-			Message:       fmt.Sprintf("WeKnora Lite — Desktop Edition\n\nA RAG framework for document understanding and semantic Q&A over complex, heterogeneous content.\n\nVersion %s\n© 2026 Tencent\n\nGitHub:\n%s", desktopAboutVersion(), weknoraGitHubRepoURL),
+			Type:  wailsruntime.InfoDialog,
+			Title: "WeKnora Lite",
+			Message: fmt.Sprintf(
+				"WeKnora Lite — Desktop Edition\n\n"+
+					"A RAG framework for document understanding and semantic Q&A over complex, heterogeneous content.\n\n"+
+					"Version %s\n© 2026 Tencent\n\nGitHub:\n%s",
+				desktopAboutVersion(), weknoraGitHubRepoURL,
+			),
 			Buttons:       []string{"Open GitHub", "OK"},
 			DefaultButton: "OK",
 		})
@@ -345,7 +365,6 @@ func main() {
 			WindowIsTranslucent:  false,
 		},
 	})
-
 	if err != nil {
 		println("Error:", err.Error())
 	}
@@ -367,7 +386,11 @@ func configureDesktopStorage(execPath string) {
 	migrateLegacyDesktopData(legacyResourcesDir, targetDataDir)
 
 	dbPath := resolveDesktopDataPath(os.Getenv("DB_PATH"), filepath.Join("data", "weknora.db"), appSupportDir)
-	filesPath := resolveDesktopDataPath(os.Getenv("LOCAL_STORAGE_BASE_DIR"), filepath.Join("data", "files"), appSupportDir)
+	filesPath := resolveDesktopDataPath(
+		os.Getenv("LOCAL_STORAGE_BASE_DIR"),
+		filepath.Join("data", "files"),
+		appSupportDir,
+	)
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logger.Warnf(context.Background(), "Failed to create desktop DB directory %s: %v", filepath.Dir(dbPath), err)
@@ -474,7 +497,7 @@ func desktopPreferredLANIPv4() net.IP {
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	la, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || la.IP == nil {
 		return nil
@@ -491,11 +514,20 @@ func migrateLegacyDesktopData(resourcesDir, targetDataDir string) {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(targetDataDir), 0o755); err != nil {
-		logger.Warnf(context.Background(), "Failed to create app support parent dir %s: %v", filepath.Dir(targetDataDir), err)
+		logger.Warnf(
+			context.Background(),
+			"Failed to create app support parent dir %s: %v",
+			filepath.Dir(targetDataDir),
+			err,
+		)
 		return
 	}
 	if err := os.Rename(legacyDataDir, targetDataDir); err != nil {
-		logger.Warnf(context.Background(), "Failed to migrate legacy desktop data from %s to %s: %v", legacyDataDir, targetDataDir, err)
+		logger.Warnf(
+			context.Background(),
+			"Failed to migrate legacy desktop data from %s to %s: %v",
+			legacyDataDir, targetDataDir, err,
+		)
 		return
 	}
 	logger.Infof(context.Background(), "Migrated legacy desktop data to %s", targetDataDir)

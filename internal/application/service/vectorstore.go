@@ -23,7 +23,7 @@ type vectorStoreService struct {
 	storeRegistry interfaces.StoreRegistry           // for dynamic registry updates on CRUD
 	factory       interfaces.EngineFactory           // creates engine services from VectorStore config
 	db            *gorm.DB                           // shared handle for cross-table transactions (delete guard)
-	envStores     []types.VectorStore                // env stores derived once at construction for ResolveStoreView fast path
+	envStores     []types.VectorStore                // env stores for ResolveStoreView fast path
 }
 
 // NewVectorStoreService creates a new vector store service.
@@ -251,7 +251,7 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 // Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
 // SQLite would either ignore (recent versions) or fail to compile on.
 func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+	return db != nil && db.Dialector != nil && db.Name() == "postgres"
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.
@@ -599,7 +599,12 @@ func validateOpenSearchIndexConfig(ic types.IndexConfig) error {
 	if ic.HNSWEFConstruction != 0 &&
 		(ic.HNSWEFConstruction < osHNSWEFConstructionMin || ic.HNSWEFConstruction > osHNSWEFConstructionMax) {
 		return errors.NewValidationError(
-			fmt.Sprintf("hnsw_ef_construction must be between %d and %d", osHNSWEFConstructionMin, osHNSWEFConstructionMax))
+			fmt.Sprintf(
+				"hnsw_ef_construction must be between %d and %d",
+				osHNSWEFConstructionMin,
+				osHNSWEFConstructionMax,
+			),
+		)
 	}
 	if ic.HNSWEFSearch != 0 &&
 		(ic.HNSWEFSearch < osHNSWEFSearchMin || ic.HNSWEFSearch > osHNSWEFSearchMax) {

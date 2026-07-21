@@ -1,3 +1,4 @@
+// Package docparser provides related functionality.
 package docparser
 
 import (
@@ -136,7 +137,11 @@ func audioToResult(fileName string, data []byte) *types.ReadResult {
 // prepends one and appends the raw bytes to imageRefs. This guarantees that
 // when MinerU OCRs a standalone image, the downstream chunks still carry the
 // original image link for retrieval display.
-func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs []types.ImageRef) (string, []types.ImageRef) {
+func ensureOriginalImageRef(
+	req *types.ReadRequest,
+	mdContent string,
+	imageRefs []types.ImageRef,
+) (string, []types.ImageRef) {
 	ft := strings.ToLower(strings.TrimPrefix(req.FileType, "."))
 	if ft == "" {
 		ft = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.FileName)), ".")

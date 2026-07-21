@@ -84,15 +84,18 @@ For fail-fast semantics, use shell composition:
 			case 0:
 				return nil
 			case 1:
-				return cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d doc(s) failed", len(res.Failed))).WithSilent()
+				return cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d doc(s) failed", len(res.Failed))).
+					WithSilent()
 			case 124:
-				return cmdutil.NewError(cmdutil.CodeOperationTimeout, fmt.Sprintf("wait timed out (%d doc(s) still pending)", len(res.Timeout))).WithSilent()
+				return cmdutil.NewError(cmdutil.CodeOperationTimeout, fmt.Sprintf("wait timed out (%d doc(s) still pending)", len(res.Timeout))).
+					WithSilent()
 			}
 			return nil
 		},
 	}
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 10*time.Minute, "Max wait time before exiting 124")
-	cmd.Flags().DurationVar(&opts.Interval, "interval", 2*time.Second, "Initial poll interval; exponential backoff capped at 15s + jitter")
+	cmd.Flags().
+		DurationVar(&opts.Interval, "interval", 2*time.Second, "Initial poll interval; exponential backoff capped at 15s + jitter")
 	cmdutil.AddFormatFlag(cmd)
 	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -241,7 +244,12 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 					// auto-enqueues). It never progresses on its own, so
 					// waiting would hang to the --timeout (124). Fail fast with
 					// the exact unblock command instead of silently polling.
-					addFailed(FailedDoc{ID: id, Message: "parse_status=draft: not queued for parsing — run `weknora doc reparse " + id + "` to index it"})
+					addFailed(
+						FailedDoc{
+							ID:      id,
+							Message: "parse_status=draft: not queued for parsing — run `weknora doc reparse " + id + "` to index it",
+						},
+					)
 					return
 				}
 

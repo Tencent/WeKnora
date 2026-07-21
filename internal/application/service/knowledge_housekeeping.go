@@ -1,21 +1,4 @@
-// Package service: knowledge housekeeping.
-//
-// HousekeepingService periodically scans for knowledge rows that have been
-// stuck in "processing" longer than any reasonable execution window and
-// marks them as failed. This is the safety net that catches anything the
-// other defences (asynq retry, dead-letter callback, image_multimodal
-// finalize-on-last-attempt) miss — for example:
-//
-//   - Worker process killed mid-handler before any defer could run.
-//   - DocReader call genuinely exceeding DocReaderCallTimeout AND the
-//     worker subsequently being lost before retry kicks in.
-//   - Multimodal Redis counter set to N but ALL N image tasks failing in
-//     ways that bypass finalize (extremely rare; defence-in-depth here).
-//
-// Without this sweep, a single unlucky failure mode can leave a knowledge
-// row in "processing" forever — invisible to users except as a permanent
-// spinner. With this sweep the worst-case latency from stall to user-
-// visible failure is bounded to ~1 stale-threshold + 1 sweep interval.
+// Package service implements knowledge housekeeping.
 package service
 
 import (
@@ -216,7 +199,11 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 // with no span rows at all also pass through (they're lite-mode or
 // pre-instrumentation tasks; the simple updated_at check already proved
 // them stuck and we have no heartbeat to override that).
-func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, candidates []types.Knowledge, cutoff time.Time) []types.Knowledge {
+func (h *HousekeepingService) filterByLastSpanActivity(
+	ctx context.Context,
+	candidates []types.Knowledge,
+	cutoff time.Time,
+) []types.Knowledge {
 	if len(candidates) == 0 {
 		return candidates
 	}
@@ -247,7 +234,11 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		// On query failure, fail safe — assume nothing has a
 		// heartbeat (so all candidates are "stuck"). This matches
 		// the previous-version behaviour and never under-recovers.
-		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
+		logger.Warnf(
+			ctx,
+			"[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)",
+			err,
+		)
 		return candidates
 	}
 	heartbeat := make(map[string]time.Time, len(beats))

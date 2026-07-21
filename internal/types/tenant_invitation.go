@@ -61,9 +61,9 @@ func (s TenantInvitationStatus) IsTerminal() bool {
 // polluting the authoritative member roster.
 type TenantInvitation struct {
 	// Surrogate primary key.
-	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID uint64 `json:"id"                     gorm:"primaryKey;autoIncrement"`
 	// TenantID references tenants.id.
-	TenantID uint64 `json:"tenant_id" gorm:"not null;index"`
+	TenantID uint64 `json:"tenant_id"              gorm:"not null;index"`
 	// InviteeUserID references users.id when this row represents a
 	// per-user invitation (Owner picked a registered email). For
 	// share-link rows the field is the empty-string sentinel — there
@@ -71,7 +71,7 @@ type TenantInvitation struct {
 	// The (tenant_id, invitee_user_id) partial unique index in
 	// migration 000054 was relaxed to skip empty values so multiple
 	// share-link rows can coexist per tenant.
-	InviteeUserID string `json:"invitee_user_id" gorm:"type:varchar(36);not null;default:'';index"`
+	InviteeUserID string `json:"invitee_user_id"        gorm:"type:varchar(36);not null;default:'';index"`
 	// Token holds the plaintext registration token for share-link
 	// rows. Empty for per-user invitations (those use the in-app
 	// inbox, not a URL). Stored plaintext so the management UI can
@@ -79,19 +79,19 @@ type TenantInvitation struct {
 	// short TTL, revocability, and the fact that all the link grants
 	// is membership in this one tenant. Excluded from JSON to keep
 	// the wire shape small; handlers emit invite_url instead.
-	Token string `json:"-" gorm:"column:token;type:varchar(64);not null;default:'';index"`
+	Token string `json:"-"                      gorm:"column:token;type:varchar(64);not null;default:'';index"`
 	// InvitedBy records the user id that issued this invitation. NULL
 	// for invitations created via service-internal / synthetic actors
 	// (mirrors the same treatment TenantMember.InvitedBy gets).
-	InvitedBy *string `json:"invited_by,omitempty" gorm:"type:varchar(36)"`
+	InvitedBy *string `json:"invited_by,omitempty"   gorm:"type:varchar(36)"`
 	// Role the invitee will receive in tenant_members if they accept.
-	Role TenantRole `json:"role" gorm:"type:varchar(20);not null"`
+	Role TenantRole `json:"role"                   gorm:"type:varchar(20);not null"`
 	// Status holds the lifecycle state. Default pending; mutated to
 	// accepted/declined/revoked/expired exactly once.
-	Status TenantInvitationStatus `json:"status" gorm:"type:varchar(20);not null;default:'pending'"`
+	Status TenantInvitationStatus `json:"status"                 gorm:"type:varchar(20);not null;default:'pending'"`
 	// Message is an optional free-text note the Owner can include in
 	// the invitation (e.g. "joining the design squad — welcome!").
-	Message string `json:"message,omitempty" gorm:"type:varchar(500)"`
+	Message string `json:"message,omitempty"      gorm:"type:varchar(500)"`
 	// ExpiresAt is when this row auto-flips to expired if still pending.
 	// Set at creation time from RBAC_INVITATION_TTL (default 7d).
 	ExpiresAt time.Time `json:"expires_at"`
@@ -99,14 +99,14 @@ type TenantInvitation struct {
 	RespondedAt *time.Time     `json:"responded_at,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt   gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 	// AcceptedCount counts how many users have completed registration
 	// through this invitation. Per-user invitations cap out at 1 (and
 	// the row flips to accepted in the same step). Share-link rows can
 	// accumulate many — this is what the management UI surfaces as the
 	// "已加入 N 人" caption so Owners can see whether a link is fresh
 	// or has already been used widely.
-	AcceptedCount int `json:"accepted_count" gorm:"column:accepted_count;not null;default:0"`
+	AcceptedCount int `json:"accepted_count"         gorm:"column:accepted_count;not null;default:0"`
 }
 
 // TableName binds TenantInvitation to the tenant_invitations table.

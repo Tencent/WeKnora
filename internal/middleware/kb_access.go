@@ -254,7 +254,15 @@ func RequireKBAccess(
 		// regardless of whether RBAC enforcement is active.
 		enforcing := rbacEnforcementEnabled(cfg)
 
-		access, err := resolveKBAccessOnce(ctx, c, kbID, requiredPermission, kbService, kbShareService, agentShareService)
+		access, err := resolveKBAccessOnce(
+			ctx,
+			c,
+			kbID,
+			requiredPermission,
+			kbService,
+			kbShareService,
+			agentShareService,
+		)
 		switch {
 		case stderrors.Is(err, errKBAccessUnauthorized):
 			if !enforcing {

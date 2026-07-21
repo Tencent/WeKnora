@@ -158,7 +158,11 @@ func runAddWithConfig(opts *AddOptions, fopts *cmdutil.FormatOptions, name, host
 		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: current}, nil)
 	}
 	if current {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s (now current). Run `weknora auth login` to attach credentials.\n", name)
+		fmt.Fprintf(
+			iostreams.IO.Out,
+			"✓ Added profile %s (now current). Run `weknora auth login` to attach credentials.\n",
+			name,
+		)
 	} else {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s. Run `weknora profile use %s` then `weknora auth login` to attach credentials.\n", name, name)
 	}

@@ -76,12 +76,18 @@ short faq.`
 // during summary generation.
 func TestSplit_PreservesPositionInvariantAcrossTiers(t *testing.T) {
 	cases := map[string]string{
-		"heading-tier": "# Top\nintro paragraph here.\n\n## Section A\nbody A here.\n\n## Section B\nbody B here.\n\n## Section C\nbody C.",
+		"heading-tier": "# Top\nintro paragraph here.\n\n## Section A\nbody A her" +
+			"e.\n\n## Section B\nbody B here.\n\n## Section C\nbody C.",
 		"heuristic-tier": strings.Repeat("Kapitel 1: Einleitung\n", 1) + strings.Repeat("Beispieltext. ", 50) +
 			"\n\n" + strings.Repeat("Kapitel 2: Hauptteil\n", 1) + strings.Repeat("Mehr Text. ", 50),
 		"recursive-tier": strings.Repeat("plain prose without structure. ", 100),
 	}
-	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 30, Separators: []string{"\n\n", "\n", "。", ". "}, Strategy: StrategyAuto}
+	cfg := SplitterConfig{
+		ChunkSize:    300,
+		ChunkOverlap: 30,
+		Separators:   []string{"\n\n", "\n", "。", ". "},
+		Strategy:     StrategyAuto,
+	}
 
 	for name, doc := range cases {
 		t.Run(name, func(t *testing.T) {

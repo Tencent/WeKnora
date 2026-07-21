@@ -7,10 +7,10 @@ import (
 )
 
 // BlocksToMarkdown converts a tree of Notion blocks into Markdown text,
-// and collects attachment references (image, file, pdf, video, audio).
-func BlocksToMarkdown(blocks []notionBlock) (string, []attachment) {
+// and collects Attachment references (image, file, pdf, video, audio).
+func BlocksToMarkdown(blocks []notionBlock) (string, []Attachment) {
 	var b strings.Builder
-	var attachments []attachment
+	var attachments []Attachment
 	renderBlocks(&b, blocks, 0, &attachments)
 	// Collapse 3+ consecutive newlines into 2 (avoids excessive blank lines from empty paragraphs)
 	result := b.String()
@@ -21,7 +21,7 @@ func BlocksToMarkdown(blocks []notionBlock) (string, []attachment) {
 }
 
 // renderBlocks renders a list of blocks at the given indentation depth.
-func renderBlocks(b *strings.Builder, blocks []notionBlock, depth int, attachments *[]attachment) {
+func renderBlocks(b *strings.Builder, blocks []notionBlock, depth int, attachments *[]Attachment) {
 	inList := false
 
 	for i, block := range blocks {
@@ -47,7 +47,14 @@ func renderBlocks(b *strings.Builder, blocks []notionBlock, depth int, attachmen
 }
 
 // renderBlock renders a single block to Markdown.
-func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *[]attachment, index int, siblings []notionBlock) {
+func renderBlock(
+	b *strings.Builder,
+	block notionBlock,
+	depth int,
+	attachments *[]Attachment,
+	index int,
+	siblings []notionBlock,
+) {
 	indent := strings.Repeat("  ", depth)
 
 	switch block.Type {
@@ -78,7 +85,7 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		for j := index - 1; j >= 0 && siblings[j].Type == "numbered_list_item"; j-- {
 			num++
 		}
-		b.WriteString(fmt.Sprintf("%s%d. %s\n", indent, num, renderRichText(rt)))
+		fmt.Fprintf(b, "%s%d. %s\n", indent, num, renderRichText(rt))
 		if len(block.Children) > 0 {
 			renderBlocks(b, block.Children, depth+1, attachments)
 		}
@@ -90,11 +97,11 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		if checked {
 			checkbox = "[x]"
 		}
-		b.WriteString(fmt.Sprintf("%s- %s %s\n", indent, checkbox, renderRichText(rt)))
+		fmt.Fprintf(b, "%s- %s %s\n", indent, checkbox, renderRichText(rt))
 
 	case "toggle":
 		rt := extractRichText(block.RawContent)
-		b.WriteString(fmt.Sprintf("<details><summary>%s</summary>\n\n", renderRichText(rt)))
+		fmt.Fprintf(b, "<details><summary>%s</summary>\n\n", renderRichText(rt))
 		if len(block.Children) > 0 {
 			renderBlocks(b, block.Children, depth, attachments)
 		}
@@ -103,7 +110,7 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "code":
 		rt := extractRichText(block.RawContent)
 		lang := extractString(block.RawContent, "language")
-		b.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n", lang, renderRichText(rt)))
+		fmt.Fprintf(b, "```%s\n%s\n```\n\n", lang, renderRichText(rt))
 
 	case "quote", "meeting_notes":
 		rt := extractRichText(block.RawContent)
@@ -141,9 +148,9 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "image":
 		file, caption := extractFileAndCaption(block.RawContent)
 		url := file.GetURL()
-		b.WriteString(fmt.Sprintf("![%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "![%s](%s)\n\n", caption, url)
 		if url != "" {
-			*attachments = append(*attachments, attachment{
+			*attachments = append(*attachments, Attachment{
 				URL:      url,
 				FileName: fileNameFromURL(url, "image"),
 				Type:     "image",
@@ -161,16 +168,16 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		} else {
 			caption = url
 		}
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", caption, url)
 
 	case "embed":
 		url := extractString(block.RawContent, "url")
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", url, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", url, url)
 
 	case "link_to_page":
 		// Render as a link; the actual page title is not available in block data
 		pageID := extractLinkToPageID(block.RawContent)
-		b.WriteString(fmt.Sprintf("[Page %s](https://notion.so/%s)\n\n", pageID, strings.ReplaceAll(pageID, "-", "")))
+		fmt.Fprintf(b, "[Page %s](https://notion.so/%s)\n\n", pageID, strings.ReplaceAll(pageID, "-", ""))
 
 	case "synced_block":
 		// Render children (the synced content)
@@ -217,14 +224,14 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		if title == "" {
 			title = "Untitled"
 		}
-		b.WriteString(fmt.Sprintf("- [%s](https://notion.so/%s)\n", title, strings.ReplaceAll(block.ID, "-", "")))
+		fmt.Fprintf(b, "- [%s](https://notion.so/%s)\n", title, strings.ReplaceAll(block.ID, "-", ""))
 
 	case "child_database":
 		title := extractString(block.RawContent, "title")
 		if title == "" {
 			title = "Database"
 		}
-		b.WriteString(fmt.Sprintf("- [%s](https://notion.so/%s)\n", title, strings.ReplaceAll(block.ID, "-", "")))
+		fmt.Fprintf(b, "- [%s](https://notion.so/%s)\n", title, strings.ReplaceAll(block.ID, "-", ""))
 
 	case "table_of_contents", "breadcrumb", "template", "table_row", "unsupported":
 		// Skip — no meaningful content
@@ -234,17 +241,17 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	}
 }
 
-// renderMediaBlock renders a file/pdf/video/audio block as a Markdown link and collects the attachment.
-func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]attachment) {
+// renderMediaBlock renders a file/pdf/video/audio block as a Markdown link and collects the Attachment.
+func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]Attachment) {
 	file, _ := extractFileAndCaption(block.RawContent)
 	url := file.GetURL()
 	name := file.Name
 	if name == "" {
 		name = fileNameFromURL(url, block.Type)
 	}
-	b.WriteString(fmt.Sprintf("[%s](%s)\n\n", name, url))
+	fmt.Fprintf(b, "[%s](%s)\n\n", name, url)
 	if url != "" {
-		*attachments = append(*attachments, attachment{
+		*attachments = append(*attachments, Attachment{
 			URL:      url,
 			FileName: name,
 			Type:     block.Type,
@@ -374,7 +381,7 @@ func extractRichText(raw json.RawMessage) []notionRichText {
 	var content struct {
 		RichText []notionRichText `json:"rich_text"`
 	}
-	json.Unmarshal(raw, &content)
+	_ = json.Unmarshal(raw, &content)
 	return content.RichText
 }
 
@@ -391,7 +398,7 @@ func extractString(raw json.RawMessage, key string) string {
 		return ""
 	}
 	var s string
-	json.Unmarshal(val, &s)
+	_ = json.Unmarshal(val, &s)
 	return s
 }
 
@@ -408,7 +415,7 @@ func extractBool(raw json.RawMessage, key string) bool {
 		return false
 	}
 	var b bool
-	json.Unmarshal(val, &b)
+	_ = json.Unmarshal(val, &b)
 	return b
 }
 
@@ -422,7 +429,7 @@ func extractIcon(raw json.RawMessage) string {
 			Emoji string `json:"emoji,omitempty"`
 		} `json:"icon"`
 	}
-	json.Unmarshal(raw, &content)
+	_ = json.Unmarshal(raw, &content)
 	if content.Icon != nil && content.Icon.Type == "emoji" {
 		return content.Icon.Emoji
 	}
@@ -432,7 +439,7 @@ func extractIcon(raw json.RawMessage) string {
 func extractFileAndCaption(raw json.RawMessage) (notionFile, string) {
 	var file notionFile
 	if raw != nil {
-		json.Unmarshal(raw, &file)
+		_ = json.Unmarshal(raw, &file)
 	}
 	captionText := ""
 	if len(file.Caption) > 0 {
@@ -448,7 +455,7 @@ func extractCaptionText(raw json.RawMessage) string {
 	var content struct {
 		Caption []notionRichText `json:"caption"`
 	}
-	json.Unmarshal(raw, &content)
+	_ = json.Unmarshal(raw, &content)
 	if len(content.Caption) > 0 {
 		return renderRichText(content.Caption)
 	}
@@ -462,7 +469,7 @@ func extractTableCells(raw json.RawMessage) [][]notionRichText {
 	var content struct {
 		Cells [][]notionRichText `json:"cells"`
 	}
-	json.Unmarshal(raw, &content)
+	_ = json.Unmarshal(raw, &content)
 	return content.Cells
 }
 
@@ -474,7 +481,7 @@ func extractLinkToPageID(raw json.RawMessage) string {
 		Type   string `json:"type"`
 		PageID string `json:"page_id,omitempty"`
 	}
-	json.Unmarshal(raw, &content)
+	_ = json.Unmarshal(raw, &content)
 	return content.PageID
 }
 

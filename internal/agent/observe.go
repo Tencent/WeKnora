@@ -20,7 +20,11 @@ import (
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
 // currentTokens is the caller's best estimate of the current context size (using
 // API-reported Usage when available, falling back to BPE estimation).
-func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
+func (e *Engine) manageContextWindow(
+	ctx context.Context,
+	messages []chat.Message,
+	round, currentTokens int,
+) []chat.Message {
 	if e.config.MaxContextTokens <= 0 {
 		return messages
 	}
@@ -78,7 +82,7 @@ func isNaturalStopFinishReason(reason string) bool {
 // assistant text (there is no dedicated final_answer tool). Any round that
 // still requests tool calls is non-terminal and the caller continues the loop.
 // It returns a responseVerdict. If isDone is true the caller should break out of the loop.
-func (e *AgentEngine) analyzeResponse(
+func (e *Engine) analyzeResponse(
 	ctx context.Context, response *types.ChatResponse,
 	step types.AgentStep, iteration int, sessionID string, roundStart time.Time,
 ) responseVerdict {
@@ -100,7 +104,7 @@ func (e *AgentEngine) analyzeResponse(
 		}
 
 		answerID := generateEventID("answer")
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
 			Type:      event.EventAgentFinalAnswer,
 			SessionID: sessionID,
@@ -109,7 +113,7 @@ func (e *AgentEngine) analyzeResponse(
 				Done:    false,
 			},
 		})
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
 			Type:      event.EventAgentFinalAnswer,
 			SessionID: sessionID,
@@ -156,7 +160,7 @@ func (e *AgentEngine) analyzeResponse(
 		} else {
 			answerID = generateEventID("answer")
 			if response.Content != "" {
-				e.eventBus.Emit(ctx, event.Event{
+				_ = e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
@@ -167,7 +171,7 @@ func (e *AgentEngine) analyzeResponse(
 				})
 			}
 		}
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
 			Type:      event.EventAgentFinalAnswer,
 			SessionID: sessionID,
@@ -275,12 +279,23 @@ func buildRuntimeContextBlock(
 		}
 		sb.WriteString("  </pinned_documents>\n")
 		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. ")
-		sb.WriteString("Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ")
-		sb.WriteString("If an earlier turn analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
+		sb.WriteString(
+			"Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ",
+		)
+		sb.WriteString(
+			"If an earlier turn analysed a different document, do NOT reus" +
+				"e that analysis — re-query against the current scope.</note>\n",
+		)
 	}
 
-	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
+	sb.WriteString(
+		"  <communication_instruction>Do not use internal tool n" +
+			"ames or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n", //nolint:lll
+	)
+	sb.WriteString(
+		"  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not reques" + //nolint:lll
+			"t any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n", //nolint:lll
+	)
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -302,14 +317,24 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if display == "" {
 			display = sanitizeMustUseField(svc.ID)
 		}
-		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
+		lines = append(
+			lines,
+			fmt.Sprintf(
+				"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
+				prefix,
+				display,
+			),
+		)
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", name, name))
+		lines = append(
+			lines,
+			fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", name, name),
+		)
 	}
 	if len(lines) == 0 {
 		return ""
@@ -374,7 +399,7 @@ func commonStringPrefix(a, b string) string {
 // RenderUserTurnContent builds the user-turn payload for the current LLM call
 // (runtime_context + must_use + query). Used by Execute and finalize paths only;
 // not written to rendered_content / history.
-func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
+func (e *Engine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
 	runtimeCtx = e.sourceRefs.CompactKnownText(runtimeCtx)
@@ -384,7 +409,7 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 
 // registerRuntimeReferences makes bound KBs, pinned documents and recent
 // chunks addressable without exposing their durable IDs to the model.
-func (e *AgentEngine) registerRuntimeReferences() {
+func (e *Engine) registerRuntimeReferences() {
 	if e == nil || e.sourceRefs == nil {
 		return
 	}
@@ -448,7 +473,7 @@ func listToolNames(ts []chat.Tool) []string {
 }
 
 // buildToolsForLLM builds the tools list for LLM function calling
-func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
+func (e *Engine) buildToolsForLLM() []chat.Tool {
 	functionDefs := e.toolRegistry.GetFunctionDefinitions()
 	tools := make([]chat.Tool, 0, len(functionDefs))
 	for _, def := range functionDefs {
@@ -469,7 +494,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 // OpenAI's tool-calling format. Cross-turn persistence is handled separately:
 // the final AgentSteps are written to the assistant message by the SSE handler,
 // and rebuilt from DB on the next turn by service.LoadAgentHistory.
-func (e *AgentEngine) appendToolResults(
+func (e *Engine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
@@ -571,7 +596,7 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 }
 
 // buildMessagesWithLLMContext builds the message array with LLM context
-func (e *AgentEngine) buildMessagesWithLLMContext(
+func (e *Engine) buildMessagesWithLLMContext(
 	systemPrompt, currentQuery, sessionID string,
 	llmContext []chat.Message,
 	imageURLs []string,
@@ -584,12 +609,15 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		var sanitized []chat.Message
 		if e.config.RetainRetrievalHistory {
 			sanitized = llmContext
-			logger.Infof(context.Background(), "Retaining full retrieval history in context (RetainRetrievalHistory=true)")
+			logger.Infof(
+				context.Background(),
+				"Retaining full retrieval history in context (RetainRetrievalHistory=true)",
+			)
 		} else {
 			// Redact KB tool results from previous turns to prevent the LLM
 			// from reusing stale retrieval data when the KB has been modified.
 			sanitized = redactHistoryKBResults(llmContext)
-			logger.Infof(context.Background(), "Added %d history messages to context (KB tool results redacted)", len(llmContext))
+			logger.Infof(context.Background(), "Added %d history messages to context (KB tool results redacted)", len(llmContext)) //nolint:lll
 		}
 
 		for _, msg := range sanitized {

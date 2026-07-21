@@ -12,12 +12,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }
@@ -28,11 +28,11 @@ func TestMain(m *testing.M) {
 
 // fakeFeishu builds an httptest.Server that emulates the relevant Feishu APIs.
 // It returns the server and a Config pointing at it.
-func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
+func fakeFeishu(nodes []WikiNode) (*httptest.Server, *Config) {
 	mux := http.NewServeMux()
 
 	// --- auth ---
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, tokenResponse{
 			apiResponse:       apiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
@@ -41,15 +41,15 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	// --- wiki spaces ---
-	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
-				Items     []wikiSpace `json:"items"`
+				Items     []WikiSpace `json:"items"`
 				HasMore   bool        `json:"has_more"`
 				PageToken string      `json:"page_token"`
 			}{
-				Items: []wikiSpace{
+				Items: []WikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
 			},
@@ -57,11 +57,11 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	// --- wiki nodes (top-level only for simplicity) ---
-	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
-				Items     []wikiNode `json:"items"`
+				Items     []WikiNode `json:"items"`
 				HasMore   bool       `json:"has_more"`
 				PageToken string     `json:"page_token"`
 			}{
@@ -110,7 +110,7 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	// --- export task: status polling (pattern match with ticket) ---
-	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-123", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-123", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, exportTaskStatusResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
@@ -139,16 +139,19 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	// --- export file download ---
-	mux.HandleFunc("/open-apis/drive/v1/export_tasks/file/ft-abc/download", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write([]byte("fake-docx-content"))
-	})
+	mux.HandleFunc(
+		"/open-apis/drive/v1/export_tasks/file/ft-abc/download",
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("fake-docx-content"))
+		},
+	)
 
 	// --- drive file download (for "file" type nodes) ---
 	mux.HandleFunc("/open-apis/drive/v1/files/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/download") {
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write([]byte("fake-pdf-binary"))
+			_, _ = w.Write([]byte("fake-pdf-binary"))
 			return
 		}
 		http.NotFound(w, r)
@@ -163,13 +166,17 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	return ts, cfg
 }
 
-func fakeFeishuWithChildFailure(topNodes []wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+func fakeFeishuWithChildFailure(topNodes []WikiNode, failingParentToken string) (*httptest.Server, *Config) {
 	return fakeFeishuHierarchy(topNodes, nil, failingParentToken)
 }
 
-func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+func fakeFeishuHierarchy(
+	topNodes []WikiNode,
+	childNodes map[string][]WikiNode,
+	failingParentToken string,
+) (*httptest.Server, *Config) {
 	mux := http.NewServeMux()
-	nodeByToken := make(map[string]wikiNode)
+	nodeByToken := make(map[string]WikiNode)
 	for _, node := range topNodes {
 		node.SpaceID = "space1"
 		nodeByToken[node.NodeToken] = node
@@ -184,7 +191,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		}
 	}
 
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, tokenResponse{
 			apiResponse:       apiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
@@ -192,15 +199,15 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		})
 	})
 
-	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
-				Items     []wikiSpace `json:"items"`
+				Items     []WikiSpace `json:"items"`
 				HasMore   bool        `json:"has_more"`
 				PageToken string      `json:"page_token"`
 			}{
-				Items: []wikiSpace{
+				Items: []WikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
 			},
@@ -229,7 +236,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
-				Items     []wikiNode `json:"items"`
+				Items     []WikiNode `json:"items"`
 				HasMore   bool       `json:"has_more"`
 				PageToken string     `json:"page_token"`
 			}{
@@ -250,7 +257,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		writeJSON(w, wikiNodeInfoResponse{
 			apiResponse: apiResponse{Code: 0},
 			Data: struct {
-				Node wikiNode `json:"node"`
+				Node WikiNode `json:"node"`
 			}{Node: node},
 		})
 	})
@@ -275,7 +282,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func makeConfig(cfg *Config, resourceIDs []string) *types.DataSourceConfig {
@@ -480,11 +487,18 @@ func TestConnectorListResources(t *testing.T) {
 // the wiki tree lazily — only the requested level — instead of recursing the whole
 // tree up front (Tencent/WeKnora#1672).
 func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
-	topNodes := []wikiNode{
-		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true, ObjEditTime: "100"},
+	topNodes := []WikiNode{
+		{
+			NodeToken:   "nt-root",
+			ObjToken:    "obj-root",
+			ObjType:     "docx",
+			Title:       "Root",
+			HasChild:    true,
+			ObjEditTime: "100",
+		},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "docx", Title: "Peer", ObjEditTime: "200"},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", ObjEditTime: "300"},
 		},
@@ -541,10 +555,10 @@ func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
 // deeply nested selection is resolved (so an edit-mode picker can reveal it)
 // without listing the whole tree.
 func TestConnectorResolveResourceAncestors(t *testing.T) {
-	topNodes := []wikiNode{
+	topNodes := []WikiNode{
 		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", HasChild: true},
 		},
@@ -605,7 +619,7 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestFetchAll_DocxNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []WikiNode{{
 		NodeToken:    "nt1",
 		ObjToken:     "obj-docx-1",
 		ObjType:      "docx",
@@ -647,7 +661,7 @@ func TestFetchAll_DocxNode(t *testing.T) {
 }
 
 func TestFetchAll_SheetNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []WikiNode{{
 		NodeToken:    "nt-sheet",
 		ObjToken:     "obj-sheet-1",
 		ObjType:      "sheet",
@@ -672,7 +686,7 @@ func TestFetchAll_SheetNode(t *testing.T) {
 }
 
 func TestFetchAll_BitableNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []WikiNode{{
 		NodeToken:    "nt-bitable",
 		ObjToken:     "obj-bitable-1",
 		ObjType:      "bitable",
@@ -696,7 +710,7 @@ func TestFetchAll_BitableNode(t *testing.T) {
 }
 
 func TestFetchAll_FileNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []WikiNode{{
 		NodeToken:    "nt-file",
 		ObjToken:     "obj-file-1",
 		ObjType:      "file",
@@ -729,7 +743,7 @@ func TestFetchAll_FileNode(t *testing.T) {
 }
 
 func TestFetchAll_SkipsMindnoteAndSlides(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []WikiNode{
 		{NodeToken: "nt-mn", ObjToken: "obj-mn", ObjType: "mindnote", Title: "Brain Map"},
 		{NodeToken: "nt-sl", ObjToken: "obj-sl", ObjType: "slides", Title: "Presentation"},
 	}
@@ -749,7 +763,7 @@ func TestFetchAll_SkipsMindnoteAndSlides(t *testing.T) {
 }
 
 func TestFetchAll_MixedTypes(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "sheet", Title: "Sheet", NodeEditTime: "1711468800"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "file", Title: "report.pdf", NodeEditTime: "1711468800"},
@@ -776,8 +790,15 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 }
 
 func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
-	nodes := []wikiNode{
-		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	nodes := []WikiNode{
+		{
+			NodeToken:    "nt-parent",
+			ObjToken:     "obj-parent",
+			ObjType:      "file",
+			Title:        "Parent.pdf",
+			NodeEditTime: "100",
+			HasChild:     true,
+		},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
@@ -826,11 +847,18 @@ func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
 }
 
 func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
-	topNodes := []wikiNode{
-		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "file", Title: "Root.pdf", NodeEditTime: "100", HasChild: true},
+	topNodes := []WikiNode{
+		{
+			NodeToken:    "nt-root",
+			ObjToken:     "obj-root",
+			ObjType:      "file",
+			Title:        "Root.pdf",
+			NodeEditTime: "100",
+			HasChild:     true,
+		},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "300"},
 		},
@@ -871,7 +899,7 @@ func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestFetchIncremental_FirstSync(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "file", Title: "file.pdf", NodeEditTime: "200"},
 	}
@@ -899,7 +927,7 @@ func TestFetchIncremental_FirstSync(t *testing.T) {
 }
 
 func TestFetchIncremental_NoChanges(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 	}
 	ts, cfg := fakeFeishu(nodes)
@@ -927,7 +955,7 @@ func TestFetchIncremental_NoChanges(t *testing.T) {
 
 func TestFetchIncremental_DetectsDeleted(t *testing.T) {
 	// First sync: 2 nodes
-	allNodes := []wikiNode{
+	allNodes := []WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "docx", Title: "Doc2", NodeEditTime: "200"},
 	}
@@ -943,7 +971,7 @@ func TestFetchIncremental_DetectsDeleted(t *testing.T) {
 	ts.Close()
 
 	// Second sync: only 1 node remains (nt2 was deleted)
-	ts2, cfg2 := fakeFeishu([]wikiNode{
+	ts2, cfg2 := fakeFeishu([]WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 	})
 	defer ts2.Close()
@@ -987,8 +1015,15 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 }
 
 func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *testing.T) {
-	nodes := []wikiNode{
-		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	nodes := []WikiNode{
+		{
+			NodeToken:    "nt-parent",
+			ObjToken:     "obj-parent",
+			ObjType:      "file",
+			Title:        "Parent.pdf",
+			NodeEditTime: "100",
+			HasChild:     true,
+		},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
@@ -1022,10 +1057,17 @@ func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *test
 }
 
 func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(t *testing.T) {
-	firstNodes := []wikiNode{
-		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	firstNodes := []WikiNode{
+		{
+			NodeToken:    "nt-parent",
+			ObjToken:     "obj-parent",
+			ObjType:      "file",
+			Title:        "Parent.pdf",
+			NodeEditTime: "100",
+			HasChild:     true,
+		},
 	}
-	firstChildren := map[string][]wikiNode{
+	firstChildren := map[string][]WikiNode{
 		"nt-parent": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "150"},
 		},
@@ -1042,8 +1084,15 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	}
 	ts.Close()
 
-	secondNodes := []wikiNode{
-		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	secondNodes := []WikiNode{
+		{
+			NodeToken:    "nt-parent",
+			ObjToken:     "obj-parent",
+			ObjType:      "file",
+			Title:        "Parent.pdf",
+			NodeEditTime: "100",
+			HasChild:     true,
+		},
 	}
 	ts2, cfg2 := fakeFeishuHierarchy(secondNodes, nil, "nt-parent")
 	defer ts2.Close()
@@ -1085,7 +1134,7 @@ func TestClientPing(t *testing.T) {
 func TestClientTokenCaching(t *testing.T) {
 	callCount := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
 		callCount++
 		writeJSON(w, tokenResponse{
 			apiResponse:       apiResponse{Code: 0},

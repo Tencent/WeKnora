@@ -69,7 +69,7 @@ type ErrorData struct {
 }
 
 // NewEvent creates a new Event with metadata
-func NewEvent(eventType EventType, data interface{}) Event {
+func NewEvent(eventType Type, data interface{}) Event {
 	return Event{
 		Type:     eventType,
 		Data:     data,
@@ -134,11 +134,12 @@ type AgentQueryData struct {
 
 // AgentCompleteData represents agent completion event data
 type AgentCompleteData struct {
-	SessionID       string                 `json:"session_id"`
-	TotalSteps      int                    `json:"total_steps"`
-	FinalAnswer     string                 `json:"final_answer"`
-	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
-	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
+	SessionID     string        `json:"session_id"`
+	TotalSteps    int           `json:"total_steps"`
+	FinalAnswer   string        `json:"final_answer"`
+	KnowledgeRefs []interface{} `json:"knowledge_refs,omitempty"` // []*types.SearchResult
+	//nolint:lll
+	AgentSteps      interface{}            `json:"agent_steps,omitempty"` // []types.AgentStep - detailed execution steps //nolint:lll
 	TotalDurationMs int64                  `json:"total_duration_ms"`
 	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
 	RequestID       string                 `json:"request_id,omitempty"`
@@ -166,14 +167,15 @@ type AgentToolCallData struct {
 
 // AgentToolResultData represents agent tool execution result data
 type AgentToolResultData struct {
-	ToolCallID string                 `json:"tool_call_id"` // Tool call ID for tracking
-	ToolName   string                 `json:"tool_name"`
-	Output     string                 `json:"output"`
-	Error      string                 `json:"error,omitempty"`
-	Success    bool                   `json:"success"`
-	Duration   int64                  `json:"duration_ms,omitempty"`
-	Iteration  int                    `json:"iteration"`
-	Data       map[string]interface{} `json:"data,omitempty"` // Structured data from tool result (e.g., display_type, formatted results)
+	ToolCallID string `json:"tool_call_id"` // Tool call ID for tracking
+	ToolName   string `json:"tool_name"`
+	Output     string `json:"output"`
+	Error      string `json:"error,omitempty"`
+	Success    bool   `json:"success"`
+	Duration   int64  `json:"duration_ms,omitempty"`
+	Iteration  int    `json:"iteration"`
+	// Structured data from tool result (e.g., display_type, formatted results)
+	Data map[string]interface{} `json:"data,omitempty"`
 }
 
 // AgentReferencesData represents knowledge references data

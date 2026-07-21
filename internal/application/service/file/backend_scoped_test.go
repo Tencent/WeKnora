@@ -27,7 +27,7 @@ func TestBackendScopedLocalURLRetainsBackendID(t *testing.T) {
 
 	reader, err := svc.GetFile(context.Background(), path)
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", string(data))

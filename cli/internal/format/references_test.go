@@ -8,7 +8,14 @@ import (
 
 func TestIndexReferences_ProjectsLookupFieldsWithoutMutation(t *testing.T) {
 	refs := []*sdk.SearchResult{
-		{ID: "c1", Content: "bulky passage one", KnowledgeBaseID: "kb1", ParentChunkID: "p1", KnowledgeTitle: "Doc One", Score: 0.5},
+		{
+			ID:              "c1",
+			Content:         "bulky passage one",
+			KnowledgeBaseID: "kb1",
+			ParentChunkID:   "p1",
+			KnowledgeTitle:  "Doc One",
+			Score:           0.5,
+		},
 		{ID: "c2", Content: "bulky passage two", ParentChunkID: "p2"},
 		nil,
 	}

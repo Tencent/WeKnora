@@ -14,7 +14,9 @@ import (
 // WebSearchProviderType represents the type of web search provider
 type WebSearchProviderType string
 
+// WebSearchProviderTypeGoogle and related constants.
 const (
+	// WebSearchProviderTypeBing identifies the Bing web search provider.
 	WebSearchProviderTypeBing       WebSearchProviderType = "bing"
 	WebSearchProviderTypeGoogle     WebSearchProviderType = "google"
 	WebSearchProviderTypeDuckDuckGo WebSearchProviderType = "duckduckgo"
@@ -32,23 +34,23 @@ const (
 // Agents reference these by ID.
 type WebSearchProviderEntity struct {
 	// Unique identifier (UUID, auto-generated)
-	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(36);primaryKey"`
 	// Workspace ID for scoping
-	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
+	TenantID uint64 `yaml:"tenant_id"   json:"tenant_id"`
 	// User-friendly name, e.g., "Production Bing Search"
-	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
+	Name string `yaml:"name"        json:"name"        gorm:"type:varchar(255);not null"`
 	// Provider type: bing, google, duckduckgo, tavily
-	Provider WebSearchProviderType `yaml:"provider" json:"provider" gorm:"type:varchar(50);not null"`
+	Provider WebSearchProviderType `yaml:"provider"    json:"provider"    gorm:"type:varchar(50);not null"`
 	// Description
 	Description string `yaml:"description" json:"description" gorm:"type:text"`
 	// Provider-specific parameters (API key, engine ID, etc.) stored as encrypted JSON
-	Parameters WebSearchProviderParameters `yaml:"parameters" json:"parameters" gorm:"type:json"`
+	Parameters WebSearchProviderParameters `yaml:"parameters"  json:"parameters"  gorm:"type:json"`
 	// Whether this is the default provider for the workspace
-	IsDefault bool `yaml:"is_default" json:"is_default" gorm:"default:false"`
+	IsDefault bool `yaml:"is_default"  json:"is_default"  gorm:"default:false"`
 	// Timestamps
-	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
-	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
-	DeletedAt gorm.DeletedAt `yaml:"deleted_at" json:"deleted_at" gorm:"index"`
+	CreatedAt time.Time      `yaml:"created_at"  json:"created_at"`
+	UpdatedAt time.Time      `yaml:"updated_at"  json:"updated_at"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at"  json:"deleted_at"  gorm:"index"`
 }
 
 // TableName returns the table name for WebSearchProviderEntity
@@ -58,7 +60,7 @@ func (WebSearchProviderEntity) TableName() string {
 
 // BeforeCreate is a GORM hook that runs before creating a new record.
 // Automatically generates a UUID for new providers.
-func (e *WebSearchProviderEntity) BeforeCreate(tx *gorm.DB) (err error) {
+func (e *WebSearchProviderEntity) BeforeCreate(_ *gorm.DB) (err error) {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
 	}
@@ -74,15 +76,16 @@ func (e *WebSearchProviderEntity) BeforeCreate(tx *gorm.DB) (err error) {
 // dto.NewWebSearchProviderResponse which omits APIKey by construction.
 type WebSearchProviderParameters struct {
 	// API key for the search provider (encrypted in DB)
-	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
+	APIKey string `yaml:"api_key"      json:"api_key,omitempty"`
 	// Google Custom Search Engine ID (only for Google provider)
-	EngineID string `yaml:"engine_id" json:"engine_id,omitempty"`
+	EngineID string `yaml:"engine_id"    json:"engine_id,omitempty"`
 	// Base URL for self-hosted search engines (e.g. SearXNG instance URL).
 	// Validated with utils.ValidateURLForSSRF; private hosts must be added to SSRF_WHITELIST.
-	BaseURL string `yaml:"base_url" json:"base_url,omitempty"`
-	// Optional HTTP/HTTPS proxy URL for outbound search requests (e.g. http://host:port); validated with utils.ValidateURLForSSRF.
+	BaseURL string `yaml:"base_url"     json:"base_url,omitempty"`
+	// Optional HTTP/HTTPS proxy URL for outbound search requests (e.g. http://host:port); validated with
+	// utils.ValidateURLForSSRF.
 	// Does not replace the search API endpoint; only tunnels traffic to the official APIs.
-	ProxyURL string `yaml:"proxy_url" json:"proxy_url,omitempty"`
+	ProxyURL string `yaml:"proxy_url"    json:"proxy_url,omitempty"`
 	// Provider-specific extra configuration for future extensibility
 	ExtraConfig map[string]string `yaml:"extra_config" json:"extra_config,omitempty"`
 }
@@ -114,7 +117,7 @@ func (p *WebSearchProviderParameters) Scan(value interface{}) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(p.APIKey); ok {
 		p.APIKey = plain
 	} else {
-		log.Printf("[crypto] web search provider api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf("[crypto] web search provider api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured") //nolint:lll // long struct tag or string
 		p.APIKey = ""
 	}
 	return nil
@@ -216,7 +219,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			RequiresAPIKey:  false,
 			RequiresBaseURL: true,
 			SupportsProxy:   true,
-			Description:     "Self-hosted SearXNG metasearch instance (provide instance URL; private hosts must be SSRF-whitelisted)",
+			Description:     "Self-hosted SearXNG metasearch instance (provide instance URL; private hosts must be SSRF-whitelisted)", //nolint:lll // long struct tag or string
 			DocsURL:         "https://docs.searxng.org/",
 		},
 		{
@@ -232,7 +235,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			RequiresAPIKey:         false,
 			SupportsOptionalAPIKey: true,
 			SupportsProxy:          true,
-			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
+			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)", //nolint:lll // long struct tag or string
 			DocsURL:                "https://keenable.ai/",
 		},
 		{
@@ -253,10 +256,26 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					Description:    "Select the Zhipu search engine and per-request price tier.",
 					DescriptionKey: "webSearchSettings.configFields.searchEngineDesc",
 					Options: []WebSearchProviderConfigFieldOption{
-						{Label: "Standard · ¥0.01/request", LabelKey: "webSearchSettings.configFields.searchStd", Value: "search_std"},
-						{Label: "Pro · ¥0.03/request", LabelKey: "webSearchSettings.configFields.searchPro", Value: "search_pro"},
-						{Label: "Sogou · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchSogou", Value: "search_pro_sogou"},
-						{Label: "Quark · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchQuark", Value: "search_pro_quark"},
+						{
+							Label:    "Standard · ¥0.01/request",
+							LabelKey: "webSearchSettings.configFields.searchStd",
+							Value:    "search_std",
+						},
+						{
+							Label:    "Pro · ¥0.03/request",
+							LabelKey: "webSearchSettings.configFields.searchPro",
+							Value:    "search_pro",
+						},
+						{
+							Label:    "Sogou · ¥0.05/request",
+							LabelKey: "webSearchSettings.configFields.searchSogou",
+							Value:    "search_pro_sogou",
+						},
+						{
+							Label:    "Quark · ¥0.05/request",
+							LabelKey: "webSearchSettings.configFields.searchQuark",
+							Value:    "search_pro_quark",
+						},
 					},
 				},
 				{

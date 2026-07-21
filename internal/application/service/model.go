@@ -27,7 +27,7 @@ type modelService struct {
 	repo          interfaces.ModelRepository
 	kbRepo        interfaces.KnowledgeBaseRepository
 	agentRepo     interfaces.CustomAgentRepository
-	ollamaService *ollama.OllamaService
+	ollamaService *ollama.Service
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
 }
@@ -36,7 +36,7 @@ type modelService struct {
 func NewModelService(repo interfaces.ModelRepository,
 	kbRepo interfaces.KnowledgeBaseRepository,
 	agentRepo interfaces.CustomAgentRepository,
-	ollamaService *ollama.OllamaService,
+	ollamaService *ollama.Service,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
@@ -65,11 +65,14 @@ func (s *modelService) decryptAppSecret(encrypted string) string {
 
 // resolveWeKnoraCloudCredentials 为 WeKnoraCloud 厂商模型补全 AppID/AppSecret。
 // 当模型自身参数中未存储凭证时，自动从空间配置中获取（SaveCredentials 保存的凭证）。
-func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, params *types.ModelParameters) (appID, appSecret string) {
+func (s *modelService) resolveWeKnoraCloudCredentials(
+	ctx context.Context,
+	params *types.ModelParameters,
+) (appID, appSecret string) {
 	appID = params.AppID
 	appSecret = s.decryptAppSecret(params.AppSecret)
 
-	if provider.ProviderName(params.Provider) != provider.ProviderWeKnoraCloud {
+	if provider.Name(params.Provider) != provider.ProviderWeKnoraCloud {
 		return
 	}
 	if appID != "" && appSecret != "" {
@@ -147,7 +150,7 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 			model.Status = types.ModelStatusActive
 		}
 		logger.Infof(newCtx, "Updating model status to: %s", model.Status)
-		s.repo.Update(newCtx, model)
+		_ = s.repo.Update(newCtx, model)
 	}()
 
 	logger.Infof(ctx, "Model creation initiated successfully: %s", model.ID)
@@ -409,12 +412,12 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 
 // GetEmbeddingModel retrieves and initializes an embedding model instance
 // Takes a model ID and returns an Embedder interface implementation
-func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error) {
+func (s *modelService) GetEmbeddingModel(ctx context.Context, modelID string) (embedding.Embedder, error) {
 	// Get the model details
-	model, err := s.GetModelByID(ctx, modelId)
+	model, err := s.GetModelByID(ctx, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": modelId,
+			"model_id": modelID,
 		})
 		return nil, err
 	}
@@ -423,7 +426,11 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(
+		embedding.ConfigFromModel(model, appID, appSecret),
+		s.pooler,
+		s.ollamaService,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -439,18 +446,22 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
 // This is used for cross-tenant knowledge base sharing where the embedding model from
 // the source tenant must be used to ensure vector compatibility
-func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error) {
+func (s *modelService) GetEmbeddingModelForTenant(
+	ctx context.Context,
+	modelID string,
+	tenantID uint64,
+) (embedding.Embedder, error) {
 	// Check if model ID is empty
-	if modelId == "" {
+	if modelID == "" {
 		logger.Error(ctx, "Model ID is empty")
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	// Fetch model from repository using the specified tenant ID
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err
@@ -466,11 +477,21 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		return nil, errors.New("model is not active")
 	}
 
-	logger.Infof(ctx, "Getting cross-tenant embedding model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
+	logger.Infof(
+		ctx,
+		"Getting cross-tenant embedding model: %s, source: %s, tenant: %d",
+		model.Name,
+		model.Source,
+		tenantID,
+	)
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(
+		embedding.ConfigFromModel(model, appID, appSecret),
+		s.pooler,
+		s.ollamaService,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -486,12 +507,12 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 // GetRerankModel retrieves and initializes a reranking model instance
 // Takes a model ID and returns a Reranker interface implementation
-func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error) {
+func (s *modelService) GetRerankModel(ctx context.Context, modelID string) (rerank.Reranker, error) {
 	// Get the model details
-	model, err := s.GetModelByID(ctx, modelId)
+	model, err := s.GetModelByID(ctx, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": modelId,
+			"model_id": modelID,
 		})
 		return nil, err
 	}
@@ -515,9 +536,9 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 // GetChatModel retrieves and initializes a chat model instance
 // Takes a model ID and returns a Chat interface implementation
-func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.Chat, error) {
+func (s *modelService) GetChatModel(ctx context.Context, modelID string) (chat.Chat, error) {
 	// Check if model ID is empty
-	if modelId == "" {
+	if modelID == "" {
 		logger.Error(ctx, "Model ID is empty")
 		return nil, errors.New("model ID cannot be empty")
 	}
@@ -525,10 +546,10 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Get the model directly from repository to avoid status checks
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err
@@ -556,17 +577,17 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 }
 
 // GetVLMModel retrieves and initializes a vision language model instance.
-func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
-	if modelId == "" {
+func (s *modelService) GetVLMModel(ctx context.Context, modelID string) (vlm.VLM, error) {
+	if modelID == "" {
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err
@@ -596,17 +617,17 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 // maintain a per-type default flag at the service layer.
 
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
-func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {
-	if modelId == "" {
+func (s *modelService) GetASRModel(ctx context.Context, modelID string) (asr.ASR, error) {
+	if modelID == "" {
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err

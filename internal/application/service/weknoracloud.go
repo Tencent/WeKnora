@@ -21,7 +21,7 @@ type weKnoraCloudService struct {
 
 // NewWeKnoraCloudService 构造 WeKnoraCloudService
 func NewWeKnoraCloudService(
-	repo interfaces.ModelRepository,
+	_ interfaces.ModelRepository,
 	tenantRepo interfaces.TenantRepository,
 ) interfaces.WeKnoraCloudService {
 	return &weKnoraCloudService{
@@ -29,8 +29,15 @@ func NewWeKnoraCloudService(
 	}
 }
 
+// IsWeKnoraCloudDocReaderAddr is an exported function.
 func IsWeKnoraCloudDocReaderAddr(addr string) bool {
-	return strings.TrimSuffix(strings.TrimSpace(addr), "/") == strings.TrimRight(provider.WeKnoraCloudBaseURL, "/")+"/api/v1/doc/reader"
+	return strings.TrimSuffix(
+		strings.TrimSpace(addr),
+		"/",
+	) == strings.TrimRight(
+		provider.WeKnoraCloudBaseURL,
+		"/",
+	)+"/api/v1/doc/reader"
 }
 
 // SaveCredentials 仅保存 APPID/APPSECRET 凭证，不自动创建模型
@@ -78,7 +85,7 @@ func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appS
 		logger.Warnf(ctx, "credential verification HTTP failed: url=%s err=%v", healthURL, err)
 		return fmt.Errorf("service unreachable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("invalid APPID or APPSECRET (HTTP %d)", resp.StatusCode)
@@ -117,7 +124,11 @@ func (s *weKnoraCloudService) CheckStatus(ctx context.Context) (*types.WeKnoraCl
 }
 
 // updateTenantCredentials 更新空间的 WeKnoraCloud 凭证
-func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenantID uint64, appID, appSecret string) error {
+func (s *weKnoraCloudService) updateTenantCredentials(
+	ctx context.Context,
+	tenantID uint64,
+	appID, appSecret string,
+) error {
 	if s.tenantRepo == nil {
 		return fmt.Errorf("tenant repository is required")
 	}

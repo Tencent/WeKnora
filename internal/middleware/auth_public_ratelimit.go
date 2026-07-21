@@ -50,8 +50,8 @@ type ipRateLimiter struct {
 	buckets sync.Map // string (IP) -> *ipBucket
 }
 
-func newIPRateLimiter(window time.Duration, max int) *ipRateLimiter {
-	l := &ipRateLimiter{window: window, max: max}
+func newIPRateLimiter(window time.Duration, limit int) *ipRateLimiter {
+	l := &ipRateLimiter{window: window, max: limit}
 	go l.cleanupLoop()
 	return l
 }
@@ -122,7 +122,7 @@ func PublicAuthRateLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		if !publicAuthLimiter.allow(ip) {
-			c.Error(&apperrors.AppError{
+			_ = c.Error(&apperrors.AppError{
 				Code:     apperrors.ErrTooManyRequests,
 				Message:  "too many requests; please retry shortly",
 				HTTPCode: http.StatusTooManyRequests,

@@ -15,7 +15,8 @@ import (
 
 var webSearchTool = BaseTool{
 	name: ToolWebSearch,
-	description: `Search the web for current information and news. This tool searches the internet to find up-to-date information that may not be in the knowledge base.
+	//nolint:lll
+	description: `Search the web for current information and news. This tool searches the internet to find up-to-date information that may not be in the knowledge base. //nolint:lll
 
 ## CRITICAL - KB First Rule
 **ABSOLUTE RULE**: You MUST complete KB retrieval (grep_chunks AND knowledge_search) FIRST before using this tool.
@@ -63,7 +64,8 @@ var webSearchTool = BaseTool{
 - Search results are stored in a temporary knowledge base for the session
 - Use this tool when knowledge bases don't have the information you need
 - Results include a short wN page ID, title, snippet, and content snippet (may be truncated)
-- **CRITICAL**: If content is truncated or you need full details, pass that wN value to **web_fetch** to fetch complete page content
+- **CRITICAL**: If content is truncated or you need full details, pass that wN value to **web_fetch** to fetch
+complete page content
 - Maximum %d results will be returned per search`,
 	schema: utils.GenerateSchema[WebSearchInput](),
 }
@@ -267,6 +269,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	output += "\n=== Next Steps ===\n"
 	if len(webResults) > 0 {
 		output += "- ⚠️ Content may be truncated (showing first 500 chars). Use web_fetch to get full page content.\n"
+		//nolint:lll
 		output += "- Extract URLs from results above and use web_fetch with appropriate prompts to get detailed information.\n"
 		output += "- Synthesize information from multiple sources for comprehensive answers.\n"
 	} else {

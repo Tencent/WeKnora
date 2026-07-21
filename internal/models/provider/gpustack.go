@@ -21,8 +21,8 @@ func init() {
 }
 
 // Info 返回 GPUStack provider 的元数据
-func (p *GPUStackProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *GPUStackProvider) Info() Info {
+	return Info{
 		Name:        ProviderGPUStack,
 		DisplayName: "GPUStack",
 		Description: "Choose your deployed model on GPUStack",

@@ -1,12 +1,4 @@
-// Package errors: parse stage error codes.
-//
-// These constants are the stable wire format the frontend uses to map a
-// failure to a localized "what to do about it" message. Adding a new code
-// is non-breaking; renaming an existing one requires a coordinated
-// frontend release because the i18n keys are looked up by code.
-//
-// Codes are SCREAMING_SNAKE so they survive JSON case transforms and look
-// distinct from Go identifiers in logs/dashboards.
+// Package errors defines parse error code helpers.
 package errors
 
 const (

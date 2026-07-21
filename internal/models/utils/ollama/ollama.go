@@ -1,3 +1,4 @@
+// Package ollama provides related functionality.
 package ollama
 
 import (
@@ -16,8 +17,8 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-// OllamaService manages Ollama service
-type OllamaService struct {
+// Service manages Ollama service
+type Service struct {
 	client      *api.Client
 	baseURL     string
 	mu          sync.Mutex
@@ -25,8 +26,8 @@ type OllamaService struct {
 	isOptional  bool // Added: marks if Ollama service is optional
 }
 
-// GetOllamaService gets Ollama service instance (singleton pattern)
-func GetOllamaService() (*OllamaService, error) {
+// GetService gets Ollama service instance (singleton pattern)
+func GetService() (*Service, error) {
 	// Get Ollama base URL from environment variable, if not set use provided baseURL or default value
 	logger.GetLogger(context.Background()).Infof("Ollama base URL: %s", os.Getenv("OLLAMA_BASE_URL"))
 	baseURL := "http://localhost:11434"
@@ -61,7 +62,7 @@ func GetOllamaService() (*OllamaService, error) {
 		logger.GetLogger(context.Background()).Info("Ollama service set to optional mode")
 	}
 
-	service := &OllamaService{
+	service := &Service{
 		client:     client,
 		baseURL:    baseURL,
 		isOptional: isOptional,
@@ -71,7 +72,7 @@ func GetOllamaService() (*OllamaService, error) {
 }
 
 // StartService checks if Ollama service is available
-func (s *OllamaService) StartService(ctx context.Context) error {
+func (s *Service) StartService(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -95,14 +96,14 @@ func (s *OllamaService) StartService(ctx context.Context) error {
 }
 
 // IsAvailable returns whether the service is available
-func (s *OllamaService) IsAvailable() bool {
+func (s *Service) IsAvailable() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.isAvailable
 }
 
 // IsModelAvailable checks if a model is available
-func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) (bool, error) {
+func (s *Service) IsModelAvailable(ctx context.Context, modelName string) (bool, error) {
 	// First check if the service is available
 	if err := s.StartService(ctx); err != nil {
 		return false, err
@@ -135,7 +136,7 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 }
 
 // PullModel pulls a model
-func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
+func (s *Service) PullModel(ctx context.Context, modelName string) error {
 	// First check if the service is available
 	if err := s.StartService(ctx); err != nil {
 		return err
@@ -187,7 +188,7 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 }
 
 // EnsureModelAvailable ensures the model is available, pulls it if not available
-func (s *OllamaService) EnsureModelAvailable(ctx context.Context, modelName string) error {
+func (s *Service) EnsureModelAvailable(ctx context.Context, modelName string) error {
 	// If service is not available but set as optional, return nil directly
 	if !s.IsAvailable() && s.isOptional {
 		logger.GetLogger(ctx).Warnf("Ollama service unavailable, skipping ensuring model %s availability", modelName)
@@ -212,7 +213,7 @@ func (s *OllamaService) EnsureModelAvailable(ctx context.Context, modelName stri
 }
 
 // GetVersion gets Ollama version
-func (s *OllamaService) GetVersion(ctx context.Context) (string, error) {
+func (s *Service) GetVersion(ctx context.Context) (string, error) {
 	// If service is not available but set as optional, return empty version info
 	if !s.IsAvailable() && s.isOptional {
 		return "unavailable", nil
@@ -226,7 +227,7 @@ func (s *OllamaService) GetVersion(ctx context.Context) (string, error) {
 }
 
 // CreateModel creates a custom model
-func (s *OllamaService) CreateModel(ctx context.Context, name, modelfile string) error {
+func (s *Service) CreateModel(ctx context.Context, name, modelfile string) error {
 	req := &api.CreateRequest{
 		Model:    name,
 		Template: modelfile, // Use Template field instead of Modelfile
@@ -246,7 +247,7 @@ func (s *OllamaService) CreateModel(ctx context.Context, name, modelfile string)
 }
 
 // GetModelInfo gets model information
-func (s *OllamaService) GetModelInfo(ctx context.Context, modelName string) (*api.ShowResponse, error) {
+func (s *Service) GetModelInfo(ctx context.Context, modelName string) (*api.ShowResponse, error) {
 	req := &api.ShowRequest{
 		Name: modelName,
 	}
@@ -259,8 +260,8 @@ func (s *OllamaService) GetModelInfo(ctx context.Context, modelName string) (*ap
 	return resp, nil
 }
 
-// OllamaModelInfo represents detailed information about an Ollama model
-type OllamaModelInfo struct {
+// ModelInfo represents detailed information about an Ollama model
+type ModelInfo struct {
 	Name       string    `json:"name"`
 	Size       int64     `json:"size"`
 	Digest     string    `json:"digest"`
@@ -268,7 +269,7 @@ type OllamaModelInfo struct {
 }
 
 // ListModels lists all available models with basic info (names only)
-func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
+func (s *Service) ListModels(ctx context.Context) ([]string, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model list: %w", err)
@@ -283,7 +284,7 @@ func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
 }
 
 // ListModelsDetailed lists all available models with detailed information
-func (s *OllamaService) ListModelsDetailed(ctx context.Context) ([]OllamaModelInfo, error) {
+func (s *Service) ListModelsDetailed(ctx context.Context) ([]ModelInfo, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model list: %w", err)
@@ -294,9 +295,9 @@ func (s *OllamaService) ListModelsDetailed(ctx context.Context) ([]OllamaModelIn
 	}
 	logger.GetLogger(ctx).Infof("List models detailed: %s", string(jsonData))
 
-	models := make([]OllamaModelInfo, len(listResp.Models))
+	models := make([]ModelInfo, len(listResp.Models))
 	for i, model := range listResp.Models {
-		models[i] = OllamaModelInfo{
+		models[i] = ModelInfo{
 			Name:       model.Name,
 			Size:       model.Size,
 			Digest:     model.Digest,
@@ -308,7 +309,7 @@ func (s *OllamaService) ListModelsDetailed(ctx context.Context) ([]OllamaModelIn
 }
 
 // DeleteModel deletes a model
-func (s *OllamaService) DeleteModel(ctx context.Context, modelName string) error {
+func (s *Service) DeleteModel(ctx context.Context, modelName string) error {
 	req := &api.DeleteRequest{
 		Name: modelName,
 	}
@@ -328,7 +329,7 @@ func IsValidModelName(name string) bool {
 }
 
 // Chat uses Ollama chat
-func (s *OllamaService) Chat(ctx context.Context, req *api.ChatRequest, fn api.ChatResponseFunc) error {
+func (s *Service) Chat(ctx context.Context, req *api.ChatRequest, fn api.ChatResponseFunc) error {
 	// First check if service is available
 	if err := s.StartService(ctx); err != nil {
 		return err
@@ -339,7 +340,7 @@ func (s *OllamaService) Chat(ctx context.Context, req *api.ChatRequest, fn api.C
 }
 
 // Embeddings gets text embedding vectors
-func (s *OllamaService) Embeddings(ctx context.Context, req *api.EmbedRequest) (*api.EmbedResponse, error) {
+func (s *Service) Embeddings(ctx context.Context, req *api.EmbedRequest) (*api.EmbedResponse, error) {
 	// First check if service is available
 	if err := s.StartService(ctx); err != nil {
 		return nil, err
@@ -349,7 +350,7 @@ func (s *OllamaService) Embeddings(ctx context.Context, req *api.EmbedRequest) (
 }
 
 // Generate generates text (used for Rerank)
-func (s *OllamaService) Generate(ctx context.Context, req *api.GenerateRequest, fn api.GenerateResponseFunc) error {
+func (s *Service) Generate(ctx context.Context, req *api.GenerateRequest, fn api.GenerateResponseFunc) error {
 	// First check if service is available
 	if err := s.StartService(ctx); err != nil {
 		return err
@@ -360,6 +361,6 @@ func (s *OllamaService) Generate(ctx context.Context, req *api.GenerateRequest, 
 }
 
 // GetClient returns the underlying ollama client for advanced operations
-func (s *OllamaService) GetClient() *api.Client {
+func (s *Service) GetClient() *api.Client {
 	return s.client
 }

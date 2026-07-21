@@ -48,14 +48,14 @@ func NewPluginExtractEntity(
 }
 
 // ActivationEvents returns the list of event types this plugin responds to.
-func (p *PluginExtractEntity) ActivationEvents() []types.EventType {
-	return []types.EventType{types.QUERY_UNDERSTAND}
+func (p *PluginExtractEntity) ActivationEvents() []types.Type {
+	return []types.Type{types.QueryUnderstand}
 }
 
 // OnEvent processes triggered events
 // When receiving a QUERY_UNDERSTAND event, it extracts entities from the query
 func (p *PluginExtractEntity) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
@@ -80,7 +80,11 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	// Also build a mapping from KnowledgeID to KnowledgeBaseID
 	knowledgeToKBMap := make(map[string]string)
 	if len(chatManage.KnowledgeIDs) > 0 {
-		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
+		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(
+			ctx,
+			chatManage.TenantID,
+			chatManage.KnowledgeIDs,
+		)
 		if err != nil {
 			logger.Errorf(ctx, "failed to get knowledges: %v", err)
 			return next()
@@ -156,7 +160,7 @@ type Extractor struct {
 	chat     chat.Chat
 	formater *Formater
 	template *types.PromptTemplateStructured
-	chatOpt  *chat.ChatOptions
+	chatOpt  *chat.Options
 }
 
 // NewExtractor creates a new extractor
@@ -169,7 +173,7 @@ func NewExtractor(
 		chat:     chatModel,
 		formater: NewFormater(),
 		template: template,
-		chatOpt: &chat.ChatOptions{
+		chatOpt: &chat.Options{
 			Temperature: 0.3,
 			MaxTokens:   4096,
 			Thinking:    &think,
@@ -240,7 +244,7 @@ func NewQAPromptGenerator(formater *Formater, template *types.PromptTemplateStru
 }
 
 // System generates a system prompt
-func (qa *QAPromptGenerator) System(ctx context.Context) string {
+func (qa *QAPromptGenerator) System(_ context.Context) string {
 	promptLines := []string{}
 
 	if len(qa.Template.Tags) == 0 {
@@ -270,7 +274,7 @@ func (qa *QAPromptGenerator) System(ctx context.Context) string {
 }
 
 // User generates a user prompt
-func (qa *QAPromptGenerator) User(ctx context.Context, question string) string {
+func (qa *QAPromptGenerator) User(_ context.Context, question string) string {
 	promptLines := []string{}
 	promptLines = append(promptLines, qa.QuestionHeading)
 	promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.QuestionPrefix, question))
@@ -303,15 +307,15 @@ const (
 )
 
 const (
-	_FENCE_START   = "```"
-	_LANGUAGE_TAG  = `(?P<lang>[A-Za-z0-9_+-]+)?`
-	_FENCE_NEWLINE = `(?:\s*\n)?`
-	_FENCE_BODY    = `(?P<body>[\s\S]*?)`
-	_FENCE_END     = "```"
+	fenceStart   = "```"
+	languageTag  = `(?P<lang>[A-Za-z0-9_+-]+)?`
+	fenceNewline = `(?:\s*\n)?`
+	fenceBody    = `(?P<body>[\s\S]*?)`
+	fenceEnd     = "```"
 )
 
-var _FENCE_RE = regexp.MustCompile(
-	_FENCE_START + _LANGUAGE_TAG + _FENCE_NEWLINE + _FENCE_BODY + _FENCE_END,
+var fenceRE = regexp.MustCompile(
+	fenceStart + languageTag + fenceNewline + fenceBody + fenceEnd,
 )
 
 // Formater is a struct for formatting entities
@@ -410,12 +414,13 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		if itemMap, ok := item.(map[string]interface{}); ok {
 			itemsList = append(itemsList, itemMap)
 		} else {
-			return nil, fmt.Errorf("each item in the sequence must be a mapping.")
+			return nil, fmt.Errorf("each item in the sequence must be a mapping")
 		}
 	}
 	return itemsList, nil
 }
 
+// ParseGraph implements the required interface method.
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
@@ -519,7 +524,7 @@ func (f *Formater) extractContent(ctx context.Context, text string) string {
 		FormatTypeYAML: {"yaml": {}, "yml": {}},
 		FormatTypeJSON: {"json": {}},
 	}
-	matches := _FENCE_RE.FindAllStringSubmatch(text, -1)
+	matches := fenceRE.FindAllStringSubmatch(text, -1)
 	var candidates []string
 	for _, match := range matches {
 		lang := match[1]

@@ -22,7 +22,7 @@ type mockTool struct {
 func (m *mockTool) Name() string                { return m.name }
 func (m *mockTool) Description() string         { return m.description }
 func (m *mockTool) Parameters() json.RawMessage { return m.parameters }
-func (m *mockTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+func (m *mockTool) Execute(_ context.Context, _ json.RawMessage) (*types.ToolResult, error) {
 	return &types.ToolResult{Success: true}, nil
 }
 

@@ -22,9 +22,9 @@ func TestValidateSearxngBaseURL(t *testing.T) {
 	// here would otherwise be ignored. Reset the singleton on both
 	// entry and exit to keep the env / singleton in sync.
 	utils.ResetSSRFWhitelistForTest()
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	defer func() {
-		os.Unsetenv("SSRF_WHITELIST")
+		_ = os.Unsetenv("SSRF_WHITELIST")
 		utils.ResetSSRFWhitelistForTest()
 	}()
 
@@ -79,9 +79,9 @@ func TestSearxngProvider_Search(t *testing.T) {
 	// singleton so the setenv below is actually observed by the cached
 	// ssrfWhitelistConfig in internal/utils.
 	utils.ResetSSRFWhitelistForTest()
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	defer func() {
-		os.Unsetenv("SSRF_WHITELIST")
+		_ = os.Unsetenv("SSRF_WHITELIST")
 		utils.ResetSSRFWhitelistForTest()
 	}()
 
@@ -131,13 +131,13 @@ func TestSearxngProvider_Search(t *testing.T) {
 
 func TestSearxngProvider_Search_EmptyWithUnresponsiveEngines(t *testing.T) {
 	utils.ResetSSRFWhitelistForTest()
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	defer func() {
-		os.Unsetenv("SSRF_WHITELIST")
+		_ = os.Unsetenv("SSRF_WHITELIST")
 		utils.ResetSSRFWhitelistForTest()
 	}()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results":              []any{},

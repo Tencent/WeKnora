@@ -47,7 +47,12 @@ type TenantInvitationRepository interface {
 
 	// ListByTenantPage returns invitations for the tenant with id DESC
 	// paging, same filtering semantics as ListByTenant.
-	ListByTenantPage(ctx context.Context, tenantID uint64, includeTerminal bool, offset, limit int) ([]*types.TenantInvitation, error)
+	ListByTenantPage(
+		ctx context.Context,
+		tenantID uint64,
+		includeTerminal bool,
+		offset, limit int,
+	) ([]*types.TenantInvitation, error)
 
 	// ListByInvitee returns invitations addressed to the user across
 	// all tenants. Ordered by id DESC. Used both by the inbox page

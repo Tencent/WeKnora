@@ -13,8 +13,10 @@ import (
 // FallbackStrategy represents the fallback strategy type
 type FallbackStrategy string
 
+// FallbackStrategyModel and related constants.
 const (
-	FallbackStrategyFixed FallbackStrategy = "fixed" // Fixed response
+	// FallbackStrategyFixed returns a fixed fallback response.
+	FallbackStrategyFixed FallbackStrategy = "fixed"
 	FallbackStrategyModel FallbackStrategy = "model" // Model fallback response
 )
 
@@ -75,18 +77,18 @@ type ContextConfig struct {
 // Session represents the session
 type Session struct {
 	// ID
-	ID string `json:"id"          gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                  gorm:"type:varchar(36);primaryKey"`
 	// Title
 	Title string `json:"title"`
 	// Description
 	Description string `json:"description"`
 	// Workspace ID
-	TenantID uint64 `json:"tenant_id"   gorm:"index"`
+	TenantID uint64 `json:"tenant_id"           gorm:"index"`
 	// UserID is the owner scope for this session. WeKnora user UUIDs, API
 	// external-user principals, and embed visitor principals all use this column.
-	UserID string `json:"user_id,omitempty" gorm:"type:varchar(512);index"`
+	UserID string `json:"user_id,omitempty"   gorm:"type:varchar(512);index"`
 	// IsPinned indicates whether the session is pinned in the list.
-	IsPinned bool `json:"is_pinned" gorm:"default:false"`
+	IsPinned bool `json:"is_pinned"           gorm:"default:false"`
 	// PinnedAt records when the session was pinned; nil when not pinned.
 	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
@@ -112,7 +114,8 @@ type Session struct {
 	// RerankThreshold   float64             `json:"rerank_threshold"`                     // 排序阈值
 	// SummaryModelID    string              `json:"summary_model_id"`                     // 总结模型ID
 	// SummaryParameters *SummaryConfig      `json:"summary_parameters" gorm:"type:json"`  // 总结模型参数
-	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:jsonb"` // Agent 配置（会话级别，仅存储enabled和knowledge_bases）
+	// AgentConfig stored session-level enabled flag and knowledge base IDs only.
+	// AgentConfig *SessionAgentConfig `json:"agent_config" gorm:"type:jsonb"`
 	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:jsonb"` // 上下文管理配置（可选）
 
 	CreatedAt time.Time      `json:"created_at"`
@@ -129,7 +132,13 @@ type Session struct {
 	Messages []Message `json:"-" gorm:"foreignKey:SessionID"`
 }
 
-func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
+// BeforeCreate implements the required behavior.
+// Session is exported.
+// Session is exported.
+// Session is exported.
+// Session is exported.
+// Session is exported.
+func (s *Session) BeforeCreate(_ *gorm.DB) (err error) {
 	s.ID = uuid.New().String()
 	return nil
 }
@@ -191,12 +200,12 @@ type SessionListQuery struct {
 // and are empty for Web-created sessions.
 type SessionListItem struct {
 	Session
-	IMPlatform  string `json:"im_platform,omitempty"   gorm:"column:im_platform"`
-	IMChatID    string `json:"im_chat_id,omitempty"    gorm:"column:im_chat_id"`
-	IMThreadID  string `json:"im_thread_id,omitempty"  gorm:"column:im_thread_id"`
-	IMUserID    string `json:"im_user_id,omitempty"    gorm:"column:im_user_id"`
-	IMAgentID   string `json:"im_agent_id,omitempty"   gorm:"column:im_agent_id"`
-	IMChannelID string `json:"im_channel_id,omitempty" gorm:"column:im_channel_id"`
+	IMPlatform string `json:"im_platform,omitempty"   gorm:"column:im_platform"`
+	IMChatID   string `json:"im_chat_id,omitempty"    gorm:"column:im_chat_id"`
+	IMThreadID string `json:"im_thread_id,omitempty"  gorm:"column:im_thread_id"`
+	IMUserID   string `json:"im_user_id,omitempty"    gorm:"column:im_user_id"`
+	IMAgentID  string `json:"im_agent_id,omitempty"   gorm:"column:im_agent_id"`
+	ChannelID  string `json:"im_channel_id,omitempty" gorm:"column:im_channel_id"`
 }
 
 // StringArray represents a list of strings

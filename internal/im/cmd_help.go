@@ -16,11 +16,15 @@ func newHelpCommand(registry *CommandRegistry) *HelpCommand {
 	return &HelpCommand{registry: registry}
 }
 
+// Name implements the required interface method.
 func (c *HelpCommand) Name() string { return "help" }
+
+// Description implements the required interface method.
 func (c *HelpCommand) Description() string {
 	return "显示可用指令列表，或查看某个指令的详细用法"
 }
 
+// Execute implements the required interface method.
 func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []string) (*CommandResult, error) {
 	// /help <command> — show detailed usage for a specific command
 	if len(args) > 0 {
@@ -43,7 +47,7 @@ func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []strin
 	var sb strings.Builder
 	sb.WriteString("**可用指令**\n\n")
 	for _, cmd := range cmds {
-		sb.WriteString(fmt.Sprintf("· `/%s` — %s\n", cmd.Name(), cmd.Description()))
+		fmt.Fprintf(&sb, "· `/%s` — %s\n", cmd.Name(), cmd.Description())
 	}
 	sb.WriteString("\n发送 `/help <指令名>` 查看详细用法")
 	return &CommandResult{Content: sb.String()}, nil

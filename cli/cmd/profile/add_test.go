@@ -53,7 +53,11 @@ func TestAdd_DuplicateName(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	err := runAdd(&AddOptions{Host: "https://new.example.com"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "staging")
+	err := runAdd(
+		&AddOptions{Host: "https://new.example.com"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		"staging",
+	)
 	if err == nil {
 		t.Fatal("expected error on duplicate name")
 	}

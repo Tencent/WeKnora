@@ -84,10 +84,10 @@ type TenantAPIKey struct {
 	APIKey           string           `json:"api_key"`
 	Role             TenantAPIKeyRole `json:"role"`
 	KnowledgeBaseIDs []string         `json:"knowledge_base_ids"`
-	LastUsedAt       *time.Time          `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
-	CreatedAt        time.Time           `json:"created_at"`
-	UpdatedAt        time.Time           `json:"updated_at"`
+	LastUsedAt       *time.Time       `json:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time       `json:"expires_at,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 // CreateTenantAPIKeyRequest creates a revocable tenant API key.
@@ -220,7 +220,12 @@ type TenantSearchResponse struct {
 }
 
 // SearchTenants searches tenants with pagination (requires cross-tenant access)
-func (c *Client) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]Tenant, int64, error) {
+func (c *Client) SearchTenants(
+	ctx context.Context,
+	keyword string,
+	tenantID uint64,
+	page, pageSize int,
+) ([]Tenant, int64, error) {
 	queryParams := url.Values{}
 	if keyword != "" {
 		queryParams.Set("keyword", keyword)

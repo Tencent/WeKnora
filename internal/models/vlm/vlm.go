@@ -83,7 +83,7 @@ func stringMapToAnyMap(in map[string]string) map[string]any {
 }
 
 // NewVLM creates a VLM instance based on the provided configuration.
-func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
+func NewVLM(config *Config, ollamaService *ollama.Service) (VLM, error) {
 	v, err := newVLM(config, ollamaService)
 	if err != nil {
 		return v, err
@@ -97,14 +97,14 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
 }
 
-func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
+func newVLM(config *Config, ollamaService *ollama.Service) (VLM, error) {
 	ifType := strings.ToLower(config.InterfaceType)
 
 	if ifType == "ollama" || config.Source == types.ModelSourceLocal {
 		return NewOllamaVLM(config, ollamaService)
 	}
 
-	providerName := provider.ProviderName(config.Provider)
+	providerName := provider.Name(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}
@@ -116,7 +116,7 @@ func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 }
 
 // NewVLMFromLegacyConfig creates a VLM from a legacy VLMConfig (inline BaseURL/APIKey/ModelName).
-func NewVLMFromLegacyConfig(vlmCfg types.VLMConfig, ollamaService *ollama.OllamaService) (VLM, error) {
+func NewVLMFromLegacyConfig(vlmCfg types.VLMConfig, ollamaService *ollama.Service) (VLM, error) {
 	if !vlmCfg.IsEnabled() {
 		return nil, fmt.Errorf("VLM config is not enabled")
 	}

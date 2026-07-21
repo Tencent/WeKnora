@@ -1,3 +1,4 @@
+// Package asr defines Automatic Speech Recognition model interfaces and implementations.
 package asr
 
 import (

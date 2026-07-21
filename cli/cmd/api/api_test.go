@@ -133,7 +133,15 @@ func TestAPI_InlineDataMalformed_RejectedAsInput(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Data: `{bad`}
-	err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, cli, "POST", "/api/v1/things", false)
+	err := runAPI(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		cli,
+		"POST",
+		"/api/v1/things",
+		false,
+	)
 	var typed *cmdutil.Error
 	if !errors.As(err, &typed) || typed.Code != cmdutil.CodeInputInvalidArgument {
 		t.Errorf("want input.invalid_argument for malformed -d, got %v", err)
@@ -182,7 +190,15 @@ func TestAPI_MalformedInputJSON_RejectedAsInput(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(`{bad json`)}
-	err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, cli, "POST", "/api/v1/things", false)
+	err := runAPI(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		cli,
+		"POST",
+		"/api/v1/things",
+		false,
+	)
 	if err == nil {
 		t.Fatal("expected an error for malformed --input JSON")
 	}
@@ -248,7 +264,15 @@ func TestAPI_NotFound(t *testing.T) {
 	})
 	defer stop()
 
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/missing", false)
+	err := runAPI(
+		context.Background(),
+		&Options{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		cli,
+		"GET",
+		"/api/v1/missing",
+		false,
+	)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -268,7 +292,15 @@ func TestAPI_AcceptsArbitraryMethod(t *testing.T) {
 	for _, m := range []string{"OPTIONS", "PATCH", "TRACE", "CUSTOM"} {
 		t.Run(m, func(t *testing.T) {
 			seenMethod = ""
-			err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, m, "/api/v1/things", false)
+			err := runAPI(
+				context.Background(),
+				&Options{},
+				&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+				cli,
+				m,
+				"/api/v1/things",
+				false,
+			)
 			if err != nil {
 				t.Fatalf("expected method %q to be accepted, got %v", m, err)
 			}
@@ -281,7 +313,15 @@ func TestAPI_AcceptsArbitraryMethod(t *testing.T) {
 
 func TestAPI_EmptyMethodRejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "", "/api/v1/things", false)
+	err := runAPI(
+		context.Background(),
+		&Options{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		nil,
+		"",
+		"/api/v1/things",
+		false,
+	)
 	if err == nil {
 		t.Fatal("expected error for empty method")
 	}
@@ -293,7 +333,15 @@ func TestAPI_EmptyMethodRejected(t *testing.T) {
 
 func TestAPI_PathWithoutSlash(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "GET", "api/v1/things", false)
+	err := runAPI(
+		context.Background(),
+		&Options{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		nil,
+		"GET",
+		"api/v1/things",
+		false,
+	)
 	if err == nil {
 		t.Fatal("expected error for missing leading slash")
 	}
@@ -443,8 +491,10 @@ func TestAPI_PaginateIgnoredForPOST(t *testing.T) {
 		called++
 		return &http.Response{
 			StatusCode: 200,
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"success":true,"data":[],"total":5,"page":1,"page_size":2}`))),
-			Header:     make(http.Header),
+			Body: io.NopCloser(
+				bytes.NewReader([]byte(`{"success":true,"data":[],"total":5,"page":1,"page_size":2}`)),
+			),
+			Header: make(http.Header),
 		}, nil
 	}}
 

@@ -8,7 +8,12 @@ import (
 func TestSplitWithDiagnostics_LegacyStrategy_ReportsLegacyTier(t *testing.T) {
 	// Splittable input so the validator accepts the legacy output cleanly.
 	text := strings.Repeat("Hello world.\n\nNext paragraph here.\n\n", 50)
-	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 20, Separators: []string{"\n\n", "\n"}, Strategy: StrategyLegacy}
+	cfg := SplitterConfig{
+		ChunkSize:    200,
+		ChunkOverlap: 20,
+		Separators:   []string{"\n\n", "\n"},
+		Strategy:     StrategyLegacy,
+	}
 	chunks, diag := SplitWithDiagnostics(text, cfg)
 	if len(chunks) == 0 {
 		t.Fatal("expected chunks")
@@ -25,7 +30,11 @@ func TestSplitWithDiagnostics_LegacyStrategy_ReportsLegacyTier(t *testing.T) {
 }
 
 func TestSplitWithDiagnostics_AutoOnHeadingDoc_PicksHeading(t *testing.T) {
-	doc := strings.Repeat("# Top\nintro paragraph here.\n\n## Section A\nbody A here.\n\n## Section B\nbody B here.\n\n## Section C\nbody C here.\n\n", 1)
+	doc := strings.Repeat(
+		"# Top\nintro paragraph here.\n\n## Section A\nbody A here.\n"+
+			"## Section B\nbody B here.\n\n## Section C\nbody C here.\n\n",
+		1,
+	)
 	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 30, Strategy: StrategyAuto}
 	_, diag := SplitWithDiagnostics(doc, cfg)
 	if len(diag.TierChain) == 0 {

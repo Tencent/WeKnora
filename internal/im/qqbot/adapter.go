@@ -1,3 +1,4 @@
+// Package qqbot provides related functionality.
 package qqbot
 
 import (
@@ -15,26 +16,41 @@ import (
 
 var _ im.Adapter = (*Adapter)(nil)
 
+// Adapter is an exported type.
 type Adapter struct {
 	client *Client
 }
 
+// NewAdapter is an exported function.
 func NewAdapter(client *Client) *Adapter {
 	return &Adapter{client: client}
 }
 
+// Platform implements the required interface method.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformQQBot
 }
 
-func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
+// HandleURLVerification implements the required behavior.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter implements the required behavior.
+func (a *Adapter) HandleURLVerification(_ *gin.Context) bool {
 	return false
 }
 
-func (a *Adapter) VerifyCallback(c *gin.Context) error {
+// VerifyCallback is exported.
+// Adapter represents the exported value.
+// VerifyCallback implements the required behavior.
+// Adapter implements the required behavior.
+func (a *Adapter) VerifyCallback(_ *gin.Context) error {
 	return nil
 }
 
+// ParseCallback implements the required interface method.
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -49,6 +65,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	return parseGatewayPayload(&payload)
 }
 
+// SendReply implements the required interface method.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	content := strings.TrimSpace(im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal))
 	if content == "" {

@@ -26,7 +26,7 @@ type RemoteAPIChat struct {
 	modelID   string
 	baseURL   string
 	apiKey    string
-	provider  provider.ProviderName
+	provider  provider.Name
 	appID     string
 	appSecret string
 	// customHeaders 为用户在模型配置中指定的自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
@@ -39,7 +39,7 @@ type RemoteAPIChat struct {
 }
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
-func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
+func NewRemoteAPIChat(chatConfig *Config) (*RemoteAPIChat, error) {
 	if chatConfig.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(chatConfig.BaseURL); err != nil {
 			return nil, fmt.Errorf("baseURL SSRF check failed: %w", err)
@@ -47,7 +47,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	}
 
 	apiKey := chatConfig.APIKey
-	providerName := provider.ProviderName(chatConfig.Provider)
+	providerName := provider.Name(chatConfig.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(chatConfig.BaseURL)
 	}
@@ -118,7 +118,9 @@ func (c *RemoteAPIChat) authCreds() authCreds {
 
 // shapedRequest builds the standard request and applies the adapter's message
 // transform and parameter shaping (but not thinking, which may wrap the body).
-func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isStream bool) openai.ChatCompletionRequest {
+func (c *RemoteAPIChat) shapedRequest(
+	messages []Message, opts *Options, isStream bool,
+) openai.ChatCompletionRequest {
 	req := c.BuildChatCompletionRequest(messages, opts, isStream)
 	req.Messages = c.adapter.TransformMessages(req.Messages)
 	c.adapter.ShapeRequest(&req, opts, isStream)
@@ -130,7 +132,7 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 // path is required. This is the single place that composes adapter + thinking,
 // replacing the former buildRequestCustomizer plumbing.
 func (c *RemoteAPIChat) buildOutbound(
-	messages []Message, opts *ChatOptions, isStream bool,
+	messages []Message, opts *Options, isStream bool,
 ) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
 
@@ -162,7 +164,7 @@ func (c *RemoteAPIChat) logRequest(ctx context.Context, req any, isStream bool) 
 }
 
 // Chat 进行非流式聊天
-func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Options) (*types.ChatResponse, error) {
 	// 仅在调用方未设置 deadline 时附加一个兜底超时，防止 hung 请求永久阻塞 worker；
 	// 调用方若显式设置了更短或更长的 deadline，都会被原样尊重。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
@@ -181,7 +183,11 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	resp, err := c.client.CreateChatCompletion(timeoutCtx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(timeoutCtx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(
+				timeoutCtx,
+				"[LLM Request] Model %s does not support multimodal, retrying without images",
+				c.modelName,
+			)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.shapedRequest(cleaned, opts, false)
 			resp, err = c.client.CreateChatCompletion(timeoutCtx, req)
@@ -200,7 +206,9 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 // chatWithRawHTTP 使用原始 HTTP 请求进行聊天（供自定义请求使用）
-func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, customReq any) (*types.ChatResponse, error) {
+func (c *RemoteAPIChat) chatWithRawHTTP(
+	ctx context.Context, endpoint string, customReq any,
+) (*types.ChatResponse, error) {
 	jsonData, err := json.Marshal(customReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -233,7 +241,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -260,7 +268,9 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 }
 
 // ChatStream 进行流式聊天
-func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+func (c *RemoteAPIChat) ChatStream(
+	ctx context.Context, messages []Message, opts *Options,
+) (<-chan types.StreamResponse, error) {
 	// 仅在调用方未设置 deadline 时附加兜底超时；流式调用默认超时更长，
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
@@ -288,7 +298,11 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	stream, err := c.client.CreateChatCompletionStream(timeoutCtx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(timeoutCtx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(
+				timeoutCtx,
+				"[LLM Stream] Model %s does not support multimodal, retrying without images",
+				c.modelName,
+			)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.shapedRequest(cleaned, opts, true)
 			stream, err = c.client.CreateChatCompletionStream(timeoutCtx, req)
@@ -313,7 +327,9 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 
 // wrapStreamCancel 在子 channel 关闭后执行 cancel，避免 timeout context 泄漏。
 // 当底层调用直接返回 error 时，立即调用 cancel 并将 error 透出。
-func wrapStreamCancel(in <-chan types.StreamResponse, err error, cancel context.CancelFunc) (<-chan types.StreamResponse, error) {
+func wrapStreamCancel(
+	in <-chan types.StreamResponse, err error, cancel context.CancelFunc,
+) (<-chan types.StreamResponse, error) {
 	if err != nil {
 		cancel()
 		return nil, err
@@ -330,7 +346,9 @@ func wrapStreamCancel(in <-chan types.StreamResponse, err error, cancel context.
 }
 
 // chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天
-func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint string, customReq any) (<-chan types.StreamResponse, error) {
+func (c *RemoteAPIChat) chatStreamWithRawHTTP(
+	ctx context.Context, endpoint string, customReq any,
+) (<-chan types.StreamResponse, error) {
 	jsonData, err := json.Marshal(customReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -368,7 +386,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -399,7 +417,7 @@ func (c *RemoteAPIChat) GetModelID() string {
 }
 
 // GetProvider 获取 provider 名称
-func (c *RemoteAPIChat) GetProvider() provider.ProviderName {
+func (c *RemoteAPIChat) GetProvider() provider.Name {
 	return c.provider
 }
 

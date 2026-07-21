@@ -28,9 +28,9 @@ func (r *JinaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
 
-// JinaRerankRequest represents a Jina rerank request
+// JinaRequest represents a Jina rerank request
 // Note: Jina does NOT support truncate_prompt_tokens parameter
-type JinaRerankRequest struct {
+type JinaRequest struct {
 	Model           string   `json:"model"`                      // Model to use for reranking
 	Query           string   `json:"query"`                      // Query text to compare documents against
 	Documents       []string `json:"documents"`                  // List of document texts to rerank
@@ -38,8 +38,8 @@ type JinaRerankRequest struct {
 	ReturnDocuments bool     `json:"return_documents,omitempty"` // Whether to return document text in response
 }
 
-// JinaRerankResponse represents the response from a Jina reranking request
-type JinaRerankResponse struct {
+// JinaResponse represents the response from a Jina reranking request
+type JinaResponse struct {
 	Model   string       `json:"model"`   // Model used for reranking
 	Results []RankResult `json:"results"` // Ranked results with relevance scores
 	Usage   struct {
@@ -70,7 +70,7 @@ func NewJinaReranker(config *RerankerConfig) (*JinaReranker, error) {
 // Rerank performs document reranking based on relevance to the query
 func (r *JinaReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body - Jina does NOT use truncate_prompt_tokens
-	requestBody := &JinaRerankRequest{
+	requestBody := &JinaRequest{
 		Model:           r.modelName,
 		Query:           query,
 		Documents:       documents,
@@ -91,13 +91,17 @@ func (r *JinaReranker) Rerank(ctx context.Context, query string, documents []str
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
 	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
-	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, fmt.Sprintf("%s/rerank", r.baseURL), query, documents))
+	logger.Debugf(
+		ctx,
+		"%s",
+		buildRequestDebug(r.modelName, fmt.Sprintf("%s/rerank", r.baseURL), query, documents),
+	)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
@@ -110,7 +114,7 @@ func (r *JinaReranker) Rerank(ctx context.Context, query string, documents []str
 		return nil, fmt.Errorf("Rerank API error: Http Status: %s", resp.Status)
 	}
 
-	var response JinaRerankResponse
+	var response JinaResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}

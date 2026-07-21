@@ -164,20 +164,20 @@ func TestSessionRepositoryDeleteAllHonorsUserScope(t *testing.T) {
 
 // im_channel_sessions row for QueryPaged source-filter tests. Mirrors the columns
 // the LEFT JOIN projects; kept local to avoid importing internal/im.
-type testIMChannelSession struct {
-	ID          string `gorm:"primaryKey"`
-	SessionID   string
-	Platform    string
-	ChatID      string
-	ThreadID    string
-	UserID      string
-	AgentID     string
-	IMChannelID string `gorm:"column:im_channel_id"`
-	TenantID    uint64
-	DeletedAt   gorm.DeletedAt
+type testChannelSession struct {
+	ID        string `gorm:"primaryKey"`
+	SessionID string
+	Platform  string
+	ChatID    string
+	ThreadID  string
+	UserID    string
+	AgentID   string
+	ChannelID string `gorm:"column:im_channel_id"`
+	TenantID  uint64
+	DeletedAt gorm.DeletedAt
 }
 
-func (testIMChannelSession) TableName() string { return "im_channel_sessions" }
+func (testChannelSession) TableName() string { return "im_channel_sessions" }
 
 func listItemIDsForTest(items []*types.SessionListItem) []string {
 	ids := make([]string, 0, len(items))
@@ -192,17 +192,17 @@ func listItemIDsForTest(items []*types.SessionListItem) []string {
 // (which would happen if the source-filter join excluded soft-deleted mappings).
 func TestSessionRepositoryQueryPagedKeepsClearedIMSessionsOutOfWeb(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
-	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testChannelSession{}))
 	ctx := context.Background()
 
 	web := createSessionForTest(t, db, 1, "alice")     // never bound to IM -> web
 	active := createSessionForTest(t, db, 1, "alice")  // active IM mapping
 	cleared := createSessionForTest(t, db, 1, "alice") // IM mapping soft-deleted by /clear
 
-	require.NoError(t, db.Create(&testIMChannelSession{
+	require.NoError(t, db.Create(&testChannelSession{
 		ID: "m-active", SessionID: active.ID, Platform: "wecom", TenantID: 1,
 	}).Error)
-	clearedMapping := &testIMChannelSession{
+	clearedMapping := &testChannelSession{
 		ID: "m-cleared", SessionID: cleared.ID, Platform: "wecom", TenantID: 1,
 	}
 	require.NoError(t, db.Create(clearedMapping).Error)
@@ -225,7 +225,7 @@ func TestSessionRepositoryQueryPagedKeepsClearedIMSessionsOutOfWeb(t *testing.T)
 
 func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
-	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testChannelSession{}))
 	ctx := context.Background()
 
 	web := createSessionForTest(t, db, 1, "alice")
@@ -251,7 +251,7 @@ func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
 // Legacy tenant-level rows (user_id "") must still show up in web.
 func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
-	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testChannelSession{}))
 	ctx := context.Background()
 
 	legacy := createSessionForTest(t, db, 1, "") // legacy tenant web row
@@ -267,11 +267,11 @@ func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
 
 func TestSessionRepositoryGetIMPlatform(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
-	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testChannelSession{}))
 	ctx := context.Background()
 
 	imSession := createSessionForTest(t, db, 1, "alice")
-	require.NoError(t, db.Create(&testIMChannelSession{
+	require.NoError(t, db.Create(&testChannelSession{
 		ID: "ics-1", SessionID: imSession.ID, Platform: "feishu",
 	}).Error)
 	webSession := createSessionForTest(t, db, 1, "alice")
@@ -292,7 +292,7 @@ func TestSessionRepositoryGetIMPlatform(t *testing.T) {
 
 func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
-	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testChannelSession{}))
 	ctx := context.Background()
 
 	// Two different API keys plus a web user and a cross-tenant API session.

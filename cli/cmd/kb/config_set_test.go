@@ -38,8 +38,11 @@ func (f *fakeInitSvc) GetInitializationConfig(_ context.Context, _ string) (*sdk
 	}
 	return &sdk.KBModelConfigView{
 		RetrievalReady: f.gotCfg.EmbeddingModelID != "",
-		Embedding:      sdk.ModelSlotView{Configured: f.gotCfg.EmbeddingModelID != "", ModelName: f.gotCfg.EmbeddingModelID},
-		LLM:            sdk.ModelSlotView{Configured: f.gotCfg.LLMModelID != "", ModelName: f.gotCfg.LLMModelID},
+		Embedding: sdk.ModelSlotView{
+			Configured: f.gotCfg.EmbeddingModelID != "",
+			ModelName:  f.gotCfg.EmbeddingModelID,
+		},
+		LLM: sdk.ModelSlotView{Configured: f.gotCfg.LLMModelID != "", ModelName: f.gotCfg.LLMModelID},
 	}, nil
 }
 
@@ -47,7 +50,10 @@ func TestKBConfigSet_AppliesAndEmitsResult(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeInitSvc{}
 	opts := &ConfigSetOptions{ChatModel: "model_llm", EmbeddingModel: "model_emb"}
-	require.NoError(t, runConfigSet(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_abc"))
+	require.NoError(
+		t,
+		runConfigSet(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_abc"),
+	)
 
 	assert.Equal(t, "kb_abc", svc.gotKB)
 	require.NotNil(t, svc.gotCfg)
@@ -69,14 +75,26 @@ func TestKBConfigSet_RequiresBothModels(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeInitSvc{}
 	// Missing both.
-	err := runConfigSet(context.Background(), &ConfigSetOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc")
+	err := runConfigSet(
+		context.Background(),
+		&ConfigSetOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"kb_abc",
+	)
 	var ce *cmdutil.Error
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, cmdutil.CodeInputMissingFlag, ce.Code)
 	assert.Equal(t, "", svc.gotKB, "must not call SetKBModelConfig when flags are missing")
 
 	// Missing just embedding.
-	err = runConfigSet(context.Background(), &ConfigSetOptions{ChatModel: "m"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc")
+	err = runConfigSet(
+		context.Background(),
+		&ConfigSetOptions{ChatModel: "m"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"kb_abc",
+	)
 	require.ErrorAs(t, err, &ce)
 	assert.Contains(t, ce.Message, "--embedding-model")
 }
@@ -85,7 +103,10 @@ func TestKBConfigSet_WriteSucceedsReadbackFails(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc2 := &readbackErrSvc{fakeInitSvc: &fakeInitSvc{}}
 	opts := &ConfigSetOptions{ChatModel: "model_llm", EmbeddingModel: "model_emb"}
-	require.NoError(t, runConfigSet(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc2, "kb_abc"))
+	require.NoError(
+		t,
+		runConfigSet(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc2, "kb_abc"),
+	)
 	var env struct {
 		Data sdk.KBModelConfigView `json:"data"`
 	}
@@ -125,7 +146,17 @@ func TestKBConfigSet_RequiresConfirmation(t *testing.T) {
 		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
 	}
 	// Drive `kb config set` (the config parent routes to its `set` subcommand).
-	root := withRootKB(NewCmdConfig(f), "set", "kb_abc", "--chat-model", "model_llm", "--embedding-model", "model_emb", "--format", "json")
+	root := withRootKB(
+		NewCmdConfig(f),
+		"set",
+		"kb_abc",
+		"--chat-model",
+		"model_llm",
+		"--embedding-model",
+		"model_emb",
+		"--format",
+		"json",
+	)
 	err := root.Execute()
 	require.Error(t, err)
 	var ce *cmdutil.Error

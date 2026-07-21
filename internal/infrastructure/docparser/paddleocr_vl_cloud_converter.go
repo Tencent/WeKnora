@@ -39,8 +39,11 @@ type PaddleOCRVLCloudReader struct {
 // NewPaddleOCRVLCloudReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLCloudReader(overrides map[string]string) *PaddleOCRVLCloudReader {
 	return &PaddleOCRVLCloudReader{
-		token:    strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
-		baseURL:  strings.TrimRight(stringOr(overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL), "/"),
+		token: strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
+		baseURL: strings.TrimRight(
+			stringOr(overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL),
+			"/",
+		),
 		model:    stringOr(overrides["paddleocr_vl_cloud_model"], paddleOCRVLCloudDefaultModel),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_cloud_use_seal_recognition"], true),
 		useChart: parseBoolOr(overrides["paddleocr_vl_cloud_use_chart_recognition"], false),
@@ -102,7 +105,11 @@ type paddleOCRVLCloudSubmitResponse struct {
 	ErrorMsg  string `json:"errorMsg"`
 }
 
-func (c *PaddleOCRVLCloudReader) submitJob(ctx context.Context, req *types.ReadRequest, content []byte) (string, error) {
+func (c *PaddleOCRVLCloudReader) submitJob(
+	ctx context.Context,
+	req *types.ReadRequest,
+	content []byte,
+) (string, error) {
 	optional, err := json.Marshal(c.optionalPayload())
 	if err != nil {
 		return "", fmt.Errorf("marshal optionalPayload: %w", err)
@@ -128,7 +135,7 @@ func (c *PaddleOCRVLCloudReader) submitJob(ctx context.Context, req *types.ReadR
 	if _, err := part.Write(content); err != nil {
 		return "", fmt.Errorf("write file content: %w", err)
 	}
-	writer.Close()
+	_ = writer.Close()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, &body)
 	if err != nil {
@@ -142,7 +149,7 @@ func (c *PaddleOCRVLCloudReader) submitJob(ctx context.Context, req *types.ReadR
 	if err != nil {
 		return "", fmt.Errorf("HTTP request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -198,7 +205,9 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 		}
 		httpReq.Header.Set("Authorization", "bearer "+c.token)
 
-		client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 30 * time.Second, MaxRedirects: 5})
+		client := utils.NewSSRFSafeHTTPClient(
+			utils.SSRFSafeHTTPClientConfig{Timeout: 30 * time.Second, MaxRedirects: 5},
+		)
 		resp, err := client.Do(httpReq)
 		if err != nil {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d failed: %v", pollCount, err)
@@ -206,10 +215,16 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 			continue
 		}
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s", pollCount, resp.StatusCode, string(respBody))
+			logger.Errorf(
+				context.Background(),
+				"[PaddleOCR-VL Cloud] poll #%d status %d: %s",
+				pollCount,
+				resp.StatusCode,
+				string(respBody),
+			)
 			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
 			continue
 		}
@@ -223,8 +238,14 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 
 		state := strings.ToLower(pollResp.Data.State)
 		if pollCount == 1 || pollCount%6 == 0 || state == "done" || state == "failed" {
-			logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] poll #%d: state=%s pages=%d/%d",
-				pollCount, state, pollResp.Data.ExtractProgress.ExtractedPages, pollResp.Data.ExtractProgress.TotalPages)
+			logger.Infof(
+				context.Background(),
+				"[PaddleOCR-VL Cloud] poll #%d: state=%s pages=%d/%d",
+				pollCount,
+				state,
+				pollResp.Data.ExtractProgress.ExtractedPages,
+				pollResp.Data.ExtractProgress.TotalPages,
+			)
 		}
 
 		switch state {
@@ -265,7 +286,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	if err != nil {
 		return "", nil, fmt.Errorf("download jsonl: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
 	}
@@ -322,9 +343,15 @@ func (c *PaddleOCRVLCloudReader) downloadImages(mdContent string, imagesURL map[
 			continue
 		}
 		imgBytes, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil || resp.StatusCode != http.StatusOK {
-			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] read image %s status=%d err=%v", ipath, resp.StatusCode, err)
+			logger.Errorf(
+				context.Background(),
+				"[PaddleOCR-VL Cloud] read image %s status=%d err=%v",
+				ipath,
+				resp.StatusCode,
+				err,
+			)
 			continue
 		}
 

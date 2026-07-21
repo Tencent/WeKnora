@@ -44,8 +44,8 @@ func NewIMHandler(imService *im.Service) *IMHandler {
 
 // ── Channel CRUD handlers ──
 
-// CreateIMChannel creates a new IM channel for an agent.
-func (h *IMHandler) CreateIMChannel(c *gin.Context) {
+// CreateChannel creates a new IM channel for an agent.
+func (h *IMHandler) CreateChannel(c *gin.Context) {
 	agentID := c.Param("id")
 	if agentID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id is required"})
@@ -77,7 +77,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		return
 	}
 
-	channel := &im.IMChannel{
+	channel := &im.Channel{
 		TenantID:        tenantID,
 		AgentID:         agentID,
 		Platform:        req.Platform,
@@ -124,8 +124,8 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channel})
 }
 
-// ListIMChannels lists all IM channels for an agent.
-func (h *IMHandler) ListIMChannels(c *gin.Context) {
+// ListChannels lists all IM channels for an agent.
+func (h *IMHandler) ListChannels(c *gin.Context) {
 	agentID := c.Param("id")
 	if agentID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id is required"})
@@ -144,13 +144,13 @@ func (h *IMHandler) ListIMChannels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": im.SummarizeIMChannels(channels)})
+	c.JSON(http.StatusOK, gin.H{"data": im.SummarizeChannels(channels)})
 }
 
-// ListAllIMChannels lists every IM channel in the current tenant, across
+// ListAllChannels lists every IM channel in the current tenant, across
 // agents, for the cross-agent overview page. Credentials are intentionally
 // NOT included in the response.
-func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
+func (h *IMHandler) ListAllChannels(c *gin.Context) {
 	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
@@ -166,23 +166,24 @@ func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channels})
 }
 
-// UpdateIMChannel updates an IM channel.
+// UpdateChannel updates an IM channel.
 //
-// UpdateIMChannel godoc
+// UpdateChannel godoc
 // @Summary      更新 IM 渠道
 // @Description  更新指定 IM 渠道的名称、模式、知识库、凭证或启用状态
 // @Tags         IM 渠道
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                  true  "渠道 ID"
-// @Param        request  body      map[string]interface{}  true  "更新字段（name/mode/output_mode/knowledge_base_id/credentials/enabled）"
+// @Param        request  body      map[string]interface{}  true
+// "更新字段（name/mode/output_mode/knowledge_base_id/credentials/enabled）"
 // @Success      200      {object}  map[string]interface{}  "更新后的渠道"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404      {object}  map[string]interface{}  "渠道不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /im-channels/{id} [put]
-func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
+func (h *IMHandler) UpdateChannel(c *gin.Context) {
 	channelID := c.Param("id")
 	if channelID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "channel id is required"})
@@ -257,9 +258,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channel})
 }
 
-// DeleteIMChannel deletes an IM channel.
+// DeleteChannel deletes an IM channel.
 //
-// DeleteIMChannel godoc
+// DeleteChannel godoc
 // @Summary      删除 IM 渠道
 // @Description  删除指定 IM 渠道
 // @Tags         IM 渠道
@@ -271,7 +272,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /im-channels/{id} [delete]
-func (h *IMHandler) DeleteIMChannel(c *gin.Context) {
+func (h *IMHandler) DeleteChannel(c *gin.Context) {
 	channelID := c.Param("id")
 	if channelID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "channel id is required"})
@@ -292,9 +293,9 @@ func (h *IMHandler) DeleteIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// ToggleIMChannel toggles the enabled state of an IM channel.
+// ToggleChannel toggles the enabled state of an IM channel.
 //
-// ToggleIMChannel godoc
+// ToggleChannel godoc
 // @Summary      启用/停用 IM 渠道
 // @Description  切换指定 IM 渠道的启用状态
 // @Tags         IM 渠道
@@ -306,7 +307,7 @@ func (h *IMHandler) DeleteIMChannel(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /im-channels/{id}/toggle [post]
-func (h *IMHandler) ToggleIMChannel(c *gin.Context) {
+func (h *IMHandler) ToggleChannel(c *gin.Context) {
 	channelID := c.Param("id")
 	if channelID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "channel id is required"})
@@ -400,8 +401,15 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	// If nil, it's a non-message event - just acknowledge
 	if msg == nil {
 		if channel.Platform == "mattermost" {
-			logger.Infof(ctx, "[IM] Mattermost callback ignored (no message): path_channel_id=%s — check: (1) trigger word must be the *first word* of the post; (2) if channel+trigger are both set, post must be in that channel; (3) bot_user_id must not match the sender", channelID)
+			logger.Infof(
+				ctx,
+				"[IM] Mattermost callback ignored (no message): path_channel_id=%s — check: (1) trigger word must be the "+
+					"*first word* of the post; (2) if channel+trigger are both set, post must be in that channel; "+
+					"(3) bot_user_id must not match the sender",
+				channelID,
+			)
 		} else {
+			//nolint:lll
 			logger.Infof(ctx, "[IM] Callback parsed no message to process platform=%s path_channel_id=%s", channel.Platform, channelID)
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true})

@@ -58,6 +58,7 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		//nolint:lll
 		logger.Infof(context.Background(), "[%s] %s = {object with %d keys: %s}", label, prefix, len(v), strings.Join(keys, ", "))
 		for _, key := range keys {
 			val := v[key]

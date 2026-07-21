@@ -30,7 +30,10 @@ type s3FileService struct {
 }
 
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
-func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (*s3FileService, error) {
+func newS3Client(
+	endpoint, accessKey, secretKey, bucketName, region, pathPrefix string,
+	forcePathStyle bool,
+) (*s3FileService, error) {
 	var cfg aws.Config
 	var err error
 
@@ -39,7 +42,6 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
@@ -98,7 +100,10 @@ func NewS3FileService(endpoint,
 
 // NewS3FileServiceWithOptions is the instance-aware S3 constructor. Existing
 // callers keep the historical endpoint-based path-style inference.
-func NewS3FileServiceWithOptions(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (interfaces.FileService, error) {
+func NewS3FileServiceWithOptions(
+	endpoint, accessKey, secretKey, bucketName, region, pathPrefix string,
+	forcePathStyle bool,
+) (interfaces.FileService, error) {
 	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix, forcePathStyle)
 	if err != nil {
 		return nil, err
@@ -167,7 +172,12 @@ func CheckS3Connectivity(ctx context.Context, endpoint, accessKey, secretKey, bu
 	return CheckS3ConnectivityWithOptions(ctx, endpoint, accessKey, secretKey, bucketName, region, false)
 }
 
-func CheckS3ConnectivityWithOptions(ctx context.Context, endpoint, accessKey, secretKey, bucketName, region string, forcePathStyle bool) error {
+// CheckS3ConnectivityWithOptions is an exported function.
+func CheckS3ConnectivityWithOptions(
+	ctx context.Context,
+	endpoint, accessKey, secretKey, bucketName, region string,
+	forcePathStyle bool,
+) error {
 	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, "", forcePathStyle)
 	if err != nil {
 		return err
@@ -209,7 +219,7 @@ func (s *s3FileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Determine content type
 	contentType := file.Header.Get("Content-Type")
@@ -301,7 +311,13 @@ func (s *s3FileService) CopyFile(ctx context.Context,
 
 // SaveBytes saves bytes data to S3 and returns the file path
 // temp parameter is ignored for S3 (no auto-expiration support in this implementation)
-func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *s3FileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	_ bool,
+) (string, error) {
 	safeName, err := utils.SafeFileName(fileName)
 	if err != nil {
 		return "", fmt.Errorf("invalid file name: %w", err)

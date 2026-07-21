@@ -109,7 +109,8 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return cmdutil.NewFlagError(fmt.Errorf(`required flag(s) "model" not set`))
 			}
 			opts.flags.agentModeSet = cmd.Flags().Changed("agent-mode")
-			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") || cmd.Flags().Changed("system-prompt-file")
+			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") ||
+				cmd.Flags().Changed("system-prompt-file")
 			opts.flags.rerankModelSet = cmd.Flags().Changed("rerank-model")
 			opts.flags.temperatureSet = cmd.Flags().Changed("temperature")
 			opts.flags.kbSelectionModeSet = cmd.Flags().Changed("kb-selection-mode")
@@ -132,7 +133,10 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			if systemPromptFile != "" {
 				r, err := cmdutil.OpenInput(systemPromptFile)
 				if err != nil {
-					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
+					return cmdutil.NewError(
+						cmdutil.CodeInputInvalidArgument,
+						fmt.Sprintf("--system-prompt-file: %v", err),
+					)
 				}
 				opts.SystemPromptReader = r
 			}
@@ -202,19 +206,24 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 
 	// Hot-path (8 flag names, 7 distinct config fields)
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Agent description")
-	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
+	cmd.Flags().
+		StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
 	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
 	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
-	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
-	cmd.Flags().StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent update --add-kb'")
-	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
+	cmd.Flags().
+		StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
+	cmd.Flags().
+		StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent update --add-kb'")
+	cmd.Flags().
+		StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
 	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id or name")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
 
 	// Power-user / utility
 	cmd.Flags().StringVar(&opts.From, "from", "", "Copy from existing agent id (then apply other flags)")
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (use '-' for stdin)")
-	cmd.Flags().BoolVar(&opts.GenerateSkeleton, "generate-skeleton", false, "Emit blank AgentConfig YAML to stdout and exit")
+	cmd.Flags().
+		BoolVar(&opts.GenerateSkeleton, "generate-skeleton", false, "Emit blank AgentConfig YAML to stdout and exit")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)

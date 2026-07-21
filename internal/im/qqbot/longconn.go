@@ -12,8 +12,10 @@ import (
 	ws "github.com/gorilla/websocket"
 )
 
+// MessageHandler is an exported type.
 type MessageHandler func(ctx context.Context, msg *im.IncomingMessage) error
 
+// LongConnClient is an exported type.
 type LongConnClient struct {
 	client  *Client
 	handler MessageHandler
@@ -24,10 +26,12 @@ type LongConnClient struct {
 	closed bool
 }
 
+// NewLongConnClient is an exported function.
 func NewLongConnClient(client *Client, handler MessageHandler) *LongConnClient {
 	return &LongConnClient{client: client, handler: handler}
 }
 
+// Start implements the required interface method.
 func (c *LongConnClient) Start(ctx context.Context) error {
 	logger.Infof(ctx, "[IM] QQBot WebSocket connecting...")
 	attempt := 0
@@ -53,6 +57,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 	}
 }
 
+// Stop implements the required interface method.
 func (c *LongConnClient) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

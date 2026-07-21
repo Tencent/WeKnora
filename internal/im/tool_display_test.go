@@ -6,7 +6,7 @@ import (
 )
 
 func TestFormatIMToolLine_pendingWithQuery(t *testing.T) {
-	line := FormatIMToolLine(IMToolStep{
+	line := FormatIMToolLine(ToolStep{
 		ToolName:  "knowledge_search",
 		Pending:   true,
 		Arguments: map[string]any{"query": "文明6"},
@@ -17,7 +17,7 @@ func TestFormatIMToolLine_pendingWithQuery(t *testing.T) {
 }
 
 func TestFormatIMToolLine_searchDoneWithQueryAndSummary(t *testing.T) {
-	line := FormatIMToolLine(IMToolStep{
+	line := FormatIMToolLine(ToolStep{
 		ToolName: "knowledge_search",
 		Success:  true,
 		Arguments: map[string]any{
@@ -37,14 +37,14 @@ func TestFormatIMToolLine_searchDoneWithQueryAndSummary(t *testing.T) {
 }
 
 func TestFormatIMToolLine_grepPatterns(t *testing.T) {
-	line := FormatIMToolLine(IMToolStep{
+	line := FormatIMToolLine(ToolStep{
 		ToolName: "grep_chunks",
 		Success:  true,
 		Arguments: map[string]any{
 			"patterns": []any{"文明", "策略"},
 		},
 		Data: map[string]interface{}{
-			"total_matches": float64(5),
+			"total_matches":  float64(5),
 			"document_count": float64(2),
 		},
 	})
@@ -54,14 +54,14 @@ func TestFormatIMToolLine_grepPatterns(t *testing.T) {
 }
 
 func TestFormatIMRagPipelineLine_queryUnderstand(t *testing.T) {
-	pending := FormatIMRagPipelineLine(IMToolStep{
+	pending := FormatIMRagPipelineLine(ToolStep{
 		ToolName: "query_understand",
 		Pending:  true,
 	})
 	if pending != "正在理解问题..." {
 		t.Fatalf("pending = %q", pending)
 	}
-	done := FormatIMRagPipelineLine(IMToolStep{
+	done := FormatIMRagPipelineLine(ToolStep{
 		ToolName: "query_understand",
 		Success:  true,
 	})
@@ -71,7 +71,7 @@ func TestFormatIMRagPipelineLine_queryUnderstand(t *testing.T) {
 }
 
 func TestFormatIMRagPipelineLine_searchWithQuery(t *testing.T) {
-	line := FormatIMRagPipelineLine(IMToolStep{
+	line := FormatIMRagPipelineLine(ToolStep{
 		ToolName:  "knowledge_search",
 		Pending:   true,
 		Arguments: map[string]any{"query": "讯飞开放平台"},
@@ -82,7 +82,7 @@ func TestFormatIMRagPipelineLine_searchWithQuery(t *testing.T) {
 }
 
 func TestFormatIMRagPipelineLine_webSearchWithQuery(t *testing.T) {
-	line := FormatIMRagPipelineLine(IMToolStep{
+	line := FormatIMRagPipelineLine(ToolStep{
 		ToolName:  "knowledge_search",
 		Pending:   true,
 		Arguments: map[string]any{"query": "任素汐演唱会", "search_source": "web"},

@@ -21,9 +21,11 @@ type fakeStorageBackendRepo struct{ backends []*types.StorageBackend }
 func (f *fakeStorageBackendRepo) Create(context.Context, *types.StorageBackend) error {
 	return nil
 }
+
 func (f *fakeStorageBackendRepo) GetByID(context.Context, uint64, string) (*types.StorageBackend, error) {
 	return nil, nil
 }
+
 func (f *fakeStorageBackendRepo) List(context.Context, uint64) ([]*types.StorageBackend, error) {
 	return f.backends, nil
 }

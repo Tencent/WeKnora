@@ -15,7 +15,9 @@ import (
 // - resource:// and provider-backed local paths are read through the
 // application resolver and converted to base64 data URIs.
 func resolveImageURLForLLM(imageURL string) string {
-	if strings.HasPrefix(imageURL, "data:") || strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
+	if strings.HasPrefix(imageURL, "data:") ||
+		strings.HasPrefix(imageURL, "http://") ||
+		strings.HasPrefix(imageURL, "https://") {
 		return imageURL
 	}
 	if isApplicationStoredImage(imageURL) {
@@ -53,9 +55,9 @@ func isApplicationStoredImage(imageURL string) bool {
 		strings.HasPrefix(imageURL, "storage://")
 }
 
-// LocalImageResolver, when set by the application layer at startup, resolves a
-// resource:// or provider storage URL to bytes using the owning tenant's
-// storage config.
+// LocalImageResolver resolves resource:// or provider storage URLs to bytes
+// using the owning tenant's storage config when set by the application layer
+// at startup.
 // Stored local:// URLs are relative to the storage base dir and do NOT encode
 // the tenant's configured PathPrefix, so a plain env-based join would miss the
 // prefix. When nil (e.g. in tests), callers fall back to the env-based

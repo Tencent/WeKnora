@@ -162,7 +162,11 @@ func TestGetSessionAllowsAdminToOpenAPIKeySessions(t *testing.T) {
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
 
 	// An admin can open the API-key session.
-	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
 	got, err := svc.GetSession(adminCtx, apiSession.ID)
 	require.NoError(t, err)
 	require.Equal(t, apiSession.ID, got.ID)
@@ -199,7 +203,7 @@ func TestGetOwnedSessionDeniesAdminOnAPIKeySessions(t *testing.T) {
 
 func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	svc, db := newTestSessionService(t)
-	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testListSessionsChannelSession{}))
 
 	key1 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:10", Title: "key1"}
 	key2 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:20", Title: "key2"}
@@ -217,7 +221,11 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
 
 	// An admin sees every API-key session in the tenant, not just their own.
-	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
 	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: types.SessionSourceAPI})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, result.Total)
@@ -225,11 +233,11 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 
 func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
 	svc, db := newTestSessionService(t)
-	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testListSessionsChannelSession{}))
 
 	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
 	require.NoError(t, db.Create(imSession).Error)
-	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+	require.NoError(t, db.Create(&testListSessionsChannelSession{
 		SessionID: imSession.ID, Platform: "feishu",
 	}).Error)
 
@@ -240,7 +248,11 @@ func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
 	require.ErrorAs(t, err, &appErr)
 	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
 
-	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
 	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: "feishu"})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, result.Total)
@@ -248,7 +260,7 @@ func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
 
 func TestListSessionsEmbedSourceRequiresAdmin(t *testing.T) {
 	svc, db := newTestSessionService(t)
-	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testListSessionsChannelSession{}))
 
 	embed := &types.Session{
 		TenantID:    1,
@@ -265,7 +277,11 @@ func TestListSessionsEmbedSourceRequiresAdmin(t *testing.T) {
 	require.ErrorAs(t, err, &appErr)
 	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
 
-	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
 	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: "embed:ch-1"})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, result.Total)
@@ -273,11 +289,11 @@ func TestListSessionsEmbedSourceRequiresAdmin(t *testing.T) {
 
 func TestGetSessionDeniesViewerOnIMSession(t *testing.T) {
 	svc, db := newTestSessionService(t)
-	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+	require.NoError(t, db.AutoMigrate(&testListSessionsChannelSession{}))
 
 	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
 	require.NoError(t, db.Create(imSession).Error)
-	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+	require.NoError(t, db.Create(&testListSessionsChannelSession{
 		SessionID: imSession.ID, Platform: "feishu",
 	}).Error)
 
@@ -285,24 +301,28 @@ func TestGetSessionDeniesViewerOnIMSession(t *testing.T) {
 	_, err := svc.GetSession(viewerCtx, imSession.ID)
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
 
-	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
 	got, err := svc.GetSession(adminCtx, imSession.ID)
 	require.NoError(t, err)
 	require.Equal(t, imSession.ID, got.ID)
 	require.Equal(t, "feishu", got.IMPlatform)
 }
 
-// testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a
+// testListSessionsChannelSession lets QueryPaged's LEFT JOIN resolve against a
 // real table in the in-memory SQLite database.
-type testListSessionsIMChannelSession struct {
-	ID          uint64 `gorm:"primaryKey;autoIncrement"`
-	SessionID   string `gorm:"column:session_id"`
-	Platform    string `gorm:"column:platform"`
-	ChatID      string `gorm:"column:chat_id"`
-	ThreadID    string `gorm:"column:thread_id"`
-	UserID      string `gorm:"column:user_id"`
-	AgentID     string `gorm:"column:agent_id"`
-	IMChannelID string `gorm:"column:im_channel_id"`
+type testListSessionsChannelSession struct {
+	ID        uint64 `gorm:"primaryKey;autoIncrement"`
+	SessionID string `gorm:"column:session_id"`
+	Platform  string `gorm:"column:platform"`
+	ChatID    string `gorm:"column:chat_id"`
+	ThreadID  string `gorm:"column:thread_id"`
+	UserID    string `gorm:"column:user_id"`
+	AgentID   string `gorm:"column:agent_id"`
+	ChannelID string `gorm:"column:im_channel_id"`
 }
 
-func (testListSessionsIMChannelSession) TableName() string { return "im_channel_sessions" }
+func (testListSessionsChannelSession) TableName() string { return "im_channel_sessions" }

@@ -21,8 +21,8 @@ func init() {
 }
 
 // Info 返回 Gemini provider 的元数据
-func (p *GeminiProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *GeminiProvider) Info() Info {
+	return Info{
 		Name:        ProviderGemini,
 		DisplayName: "Google Gemini",
 		Description: "gemini-3-flash-preview, gemini-2.5-pro, gemini-embedding-2, etc.",

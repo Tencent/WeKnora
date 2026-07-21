@@ -42,7 +42,12 @@ func (f *fakeChatService) CreateSession(_ context.Context, req *sdk.CreateSessio
 	return &sdk.Session{ID: "sess_auto", Title: req.Title}, nil
 }
 
-func (f *fakeChatService) KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error {
+func (f *fakeChatService) KnowledgeQAStream(
+	ctx context.Context,
+	sessionID string,
+	req *sdk.KnowledgeQARequest,
+	cb func(*sdk.StreamResponse) error,
+) error {
 	f.streamCalled = true
 	f.gotSessionID = sessionID
 	f.gotRequest = req
@@ -523,7 +528,13 @@ func TestChat_FormatJSON_ReferenceAddsIndexes(t *testing.T) {
 		streamEvents: []*sdk.StreamResponse{
 			{ResponseType: sdk.ResponseTypeAnswer, Content: "the answer"},
 			{ResponseType: sdk.ResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{
-				{ID: "c1", Content: "BULKY FULL CHUNK CONTENT", ParentChunkID: "p1", KnowledgeTitle: "Doc One", Score: 0.5},
+				{
+					ID:             "c1",
+					Content:        "BULKY FULL CHUNK CONTENT",
+					ParentChunkID:  "p1",
+					KnowledgeTitle: "Doc One",
+					Score:          0.5,
+				},
 			}},
 			{ResponseType: sdk.ResponseTypeComplete, Done: true, SessionID: "sess_auto"},
 		},

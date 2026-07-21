@@ -17,20 +17,23 @@ type PluginIntoChatMessage struct {
 }
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
-func NewPluginIntoChatMessage(eventManager *EventManager, messageService interfaces.MessageService) *PluginIntoChatMessage {
+func NewPluginIntoChatMessage(
+	eventManager *EventManager,
+	messageService interfaces.MessageService,
+) *PluginIntoChatMessage {
 	res := &PluginIntoChatMessage{messageService: messageService}
 	eventManager.Register(res)
 	return res
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginIntoChatMessage) ActivationEvents() []types.EventType {
-	return []types.EventType{types.INTO_CHAT_MESSAGE}
+func (p *PluginIntoChatMessage) ActivationEvents() []types.Type {
+	return []types.Type{types.IntoChatMessage}
 }
 
 // OnEvent processes the INTO_CHAT_MESSAGE event to format chat message content
 func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	pipelineInfo(ctx, "IntoChatMessage", "input", map[string]interface{}{
 		"session_id":       chatManage.SessionID,
@@ -136,9 +139,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\" match=\"exact\">%s</context>\n", i+1, passage))
+				fmt.Fprintf(&contextsBuilder, "<context id=\"FAQ-%d\" match=\"exact\">%s</context>\n", i+1, passage)
 			} else {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\">%s</context>\n", i+1, passage))
+				fmt.Fprintf(&contextsBuilder, "<context id=\"FAQ-%d\">%s</context>\n", i+1, passage)
 			}
 		}
 		contextsBuilder.WriteString("</source>\n")
@@ -147,7 +150,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			contextsBuilder.WriteString("<source type=\"document\" priority=\"supplementary\">\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"DOC-%d\">%s</context>\n", i+1, passage))
+				fmt.Fprintf(&contextsBuilder, "<context id=\"DOC-%d\">%s</context>\n", i+1, passage)
 			}
 			contextsBuilder.WriteString("</source>")
 		}
@@ -157,7 +160,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			if i > 0 {
 				contextsBuilder.WriteString("\n")
 			}
-			contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>", i+1, passage))
+			fmt.Fprintf(&contextsBuilder, "<context id=\"%d\">%s</context>", i+1, passage)
 		}
 	}
 
@@ -276,9 +279,9 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 	b.WriteString("<documents>\n")
 	for _, d := range docs {
 		b.WriteString("<document>\n")
-		b.WriteString(fmt.Sprintf("<title>%s</title>\n", d.title))
+		fmt.Fprintf(&b, "<title>%s</title>\n", d.title)
 		if d.description != "" {
-			b.WriteString(fmt.Sprintf("<description>%s</description>\n", d.description))
+			fmt.Fprintf(&b, "<description>%s</description>\n", d.description)
 		}
 		b.WriteString("</document>\n")
 	}

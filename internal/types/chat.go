@@ -59,7 +59,6 @@ type ChatResponse struct {
 	ToolCalls        []LLMToolCall `json:"tool_calls,omitempty"`
 	FinishReason     string        `json:"finish_reason,omitempty"`
 	Usage            TokenUsage    `json:"usage"`
-
 	// AnswerStreamed reports whether the user-facing answer text was already
 	// streamed live to the final-answer UI area during this round (i.e. the
 	// model answered with plain content). When true, the natural-stop branch
@@ -68,46 +67,43 @@ type ChatResponse struct {
 	// otherwise the answer would render twice and "jump" at end of stream.
 	// Transient, never persisted.
 	AnswerStreamed bool `json:"-"`
-	// AnswerEventID is the EventBus event ID under which the live answer
+	// AnswerEventID is the Bus event ID under which the live answer
 	// chunks were streamed, so the natural-stop branch can close the same
 	// stream with a Done marker. Empty when AnswerStreamed is false.
 	AnswerEventID string `json:"-"`
 }
 
-// Response type
+// ResponseType identifies a streaming chat/agent event kind.
 type ResponseType string
 
 const (
-	// Answer response type
+	// ResponseTypeAnswer is the main assistant answer payload.
 	ResponseTypeAnswer ResponseType = "answer"
-	// References response type
+	// ResponseTypeReferences carries retrieved source citations.
 	ResponseTypeReferences ResponseType = "references"
-	// Thinking response type (for agent thought process)
+	// ResponseTypeThinking exposes agent thought process text.
 	ResponseTypeThinking ResponseType = "thinking"
-	// Tool call response type (for agent tool invocations)
+	// ResponseTypeToolCall announces a tool invocation.
 	ResponseTypeToolCall ResponseType = "tool_call"
-	// Tool result response type (for agent tool results)
+	// ResponseTypeToolResult carries a tool execution result.
 	ResponseTypeToolResult ResponseType = "tool_result"
-	// Error response type
+	// ResponseTypeError reports a terminal agent error.
 	ResponseTypeError ResponseType = "error"
-	// Reflection response type (for agent reflection)
+	// ResponseTypeReflection carries agent self-reflection text.
 	ResponseTypeReflection ResponseType = "reflection"
-	// Session title response type
+	// ResponseTypeSessionTitle carries an auto-generated session title.
 	ResponseTypeSessionTitle ResponseType = "session_title"
-	// Agent query response type (query received and processing started)
+	// ResponseTypeAgentQuery marks query receipt and processing start.
 	ResponseTypeAgentQuery ResponseType = "agent_query"
-	// Complete response type (agent complete)
+	// ResponseTypeComplete marks successful agent completion.
 	ResponseTypeComplete ResponseType = "complete"
-	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
+	// ResponseTypeToolApprovalRequired pauses for dangerous MCP tool approval.
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
-	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
+	// ResponseTypeToolApprovalResolved reports tool approval outcome for replay.
 	ResponseTypeToolApprovalResolved ResponseType = "tool_approval_resolved"
-	// MCPOAuthRequired: an OAuth-enabled MCP service was invoked but the user
-	// has not authorized it — UI must surface an "Authorize" prompt and the
-	// agent pauses until authorization completes (or the wait times out).
+	// ResponseTypeMCPOAuthRequired pauses until the user authorizes MCP OAuth.
 	ResponseTypeMCPOAuthRequired ResponseType = "mcp_oauth_required"
-	// MCPOAuthResolved: authorization completed / timed out / canceled;
-	// informational for UI replay.
+	// ResponseTypeMCPOAuthResolved reports MCP OAuth completion for replay.
 	ResponseTypeMCPOAuthResolved ResponseType = "mcp_oauth_resolved"
 )
 

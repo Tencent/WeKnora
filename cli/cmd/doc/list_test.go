@@ -32,7 +32,12 @@ type fakeListSvc struct {
 	}
 }
 
-func (f *fakeListSvc) ListKnowledgeWithFilter(_ context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error) {
+func (f *fakeListSvc) ListKnowledgeWithFilter(
+	_ context.Context,
+	kbID string,
+	page, pageSize int,
+	filter sdk.KnowledgeListFilter,
+) ([]sdk.Knowledge, int64, error) {
 	f.got.kbID, f.got.page, f.got.pageSize, f.got.filter = kbID, page, pageSize, filter
 	return f.items, f.total, f.err
 }
@@ -53,12 +58,21 @@ func TestList_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	now := time.Now()
 	items := []sdk.Knowledge{
-		{ID: "doc1", FileName: "alpha.pdf", FileSize: 2048, ParseStatus: "completed", UpdatedAt: now.Add(-1 * time.Hour)},
+		{
+			ID:          "doc1",
+			FileName:    "alpha.pdf",
+			FileSize:    2048,
+			ParseStatus: "completed",
+			UpdatedAt:   now.Add(-1 * time.Hour),
+		},
 		{ID: "doc2", FileName: "beta.md", FileSize: 0, ParseStatus: "pending", UpdatedAt: now.Add(-2 * 24 * time.Hour)},
 	}
 	svc := &fakeListSvc{items: items, total: 2}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, 1, svc.got.page)
@@ -77,7 +91,10 @@ func TestList_Success_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: []sdk.Knowledge{{ID: "doc1", FileName: "a.pdf"}}, total: 1}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 
 	got := out.String()
 	var env struct {
@@ -94,7 +111,10 @@ func TestList_Empty_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: nil, total: 0}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Contains(t, out.String(), "(no documents)")
 }
 
@@ -102,7 +122,10 @@ func TestList_Empty_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: nil, total: 0}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 
 	var env struct {
 		OK   bool            `json:"ok"`
@@ -197,7 +220,16 @@ func TestList_SortByUpdatedDesc(t *testing.T) {
 		{ID: "new", FileName: "new.pdf", UpdatedAt: now.Add(-1 * time.Hour)},
 	}
 	svc := &fakeListSvc{items: items, total: 2}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 20, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(
+			context.Background(),
+			&ListOptions{PageSize: 20, Limit: 30},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			svc,
+			"kb_xxx",
+		),
+	)
 
 	got := out.String()
 	newIdx := strings.Index(got, "new.pdf")
@@ -231,7 +263,10 @@ func TestList_StatusFilter_ForwardedToSDK(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
 	opts := &ListOptions{PageSize: 20, Limit: 30, Status: "failed"}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Equal(t, "failed", svc.got.filter.ParseStatus,
 		"--status must be forwarded as filter.ParseStatus for server-side filtering")
 }
@@ -256,8 +291,12 @@ func TestList_StatusFilter_AcceptsAllEnumValues(t *testing.T) {
 		_, _ = iostreams.SetForTest(t)
 		svc := &fakeListSvc{}
 		opts := &ListOptions{PageSize: 20, Limit: 30, Status: v}
-		require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
-			"status=%q should be accepted", v)
+		require.NoError(
+			t,
+			runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+			"status=%q should be accepted",
+			v,
+		)
 	}
 }
 
@@ -284,7 +323,12 @@ type pagedDocSvc struct {
 	pageSize int
 }
 
-func (p *pagedDocSvc) ListKnowledgeWithFilter(_ context.Context, _ string, page, pageSize int, _ sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error) {
+func (p *pagedDocSvc) ListKnowledgeWithFilter(
+	_ context.Context,
+	_ string,
+	page, pageSize int,
+	_ sdk.KnowledgeListFilter,
+) ([]sdk.Knowledge, int64, error) {
 	p.calls = append(p.calls, page)
 	p.pageSize = pageSize
 	start := (page - 1) * pageSize
@@ -302,7 +346,10 @@ func TestList_Limit_LessThanPageSize_SlicesToLimit(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: makeDocs(20), total: 20}
 	opts := &ListOptions{PageSize: 20, Limit: 5}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	body := out.String()
 	// Count occurrences of "id":"doc_" - should be exactly 5.
 	got := strings.Count(body, `"id":"doc_`)
@@ -313,7 +360,10 @@ func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: makeDocs(10), total: 10}
 	opts := &ListOptions{PageSize: 10, Limit: 50}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	got := strings.Count(out.String(), `"id":"doc_`)
 	assert.Equal(t, 10, got, "--limit 50 with page-size 10 + 10 items returns all 10")
 }
@@ -321,7 +371,13 @@ func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	opts := &ListOptions{PageSize: 20, Limit: -1}
-	err := runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{}, "kb_xxx")
+	err := runList(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		&fakeListSvc{},
+		"kb_xxx",
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -332,7 +388,10 @@ func TestList_AllPages_WalksAllServerPages(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &pagedDocSvc{all: makeDocs(45)}
 	opts := &ListOptions{PageSize: 20, Limit: 10000, AllPages: true}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	// 45 items / page_size 20 = 3 pages: 20 + 20 + 5.
 	assert.Equal(t, []int{1, 2, 3}, svc.calls)
 	got := strings.Count(out.String(), `"id":"doc_`)
@@ -343,7 +402,10 @@ func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &pagedDocSvc{all: makeDocs(200)}
 	opts := &ListOptions{PageSize: 20, AllPages: true, Limit: 50}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	got := strings.Count(out.String(), `"id":"doc_`)
 	assert.Equal(t, 50, got, "--limit 50 with --all-pages should stop after 50 items")
 	// Should have called pages 1..3 (60 items) then capped at 50.
@@ -356,7 +418,10 @@ func TestList_Keyword_PassedToFilter(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
 	opts := &ListOptions{PageSize: 20, Limit: 30, Keyword: "spec"}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Equal(t, "spec", svc.got.filter.Keyword)
 }
 
@@ -364,7 +429,10 @@ func TestList_FileType_PassedToFilter(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
 	opts := &ListOptions{PageSize: 20, Limit: 30, FileType: "pdf"}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Equal(t, "pdf", svc.got.filter.FileType)
 }
 
@@ -372,7 +440,10 @@ func TestList_Source_PassedToFilter(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
 	opts := &ListOptions{PageSize: 20, Limit: 30, Source: "api"}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Equal(t, "api", svc.got.filter.Source)
 }
 
@@ -380,7 +451,10 @@ func TestList_TagID_PassedToFilter(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
 	opts := &ListOptions{PageSize: 20, Limit: 30, TagID: "tag_42"}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	assert.Equal(t, "tag_42", svc.got.filter.TagID)
 }
 
@@ -389,7 +463,10 @@ func TestList_StartTime_RFC3339Parses(t *testing.T) {
 	svc := &fakeListSvc{}
 	want := "2026-05-01T00:00:00Z"
 	opts := &ListOptions{PageSize: 20, Limit: 30, StartTime: want}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	parsed, err := time.Parse(time.RFC3339, want)
 	require.NoError(t, err)
 	assert.True(t, svc.got.filter.StartTime.Equal(parsed),
@@ -402,7 +479,10 @@ func TestList_EndTime_RFC3339Parses(t *testing.T) {
 	svc := &fakeListSvc{}
 	want := "2026-06-30T23:59:59Z"
 	opts := &ListOptions{PageSize: 20, Limit: 30, EndTime: want}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	parsed, err := time.Parse(time.RFC3339, want)
 	require.NoError(t, err)
 	assert.True(t, svc.got.filter.EndTime.Equal(parsed))
@@ -411,7 +491,13 @@ func TestList_EndTime_RFC3339Parses(t *testing.T) {
 func TestList_StartTime_InvalidFormat_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	opts := &ListOptions{PageSize: 20, Limit: 30, StartTime: "tomorrow"}
-	err := runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{}, "kb_xxx")
+	err := runList(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		&fakeListSvc{},
+		"kb_xxx",
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -423,7 +509,13 @@ func TestList_StartTime_InvalidFormat_Rejected(t *testing.T) {
 func TestList_EndTime_InvalidFormat_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	opts := &ListOptions{PageSize: 20, Limit: 30, EndTime: "2026-05-01"} // date-only, not RFC3339
-	err := runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{}, "kb_xxx")
+	err := runList(
+		context.Background(),
+		opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		&fakeListSvc{},
+		"kb_xxx",
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -440,7 +532,10 @@ func TestList_JSON_TotalCount_SinglePage(t *testing.T) {
 		total: 99,
 	}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	body := out.String()
 	assert.Contains(t, body, `"total_count":99`, "single-page fetch must surface server total in meta.total_count")
 }
@@ -451,7 +546,10 @@ func TestList_JSON_TotalCount_AllPages(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &pagedDocSvc{all: makeDocs(45)}
 	opts := &ListOptions{PageSize: 20, Limit: 10000, AllPages: true}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	body := out.String()
 	assert.Contains(t, body, `"total_count":45`, "--all-pages fetch must surface server total in meta.total_count")
 }
@@ -464,7 +562,10 @@ func TestList_JSON_TotalCount_Zero_Present(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: nil, total: 0}
 	opts := &ListOptions{PageSize: 20, Limit: 30}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"),
+	)
 	body := out.String()
 	assert.Contains(t, body, `"total_count":0`, "zero server total must serialize as 0 on empty list")
 	assert.Contains(t, body, `"count":0`, "empty list must report count:0, not omit it")
@@ -486,7 +587,10 @@ func TestList_AllFiltersCombined(t *testing.T) {
 		StartTime: "2026-01-01T00:00:00Z",
 		EndTime:   "2026-12-31T23:59:59Z",
 	}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	require.NoError(
+		t,
+		runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
+	)
 	f := svc.got.filter
 	assert.Equal(t, "completed", f.ParseStatus)
 	assert.Equal(t, "spec", f.Keyword)

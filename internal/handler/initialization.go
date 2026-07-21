@@ -1,3 +1,4 @@
+//nolint:lll // long initialization handler lines
 package handler
 
 import (
@@ -60,7 +61,7 @@ type InitializationHandler struct {
 	kbService        interfaces.KnowledgeBaseService
 	kbRepository     interfaces.KnowledgeBaseRepository
 	knowledgeService interfaces.KnowledgeService
-	ollamaService    *ollama.OllamaService
+	ollamaService    *ollama.Service
 	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
 	storageResolver  interfaces.StorageBackendResolver
@@ -74,7 +75,7 @@ func NewInitializationHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbRepository interfaces.KnowledgeBaseRepository,
 	knowledgeService interfaces.KnowledgeService,
-	ollamaService *ollama.OllamaService,
+	ollamaService *ollama.Service,
 	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
 	storageResolver interfaces.StorageBackendResolver,
@@ -237,20 +238,20 @@ type InitializationRequest struct {
 // @Router       /initialization/config/{kbId} [put]
 func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
+	kbIDStr := utils.SanitizeForLog(c.Param("kbId"))
 
 	var req KBModelConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse KB config request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
 	// 获取知识库信息
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
+	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIDStr)
 	if err != nil || kb == nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
-		c.Error(errors.NewNotFoundError("知识库不存在"))
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIDStr)})
+		_ = c.Error(errors.NewNotFoundError("知识库不存在"))
 		return
 	}
 
@@ -258,13 +259,13 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if kb.EmbeddingModelID != "" && req.EmbeddingModelID != "" && kb.EmbeddingModelID != req.EmbeddingModelID {
 		// 检查是否已有文件
 		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{
+			kbIDStr, &types.Pagination{
 				Page:     1,
 				PageSize: 1,
 			}, types.KnowledgeListFilter{})
 		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
 			logger.Error(ctx, "Cannot change embedding model when files exist")
-			c.Error(errors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型"))
+			_ = c.Error(errors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型"))
 			return
 		}
 	}
@@ -273,7 +274,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	llmModel, err := h.modelService.GetModelByID(ctx, req.LLMModelID)
 	if err != nil || llmModel == nil {
 		logger.Error(ctx, "LLM model not found")
-		c.Error(errors.NewBadRequestError("LLM模型不存在"))
+		_ = c.Error(errors.NewBadRequestError("LLM模型不存在"))
 		return
 	}
 
@@ -282,7 +283,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		embeddingModel, err := h.modelService.GetModelByID(ctx, req.EmbeddingModelID)
 		if err != nil || embeddingModel == nil {
 			logger.Error(ctx, "Embedding model not found")
-			c.Error(errors.NewBadRequestError("Embedding模型不存在"))
+			_ = c.Error(errors.NewBadRequestError("Embedding模型不存在"))
 			return
 		}
 	}
@@ -356,9 +357,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新多模态配置
-	if req.Multimodal.Enabled {
-		// VLM model already set above
-	} else {
+	if !req.Multimodal.Enabled {
 		kb.VLMConfig.ModelID = ""
 	}
 	if req.VLMConfig != nil {
@@ -372,7 +371,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		tenant, _ := types.TenantInfoFromContext(ctx)
 		backend, resolveErr := h.storageResolver.ResolveBackend(ctx, tenant, req.StorageBackendID, "")
 		if resolveErr != nil || backend == nil {
-			c.Error(errors.NewBadRequestError("Storage backend is unavailable"))
+			_ = c.Error(errors.NewBadRequestError("Storage backend is unavailable"))
 			return
 		}
 		oldID := ""
@@ -380,9 +379,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			oldID = *kb.StorageBackendID
 		}
 		if oldID != "" && oldID != backend.ID {
-			knowledgeList, listErr := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+			knowledgeList, listErr := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbIDStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
 			if listErr == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-				c.Error(errors.NewBadRequestError("Storage backend cannot be changed while the knowledge base contains files; migrate storage first"))
+				_ = c.Error(errors.NewBadRequestError("Storage backend cannot be changed while the knowledge base contains files; migrate storage first"))
 				return
 			}
 		}
@@ -395,7 +394,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		provider = "local"
 	}
 	if !isStorageProviderAllowed(provider) {
-		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+		_ = c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
 		return
 	}
 	oldProvider := kb.GetStorageProvider()
@@ -404,7 +403,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if oldProvider != provider {
 		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+			kbIDStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
 		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
 			logger.Warn(ctx, "Storage engine changed with existing files, old files may become inaccessible")
 		}
@@ -438,7 +437,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -464,14 +463,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	types.NormalizeKnowledgeBasePromptInstructions(kb)
 	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	// 保存更新后的知识库
 	if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
 		logger.Error(ctx, "Failed to update knowledge base", err)
-		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
 	}
 
@@ -496,43 +495,43 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 // @Router       /initialization/initialize/{kbId} [post]
 func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 	ctx := c.Request.Context()
-	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
+	kbIDStr := utils.SanitizeForLog(c.Param("kbId"))
 
 	req, err := h.bindInitializationRequest(ctx, c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	logger.Infof(
 		ctx,
 		"Starting knowledge base configuration update, kbId: %s, request: %s",
-		utils.SanitizeForLog(kbIdStr),
+		utils.SanitizeForLog(kbIDStr),
 		utils.SanitizeForLog(utils.ToJSON(req)),
 	)
 
-	kb, err := h.getKnowledgeBaseForInitialization(ctx, kbIdStr)
+	kb, err := h.getKnowledgeBaseForInitialization(ctx, kbIDStr)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	if err := h.validateInitializationConfigs(ctx, req); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
-	processedModels, err := h.processInitializationModels(ctx, kb, kbIdStr, req)
+	processedModels, err := h.processInitializationModels(ctx, kb, kbIDStr, req)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	h.applyKnowledgeBaseInitialization(kb, req, processedModels)
 
 	if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
-		c.Error(errors.NewInternalServerError("更新知识库配置失败: " + err.Error()))
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIDStr)})
+		_ = c.Error(errors.NewInternalServerError("更新知识库配置失败: " + err.Error()))
 		return
 	}
 
@@ -555,8 +554,8 @@ func (h *InitializationHandler) bindInitializationRequest(ctx context.Context, c
 	return &req, nil
 }
 
-func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Context, kbIdStr string) (*types.KnowledgeBase, error) {
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
+func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Context, kbIDStr string) (*types.KnowledgeBase, error) {
+	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIDStr)
 	if err != nil {
 		// The repo's not-found sentinel must surface as 404, not 500.
 		// Without this, every probe of a stale kb id from the
@@ -565,7 +564,7 @@ func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Co
 		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
 			return nil, errors.NewNotFoundError("知识库不存在")
 		}
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIDStr)})
 		return nil, errors.NewInternalServerError("获取知识库信息失败: " + err.Error())
 	}
 	if kb == nil {
@@ -736,7 +735,7 @@ func buildModelDescriptors(req *InitializationRequest) []modelDescriptor {
 func (h *InitializationHandler) processInitializationModels(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
-	kbIdStr string,
+	kbIDStr string,
 	req *InitializationRequest,
 ) ([]*types.Model, error) {
 	descriptors := buildModelDescriptors(req)
@@ -766,7 +765,7 @@ func (h *InitializationHandler) processInitializationModels(
 			if err := h.modelService.UpdateModel(ctx, existingModel); err != nil {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{
 					"model_id": model.ID,
-					"kb_id":    kbIdStr,
+					"kb_id":    kbIDStr,
 				})
 				return nil, errors.NewInternalServerError("更新模型失败: " + err.Error())
 			}
@@ -777,7 +776,7 @@ func (h *InitializationHandler) processInitializationModels(
 		if err := h.modelService.CreateModel(ctx, model); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"model_id": model.ID,
-				"kb_id":    kbIdStr,
+				"kb_id":    kbIDStr,
 			})
 			return nil, errors.NewInternalServerError("创建模型失败: " + err.Error())
 		}
@@ -850,7 +849,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			if req.Multimodal.COS != nil {
 				kb.SetStorageProvider("cos")
 				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
+				kb.StorageConfig = types.StorageConfig{ //nolint:staticcheck // legacy COS config column
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.COS.BucketName,
 					AppID:      req.Multimodal.COS.AppID,
@@ -864,7 +863,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			if req.Multimodal.Minio != nil {
 				kb.SetStorageProvider("minio")
 				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
+				kb.StorageConfig = types.StorageConfig{ //nolint:staticcheck // legacy COS config column
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.Minio.BucketName,
 					PathPrefix: req.Multimodal.Minio.PathPrefix,
@@ -876,7 +875,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
 		kb.SetStorageProvider("")
-		kb.StorageConfig = types.StorageConfig{}
+		kb.StorageConfig = types.StorageConfig{} //nolint:staticcheck // legacy COS config column
 	}
 
 	if req.NodeExtract.Enabled {
@@ -994,7 +993,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse models check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -1003,7 +1002,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 		err := h.ollamaService.StartService(ctx)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
 			return
 		}
 	}
@@ -1056,7 +1055,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse model download request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -1065,7 +1064,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 		err := h.ollamaService.StartService(ctx)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
 			return
 		}
 	}
@@ -1073,7 +1072,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	// 检查模型是否已存在
 	available, err := h.ollamaService.IsModelAvailable(ctx, req.ModelName)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("检查模型状态失败: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("检查模型状态失败: " + err.Error()))
 		return
 	}
 
@@ -1161,7 +1160,7 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	taskID := c.Param("taskId")
 
 	if taskID == "" {
-		c.Error(errors.NewBadRequestError("任务ID不能为空"))
+		_ = c.Error(errors.NewBadRequestError("任务ID不能为空"))
 		return
 	}
 
@@ -1170,7 +1169,7 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	tasksMutex.RUnlock()
 
 	if !exists {
-		c.Error(errors.NewNotFoundError("下载任务不存在"))
+		_ = c.Error(errors.NewNotFoundError("下载任务不存在"))
 		return
 	}
 
@@ -1224,7 +1223,7 @@ func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
 	if !h.ollamaService.IsAvailable() {
 		if err := h.ollamaService.StartService(ctx); err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
 			return
 		}
 	}
@@ -1233,7 +1232,7 @@ func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
 	models, err := h.ollamaService.ListModelsDetailed(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("获取模型列表失败: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("获取模型列表失败: " + err.Error()))
 		return
 	}
 
@@ -1356,27 +1355,27 @@ func (h *InitializationHandler) updateTaskStatus(
 // @Router       /initialization/config/{kbId} [get]
 func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 	ctx := c.Request.Context()
-	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
+	kbIDStr := utils.SanitizeForLog(c.Param("kbId"))
 
 	logger.Info(ctx, "Getting configuration for knowledge base")
 
 	// 获取指定知识库信息
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
+	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIDStr)
 	if err != nil {
 		// Mirror getKnowledgeBaseForInitialization above: missing /
 		// cross-tenant kb ids are 404, not 500.
 		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			c.Error(errors.NewNotFoundError("知识库不存在"))
+			_ = c.Error(errors.NewNotFoundError("知识库不存在"))
 			return
 		}
 		logger.Error(ctx, "Failed to get knowledge base", err)
-		c.Error(errors.NewInternalServerError("获取知识库信息失败: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("获取知识库信息失败: " + err.Error()))
 		return
 	}
 
 	if kb == nil {
 		logger.Error(ctx, "Knowledge base not found")
-		c.Error(errors.NewNotFoundError("知识库不存在"))
+		_ = c.Error(errors.NewNotFoundError("知识库不存在"))
 		return
 	}
 
@@ -1404,7 +1403,7 @@ func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 
 	// 检查知识库是否有文件
 	knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-		kbIdStr, &types.Pagination{
+		kbIDStr, &types.Pagination{
 			Page:     1,
 			PageSize: 1,
 		}, types.KnowledgeListFilter{})
@@ -1490,8 +1489,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	// 判断多模态是否启用：有VLM模型ID或有存储配置（兼容新旧字段）
 	storageProvider := kb.GetStorageProvider()
+	legacyStorage := kb.StorageConfig //nolint:staticcheck // legacy COS config column
 	hasMultimodal := (kb.VLMConfig.IsEnabled() ||
-		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "" ||
+		legacyStorage.SecretID != "" || legacyStorage.BucketName != "" ||
 		(storageProvider != "" && storageProvider != "local"))
 	if config["multimodal"] == nil {
 		config["multimodal"] = map[string]interface{}{
@@ -1550,7 +1550,8 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
 		effectiveProvider := kb.GetStorageProvider()
-		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
+		legacyStorage := kb.StorageConfig //nolint:staticcheck // legacy COS config column
+		if legacyStorage.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
@@ -1561,19 +1562,19 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			switch effectiveProvider {
 			case "cos":
 				multimodal["cos"] = map[string]interface{}{
-					"region":     kb.StorageConfig.Region,
-					"bucketName": kb.StorageConfig.BucketName,
-					"appId":      kb.StorageConfig.AppID,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
+					"region":     legacyStorage.Region,
+					"bucketName": legacyStorage.BucketName,
+					"appId":      legacyStorage.AppID,
+					"pathPrefix": legacyStorage.PathPrefix,
 					"credentials": map[string]bool{
-						"secretId":  kb.StorageConfig.SecretID != "",
-						"secretKey": kb.StorageConfig.SecretKey != "",
+						"secretId":  legacyStorage.SecretID != "",
+						"secretKey": legacyStorage.SecretKey != "",
 					},
 				}
 			case "minio":
 				multimodal["minio"] = map[string]interface{}{
-					"bucketName": kb.StorageConfig.BucketName,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
+					"bucketName": legacyStorage.BucketName,
+					"pathPrefix": legacyStorage.PathPrefix,
 				}
 			}
 		}
@@ -1759,26 +1760,26 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse remote model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
-		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		_ = c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
 		return
 	}
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for remote model BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
+		_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
+		_ = c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
@@ -1816,7 +1817,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse embedding test request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
@@ -1827,7 +1828,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	if req.BaseURL != "" {
 		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for embedding BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
+			_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 			return
 		}
 	}
@@ -1852,7 +1853,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
+		_ = c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
@@ -1919,7 +1920,7 @@ func (h *InitializationHandler) checkChatModelConnection(
 	}
 
 	testMessages := []chat.Message{{Role: "user", Content: "test"}}
-	testOptions := &chat.ChatOptions{
+	testOptions := &chat.Options{
 		MaxTokens: 1,
 		Thinking:  &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
 	}
@@ -1984,32 +1985,32 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse rerank model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
-		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		_ = c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
 		return
 	}
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for rerank BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
+		_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
+		_ = c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
-	if providerName := provider.ProviderName(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	if providerName := provider.Name(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
 	}
@@ -2046,20 +2047,20 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse ASR model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required for ASR check")
-		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		_ = c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
 		return
 	}
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for ASR BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
+		_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 
@@ -2176,7 +2177,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	var req testMultimodalForm
 	if err := c.ShouldBind(&req); err != nil {
 		logger.Error(ctx, "Failed to parse form data", err)
-		c.Error(errors.NewBadRequestError("表单参数解析失败"))
+		_ = c.Error(errors.NewBadRequestError("表单参数解析失败"))
 		return
 	}
 	// ollama 场景自动拼接 base url
@@ -2188,14 +2189,14 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 
 	if req.VLMModel == "" || req.VLMBaseURL == "" {
 		logger.Error(ctx, "VLM model name and base URL are required")
-		c.Error(errors.NewBadRequestError("VLM模型名称和Base URL不能为空"))
+		_ = c.Error(errors.NewBadRequestError("VLM模型名称和Base URL不能为空"))
 		return
 	}
 
 	// SSRF validation for VLM BaseURL
 	if err := utils.ValidateURLForSSRF(req.VLMBaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for VLM BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("VLM Base URL", req.VLMBaseURL, err)))
+		_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("VLM Base URL", req.VLMBaseURL, err)))
 		return
 	}
 
@@ -2206,18 +2207,18 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 			req.COSRegion == "" || req.COSBucketName == "" ||
 			req.COSAppID == "" {
 			logger.Error(ctx, "COS configuration is required")
-			c.Error(errors.NewBadRequestError("COS配置信息不能为空"))
+			_ = c.Error(errors.NewBadRequestError("COS配置信息不能为空"))
 			return
 		}
 	case "minio":
 		if req.MinioBucketName == "" {
 			logger.Error(ctx, "MinIO configuration is required")
-			c.Error(errors.NewBadRequestError("MinIO配置信息不能为空"))
+			_ = c.Error(errors.NewBadRequestError("MinIO配置信息不能为空"))
 			return
 		}
 	default:
 		logger.Error(ctx, "Invalid storage type")
-		c.Error(errors.NewBadRequestError("无效的存储类型"))
+		_ = c.Error(errors.NewBadRequestError("无效的存储类型"))
 		return
 	}
 
@@ -2225,15 +2226,15 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	file, header, err := c.Request.FormFile("image")
 	if err != nil {
 		logger.Error(ctx, "Failed to get uploaded image", err)
-		c.Error(errors.NewBadRequestError("获取上传图片失败"))
+		_ = c.Error(errors.NewBadRequestError("获取上传图片失败"))
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 验证文件类型
 	if !strings.HasPrefix(header.Header.Get("Content-Type"), "image/") {
 		logger.Error(ctx, "Invalid file type, only images are allowed")
-		c.Error(errors.NewBadRequestError("只允许上传图片文件"))
+		_ = c.Error(errors.NewBadRequestError("只允许上传图片文件"))
 		return
 	}
 
@@ -2243,7 +2244,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	maxSize := maxSizeMB * 1024 * 1024
 	if header.Size > maxSize {
 		logger.Error(ctx, "File size too large")
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))
+		_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))
 		return
 	}
 	logger.Infof(ctx, "Processing image: %s", utils.SanitizeForLog(header.Filename))
@@ -2252,7 +2253,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	chunkSizeInt32, err := strconv.ParseInt(req.ChunkSize, 10, 32)
 	if err != nil {
 		logger.Error(ctx, "Failed to parse chunk size", err)
-		c.Error(errors.NewBadRequestError("Failed to parse chunk size"))
+		_ = c.Error(errors.NewBadRequestError("Failed to parse chunk size"))
 		return
 	}
 	chunkSize := int32(chunkSizeInt32)
@@ -2263,7 +2264,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	chunkOverlapInt32, err := strconv.ParseInt(req.ChunkOverlap, 10, 32)
 	if err != nil {
 		logger.Error(ctx, "Failed to parse chunk overlap", err)
-		c.Error(errors.NewBadRequestError("Failed to parse chunk overlap"))
+		_ = c.Error(errors.NewBadRequestError("Failed to parse chunk overlap"))
 		return
 	}
 	chunkOverlap := int32(chunkOverlapInt32)
@@ -2284,7 +2285,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	imageContent, err := io.ReadAll(file)
 	if err != nil {
 		logger.Error(ctx, "Failed to read image file", err)
-		c.Error(errors.NewBadRequestError("读取图片文件失败"))
+		_ = c.Error(errors.NewBadRequestError("读取图片文件失败"))
 		return
 	}
 
@@ -2328,8 +2329,8 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 func (h *InitializationHandler) testMultimodalWithDocReader(
 	ctx context.Context,
 	imageContent []byte, filename string,
-	chunkSize, chunkOverlap int32, separators []string,
-	req *testMultimodalForm,
+	_ int32, _ int32, _ []string,
+	_ *testMultimodalForm,
 ) (map[string]string, error) {
 	fileExt := ""
 	if idx := strings.LastIndex(filename, "."); idx != -1 {
@@ -2394,24 +2395,24 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	var req TextRelationExtractionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "文本关系提取请求参数错误")
-		c.Error(errors.NewBadRequestError("文本关系提取请求参数错误"))
+		_ = c.Error(errors.NewBadRequestError("文本关系提取请求参数错误"))
 		return
 	}
 
 	// 验证文本内容
 	if len(req.Text) == 0 {
-		c.Error(errors.NewBadRequestError("文本内容不能为空"))
+		_ = c.Error(errors.NewBadRequestError("文本内容不能为空"))
 		return
 	}
 
 	if len(req.Text) > 5000 {
-		c.Error(errors.NewBadRequestError("文本内容长度不能超过5000字符"))
+		_ = c.Error(errors.NewBadRequestError("文本内容长度不能超过5000字符"))
 		return
 	}
 
 	// 验证标签
 	if len(req.Tags) == 0 {
-		c.Error(errors.NewBadRequestError("至少需要选择一个关系标签"))
+		_ = c.Error(errors.NewBadRequestError("至少需要选择一个关系标签"))
 		return
 	}
 
@@ -2419,7 +2420,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
-		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		_ = c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
 		return
 	}
 
@@ -2427,7 +2428,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
-		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
 		return
 	}
 
@@ -2495,21 +2496,21 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 	var req FabriTextRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "failed to parse fabri text request")
-		c.Error(errors.NewBadRequestError("invalid fabri text request parameters"))
+		_ = c.Error(errors.NewBadRequestError("invalid fabri text request parameters"))
 		return
 	}
 
 	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
-		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		_ = c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
 		return
 	}
 
 	result, err := h.fabriText(ctx, req.Tags, chatModel)
 	if err != nil {
 		logger.Error(ctx, "failed to generate fabri text", err)
-		c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
 		return
 	}
 
@@ -2530,7 +2531,7 @@ func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, ch
 	think := false
 	result, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: content},
-	}, &chat.ChatOptions{
+	}, &chat.Options{
 		Temperature: 0.3,
 		MaxTokens:   4096,
 		Thinking:    &think,

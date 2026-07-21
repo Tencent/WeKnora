@@ -19,32 +19,32 @@ import (
 type TaskPendingOp struct {
 	// Auto-increment row id. Used by PeekBatch ordering and by
 	// DeleteByIDs / IncrFailCount as the row key.
-	ID int64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID int64 `json:"id"                   gorm:"primaryKey;autoIncrement"`
 	// Tenant scope mirrored from the enclosing object so per-tenant
 	// retention / quota queries don't have to join.
-	TenantID uint64 `json:"tenant_id" gorm:"index"`
+	TenantID uint64 `json:"tenant_id"            gorm:"index"`
 	// Free-form task identifier (e.g. "wiki:ingest"). Should match an
 	// asynq task type when applicable, but the queue itself doesn't
 	// enforce that — it's just a string.
-	TaskType string `json:"task_type" gorm:"type:varchar(64)"`
+	TaskType string `json:"task_type"            gorm:"type:varchar(64)"`
 	// Logical scope, e.g. "knowledge_base" / "knowledge" / "tenant".
 	// Read together with ScopeID.
-	Scope string `json:"scope" gorm:"type:varchar(32)"`
+	Scope string `json:"scope"                gorm:"type:varchar(32)"`
 	// Identifier within the scope (e.g. kbID for scope="knowledge_base").
-	ScopeID string `json:"scope_id" gorm:"type:varchar(64)"`
+	ScopeID string `json:"scope_id"             gorm:"type:varchar(64)"`
 	// Operation kind. Service-defined: e.g. "ingest" / "retract" for
 	// wiki, but other consumers can use whatever vocabulary they like.
-	Op string `json:"op" gorm:"type:varchar(32)"`
+	Op string `json:"op"                   gorm:"type:varchar(32)"`
 	// Optional service-defined deduplication key. The consumer is
 	// responsible for collapsing equivalent ops within a peeked batch
 	// (the queue itself does NOT enforce uniqueness — multiple rows with
 	// the same DedupKey can coexist; the consumer chooses which wins).
-	DedupKey string `json:"dedup_key" gorm:"type:varchar(128);default:''"`
+	DedupKey string `json:"dedup_key"            gorm:"type:varchar(128);default:''"`
 	// JSON-serialized op payload. Schema is consumer-defined; the queue
 	// stores it verbatim. Use json.RawMessage to avoid double-decode.
-	Payload json.RawMessage `json:"payload" gorm:"type:jsonb;default:'{}'"`
+	Payload json.RawMessage `json:"payload"              gorm:"type:jsonb;default:'{}'"`
 	// In-batch retry counter. Reset to 0 on successful consume.
-	FailCount int `json:"fail_count" gorm:"default:0"`
+	FailCount int `json:"fail_count"           gorm:"default:0"`
 	// Server-side enqueue time. NOT used for ordering (id is the cursor)
 	// but useful for ops queries like "rows older than 1h that never
 	// drained".

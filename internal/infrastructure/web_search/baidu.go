@@ -1,3 +1,4 @@
+// Package web_search implements pluggable web search providers for tenant-configured retrieval.
 package web_search
 
 import (
@@ -117,12 +118,14 @@ func (p *BaiduProvider) buildRequest(ctx context.Context, query string, maxResul
 	return req, nil
 }
 
-func (p *BaiduProvider) doSearch(ctx context.Context, req *http.Request, includeDate bool) ([]*types.WebSearchResult, error) {
+func (p *BaiduProvider) doSearch(
+	ctx context.Context, req *http.Request, includeDate bool,
+) ([]*types.WebSearchResult, error) {
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2MB limit
 	if err != nil {

@@ -29,8 +29,8 @@ func NewDockerSandbox(config *Config) *DockerSandbox {
 }
 
 // Type returns the sandbox type
-func (s *DockerSandbox) Type() SandboxType {
-	return SandboxTypeDocker
+func (s *DockerSandbox) Type() Type {
+	return TypeDocker
 }
 
 // IsAvailable checks if Docker is available
@@ -211,7 +211,7 @@ func (s *DockerSandbox) EnsureImage(ctx context.Context) error {
 }
 
 // Cleanup removes any lingering resources
-func (s *DockerSandbox) Cleanup(ctx context.Context) error {
+func (s *DockerSandbox) Cleanup(_ context.Context) error {
 	// Docker --rm flag should handle container cleanup
 	// This is here for any additional cleanup if needed
 	return nil

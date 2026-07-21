@@ -42,7 +42,7 @@ func (p *DuckDuckGoProvider) Search(
 	ctx context.Context,
 	query string,
 	maxResults int,
-	includeDate bool,
+	_ bool,
 ) ([]*types.WebSearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 5
@@ -85,7 +85,8 @@ func (p *DuckDuckGoProvider) searchHTML(
 	)
 
 	curlCommand := fmt.Sprintf(
-		"curl -X GET '%s' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'",
+		"curl -X GET '%s' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'",
 		req.URL.String(),
 	)
 	logger.Infof(ctx, "Curl of request: %s", secutils.SanitizeForLog(curlCommand))
@@ -94,7 +95,7 @@ func (p *DuckDuckGoProvider) searchHTML(
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return nil, fmt.Errorf("duckduckgo HTML returned status %d", resp.StatusCode)
@@ -106,7 +107,7 @@ func (p *DuckDuckGoProvider) searchHTML(
 	}
 
 	results := make([]*types.WebSearchResult, 0, maxResults)
-	doc.Find(".web-result").Each(func(i int, s *goquery.Selection) {
+	doc.Find(".web-result").Each(func(_ int, s *goquery.Selection) {
 		if len(results) >= maxResults {
 			return
 		}
@@ -155,7 +156,7 @@ func (p *DuckDuckGoProvider) searchAPI(
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("duckduckgo API returned status %d: %s", resp.StatusCode, string(body))

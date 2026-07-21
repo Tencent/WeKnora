@@ -21,8 +21,8 @@ func init() {
 }
 
 // Info 返回NVIDIA provider 的元数据
-func (p *NvidiaProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *NvidiaProvider) Info() Info {
+	return Info{
 		Name:        ProviderNvidia,
 		DisplayName: "NVIDIA",
 		Description: "deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.",

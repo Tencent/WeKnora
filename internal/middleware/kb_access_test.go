@@ -41,7 +41,12 @@ type stubKBShareForGuard struct {
 	source     map[string]uint64
 }
 
-func (s *stubKBShareForGuard) CheckTenantKBPermission(_ context.Context, kbID string, _ uint64, _ types.TenantRole) (types.OrgMemberRole, bool, error) {
+func (s *stubKBShareForGuard) CheckTenantKBPermission(
+	_ context.Context,
+	kbID string,
+	_ uint64,
+	_ types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
 	if s.shared[kbID] {
 		return s.permission[kbID], true, nil
 	}
@@ -55,42 +60,90 @@ func (s *stubKBShareForGuard) GetKBSourceTenant(_ context.Context, kbID string) 
 	return 0, errors.New("not found")
 }
 
-func (s *stubKBShareForGuard) ShareKnowledgeBase(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
+func (s *stubKBShareForGuard) ShareKnowledgeBase(
+	context.Context,
+	string,
+	string,
+	string,
+	uint64,
+	types.OrgMemberRole,
+) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string, uint64) error {
+
+func (s *stubKBShareForGuard) UpdateSharePermission(
+	context.Context,
+	string,
+	types.OrgMemberRole,
+	string,
+	uint64,
+) error {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) ListSharesByKnowledgeBase(context.Context, string, uint64) ([]*types.KnowledgeBaseShare, error) {
+
+func (s *stubKBShareForGuard) ListSharesByKnowledgeBase(
+	context.Context,
+	string,
+	uint64,
+) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) ListSharedKnowledgeBases(context.Context, uint64, types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
+
+func (s *stubKBShareForGuard) ListSharedKnowledgeBases(
+	context.Context,
+	uint64,
+	types.TenantRole,
+) ([]*types.SharedKnowledgeBaseInfo, error) {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) ListSharedKnowledgeBasesInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+
+func (s *stubKBShareForGuard) ListSharedKnowledgeBasesInOrganization(
+	context.Context,
+	string,
+	uint64,
+	types.TenantRole,
+) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, uint64) (map[string][]string, error) {
+
+func (s *stubKBShareForGuard) ListSharedKnowledgeBaseIDsByOrganizations(
+	context.Context,
+	[]string,
+	uint64,
+) (map[string][]string, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShare(context.Context, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShareByKBAndOrg(context.Context, string, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
-func (s *stubKBShareForGuard) HasTenantKBPermission(context.Context, string, uint64, types.TenantRole, types.OrgMemberRole) (bool, error) {
+
+func (s *stubKBShareForGuard) HasTenantKBPermission(
+	context.Context,
+	string,
+	uint64,
+	types.TenantRole,
+	types.OrgMemberRole,
+) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountSharesByKnowledgeBaseIDs(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -109,47 +162,94 @@ type stubAgentShareForGuard struct {
 	kbsViaSomeAgent map[string]bool
 }
 
-func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string) (*types.CustomAgent, error) {
+func (s *stubAgentShareForGuard) GetSharedAgentForTenant(
+	_ context.Context,
+	_ uint64,
+	_ types.TenantRole,
+	agentID string,
+) (*types.CustomAgent, error) {
 	return s.agents[agentID], nil
 }
 
-func (s *stubAgentShareForGuard) TenantCanAccessKBViaSomeSharedAgent(_ context.Context, _ uint64, _ types.TenantRole, kb *types.KnowledgeBase) (bool, error) {
+func (s *stubAgentShareForGuard) TenantCanAccessKBViaSomeSharedAgent(
+	_ context.Context,
+	_ uint64,
+	_ types.TenantRole,
+	kb *types.KnowledgeBase,
+) (bool, error) {
 	return s.kbsViaSomeAgent[kb.ID], nil
 }
 
-func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.AgentShare, error) {
+func (s *stubAgentShareForGuard) ShareAgent(
+	context.Context,
+	string,
+	string,
+	string,
+	uint64,
+	types.OrgMemberRole,
+) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string, uint64) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) ListSharedAgents(context.Context, uint64, types.TenantRole) ([]*types.SharedAgentInfo, error) {
+
+func (s *stubAgentShareForGuard) ListSharedAgents(
+	context.Context,
+	uint64,
+	types.TenantRole,
+) ([]*types.SharedAgentInfo, error) {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) ListSharedAgentsInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedAgentItem, error) {
+
+func (s *stubAgentShareForGuard) ListSharedAgentsInOrganization(
+	context.Context,
+	string,
+	uint64,
+	types.TenantRole,
+) ([]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) ListSharedAgentsInOrganizations(context.Context, []string, uint64, types.TenantRole) (map[string][]*types.OrganizationSharedAgentItem, error) {
+
+func (s *stubAgentShareForGuard) ListSharedAgentsInOrganizations(
+	context.Context,
+	[]string,
+	uint64,
+	types.TenantRole,
+) (map[string][]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) SetSharedAgentDisabledByMe(context.Context, uint64, string, uint64, bool) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShare(context.Context, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShareByAgentAndOrg(context.Context, string, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) GetShareByAgentIDForTenant(context.Context, uint64, string, uint64) (*types.AgentShare, error) {
+
+func (s *stubAgentShareForGuard) GetShareByAgentIDForTenant(
+	context.Context,
+	uint64,
+	string,
+	uint64,
+) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -248,8 +348,12 @@ func TestIsResourceNotFound_RecognisesKnowledgeSentinel(t *testing.T) {
 		"missing document (ErrKnowledgeNotFound) must classify as not-found")
 	require.True(t, isResourceNotFound(apprepo.ErrKnowledgeBaseNotFound),
 		"missing KB must still classify as not-found")
-	require.True(t, isResourceNotFound(apprepo.ErrChunkNotFound),
-		"missing chunk (ErrChunkNotFound) must classify as not-found — chunk view/by-id resolved a missing chunk into a raw 500 (exit 7) otherwise")
+	require.True(
+		t,
+		isResourceNotFound(apprepo.ErrChunkNotFound),
+		"missing chunk (ErrChunkNotFound) must classify as not-found — chunk "+
+			"view/by-id resolved a missing chunk into a raw 500 (exit 7) otherwise",
+	)
 	require.True(t, isResourceNotFound(ErrResourceNotFound),
 		"generic resource-not-found sentinel must still classify as not-found")
 	require.False(t, isResourceNotFound(errors.New("connection refused")),

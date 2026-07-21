@@ -30,12 +30,16 @@ type tosFileService struct {
 const tosScheme = "tos://"
 
 // NewTosFileService creates a TOS file service.
-func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
+func NewTosFileService(
+	endpoint, region, accessKey, secretKey, bucketName, pathPrefix string,
+) (interfaces.FileService, error) {
 	return NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "")
 }
 
 // NewTosFileServiceWithTempBucket creates a TOS file service with optional temp bucket.
-func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
+func NewTosFileServiceWithTempBucket(
+	endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string,
+) (interfaces.FileService, error) {
 	client, err := tos.NewClientV2(
 		endpoint,
 		tos.WithRegion(region),
@@ -152,7 +156,12 @@ func parseTOSFilePath(filePath string) (bucketName string, objectKey string, err
 	return parts[0], parts[1], nil
 }
 
-func (s *tosFileService) SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error) {
+func (s *tosFileService) SaveFile(
+	ctx context.Context,
+	file *multipart.FileHeader,
+	tenantID uint64,
+	knowledgeID string,
+) (string, error) {
 	ext := filepath.Ext(file.Filename)
 	objectName := joinTOSObjectKey(
 		s.pathPrefix,
@@ -165,7 +174,7 @@ func (s *tosFileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	contentType := file.Header.Get("Content-Type")
 	if contentType == "" {
@@ -186,7 +195,13 @@ func (s *tosFileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 	return fmt.Sprintf("tos://%s/%s", s.bucketName, objectName), nil
 }
 
-func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *tosFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	temp bool,
+) (string, error) {
 	safeName, err := utils.SafeFileName(fileName)
 	if err != nil {
 		return "", fmt.Errorf("invalid file name: %w", err)
@@ -301,7 +316,7 @@ func (s *tosFileService) DeleteFile(ctx context.Context, filePath string) error 
 	return nil
 }
 
-func (s *tosFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (s *tosFileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	bucketName, objectName, err := parseTOSFilePath(filePath)
 	if err != nil {
 		return "", err

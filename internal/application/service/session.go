@@ -651,9 +651,12 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	}
 
 	// Prepare messages for title generation
-	titlePrompt := types.RenderPromptPlaceholders(s.cfg.Conversation.GenerateSessionTitlePrompt, types.PlaceholderValues{
-		"language": types.LanguageNameFromContext(ctx),
-	})
+	titlePrompt := types.RenderPromptPlaceholders(
+		s.cfg.Conversation.GenerateSessionTitlePrompt,
+		types.PlaceholderValues{
+			"language": types.LanguageNameFromContext(ctx),
+		},
+	)
 	var chatMessages []chat.Message
 	chatMessages = append(chatMessages,
 		chat.Message{Role: "system", Content: titlePrompt},
@@ -664,7 +667,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 
 	// Call model to generate title
 	thinking := false
-	response, err := chatModel.Chat(ctx, chatMessages, &chat.ChatOptions{
+	response, err := chatModel.Chat(ctx, chatMessages, &chat.Options{
 		Temperature: 0.3,
 		Thinking:    &thinking,
 	})
@@ -695,7 +698,7 @@ func (s *sessionService) GenerateTitleAsync(
 	session *types.Session,
 	userQuery string,
 	modelID string,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) {
 	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
 	// The session row itself is still updated by its persisted tenant/user owner scope.

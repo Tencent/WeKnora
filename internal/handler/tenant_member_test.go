@@ -26,8 +26,9 @@ import (
 // gotten here" assertions.
 type stubMemberService struct {
 	interfaces.TenantMemberService
-	add             func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
-	listTenant      func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
+	add        func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) //nolint:lll
+	listTenant func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
+	//nolint:lll
 	listMembersPage func(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
 	updateRole      func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
 	remove          func(ctx context.Context, userID string, tenantID uint64) error
@@ -68,7 +69,13 @@ func (s *stubMemberService) ListMembersPage(
 	return []*types.TenantMember{}, 0, nil
 }
 
-func (s *stubMemberService) AddMember(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
+func (s *stubMemberService) AddMember(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+) (*types.TenantMember, error) {
 	return s.add(ctx, userID, tenantID, role, invitedBy)
 }
 
@@ -76,7 +83,12 @@ func (s *stubMemberService) ListByTenant(ctx context.Context, tenantID uint64) (
 	return s.listTenant(ctx, tenantID)
 }
 
-func (s *stubMemberService) UpdateRole(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error {
+func (s *stubMemberService) UpdateRole(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	newRole types.TenantRole,
+) error {
 	return s.updateRole(ctx, userID, tenantID, newRole)
 }
 
@@ -166,10 +178,10 @@ const defaultTestTenantID uint64 = 1
 // stuffed into the request context. The zero value matches the common
 // case ("authenticated, active in tenant 1, no superuser flag").
 type memberCtxOpts struct {
-	callerID    string
-	tenantID    uint64
-	user        *types.User
-	skipTenant  bool // when true, do NOT set TenantIDContextKey at all
+	callerID   string
+	tenantID   uint64
+	user       *types.User
+	skipTenant bool // when true, do NOT set TenantIDContextKey at all
 }
 
 // withMemberCtx installs the auth-middleware-equivalent values on req's
@@ -199,7 +211,13 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any, callerID
 	return doJSONWithCtx(t, r, method, path, body, memberCtxOpts{callerID: callerID})
 }
 
-func doJSONWithCtx(t *testing.T, r *gin.Engine, method, path string, body any, opts memberCtxOpts) *httptest.ResponseRecorder {
+func doJSONWithCtx(
+	t *testing.T,
+	r *gin.Engine,
+	method, path string,
+	body any,
+	opts memberCtxOpts,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *bytes.Reader
 	if body != nil {
@@ -226,8 +244,20 @@ func TestTenantMember_ListMembers_HappyPath(t *testing.T) {
 				t.Fatalf("tenantID parsed wrong: got %d", tenantID)
 			}
 			return []*types.TenantMember{
-				{UserID: "u-owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive, JoinedAt: now},
-				{UserID: "u-c", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive, JoinedAt: now},
+				{
+					UserID:   "u-owner",
+					TenantID: 1,
+					Role:     types.TenantRoleOwner,
+					Status:   types.TenantMemberStatusActive,
+					JoinedAt: now,
+				},
+				{
+					UserID:   "u-c",
+					TenantID: 1,
+					Role:     types.TenantRoleContributor,
+					Status:   types.TenantMemberStatusActive,
+					JoinedAt: now,
+				},
 			}, nil
 		},
 	}
@@ -310,11 +340,19 @@ func TestTenantMember_AddMember_HappyPath(t *testing.T) {
 	caller := "u-owner"
 	now := time.Now()
 	ms := &stubMemberService{
+		//nolint:lll
 		add: func(_ context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
 			if invitedBy == nil || *invitedBy != caller {
 				t.Fatalf("invited_by must be the caller, got %v", invitedBy)
 			}
-			return &types.TenantMember{UserID: userID, TenantID: tenantID, Role: role, Status: types.TenantMemberStatusActive, JoinedAt: now, InvitedBy: invitedBy}, nil
+			return &types.TenantMember{
+				UserID:    userID,
+				TenantID:  tenantID,
+				Role:      role,
+				Status:    types.TenantMemberStatusActive,
+				JoinedAt:  now,
+				InvitedBy: invitedBy,
+			}, nil
 		},
 	}
 	us := &stubMemberUserService{
@@ -712,9 +750,27 @@ func TestTenantMember_ListMembers_UsesBatchedUserLookup(t *testing.T) {
 	ms := &stubMemberService{
 		listTenant: func(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
 			return []*types.TenantMember{
-				{UserID: "u1", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive, JoinedAt: now},
-				{UserID: "u2", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive, JoinedAt: now},
-				{UserID: "u3", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive, JoinedAt: now},
+				{
+					UserID:   "u1",
+					TenantID: 1,
+					Role:     types.TenantRoleOwner,
+					Status:   types.TenantMemberStatusActive,
+					JoinedAt: now,
+				},
+				{
+					UserID:   "u2",
+					TenantID: 1,
+					Role:     types.TenantRoleAdmin,
+					Status:   types.TenantMemberStatusActive,
+					JoinedAt: now,
+				},
+				{
+					UserID:   "u3",
+					TenantID: 1,
+					Role:     types.TenantRoleViewer,
+					Status:   types.TenantMemberStatusActive,
+					JoinedAt: now,
+				},
 			}, nil
 		},
 	}
@@ -755,7 +811,13 @@ func TestTenantMember_AddMember_SyntheticCallerLeavesInvitedByNull(t *testing.T)
 	ms := &stubMemberService{
 		add: func(_ context.Context, _ string, _ uint64, _ types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
 			captured.invited = invitedBy
-			return &types.TenantMember{UserID: "u-bob", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive, JoinedAt: time.Now()}, nil
+			return &types.TenantMember{
+				UserID:   "u-bob",
+				TenantID: 1,
+				Role:     types.TenantRoleContributor,
+				Status:   types.TenantMemberStatusActive,
+				JoinedAt: time.Now(),
+			}, nil
 		},
 	}
 	us := &stubMemberUserService{

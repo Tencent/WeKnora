@@ -162,7 +162,7 @@ func formatToolHint(name string, args map[string]any) string {
 // executeToolCalls runs every tool call in the LLM response, appending results to step.ToolCalls.
 // It also emits tool-call and tool-result events, and optionally runs reflection after each call.
 // When ParallelToolCalls is enabled and there are 2+ tool calls, they execute concurrently.
-func (e *AgentEngine) executeToolCalls(
+func (e *Engine) executeToolCalls(
 	ctx context.Context, response *types.ChatResponse,
 	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
 ) {
@@ -187,7 +187,7 @@ func (e *AgentEngine) executeToolCalls(
 
 // executeToolCallsParallel runs all tool calls concurrently using errgroup,
 // collecting results in original order.
-func (e *AgentEngine) executeToolCallsParallel(
+func (e *Engine) executeToolCallsParallel(
 	ctx context.Context, response *types.ChatResponse,
 	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
 ) {
@@ -221,7 +221,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 			result = &types.ToolResult{Success: false, Error: "no result"}
 		}
 
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        toolCall.ID + "-tool-result",
 			Type:      event.EventAgentToolResult,
 			SessionID: sessionID,
@@ -237,7 +237,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 			},
 		})
 
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        toolCall.ID + "-tool-exec",
 			Type:      event.EventAgentTool,
 			SessionID: sessionID,
@@ -255,7 +255,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 }
 
 // executeSingleToolCall runs one tool call sequentially (original behavior).
-func (e *AgentEngine) executeSingleToolCall(
+func (e *Engine) executeSingleToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	step *types.AgentStep, iteration, round int, sessionID, assistantMessageID string,
 ) {
@@ -267,7 +267,7 @@ func (e *AgentEngine) executeSingleToolCall(
 		result = &types.ToolResult{Success: false, Error: "no result"}
 	}
 
-	e.eventBus.Emit(ctx, event.Event{
+	_ = e.eventBus.Emit(ctx, event.Event{
 		ID:        toolCall.ID + "-tool-result",
 		Type:      event.EventAgentToolResult,
 		SessionID: sessionID,
@@ -283,7 +283,7 @@ func (e *AgentEngine) executeSingleToolCall(
 		},
 	})
 
-	e.eventBus.Emit(ctx, event.Event{
+	_ = e.eventBus.Emit(ctx, event.Event{
 		ID:        toolCall.ID + "-tool-exec",
 		Type:      event.EventAgentTool,
 		SessionID: sessionID,
@@ -301,7 +301,7 @@ func (e *AgentEngine) executeSingleToolCall(
 
 // runToolCall handles argument parsing, execution, logging, and pipeline events for a single tool call.
 // It returns the completed ToolCall struct. Safe to call from multiple goroutines.
-func (e *AgentEngine) runToolCall(
+func (e *Engine) runToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	iteration, round int, sessionID, assistantMessageID string,
 ) types.ToolCall {
@@ -339,7 +339,7 @@ func (e *AgentEngine) runToolCall(
 
 	// Emit tool hint for UI progress display
 	toolHint := formatToolHint(tc.Function.Name, args)
-	e.eventBus.Emit(ctx, event.Event{
+	_ = e.eventBus.Emit(ctx, event.Event{
 		ID:        tc.ID + "-tool-hint",
 		Type:      event.EventAgentToolCall,
 		SessionID: sessionID,
@@ -396,7 +396,7 @@ func (e *AgentEngine) runToolCall(
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
-		EventBus:           e.eventBus,
+		Bus:                e.eventBus,
 		ToolCallID:         tc.ID,
 		UserID:             principal.StorageID(),
 		// ApprovalCtx keeps the round-level ctx without the per-tool 60s timeout,

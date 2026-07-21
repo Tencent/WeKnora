@@ -131,7 +131,13 @@ func TestNormalizeWikiHierarchyCleansModelCategoryNoise(t *testing.T) {
 	}
 	for i := range want {
 		if page.CategoryPath[i] != want[i] {
-			t.Fatalf("CategoryPath[%d] = %q, want %q; full path=%v", i, page.CategoryPath[i], want[i], page.CategoryPath)
+			t.Fatalf(
+				"CategoryPath[%d] = %q, want %q; full path=%v",
+				i,
+				page.CategoryPath[i],
+				want[i],
+				page.CategoryPath,
+			)
 		}
 	}
 	if page.Depth != 3 {
@@ -157,7 +163,13 @@ func TestNormalizeWikiIndexEntryHierarchyCleansModelCategoryNoise(t *testing.T) 
 	}
 	for i := range want {
 		if entry.CategoryPath[i] != want[i] {
-			t.Fatalf("CategoryPath[%d] = %q, want %q; full path=%v", i, entry.CategoryPath[i], want[i], entry.CategoryPath)
+			t.Fatalf(
+				"CategoryPath[%d] = %q, want %q; full path=%v",
+				i,
+				entry.CategoryPath[i],
+				want[i],
+				entry.CategoryPath,
+			)
 		}
 	}
 	if entry.WikiPath != "entity/标牌/生态/行为倡导/爱护花草标牌" {

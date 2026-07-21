@@ -38,7 +38,12 @@ type TenantMemberRepository interface {
 	// ListPagedByTenant returns active memberships sorted joined_at ASC, id ASC.
 	// search filters by user email/username (join users table); empty
 	// search lists all memberships in tenant.
-	ListPagedByTenant(ctx context.Context, tenantID uint64, search string, offset, limit int) ([]*types.TenantMember, error)
+	ListPagedByTenant(
+		ctx context.Context,
+		tenantID uint64,
+		search string,
+		offset, limit int,
+	) ([]*types.TenantMember, error)
 
 	// UpdateRole changes the role of an existing active membership. Returns
 	// gorm.ErrRecordNotFound if no active row matches.

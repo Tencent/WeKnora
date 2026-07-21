@@ -45,7 +45,7 @@ func withActor(userID string) context.Context {
 // when promote / revoke calls emitAdminAudit. This is what lets unit
 // tests of the broader handler stay lightweight, and what protects
 // the business path from a misconfigured container at runtime.
-func TestEmitAdminAudit_NilServiceIsNoop(t *testing.T) {
+func TestEmitAdminAudit_NilServiceIsNoop(_ *testing.T) {
 	h := newSystemHandlerWithAudit(nil)
 	// If this panicked the deferred t.Fatalf wouldn't fire — gating on
 	// a nil receiver is the entire point of this case.
@@ -226,7 +226,11 @@ func TestEmitAdminAudit_IdempotentBranchSurvivesMarshal(t *testing.T) {
 		t.Fatalf("unmarshal promote details: %v", err)
 	}
 	if promote["idempotent"] != true {
-		t.Fatalf("promote.idempotent must round-trip as JSON bool, got %T(%v)", promote["idempotent"], promote["idempotent"])
+		t.Fatalf(
+			"promote.idempotent must round-trip as JSON bool, got %T(%v)",
+			promote["idempotent"],
+			promote["idempotent"],
+		)
 	}
 
 	var revoke map[string]any

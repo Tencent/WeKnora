@@ -50,7 +50,11 @@ type AuthRetryTransport struct {
 // Pass an empty initialToken to indicate "no bearer credential configured"
 // (e.g. an api-key profile). In that mode the transport never invokes
 // refreshFn - a 401 is propagated as-is.
-func NewAuthRetryTransport(base http.RoundTripper, initialToken string, refreshFn func(context.Context) (string, error)) *AuthRetryTransport {
+func NewAuthRetryTransport(
+	base http.RoundTripper,
+	initialToken string,
+	refreshFn func(context.Context) (string, error),
+) *AuthRetryTransport {
 	if base == nil {
 		base = http.DefaultTransport
 	}

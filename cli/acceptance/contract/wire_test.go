@@ -162,13 +162,28 @@ var wireCases = []wireCase{
 	// list); UUID-format detection happens client-side so callers can use
 	// either form interchangeably.
 	{
-		name:   "search.success",
-		args:   []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--limit=3", "--format", "json"},
+		name: "search.success",
+		args: []string{
+			"search",
+			"chunks",
+			"query",
+			"--kb=11111111-1111-4111-8111-111111111111",
+			"--limit=3",
+			"--format",
+			"json",
+		},
 		server: searchTwoResults,
 	},
 	{
-		name:                "search.error_resource_not_found",
-		args:                []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--format", "json"},
+		name: "search.error_resource_not_found",
+		args: []string{
+			"search",
+			"chunks",
+			"query",
+			"--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+			"--format",
+			"json",
+		},
 		server:              always404,
 		wantErr:             true,
 		wantStderrSubstring: "resource.not_found",
@@ -177,8 +192,17 @@ var wireCases = []wireCase{
 		// --no-vector + --no-keyword is the input.invalid case; the KB UUID
 		// is just there to satisfy MarkFlagRequired so validation runs deep
 		// enough to hit the mutex-channel check.
-		name:                "search.error_input_invalid",
-		args:                []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--format", "json"},
+		name: "search.error_input_invalid",
+		args: []string{
+			"search",
+			"chunks",
+			"query",
+			"--kb=11111111-1111-4111-8111-111111111111",
+			"--no-vector",
+			"--no-keyword",
+			"--format",
+			"json",
+		},
 		wantErr:             true,
 		wantStderrSubstring: "input.invalid_argument",
 	},

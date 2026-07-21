@@ -68,8 +68,8 @@ func TestDecodeDataURIBytes_EmptyBase64(t *testing.T) {
 }
 
 func TestDescribeImages_WithDescriber(t *testing.T) {
-	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+	engine := &Engine{
+		imageDescriber: func(_ context.Context, _ []byte, _ string) (string, error) {
 			return "A red square image", nil
 		},
 	}
@@ -87,8 +87,8 @@ func TestDescribeImages_WithDescriber(t *testing.T) {
 }
 
 func TestDescribeImages_VLMFailure(t *testing.T) {
-	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+	engine := &Engine{
+		imageDescriber: func(_ context.Context, _ []byte, _ string) (string, error) {
 			return "", errors.New("VLM service unavailable")
 		},
 	}
@@ -103,8 +103,8 @@ func TestDescribeImages_VLMFailure(t *testing.T) {
 }
 
 func TestDescribeImages_InvalidDataURI(t *testing.T) {
-	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+	engine := &Engine{
+		imageDescriber: func(_ context.Context, _ []byte, _ string) (string, error) {
 			t.Fatal("imageDescriber should not be called for invalid data URI")
 			return "", nil
 		},
@@ -118,8 +118,8 @@ func TestDescribeImages_InvalidDataURI(t *testing.T) {
 
 func TestDescribeImages_ContextCancelled(t *testing.T) {
 	callCount := 0
-	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+	engine := &Engine{
+		imageDescriber: func(_ context.Context, _ []byte, _ string) (string, error) {
 			callCount++
 			return "desc", nil
 		},
@@ -141,7 +141,7 @@ func TestDescribeImages_ContextCancelled(t *testing.T) {
 }
 
 func TestDescribeImages_NilDescriber(t *testing.T) {
-	engine := &AgentEngine{
+	engine := &Engine{
 		imageDescriber: nil,
 	}
 
@@ -154,8 +154,8 @@ func TestDescribeImages_NilDescriber(t *testing.T) {
 
 func TestDescribeImages_MixedSuccess(t *testing.T) {
 	callIdx := 0
-	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+	engine := &Engine{
+		imageDescriber: func(_ context.Context, _ []byte, _ string) (string, error) {
 			callIdx++
 			if callIdx == 2 {
 				return "", errors.New("fail on second")

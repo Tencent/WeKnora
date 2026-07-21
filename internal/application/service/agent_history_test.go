@@ -248,10 +248,12 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 				Thought:          "Let me search.",
 				ReasoningContent: "model's chain of thought",
 				ToolCalls: []types.ToolCall{{
-					ID:               "call_1",
-					Name:             agenttools.ToolKnowledgeSearch,
-					Args:             map[string]interface{}{"query": "foo"},
-					ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`)},
+					ID:   "call_1",
+					Name: agenttools.ToolKnowledgeSearch,
+					Args: map[string]interface{}{"query": "foo"},
+					ProviderMetadata: types.ToolCallMetadata{
+						"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`),
+					},
 					Result: &types.ToolResult{
 						Success: true,
 						Output:  "doc A",

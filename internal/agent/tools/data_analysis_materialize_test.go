@@ -21,27 +21,30 @@ type fakeFileService struct {
 	readers map[string]func() (io.ReadCloser, error)
 }
 
-func (f *fakeFileService) CheckConnectivity(ctx context.Context) error { return nil }
-func (f *fakeFileService) SaveFile(ctx context.Context, _ *multipart.FileHeader, _ uint64, _ string) (string, error) {
+func (f *fakeFileService) CheckConnectivity(_ context.Context) error { return nil }
+func (f *fakeFileService) SaveFile(_ context.Context, _ *multipart.FileHeader, _ uint64, _ string) (string, error) {
 	return "", errors.New("not implemented in fake")
 }
-func (f *fakeFileService) SaveBytes(ctx context.Context, _ []byte, _ uint64, _ string, _ bool) (string, error) {
+
+func (f *fakeFileService) SaveBytes(_ context.Context, _ []byte, _ uint64, _ string, _ bool) (string, error) {
 	return "", errors.New("not implemented in fake")
 }
-func (f *fakeFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+
+func (f *fakeFileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
 	fn, ok := f.readers[filePath]
 	if !ok {
 		return nil, errors.New("unknown path: " + filePath)
 	}
 	return fn()
 }
-func (f *fakeFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+
+func (f *fakeFileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	// Return a URL that DuckDB would NOT be able to open on its own; the
 	// production code must *not* pass this through to DuckDB.
 	return "local://" + strings.TrimPrefix(filePath, "/"), nil
 }
-func (f *fakeFileService) DeleteFile(ctx context.Context, _ string) error { return nil }
-func (f *fakeFileService) CopyFile(ctx context.Context, _ string, _ uint64, _ string) (string, error) {
+func (f *fakeFileService) DeleteFile(_ context.Context, _ string) error { return nil }
+func (f *fakeFileService) CopyFile(_ context.Context, _ string, _ uint64, _ string) (string, error) {
 	return "", nil
 }
 

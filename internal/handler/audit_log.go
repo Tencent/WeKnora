@@ -86,7 +86,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, tenantID, q)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -107,7 +107,8 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 
 // ListSystemAuditLog godoc
 // @Summary      获取平台审计日志
-// @Description  返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed / system.admin_promoted / system.admin_revoked 等 SystemAdmin 操作。按 id 倒序的游标分页。
+// @Description  返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed /
+// system.admin_promoted / system.admin_revoked 等 SystemAdmin 操作。按 id 倒序的游标分页。
 // @Tags         审计日志
 // @Produce      json
 // @Param        after_id  query  int     false  "游标：返回 id 小于此值的记录（默认从最新开始）"
@@ -160,7 +161,7 @@ func (h *AuditLogHandler) ListSystemAuditLog(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, 0, q)
 	if err != nil {
 		logger.Error(ctx, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 

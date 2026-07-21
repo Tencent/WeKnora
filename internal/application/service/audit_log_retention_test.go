@@ -129,7 +129,7 @@ func TestAuditLogRetentionRunner_StartIsNoOpWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestAuditLogRetentionRunner_StopIsIdempotent(t *testing.T) {
+func TestAuditLogRetentionRunner_StopIsIdempotent(_ *testing.T) {
 	// Calling Stop twice must not panic — container shutdown ordering
 	// can race ResourceCleaner with other shutdown hooks, and we'd
 	// rather no-op than crash on the second call.
@@ -146,7 +146,7 @@ func TestAuditLogRetentionRunner_StopIsIdempotent(t *testing.T) {
 	r.Stop()
 }
 
-func TestAuditLogRetentionRunner_StartIsIdempotent(t *testing.T) {
+func TestAuditLogRetentionRunner_StartIsIdempotent(_ *testing.T) {
 	// Container init that mistakenly invokes Start twice must not
 	// double-fire the loop. sync.Once guards this; the test pins the
 	// invariant.
@@ -281,8 +281,10 @@ func TestAuditLogRetentionRunner_RunOnceLogsButDoesNotPanicOnError(t *testing.T)
 
 // Ensure the test stubs satisfy the production type: if the interface
 // drifts, this assignment will fail to compile and tell us immediately.
-var _ interfaces.AuditLogRepository = (*stubAuditRepo)(nil)
-var _ interfaces.AuditLogRepository = (*stubAuditRepoForRetention)(nil)
+var (
+	_ interfaces.AuditLogRepository = (*stubAuditRepo)(nil)
+	_ interfaces.AuditLogRepository = (*stubAuditRepoForRetention)(nil)
+)
 
 // Sanity check the audit entry struct's fields stay attached to the
 // retention path — guards against a refactor that drops CreatedAt

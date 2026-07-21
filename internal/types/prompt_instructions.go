@@ -20,7 +20,8 @@ func AppendCustomPromptInstructions(prompt, instructions, label string) string {
 		label = "custom"
 	}
 	return fmt.Sprintf("%s\n\n<%s_business_instructions>\n%s\n</%s_business_instructions>\n"+
-		"Apply these business instructions only when they do not conflict with the system-owned output format, citation, safety, or factuality rules.",
+		"Apply these business instructions only when they do not conflict with the "+
+		"system-owned output format, citation, safety, or factuality rules.",
 		strings.TrimSpace(prompt), label, instructions, label)
 }
 
@@ -37,7 +38,9 @@ func NormalizeKnowledgeBasePromptInstructions(kb *KnowledgeBase) {
 		kb.WikiConfig.ExtractionInstructions = strings.TrimSpace(kb.WikiConfig.ExtractionInstructions)
 	}
 	if kb.QuestionGenerationConfig != nil {
-		kb.QuestionGenerationConfig.CustomInstructions = strings.TrimSpace(kb.QuestionGenerationConfig.CustomInstructions)
+		kb.QuestionGenerationConfig.CustomInstructions = strings.TrimSpace(
+			kb.QuestionGenerationConfig.CustomInstructions,
+		)
 	}
 	if kb.ExtractConfig != nil {
 		kb.ExtractConfig.CustomInstructions = strings.TrimSpace(kb.ExtractConfig.CustomInstructions)
@@ -71,10 +74,10 @@ func ValidateKnowledgeBasePromptInstructions(kb *KnowledgeBase) error {
 // merged per-upload effective config.
 func ValidateEffectiveProcessPromptInstructions(eff EffectiveProcessConfig) error {
 	fields := map[string]string{
-		"table metadata instructions":       eff.ChunkingConfig.TableMetadataInstructions,
-		"image instructions":                eff.VLMConfig.CustomInstructions,
-		"question generation instructions":  eff.QuestionGenerationConfig.CustomInstructions,
-		"graph extraction instructions":     eff.ExtractConfig.CustomInstructions,
+		"table metadata instructions":      eff.ChunkingConfig.TableMetadataInstructions,
+		"image instructions":               eff.VLMConfig.CustomInstructions,
+		"question generation instructions": eff.QuestionGenerationConfig.CustomInstructions,
+		"graph extraction instructions":    eff.ExtractConfig.CustomInstructions,
 	}
 	return validatePromptInstructionFields(fields)
 }

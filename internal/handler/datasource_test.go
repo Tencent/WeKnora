@@ -18,7 +18,12 @@ type stubDataSourceService struct {
 	getDataSource func(ctx context.Context, id string) (*types.DataSource, error)
 }
 
-func (s *stubDataSourceService) GetSyncLogs(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
+func (s *stubDataSourceService) GetSyncLogs(
+	ctx context.Context,
+	dsID string,
+	limit int,
+	offset int,
+) ([]*types.SyncLog, error) {
 	if s.getSyncLogs != nil {
 		return s.getSyncLogs(ctx, dsID, limit, offset)
 	}

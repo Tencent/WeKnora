@@ -101,9 +101,12 @@ Reversible write: without -y/--yes in a non-TTY / JSON context it exits 10
 	cmd.Flags().StringVar(&opts.DisplayName, "display-name", "", "New human-friendly name")
 	cmd.Flags().StringVar(&opts.Description, "description", "", "New description")
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "New model API base URL")
-	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Rotate the provider API key, read from stdin (kept out of argv / history)")
-	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Set an extra provider parameter as key=value, repeatable (value parsed as JSON)")
-	cmd.Flags().BoolVar(&opts.Default, "default", false, "Mark this the default model for its type (--default=false to unset)")
+	cmd.Flags().
+		BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Rotate the provider API key, read from stdin (kept out of argv / history)")
+	cmd.Flags().
+		StringArrayVar(&opts.Params, "param", nil, "Set an extra provider parameter as key=value, repeatable (value parsed as JSON)")
+	cmd.Flags().
+		BoolVar(&opts.Default, "default", false, "Mark this the default model for its type (--default=false to unset)")
 	cmdutil.AddFormatFlag(cmd, modelListFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetWriteRisk(cmd, "model.update")
@@ -129,7 +132,14 @@ func modelUpdateHasFlag(o *UpdateOptions) bool {
 		o.APIKeyStdin || len(o.Params) > 0
 }
 
-func runUpdate(ctx context.Context, opts *UpdateOptions, fopts *cmdutil.FormatOptions, svc UpdateService, id string, params map[string]any) error {
+func runUpdate(
+	ctx context.Context,
+	opts *UpdateOptions,
+	fopts *cmdutil.FormatOptions,
+	svc UpdateService,
+	id string,
+	params map[string]any,
+) error {
 	// Fetch-then-update: UpdateModel is a full PUT, so start from the server's
 	// current state and overlay only what the user changed.
 	cur, err := svc.GetModel(ctx, id)

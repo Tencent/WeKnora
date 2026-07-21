@@ -15,7 +15,11 @@ import (
 // plus a deliberately-insufficient TenantRole, then runs the guard. It asserts
 // the JWT guard short-circuits for API-key principals so that per-route
 // API-key authorization is left entirely to the APIKeyGate.
-func apiKeyRBACHarness(scope types.TenantAPIKeyScope, role types.TenantRole, mw gin.HandlerFunc) *httptest.ResponseRecorder {
+func apiKeyRBACHarness(
+	scope types.TenantAPIKeyScope,
+	role types.TenantRole,
+	mw gin.HandlerFunc,
+) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -123,8 +127,11 @@ func TestRequireRole_JWTViewerStillDenied(t *testing.T) {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
-	r.GET("/p", RequireRole(types.TenantRoleAdmin, &config.Config{Tenant: &config.TenantConfig{EnableRBAC: boolPtr(true)}}),
-		func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.GET(
+		"/p",
+		RequireRole(types.TenantRoleAdmin, &config.Config{Tenant: &config.TenantConfig{EnableRBAC: boolPtr(true)}}),
+		func(c *gin.Context) { c.Status(http.StatusOK) },
+	)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/p", nil))
 	if w.Code != http.StatusForbidden {

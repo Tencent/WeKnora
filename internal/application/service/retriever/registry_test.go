@@ -24,30 +24,62 @@ func (m *mockEngineService) Retrieve(_ context.Context, _ types.RetrieveParams) 
 	return nil, nil
 }
 func (m *mockEngineService) Support() []types.RetrieverType { return nil }
-func (m *mockEngineService) Index(_ context.Context, _ embedding.Embedder, _ *types.IndexInfo, _ []types.RetrieverType) error {
+
+func (m *mockEngineService) Index(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ *types.IndexInfo,
+	_ []types.RetrieverType,
+) error {
 	return nil
 }
-func (m *mockEngineService) BatchIndex(_ context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) error {
+
+func (m *mockEngineService) BatchIndex(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ []*types.IndexInfo,
+	_ []types.RetrieverType,
+) error {
 	return nil
 }
-func (m *mockEngineService) EstimateStorageSize(_ context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) int64 {
+
+func (m *mockEngineService) EstimateStorageSize(
+	_ context.Context,
+	_ embedding.Embedder,
+	_ []*types.IndexInfo,
+	_ []types.RetrieverType,
+) int64 {
 	return 0
 }
-func (m *mockEngineService) CopyIndices(_ context.Context, _ string, _ map[string]string, _ map[string]string, _ string, _ int, _ string) error {
+
+func (m *mockEngineService) CopyIndices(
+	_ context.Context,
+	_ string,
+	_ map[string]string,
+	_ map[string]string,
+	_ string,
+	_ int,
+	_ string,
+) error {
 	return nil
 }
+
 func (m *mockEngineService) DeleteByChunkIDList(_ context.Context, _ []string, _ int, _ string) error {
 	return nil
 }
+
 func (m *mockEngineService) DeleteBySourceIDList(_ context.Context, _ []string, _ int, _ string) error {
 	return nil
 }
+
 func (m *mockEngineService) DeleteByKnowledgeIDList(_ context.Context, _ []string, _ int, _ string) error {
 	return nil
 }
+
 func (m *mockEngineService) BatchUpdateChunkEnabledStatus(_ context.Context, _ map[string]bool) error {
 	return nil
 }
+
 func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[string]string) error {
 	return nil
 }
@@ -102,7 +134,7 @@ func TestRegistry_GetAllRetrieveEngineServices(t *testing.T) {
 
 	t.Run("returns copy - modifying result does not affect registry", func(t *testing.T) {
 		all := reg.GetAllRetrieveEngineServices()
-		all = append(all, newMock(types.QdrantRetrieverEngineType))
+		_ = append(all, newMock(types.QdrantRetrieverEngineType))
 		assert.Len(t, reg.GetAllRetrieveEngineServices(), 2)
 	})
 }
@@ -166,7 +198,7 @@ func TestRegistry_UnregisterByStoreID(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("idempotent on nonexistent store", func(t *testing.T) {
+	t.Run("idempotent on nonexistent store", func(_ *testing.T) {
 		reg.UnregisterByStoreID("nonexistent") // should not panic
 	})
 }
@@ -200,7 +232,7 @@ func TestRegistry_DualMapIsolation(t *testing.T) {
 
 // --- Concurrency test ---
 
-func TestRegistry_ConcurrentAccess(t *testing.T) {
+func TestRegistry_ConcurrentAccess(_ *testing.T) {
 	reg := NewRetrieveEngineRegistry().(*RetrieveEngineRegistry)
 	const goroutines = 10
 

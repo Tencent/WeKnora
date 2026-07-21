@@ -125,7 +125,7 @@ func (p *SearxngProvider) Search(
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -135,7 +135,10 @@ func (p *SearxngProvider) Search(
 	var data searxngResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		p.lastUnresponsive = nil
-		return nil, fmt.Errorf("failed to decode SearXNG response (ensure JSON format is enabled in settings.yml): %w", err)
+		return nil, fmt.Errorf(
+			"failed to decode SearXNG response (ensure JSON format is enabled in settings.yml): %w",
+			err,
+		)
 	}
 	p.lastUnresponsive = data.UnresponsiveEngines
 

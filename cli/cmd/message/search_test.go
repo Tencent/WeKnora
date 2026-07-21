@@ -20,7 +20,10 @@ type fakeSearchSvc struct {
 	gotReq *sdk.SearchMessagesRequest
 }
 
-func (s *fakeSearchSvc) SearchMessages(_ context.Context, req *sdk.SearchMessagesRequest) (*sdk.MessageSearchResult, error) {
+func (s *fakeSearchSvc) SearchMessages(
+	_ context.Context,
+	req *sdk.SearchMessagesRequest,
+) (*sdk.MessageSearchResult, error) {
 	s.gotReq = req
 	if s.err != nil {
 		return nil, s.err
@@ -67,7 +70,12 @@ func TestRunSearch_LimitOutOfRange_InvalidArgument(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runSearch(context.Background(), &SearchOptions{Query: "q", Limit: tc.limit}, jsonOpts(), &fakeSearchSvc{})
+			err := runSearch(
+				context.Background(),
+				&SearchOptions{Query: "q", Limit: tc.limit},
+				jsonOpts(),
+				&fakeSearchSvc{},
+			)
 			require.Error(t, err)
 			var cliErr *cmdutil.Error
 			require.True(t, errors.As(err, &cliErr), "expected *cmdutil.Error, got %T", err)
@@ -94,7 +102,10 @@ func TestRunSearch_InvalidMode_InvalidArgument(t *testing.T) {
 func TestRunSearch_ModeNormalized(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeSearchSvc{result: &sdk.MessageSearchResult{}}
-	require.NoError(t, runSearch(context.Background(), &SearchOptions{Query: "q", Limit: 20, Mode: "Hybrid"}, jsonOpts(), svc))
+	require.NoError(
+		t,
+		runSearch(context.Background(), &SearchOptions{Query: "q", Limit: 20, Mode: "Hybrid"}, jsonOpts(), svc),
+	)
 	assert.Equal(t, "hybrid", svc.gotReq.Mode)
 }
 
