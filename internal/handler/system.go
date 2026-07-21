@@ -150,8 +150,8 @@ func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		value := time.Unix(*req.ExpiresAt, 0)
-		if !value.After(time.Now()) {
+		value := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !value.After(time.Now().UTC()) {
 			c.Error(apperrors.NewValidationError("expires_at_unix must be in the future"))
 			return
 		}

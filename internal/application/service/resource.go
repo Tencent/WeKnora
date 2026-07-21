@@ -169,7 +169,7 @@ func (s *resourceCatalog) CreateAccessGrant(ctx context.Context, reference strin
 	}
 	// Opportunistic cleanup keeps high-volume IM rendering from accumulating
 	// expired capability rows; failure is non-fatal to the current grant.
-	_ = s.repo.DeleteExpiredGrants(ctx, time.Now())
+	_ = s.repo.DeleteExpiredGrants(ctx, time.Now().UTC())
 	for attempt := 0; attempt < 4; attempt++ {
 		token, tokenErr := randomResourceToken()
 		if tokenErr != nil {
@@ -179,7 +179,7 @@ func (s *resourceCatalog) CreateAccessGrant(ctx context.Context, reference strin
 			TokenHash:   resourceLocationHash(token),
 			ResourceID:  resource.ID,
 			AccessScope: "read",
-			ExpiresAt:   time.Now().Add(ttl),
+			ExpiresAt:   time.Now().UTC().Add(ttl),
 		}
 		if err := s.repo.CreateGrant(ctx, grant); err == nil {
 			return token, nil
@@ -191,7 +191,7 @@ func (s *resourceCatalog) CreateAccessGrant(ctx context.Context, reference strin
 }
 
 func (s *resourceCatalog) ResolveAccessGrant(ctx context.Context, token string) (*types.StoredResource, error) {
-	grant, err := s.repo.GetValidGrant(ctx, resourceLocationHash(strings.TrimSpace(token)), time.Now())
+	grant, err := s.repo.GetValidGrant(ctx, resourceLocationHash(strings.TrimSpace(token)), time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}

@@ -260,3 +260,22 @@ func TestTenantAPIKeyServiceAuthenticateThrottlesLastUsedUpdates(t *testing.T) {
 		t.Fatalf("last_used update count = %d, want 1 (throttled async write)", repo.lastUsedUpdateCount)
 	}
 }
+
+func TestTenantAPIKeyServiceAuthenticateRejectsExpiredKey(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+
+	expired := time.Now().UTC().Add(-time.Minute)
+	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID:  42,
+		Name:      "short-lived",
+		ExpiresAt: &expired,
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+	if _, err := svc.AuthenticateAPIKey(ctx, created.Token); err == nil {
+		t.Fatal("expired key should not authenticate")
+	}
+}

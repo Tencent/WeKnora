@@ -53,6 +53,11 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 	if err != nil {
 		return nil, err
 	}
+	expiresAt := req.ExpiresAt
+	if expiresAt != nil {
+		utc := expiresAt.UTC()
+		expiresAt = &utc
+	}
 	var tenantID *uint64
 	if scopeType == types.APIKeyScopeTenant {
 		tenantID = &req.TenantID
@@ -66,7 +71,7 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		FullAccess:       req.FullAccess,
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		Capabilities:     capabilities,
-		ExpiresAt:        req.ExpiresAt,
+		ExpiresAt:        expiresAt,
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
@@ -90,7 +95,7 @@ func (s *tenantAPIKeyService) AuthenticateAPIKey(ctx context.Context, token stri
 	if key.RevokedAt != nil {
 		return nil, apprepo.ErrTenantAPIKeyNotFound
 	}
-	if key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
+	if key.ExpiresAt != nil && time.Now().UTC().After(key.ExpiresAt.UTC()) {
 		return nil, apprepo.ErrTenantAPIKeyNotFound
 	}
 	s.touchAPIKeyLastUsedAsync(key.ID)
@@ -101,7 +106,7 @@ func (s *tenantAPIKeyService) AuthenticateAPIKey(ctx context.Context, token stri
 // apiKeyLastUsedMinInterval. The write runs in a detached goroutine so auth
 // latency is not tied to an UPDATE on the hot path.
 func (s *tenantAPIKeyService) touchAPIKeyLastUsedAsync(keyID uint64) {
-	now := time.Now()
+	now := time.Now().UTC()
 	if v, ok := s.lastUsedTouch.Load(keyID); ok {
 		if now.Sub(v.(time.Time)) < apiKeyLastUsedMinInterval {
 			return
