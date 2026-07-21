@@ -46,9 +46,7 @@
             :columns="auditColumns"
             size="medium"
             hover
-            expand-on-row-click
-            :expanded-row-keys="auditExpandedRowKeys"
-            @expand-change="onAuditExpandChange"
+            @row-click="openAuditDetail"
           >
             <template #created_at="{ row }">
               <div class="audit-time">
@@ -84,32 +82,6 @@
                 {{ t('system.globalSettings.audit.outcome.' + row.outcome) }}
               </t-tag>
             </template>
-            <template #expandedRow="{ row }">
-              <div class="audit-expanded">
-                <div class="audit-expanded-grid">
-                  <div class="audit-expanded-cell">
-                    <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.actorId') }}</span>
-                    <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
-                  </div>
-                  <div v-if="row.target_user_id" class="audit-expanded-cell">
-                    <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetUserId') }}</span>
-                    <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
-                  </div>
-                  <div v-if="row.target_type" class="audit-expanded-cell">
-                    <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetType') }}</span>
-                    <span class="audit-expanded-value mono">{{ row.target_type }}</span>
-                  </div>
-                  <div v-if="row.target_id" class="audit-expanded-cell">
-                    <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetId') }}</span>
-                    <span class="audit-expanded-value mono">{{ row.target_id }}</span>
-                  </div>
-                </div>
-                <div class="audit-expanded-details">
-                  <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.details') }}</span>
-                  <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
-                </div>
-              </div>
-            </template>
           </t-table>
         </div>
 
@@ -125,6 +97,76 @@
         </p>
       </div>
     </div>
+
+    <SettingDrawer
+      v-model:visible="auditDetailVisible"
+      class="audit-detail-drawer"
+      :title="auditDetailTitle"
+      :description="auditDetailDescription"
+      icon="file-paste"
+      width="640px"
+      :min-width="480"
+      :max-width="960"
+      storage-key="setting-drawer:width:system-audit-detail"
+      hide-footer
+    >
+      <template v-if="selectedAuditEntry">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">
+            {{ t('system.globalSettings.audit.drawer.sectionSummary') }}
+          </h4>
+          <dl class="audit-detail-fields">
+            <div
+              v-for="field in auditSummaryFields(selectedAuditEntry)"
+              :key="field.key"
+              class="audit-detail-field"
+            >
+              <dt>{{ field.label }}</dt>
+              <dd :title="field.value">{{ field.value }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section v-if="auditIdentifierFields(selectedAuditEntry).length > 0" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">
+            {{ t('system.globalSettings.audit.drawer.sectionIdentifiers') }}
+          </h4>
+          <dl class="audit-detail-fields">
+            <div
+              v-for="field in auditIdentifierFields(selectedAuditEntry)"
+              :key="field.key"
+              class="audit-detail-field"
+            >
+              <dt>{{ field.label }}</dt>
+              <dd class="mono" :title="field.value">{{ field.value }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section v-if="auditRequestFields(selectedAuditEntry).length > 0" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">
+            {{ t('system.globalSettings.audit.drawer.sectionRequest') }}
+          </h4>
+          <dl class="audit-detail-fields">
+            <div
+              v-for="field in auditRequestFields(selectedAuditEntry)"
+              :key="field.key"
+              class="audit-detail-field"
+            >
+              <dt>{{ field.label }}</dt>
+              <dd class="mono" :title="field.value">{{ field.value }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">
+            {{ t('system.globalSettings.audit.expanded.details') }}
+          </h4>
+          <pre class="audit-detail-json mono">{{ auditDetailsJSON(selectedAuditEntry) }}</pre>
+        </section>
+      </template>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -137,7 +179,14 @@ import {
   type AuditLog,
   type AuditOutcome,
 } from '@/api/system'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
+
+interface AuditDetailField {
+  key: string
+  label: string
+  value: string
+}
 
 const authStore = useAuthStore()
 const { t, tm, te, locale } = useI18n()
@@ -152,6 +201,9 @@ const AUDIT_PAGE_SIZE = 50
 const auditScrollRoot = ref<HTMLElement | null>(null)
 const auditLoadSentinelEl = ref<HTMLElement | null>(null)
 let auditScrollObserver: IntersectionObserver | null = null
+
+const auditDetailVisible = ref(false)
+const selectedAuditEntry = ref<AuditLog | null>(null)
 
 const auditColumns = computed(() => [
   { colKey: 'created_at', title: t('system.globalSettings.audit.columns.time'), width: 120 },
@@ -343,12 +395,129 @@ function formatSettingDiff(details: Record<string, unknown>): string {
   return `${oldStr} → ${newStr}`
 }
 
-const auditExpandedRowKeys = ref<number[]>([])
+function formatAuditDateTime(s: string | undefined): string {
+  if (!s) return '—'
+  const date = formatAuditDatePart(s)
+  const time = formatAuditTimePart(s)
+  return time ? `${date} ${time}` : date
+}
 
-function onAuditExpandChange(value: (string | number)[]) {
-  auditExpandedRowKeys.value = value
-    .map((v) => (typeof v === 'number' ? v : Number(v)))
-    .filter((v) => Number.isFinite(v))
+function auditActorDisplay(row: AuditLog): string {
+  if (!row.actor_user_id) {
+    return t('system.globalSettings.audit.systemActor')
+  }
+  const name = auditActorLabel(row.actor_user_id)
+  return row.actor_role ? `${name} (${auditActorRoleLabel(row.actor_role)})` : name
+}
+
+function auditSummaryFields(row: AuditLog): AuditDetailField[] {
+  const fields: AuditDetailField[] = [
+    {
+      key: 'time',
+      label: t('system.globalSettings.audit.columns.time'),
+      value: formatAuditDateTime(row.created_at),
+    },
+    {
+      key: 'actor',
+      label: t('system.globalSettings.audit.columns.actor'),
+      value: auditActorDisplay(row),
+    },
+    {
+      key: 'action',
+      label: t('system.globalSettings.audit.columns.action'),
+      value: formatAuditAction(row.action),
+    },
+    {
+      key: 'outcome',
+      label: t('system.globalSettings.audit.columns.outcome'),
+      value: t('system.globalSettings.audit.outcome.' + row.outcome),
+    },
+  ]
+
+  const targetKey = auditTargetKey(row)
+  if (targetKey) {
+    fields.push({
+      key: 'target',
+      label: t('system.globalSettings.audit.columns.target'),
+      value: targetKey,
+    })
+  }
+
+  const diff = auditTargetDiff(row)
+  if (diff) {
+    fields.push({
+      key: 'targetDiff',
+      label: t('system.globalSettings.audit.drawer.targetChange'),
+      value: diff,
+    })
+  }
+
+  return fields
+}
+
+function auditIdentifierFields(row: AuditLog): AuditDetailField[] {
+  const fields: AuditDetailField[] = []
+  if (row.actor_user_id) {
+    fields.push({
+      key: 'actorId',
+      label: t('system.globalSettings.audit.expanded.actorId'),
+      value: row.actor_user_id,
+    })
+  }
+  if (row.target_user_id) {
+    fields.push({
+      key: 'targetUserId',
+      label: t('system.globalSettings.audit.expanded.targetUserId'),
+      value: row.target_user_id,
+    })
+  }
+  if (row.target_type) {
+    fields.push({
+      key: 'targetType',
+      label: t('system.globalSettings.audit.expanded.targetType'),
+      value: row.target_type,
+    })
+  }
+  if (row.target_id) {
+    fields.push({
+      key: 'targetId',
+      label: t('system.globalSettings.audit.expanded.targetId'),
+      value: row.target_id,
+    })
+  }
+  return fields
+}
+
+function auditRequestFields(row: AuditLog): AuditDetailField[] {
+  const fields: AuditDetailField[] = []
+  if (row.request_method) {
+    fields.push({
+      key: 'method',
+      label: t('system.globalSettings.audit.drawer.requestMethod'),
+      value: row.request_method,
+    })
+  }
+  if (row.request_path) {
+    fields.push({
+      key: 'path',
+      label: t('system.globalSettings.audit.columns.path'),
+      value: row.request_path,
+    })
+  }
+  return fields
+}
+
+const auditDetailTitle = computed(() =>
+  selectedAuditEntry.value ? formatAuditAction(selectedAuditEntry.value.action) : '',
+)
+
+const auditDetailDescription = computed(() =>
+  selectedAuditEntry.value ? formatAuditDateTime(selectedAuditEntry.value.created_at) : '',
+)
+
+function openAuditDetail(context: { row: AuditLog }) {
+  selectedAuditEntry.value = context.row
+  auditDetailVisible.value = true
 }
 
 function auditDetailsJSON(row: AuditLog): string {
@@ -651,59 +820,49 @@ onUnmounted(() => {
   }
 }
 
-.audit-expanded {
+.audit-detail-fields {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--td-bg-color-container-hover);
-}
-
-.audit-expanded-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px 18px;
-}
-
-.audit-expanded-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.audit-expanded-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--td-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.audit-expanded-value {
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-  word-break: break-all;
-}
-
-.audit-expanded-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.audit-expanded-json {
+  gap: 10px;
   margin: 0;
-  padding: 10px 12px;
+}
+
+.audit-detail-field {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  margin: 0;
+
+  dt {
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: nowrap;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    line-height: 1.55;
+    word-break: break-all;
+  }
+}
+
+.audit-detail-json {
+  margin: 0;
+  padding: 12px 14px;
   font-size: 12px;
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: 8px;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 280px;
+  max-height: min(420px, 50vh);
   overflow: auto;
 }
 
@@ -739,17 +898,12 @@ onUnmounted(() => {
     box-shadow: inset 0 -1px 0 var(--td-component-stroke);
   }
 
+  &:deep(.t-table tbody tr) {
+    cursor: pointer;
+  }
+
   &:deep(.t-table tbody tr:hover > td) {
     background-color: var(--td-bg-color-container-hover);
-  }
-
-  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
-    padding: 0 !important;
-    background-color: transparent;
-  }
-
-  &:deep(.t-table__expandable-icon-cell) {
-    width: 36px;
   }
 }
 </style>

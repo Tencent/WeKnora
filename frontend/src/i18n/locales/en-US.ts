@@ -4045,6 +4045,13 @@ export default {
           targetId: 'Target ID',
           details: 'Raw details',
         },
+        drawer: {
+          sectionSummary: 'Event summary',
+          sectionIdentifiers: 'Related IDs',
+          sectionRequest: 'Request',
+          targetChange: 'Change',
+          requestMethod: 'Method',
+        },
       },
     }
   },

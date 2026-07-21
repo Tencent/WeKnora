@@ -49,29 +49,17 @@
     </div>
 
     <template v-else>
-      <div class="auto-save-note">
-        <t-icon name="check-circle" />
-        <span>{{ t('system.globalSettings.autoSaveHint') }}</span>
-      </div>
-
-      <!-- Resolver details matter, but are secondary to finding the setting
-           itself. Keep them one click away instead of occupying the first
-           viewport on every visit. Native details/summary also gives us a
-           keyboard-accessible disclosure without extra state. -->
-      <details class="config-source-details">
-        <summary>
-          <span class="config-source-summary">
-            <t-icon name="info-circle" />
-            {{ t('system.globalSettings.priorityHint.disclosure') }}
-          </span>
-          <t-icon name="chevron-down" class="config-source-chevron" />
-        </summary>
+      <div class="settings-intro-panel">
+        <div class="priority-hint-title">
+          <t-icon name="info-circle" />
+          <span>{{ t('system.globalSettings.priorityHint.disclosure') }}</span>
+        </div>
         <ul class="priority-hint-list">
           <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
           <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
           <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
         </ul>
-      </details>
+      </div>
 
       <t-tabs v-model="activeSettingsSection" class="settings-section-tabs">
         <t-tab-panel value="access" :label="sectionTabLabel('access')" />
@@ -86,7 +74,10 @@
       </t-tabs>
 
       <section class="settings-section-panel" :aria-labelledby="`settings-section-${activeSettingsSection}`">
-        <div class="settings-section-intro">
+        <div
+          class="settings-section-intro"
+          :class="{ 'settings-section-intro--runtime': activeSettingsSection === 'runtime' }"
+        >
           <div>
             <h3 :id="`settings-section-${activeSettingsSection}`">{{ activeSectionTitle }}</h3>
             <p>{{ activeSectionDescription }}</p>
@@ -1322,70 +1313,39 @@ onUnmounted(() => {
 }
 
 
-.auto-save-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-
-  .t-icon {
-    color: var(--td-success-color);
-  }
-}
-
-.config-source-details {
+.settings-intro-panel {
   margin-bottom: 18px;
+  padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
-  background: var(--td-bg-color-container);
-
-  summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 38px;
-    padding: 0 12px;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    list-style: none;
-
-    &::-webkit-details-marker {
-      display: none;
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color-focus);
-      outline-offset: 2px;
-    }
-  }
-
-  &[open] {
-    background: var(--td-bg-color-secondarycontainer);
-
-    .config-source-chevron {
-      transform: rotate(180deg);
-    }
-  }
+  background: var(--td-bg-color-secondarycontainer);
 }
 
-.config-source-summary {
-  display: inline-flex;
+.priority-hint-title {
+  display: flex;
   align-items: center;
   gap: 7px;
+  margin-bottom: 8px;
+  font-size: 13px;
   font-weight: 500;
+  color: var(--td-text-color-secondary);
 
   .t-icon {
     color: var(--td-brand-color);
   }
 }
 
-.config-source-chevron {
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+.priority-hint-list {
+  margin: 0;
+  padding: 0 0 0 20px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--td-text-color-primary);
+  list-style: disc;
+
+  li + li {
+    margin-top: 4px;
+  }
 }
 
 .settings-section-tabs {
@@ -1426,6 +1386,10 @@ onUnmounted(() => {
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
+}
+
+.settings-section-intro--runtime {
+  border-bottom: none;
 }
 
 .runtime-table-header {
@@ -1478,19 +1442,6 @@ onUnmounted(() => {
 
   .setting-input {
     width: 210px;
-  }
-}
-
-.priority-hint-list {
-  margin: 0;
-  padding: 0 36px 12px 34px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--td-text-color-primary);
-  list-style: disc;
-
-  li + li {
-    margin-top: 4px;
   }
 }
 

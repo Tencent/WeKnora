@@ -2729,6 +2729,13 @@ export default {
           targetType: 'Тип цели',
           targetId: 'ID цели',
           details: 'Сырые детали'
+        },
+        drawer: {
+          sectionSummary: 'Сводка события',
+          sectionIdentifiers: 'Связанные идентификаторы',
+          sectionRequest: 'Запрос',
+          targetChange: 'Изменение',
+          requestMethod: 'Метод'
         }
       }
     }

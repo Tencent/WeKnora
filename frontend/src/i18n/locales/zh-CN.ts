@@ -3054,6 +3054,13 @@ export default {
           targetId: "目标 ID",
           details: "原始详情",
         },
+        drawer: {
+          sectionSummary: "事件概要",
+          sectionIdentifiers: "关联标识",
+          sectionRequest: "请求信息",
+          targetChange: "变更内容",
+          requestMethod: "请求方法",
+        },
       },
     },
   },

@@ -3042,6 +3042,13 @@ export default {
           targetId: "대상 ID",
           details: "원본 상세",
         },
+        drawer: {
+          sectionSummary: "이벤트 요약",
+          sectionIdentifiers: "관련 식별자",
+          sectionRequest: "요청 정보",
+          targetChange: "변경 내용",
+          requestMethod: "요청 메서드",
+        },
       },
     },
   },
