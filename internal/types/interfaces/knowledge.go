@@ -232,7 +232,9 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
-	// AminusB returns the difference set of A and B.
+	// AminusB returns the IDs of knowledge in A that have no counterpart in B,
+	// comparing file_hash as a multiset (so duplicate-count differences and
+	// NULL/empty hashes are handled correctly, letting a clone converge).
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
 	// UpdateKnowledgeColumns updates multiple columns of a knowledge row in a single
