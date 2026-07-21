@@ -34,8 +34,16 @@ func NewTenantAPIKeyService(repo interfaces.TenantAPIKeyRepository) interfaces.T
 func (s *tenantAPIKeyService) CreateAPIKey(
 	ctx context.Context, req interfaces.TenantAPIKeyCreateRequest,
 ) (*interfaces.TenantAPIKeyCreateResult, error) {
-	if req.TenantID == 0 {
+	scopeType := types.NormalizeAPIKeyScopeType(req.ScopeType)
+	if scopeType == types.APIKeyScopeTenant && req.TenantID == 0 {
 		return nil, errors.New("tenant_id is required")
+	}
+	if scopeType == types.APIKeyScopePlatform && req.FullAccess {
+		return nil, errors.New("platform API keys require explicit capabilities")
+	}
+	capabilities := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if scopeType == types.APIKeyScopePlatform && len(capabilities) == 0 {
+		return nil, errors.New("platform API keys require at least one capability")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -45,14 +53,19 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 	if err != nil {
 		return nil, err
 	}
+	var tenantID *uint64
+	if scopeType == types.APIKeyScopeTenant {
+		tenantID = &req.TenantID
+	}
 	key := &types.TenantAPIKey{
-		TenantID:         req.TenantID,
+		TenantID:         tenantID,
+		ScopeType:        scopeType,
 		Name:             name,
 		KeyHash:          hashTenantAPIKey(token),
 		APIKey:           token,
 		FullAccess:       req.FullAccess,
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
-		Capabilities:     types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities)),
+		Capabilities:     capabilities,
 		ExpiresAt:        req.ExpiresAt,
 	}
 	if key.FullAccess {
@@ -108,8 +121,16 @@ func (s *tenantAPIKeyService) ListAPIKeys(ctx context.Context, tenantID uint64) 
 	return s.repo.ListAPIKeys(ctx, tenantID)
 }
 
+func (s *tenantAPIKeyService) ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error) {
+	return s.repo.ListPlatformAPIKeys(ctx)
+}
+
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	return s.repo.RevokeAPIKey(ctx, tenantID, id)
+}
+
+func (s *tenantAPIKeyService) RevokePlatformAPIKey(ctx context.Context, id uint64) error {
+	return s.repo.RevokePlatformAPIKey(ctx, id)
 }
 
 func (s *tenantAPIKeyService) BackfillMissingKeyHashes(ctx context.Context) (int, error) {

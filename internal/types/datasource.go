@@ -358,11 +358,58 @@ type SyncResult struct {
 	// Items that failed
 	Failed int `json:"failed"`
 
-	// Detailed error messages
-	Errors []string `json:"errors,omitempty"`
+	// Per-item failure samples (capped), shown in the sync-log UI.
+	Errors []SyncItemError `json:"errors,omitempty"`
 
 	// Updated cursor for next incremental sync
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
+}
+
+// SyncItemError is one user-facing failure sample. It carries a stable i18n
+// Code (+ interpolation Params) so the frontend localises it to the viewer's
+// language, plus a Message fallback for clients without the key. The raw API
+// status/body/log_id is never stored here — that stays in the server logs.
+type SyncItemError struct {
+	// Title is the document title (user content, not translated).
+	Title string `json:"title,omitempty"`
+	// Code is a stable key the frontend maps to a localized string, e.g.
+	// "feishu_rate_limited" → datasource.syncError.feishu_rate_limited.
+	Code string `json:"code,omitempty"`
+	// Params are interpolation values for the localized string, e.g. {"code":"1663"}.
+	Params map[string]string `json:"params,omitempty"`
+	// Message is a human fallback used when the client has no i18n key for Code.
+	Message string `json:"message,omitempty"`
+}
+
+// Display renders the sample as a single plain string for server-side use
+// (logs, fatal-error detail). The localised UI string is built on the frontend
+// from Code/Params; this is only a non-localised fallback.
+func (e SyncItemError) Display() string {
+	switch {
+	case e.Title != "" && e.Message != "":
+		return e.Title + ": " + e.Message
+	case e.Message != "":
+		return e.Message
+	default:
+		return e.Title
+	}
+}
+
+// UnmarshalJSON keeps old sync logs readable: historically each error was a
+// plain JSON string, so a bare string decodes into Message.
+func (e *SyncItemError) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		e.Message = s
+		return nil
+	}
+	type alias SyncItemError
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*e = SyncItemError(a)
+	return nil
 }
 
 // DataSourceSyncPayload represents the asynq task payload for data source sync

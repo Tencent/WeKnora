@@ -10098,7 +10098,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "来源过滤：web / feishu / wechat / slack / ...",
+                        "description": "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）",
                         "name": "source",
                         "in": "query"
                     },
@@ -11540,6 +11540,105 @@ const docTemplate = `{
                         "description": "Storage backend not found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/api-keys": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List platform API keys",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Creates a capability-scoped key that may target any workspace through X-Tenant-ID. The plaintext token is returned once. Human SystemAdmin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Create a platform API key",
+                "parameters": [
+                    {
+                        "description": "Platform API key",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.platformAPIKeyCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/api-keys/{key_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Immediately revokes a platform API key. Human SystemAdmin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Revoke a platform API key",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "API key ID",
+                        "name": "key_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -14745,6 +14844,8 @@ const docTemplate = `{
                 "system.admin_promoted",
                 "system.admin_revoked",
                 "system.user_password_reset",
+                "system.api_key_created",
+                "system.api_key_revoked",
                 "system.queue_task_retried",
                 "system.queue_task_deleted",
                 "system.queue_task_run_now",
@@ -14771,6 +14872,8 @@ const docTemplate = `{
                 "AuditActionSystemAdminPromoted",
                 "AuditActionSystemAdminRevoked",
                 "AuditActionSystemUserPasswordReset",
+                "AuditActionSystemAPIKeyCreated",
+                "AuditActionSystemAPIKeyRevoked",
                 "AuditActionSystemQueueTaskRetried",
                 "AuditActionSystemQueueTaskDeleted",
                 "AuditActionSystemQueueTaskRunNow",
@@ -18297,6 +18400,10 @@ const docTemplate = `{
                     "description": "ID",
                     "type": "string"
                 },
+                "im_platform": {
+                    "description": "IMPlatform is the originating IM platform (e.g. \"feishu\", \"wecom\") when\nthis session is bound to an IM channel. It is not stored on the sessions\ntable (it lives in im_channel_sessions) and is populated on read so the\nWeb console can classify a session's origin folder without a list query.",
+                    "type": "string"
+                },
                 "is_pinned": {
                     "description": "IsPinned indicates whether the session is pinned in the list.",
                     "type": "boolean"
@@ -21473,6 +21580,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.platformAPIKeyCreateRequest": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "expires_at_unix": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.registerByInviteRequest": {
             "type": "object",
             "required": [
@@ -21835,7 +21959,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "ApiKeyAuth": {
-            "description": "空间身份认证：输入 sk- 开头的 API Key",
+            "description": "API Key 认证：空间 Key 固定访问所属空间；平台 Key 调用空间接口时需同时传 X-Tenant-ID",
             "type": "apiKey",
             "name": "X-API-Key",
             "in": "header"

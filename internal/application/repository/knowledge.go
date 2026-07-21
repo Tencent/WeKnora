@@ -286,23 +286,84 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	return false, nil, nil
 }
 
+// AminusB returns the IDs of knowledge in A that have no counterpart in B,
+// comparing by file_hash as a MULTISET rather than a plain set.
+//
+// A plain "file_hash NOT IN (SELECT file_hash FROM B)" only asks whether a
+// hash exists in B at all, so once a KB accumulates several rows sharing the
+// same file_hash (e.g. the same file ingested multiple times), the diff can
+// never reconcile the *count* difference: two KBs with identical distinct-hash
+// sets but different row counts produce an empty diff in both directions, and
+// a clone target can never converge to the source. This also breaks on MySQL
+// when B contains a NULL file_hash, because NOT IN then yields no rows at all.
+//
+// The multiset diff is computed in Go rather than SQL: we only pull
+// (id, file_hash) for A plus per-hash counts for B, then keep A's surplus
+// copies. This avoids window functions (unsupported on MySQL 5.7 / MariaDB)
+// and the O(n^2) correlated-subquery ranking that would otherwise be needed
+// there. Clone is a background job over at most a few thousand rows, so the
+// two lightweight two-column reads are cheap.
+//
+// Rows with a NULL/empty file_hash carry no reliable identity (unparsed /
+// passage knowledge), so they are always treated as present-only-in-A to
+// avoid collapsing distinct rows into one.
 func (r *knowledgeRepository) AminusB(
 	ctx context.Context,
 	Atenant uint64, A string,
 	Btenant uint64, B string,
 ) ([]string, error) {
-	knowledgeIDs := []string{}
-	subQuery := r.db.Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", Btenant, B).Select("file_hash")
-	err := r.db.Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", Atenant, A).
-		Where("file_hash NOT IN (?)", subQuery).
-		Pluck("id", &knowledgeIDs).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return knowledgeIDs, nil
+	type hashRow struct {
+		ID       string
+		FileHash string
 	}
-	return knowledgeIDs, err
+	// Order so the retained (matched) copies are the earliest ones and the
+	// surplus we return is deterministic across runs.
+	var aRows []hashRow
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("id, file_hash").
+		Where("tenant_id = ? AND knowledge_base_id = ?", Atenant, A).
+		Order("file_hash, created_at, id").
+		Find(&aRows).Error; err != nil {
+		return nil, err
+	}
+
+	type hashCount struct {
+		FileHash string
+		Cnt      int
+	}
+	var bCounts []hashCount
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("file_hash, COUNT(*) AS cnt").
+		Where("tenant_id = ? AND knowledge_base_id = ?", Btenant, B).
+		Group("file_hash").
+		Find(&bCounts).Error; err != nil {
+		return nil, err
+	}
+
+	// remaining[h] is how many copies of hash h in B are still unmatched.
+	remaining := make(map[string]int, len(bCounts))
+	for _, c := range bCounts {
+		if c.FileHash != "" {
+			remaining[c.FileHash] = c.Cnt
+		}
+	}
+
+	knowledgeIDs := make([]string, 0)
+	for _, row := range aRows {
+		// NULL scans into "" here, so this also covers NULL hashes.
+		if row.FileHash == "" {
+			knowledgeIDs = append(knowledgeIDs, row.ID)
+			continue
+		}
+		if remaining[row.FileHash] > 0 {
+			remaining[row.FileHash]-- // matched by an existing copy in B
+			continue
+		}
+		knowledgeIDs = append(knowledgeIDs, row.ID) // surplus copy in A
+	}
+	return knowledgeIDs, nil
 }
 
 func (r *knowledgeRepository) UpdateKnowledgeColumn(

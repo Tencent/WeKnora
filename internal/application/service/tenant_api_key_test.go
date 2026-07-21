@@ -66,7 +66,18 @@ func (r *fakeTenantAPIKeyRepo) GetAPIKeyByHash(_ context.Context, hash string) (
 func (r *fakeTenantAPIKeyRepo) ListAPIKeys(_ context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
 	out := []*types.TenantAPIKey{}
 	for _, key := range r.byHash {
-		if key.TenantID == tenantID && key.RevokedAt == nil {
+		if key.TenantIDValue() == tenantID && key.RevokedAt == nil {
+			cp := *key
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeTenantAPIKeyRepo) ListPlatformAPIKeys(_ context.Context) ([]*types.TenantAPIKey, error) {
+	out := []*types.TenantAPIKey{}
+	for _, key := range r.byHash {
+		if key.IsPlatform() && key.RevokedAt == nil {
 			cp := *key
 			out = append(out, &cp)
 		}
@@ -77,7 +88,18 @@ func (r *fakeTenantAPIKeyRepo) ListAPIKeys(_ context.Context, tenantID uint64) (
 func (r *fakeTenantAPIKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, id uint64) error {
 	now := time.Now()
 	for _, key := range r.byHash {
-		if key.ID == id && key.TenantID == tenantID && key.RevokedAt == nil {
+		if key.ID == id && key.TenantIDValue() == tenantID && key.RevokedAt == nil {
+			key.RevokedAt = &now
+			return nil
+		}
+	}
+	return apprepo.ErrTenantAPIKeyNotFound
+}
+
+func (r *fakeTenantAPIKeyRepo) RevokePlatformAPIKey(_ context.Context, id uint64) error {
+	now := time.Now()
+	for _, key := range r.byHash {
+		if key.ID == id && key.IsPlatform() && key.RevokedAt == nil {
 			key.RevokedAt = &now
 			return nil
 		}
@@ -134,7 +156,7 @@ func TestTenantAPIKeyServiceBackfillMissingKeyHashes(t *testing.T) {
 
 	token := "sk-legacy-token-value"
 	legacy := &types.TenantAPIKey{
-		TenantID:   7,
+		TenantID:   uint64Pointer(7),
 		Name:       "legacy",
 		KeyHash:    "migrated-tenant-7",
 		APIKey:     token,
@@ -156,6 +178,38 @@ func TestTenantAPIKeyServiceBackfillMissingKeyHashes(t *testing.T) {
 	}
 	if n, err := svc.BackfillMissingKeyHashes(ctx); err != nil || n != 0 {
 		t.Fatalf("second BackfillMissingKeyHashes = (%d, %v), want (0, nil)", n, err)
+	}
+}
+
+func uint64Pointer(value uint64) *uint64 { return &value }
+
+func TestTenantAPIKeyServiceCreatesPlatformKeyWithoutTenant(t *testing.T) {
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+	created, err := svc.CreateAPIKey(context.Background(), interfaces.TenantAPIKeyCreateRequest{
+		ScopeType:    types.APIKeyScopePlatform,
+		Name:         "automation",
+		Capabilities: []string{string(types.APIKeyCapabilityRetrieve)},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+	if !created.APIKey.IsPlatform() || created.APIKey.TenantID != nil {
+		t.Fatalf("created key scope = %q tenant=%v, want platform with nil tenant", created.APIKey.ScopeType, created.APIKey.TenantID)
+	}
+	if created.APIKey.FullAccess {
+		t.Fatal("platform API key must not be full-access")
+	}
+}
+
+func TestTenantAPIKeyServiceRejectsFullAccessPlatformKey(t *testing.T) {
+	svc := NewTenantAPIKeyService(newFakeTenantAPIKeyRepo())
+	_, err := svc.CreateAPIKey(context.Background(), interfaces.TenantAPIKeyCreateRequest{
+		ScopeType: types.APIKeyScopePlatform,
+		Name:      "unsafe", FullAccess: true,
+	})
+	if err == nil {
+		t.Fatal("full-access platform key should be rejected")
 	}
 }
 

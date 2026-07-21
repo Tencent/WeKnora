@@ -148,9 +148,14 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		// API-key principals must never reach system-admin routes, even if a
-		// future route registration mistakenly declares an apiKey* policy.
-		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		// The API-key gate runs before this guard and default-denies undeclared
+		// routes. Only platform keys that passed an explicit platform capability
+		// policy may reuse the system-admin handlers below.
+		if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			if scope.IsPlatform() {
+				c.Next()
+				return
+			}
 			logger.Warnf(ctx,
 				"[rbac] system admin required: API-key principal denied path=%s",
 				c.Request.URL.Path)

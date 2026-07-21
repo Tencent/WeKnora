@@ -15,16 +15,19 @@
             :aria-label="t('system.globalSettings.runtime.autoRefresh')"
           />
         </label>
-        <t-button
-          variant="outline"
-          size="small"
-          :loading="loading"
+        <button
+          type="button"
+          class="rq-refresh"
           :disabled="loading"
+          :title="t('system.globalSettings.runtime.refresh')"
+          :aria-label="t('system.globalSettings.runtime.refresh')"
           @click="reload"
         >
-          <template #icon><t-icon name="refresh" /></template>
-          {{ t('system.globalSettings.runtime.refresh') }}
-        </t-button>
+          <t-icon
+            :name="loading ? 'loading' : 'refresh'"
+            :class="{ 'rq-refresh-spin': loading }"
+          />
+        </button>
       </div>
     </header>
 
@@ -961,7 +964,7 @@ onUnmounted(() => {
   h2 {
     margin: 0 0 8px;
     color: var(--td-text-color-primary);
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
     line-height: 1.3;
     letter-spacing: -0.01em;
@@ -982,6 +985,54 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.rq-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  :deep(.t-icon) {
+    font-size: 12px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
+.rq-refresh-spin {
+  animation: rq-refresh-rotate 0.8s linear infinite;
+}
+
+@keyframes rq-refresh-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .rq-auto-refresh {

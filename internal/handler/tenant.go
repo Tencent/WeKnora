@@ -144,15 +144,16 @@ type tenantAPIKeyCreateRequest struct {
 }
 
 type tenantAPIKeyResponse struct {
-	ID               uint64            `json:"id"`
-	Name             string            `json:"name"`
-	APIKey           string            `json:"api_key"`
-	FullAccess       bool              `json:"full_access"`
-	KnowledgeBaseIDs types.StringArray `json:"knowledge_base_ids"`
-	Capabilities     types.StringArray `json:"capabilities"`
-	LastUsedAt       *time.Time        `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
+	ID               uint64                `json:"id"`
+	ScopeType        types.APIKeyScopeType `json:"scope_type"`
+	Name             string                `json:"name"`
+	APIKey           string                `json:"api_key"`
+	FullAccess       bool                  `json:"full_access"`
+	KnowledgeBaseIDs types.StringArray     `json:"knowledge_base_ids"`
+	Capabilities     types.StringArray     `json:"capabilities"`
+	LastUsedAt       *time.Time            `json:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
+	CreatedAt        time.Time             `json:"created_at"`
 }
 
 type tenantAPIKeyCreateResponse struct {
@@ -227,12 +228,15 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
+	apiKeyScope, hasAPIKeyScope := types.TenantAPIKeyScopeFromContext(ctx)
+	platformCaller := hasAPIKeyScope && apiKeyScope.IsPlatform()
+	catalogManager := caller.CanAccessAllTenants || platformCaller
 
 	// Deployment-level policy: ordinary users may be restricted to joining
 	// existing workspaces by invitation. This check is authoritative; the
 	// frontend capability only improves UX and cannot bypass it. Cross-tenant
 	// superusers retain the catalog-management create path.
-	if !caller.CanAccessAllTenants &&
+	if !catalogManager &&
 		!resolveTenantSelfServiceCreationEnabled(ctx, h.config, h.systemSettingSvc) {
 		logger.Warnf(ctx, "Self-service tenant creation denied by policy for user %s", caller.ID)
 		c.Error(errors.NewTenantCreationDisabledError())
@@ -241,7 +245,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 
 	var tenantData types.Tenant
 
-	if caller.CanAccessAllTenants {
+	if catalogManager {
 		// Backward-compatible path for cross-tenant superusers: accept
 		// the full Tenant payload (status, storage_quota, retriever
 		// engines, configs...) so existing tooling keeps working.
@@ -352,7 +356,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// yet still occupies storage_bucket / name uniqueness slots.
 	// Idempotent: EnsureOwner is a no-op when the row already exists,
 	// so cross-tenant superusers create-and-own through the same path.
-	if h.memberService != nil {
+	if h.memberService != nil && !platformCaller {
 		if _, err := h.memberService.EnsureOwner(ctx, caller.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx,
 				"Failed to bootstrap owner membership for user %s tenant %d: %v — rolling back tenant",
@@ -416,7 +420,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// When a tenantless user creates their first workspace, make it their
 	// default login tenant. Roll the just-created resources back if this
 	// finalisation fails so the user is not left with an unreachable tenant.
-	if caller.TenantID == 0 {
+	if caller.TenantID == 0 && !platformCaller {
 		caller.TenantID = createdTenant.ID
 		if err := h.userService.UpdateUser(ctx, caller); err != nil {
 			logger.Errorf(ctx, "Failed to set first tenant %d as default for user %s: %v",
@@ -450,7 +454,10 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// tenant_api_keys. Failing to create the convenience key must NOT fail
 	// the whole tenant creation (the tenant is fully usable without a key);
 	// we log a warning and return the tenant as usual.
-	if h.autoCreateTenantAPIKey(ctx) && h.apiKeyService != nil {
+	// A platform key with system_tenants_manage may create workspaces, but it
+	// must not bootstrap a full-access workspace key and escalate beyond its
+	// own explicit capabilities.
+	if !platformCaller && h.autoCreateTenantAPIKey(ctx) && h.apiKeyService != nil {
 		result, keyErr := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 			TenantID:   createdTenant.ID,
 			Name:       "default",
@@ -731,6 +738,7 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 	}
 	return tenantAPIKeyResponse{
 		ID:               key.ID,
+		ScopeType:        types.NormalizeAPIKeyScopeType(key.ScopeType),
 		Name:             key.Name,
 		APIKey:           key.APIKey,
 		FullAccess:       key.FullAccess,

@@ -231,6 +231,14 @@ func apiKeyFullAccess() middleware.APIKeyRoutePolicy {
 	return middleware.APIKeyRoutePolicy{RequireFullAccess: true}
 }
 
+func apiKeyPlatform(capabilities ...types.APIKeyCapability) middleware.APIKeyRoutePolicy {
+	policy := middleware.APIKeyRoutePolicy{PlatformOnly: true}
+	for _, capability := range capabilities {
+		policy = policy.WithCapability(capability)
+	}
+	return policy
+}
+
 // apiKeyRetrieve grants read/search access to knowledge-base data.
 func apiKeyRetrieve(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityRetrieve)
