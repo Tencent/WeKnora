@@ -23,15 +23,16 @@ import (
 
 // DataSourceService implements the DataSourceService interface
 type DataSourceService struct {
-	dsRepo            interfaces.DataSourceRepository
-	syncLogRepo       interfaces.SyncLogRepository
-	knowledgeService  interfaces.KnowledgeService
-	kbService         interfaces.KnowledgeBaseService
-	taskEnqueuer      interfaces.TaskEnqueuer
-	connectorRegistry *datasource.ConnectorRegistry
-	scheduler         *datasource.Scheduler
-	tenantRepo        interfaces.TenantRepository
-	tagService        interfaces.KnowledgeTagService
+	dsRepo                 interfaces.DataSourceRepository
+	syncLogRepo            interfaces.SyncLogRepository
+	knowledgeService       interfaces.KnowledgeService
+	kbService              interfaces.KnowledgeBaseService
+	taskEnqueuer           interfaces.TaskEnqueuer
+	dingtalkExportTaskRepo interfaces.DingTalkExportTaskRepository
+	connectorRegistry      *datasource.ConnectorRegistry
+	scheduler              *datasource.Scheduler
+	tenantRepo             interfaces.TenantRepository
+	tagService             interfaces.KnowledgeTagService
 }
 
 // NewDataSourceService creates a new data source service
@@ -41,21 +42,23 @@ func NewDataSourceService(
 	knowledgeService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
 	taskEnqueuer interfaces.TaskEnqueuer,
+	dingtalkExportTaskRepo interfaces.DingTalkExportTaskRepository,
 	connectorRegistry *datasource.ConnectorRegistry,
 	scheduler *datasource.Scheduler,
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 ) interfaces.DataSourceService {
 	return &DataSourceService{
-		dsRepo:            dsRepo,
-		syncLogRepo:       syncLogRepo,
-		knowledgeService:  knowledgeService,
-		kbService:         kbService,
-		taskEnqueuer:      taskEnqueuer,
-		connectorRegistry: connectorRegistry,
-		scheduler:         scheduler,
-		tenantRepo:        tenantRepo,
-		tagService:        tagService,
+		dsRepo:                 dsRepo,
+		syncLogRepo:            syncLogRepo,
+		knowledgeService:       knowledgeService,
+		kbService:              kbService,
+		taskEnqueuer:           taskEnqueuer,
+		dingtalkExportTaskRepo: dingtalkExportTaskRepo,
+		connectorRegistry:      connectorRegistry,
+		scheduler:              scheduler,
+		tenantRepo:             tenantRepo,
+		tagService:             tagService,
 	}
 }
 
@@ -717,6 +720,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			continue
 		}
 
+		if handled, err := s.persistPendingDingTalkExportTask(ctx, ds, syncLog, &item); handled {
+			if err != nil {
+				logger.Warnf(ctx, "failed to persist DingTalk export task for %q: %v", item.Title, err)
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", item.Title, err))
+			} else {
+				result.Skipped++
+			}
+			continue
+		}
+
 		if len(item.Content) == 0 && item.URL == "" {
 			// Check if this is an error item from the connector (failed to fetch content)
 			if errMsg, hasErr := item.Metadata["error"]; hasErr {
@@ -877,6 +891,87 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	}
 
 	return connector.Validate(ctx, config)
+}
+
+func (s *DataSourceService) persistPendingDingTalkExportTask(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	item *types.FetchedItem,
+) (bool, error) {
+	if item == nil || item.Metadata == nil {
+		return false, nil
+	}
+	if item.Metadata["channel"] != types.ChannelDingtalk ||
+		item.Metadata["fetcher"] != "export" ||
+		item.Metadata["export_status"] != "pending" {
+		return false, nil
+	}
+	if s.dingtalkExportTaskRepo == nil {
+		return true, fmt.Errorf("dingtalk export task repository is not configured")
+	}
+	taskID := strings.TrimSpace(item.Metadata["export_task_id"])
+	if taskID == "" {
+		return true, fmt.Errorf("dingtalk export task id is empty")
+	}
+	task := &types.DingTalkExportTask{
+		TaskID:           taskID,
+		DataSourceID:     ds.ID,
+		TenantID:         ds.TenantID,
+		ExternalID:       item.ExternalID,
+		SourceResourceID: item.SourceResourceID,
+		WorkspaceID:      item.Metadata["workspace_id"],
+		NodeID:           item.Metadata["node_id"],
+		DentryUUID:       item.Metadata["dentry_uuid"],
+		Title:            item.Title,
+		FileName:         item.FileName,
+		SourceURL:        item.URL,
+		Status:           types.DingTalkExportTaskStatusPending,
+	}
+	if syncLog != nil {
+		task.SyncLogID = syncLog.ID
+	}
+	return true, s.dingtalkExportTaskRepo.UpsertPending(ctx, task)
+}
+
+func (s *DataSourceService) IngestFetchedItem(
+	ctx context.Context,
+	dataSourceID string,
+	item *types.FetchedItem,
+) error {
+	if strings.TrimSpace(dataSourceID) == "" {
+		return datasource.ErrDataSourceInvalid
+	}
+	if item == nil {
+		return fmt.Errorf("fetched item is nil")
+	}
+	if s.knowledgeService == nil {
+		return fmt.Errorf("knowledge service is not configured")
+	}
+
+	ds, err := s.GetDataSource(ctx, dataSourceID)
+	if err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
+	if s.tenantRepo != nil {
+		tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
+		if err != nil {
+			return fmt.Errorf("failed to get tenant info: %w", err)
+		}
+		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	}
+
+	autoTagIDs := []string{}
+	if s.tagService != nil {
+		if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name); tagErr != nil {
+			logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", ds.Name, tagErr)
+		} else if autoTag != nil {
+			autoTagIDs = append(autoTagIDs, autoTag.ID)
+		}
+	}
+	_, err = s.ingestItem(ctx, ds, item, autoTagIDs)
+	return err
 }
 
 // ingestItem writes a single FetchedItem into the knowledge base.
