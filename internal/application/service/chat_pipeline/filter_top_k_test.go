@@ -25,7 +25,7 @@ func TestPluginFilterTopKSortsMergeResultsBeforeTruncation(t *testing.T) {
 	plugin := &PluginFilterTopK{}
 	err := plugin.OnEvent(
 		context.Background(),
-		types.FILTER_TOP_K,
+		types.FilterTopK,
 		chatManage,
 		func() *PluginError { return nil },
 	)
@@ -50,7 +50,7 @@ func TestPluginFilterTopKUsesDeterministicTieBreakers(t *testing.T) {
 	plugin := &PluginFilterTopK{}
 	err := plugin.OnEvent(
 		context.Background(),
-		types.FILTER_TOP_K,
+		types.FilterTopK,
 		chatManage,
 		func() *PluginError { return nil },
 	)

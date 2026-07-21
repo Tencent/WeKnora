@@ -86,7 +86,7 @@ func NewTenantHandler(
 // types.Tenant when CanAccessAllTenants is true (see CreateTenant
 // below), but the recommended shape going forward is name+description.
 type createTenantRequest struct {
-	Name        string `json:"name" binding:"required,min=1,max=128"`
+	Name        string `json:"name"        binding:"required,min=1,max=128"`
 	Description string `json:"description" binding:"max=512"`
 }
 
@@ -224,7 +224,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	caller, err := h.userService.GetCurrentUser(ctx)
 	if err != nil || caller == nil {
 		logger.Error(ctx, "Failed to resolve current user from context", err)
-		c.Error(errors.NewUnauthorizedError("authentication required"))
+		_ = c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
 
@@ -235,7 +235,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	if !caller.CanAccessAllTenants &&
 		!resolveTenantSelfServiceCreationEnabled(ctx, h.config, h.systemSettingSvc) {
 		logger.Warnf(ctx, "Self-service tenant creation denied by policy for user %s", caller.ID)
-		c.Error(errors.NewTenantCreationDisabledError())
+		_ = c.Error(errors.NewTenantCreationDisabledError())
 		return
 	}
 
@@ -248,7 +248,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		if err := c.ShouldBindJSON(&tenantData); err != nil {
 			logger.Error(ctx, "Failed to parse request parameters", err)
 			appErr := errors.NewValidationError("Invalid request parameters").WithDetails(err.Error())
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		// Reset client-supplied primary key so we don't accidentally
@@ -265,7 +265,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			logger.Error(ctx, "Failed to parse request parameters", err)
 			appErr := errors.NewValidationError("Invalid request parameters").WithDetails(err.Error())
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 
@@ -278,7 +278,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
 			if listErr != nil {
 				logger.Errorf(ctx, "Failed to count owned tenants for user %s: %v", caller.ID, listErr)
-				c.Error(errors.NewInternalServerError("Failed to validate workspace quota").WithDetails(listErr.Error()))
+				_ = c.Error(errors.NewInternalServerError("Failed to validate workspace quota").WithDetails(listErr.Error()))
 				return
 			}
 			ownedCount := 0
@@ -287,13 +287,13 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					ownedCount++
 				}
 			}
-			cap := h.resolveMaxOwnedTenantsPerUser(ctx)
-			if cap > 0 && ownedCount >= cap {
+			capVal := h.resolveMaxOwnedTenantsPerUser(ctx)
+			if capVal > 0 && ownedCount >= capVal {
 				logger.Warnf(ctx,
 					"User %s reached self-service tenant quota (%d/%d)",
-					caller.ID, ownedCount, cap,
+					caller.ID, ownedCount, capVal,
 				)
-				c.Error(errors.NewTooManyRequestsError(
+				_ = c.Error(errors.NewTooManyRequestsError(
 					"reached self-service workspace quota; contact an administrator to raise the limit",
 				))
 				return
@@ -336,10 +336,10 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to create workspace: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to create workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -363,7 +363,9 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					createdTenant.ID, delErr,
 				)
 			}
-			c.Error(errors.NewInternalServerError("Failed to finalise workspace ownership").WithDetails(err.Error()))
+			_ = c.Error(
+				errors.NewInternalServerError("Failed to finalise workspace ownership").WithDetails(err.Error()),
+			)
 			return
 		}
 
@@ -386,11 +388,11 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 						ownedNow++
 					}
 				}
-				cap := h.resolveMaxOwnedTenantsPerUser(ctx)
-				if cap > 0 && ownedNow > cap {
+				capVal := h.resolveMaxOwnedTenantsPerUser(ctx)
+				if capVal > 0 && ownedNow > capVal {
 					logger.Warnf(ctx,
 						"User %s exceeded tenant quota after concurrent create (%d/%d), rolling back tenant %d",
-						caller.ID, ownedNow, cap, createdTenant.ID,
+						caller.ID, ownedNow, capVal, createdTenant.ID,
 					)
 					if rmErr := h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID); rmErr != nil {
 						logger.Errorf(ctx,
@@ -404,7 +406,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 							createdTenant.ID, delErr,
 						)
 					}
-					c.Error(errors.NewTooManyRequestsError(
+					_ = c.Error(errors.NewTooManyRequestsError(
 						"reached self-service workspace quota; contact an administrator to raise the limit",
 					))
 					return
@@ -425,7 +427,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 				_ = h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID)
 			}
 			_ = h.service.DeleteTenant(ctx, createdTenant.ID)
-			c.Error(errors.NewInternalServerError("Failed to finalise default workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to finalise default workspace").WithDetails(err.Error()))
 			return
 		}
 	}
@@ -528,7 +530,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -536,10 +538,10 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to retrieve workspace: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to retrieve workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to retrieve workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -570,7 +572,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -585,7 +587,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	var req updateTenantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
@@ -595,10 +597,10 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	existing, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -606,7 +608,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	if req.Name != nil {
 		trimmed := strings.TrimSpace(*req.Name)
 		if trimmed == "" {
-			c.Error(errors.NewValidationError("name cannot be blank"))
+			_ = c.Error(errors.NewValidationError("name cannot be blank"))
 			return
 		}
 		existing.Name = trimmed
@@ -621,10 +623,10 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -641,16 +643,17 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	})
 }
 
+// ListAPIKeys implements the required interface method.
 func (h *TenantHandler) ListAPIKeys(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	keys, err := h.apiKeyService.ListAPIKeys(ctx, id)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to list API keys").WithDetails(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to list API keys").WithDetails(err.Error()))
 		return
 	}
 	resp := make([]tenantAPIKeyResponse, 0, len(keys))
@@ -660,27 +663,28 @@ func (h *TenantHandler) ListAPIKeys(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// CreateAPIKey implements the required interface method.
 func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	var req tenantAPIKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	if err := validateTenantAPIKeyRequest(ctx, h.kbService, id, req); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0)
 		if !t.After(time.Now()) {
-			c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
+			_ = c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
 			return
 		}
 		expiresAt = &t
@@ -694,7 +698,7 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		ExpiresAt:        expiresAt,
 	})
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{
@@ -706,20 +710,21 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	})
 }
 
+// DeleteAPIKey implements the required interface method.
 func (h *TenantHandler) DeleteAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
 	if err != nil || keyID == 0 {
-		c.Error(errors.NewBadRequestError("Invalid API key ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid API key ID"))
 		return
 	}
 	if err := h.apiKeyService.RevokeAPIKey(ctx, tenantID, keyID); err != nil {
-		c.Error(errors.NewNotFoundError("API key not found"))
+		_ = c.Error(errors.NewNotFoundError("API key not found"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -815,15 +820,15 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -850,12 +855,12 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	var req apiPrincipalConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	if req.Mode == "" {
@@ -864,16 +869,16 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	switch req.Mode {
 	case types.APIPrincipalModeTenant, types.APIPrincipalModeDirect, types.APIPrincipalModeSignedToken:
 	default:
-		c.Error(errors.NewValidationError("mode must be tenant, direct_header, or signed_token"))
+		_ = c.Error(errors.NewValidationError("mode must be tenant, direct_header, or signed_token"))
 		return
 	}
 
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -901,7 +906,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 		HMACSecret:            hmacSecret,
 	}
 	if cfg.Mode == types.APIPrincipalModeSignedToken && strings.TrimSpace(cfg.HMACSecret) == "" {
-		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		_ = c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
 		return
 	}
 	tenant.APIPrincipalConfig = cfg
@@ -909,9 +914,9 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to update API principal config").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update API principal config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -938,40 +943,40 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
 	var req apiPrincipalTestTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
 	externalUserID := strings.TrimSpace(req.ExternalUserID)
 	if err := validateAPIPrincipalExternalUserID(externalUserID); err != nil {
-		c.Error(errors.NewValidationError("external_user_id is invalid").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("external_user_id is invalid").WithDetails(err.Error()))
 		return
 	}
 
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
 
 	cfg := tenant.APIPrincipalConfig
 	if cfg == nil || cfg.Mode != types.APIPrincipalModeSignedToken {
-		c.Error(errors.NewValidationError("signed_token mode is required"))
+		_ = c.Error(errors.NewValidationError("signed_token mode is required"))
 		return
 	}
 	secret := strings.TrimSpace(cfg.HMACSecret)
 	if secret == "" {
-		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		_ = c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
 		return
 	}
 
@@ -980,7 +985,7 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 		ttl = time.Duration(req.ExpiresInSeconds) * time.Second
 	}
 	if ttl <= 0 || ttl > maxAPIPrincipalTestTokenTTL {
-		c.Error(errors.NewValidationError("expires_in_seconds must be between 1 and 3600"))
+		_ = c.Error(errors.NewValidationError("expires_in_seconds must be between 1 and 3600"))
 		return
 	}
 
@@ -994,7 +999,7 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 		"exp":       expiresAt.Unix(),
 	}).SignedString([]byte(secret))
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to create API principal test token").WithDetails(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to create API principal test token").WithDetails(err.Error()))
 		return
 	}
 
@@ -1044,7 +1049,7 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		logger.Errorf(ctx, "Invalid workspace ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
@@ -1053,10 +1058,10 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	if err := h.service.DeleteTenant(ctx, id); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to delete workspace: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to delete workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to delete workspace").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1083,7 +1088,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 
 	tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if !ok || tenant == nil {
-		c.Error(errors.NewUnauthorizedError("Authentication required"))
+		_ = c.Error(errors.NewUnauthorizedError("Authentication required"))
 		return
 	}
 
@@ -1116,10 +1121,10 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to retrieve all workspaces list: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to retrieve all workspaces list").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to retrieve all workspaces list").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1186,10 +1191,10 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to search workspaces: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search workspaces").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to search workspaces").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1207,7 +1212,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description
+//
+// 获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1217,6 +1224,8 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /tenants/kv/{key} [get]
+//
+//nolint:lll
 func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
@@ -1224,7 +1233,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	switch key {
 	case "web-search-config", "parser-engine-config", "storage-engine-config":
 		if !dto.CanViewIntegrationSecrets(ctx) {
-			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+			_ = c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
 			return
 		}
 	}
@@ -1250,14 +1259,15 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
-		c.Error(errors.NewBadRequestError("unsupported key"))
+		_ = c.Error(errors.NewBadRequestError("unsupported key"))
 		return
 	}
 }
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description
+// 更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1275,7 +1285,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	switch key {
 	case "web-search-config", "parser-engine-config", "storage-engine-config":
 		if !dto.CanViewIntegrationSecrets(ctx) {
-			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+			_ = c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
 			return
 		}
 	}
@@ -1298,7 +1308,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
-		c.Error(errors.NewBadRequestError("unsupported key"))
+		_ = c.Error(errors.NewBadRequestError("unsupported key"))
 		return
 	}
 }
@@ -1311,14 +1321,14 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	var cfg types.WebSearchConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1326,7 +1336,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 
 	// Validate configuration
 	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
-		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
+		_ = c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
 		return
 	}
 
@@ -1335,10 +1345,10 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace web search config").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update workspace web search config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1367,7 +1377,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1384,7 +1394,7 @@ func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := types.ParserEngineConfigForResponse(tenant.ParserEngineConfig, true)
@@ -1403,28 +1413,29 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 	var cfg types.ParserEngineConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
 	if err := validateParserEngineOutboundURLs(merged); err != nil {
-		c.Error(errors.NewValidationError(err.Error()))
+		_ = c.Error(errors.NewValidationError(err.Error()))
 		return
 	}
 	tenant.ParserEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace parser engine config").WithDetails(err.Error()))
+			//nolint:lll
+			_ = c.Error(errors.NewInternalServerError("Failed to update workspace parser engine config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1441,7 +1452,7 @@ func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := types.StorageEngineConfigForResponse(tenant.StorageEngineConfig, true)
@@ -1460,7 +1471,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	var cfg types.StorageEngineConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.DefaultProvider))
@@ -1468,18 +1479,18 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		provider = firstAllowedStorageProvider()
 	}
 	if provider == "" {
-		c.Error(errors.NewBadRequestError("No storage provider is allowed by STORAGE_ALLOW_LIST"))
+		_ = c.Error(errors.NewBadRequestError("No storage provider is allowed by STORAGE_ALLOW_LIST"))
 		return
 	}
 	if !isStorageProviderAllowed(provider) {
-		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+		_ = c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
 		return
 	}
 	cfg.DefaultProvider = provider
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
@@ -1487,10 +1498,11 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace storage engine config").WithDetails(err.Error()))
+			//nolint:lll
+			_ = c.Error(errors.NewInternalServerError("Failed to update workspace storage engine config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1547,7 +1559,7 @@ func (h *TenantHandler) GetTenantChatHistoryConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := tenant.ChatHistoryConfig
@@ -1570,14 +1582,14 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	var req types.ChatHistoryConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1597,6 +1609,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 		} else {
 			// Embedding model changed — the old KB is incompatible.
 			// We'll create a new one below. The old KB remains but is orphaned (can be cleaned up later).
+			//nolint:lll
 			logger.Infof(ctx, "Embedding model changed from %s to %s, will create new chat history KB", existing.EmbeddingModelID, req.EmbeddingModelID)
 		}
 	}
@@ -1613,7 +1626,9 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 		createdKB, err := h.kbService.CreateKnowledgeBase(ctx, kb)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create chat history knowledge base").WithDetails(err.Error()))
+			_ = c.Error(
+				errors.NewInternalServerError("Failed to create chat history knowledge base").WithDetails(err.Error()),
+			)
 			return
 		}
 		cfg.KnowledgeBaseID = createdKB.ID
@@ -1624,10 +1639,10 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update chat history config").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update chat history config").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -1644,7 +1659,7 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 	data := tenant.RetrievalConfig
@@ -1664,36 +1679,36 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	var cfg types.RetrievalConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
 	// Validate thresholds
 	if cfg.VectorThreshold < 0 || cfg.VectorThreshold > 1 {
-		c.Error(errors.NewBadRequestError("vector_threshold must be between 0 and 1"))
+		_ = c.Error(errors.NewBadRequestError("vector_threshold must be between 0 and 1"))
 		return
 	}
 	if cfg.KeywordThreshold < 0 || cfg.KeywordThreshold > 1 {
-		c.Error(errors.NewBadRequestError("keyword_threshold must be between 0 and 1"))
+		_ = c.Error(errors.NewBadRequestError("keyword_threshold must be between 0 and 1"))
 		return
 	}
 	if cfg.RerankThreshold < -10 || cfg.RerankThreshold > 10 {
-		c.Error(errors.NewBadRequestError("rerank_threshold must be between -10 and 10"))
+		_ = c.Error(errors.NewBadRequestError("rerank_threshold must be between -10 and 10"))
 		return
 	}
 	if cfg.EmbeddingTopK < 0 || cfg.EmbeddingTopK > 200 {
-		c.Error(errors.NewBadRequestError("embedding_top_k must be between 0 and 200"))
+		_ = c.Error(errors.NewBadRequestError("embedding_top_k must be between 0 and 200"))
 		return
 	}
 	if cfg.RerankTopK < 0 || cfg.RerankTopK > 200 {
-		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
+		_ = c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
 	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
 
@@ -1701,10 +1716,10 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update retrieval config").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to update retrieval config").WithDetails(err.Error()))
 		}
 		return
 	}

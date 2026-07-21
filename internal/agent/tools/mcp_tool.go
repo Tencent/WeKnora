@@ -14,13 +14,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// MCPInput is an exported type.
 type MCPInput = map[string]any
 
 // MCPTool wraps an MCP service tool to implement the Tool interface
 type MCPTool struct {
 	service    *types.MCPService
 	mcpTool    *types.MCPTool
-	mcpManager *mcp.MCPManager
+	mcpManager *mcp.Manager
 	gate       approval.MCPApproval // optional human approval before CallTool (issue #1173)
 	// authWaitTimeoutSeconds carries the agent-level, user-configured OAuth wait
 	// timeout (seconds) applied when a tool call triggers in-conversation auth.
@@ -32,7 +33,7 @@ type MCPTool struct {
 // agent-level OAuth wait timeout applied when a tool call triggers in-conversation auth.
 func NewMCPTool(
 	service *types.MCPService, mcpTool *types.MCPTool,
-	mcpManager *mcp.MCPManager, gate approval.MCPApproval, authWaitTimeoutSeconds int,
+	mcpManager *mcp.Manager, gate approval.MCPApproval, authWaitTimeoutSeconds int,
 ) *MCPTool {
 	return &MCPTool{
 		service:                service,
@@ -115,7 +116,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
-		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.EventBus != nil {
+		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.Bus != nil {
 			tenantID, _ := types.TenantIDFromContext(ctx)
 			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
@@ -132,7 +133,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					SessionID:          meta.SessionID,
 					AssistantMessageID: meta.AssistantMessageID,
 					RequestID:          meta.RequestID,
-					EventBus:           meta.EventBus,
+					Bus:                meta.Bus,
 					ServiceID:          t.service.ID,
 					ServiceName:        t.service.Name,
 					MCPToolName:        t.mcpTool.Name,
@@ -245,7 +246,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// Extract text content and image data URIs from result
 	output, images, skipped := extractContentAndImages(result.Content)
 	if skipped > 0 {
-		logger.GetLogger(ctx).Warnf("MCP tool %s: %d image(s) skipped (exceeded count/size/MIME limits)", t.mcpTool.Name, skipped)
+		logger.GetLogger(ctx).
+			Warnf("MCP tool %s: %d image(s) skipped (exceeded count/size/MIME limits)", t.mcpTool.Name, skipped)
 	}
 
 	// Mitigate indirect prompt injection: prefix MCP output so the LLM treats it as
@@ -412,7 +414,7 @@ func RegisterMCPTools(
 	ctx context.Context,
 	registry *ToolRegistry,
 	services []*types.MCPService,
-	mcpManager *mcp.MCPManager,
+	mcpManager *mcp.Manager,
 	gate approval.MCPApproval,
 	oauthSess *MCPOAuthSession,
 ) (int, error) {
@@ -469,7 +471,8 @@ func RegisterMCPTools(
 		cancel()
 
 		if err != nil && !isStdio {
-			logger.GetLogger(ctx).Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
+			logger.GetLogger(ctx).
+				Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
 			_ = client.Disconnect()
 
 			client, err = getOrCreateMCPClientWithOAuthRetry(
@@ -542,7 +545,7 @@ func MCPToolNamesByServiceID(registry *ToolRegistry) map[string][]string {
 func GetMCPToolsInfo(
 	ctx context.Context,
 	services []*types.MCPService,
-	mcpManager *mcp.MCPManager,
+	mcpManager *mcp.Manager,
 ) (map[string][]string, error) {
 	result := make(map[string][]string)
 

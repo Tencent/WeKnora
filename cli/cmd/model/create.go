@@ -163,23 +163,33 @@ else goes through repeatable --param key=value.`,
 			return runCreate(c.Context(), opts, fopts, cli, params)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Type, "type", "", "Model type: "+strings.Join(modelTypeValues, " | ")+" (required; \"chat\" is accepted for KnowledgeQA)")
-	cmd.Flags().StringVar(&opts.Source, "source", "", "Where the model runs: "+strings.Join(createSourceValues, " | ")+" (required; local=Ollama, remote=provider API)")
-	cmd.Flags().StringVar(&opts.Provider, "provider", "", "Remote provider id, required+validated with --source remote (see `weknora api /api/v1/models/providers`)")
+	cmd.Flags().
+		StringVar(&opts.Type, "type", "", "Model type: "+strings.Join(modelTypeValues, " | ")+" (required; \"chat\" is accepted for KnowledgeQA)")
+	cmd.Flags().
+		StringVar(&opts.Source, "source", "", "Where the model runs: "+strings.Join(createSourceValues, " | ")+" (required; local=Ollama, remote=provider API)")
+	cmd.Flags().
+		StringVar(&opts.Provider, "provider", "", "Remote provider id, required+validated with --source remote (see `weknora api /api/v1/models/providers`)")
 	cmd.Flags().StringVar(&opts.DisplayName, "display-name", "", "Human-friendly name (optional)")
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Description (optional)")
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "Model API base URL (e.g. http://localhost:11434 for Ollama)")
-	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Read the provider API key from stdin (kept out of argv / history)")
+	cmd.Flags().
+		BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Read the provider API key from stdin (kept out of argv / history)")
 	cmd.Flags().IntVar(&opts.Dimension, "dimension", 0, "Embedding dimension (Embedding models only)")
 	cmd.Flags().BoolVar(&opts.Default, "default", false, "Mark this the default model for its type")
-	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Extra provider parameter as key=value, repeatable (value parsed as JSON: true/42/text)")
+	cmd.Flags().
+		StringArrayVar(&opts.Params, "param", nil, "Extra provider parameter as key=value, repeatable (value parsed as JSON: true/42/text)")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("source")
 	cmdutil.AddFormatFlag(cmd, modelCreateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "register a model (embedding/rerank/chat/VLLM/ASR) so a KB or agent can use it; capture .data.id to pass to `weknora kb config set` / `agent create --model`.",
-		RequiredFlags: []string{"<name> (positional)", "--type", "--source (local|remote)", "--provider (when --source remote)"},
+		UsedFor: "register a model (embedding/rerank/chat/VLLM/ASR) so a KB or agent can use it; capture .data.id to pass to `weknora kb config set` / `agent create --model`.",
+		RequiredFlags: []string{
+			"<name> (positional)",
+			"--type",
+			"--source (local|remote)",
+			"--provider (when --source remote)",
+		},
 		Examples: []string{
 			`weknora model create nomic-embed-text --type Embedding --source local --dimension 768   # Ollama (server pulls it)`,
 			`printf '%s' "$OPENAI_KEY" | weknora model create text-embedding-3-small --type Embedding --source remote --provider openai --dimension 1536 --api-key-stdin`,
@@ -219,7 +229,13 @@ func parseParams(kvs []string) (map[string]any, error) {
 	return out, nil
 }
 
-func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOptions, svc CreateService, params map[string]any) error {
+func runCreate(
+	ctx context.Context,
+	opts *CreateOptions,
+	fopts *cmdutil.FormatOptions,
+	svc CreateService,
+	params map[string]any,
+) error {
 	// Remote models: validate --provider against the server's live provider
 	// catalog for this model type, and default --base-url from it when omitted.
 	// Uses the authoritative /models/providers data (via the SDK) instead of a

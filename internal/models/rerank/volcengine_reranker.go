@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// VolcengineRerankBaseURL and related constants.
 const (
 	VolcengineRerankBaseURL = provider.VolcengineRerankBaseURL
 
@@ -36,6 +37,7 @@ type VolcengineReranker struct {
 	client      *knowledge.Client
 }
 
+// NewVolcengineReranker is an exported function.
 func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) {
 	accessKey := strings.TrimSpace(config.APIKey)
 	secretKey := strings.TrimSpace(config.AppSecret)
@@ -90,6 +92,7 @@ func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) 
 	}, nil
 }
 
+// Rerank implements the required interface method.
 func (r *VolcengineReranker) Rerank(
 	ctx context.Context, query string, documents []string,
 ) ([]RankResult, error) {
@@ -154,21 +157,21 @@ func (r *VolcengineReranker) rerankBatch(
 	logger.Debugf(
 		ctx,
 		"%s",
-		buildRerankRequestDebug(r.modelName, r.endpoint+volcengineRerankPath, query, documents),
+		buildRequestDebug(r.modelName, r.endpoint+volcengineRerankPath, query, documents),
 	)
 	response, err := r.client.Rerank(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("call Volcengine rerank: %w", err)
 	}
 	if response == nil || response.Data == nil {
-		return nil, fmt.Errorf("Volcengine rerank returned an empty response")
+		return nil, fmt.Errorf("volcengine rerank returned an empty response")
 	}
 	if response.Code != 0 {
-		return nil, fmt.Errorf("Volcengine rerank API error %d: %s", response.Code, response.Message)
+		return nil, fmt.Errorf("volcengine rerank API error %d: %s", response.Code, response.Message)
 	}
 	if len(response.Data.Scores) != len(documents) {
 		return nil, fmt.Errorf(
-			"Volcengine rerank score count mismatch: got %d scores for %d documents",
+			"volcengine rerank score count mismatch: got %d scores for %d documents",
 			len(response.Data.Scores),
 			len(documents),
 		)
@@ -176,10 +179,12 @@ func (r *VolcengineReranker) rerankBatch(
 	return response.Data.Scores, nil
 }
 
+// GetModelName implements the required interface method.
 func (r *VolcengineReranker) GetModelName() string {
 	return r.modelName
 }
 
+// GetModelID implements the required interface method.
 func (r *VolcengineReranker) GetModelID() string {
 	return r.modelID
 }

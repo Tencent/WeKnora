@@ -27,8 +27,8 @@ func (r *ZhipuReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
 
-// ZhipuRerankRequest represents a request to rerank documents using Zhipu AI API
-type ZhipuRerankRequest struct {
+// ZhipuRequest represents a request to rerank documents using Zhipu AI API
+type ZhipuRequest struct {
 	Model           string   `json:"model"`                       // Model to use for reranking
 	Query           string   `json:"query"`                       // Query text to compare documents against
 	Documents       []string `json:"documents"`                   // List of document texts to rerank
@@ -37,8 +37,8 @@ type ZhipuRerankRequest struct {
 	ReturnRawScores bool     `json:"return_raw_scores,omitempty"` // Whether to return raw scores
 }
 
-// ZhipuRerankResponse represents the response from Zhipu AI reranking request
-type ZhipuRerankResponse struct {
+// ZhipuResponse represents the response from Zhipu AI reranking request
+type ZhipuResponse struct {
 	RequestID string            `json:"request_id"` // Request ID from client or platform
 	ID        string            `json:"id"`         // Task order ID from Zhipu platform
 	Results   []ZhipuRankResult `json:"results"`    // Ranked results with relevance scores
@@ -81,7 +81,7 @@ func NewZhipuReranker(config *RerankerConfig) (*ZhipuReranker, error) {
 // Rerank performs document reranking based on relevance to the query using Zhipu AI API
 func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body
-	requestBody := &ZhipuRerankRequest{
+	requestBody := &ZhipuRequest{
 		Model:           r.modelName,
 		Query:           query,
 		Documents:       documents,
@@ -104,13 +104,13 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
 	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
-	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.baseURL, query, documents))
+	logger.Debugf(ctx, "%s", buildRequestDebug(r.modelName, r.baseURL, query, documents))
 
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
@@ -122,7 +122,7 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 		return nil, fmt.Errorf("zhipu rerank API error: Http Status: %s, Body: %s", resp.Status, string(body))
 	}
 
-	var response ZhipuRerankResponse
+	var response ZhipuResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}

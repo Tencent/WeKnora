@@ -22,10 +22,14 @@ type WebSearchConfig struct {
 	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 嵌入维度（用于RAG压缩）
 	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 重排模型ID（用于RAG压缩）
 	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 文档片段数量（用于RAG压缩）
-	ProxyURL           string `json:"proxy_url,omitempty"`           // Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at call time when set.
+	//	// Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at
+	// call time when set. // long struct tag or string
+	ProxyURL string `json:"proxy_url,omitempty"`
 }
 
+// DefaultWebSearchCompressionMethod and related constants.
 const (
+	// DefaultWebSearchMaxResults is the default maximum web search result count.
 	DefaultWebSearchMaxResults        = 10
 	DefaultWebSearchCompressionMethod = "none"
 )
@@ -87,8 +91,8 @@ type WebSearchResult struct {
 	PublishedAt *time.Time `json:"published_at,omitempty"` // 发布时间（如果有）
 }
 
-// WebSearchProviderInfo represents information about a web search provider
-type WebSearchProviderInfo struct {
+// WebSearchInfo represents information about a web search provider
+type WebSearchInfo struct {
 	ID             string `json:"id"`                // 提供商ID
 	Name           string `json:"name"`              // 提供商名称
 	Free           bool   `json:"free"`              // 是否免费

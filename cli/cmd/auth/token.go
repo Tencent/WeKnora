@@ -174,9 +174,15 @@ func emitToken(fopts *cmdutil.FormatOptions, token, mode, profile string) error 
 	// recourse on leak - bearer tokens self-expire via refresh.
 	if iostreams.IO.IsStdoutTTY() {
 		fmt.Fprintln(iostreams.IO.Err)
-		fmt.Fprintln(iostreams.IO.Err, "hint: pipe to $(weknora auth token) to capture; this terminal scrollback now contains the secret")
+		fmt.Fprintln(
+			iostreams.IO.Err,
+			"hint: pipe to $(weknora auth token) to capture; this terminal scrollback now contains the secret",
+		)
 		if mode == ModeAPIKey {
-			fmt.Fprintln(iostreams.IO.Err, "note: api-key credentials are long-lived - rotate via your auth provider if exposed (no `auth refresh` path)")
+			fmt.Fprintln(
+				iostreams.IO.Err,
+				"note: api-key credentials are long-lived - rotate via your auth provider if exposed (no `auth refresh` path)",
+			)
 		}
 	}
 	return nil

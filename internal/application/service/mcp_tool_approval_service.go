@@ -21,7 +21,11 @@ func NewMCPToolApprovalService(
 	return &mcpToolApprovalService{repo: repo, mcpRepo: mcpRepo}
 }
 
-func (s *mcpToolApprovalService) ListByService(ctx context.Context, tenantID uint64, serviceID string) ([]*types.MCPToolApproval, error) {
+func (s *mcpToolApprovalService) ListByService(
+	ctx context.Context,
+	tenantID uint64,
+	serviceID string,
+) ([]*types.MCPToolApproval, error) {
 	svc, err := s.mcpRepo.GetByID(ctx, tenantID, serviceID)
 	if err != nil {
 		return nil, err
@@ -54,6 +58,10 @@ func (s *mcpToolApprovalService) SetRequireApproval(
 	return s.repo.Upsert(ctx, row)
 }
 
-func (s *mcpToolApprovalService) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+func (s *mcpToolApprovalService) IsRequired(
+	ctx context.Context,
+	tenantID uint64,
+	serviceID, toolName string,
+) (bool, error) {
 	return s.repo.IsRequired(ctx, tenantID, serviceID, toolName)
 }

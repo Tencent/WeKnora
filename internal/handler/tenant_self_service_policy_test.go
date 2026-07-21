@@ -49,7 +49,11 @@ func (s *tenantPolicyUserService) GetCurrentUser(context.Context) (*types.User, 
 	return s.user, nil
 }
 
-func (s *tenantPolicyUserService) BuildLoginMemberships(context.Context, *types.User, *types.Tenant) []types.Membership {
+func (s *tenantPolicyUserService) BuildLoginMemberships(
+	context.Context,
+	*types.User,
+	*types.Tenant,
+) []types.Membership {
 	return []types.Membership{}
 }
 

@@ -25,6 +25,7 @@ func ToInterfaceSlice[T any](slice []T) []interface{} {
 	return interfaceSlice
 }
 
+// StringSliceJoin is exported.
 // []string -> string, " join, space separated
 func StringSliceJoin(slice []string) string {
 	result := make([]string, len(slice))
@@ -34,6 +35,7 @@ func StringSliceJoin(slice []string) string {
 	return strings.Join(result, " ")
 }
 
+// GetAttrs is an exported function.
 func GetAttrs[A, B any](extract func(A) B, attrs ...A) []B {
 	result := make([]B, len(attrs))
 	for i, attr := range attrs {
@@ -100,6 +102,7 @@ func DeduplicateWithScore[T ScoreComparable, K comparable](keyFunc func(T) K, it
 // Compiled once: ParseLLMJsonResponse runs on the graph-extraction path.
 var jsonCodeFenceRE = regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
 
+// ParseLLMJsonResponse is an exported function.
 func ParseLLMJsonResponse(content string, target interface{}) error {
 	// First, try to parse directly as JSON
 	err := json.Unmarshal([]byte(content), target)
@@ -222,6 +225,7 @@ func truncatePipelineValue(content string) string {
 	return string(runes[:pipelineLogValueMaxRune]) + pipelineTruncateEll
 }
 
+// TruncateForLog is an exported function.
 func TruncateForLog(content string) string {
 	return truncatePipelineValue(content)
 }

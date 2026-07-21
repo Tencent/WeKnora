@@ -102,9 +102,12 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 // WEKNORA_KB_ID / the linked directory via Factory.ResolveKB.
 func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (overrides env / project link)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return (default 8 - tuned for RAG context window; list commands default to 30)")
-	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
-	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
+	cmd.Flags().
+		IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return (default 8 - tuned for RAG context window; list commands default to 30)")
+	cmd.Flags().
+		Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
+	cmd.Flags().
+		Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")
 	cmd.Flags().BoolVar(&opts.NoKeyword, "no-keyword", false, "Disable the keyword channel")
 	cmdutil.AddFormatFlag(cmd, chunksFields...)
@@ -158,7 +161,11 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		meta := &output.Meta{Count: output.IntPtr(len(results)), HasMore: truncated, Hint: emptyContentSearchHint(len(results))}
+		meta := &output.Meta{
+			Count:   output.IntPtr(len(results)),
+			HasMore: truncated,
+			Hint:    emptyContentSearchHint(len(results)),
+		}
 		return fopts.Emit(iostreams.IO.Out, results, meta)
 	}
 	return renderChunkResults(results, opts.KBID)

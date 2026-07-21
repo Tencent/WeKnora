@@ -27,8 +27,8 @@ func (r *OpenAIReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
 
-// RerankRequest represents a request to rerank documents based on relevance to a query
-type RerankRequest struct {
+// Request represents a request to rerank documents based on relevance to a query
+type Request struct {
 	Model                string                 `json:"model"`                  // Model to use for reranking
 	Query                string                 `json:"query"`                  // Query text to compare documents against
 	Documents            []string               `json:"documents"`              // List of document texts to rerank
@@ -36,8 +36,8 @@ type RerankRequest struct {
 	TruncatePromptTokens int                    `json:"truncate_prompt_tokens"` // Maximum prompt tokens to use
 }
 
-// RerankResponse represents the response from a reranking request
-type RerankResponse struct {
+// Response represents the response from a reranking request
+type Response struct {
 	ID      string       `json:"id"`      // Request ID
 	Model   string       `json:"model"`   // Model used for reranking
 	Usage   UsageInfo    `json:"usage"`   // Token usage information
@@ -72,7 +72,7 @@ func NewOpenAIReranker(config *RerankerConfig) (*OpenAIReranker, error) {
 // Rerank performs document reranking based on relevance to the query
 func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body
-	requestBody := &RerankRequest{
+	requestBody := &Request{
 		Model:                r.modelName,
 		Query:                query,
 		Documents:            documents,
@@ -93,13 +93,17 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
 	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
-	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, fmt.Sprintf("%s/rerank", r.baseURL), query, documents))
+	logger.Debugf(
+		ctx,
+		"%s",
+		buildRequestDebug(r.modelName, fmt.Sprintf("%s/rerank", r.baseURL), query, documents),
+	)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
@@ -111,7 +115,7 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 		return nil, fmt.Errorf("Rerank API error: Http Status: %s", resp.Status)
 	}
 
-	var response RerankResponse
+	var response Response
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}

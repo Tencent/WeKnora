@@ -15,7 +15,7 @@ type SkillInfo struct {
 type SkillListResponse struct {
 	Success         bool        `json:"success"`
 	Data            []SkillInfo `json:"data"`
-	SkillsAvailable bool       `json:"skills_available"`
+	SkillsAvailable bool        `json:"skills_available"`
 }
 
 // ListSkills lists all preloaded agent skills

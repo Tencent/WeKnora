@@ -118,7 +118,8 @@ func findSafeEnd(value string, from int) (int, bool) {
 	i := from
 	for i < len(value) {
 		ch := value[i]
-		if ch == '\\' {
+		switch ch {
+		case '\\':
 			// Escape sequence - need at least 2 bytes
 			if i+1 >= len(value) {
 				// Incomplete escape at end, stop before it
@@ -135,10 +136,10 @@ func findSafeEnd(value string, from int) (int, bool) {
 				// Simple escape: \", \\, \n, \t, \r, \/, \b, \f
 				i += 2
 			}
-		} else if ch == '"' {
+		case '"':
 			// Closing quote of the JSON string value
 			return i, true
-		} else {
+		default:
 			// Regular character - handle multi-byte UTF-8
 			_, size := utf8.DecodeRuneInString(value[i:])
 			if size == 0 {

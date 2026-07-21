@@ -77,7 +77,7 @@ func (s *skillService) ensureInitialized(ctx context.Context) error {
 	if _, err := os.Stat(s.preloadedDir); os.IsNotExist(err) {
 		logger.Warnf(ctx, "Preloaded skills directory does not exist: %s", s.preloadedDir)
 		// Create the directory to avoid repeated warnings
-		if err := os.MkdirAll(s.preloadedDir, 0755); err != nil {
+		if err := os.MkdirAll(s.preloadedDir, 0o755); err != nil {
 			logger.Warnf(ctx, "Failed to create preloaded skills directory: %v", err)
 		}
 	}

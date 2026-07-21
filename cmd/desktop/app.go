@@ -1,3 +1,4 @@
+// Package main implements the WeKnora Lite desktop shell via Wails.
 package main
 
 import (
@@ -26,7 +27,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-func (a *App) shutdown(ctx context.Context) {
+func (a *App) shutdown(_ context.Context) {
 	a.shutdownCh <- struct{}{}
 }
 
@@ -44,7 +45,8 @@ func (a *App) GetDesktopHTTPPortSetting() int {
 	return LoadDesktopPrefsHTTPPort()
 }
 
-// SetDesktopHTTPPortSetting saves the preferred local API port to application support. Restart the app for it to take effect unless it matches the current listener.
+// SetDesktopHTTPPortSetting saves the preferred local API port.
+// Restart the app for the change to take effect unless it matches the current listener.
 func (a *App) SetDesktopHTTPPortSetting(port int) error {
 	return SaveDesktopHTTPPortPreference(port)
 }
@@ -59,12 +61,14 @@ func (a *App) SetDesktopHTTPBindPublicSetting(v bool) error {
 	return SaveDesktopHTTPBindPublicPreference(v)
 }
 
-// GetAPILanBaseURL returns a suggested base URL for other devices on the LAN (…/api/v1), or empty if not in bind-public mode or IP detection failed.
+// GetAPILanBaseURL returns a suggested LAN base URL (.../api/v1), or empty when
+// bind-public mode is off or IP detection failed.
 func (a *App) GetAPILanBaseURL() string {
 	return a.apiLanBaseURL
 }
 
-// GetDesktopListenPublicActive is true when this session’s API server is listening on all interfaces (runtime), not the saved preference.
+// GetDesktopListenPublicActive reports whether this session's API listens on all
+// interfaces at runtime, not the saved preference.
 func (a *App) GetDesktopListenPublicActive() bool {
 	return a.listenPublic
 }

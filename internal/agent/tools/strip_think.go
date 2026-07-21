@@ -11,7 +11,7 @@ var thinkBlockRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // <think> tags in the content field. These should be stripped before:
 //   - Displaying content to users
 //   - Storing content in agent state / context manager
-//   - Emitting content via EventBus
+//   - Emitting content via Bus
 //
 // Returns the cleaned string, or empty string if input is empty or becomes empty.
 func StripThinkBlocks(content string) string {

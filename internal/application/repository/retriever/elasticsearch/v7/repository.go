@@ -35,7 +35,7 @@ type elasticsearchRepository struct {
 // NewElasticsearchEngineRepository creates and initializes a new Elasticsearch v7 repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
 func NewElasticsearchEngineRepository(client *elasticsearch.Client,
-	config *config.Config,
+	_ *config.Config,
 	indexCfg *typesLocal.IndexConfig,
 ) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
@@ -80,7 +80,7 @@ func (e *elasticsearchRepository) detectFieldTypes(ctx context.Context) {
 		e.useKeywordSuffix = true
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.IsError() {
 		log.Warnf("[ElasticsearchV7] GetMapping returned error: %s, defaulting to .keyword suffix", resp.String())
@@ -136,7 +136,7 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 	if err != nil {
 		return fmt.Errorf("check index existence: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if !res.IsError() {
 		log.Debugf("[ElasticsearchV7] Index already exists: %s", e.index)
@@ -171,7 +171,7 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 	if err != nil {
 		return fmt.Errorf("create index: %w", err)
 	}
-	defer createRes.Body.Close()
+	defer func() { _ = createRes.Body.Close() }()
 
 	if createRes.IsError() {
 		// Log detailed response server-side; return generic message to avoid leaking cluster info
@@ -199,7 +199,7 @@ func (e *elasticsearchRepository) EstimateStorageSize(ctx context.Context,
 	log.Infof("[ElasticsearchV7] Estimating storage size for %d indices", len(indexInfoList))
 
 	// 计算总存储大小
-	var totalStorageSize int64 = 0
+	var totalStorageSize int64
 	for _, indexInfo := range indexInfoList {
 		embeddingDB := elasticsearchRetriever.ToDBVectorEmbedding(indexInfo, params)
 		// 计算单个文档的存储大小并累加
@@ -218,7 +218,7 @@ func (e *elasticsearchRepository) calculateStorageSize(embedding *elasticsearchR
 	contentSizeBytes := int64(len(embedding.Content))
 
 	// 2. 向量存储大小
-	var vectorSizeBytes int64 = 0
+	var vectorSizeBytes int64
 	if embedding.Embedding != nil {
 		// 4字节/维度 (全精度浮点数)
 		vectorSizeBytes = int64(len(embedding.Embedding) * 4)
@@ -269,7 +269,7 @@ func (e *elasticsearchRepository) Save(ctx context.Context,
 		log.Errorf("[ElasticsearchV7] Failed to create document: %v", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.IsError() {
 		log.Errorf("[ElasticsearchV7] Failed to index document: %s", resp.String())
@@ -319,7 +319,7 @@ func (e *elasticsearchRepository) BatchSave(ctx context.Context,
 		log.Errorf("[ElasticsearchV7] Failed to execute bulk index operation: %v", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Process bulk response
 	err = e.processBulkResponse(ctx, resp, len(embeddingList))
@@ -400,7 +400,7 @@ func (e *elasticsearchRepository) processBulkResponse(ctx context.Context,
 
 // countBulkErrors counts the number of errors in a bulk response
 func (e *elasticsearchRepository) countBulkErrors(ctx context.Context,
-	bulkResponse map[string]interface{}, totalDocuments int,
+	bulkResponse map[string]interface{}, _ int,
 ) int {
 	log := logger.GetLogger(ctx)
 	log.Warn("[ElasticsearchV7] Bulk operation completed with some errors")
@@ -423,18 +423,28 @@ func (e *elasticsearchRepository) countBulkErrors(ctx context.Context,
 }
 
 // DeleteByChunkIDList Delete indices by chunk ID list
-func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
+func (e *elasticsearchRepository) DeleteByChunkIDList(
+	ctx context.Context,
+	chunkIDList []string,
+	_ int,
+	_ string,
+) error {
 	return e.deleteByFieldList(ctx, e.idField("chunk_id"), chunkIDList)
 }
 
 // DeleteBySourceIDList Delete indices by source ID list
-func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
+func (e *elasticsearchRepository) DeleteBySourceIDList(
+	ctx context.Context,
+	sourceIDList []string,
+	_ int,
+	_ string,
+) error {
 	return e.deleteByFieldList(ctx, e.idField("source_id"), sourceIDList)
 }
 
 // DeleteByKnowledgeIDList Delete indices by knowledge ID list
 func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int, knowledgeType string,
+	knowledgeIDList []string, _ int, _ string,
 ) error {
 	return e.deleteByFieldList(ctx, e.idField("knowledge_id"), knowledgeIDList)
 }
@@ -466,7 +476,7 @@ func (e *elasticsearchRepository) deleteByFieldList(ctx context.Context, field s
 		log.Errorf("[ElasticsearchV7] Failed to execute delete by query: %v", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.IsError() {
 		errMsg := fmt.Sprintf("failed to delete by query: %s", resp.String())
@@ -690,7 +700,7 @@ func (e *elasticsearchRepository) executeVectorSearch(
 		log.Errorf("[ElasticsearchV7] Vector search failed: %v", err)
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	results, err := e.processSearchResponse(ctx, response, typesLocal.VectorRetrieverType)
 	if err != nil {
@@ -767,7 +777,7 @@ func (e *elasticsearchRepository) executeKeywordSearch(
 		log.Errorf("[ElasticsearchV7] Keywords search failed: %v", err)
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	results, err := e.processSearchResponse(ctx, response, typesLocal.KeywordsRetrieverType)
 	if err != nil {
@@ -790,13 +800,13 @@ func (e *elasticsearchRepository) processSearchResponse(ctx context.Context,
 	}
 
 	// Decode response body
-	rJson, err := e.decodeSearchResponse(ctx, response)
+	rJSON, err := e.decodeSearchResponse(ctx, response)
 	if err != nil {
 		return nil, err
 	}
 
 	// Extract hits from response
-	hitsList, err := e.extractHitsFromResponse(ctx, rJson)
+	hitsList, err := e.extractHitsFromResponse(ctx, rJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -818,24 +828,24 @@ func (e *elasticsearchRepository) decodeSearchResponse(ctx context.Context,
 	response *esapi.Response,
 ) (map[string]any, error) {
 	log := logger.GetLogger(ctx)
-	var rJson map[string]any
+	var rJSON map[string]any
 
-	if err := json.NewDecoder(response.Body).Decode(&rJson); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&rJSON); err != nil {
 		log.Errorf("[ElasticsearchV7] Failed to decode search response: %v", err)
 		return nil, err
 	}
 
-	return rJson, nil
+	return rJSON, nil
 }
 
 // extractHitsFromResponse extracts the hits list from the response JSON
 func (e *elasticsearchRepository) extractHitsFromResponse(ctx context.Context,
-	rJson map[string]any,
+	rJSON map[string]any,
 ) ([]interface{}, error) {
 	log := logger.GetLogger(ctx)
 
 	// Extract hits from response
-	hitsObj, ok := rJson["hits"].(map[string]interface{})
+	hitsObj, ok := rJSON["hits"].(map[string]interface{})
 	if !ok {
 		log.Errorf("[ElasticsearchV7] Invalid search response format: 'hits' object missing")
 		return nil, fmt.Errorf("invalid search response format")
@@ -972,8 +982,8 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceToTargetKBIDMap map[string]string,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
-	dimension int,
-	knowledgeType string,
+	_ int,
+	_ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof(
@@ -1078,7 +1088,7 @@ func (e *elasticsearchRepository) querySourceBatch(ctx context.Context,
 		log.Errorf("[ElasticsearchV7] Failed to query source index data: %v", err)
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if response.IsError() {
 		log.Errorf("[ElasticsearchV7] Failed to query source index data: %s", response.String())
@@ -1338,7 +1348,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			log.Errorf("[ElasticsearchV7] Failed to update enabled chunks: %v", err)
 			return err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if res.IsError() {
 			var e map[string]interface{}
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
@@ -1373,7 +1383,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			log.Errorf("[ElasticsearchV7] Failed to update disabled chunks: %v", err)
 			return err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if res.IsError() {
 			var e map[string]interface{}
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
@@ -1434,7 +1444,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkTagID(
 			log.Errorf("[ElasticsearchV7] Failed to update chunks with tag_id %s: %v", tagID, err)
 			return err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if res.IsError() {
 			var e map[string]interface{}
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {

@@ -1,3 +1,4 @@
+// Package neo4j provides related functionality.
 package neo4j
 
 import (
@@ -11,39 +12,39 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-// Neo4jRepository is a repository for Neo4j
-type Neo4jRepository struct {
+// Repository is a repository for Neo4j
+type Repository struct {
 	driver     neo4j.Driver
 	nodePrefix string
 }
 
-// NewNeo4jRepository creates a new Neo4j repository
-func NewNeo4jRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository {
-	return &Neo4jRepository{driver: driver, nodePrefix: "ENTITY"}
+// NewRepository creates a new Neo4j repository
+func NewRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository {
+	return &Repository{driver: driver, nodePrefix: "ENTITY"}
 }
 
-// _remove_hyphen removes hyphens from a string
-func _remove_hyphen(s string) string {
+// _removeHyphen removes hyphens from a string
+func _removeHyphen(s string) string {
 	return strings.ReplaceAll(s, "-", "_")
 }
 
 // Labels returns the labels for a namespace
-func (n *Neo4jRepository) Labels(namespace types.NameSpace) []string {
+func (n *Repository) Labels(namespace types.NameSpace) []string {
 	res := make([]string, 0)
 	for _, label := range namespace.Labels() {
-		res = append(res, n.nodePrefix+_remove_hyphen(label))
+		res = append(res, n.nodePrefix+_removeHyphen(label))
 	}
 	return res
 }
 
 // Label returns the label for a namespace
-func (n *Neo4jRepository) Label(namespace types.NameSpace) string {
+func (n *Repository) Label(namespace types.NameSpace) string {
 	labels := n.Labels(namespace)
 	return strings.Join(labels, ":")
 }
 
 // AddGraph adds a graph to the Neo4j repository
-func (n *Neo4jRepository) AddGraph(ctx context.Context, namespace types.NameSpace, graphs []*types.GraphData) error {
+func (n *Repository) AddGraph(ctx context.Context, namespace types.NameSpace, graphs []*types.GraphData) error {
 	if n.driver == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil
@@ -57,13 +58,13 @@ func (n *Neo4jRepository) AddGraph(ctx context.Context, namespace types.NameSpac
 }
 
 // addGraph adds a graph to the Neo4j repository
-func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpace, graph *types.GraphData) error {
+func (n *Repository) addGraph(ctx context.Context, namespace types.NameSpace, graph *types.GraphData) error {
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		// Node import query
-		node_import_query := `
+		nodeImportQuery := `
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
 			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
@@ -79,12 +80,12 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"labels":       n.Labels(namespace),
 			})
 		}
-		if _, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData}); err != nil {
+		if _, err := tx.Run(ctx, nodeImportQuery, map[string]interface{}{"data": nodeData}); err != nil {
 			return nil, fmt.Errorf("failed to create nodes: %v", err)
 		}
 
 		// Relationship import query
-		rel_import_query := `
+		relImportQuery := `
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
 			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
@@ -102,7 +103,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target_labels": n.Labels(namespace),
 			})
 		}
-		if _, err := tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData}); err != nil {
+		if _, err := tx.Run(ctx, relImportQuery, map[string]interface{}{"data": relData}); err != nil {
 			return nil, fmt.Errorf("failed to create relationships: %v", err)
 		}
 		return nil, nil
@@ -115,13 +116,13 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 }
 
 // DelGraph deletes a graph from the Neo4j repository
-func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameSpace) error {
+func (n *Repository) DelGraph(ctx context.Context, namespaces []types.NameSpace) error {
 	if n.driver == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil
 	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	result, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		for _, namespace := range namespaces {
@@ -161,7 +162,7 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 }
 
 // SearchNode searches for nodes in the Neo4j repository
-func (n *Neo4jRepository) SearchNode(
+func (n *Repository) SearchNode(
 	ctx context.Context,
 	namespace types.NameSpace,
 	nodes []string,
@@ -171,7 +172,7 @@ func (n *Neo4jRepository) SearchNode(
 		return nil, nil
 	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		labelExpr := n.Label(namespace)

@@ -1,3 +1,4 @@
+// Package elasticsearch provides related functionality.
 package elasticsearch
 
 import (
@@ -16,9 +17,9 @@ type VectorEmbedding struct {
 	KnowledgeID     string    `json:"knowledge_id"      gorm:"column:knowledge_id"`         // ID of the knowledge item
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`    // ID of the knowledge base
 	TagID           string    `json:"tag_id"            gorm:"column:tag_id"`               // Tag ID for categorization
-	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`   // Vector embedding of the content
-	IsEnabled       bool      `json:"is_enabled"`                                           // Whether the chunk is enabled
-	IsRecommended   bool      `json:"is_recommended"`                                       // Whether the chunk is recommended
+	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`
+	IsEnabled       bool      `json:"is_enabled"`     // Whether the chunk is enabled
+	IsRecommended   bool      `json:"is_recommended"` // Whether the chunk is recommended
 }
 
 // VectorEmbeddingWithScore extends VectorEmbedding with similarity score

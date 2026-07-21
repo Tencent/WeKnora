@@ -238,7 +238,11 @@ func (r *messageRepository) GetKnowledgeIDsBySessionID(
 // UpdateMessageImages updates only the images JSONB column for a message.
 // Uses Select to force GORM to include the column even when struct-based
 // Updates would otherwise skip custom Valuer types.
-func (r *messageRepository) UpdateMessageImages(ctx context.Context, sessionID, messageID string, images types.MessageImages) error {
+func (r *messageRepository) UpdateMessageImages(
+	ctx context.Context,
+	sessionID, messageID string,
+	images types.MessageImages,
+) error {
 	return r.db.WithContext(ctx).
 		Model(&types.Message{}).
 		Where("id = ? AND session_id = ?", messageID, sessionID).
@@ -246,7 +250,11 @@ func (r *messageRepository) UpdateMessageImages(ctx context.Context, sessionID, 
 }
 
 // UpdateMessageRenderedContent updates only the rendered_content column for a message.
-func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, sessionID, messageID string, renderedContent string) error {
+func (r *messageRepository) UpdateMessageRenderedContent(
+	ctx context.Context,
+	sessionID, messageID string,
+	renderedContent string,
+) error {
 	return r.db.WithContext(ctx).
 		Model(&types.Message{}).
 		Where("id = ? AND session_id = ?", messageID, sessionID).

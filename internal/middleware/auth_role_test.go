@@ -63,7 +63,7 @@ func (f *fakeMemberService) seedActive(userID string, tenantID uint64, role type
 }
 
 func (f *fakeMemberService) AddMember(
-	ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string,
+	_ context.Context, userID string, tenantID uint64, role types.TenantRole, _ *string,
 ) (*types.TenantMember, error) {
 	f.addCalls = append(f.addCalls, struct {
 		UserID   string
@@ -88,7 +88,7 @@ func (f *fakeMemberService) EnsureOwner(
 }
 
 func (f *fakeMemberService) GetMembership(
-	ctx context.Context, userID string, tenantID uint64,
+	_ context.Context, userID string, tenantID uint64,
 ) (*types.TenantMember, error) {
 	if f.failGet != nil {
 		return nil, f.failGet
@@ -101,25 +101,28 @@ func (f *fakeMemberService) GetMembership(
 	return &cp, nil
 }
 
-func (f *fakeMemberService) ListByUser(ctx context.Context, userID string) ([]*types.TenantMember, error) {
+func (f *fakeMemberService) ListByUser(_ context.Context, userID string) ([]*types.TenantMember, error) {
 	var out []*types.TenantMember
 	for _, member := range f.members {
 		if member.UserID == userID && member.Status == types.TenantMemberStatusActive {
-			copy := *member
-			out = append(out, &copy)
+			copyVal := *member
+			out = append(out, &copyVal)
 		}
 	}
 	return out, nil
 }
-func (f *fakeMemberService) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
+
+func (f *fakeMemberService) ListByTenant(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
 	return nil, nil
 }
+
 func (f *fakeMemberService) ListMembersPage(
-	ctx context.Context, tenantID uint64, query string, page, pageSize int,
+	_ context.Context, _ uint64, _ string, _, _ int,
 ) ([]*types.TenantMember, int64, error) {
 	return nil, 0, nil
 }
-func (f *fakeMemberService) HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error) {
+
+func (f *fakeMemberService) HasAnyMembers(_ context.Context, tenantID uint64) (bool, error) {
 	if f.failHasAny != nil {
 		return false, f.failHasAny
 	}
@@ -130,12 +133,14 @@ func (f *fakeMemberService) HasAnyMembers(ctx context.Context, tenantID uint64) 
 	}
 	return false, nil
 }
+
 func (f *fakeMemberService) UpdateRole(
-	ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole,
+	_ context.Context, _ string, _ uint64, _ types.TenantRole,
 ) error {
 	return nil
 }
-func (f *fakeMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
+
+func (f *fakeMemberService) RemoveMember(_ context.Context, _ string, _ uint64) error {
 	return nil
 }
 

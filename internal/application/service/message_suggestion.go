@@ -20,8 +20,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var suggestionThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
-var trailingCitationTags = regexp.MustCompile(`(?s)(?:\s*<(?:kb|web)>.*?</(?:kb|web)>)+\s*$`)
+var (
+	suggestionThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
+	trailingCitationTags = regexp.MustCompile(`(?s)(?:\s*<(?:kb|web)>.*?</(?:kb|web)>)+\s*$`)
+)
 
 const (
 	suggestionHistoryRuneBudget        = 6000
@@ -51,6 +53,7 @@ type messageSuggestionService struct {
 	customAgentService interfaces.CustomAgentService
 }
 
+// NewMessageSuggestionService is an exported function.
 func NewMessageSuggestionService(
 	repo interfaces.MessageSuggestionRepository,
 	messageService interfaces.MessageService,
@@ -358,7 +361,7 @@ func (s *messageSuggestionService) generateWithModel(
 	response, err := chatModel.Chat(modelCtx, []chat.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
-	}, &chat.ChatOptions{
+	}, &chat.Options{
 		Temperature:         0.3,
 		MaxCompletionTokens: 700,
 		Thinking:            &thinking,
@@ -779,7 +782,7 @@ func (s *messageSuggestionService) createEvent(
 		SessionID:       set.SessionID,
 		SuggestionSetID: set.ID,
 		QuestionID:      questionID,
-		EventType:       eventType,
+		Type:            eventType,
 		ActorID:         actorID,
 	})
 }
@@ -874,10 +877,10 @@ func mergeHybridSuggestionItems(model, knowledge types.SuggestionItems, limit in
 
 	result := make(types.SuggestionItems, 0, limit)
 	seen := make(map[string]struct{}, limit)
-	appendFrom := func(items types.SuggestionItems, max int) {
+	appendFrom := func(items types.SuggestionItems, itemLimit int) {
 		added := 0
 		for _, item := range items {
-			if len(result) == limit || (max >= 0 && added == max) {
+			if len(result) == limit || (itemLimit >= 0 && added == itemLimit) {
 				return
 			}
 			key := normalizeSuggestionText(item.Text)

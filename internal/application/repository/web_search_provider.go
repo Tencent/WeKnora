@@ -25,7 +25,11 @@ func (r *webSearchProviderRepository) Create(ctx context.Context, provider *type
 }
 
 // GetByID retrieves a web search provider by ID within a tenant scope
-func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.WebSearchProviderEntity, error) {
+func (r *webSearchProviderRepository) GetByID(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+) (*types.WebSearchProviderEntity, error) {
 	var provider types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
 		"id = ? AND tenant_id = ?", id, tenantID,
@@ -39,7 +43,10 @@ func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint
 }
 
 // GetDefault retrieves the default provider (is_default=true) for a tenant, or nil if none.
-func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error) {
+func (r *webSearchProviderRepository) GetDefault(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.WebSearchProviderEntity, error) {
 	var provider types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
 		"tenant_id = ? AND is_default = ?", tenantID, true,
@@ -53,7 +60,10 @@ func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID u
 }
 
 // List lists all web search providers for a tenant
-func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error) {
+func (r *webSearchProviderRepository) List(
+	ctx context.Context,
+	tenantID uint64,
+) ([]*types.WebSearchProviderEntity, error) {
 	var providers []*types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
 		"tenant_id = ?", tenantID,

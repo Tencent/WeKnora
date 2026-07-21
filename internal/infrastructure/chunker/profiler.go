@@ -207,6 +207,7 @@ func matchHeading(line string, counts *map[int]int) bool {
 // StrategyTier identifies which chunking implementation should run.
 type StrategyTier string
 
+// TierHeading and related constants.
 const (
 	TierHeading   StrategyTier = "heading"
 	TierHeuristic StrategyTier = "heuristic"

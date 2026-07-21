@@ -228,7 +228,12 @@ func TestList_Limit_Zero_Rejected(t *testing.T) {
 
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: makeKBs(3)})
+	err := runList(
+		context.Background(),
+		&ListOptions{Limit: -1},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		&fakeListSvc{items: makeKBs(3)},
+	)
 	if err == nil {
 		t.Fatal("expected error for negative --limit")
 	}

@@ -21,6 +21,7 @@ func getMaxMessageSize() int {
 	return 50 * 1024 * 1024
 }
 
+// Logger is exported.
 var Logger = log.New(os.Stdout, "[DocReader] ", log.LstdFlags|log.Lmicroseconds)
 
 // ImageRefInfo represents an image reference from a converted document.
@@ -38,11 +39,13 @@ type Client struct {
 	debug bool
 }
 
+// NewClient is an exported function.
 func NewClient(addr string) (*Client, error) {
 	authConfig := LoadAuthConfigFromEnv()
 	return NewClientWithAuth(addr, authConfig)
 }
 
+// NewClientWithAuth is an exported function.
 func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 	Logger.Printf("INFO: Creating new DocReader client connecting to %s", addr)
 
@@ -61,7 +64,7 @@ func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 	resolver.SetDefaultScheme("dns")
 
 	startTime := time.Now()
-	conn, err := grpc.Dial("dns:///"+addr, opts...)
+	conn, err := grpc.NewClient("dns:///"+addr, opts...)
 	if err != nil {
 		Logger.Printf("ERROR: Failed to connect to DocReader service: %v", err)
 		return nil, err
@@ -75,15 +78,18 @@ func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 	}, nil
 }
 
+// Close implements the required interface method.
 func (c *Client) Close() error {
 	Logger.Printf("INFO: Closing DocReader client connection")
 	return c.conn.Close()
 }
 
+// SetDebug implements the required interface method.
 func (c *Client) SetDebug(debug bool) {
 	c.debug = debug
 }
 
+// Log implements the required interface method.
 func (c *Client) Log(level string, format string, args ...interface{}) {
 	if level == "DEBUG" && !c.debug {
 		return

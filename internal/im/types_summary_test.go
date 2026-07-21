@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSummarizeIMChannel_OmitsCredentials(t *testing.T) {
-	ch := IMChannel{
+func TestSummarizeChannel_OmitsCredentials(t *testing.T) {
+	ch := Channel{
 		ID:          "ch-1",
 		TenantID:    1,
 		AgentID:     "agent-1",
@@ -19,7 +19,7 @@ func TestSummarizeIMChannel_OmitsCredentials(t *testing.T) {
 		Credentials: types.JSON(`{"app_secret":"top-secret"}`),
 	}
 
-	summary := SummarizeIMChannel(ch)
+	summary := SummarizeChannel(ch)
 	body, err := json.Marshal(summary)
 	require.NoError(t, err)
 
@@ -28,7 +28,7 @@ func TestSummarizeIMChannel_OmitsCredentials(t *testing.T) {
 	assert.NotContains(t, string(body), `"credentials":`)
 }
 
-func TestSummarizeIMChannel_EmptyCredentialsNotConfigured(t *testing.T) {
-	summary := SummarizeIMChannel(IMChannel{Credentials: types.JSON("{}")})
+func TestSummarizeChannel_EmptyCredentialsNotConfigured(t *testing.T) {
+	summary := SummarizeChannel(Channel{Credentials: types.JSON("{}")})
 	assert.False(t, summary.CredentialsConfigured)
 }

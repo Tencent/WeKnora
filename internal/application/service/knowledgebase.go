@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package service
 
 import (
@@ -304,7 +305,10 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByIDOnly(ctx context.Context, id 
 }
 
 // GetKnowledgeBasesByIDsOnly retrieves knowledge bases by IDs without tenant filter (batch).
-func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(
+	ctx context.Context,
+	ids []string,
+) ([]*types.KnowledgeBase, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -385,7 +389,10 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 }
 
 // ListKnowledgeBasesByTenantID returns all knowledge bases for the given tenant (e.g. for shared agent context).
-func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(
+	ctx context.Context,
+	tenantID uint64,
+) ([]*types.KnowledgeBase, error) {
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -405,6 +412,7 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 				kb.ChunkCount = cnt
 			}
 		}
+		//nolint:lll
 		if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
 			kb.IsProcessing = processingCount > 0
 			kb.ProcessingCount = processingCount
@@ -422,7 +430,8 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 	return kbs, nil
 }
 
-// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB using kb.TenantID.
+// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB using
+// kb.TenantID.
 func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *types.KnowledgeBase) error {
 	if kb == nil {
 		return nil
@@ -439,7 +448,10 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 			kb.ChunkCount = cnt
 		}
 	}
-	if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+	if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{
+		"pending",
+		"processing",
+	}); err == nil {
 		kb.IsProcessing = processingCount > 0
 		kb.ProcessingCount = processingCount
 	}
@@ -788,7 +800,13 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		)
 		if errors.Is(err, retriever.ErrVectorStoreForbidden) ||
 			errors.Is(err, retriever.ErrVectorStoreNotFound) {
-			logger.Errorf(ctx, "KB delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
+			logger.Errorf(
+				ctx,
+				"KB delete task aborted: %v (tenant=%d, kb=%s)",
+				err,
+				payload.TenantID,
+				payload.KnowledgeBaseID,
+			)
 			return asynq.SkipRetry
 		}
 		if err != nil {
@@ -811,6 +829,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 					logger.Warnf(ctx, "Failed to get embedding model %s: %v", key.EmbeddingModelID, err)
 					continue
 				}
+				//nolint:lll
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeGroup, embeddingModel.GetDimensions(), key.Type); err != nil {
 					logger.Warnf(ctx, "Failed to delete embeddings for model %s: %v", key.EmbeddingModelID, err)
 				}
@@ -1027,7 +1046,8 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			}
 			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
 				return nil, nil, apperrors.NewBadRequestError(
-					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported")
+					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported",
+				)
 			}
 		}
 	} else {
@@ -1051,7 +1071,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			VLMConfig:             sourceKB.VLMConfig,
 			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageBackendID:      sourceKB.StorageBackendID,
-			StorageConfig:         sourceKB.StorageConfig,
+			StorageConfig:         sourceKB.StorageConfig, //nolint:staticcheck // preserve legacy cos_config on clone
 			FAQConfig:             faqConfig,
 			VectorStoreID:         sourceKB.VectorStoreID,
 		}

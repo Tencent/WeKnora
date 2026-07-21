@@ -20,7 +20,11 @@ type wikiWritePageTool struct {
 }
 
 // NewWikiWritePageTool creates a new wiki_write_page tool
-func NewWikiWritePageTool(wikiPageService interfaces.WikiPageService, kbIDs []string, knowledgeService interfaces.KnowledgeService) types.Tool {
+func NewWikiWritePageTool(
+	wikiPageService interfaces.WikiPageService,
+	kbIDs []string,
+	knowledgeService interfaces.KnowledgeService,
+) types.Tool {
 	return &wikiWritePageTool{
 		BaseTool: NewBaseTool(
 			ToolWikiWritePage,
@@ -56,7 +60,8 @@ func NewWikiWritePageTool(wikiPageService interfaces.WikiPageService, kbIDs []st
 					"source_refs": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "A list of short dN source document IDs that contributed to this page. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
+						"description": "A list of short dN source document IDs that contributed to this page. If pr" +
+							"ovided, these will COMPLETELY REPLACE the existing source_refs of the page."
 					}
 				},
 				"required": ["slug", "title", "summary", "content", "page_type"]
@@ -89,7 +94,10 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	kbID := t.kbIDs[0]
 
 	if params.Title == "" || params.PageType == "" || params.Content == "" || params.Summary == "" {
-		return &types.ToolResult{Success: false, Error: "title, summary, content, and page_type are required for write action"}, nil
+		return &types.ToolResult{
+			Success: false,
+			Error:   "title, summary, content, and page_type are required for write action",
+		}, nil
 	}
 
 	// Try to get the existing page
@@ -143,7 +151,15 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	// Rebuild the index page to reflect the new/updated summary
 	_ = t.wikiPageService.RebuildIndexPage(ctx, kbID)
 
-	output := fmt.Sprintf("Successfully %s page [[%s]].\n- Title: %s\n- Type: %s\n- Summary: %s\n- Content length: %d chars", action, params.Slug, params.Title, params.PageType, params.Summary, len(params.Content))
+	output := fmt.Sprintf(
+		"Successfully %s page [[%s]].\n- Title: %s\n- Type: %s\n- Summary: %s\n- Content length: %d chars",
+		action,
+		params.Slug,
+		params.Title,
+		params.PageType,
+		params.Summary,
+		len(params.Content),
+	)
 	if len(params.Aliases) > 0 {
 		output += fmt.Sprintf("\n- Aliases: %s", strings.Join(params.Aliases, ", "))
 	}

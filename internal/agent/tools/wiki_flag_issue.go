@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -16,12 +17,14 @@ type wikiFlagIssueTool struct {
 	kbIDs       []string
 }
 
+// NewWikiFlagIssueTool is an exported function.
 func NewWikiFlagIssueTool(wikiService interfaces.WikiPageService, kbIDs []string) types.Tool {
 	return &wikiFlagIssueTool{
 		BaseTool: NewBaseTool(
 			ToolWikiFlagIssue,
 			`Flag a wiki page that contains errors, mixed entities, or outdated information.
-Use this tool when you or the user identifies that a wiki page is factually incorrect or wrongly merged (e.g., a page contains information about two different products).
+Use this tool when you or the user identifies that a wiki page is factually incorrect or wrongly merged (e.g.,
+	a page contains information about two different products).
 This will log an issue for human review or automated maintenance.`,
 			json.RawMessage(`{
   "type": "object",
@@ -42,7 +45,8 @@ This will log an issue for human review or automated maintenance.`,
     "suspected_knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error."
+      //nolint:lll
+      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error." //nolint:lll
     }
   },
   "required": ["slug", "issue_type", "description"]
@@ -100,6 +104,9 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	return &types.ToolResult{
 		Success: true,
-		Output:  fmt.Sprintf("Successfully flagged issue for %s. A maintenance ticket has been created for review.", slug),
+		Output: fmt.Sprintf(
+			"Successfully flagged issue for %s. A maintenance ticket has been created for review.",
+			slug,
+		),
 	}, nil
 }

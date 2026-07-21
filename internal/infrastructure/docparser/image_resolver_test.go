@@ -92,7 +92,13 @@ func (c *captureSaveBytes) SaveFile(context.Context, *multipart.FileHeader, uint
 	return "", fmt.Errorf("not implemented")
 }
 
-func (c *captureSaveBytes) SaveBytes(_ context.Context, data []byte, _ uint64, fileName string, _ bool) (string, error) {
+func (c *captureSaveBytes) SaveBytes(
+	_ context.Context,
+	data []byte,
+	_ uint64,
+	fileName string,
+	_ bool,
+) (string, error) {
 	c.saved = append(c.saved, append([]byte(nil), data...))
 	u := "local://test/" + fileName
 	c.urls = append(c.urls, u)

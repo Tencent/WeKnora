@@ -15,6 +15,7 @@ type messageSuggestionRepository struct {
 	db *gorm.DB
 }
 
+// NewMessageSuggestionRepository is an exported function.
 func NewMessageSuggestionRepository(db *gorm.DB) interfaces.MessageSuggestionRepository {
 	return &messageSuggestionRepository{db: db}
 }
@@ -94,7 +95,8 @@ func (r *messageSuggestionRepository) AcquireGeneration(
 	if existing.Status == types.SuggestionStatusSuppressed && !regenerate {
 		return existing, false, nil
 	}
-	if existing.Status == types.SuggestionStatusGenerating && existing.LeaseUntil != nil && existing.LeaseUntil.After(now) {
+	if existing.Status == types.SuggestionStatusGenerating && existing.LeaseUntil != nil &&
+		existing.LeaseUntil.After(now) {
 		return existing, false, nil
 	}
 

@@ -41,8 +41,8 @@ func TestCheckSufficientSummaryContent(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "scanned PDF with empty <image> wrapper rejected",
-			content: `<image url="x"><image_original>![a](x)</image_original></image>`,
+			name:      "scanned PDF with empty <image> wrapper rejected",
+			content:   `<image url="x"><image_original>![a](x)</image_original></image>`,
 			wantError: true,
 		},
 		{

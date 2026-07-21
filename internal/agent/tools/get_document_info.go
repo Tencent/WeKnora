@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -44,6 +45,7 @@ Do not use when:
 
 ## IDs
 - knowledge_ids: regular documents, using the short dN IDs from retrieval results
+//nolint:lll
 - faq_ids: individual FAQ entries, using the short cN chunk IDs. Returns the standard question and answers, not the container title.`,
 	schema: json.RawMessage(`{
   "type": "object",
@@ -140,11 +142,19 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			}
 			if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
 				mu.Lock()
-				results["faq:"+id] = &docInfo{err: fmt.Errorf("knowledge base %s is not accessible", chunk.KnowledgeBaseID)}
+				results["faq:"+id] = &docInfo{
+					err: fmt.Errorf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
+				}
 				mu.Unlock()
 				return
 			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(
+				ctx,
+				t.searchTargets,
+				chunk.KnowledgeID,
+				chunk.KnowledgeBaseID,
+				t.knowledgeService,
+			)
 			if scopeErr != nil || !allowed {
 				mu.Lock()
 				if scopeErr != nil {
@@ -190,7 +200,13 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				mu.Unlock()
 				return
 			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(
+				ctx,
+				t.searchTargets,
+				knowledge.ID,
+				knowledge.KnowledgeBaseID,
+				t.knowledgeService,
+			)
 			if scopeErr != nil || !allowed {
 				mu.Lock()
 				if scopeErr != nil {

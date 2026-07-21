@@ -23,7 +23,12 @@ type Refresher interface {
 // Single canonical implementation shared by `weknora auth refresh` and the
 // AuthRetryTransport's refresh closure - both used to inline the same
 // six-step sequence with subtly diverging error wording.
-func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refresher, profileName string) (string, error) {
+func RefreshAndPersist(
+	ctx context.Context,
+	store secrets.Store,
+	refresher Refresher,
+	profileName string,
+) (string, error) {
 	refresh, err := store.Get(profileName, "refresh")
 	if errors.Is(err, secrets.ErrNotFound) || refresh == "" {
 		return "", &Error{

@@ -21,7 +21,7 @@ func TestValidateSessionMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := &IMChannel{SessionMode: tt.sessionMode}
+			ch := &Channel{SessionMode: tt.sessionMode}
 			err := ch.validateSessionMode()
 
 			if tt.sessionMode == "" {
@@ -40,7 +40,7 @@ func TestValidateSessionMode(t *testing.T) {
 	}
 }
 
-func TestIMChannelBeforeCreate_SessionModeDefault(t *testing.T) {
+func TestChannelBeforeCreate_SessionModeDefault(t *testing.T) {
 	tests := []struct {
 		name         string
 		inputMode    string
@@ -53,7 +53,7 @@ func TestIMChannelBeforeCreate_SessionModeDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := &IMChannel{
+			ch := &Channel{
 				TenantID:    1,
 				AgentID:     "agent-1",
 				Platform:    "slack",
@@ -71,8 +71,8 @@ func TestIMChannelBeforeCreate_SessionModeDefault(t *testing.T) {
 	}
 }
 
-func TestIMChannelBeforeCreate_InvalidSessionMode(t *testing.T) {
-	ch := &IMChannel{
+func TestChannelBeforeCreate_InvalidSessionMode(t *testing.T) {
+	ch := &Channel{
 		TenantID:    1,
 		AgentID:     "agent-1",
 		Platform:    "slack",
@@ -85,7 +85,7 @@ func TestIMChannelBeforeCreate_InvalidSessionMode(t *testing.T) {
 	}
 }
 
-func TestIMChannelBeforeSave_SessionModeValidation(t *testing.T) {
+func TestChannelBeforeSave_SessionModeValidation(t *testing.T) {
 	tests := []struct {
 		name        string
 		sessionMode string
@@ -100,7 +100,7 @@ func TestIMChannelBeforeSave_SessionModeValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := &IMChannel{
+			ch := &Channel{
 				SessionMode: tt.sessionMode,
 				Credentials: []byte("{}"),
 			}
@@ -136,8 +136,8 @@ func TestSessionModeConstants(t *testing.T) {
 func TestComputeBotIdentity_FeishuAndLarkAreDistinct(t *testing.T) {
 	const creds = `{"app_id":"cli_a1b2c3","app_secret":"s"}`
 
-	feishu := &IMChannel{Platform: "feishu", Credentials: []byte(creds)}
-	lark := &IMChannel{Platform: "lark", Credentials: []byte(creds)}
+	feishu := &Channel{Platform: "feishu", Credentials: []byte(creds)}
+	lark := &Channel{Platform: "lark", Credentials: []byte(creds)}
 
 	feishuID := feishu.computeBotIdentity()
 	larkID := lark.computeBotIdentity()
@@ -154,7 +154,7 @@ func TestComputeBotIdentity_FeishuAndLarkAreDistinct(t *testing.T) {
 }
 
 func TestComputeBotIdentity_LarkWithoutAppID(t *testing.T) {
-	ch := &IMChannel{Platform: "lark", Credentials: []byte(`{"app_secret":"s"}`)}
+	ch := &Channel{Platform: "lark", Credentials: []byte(`{"app_secret":"s"}`)}
 	if got := ch.computeBotIdentity(); got != "" {
 		t.Errorf("identity = %q, want empty when app_id is missing", got)
 	}

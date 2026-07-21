@@ -40,7 +40,7 @@ func TestSSRFSafeClientStripsAuthTokenOnCrossHostRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if gotToken != "" {
 		t.Fatalf("X-Auth-Token leaked on cross-host redirect: %q", gotToken)

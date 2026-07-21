@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -18,13 +19,18 @@ type wikiReadSourceDocTool struct {
 	chunkService     interfaces.ChunkService
 }
 
-func NewWikiReadSourceDocTool(knowledgeService interfaces.KnowledgeService, chunkService interfaces.ChunkService) types.Tool {
+// NewWikiReadSourceDocTool is an exported function.
+func NewWikiReadSourceDocTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+) types.Tool {
 	return &wikiReadSourceDocTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadSourceDoc,
 			`Read or search within a specific source document to drill down for details omitted from the wiki.
 Provide the knowledge_id from the <sources> block.
-You can EITHER search using a regex query OR fetch a specific contiguous range of chunks using start_chunk_index and end_chunk_index (useful for expanding context around a known chunk).
+You can EITHER search using a regex query OR fetch a specific contiguous range of chunks using start_chunk_index
+and end_chunk_index (useful for expanding context around a known chunk).
 If neither query nor range is provided, it returns the beginning of the document.`,
 			json.RawMessage(`{
   "type": "object",
@@ -35,7 +41,9 @@ If neither query nor range is provided, it returns the beginning of the document
     },
     "query": {
       "type": "string",
-      "description": "Optional: A regex query to filter the document chunks. Use this to find specific quotes or details efficiently. Remember to double-escape backslashes for JSON: write \"C\\\\+\\\\+\" (NOT \"C\\+\\+\") and \"\\\\d+\" (NOT \"\\d+\")."
+      "description": "Optional: A regex query to filter the document chunks. Use this to find specific qu" +
+      	//nolint:lll
+      	"otes or details efficiently. Remember to double-escape backslashes for JSON: write \"C\\\\+\\\\+\" (NOT \"C\\+\\+\") and \"\\\\d+\" (NOT \"\\d+\")." //nolint:lll
     },
     "start_chunk_index": {
       "type": "integer",
@@ -43,6 +51,7 @@ If neither query nor range is provided, it returns the beginning of the document
     },
     "end_chunk_index": {
       "type": "integer",
+      //nolint:lll
       "description": "Optional: The ending chunk index (1-based) to read a specific range. Must be >= start_chunk_index."
     }
   },
@@ -130,8 +139,8 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	var sb strings.Builder
 	sb.WriteString("<source_document>\n<metadata>\n")
-	sb.WriteString(fmt.Sprintf("<title>%s</title>\n", knowledge.Title))
-	sb.WriteString(fmt.Sprintf("<knowledge_id>%s</knowledge_id>\n", knowledgeID))
+	fmt.Fprintf(&sb, "<title>%s</title>\n", knowledge.Title)
+	fmt.Fprintf(&sb, "<knowledge_id>%s</knowledge_id>\n", knowledgeID)
 
 	hasRange := params.StartChunkIndex > 0
 	var re *regexp.Regexp
@@ -143,14 +152,14 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 		if params.EndChunkIndex-params.StartChunkIndex > 50 {
 			params.EndChunkIndex = params.StartChunkIndex + 50 // Max 50 chunks to prevent bloat
 		}
-		sb.WriteString(fmt.Sprintf("<chunk_range start=\"%d\" end=\"%d\"/>\n", params.StartChunkIndex, params.EndChunkIndex))
+		fmt.Fprintf(&sb, "<chunk_range start=\"%d\" end=\"%d\"/>\n", params.StartChunkIndex, params.EndChunkIndex)
 	} else if params.Query != "" {
 		compiled, err := regexp.Compile("(?i)" + params.Query)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Invalid regex query '%s': %v", params.Query, err)}, nil
 		}
 		re = compiled
-		sb.WriteString(fmt.Sprintf("<query>%s</query>\n", params.Query))
+		fmt.Fprintf(&sb, "<query>%s</query>\n", params.Query)
 	}
 
 	matchCount := 0
@@ -227,7 +236,12 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					reachedMax = true
 					break
 				}
-				fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"range\">\n%s\n</chunk>\n", chunkNum, chunkContent)
+				fmt.Fprintf(
+					&chunksOutput,
+					"<chunk index=\"%d\" type=\"range\">\n%s\n</chunk>\n",
+					chunkNum,
+					chunkContent,
+				)
 				appendFormattedChunk(c, chunkContent)
 				matchCount++
 				continue
@@ -247,7 +261,12 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					// Output previous chunk for context
 					if prevChunk != nil && !outputtedIndices[prevChunk.ChunkIndex] {
 						prevContent := enrichChunkContent(prevChunk)
-						fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_before\">\n%s\n</chunk>\n", prevChunk.ChunkIndex+1, prevContent)
+						fmt.Fprintf(
+							&chunksOutput,
+							"<chunk index=\"%d\" type=\"context_before\">\n%s\n</chunk>\n",
+							prevChunk.ChunkIndex+1,
+							prevContent,
+						)
 						appendFormattedChunk(prevChunk, prevContent)
 						outputtedIndices[prevChunk.ChunkIndex] = true
 					}
@@ -258,7 +277,13 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					if re != nil {
 						matchAttr = ` type="match"`
 					}
-					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\"%s>\n%s\n</chunk>\n", c.ChunkIndex+1, matchAttr, chunkContent)
+					fmt.Fprintf(
+						&chunksOutput,
+						"<chunk index=\"%d\"%s>\n%s\n</chunk>\n",
+						c.ChunkIndex+1,
+						matchAttr,
+						chunkContent,
+					)
 					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
@@ -268,6 +293,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 				}
 			} else if forceOutputNext {
 				if !outputtedIndices[c.ChunkIndex] {
+					//nolint:lll
 					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_after\">\n%s\n</chunk>\n", c.ChunkIndex+1, chunkContent)
 					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
@@ -305,10 +331,10 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 		page++
 	}
 
-	sb.WriteString(fmt.Sprintf("<total_chunks>%d</total_chunks>\n</metadata>\n", totalChunks))
+	fmt.Fprintf(&sb, "<total_chunks>%d</total_chunks>\n</metadata>\n", totalChunks)
 
 	if matchCount > 0 {
-		sb.WriteString(fmt.Sprintf("<chunks count=\"%d\">\n", matchCount))
+		fmt.Fprintf(&sb, "<chunks count=\"%d\">\n", matchCount)
 		sb.WriteString(chunksOutput.String())
 		sb.WriteString("</chunks>\n")
 	} else {
@@ -316,7 +342,9 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	if reachedMax {
-		sb.WriteString("<message>Reached maximum limit for fetching chunks in a single call. Please refine your query or range if needed.</message>\n")
+		sb.WriteString(
+			"<message>Reached maximum limit for fetching chunks in a single call. Please refine your query or range if needed.</message>\n", //nolint:lll
+		)
 	} else if matchCount == 0 {
 		if hasRange {
 			sb.WriteString("<message>No chunks found in the specified range.</message>\n")

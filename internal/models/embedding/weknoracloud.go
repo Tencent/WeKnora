@@ -77,6 +77,7 @@ type weKnoraCloudEmbedResponse struct {
 	} `json:"data"`
 }
 
+// Embed implements the required interface method.
 func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	results, err := e.BatchEmbed(ctx, []string{text})
 	if err != nil {
@@ -88,6 +89,7 @@ func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float3
 	return results[0], nil
 }
 
+// BatchEmbed implements the required interface method.
 func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts}
 	if e.supportsDimensionOverride && e.dimensions > 0 {
@@ -101,7 +103,12 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	requestID := uuid.New().String()
 	headers := utils.Sign(e.appID, e.apiKey, requestID, string(bodyBytes))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+weKnoraCloudEmbedPath, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		e.baseURL+weKnoraCloudEmbedPath,
+		bytes.NewReader(bodyBytes),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: create request: %w", err)
 	}
@@ -114,7 +121,7 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -138,10 +145,16 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	return result, nil
 }
 
-func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
+// BatchEmbedWithPool implements the required interface method.
+func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(
+	ctx context.Context,
+	_ Embedder,
+	texts []string,
+) ([][]float32, error) {
 	return e.BatchEmbed(ctx, texts)
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *WeKnoraCloudEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -153,6 +166,11 @@ func (e *WeKnoraCloudEmbedder) effectiveModelName() string {
 	return e.modelName
 }
 
+// GetModelName implements the required interface method.
 func (e *WeKnoraCloudEmbedder) GetModelName() string { return e.modelName }
-func (e *WeKnoraCloudEmbedder) GetModelID() string   { return e.modelID }
-func (e *WeKnoraCloudEmbedder) GetDimensions() int   { return e.dimensions }
+
+// GetModelID implements the required interface method.
+func (e *WeKnoraCloudEmbedder) GetModelID() string { return e.modelID }
+
+// GetDimensions implements the required interface method.
+func (e *WeKnoraCloudEmbedder) GetDimensions() int { return e.dimensions }

@@ -256,9 +256,9 @@ func cosineSimilarity(a, b []float32) float64 {
 }
 
 // capFolders truncates a folder list to at most max entries (max <= 0 = no cap).
-func capFolders(paths [][]string, max int) [][]string {
-	if max > 0 && len(paths) > max {
-		return paths[:max]
+func capFolders(paths [][]string, limit int) [][]string {
+	if limit > 0 && len(paths) > limit {
+		return paths[:limit]
 	}
 	return paths
 }

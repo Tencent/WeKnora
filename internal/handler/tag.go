@@ -45,11 +45,11 @@ func NewTagHandler(
 // Uses tenant from c's context — which the route-level KB-access guard
 // has already rewritten to the effective tenant for shared KBs.
 func (h *TagHandler) resolveTagID(c *gin.Context) (string, error) {
-	return h.resolveTagIDWithCtx(c, c.Request.Context())
+	return h.resolveTagIDWithCtx(c.Request.Context(), c)
 }
 
 // resolveTagIDWithCtx resolves tag_id using the given context for tenant.
-func (h *TagHandler) resolveTagIDWithCtx(c *gin.Context, ctx context.Context) (string, error) {
+func (h *TagHandler) resolveTagIDWithCtx(ctx context.Context, c *gin.Context) (string, error) {
 	tagIDParam := secutils.SanitizeForLog(c.Param("tag_id"))
 
 	if seqID, err := strconv.ParseInt(tagIDParam, 10, 64); err == nil {
@@ -90,7 +90,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
-		c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	tags, err := h.tagService.ListTags(ctx, kbID, &page, keyword)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	var req createTagRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind create tag payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"kb_id": kbID,
 		})
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -180,14 +180,14 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 
 	tagID, err := h.resolveTagID(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	var req updateTagRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind update tag payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
 		})
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -227,7 +227,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 
 	tagID, err := h.resolveTagID(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -255,7 +255,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
 		})
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 

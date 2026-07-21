@@ -22,12 +22,14 @@ type Reranker interface {
 	GetModelID() string
 }
 
+// RankResult is an exported type.
 type RankResult struct {
 	Index          int          `json:"index"`
 	Document       DocumentInfo `json:"document"`
 	RelevanceScore float64      `json:"relevance_score"`
 }
 
+// UnmarshalJSON implements the required interface method.
 // Handles the RelevanceScore field by checking if RelevanceScore exists first, otherwise falls back to Score field
 func (r *RankResult) UnmarshalJSON(data []byte) error {
 	var temp struct {
@@ -53,6 +55,7 @@ func (r *RankResult) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// DocumentInfo is an exported type.
 type DocumentInfo struct {
 	Text string `json:"text"`
 }
@@ -78,6 +81,7 @@ func (d *DocumentInfo) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// RerankerConfig is an exported type.
 type RerankerConfig struct {
 	APIKey      string
 	BaseURL     string
@@ -132,7 +136,7 @@ type customHeaderSetter interface {
 
 func newReranker(config *RerankerConfig) (Reranker, error) {
 	// Use provider field if set, otherwise detect from URL using provider registry
-	providerName := provider.ProviderName(config.Provider)
+	providerName := provider.Name(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}

@@ -38,7 +38,8 @@ func TestLLMToolOutputsUseMarkdownImages(t *testing.T) {
 			if !strings.Contains(output, "![目标说话人提取流程图](resource://AbCdEfGhIjKlMnOpQrStUv)") {
 				t.Fatalf("expected Markdown image in tool output:\n%s", output)
 			}
-			if strings.Contains(output, "<image") || strings.Contains(output, "<caption>") || strings.Contains(output, "<ocr_text>") {
+			if strings.Contains(output, "<image") || strings.Contains(output, "<caption>") ||
+				strings.Contains(output, "<ocr_text>") {
 				t.Fatalf("tool output leaked legacy image XML:\n%s", output)
 			}
 		})

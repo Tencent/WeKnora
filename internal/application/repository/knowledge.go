@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrKnowledgeNotFound is exported.
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
@@ -287,7 +288,7 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 }
 
 func (r *knowledgeRepository) AminusB(
-	ctx context.Context,
+	_ context.Context,
 	Atenant uint64, A string,
 	Btenant uint64, B string,
 ) ([]string, error) {
@@ -538,7 +539,11 @@ func (r *knowledgeRepository) SearchKnowledge(
 	// If keyword is provided, filter by file_name or title (case-insensitive).
 	if keyword != "" {
 		escaped := strings.ToLower(escapeLikeKeyword(keyword))
-		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)",
+			"%"+escaped+"%",
+			"%"+escaped+"%",
+		)
 	}
 
 	// If fileTypes is provided, filter by file extension or type
@@ -622,7 +627,8 @@ func (r *knowledgeRepository) SearchKnowledge(
 	return knowledges, hasMore, nil
 }
 
-// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (e.g. own + shared KBs).
+// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (e.g. own +
+// shared KBs).
 func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	ctx context.Context,
 	scopes []types.KnowledgeSearchScope,
@@ -645,19 +651,27 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		placeholders[i] = "(?,?)"
 		args = append(args, s.TenantID, s.KBID)
 	}
-	scopeCondition := "(knowledges.tenant_id, knowledges.knowledge_base_id) IN (" + strings.Join(placeholders, ",") + ")"
+	scopeCondition := "(knowledges.tenant_id, knowledges.knowledge_base_id) IN (" + strings.Join(
+		placeholders,
+		",",
+	) + ")"
 
 	query := r.db.WithContext(ctx).
 		Table("knowledges").
 		Select("knowledges.*, knowledge_bases.name as knowledge_base_name").
-		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id AND knowledge_bases.tenant_id = knowledges.tenant_id").
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowled"+
+			"ge_base_id AND knowledge_bases.tenant_id = knowledges.tenant_id").
 		Where(scopeCondition, args...).
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
 		Where("knowledges.deleted_at IS NULL")
 
 	if keyword != "" {
 		escaped := strings.ToLower(escapeLikeKeyword(keyword))
-		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)",
+			"%"+escaped+"%",
+			"%"+escaped+"%",
+		)
 	}
 
 	if len(fileTypes) > 0 {

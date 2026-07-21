@@ -44,9 +44,33 @@ func (e *builtinEngine) Name() string { return "builtin" }
 func (e *builtinEngine) Description() string {
 	return "DocReader built-in parser engine"
 }
+
 func (e *builtinEngine) FileTypes(_ bool) []string {
-	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "epub", "mhtml", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
+	return []string{
+		"docx",
+		"doc",
+		"pdf",
+		"md",
+		"markdown",
+		"xlsx",
+		"xls",
+		"epub",
+		"mhtml",
+		"jpg",
+		"jpeg",
+		"png",
+		"gif",
+		"bmp",
+		"tiff",
+		"webp",
+		"mp3",
+		"wav",
+		"m4a",
+		"flac",
+		"ogg",
+	}
 }
+
 func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
 	if docreaderConnected {
 		return true, ""
@@ -72,9 +96,29 @@ func (e *simpleEngine) Name() string { return SimpleEngineName }
 func (e *simpleEngine) Description() string {
 	return "Simple format & image parsing (no external service required)"
 }
+
 func (e *simpleEngine) FileTypes(_ bool) []string {
-	return []string{"md", "markdown", "txt", "csv", "json", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
+	return []string{
+		"md",
+		"markdown",
+		"txt",
+		"csv",
+		"json",
+		"jpg",
+		"jpeg",
+		"png",
+		"gif",
+		"bmp",
+		"tiff",
+		"webp",
+		"mp3",
+		"wav",
+		"m4a",
+		"flac",
+		"ogg",
+	}
 }
+
 func (e *simpleEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
 	return true, ""
 }
@@ -90,7 +134,8 @@ func (e *weKnoraCloudEngine) Description() string { return "WeKnoraCloud documen
 func (e *weKnoraCloudEngine) FileTypes(_ bool) []string {
 	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "pptx", "ppt"}
 }
-func (e *weKnoraCloudEngine) CheckAvailable(docreaderConnected bool, overrides map[string]string) (bool, string) {
+
+func (e *weKnoraCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	if overrides["weknoracloud_app_id"] != "" {
 		return true, ""
 	}
@@ -108,6 +153,7 @@ func (e *mineruEngine) Description() string { return "MinerU self-hosted service
 func (e *mineruEngine) FileTypes(_ bool) []string {
 	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
 }
+
 func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	endpoint := strings.TrimSpace(overrides["mineru_endpoint"])
 	if endpoint == "" {
@@ -127,6 +173,7 @@ func (e *mineruCloudEngine) Description() string { return "MinerU Cloud API" }
 func (e *mineruCloudEngine) FileTypes(_ bool) []string {
 	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
 }
+
 func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	apiKey := strings.TrimSpace(overrides["mineru_api_key"])
 	if apiKey == "" {
@@ -146,6 +193,7 @@ func (e *paddleOCRVLEngine) Description() string { return "PaddleOCR-VL self-hos
 func (e *paddleOCRVLEngine) FileTypes(_ bool) []string {
 	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
 }
+
 func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	endpoint := strings.TrimSpace(overrides["paddleocr_vl_endpoint"])
 	if endpoint == "" {
@@ -165,6 +213,7 @@ func (e *paddleOCRVLCloudEngine) Description() string { return "PaddleOCR-VL Clo
 func (e *paddleOCRVLCloudEngine) FileTypes(_ bool) []string {
 	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
 }
+
 func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	token := strings.TrimSpace(overrides["paddleocr_vl_cloud_token"])
 	if token == "" {
@@ -187,7 +236,11 @@ func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]str
 //     authoritative for its own capabilities).
 //   - Remote engines not present locally are appended as-is, enabling
 //     auto-discovery of newly added docreader engines without Go changes.
-func ListAllEngines(docreaderConnected bool, overrides map[string]string, remoteEngines []types.ParserEngineInfo) []types.ParserEngineInfo {
+func ListAllEngines(
+	docreaderConnected bool,
+	overrides map[string]string,
+	remoteEngines []types.ParserEngineInfo,
+) []types.ParserEngineInfo {
 	remoteMap := make(map[string]types.ParserEngineInfo, len(remoteEngines))
 	for _, re := range remoteEngines {
 		remoteMap[re.Name] = re

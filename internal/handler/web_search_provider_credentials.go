@@ -22,6 +22,7 @@ type WebSearchProviderCredentialsHandler struct {
 	svc  interfaces.WebSearchProviderService
 }
 
+// NewWebSearchProviderCredentialsHandler is an exported function.
 func NewWebSearchProviderCredentialsHandler(
 	repo interfaces.WebSearchProviderRepository,
 	svc interfaces.WebSearchProviderService,
@@ -37,23 +38,24 @@ type webSearchCredentialsPutRequest struct {
 	APIKey *string `json:"api_key,omitempty"`
 }
 
+// Put implements the required interface method.
 func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	id := c.Param("id")
 	var req webSearchCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if req.APIKey == nil {
 		provider, err := h.repo.GetByID(ctx, tenantID, id)
 		if err != nil || provider == nil {
-			c.Error(errors.NewNotFoundError("web search provider not found"))
+			_ = c.Error(errors.NewNotFoundError("web search provider not found"))
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.CredentialsResponse{
@@ -68,7 +70,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"provider_id": secutils.SanitizeForLog(id),
 		})
-		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
 		return
 	}
 	resp := dto.CredentialsResponse{
@@ -79,17 +81,18 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField implements the required interface method.
 func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	id := c.Param("id")
 	field := c.Param("field")
 	if field != "api_key" {
-		c.Error(errors.NewBadRequestError("unknown credential field: " + secutils.SanitizeForLog(field)))
+		_ = c.Error(errors.NewBadRequestError("unknown credential field: " + secutils.SanitizeForLog(field)))
 		return
 	}
 	if err := h.svc.ClearProviderCredential(ctx, tenantID, id, field); err != nil {
@@ -97,7 +100,7 @@ func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 			"provider_id": secutils.SanitizeForLog(id),
 			"field":       field,
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
 		return
 	}
 	c.Status(http.StatusNoContent)

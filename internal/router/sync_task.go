@@ -21,6 +21,7 @@ type SyncTaskExecutor struct {
 	handlers map[string]func(context.Context, *asynq.Task) error
 }
 
+// NewSyncTaskExecutor is an exported function.
 func NewSyncTaskExecutor() *SyncTaskExecutor {
 	return &SyncTaskExecutor{
 		handlers: make(map[string]func(context.Context, *asynq.Task) error),
@@ -114,6 +115,7 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	return info, nil
 }
 
+// SyncTaskParams is an exported type.
 type SyncTaskParams struct {
 	dig.In
 

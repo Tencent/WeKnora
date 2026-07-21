@@ -22,7 +22,7 @@ type captureChatModel struct {
 func (m *captureChatModel) Chat(
 	context.Context,
 	[]chat.Message,
-	*chat.ChatOptions,
+	*chat.Options,
 ) (*types.ChatResponse, error) {
 	return nil, nil
 }
@@ -30,7 +30,7 @@ func (m *captureChatModel) Chat(
 func (m *captureChatModel) ChatStream(
 	_ context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	_ *chat.Options,
 ) (<-chan types.StreamResponse, error) {
 	m.lastMessages = append([]chat.Message(nil), messages...)
 
@@ -53,7 +53,7 @@ type stubModelService struct {
 }
 
 func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) {
-	bus := event.NewEventBus()
+	bus := event.NewBus()
 	var emitted []event.Event
 	bus.On(event.EventAgentReferences, func(_ context.Context, evt event.Event) error {
 		emitted = append(emitted, evt)
@@ -66,7 +66,7 @@ func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) 
 		PipelineState: types.PipelineState{
 			MergeResult: []*types.SearchResult{result},
 		},
-		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+		PipelineContext: types.PipelineContext{Bus: bus.AsBusInterface()},
 	}
 
 	emitKnowledgeReferencesEvent(context.Background(), cm)
@@ -140,7 +140,7 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 		modelService: &stubModelService{chatModel: chatModel},
 	}
 
-	bus := event.NewEventBus()
+	bus := event.NewBus()
 	cm := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
 			SessionID:      "session-1",
@@ -161,7 +161,7 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 			},
 		},
 		PipelineContext: types.PipelineContext{
-			EventBus: bus.AsEventBusInterface(),
+			Bus: bus.AsBusInterface(),
 		},
 	}
 

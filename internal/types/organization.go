@@ -60,45 +60,45 @@ func MinOrgRole(a, b OrgMemberRole) OrgMemberRole {
 // Organization represents a collaboration organization for cross-tenant sharing
 type Organization struct {
 	// Unique identifier of the organization
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                        gorm:"type:varchar(36);primaryKey"`
 	// Name of the organization
-	Name string `json:"name" gorm:"type:varchar(255);not null"`
+	Name string `json:"name"                      gorm:"type:varchar(255);not null"`
 	// Description of the organization
-	Description string `json:"description" gorm:"type:text"`
+	Description string `json:"description"               gorm:"type:text"`
 	// Avatar URL for display in list and settings
-	Avatar string `json:"avatar" gorm:"type:varchar(512)"`
+	Avatar string `json:"avatar"                    gorm:"type:varchar(512)"`
 	// User ID of the organization owner
-	OwnerID string `json:"owner_id" gorm:"type:varchar(36);not null;index"`
+	OwnerID string `json:"owner_id"                  gorm:"type:varchar(36);not null;index"`
 	// OwnerTenantID is the tenant the owner belonged to when the
 	// organization was created. Plan 3 (#1303) treats this tenant as
 	// the org's "owning tenant": its membership row in
 	// organization_tenant_members is undeletable / unchangeable so
 	// the org can never be orphaned even if the owner user later
 	// switches tenants or is soft-deleted. See migration 000046.
-	OwnerTenantID uint64 `json:"owner_tenant_id" gorm:"not null;index"`
+	OwnerTenantID uint64 `json:"owner_tenant_id"           gorm:"not null;index"`
 	// Unique invitation code for joining the organization
-	InviteCode string `json:"invite_code" gorm:"type:varchar(32);uniqueIndex"`
+	InviteCode string `json:"invite_code"               gorm:"type:varchar(32);uniqueIndex"`
 	// When the current invite code expires; nil means no expiry
-	InviteCodeExpiresAt *time.Time `json:"invite_code_expires_at" gorm:"type:timestamp with time zone"`
+	InviteCodeExpiresAt *time.Time `json:"invite_code_expires_at"    gorm:"type:timestamp with time zone"`
 	// Invite link validity in days: 0=never, 1/7/30
 	InviteCodeValidityDays int `json:"invite_code_validity_days" gorm:"default:7"`
 	// Whether joining requires admin approval
-	RequireApproval bool `json:"require_approval" gorm:"default:false"`
+	RequireApproval bool `json:"require_approval"          gorm:"default:false"`
 	// Whether the space is open for search (discoverable; non-members can search and join by org ID)
-	Searchable bool `json:"searchable" gorm:"default:false"`
+	Searchable bool `json:"searchable"                gorm:"default:false"`
 	// Max members allowed; 0 means no limit
-	MemberLimit int `json:"member_limit" gorm:"default:50"`
+	MemberLimit int `json:"member_limit"              gorm:"default:50"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
 	UpdatedAt time.Time `json:"updated_at"`
 	// Deletion time (soft delete)
-	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"                gorm:"index"`
 
 	// Associations (not stored in database)
-	Owner   *User                      `json:"owner,omitempty" gorm:"foreignKey:OwnerID"`
+	Owner   *User                      `json:"owner,omitempty"   gorm:"foreignKey:OwnerID"`
 	Members []OrganizationTenantMember `json:"members,omitempty" gorm:"foreignKey:OrganizationID"`
-	Shares  []KnowledgeBaseShare       `json:"shares,omitempty" gorm:"foreignKey:OrganizationID"`
+	Shares  []KnowledgeBaseShare       `json:"shares,omitempty"  gorm:"foreignKey:OrganizationID"`
 }
 
 // TableName returns the table name for GORM
@@ -113,16 +113,16 @@ func (Organization) TableName() string {
 // brought this tenant into the org — and is used purely for UI/audit
 // labels. Permission checks are driven exclusively by (org, tenant, role).
 type OrganizationTenantMember struct {
-	ID                   string        `json:"id" gorm:"type:varchar(36);primaryKey"`
-	OrganizationID       string        `json:"organization_id" gorm:"type:varchar(36);not null;index"`
-	TenantID             uint64        `json:"tenant_id" gorm:"not null;index"`
-	Role                 OrgMemberRole `json:"role" gorm:"type:varchar(32);not null;default:'viewer'"`
+	ID                   string        `json:"id"                     gorm:"type:varchar(36);primaryKey"`
+	OrganizationID       string        `json:"organization_id"        gorm:"type:varchar(36);not null;index"`
+	TenantID             uint64        `json:"tenant_id"              gorm:"not null;index"`
+	Role                 OrgMemberRole `json:"role"                   gorm:"type:varchar(32);not null;default:'viewer'"`
 	RepresentativeUserID string        `json:"representative_user_id" gorm:"type:varchar(36);default:''"`
 	JoinedAt             *time.Time    `json:"joined_at"`
 	CreatedAt            time.Time     `json:"created_at"`
 	UpdatedAt            time.Time     `json:"updated_at"`
 
-	Organization       *Organization `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
+	Organization       *Organization `json:"organization,omitempty"        gorm:"foreignKey:OrganizationID"`
 	RepresentativeUser *User         `json:"representative_user,omitempty" gorm:"foreignKey:RepresentativeUserID"`
 }
 
@@ -134,6 +134,7 @@ func (OrganizationTenantMember) TableName() string {
 // JoinRequestStatus represents the status of a join request
 type JoinRequestStatus string
 
+// JoinRequestStatusPending and related constants.
 const (
 	JoinRequestStatusPending  JoinRequestStatus = "pending"
 	JoinRequestStatusApproved JoinRequestStatus = "approved"
@@ -153,29 +154,29 @@ const (
 // OrganizationJoinRequest represents a request to join an organization or upgrade role
 type OrganizationJoinRequest struct {
 	// Unique identifier
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"              gorm:"type:varchar(36);primaryKey"`
 	// Organization ID
 	OrganizationID string `json:"organization_id" gorm:"type:varchar(36);not null;index"`
 	// User ID of the requester
-	UserID string `json:"user_id" gorm:"type:varchar(36);not null;index"`
+	UserID string `json:"user_id"         gorm:"type:varchar(36);not null;index"`
 	// Tenant ID of the requester
-	TenantID uint64 `json:"tenant_id" gorm:"not null"`
+	TenantID uint64 `json:"tenant_id"       gorm:"not null"`
 	// Type of request: 'join' for new member, 'upgrade' for role upgrade
-	RequestType JoinRequestType `json:"request_type" gorm:"type:varchar(32);not null;default:'join';index"`
+	RequestType JoinRequestType `json:"request_type"    gorm:"type:varchar(32);not null;default:'join';index"`
 	// Previous role before upgrade (only for upgrade requests)
-	PrevRole OrgMemberRole `json:"prev_role" gorm:"column:prev_role;type:varchar(32)"`
+	PrevRole OrgMemberRole `json:"prev_role"       gorm:"column:prev_role;type:varchar(32)"`
 	// Role requested by the applicant (admin/editor/viewer)
-	RequestedRole OrgMemberRole `json:"requested_role" gorm:"type:varchar(32);not null;default:'viewer'"`
+	RequestedRole OrgMemberRole `json:"requested_role"  gorm:"type:varchar(32);not null;default:'viewer'"`
 	// Status of the request
-	Status JoinRequestStatus `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
+	Status JoinRequestStatus `json:"status"          gorm:"type:varchar(32);not null;default:'pending';index"`
 	// Optional message from the requester
-	Message string `json:"message" gorm:"type:text"`
+	Message string `json:"message"         gorm:"type:text"`
 	// User ID of the admin who reviewed the request
-	ReviewedBy string `json:"reviewed_by" gorm:"type:varchar(36)"`
+	ReviewedBy string `json:"reviewed_by"     gorm:"type:varchar(36)"`
 	// Time when the request was reviewed
 	ReviewedAt *time.Time `json:"reviewed_at"`
 	// Optional message from the reviewer
-	ReviewMessage string `json:"review_message" gorm:"type:text"`
+	ReviewMessage string `json:"review_message"  gorm:"type:text"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
@@ -183,8 +184,8 @@ type OrganizationJoinRequest struct {
 
 	// Associations (not stored in database)
 	Organization *Organization `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
-	User         *User         `json:"user,omitempty" gorm:"foreignKey:UserID"`
-	Reviewer     *User         `json:"reviewer,omitempty" gorm:"foreignKey:ReviewedBy"`
+	User         *User         `json:"user,omitempty"         gorm:"foreignKey:UserID"`
+	Reviewer     *User         `json:"reviewer,omitempty"     gorm:"foreignKey:ReviewedBy"`
 }
 
 // TableName returns the table name for GORM
@@ -195,27 +196,27 @@ func (OrganizationJoinRequest) TableName() string {
 // KnowledgeBaseShare represents a sharing record of a knowledge base to an organization
 type KnowledgeBaseShare struct {
 	// Unique identifier
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                gorm:"type:varchar(36);primaryKey"`
 	// Knowledge base ID being shared
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);not null;index"`
 	// Organization ID receiving the share
-	OrganizationID string `json:"organization_id" gorm:"type:varchar(36);not null;index"`
+	OrganizationID string `json:"organization_id"   gorm:"type:varchar(36);not null;index"`
 	// User ID who shared the knowledge base
 	SharedByUserID string `json:"shared_by_user_id" gorm:"type:varchar(36);not null"`
 	// Original tenant ID of the knowledge base (for cross-tenant embedding model access)
-	SourceTenantID uint64 `json:"source_tenant_id" gorm:"not null;index"`
+	SourceTenantID uint64 `json:"source_tenant_id"  gorm:"not null;index"`
 	// Permission level (admin/editor/viewer)
-	Permission OrgMemberRole `json:"permission" gorm:"type:varchar(32);not null;default:'viewer'"`
+	Permission OrgMemberRole `json:"permission"        gorm:"type:varchar(32);not null;default:'viewer'"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
 	UpdatedAt time.Time `json:"updated_at"`
 	// Deletion time (soft delete)
-	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"        gorm:"index"`
 
 	// Associations (not stored in database)
 	KnowledgeBase *KnowledgeBase `json:"knowledge_base,omitempty" gorm:"foreignKey:KnowledgeBaseID"`
-	Organization  *Organization  `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
+	Organization  *Organization  `json:"organization,omitempty"   gorm:"foreignKey:OrganizationID"`
 }
 
 // TableName returns the table name for GORM
@@ -236,15 +237,15 @@ type SharedKnowledgeBaseInfo struct {
 
 // AgentShare represents a sharing record of an agent to an organization
 type AgentShare struct {
-	ID             string         `json:"id" gorm:"type:varchar(36);primaryKey"`
-	AgentID        string         `json:"agent_id" gorm:"type:varchar(36);not null;index"`
-	OrganizationID string         `json:"organization_id" gorm:"type:varchar(36);not null;index"`
-	SharedByUserID string         `json:"shared_by_user_id" gorm:"type:varchar(36);not null"`
-	SourceTenantID uint64         `json:"source_tenant_id" gorm:"not null;index"`
-	Permission     OrgMemberRole  `json:"permission" gorm:"type:varchar(32);not null;default:'viewer'"`
+	ID             string         `json:"id"                     gorm:"type:varchar(36);primaryKey"`
+	AgentID        string         `json:"agent_id"               gorm:"type:varchar(36);not null;index"`
+	OrganizationID string         `json:"organization_id"        gorm:"type:varchar(36);not null;index"`
+	SharedByUserID string         `json:"shared_by_user_id"      gorm:"type:varchar(36);not null"`
+	SourceTenantID uint64         `json:"source_tenant_id"       gorm:"not null;index"`
+	Permission     OrgMemberRole  `json:"permission"             gorm:"type:varchar(32);not null;default:'viewer'"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt      gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 	Agent          *CustomAgent   `json:"agent,omitempty" gorm:"foreignKey:AgentID,SourceTenantID;references:ID,TenantID"`
 	Organization   *Organization  `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
 }
@@ -276,8 +277,8 @@ type SourceFromAgentInfo struct {
 	KBSelectionMode string `json:"kb_selection_mode"` // "all" | "selected" | "none"; for drawer copy "该智能体对知识库的策略"
 }
 
-// OrganizationSharedKnowledgeBaseItem is used by GET /organizations/:id/shared-knowledge-bases (space-scoped list including mine).
-// When SourceFromAgent is set, the KB is from a shared agent's config (no direct KB share); show as read-only and "来自智能体 XXX".
+// OrganizationSharedKnowledgeBaseItem is used by GET /organizations/:id/shared-knowledge-bases.
+// When SourceFromAgent is set, the KB comes from a shared agent config without a direct KB share.
 type OrganizationSharedKnowledgeBaseItem struct {
 	SharedKnowledgeBaseInfo
 	IsMine          bool                 `json:"is_mine"`
@@ -292,8 +293,8 @@ type OrganizationSharedAgentItem struct {
 
 // TenantDisabledSharedAgent records that a tenant has "disabled" a shared agent for their own dropdown
 type TenantDisabledSharedAgent struct {
-	TenantID       uint64    `json:"tenant_id" gorm:"primaryKey"`
-	AgentID        string    `json:"agent_id" gorm:"type:varchar(36);primaryKey"`
+	TenantID       uint64    `json:"tenant_id"        gorm:"primaryKey"`
+	AgentID        string    `json:"agent_id"         gorm:"type:varchar(36);primaryKey"`
 	SourceTenantID uint64    `json:"source_tenant_id" gorm:"primaryKey"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -309,18 +310,20 @@ func (TenantDisabledSharedAgent) TableName() string {
 
 // CreateOrganizationRequest represents a request to create an organization
 type CreateOrganizationRequest struct {
-	Name                   string `json:"name" binding:"required,min=1,max=255"`
-	Description            string `json:"description" binding:"max=1000"`
-	Avatar                 string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
-	InviteCodeValidityDays *int   `json:"invite_code_validity_days"`          // optional: 0=never, 1, 7, 30; default 7
-	MemberLimit            *int   `json:"member_limit"`                       // optional: max members; 0=unlimited; default 50
+	Name        string `json:"name"                      binding:"required,min=1,max=255"`
+	Description string `json:"description"               binding:"max=1000"`
+	Avatar      string `json:"avatar"                    binding:"omitempty,max=512"` // optional avatar URL
+	// 0=never, 1, 7, 30; default 7
+	InviteCodeValidityDays *int `json:"invite_code_validity_days"`
+	// optional: max members; 0=unlimited; default 50
+	MemberLimit *int `json:"member_limit"`
 }
 
 // UpdateOrganizationRequest represents a request to update an organization
 type UpdateOrganizationRequest struct {
-	Name                   *string `json:"name" binding:"omitempty,min=1,max=255"`
-	Description            *string `json:"description" binding:"omitempty,max=1000"`
-	Avatar                 *string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
+	Name                   *string `json:"name"                      binding:"omitempty,min=1,max=255"`
+	Description            *string `json:"description"               binding:"omitempty,max=1000"`
+	Avatar                 *string `json:"avatar"                    binding:"omitempty,max=512"` // optional avatar URL
 	RequireApproval        *bool   `json:"require_approval"`
 	Searchable             *bool   `json:"searchable"`                // open for search so others can discover and join
 	InviteCodeValidityDays *int    `json:"invite_code_validity_days"` // 0=never, 1, 7, 30
@@ -330,7 +333,7 @@ type UpdateOrganizationRequest struct {
 // AddMemberRequest represents a request to add a member to an organization
 type AddMemberRequest struct {
 	Email string        `json:"email" binding:"required,email"`
-	Role  OrgMemberRole `json:"role" binding:"required"`
+	Role  OrgMemberRole `json:"role"  binding:"required"`
 }
 
 // UpdateMemberRoleRequest represents a request to update a member's role
@@ -346,21 +349,21 @@ type JoinOrganizationRequest struct {
 // SubmitJoinRequestRequest represents a request to submit a join request for approval
 type SubmitJoinRequestRequest struct {
 	InviteCode string        `json:"invite_code" binding:"required,min=8,max=32"`
-	Message    string        `json:"message" binding:"max=500"`
+	Message    string        `json:"message"     binding:"max=500"`
 	Role       OrgMemberRole `json:"role"` // Optional: role the applicant requests (admin/editor/viewer); default viewer
 }
 
 // ReviewJoinRequestRequest represents a request to review a join request
 type ReviewJoinRequestRequest struct {
 	Approved bool          `json:"approved"`
-	Message  string        `json:"message" binding:"max=500"`
+	Message  string        `json:"message"  binding:"max=500"`
 	Role     OrgMemberRole `json:"role"` // Optional: role to assign when approving; overrides applicant's requested role
 }
 
 // RequestRoleUpgradeRequest represents a request to upgrade role in an organization
 type RequestRoleUpgradeRequest struct {
 	RequestedRole OrgMemberRole `json:"requested_role" binding:"required"` // The role user wants to upgrade to
-	Message       string        `json:"message" binding:"max=500"`         // Optional message explaining the reason
+	Message       string        `json:"message"        binding:"max=500"`  // Optional message explaining the reason
 }
 
 // InviteMemberRequest represents a request to directly invite a workspace to an organization.
@@ -382,13 +385,13 @@ type InviteMemberRequest struct {
 	// TenantID, the handler resolves the user's TenantID and uses this
 	// user as the representative.
 	UserID string        `json:"user_id"`
-	Role   OrgMemberRole `json:"role" binding:"required"` // Role to assign: admin/editor/viewer
+	Role   OrgMemberRole `json:"role"                   binding:"required"` // Role to assign: admin/editor/viewer
 }
 
 // ShareKnowledgeBaseRequest represents a request to share a knowledge base
 type ShareKnowledgeBaseRequest struct {
 	OrganizationID string        `json:"organization_id" binding:"required"`
-	Permission     OrgMemberRole `json:"permission" binding:"required"`
+	Permission     OrgMemberRole `json:"permission"      binding:"required"`
 }
 
 // UpdateSharePermissionRequest represents a request to update share permission
@@ -476,7 +479,7 @@ type KnowledgeBaseShareResponse struct {
 	SourceTenantID    uint64    `json:"source_tenant_id"`
 	Permission        string    `json:"permission"`     // Share permission (what the space was granted: viewer/editor)
 	MyRoleInOrg       string    `json:"my_role_in_org"` // Current user's role in this organization (admin/editor/viewer)
-	MyPermission      string    `json:"my_permission"`  // Effective permission for current user = min(Permission, MyRoleInOrg)
+	MyPermission      string    `json:"my_permission"`  // min(Permission, MyRoleInOrg)
 	CreatedAt         time.Time `json:"created_at"`
 	RequireApproval   bool      `json:"require_approval"`
 }
@@ -545,8 +548,8 @@ type ListSearchableOrganizationsResponse struct {
 // JoinByOrganizationIDRequest is used to join a searchable organization by ID (no invite code)
 type JoinByOrganizationIDRequest struct {
 	OrganizationID string        `json:"organization_id" binding:"required"`
-	Message        string        `json:"message" binding:"max=500"` // Optional message for join request
-	Role           OrgMemberRole `json:"role"`                      // Optional: requested role (admin/editor/viewer); default viewer
+	Message        string        `json:"message"         binding:"max=500"` // Optional message for join request
+	Role           OrgMemberRole `json:"role"`                              // requested role; default viewer
 }
 
 // JoinRequestResponse represents a join request in API responses

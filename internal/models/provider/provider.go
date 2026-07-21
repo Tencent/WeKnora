@@ -9,65 +9,90 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// ProviderName 模型服务商名称
-type ProviderName string
+// Name 模型服务商名称
+type Name string
 
 const (
+	// ProviderOpenAI is exported.
 	// OpenAI
-	ProviderOpenAI ProviderName = "openai"
+	ProviderOpenAI Name = "openai"
+	// ProviderAnthropic is exported.
 	// Anthropic Claude
-	ProviderAnthropic ProviderName = "anthropic"
+	ProviderAnthropic Name = "anthropic"
+	// ProviderAliyun is exported.
 	// 阿里云 DashScope
-	ProviderAliyun ProviderName = "aliyun"
+	ProviderAliyun Name = "aliyun"
+	// ProviderZhipu is exported.
 	// 智谱AI (GLM 系列)
-	ProviderZhipu ProviderName = "zhipu"
+	ProviderZhipu Name = "zhipu"
+	// ProviderOpenRouter is exported.
 	// OpenRouter
-	ProviderOpenRouter ProviderName = "openrouter"
+	ProviderOpenRouter Name = "openrouter"
+	// ProviderRequesty is exported.
 	// Requesty
-	ProviderRequesty ProviderName = "requesty"
+	ProviderRequesty Name = "requesty"
+	// ProviderSiliconFlow is exported.
 	// 硅基流动
-	ProviderSiliconFlow ProviderName = "siliconflow"
+	ProviderSiliconFlow Name = "siliconflow"
+	// ProviderJina is exported.
 	// Jina AI (Embedding and Rerank)
-	ProviderJina ProviderName = "jina"
+	ProviderJina Name = "jina"
+	// ProviderGeneric is exported.
 	// Generic 兼容OpenAI (自定义部署)
-	ProviderGeneric ProviderName = "generic"
+	ProviderGeneric Name = "generic"
+	// ProviderDeepSeek is exported.
 	// DeepSeek
-	ProviderDeepSeek ProviderName = "deepseek"
+	ProviderDeepSeek Name = "deepseek"
+	// ProviderGemini is exported.
 	// Google Gemini
-	ProviderGemini ProviderName = "gemini"
+	ProviderGemini Name = "gemini"
+	// ProviderVolcengine is exported.
 	// 火山引擎 Ark
-	ProviderVolcengine ProviderName = "volcengine"
+	ProviderVolcengine Name = "volcengine"
+	// ProviderHunyuan is exported.
 	// 腾讯混元
-	ProviderHunyuan ProviderName = "hunyuan"
+	ProviderHunyuan Name = "hunyuan"
+	// ProviderMiniMax is exported.
 	// MiniMax
-	ProviderMiniMax ProviderName = "minimax"
+	ProviderMiniMax Name = "minimax"
+	// ProviderMimo is exported.
 	// 小米 Mimo
-	ProviderMimo ProviderName = "mimo"
+	ProviderMimo Name = "mimo"
+	// ProviderGPUStack is exported.
 	// GPUStack (私有化部署)
-	ProviderGPUStack ProviderName = "gpustack"
+	ProviderGPUStack Name = "gpustack"
+	// ProviderMoonshot is exported.
 	// 月之暗面 Moonshot (Kimi)
-	ProviderMoonshot ProviderName = "moonshot"
+	ProviderMoonshot Name = "moonshot"
+	// ProviderModelScope is exported.
 	// 魔搭 ModelScope
-	ProviderModelScope ProviderName = "modelscope"
+	ProviderModelScope Name = "modelscope"
+	// ProviderQianfan is exported.
 	// 百度千帆
-	ProviderQianfan ProviderName = "qianfan"
+	ProviderQianfan Name = "qianfan"
+	// ProviderQiniu is exported.
 	// 七牛云
-	ProviderQiniu ProviderName = "qiniu"
+	ProviderQiniu Name = "qiniu"
+	// ProviderLongCat is exported.
 	// 美团 LongCat AI
-	ProviderLongCat ProviderName = "longcat"
+	ProviderLongCat Name = "longcat"
+	// ProviderLKEAP is exported.
 	// 腾讯云 LKEAP (知识引擎原子能力)
-	ProviderLKEAP ProviderName = "lkeap"
+	ProviderLKEAP Name = "lkeap"
+	// ProviderNvidia is exported.
 	// NVIDIA
-	ProviderNvidia ProviderName = "nvidia"
+	ProviderNvidia Name = "nvidia"
+	// ProviderNovita is exported.
 	// Novita AI
-	ProviderNovita ProviderName = "novita"
+	ProviderNovita Name = "novita"
+	// ProviderAzureOpenAI is exported.
 	// Azure OpenAI
-	ProviderAzureOpenAI ProviderName = "azure_openai"
+	ProviderAzureOpenAI Name = "azure_openai"
 )
 
 // AllProviders 返回所有注册的提供者名称
-func AllProviders() []ProviderName {
-	return []ProviderName{
+func AllProviders() []Name {
+	return []Name{
 		ProviderGeneric,
 		ProviderWeKnoraCloud,
 		ProviderAliyun,
@@ -97,9 +122,9 @@ func AllProviders() []ProviderName {
 	}
 }
 
-// ProviderInfo 包含提供者的元数据
-type ProviderInfo struct {
-	Name         ProviderName               // 提供者标识
+// Info 包含提供者的元数据
+type Info struct {
+	Name         Name                       // 提供者标识
 	DisplayName  string                     // 可读名称
 	Description  string                     // 提供者描述
 	DefaultURLs  map[types.ModelType]string // 按模型类型区分的默认 BaseURL
@@ -109,7 +134,7 @@ type ProviderInfo struct {
 }
 
 // GetDefaultURL 获取指定模型类型的默认 URL
-func (p ProviderInfo) GetDefaultURL(modelType types.ModelType) string {
+func (p Info) GetDefaultURL(modelType types.ModelType) string {
 	if url, ok := p.DefaultURLs[modelType]; ok {
 		return url
 	}
@@ -136,7 +161,7 @@ type ExtraFieldConfig struct {
 
 // Config 表示模型提供者的配置
 type Config struct {
-	Provider  ProviderName   `json:"provider"`
+	Provider  Name           `json:"provider"`
 	BaseURL   string         `json:"base_url"`
 	APIKey    string         `json:"api_key"`
 	ModelName string         `json:"model_name"`
@@ -144,9 +169,10 @@ type Config struct {
 	Extra     map[string]any `json:"extra,omitempty"`
 }
 
+// Provider is an exported type.
 type Provider interface {
 	// Info 返回服务商的元数据
-	Info() ProviderInfo
+	Info() Info
 
 	// ValidateConfig 验证服务商的配置
 	ValidateConfig(config *Config) error
@@ -155,7 +181,7 @@ type Provider interface {
 // registry 存储所有注册的提供者
 var (
 	registryMu sync.RWMutex
-	registry   = make(map[ProviderName]Provider)
+	registry   = make(map[Name]Provider)
 )
 
 // Register 添加一个提供者到全局注册表
@@ -166,7 +192,7 @@ func Register(p Provider) {
 }
 
 // Get 通过名称从注册表中获取提供者
-func Get(name ProviderName) (Provider, bool) {
+func Get(name Name) (Provider, bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	p, ok := registry[name]
@@ -174,7 +200,7 @@ func Get(name ProviderName) (Provider, bool) {
 }
 
 // GetOrDefault 通过名称从注册表中获取提供者，如果未找到则返回默认提供者
-func GetOrDefault(name ProviderName) Provider {
+func GetOrDefault(name Name) Provider {
 	p, ok := Get(name)
 	if ok {
 		return p
@@ -185,11 +211,11 @@ func GetOrDefault(name ProviderName) Provider {
 }
 
 // List 返回所有注册的提供者（按 AllProviders 定义的顺序）
-func List() []ProviderInfo {
+func List() []Info {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
-	result := make([]ProviderInfo, 0, len(registry))
+	result := make([]Info, 0, len(registry))
 	for _, name := range AllProviders() {
 		if p, ok := registry[name]; ok {
 			result = append(result, p.Info())
@@ -199,11 +225,11 @@ func List() []ProviderInfo {
 }
 
 // ListByModelType 返回所有支持指定模型类型的提供者（按 AllProviders 定义的顺序）
-func ListByModelType(modelType types.ModelType) []ProviderInfo {
+func ListByModelType(modelType types.ModelType) []Info {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
-	result := make([]ProviderInfo, 0)
+	result := make([]Info, 0)
 	for _, name := range AllProviders() {
 		if p, ok := registry[name]; ok {
 			info := p.Info()
@@ -219,7 +245,7 @@ func ListByModelType(modelType types.ModelType) []ProviderInfo {
 }
 
 // DetectProvider 通过 BaseURL 检测服务商
-func DetectProvider(baseURL string) ProviderName {
+func DetectProvider(baseURL string) Name {
 	switch {
 	case containsAny(baseURL, "dashscope.aliyuncs.com"):
 		return ProviderAliyun
@@ -285,12 +311,13 @@ func containsAny(s string, substrs ...string) bool {
 	return false
 }
 
+// NewConfigFromModel is an exported function.
 func NewConfigFromModel(model *types.Model) (*Config, error) {
 	if model == nil {
 		return nil, fmt.Errorf("model is nil")
 	}
 
-	providerName := ProviderName(model.Parameters.Provider)
+	providerName := Name(model.Parameters.Provider)
 	if providerName == "" {
 		providerName = DetectProvider(model.Parameters.BaseURL)
 	}

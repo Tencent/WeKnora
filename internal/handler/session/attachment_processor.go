@@ -99,21 +99,27 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	if p.isTextFile(ext) {
 		if err := p.processTextFile(ctx, data, attachment); err != nil {
 			logger.Warnf(ctx, "text file processing failed: %v", err)
-			attachment.Content = fmt.Sprintf("<error><message>Failed to process text file</message><details>%v</details></error>", err)
+			attachment.Content = fmt.Sprintf(
+				"<error><message>Failed to process text file</message><details>%v</details></error>",
+				err,
+			)
 		}
 	} else if docparser.IsAudioFormat(ext) {
 		if err := p.processAudioFile(ctx, data, baseName, attachment, asrModelID); err != nil {
 			logger.Warnf(ctx, "audio transcription failed: %v, keeping placeholder", err)
-			attachment.Content = fmt.Sprintf("<error><message>Failed to transcribe audio file</message><details>%v</details></error>", err)
+			attachment.Content = fmt.Sprintf("<error><message>Failed to transcribe audio "+
+				"file</message><details>%v</details></error>", err)
 		}
 	} else if docparser.IsSimpleFormat(ext) {
 		if err := p.processWithDocParser(ctx, data, baseName, ext, attachment, tenantID); err != nil {
 			logger.Warnf(ctx, "SimpleFormatReader failed: %v", err)
+			//nolint:lll
 			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
 		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
 			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
+			//nolint:lll
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
 	}
@@ -132,7 +138,11 @@ func (p *AttachmentProcessor) isTextFile(ext string) bool {
 }
 
 // processTextFile reads plain-text content line by line, truncating at maxTextFileLines.
-func (p *AttachmentProcessor) processTextFile(ctx context.Context, data []byte, attachment *types.MessageAttachment) error {
+func (p *AttachmentProcessor) processTextFile(
+	ctx context.Context,
+	data []byte,
+	attachment *types.MessageAttachment,
+) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	var lines []string
 	lineCount := 0
@@ -235,7 +245,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
 	}
-	
+
 	normalizedType := strings.TrimPrefix(fileType, ".")
 
 	result, err := p.documentReader.Read(ctx, &types.ReadRequest{
@@ -263,7 +273,11 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 }
 
 // applyLineTruncation stores content into attachment, truncating at maxTextFileLines if needed.
-func (p *AttachmentProcessor) applyLineTruncation(ctx context.Context, content string, attachment *types.MessageAttachment) {
+func (p *AttachmentProcessor) applyLineTruncation(
+	ctx context.Context,
+	content string,
+	attachment *types.MessageAttachment,
+) {
 	lines := strings.Split(content, "\n")
 	lineCount := len(lines)
 	attachment.LineCount = lineCount

@@ -23,8 +23,8 @@ func init() {
 }
 
 // Info 返回 LKEAP provider 的元数据
-func (p *LKEAPProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *LKEAPProvider) Info() Info {
+	return Info{
 		Name:        ProviderLKEAP,
 		DisplayName: "腾讯云 LKEAP",
 		Description: "DeepSeek-R1, DeepSeek-V3, lke-reranker-base 等",

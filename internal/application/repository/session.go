@@ -42,7 +42,12 @@ func (r *sessionRepository) Create(ctx context.Context, session *types.Session) 
 }
 
 // Get retrieves a session by ID
-func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, userID string, id string) (*types.Session, error) {
+func (r *sessionRepository) Get(
+	ctx context.Context,
+	tenantID uint64,
+	userID string,
+	id string,
+) (*types.Session, error) {
 	var session types.Session
 	err := applySessionUserScope(
 		r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id),
@@ -92,7 +97,11 @@ func (r *sessionRepository) GetIMPlatform(
 }
 
 // GetByTenantID retrieves all sessions for a tenant
-func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
+func (r *sessionRepository) GetByTenantID(
+	ctx context.Context,
+	tenantID uint64,
+	userID string,
+) ([]*types.Session, error) {
 	var sessions []*types.Session
 	err := applySessionUserScope(
 		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
@@ -143,7 +152,7 @@ func (r *sessionRepository) QueryPaged(
 	ctx context.Context, q *types.SessionListQuery,
 ) ([]*types.SessionListItem, int64, error) {
 	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	isPostgres := r.db.Name() == "postgres"
 	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
 	if isPostgres {
 		titleLikeExpr = "s.title ILIKE ?"
@@ -356,7 +365,12 @@ func (r *sessionRepository) Delete(ctx context.Context, tenantID uint64, userID 
 }
 
 // BatchDelete deletes multiple sessions by IDs
-func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, userID string, ids []string) (int64, error) {
+func (r *sessionRepository) BatchDelete(
+	ctx context.Context,
+	tenantID uint64,
+	userID string,
+	ids []string,
+) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}

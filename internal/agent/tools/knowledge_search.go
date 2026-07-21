@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -23,7 +24,8 @@ var knowledgeSearchTool = BaseTool{
 	name: ToolKnowledgeSearch,
 	description: `Semantic/vector search tool for retrieving knowledge by meaning, intent, and conceptual relevance.
 
-This tool uses embeddings to understand the user's query and find semantically similar content across knowledge base chunks.
+This tool uses embeddings to understand the user's query and find semantically similar content across knowledge
+base chunks.
 
 ## Purpose
 Designed for high-level understanding tasks, such as:
@@ -33,7 +35,8 @@ Designed for high-level understanding tasks, such as:
 - contextual or intent-driven retrieval
 - queries that cannot be answered with literal keyword matching
 
-The tool searches by MEANING rather than exact text. It identifies chunks that are conceptually relevant even when the wording differs.
+//nolint:lll
+The tool searches by MEANING rather than exact text. It identifies chunks that are conceptually relevant even when the wording differs. //nolint:lll
 
 ## What the Tool Does NOT Do
 - Does NOT perform exact keyword matching
@@ -45,7 +48,8 @@ The tool searches by MEANING rather than exact text. It identifies chunks that a
 For literal/keyword/entity search, another tool should be used.
 
 ## Required Input Behavior
-"queries" must contain **1–5 short, well-formed semantic questions or conceptual statements** that clearly express the meaning the model is trying to retrieve.
+//nolint:lll
+"queries" must contain **1–5 short, well-formed semantic questions or conceptual statements** that clearly express the meaning the model is trying to retrieve. //nolint:lll
 
 Each query should represent a **concept, idea, topic, explanation, or intent**, such as:
 - abstract topics
@@ -75,7 +79,7 @@ Avoid:
 
 ## Output
 Returns chunks ranked by semantic similarity, reranked when applicable.  
-Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`,
+Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`, //nolint:lll
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -180,7 +184,12 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
+		logger.Infof(
+			ctx,
+			"[Tool][KnowledgeSearch] User specified %d knowledge bases: %v",
+			len(userSpecifiedKBs),
+			userSpecifiedKBs,
+		)
 	}
 
 	// Use pre-computed search targets, optionally filtered by user-specified KBs
@@ -465,14 +474,21 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 			continue
 		}
 		if knownKBs[st.KnowledgeBaseID] {
-			logger.Infof(ctx, "[Tool][KnowledgeSearch] Skipping non-searchable KB %s (no vector/keyword index, likely wiki/graph-only)", st.KnowledgeBaseID)
+			logger.Infof(
+				ctx,
+				"[Tool][KnowledgeSearch] Skipping non-searchable KB %s (no vector/keyword index, likely wiki/graph-only)",
+				st.KnowledgeBaseID,
+			)
 			continue
 		}
 		// KB record unavailable; keep so downstream can surface real errors.
 		filteredTargets = append(filteredTargets, st)
 	}
 	if len(filteredTargets) == 0 {
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] No searchable KBs in scope (all wiki/graph-only); skipping retrieval")
+		logger.Infof(
+			ctx,
+			"[Tool][KnowledgeSearch] No searchable KBs in scope (all wiki/graph-only); skipping retrieval",
+		)
 		return nil
 	}
 	searchTargets = filteredTargets
@@ -502,7 +518,12 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 				if modelKey != "" {
 					emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, q)
 					if err != nil {
-						logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to pre-compute embedding for model %s: %v", modelKey, err)
+						logger.Warnf(
+							ctx,
+							"[Tool][KnowledgeSearch] Failed to pre-compute embedding for model %s: %v",
+							modelKey,
+							err,
+						)
 					} else {
 						queryEmbedding = emb
 					}
@@ -536,7 +557,12 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
 						if err != nil {
-							logger.Warnf(ctx, "[Tool][KnowledgeSearch] Combined search failed for KBs %v: %v", fullKBIDs, err)
+							logger.Warnf(
+								ctx,
+								"[Tool][KnowledgeSearch] Combined search failed for KBs %v: %v",
+								fullKBIDs,
+								err,
+							)
 							return
 						}
 						mu.Lock()
@@ -575,7 +601,12 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {
-							logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
+							logger.Warnf(
+								ctx,
+								"[Tool][KnowledgeSearch] Failed to search KB %s: %v",
+								st.KnowledgeBaseID,
+								err,
+							)
 							return
 						}
 						mu.Lock()
@@ -623,7 +654,7 @@ func (t *KnowledgeSearchTool) rerankResults(
 			if err != nil {
 				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model failed, falling back to chat model: %v", err)
 			} else {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model returned no results above threshold, falling back to chat model")
+				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model returned no results above threshold, falling back to chat model") //nolint:lll
 			}
 			err = nil
 			if t.chatModel != nil {
@@ -725,18 +756,20 @@ func (t *KnowledgeSearchTool) rerankWithLLM(
 				passagesBuilder.WriteString("\n")
 			}
 			passagesBuilder.WriteString("─────────────────────────────────────────────────────────────\n")
-			passagesBuilder.WriteString(fmt.Sprintf("Passage %d:\n", i+1))
+			fmt.Fprintf(&passagesBuilder, "Passage %d:\n", i+1)
 			passagesBuilder.WriteString("─────────────────────────────────────────────────────────────\n")
 			passagesBuilder.WriteString(content + "\n")
 		}
 
 		// Optimized prompt focused on retrieval matching and reranking
 		prompt := fmt.Sprintf(
-			`You are a search result reranking expert. Your task is to evaluate how well each retrieved passage matches the user's search query and information need.
+			//nolint:lll
+			`You are a search result reranking expert. Your task is to evaluate how well each retrieved passage matches the user's search query and information need. //nolint:lll
 
 User Query: %s
 
-Your task: Rerank these search results by evaluating their retrieval relevance - how well each passage answers or relates to the query.
+//nolint:lll
+Your task: Rerank these search results by evaluating their retrieval relevance - how well each passage answers or relates to the query. //nolint:lll
 
 Scoring Criteria (0.0 to 1.0):
 - 1.0 (0.9-1.0): Directly answers the query, contains key information needed, highly relevant
@@ -772,8 +805,9 @@ Output only the scores, no explanations or additional text.`,
 
 		messages := []chat.Message{
 			{
-				Role:    "system",
-				Content: "You are a professional search result reranking expert specializing in information retrieval. You evaluate how well retrieved passages match user queries in search scenarios. Focus on retrieval relevance: whether the passage answers the query, provides needed information, and matches the user's information need. Always respond with scores only, no explanations.",
+				Role: "system",
+				Content: "You are a professional search result reranking expert specializing in information retrieval. You evaluate how well retrieved passages match user queries in search scenarios. Focus o" + //nolint:lll
+					"n retrieval relevance: whether the passage answers the query, provides needed information, and matches the user's information need. Always respond with scores only, no explanations.", //nolint:lll
 			},
 			{
 				Role:    "user",
@@ -785,7 +819,7 @@ Output only the scores, no explanations or additional text.`,
 		// Each score line is ~15 tokens, add buffer for safety
 		maxTokens := len(batch)*20 + 100
 
-		response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+		response, err := t.chatModel.Chat(ctx, messages, &chat.Options{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
 		})
@@ -1131,9 +1165,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 	// agents and downstream consumers see a single consistent shape across
 	// all retrieval tools.
 	var ob strings.Builder
-	ob.WriteString(fmt.Sprintf("<search_results count=\"%d\">\n", len(results)))
+	fmt.Fprintf(&ob, "<search_results count=\"%d\">\n", len(results))
 	for _, q := range queries {
-		ob.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
+		fmt.Fprintf(&ob, "<query>%s</query>\n", xmlEscape(q))
 	}
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
@@ -1149,7 +1183,12 @@ func (t *KnowledgeSearchTool) formatOutput(
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			meta, err := t.getFAQMetadata(ctx, result.ID, faqMetadataCache)
 			if err != nil {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v", result.ID, err)
+				logger.Warnf(
+					ctx,
+					"[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v",
+					result.ID,
+					err,
+				)
 			} else {
 				faqMeta = meta
 			}
@@ -1165,7 +1204,11 @@ func (t *KnowledgeSearchTool) formatOutput(
 		if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
 			effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
 			if effectiveTenantID == 0 {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
+				logger.Warnf(
+					ctx,
+					"[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count",
+					result.KnowledgeBaseID,
+				)
 				knowledgeTotalMap[result.KnowledgeID] = 0
 			} else {
 				// Use the same chunk-type filter as list_knowledge_chunks so the
@@ -1178,7 +1221,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "",
 				)
 				if err != nil {
-					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
+					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err) //nolint:lll
 					knowledgeTotalMap[result.KnowledgeID] = 0
 				} else {
 					knowledgeTotalMap[result.KnowledgeID] = total
@@ -1197,8 +1240,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 			// knowledge_search call during this session. The model has the
 			// content in context already, so re-emitting it only burns tokens.
 			if isFAQ {
-				ob.WriteString(fmt.Sprintf(
-					"<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
+				fmt.Fprintf(
+					&ob,
+					"<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n", //nolint:lll
 					i+1,
 					xmlEscape(result.ID),
 					result.ChunkIndex,
@@ -1206,10 +1250,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 					xmlEscape(result.KnowledgeTitle),
 					result.Score,
 					xmlEscape(result.SourceQuery),
-				))
+				)
 			} else {
-				ob.WriteString(fmt.Sprintf(
-					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
+				fmt.Fprintf(&ob, "<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n", //nolint:lll
 					i+1,
 					xmlEscape(result.ID),
 					result.ChunkIndex,
@@ -1217,10 +1260,11 @@ func (t *KnowledgeSearchTool) formatOutput(
 					xmlEscape(result.KnowledgeBaseID),
 					xmlEscape(result.KnowledgeTitle),
 					result.Score,
-					xmlEscape(result.SourceQuery),
-				))
+					xmlEscape(result.SourceQuery))
 			}
-			ob.WriteString("<note>(content omitted, already returned in a previous knowledge_search call this session)</note>\n")
+			ob.WriteString(
+				"<note>(content omitted, already returned in a previous knowledge_search call this session)</note>\n",
+			)
 			if isFAQ {
 				ob.WriteString("</faq>\n")
 			} else {
@@ -1228,19 +1272,16 @@ func (t *KnowledgeSearchTool) formatOutput(
 			}
 		} else {
 			if isFAQ {
-				ob.WriteString(fmt.Sprintf(
-					"<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+				fmt.Fprintf(&ob, "<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n", //nolint:lll
 					i+1,
 					xmlEscape(result.ID),
 					result.ChunkIndex,
 					xmlEscape(result.KnowledgeBaseID),
 					xmlEscape(result.KnowledgeTitle),
 					result.Score,
-					xmlEscape(result.SourceQuery),
-				))
+					xmlEscape(result.SourceQuery))
 			} else {
-				ob.WriteString(fmt.Sprintf(
-					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+				fmt.Fprintf(&ob, "<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n", //nolint:lll
 					i+1,
 					xmlEscape(result.ID),
 					result.ChunkIndex,
@@ -1248,8 +1289,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 					xmlEscape(result.KnowledgeBaseID),
 					xmlEscape(result.KnowledgeTitle),
 					result.Score,
-					xmlEscape(result.SourceQuery),
-				))
+					xmlEscape(result.SourceQuery))
 			}
 			snippet := ""
 			if faqMeta != nil {
@@ -1259,9 +1299,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 				snippet = extractSnippetForQueries(result.Content, queries)
 			}
 			if snippet != "" {
-				ob.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
+				fmt.Fprintf(&ob, "<match_snippet>%s</match_snippet>\n", xmlEscape(snippet))
 			}
-			ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
+			fmt.Fprintf(&ob, "<content>%s</content>\n", result.Content)
 
 			if result.ImageInfo != "" {
 				var imageInfos []types.ImageInfo
@@ -1347,8 +1387,16 @@ func (t *KnowledgeSearchTool) formatOutput(
 		if totalChunks > 0 {
 			remaining := totalChunks - int64(retrievedCount)
 			percentage := float64(retrievedCount) / float64(totalChunks) * 100
-			ob.WriteString(fmt.Sprintf("<document_stat knowledge_id=\"%s\" title=\"%s\" total_chunks=\"%d\" retrieved=\"%d\" remaining=\"%d\" coverage=\"%.1f%%\" />\n",
-				xmlEscape(knowledgeID), xmlEscape(title), totalChunks, retrievedCount, remaining, percentage))
+			fmt.Fprintf(
+				&ob,
+				"<document_stat knowledge_id=\"%s\" title=\"%s\" total_chunks=\"%d\" retrieved=\"%d\" remaining=\"%d\" coverage=\"%.1f%%\" />\n", //nolint:lll
+				xmlEscape(knowledgeID),
+				xmlEscape(title),
+				totalChunks,
+				retrievedCount,
+				remaining,
+				percentage,
+			)
 		}
 	}
 	ob.WriteString("</retrieval_statistics>\n")
@@ -1373,12 +1421,6 @@ func (t *KnowledgeSearchTool) formatOutput(
 		Output:  output,
 		Data:    data,
 	}, nil
-}
-
-// chunkRange represents a continuous range of chunk indices
-type chunkRange struct {
-	start int
-	end   int
 }
 
 // getEnrichedPassage 合并Content和ImageInfo的文本内容

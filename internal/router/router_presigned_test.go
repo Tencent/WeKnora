@@ -43,6 +43,7 @@ func (s *stubTenantService) CreateTenant(context.Context, *types.Tenant) (*types
 func (s *stubTenantService) GetTenantsByIDs(context.Context, []uint64) (map[uint64]*types.Tenant, error) {
 	panic("unexpected")
 }
+
 func (s *stubTenantService) ListTenants(context.Context) ([]*types.Tenant, error) {
 	panic("unexpected")
 }
@@ -54,6 +55,7 @@ func (s *stubTenantService) DeleteTenant(context.Context, uint64) error { panic(
 func (s *stubTenantService) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	panic("unexpected")
 }
+
 func (s *stubTenantService) BulkSetStorageQuota(context.Context, int64) (int64, error) {
 	panic("unexpected")
 }
@@ -73,7 +75,9 @@ func (s *stubTenantService) GetWeKnoraCloudCredentials(context.Context) *types.W
 // setupPresignedTestServer wires presignedFileHandler with a real local file
 // service rooted at a temp dir, returning the engine, baseDir, and the
 // presigned URL generator helper.
-func setupPresignedTestServer(t *testing.T) (engine *gin.Engine, baseDir string, signURL func(filePath string, tenantID uint64, ttl time.Duration) string) {
+func setupPresignedTestServer(
+	t *testing.T,
+) (engine *gin.Engine, baseDir string, signURL func(filePath string, tenantID uint64, ttl time.Duration) string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")

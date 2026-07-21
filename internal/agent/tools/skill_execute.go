@@ -41,10 +41,13 @@ var executeSkillScriptTool = BaseTool{
 
 // ExecuteSkillScriptInput defines the input parameters for the execute_skill_script tool
 type ExecuteSkillScriptInput struct {
-	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
-	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
-	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
-	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
+	SkillName string `json:"skill_name"      jsonschema:"Name of the skill containing the script"`
+	//nolint:lll
+	ScriptPath string `json:"script_path"     jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
+	//nolint:lll
+	Args []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
+	//nolint:lll
+	Input string `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
 }
 
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox
@@ -113,14 +116,14 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 
 	// Build output
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("=== Script Execution: %s/%s ===\n\n", input.SkillName, input.ScriptPath))
+	fmt.Fprintf(&builder, "=== Script Execution: %s/%s ===\n\n", input.SkillName, input.ScriptPath)
 
 	if len(input.Args) > 0 {
-		builder.WriteString(fmt.Sprintf("**Arguments**: %v\n", input.Args))
+		fmt.Fprintf(&builder, "**Arguments**: %v\n", input.Args)
 	}
 
-	builder.WriteString(fmt.Sprintf("**Exit Code**: %d\n", result.ExitCode))
-	builder.WriteString(fmt.Sprintf("**Duration**: %v\n\n", result.Duration))
+	fmt.Fprintf(&builder, "**Exit Code**: %d\n", result.ExitCode)
+	fmt.Fprintf(&builder, "**Duration**: %v\n\n", result.Duration)
 
 	if result.Killed {
 		builder.WriteString("**Warning**: Script was terminated (timeout or killed)\n\n")
@@ -185,6 +188,6 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 }
 
 // Cleanup releases any resources
-func (t *ExecuteSkillScriptTool) Cleanup(ctx context.Context) error {
+func (t *ExecuteSkillScriptTool) Cleanup(_ context.Context) error {
 	return nil
 }

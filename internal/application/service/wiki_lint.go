@@ -13,6 +13,7 @@ import (
 // WikiLintIssueType defines the type of lint issue
 type WikiLintIssueType string
 
+// LintIssueOrphanPage and related constants.
 const (
 	LintIssueOrphanPage      WikiLintIssueType = "orphan_page"
 	LintIssueBrokenLink      WikiLintIssueType = "broken_link"
@@ -25,6 +26,7 @@ const (
 // WikiLintIssueSeverity defines the severity of a lint issue
 type WikiLintIssueSeverity string
 
+// SeverityInfo and related constants.
 const (
 	SeverityInfo    WikiLintIssueSeverity = "info"
 	SeverityWarning WikiLintIssueSeverity = "warning"
@@ -153,10 +155,13 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			if page.PageType != types.WikiPageTypeIndex && page.PageType != types.WikiPageTypeLog {
 				if len(page.InLinks) == 0 {
 					issues = append(issues, WikiLintIssue{
-						Type:        LintIssueOrphanPage,
-						Severity:    SeverityWarning,
-						PageSlug:    page.Slug,
-						Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
+						Type:     LintIssueOrphanPage,
+						Severity: SeverityWarning,
+						PageSlug: page.Slug,
+						Description: fmt.Sprintf(
+							"Page '%s' has no inbound links — it's disconnected from the wiki",
+							page.Title,
+						),
 						AutoFixable: false,
 					})
 				}
@@ -258,11 +263,16 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 					continue
 				}
 				issues = append(issues, WikiLintIssue{
-					Type:        LintIssueMissingCrossRef,
-					Severity:    SeverityInfo,
-					PageSlug:    page.Slug,
-					TargetSlug:  slug,
-					Description: fmt.Sprintf("Page '%s' mentions '%s' but doesn't link to [[%s]]", page.Title, title, slug),
+					Type:       LintIssueMissingCrossRef,
+					Severity:   SeverityInfo,
+					PageSlug:   page.Slug,
+					TargetSlug: slug,
+					Description: fmt.Sprintf(
+						"Page '%s' mentions '%s' but doesn't link to [[%s]]",
+						page.Title,
+						title,
+						slug,
+					),
 					AutoFixable: false,
 				})
 			}

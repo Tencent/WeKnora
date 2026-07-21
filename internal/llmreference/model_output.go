@@ -227,7 +227,12 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 		}
 		group := groupsByKey[key]
 		if group == nil {
-			group = &docGroup{alias: chunk.docAlias, kbAlias: chunk.kbAlias, title: chunk.title, order: chunk.inputOrder}
+			group = &docGroup{
+				alias:   chunk.docAlias,
+				kbAlias: chunk.kbAlias,
+				title:   chunk.title,
+				order:   chunk.inputOrder,
+			}
 			groupsByKey[key] = group
 			groups = append(groups, group)
 		}
@@ -371,8 +376,6 @@ func stringValue(values map[string]interface{}, key string) string {
 	case string:
 		return value
 	case fmt.Stringer:
-		return value.String()
-	case json.Number:
 		return value.String()
 	default:
 		return ""

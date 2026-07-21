@@ -78,27 +78,27 @@ type WikiLogEntry struct {
 	// Auto-increment identifier. Monotonic within a single database, so
 	// frontend pagination uses it as a stable cursor without needing to
 	// disambiguate identical created_at values.
-	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID uint64 `json:"id"                gorm:"primaryKey;autoIncrement"`
 	// Workspace scope, mirrored from the enclosing knowledge base.
-	TenantID uint64 `json:"tenant_id" gorm:"index"`
+	TenantID uint64 `json:"tenant_id"         gorm:"index"`
 	// Knowledge base this event belongs to.
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
 	// Short operation tag: "ingest", "retract", etc. Matches the `action`
 	// argument historically passed to appendLogEntry.
-	Action string `json:"action" gorm:"type:varchar(32)"`
+	Action string `json:"action"            gorm:"type:varchar(32)"`
 	// Knowledge ID the event was about (may be empty for KB-level events).
-	KnowledgeID string `json:"knowledge_id" gorm:"type:varchar(36);default:''"`
+	KnowledgeID string `json:"knowledge_id"      gorm:"type:varchar(36);default:''"`
 	// Document title at the time of the event. Stored verbatim rather than
 	// joined at read time so deleted knowledge still has a human-readable
 	// label in the log.
-	DocTitle string `json:"doc_title" gorm:"type:text"`
+	DocTitle string `json:"doc_title"         gorm:"type:text"`
 	// One-line summary of the change, as it was when the event was logged.
-	Summary string `json:"summary" gorm:"type:text"`
+	Summary string `json:"summary"           gorm:"type:text"`
 	// Wiki pages affected by this event. Each ref carries both slug (for
 	// navigation) and title (for display) so the log renders human-
 	// readable text without a post-hoc slug→title lookup that might fail
 	// for now-deleted pages.
-	PagesAffected WikiLogPageRefs `json:"pages_affected" gorm:"type:jsonb;default:'[]'"`
+	PagesAffected WikiLogPageRefs `json:"pages_affected"    gorm:"type:jsonb;default:'[]'"`
 	// Server-side timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
 }

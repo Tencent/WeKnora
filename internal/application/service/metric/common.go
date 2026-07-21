@@ -15,7 +15,7 @@ func sum(m map[string]int) int {
 	return s
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -29,7 +29,7 @@ func abs(a int) int {
 	return a
 }
 
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
@@ -98,6 +98,7 @@ func splitIntoWords(sentences []string) []string {
 	return tokens
 }
 
+// ToSet is an exported function.
 func ToSet[T comparable](li []T) map[T]struct{} {
 	res := make(map[T]struct{}, len(li))
 	for _, v := range li {
@@ -106,6 +107,7 @@ func ToSet[T comparable](li []T) map[T]struct{} {
 	return res
 }
 
+// SliceMap is an exported function.
 func SliceMap[T any, Y any](li []T, fn func(T) Y) []Y {
 	res := make([]Y, len(li))
 	for i, v := range li {
@@ -114,6 +116,7 @@ func SliceMap[T any, Y any](li []T, fn func(T) Y) []Y {
 	return res
 }
 
+// Hit is an exported function.
 func Hit[T comparable](li []T, set map[T]struct{}) int {
 	count := 0
 	for _, v := range li {
@@ -124,6 +127,7 @@ func Hit[T comparable](li []T, set map[T]struct{}) int {
 	return count
 }
 
+// Fold is an exported function.
 func Fold[T any, Y any](slice []T, initial Y, f func(Y, T) Y) Y {
 	accumulator := initial
 	for _, item := range slice {

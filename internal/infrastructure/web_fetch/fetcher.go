@@ -48,9 +48,11 @@ func FetchURLContent(ctx context.Context, rawURL string) (string, error) {
 
 	// Browser-like headers to reduce 403 rejections.
 	req.Header.Set("User-Agent",
-		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	req.Header.Set("Accept",
-		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,"+
+			"image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6")
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Cache-Control", "no-cache")
@@ -73,7 +75,7 @@ func FetchURLContent(ctx context.Context, rawURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
@@ -98,7 +100,7 @@ func htmlToText(html string) string {
 	doc.Find("script, style, nav, footer, header, iframe, noscript, svg, img").Remove()
 
 	var sb strings.Builder
-	doc.Find("body").Each(func(i int, s *goquery.Selection) {
+	doc.Find("body").Each(func(_ int, s *goquery.Selection) {
 		sb.WriteString(s.Text())
 	})
 	text := sb.String()

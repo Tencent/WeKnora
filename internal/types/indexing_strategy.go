@@ -10,13 +10,13 @@ import (
 // When a document is uploaded, only the enabled pipelines will run.
 type IndexingStrategy struct {
 	// VectorEnabled enables semantic vector embedding and search
-	VectorEnabled bool `yaml:"vector_enabled" json:"vector_enabled"`
+	VectorEnabled bool `yaml:"vector_enabled"  json:"vector_enabled"`
 	// KeywordEnabled enables keyword-based (BM25) search
 	KeywordEnabled bool `yaml:"keyword_enabled" json:"keyword_enabled"`
 	// WikiEnabled enables automatic wiki page generation from documents
-	WikiEnabled bool `yaml:"wiki_enabled" json:"wiki_enabled"`
+	WikiEnabled bool `yaml:"wiki_enabled"    json:"wiki_enabled"`
 	// GraphEnabled enables knowledge graph entity/relation extraction
-	GraphEnabled bool `yaml:"graph_enabled" json:"graph_enabled"`
+	GraphEnabled bool `yaml:"graph_enabled"   json:"graph_enabled"`
 }
 
 // DefaultIndexingStrategy returns the default strategy matching the legacy behavior:

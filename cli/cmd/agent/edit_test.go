@@ -121,7 +121,12 @@ func TestEdit_AddRemoveKB_SameID_NetNoOpWithWarning(t *testing.T) {
 
 func TestEdit_NoFlags_InvalidArgument(t *testing.T) {
 	svc := &fakeEditSvc{}
-	err := runEdit(context.Background(), &EditOptions{AgentID: "ag_abc"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
+	err := runEdit(
+		context.Background(),
+		&EditOptions{AgentID: "ag_abc"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+		svc,
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

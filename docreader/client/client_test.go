@@ -21,7 +21,7 @@ func TestReadURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	client.SetDebug(true)
 
 	startTime := time.Now()
@@ -51,7 +51,7 @@ func TestReadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	client.SetDebug(true)
 
 	fileContent, err := os.ReadFile("../testdata/test.md")

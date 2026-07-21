@@ -67,7 +67,10 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	// Get existing page
 	existingPage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, params.Slug)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Page %s not found. Cannot rename a non-existent page.", params.Slug)}, nil
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Page %s not found. Cannot rename a non-existent page.", params.Slug),
+		}, nil
 	}
 
 	inLinks := make([]string, len(existingPage.InLinks))
@@ -95,7 +98,7 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		sourcePage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, sourceSlug)
 		if err == nil {
 			changed := false
-			
+
 			// Replace [[old-slug]] with [[new-slug]]
 			link1 := "[[" + params.Slug + "]]"
 			newLink1 := "[[" + params.NewSlug + "]]"
@@ -103,7 +106,7 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 				sourcePage.Content = strings.ReplaceAll(sourcePage.Content, link1, newLink1)
 				changed = true
 			}
-			
+
 			// Replace [[old-slug|text]] with [[new-slug|text]]
 			link2 := "[[" + params.Slug + "|"
 			newLink2 := "[[" + params.NewSlug + "|"
@@ -125,7 +128,10 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	// Delete old page
 	err = t.wikiPageService.DeletePage(ctx, kbID, params.Slug)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Successfully created new page and updated links, but failed to delete old page: " + err.Error()}, nil
+		return &types.ToolResult{
+			Success: false,
+			Error:   "Successfully created new page and updated links, but failed to delete old page: " + err.Error(),
+		}, nil
 	}
 
 	// Inject cross-links so other pages know about this new slug
@@ -134,7 +140,12 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	// Rebuild the index page to reflect the new/updated summary
 	_ = t.wikiPageService.RebuildIndexPage(ctx, kbID)
 
-	outputMsg := fmt.Sprintf("Successfully renamed page [[%s]] → [[%s]] and updated %d incoming links.", params.Slug, params.NewSlug, updatedCount)
+	outputMsg := fmt.Sprintf(
+		"Successfully renamed page [[%s]] → [[%s]] and updated %d incoming links.",
+		params.Slug,
+		params.NewSlug,
+		updatedCount,
+	)
 	if updatedCount > 0 {
 		outputMsg += fmt.Sprintf("\n- Affected pages: %s", strings.Join(updatedSlugs, ", "))
 	}
@@ -143,12 +154,12 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Success: true,
 		Output:  outputMsg,
 		Data: map[string]interface{}{
-			"display_type":    "wiki_rename_page",
-			"old_slug":        params.Slug,
-			"new_slug":        params.NewSlug,
-			"title":           existingPage.Title,
-			"updated_count":   updatedCount,
-			"affected_pages":  updatedSlugs,
+			"display_type":   "wiki_rename_page",
+			"old_slug":       params.Slug,
+			"new_slug":       params.NewSlug,
+			"title":          existingPage.Title,
+			"updated_count":  updatedCount,
+			"affected_pages": updatedSlugs,
 		},
 	}, nil
 }

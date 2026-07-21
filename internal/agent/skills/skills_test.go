@@ -139,11 +139,11 @@ func TestLoaderDiscoverSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
@@ -156,7 +156,7 @@ description: A test skill for loader testing.
 
 This is the test skill content.
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
@@ -184,11 +184,11 @@ func TestLoaderLoadSkillInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
@@ -205,7 +205,7 @@ This is the main content.
 
 More content here.
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
@@ -237,12 +237,12 @@ func TestLoaderLoadSkillFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test skill directory with additional files
 	skillDir := filepath.Join(tmpDir, "test-skill")
 	scriptsDir := filepath.Join(skillDir, "scripts")
-	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
@@ -255,19 +255,19 @@ description: A test skill with additional files.
 
 See [GUIDE.md](GUIDE.md) for more info.
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
 	// Write additional file
 	guideContent := "# Guide\n\nThis is the guide content."
-	if err := os.WriteFile(filepath.Join(skillDir, "GUIDE.md"), []byte(guideContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "GUIDE.md"), []byte(guideContent), 0o644); err != nil {
 		t.Fatalf("Failed to write GUIDE.md: %v", err)
 	}
 
 	// Write a script
 	scriptContent := "#!/usr/bin/env python3\nprint('Hello from script')"
-	if err := os.WriteFile(filepath.Join(scriptsDir, "hello.py"), []byte(scriptContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hello.py"), []byte(scriptContent), 0o644); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
 	}
 
@@ -312,11 +312,11 @@ func TestManagerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
@@ -329,7 +329,7 @@ description: A test skill for manager integration testing.
 
 Integration test content.
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 

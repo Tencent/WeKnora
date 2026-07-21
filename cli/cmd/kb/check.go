@@ -33,7 +33,12 @@ type CheckResult struct {
 // CheckService is the narrow SDK surface needed for kb check.
 type CheckService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
-	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
+	ListKnowledgeWithFilter(
+		ctx context.Context,
+		kbID string,
+		page, pageSize int,
+		filter sdk.KnowledgeListFilter,
+	) ([]sdk.Knowledge, int64, error)
 }
 
 var kbCheckFields = []string{
@@ -118,7 +123,13 @@ func aggregateFailedCount(ctx context.Context, svc CheckService, kbID string) (i
 	var total int64
 	page := 1
 	for {
-		docs, totalAvailable, err := svc.ListKnowledgeWithFilter(ctx, kbID, page, pageSize, sdk.KnowledgeListFilter{ParseStatus: "failed"})
+		docs, totalAvailable, err := svc.ListKnowledgeWithFilter(
+			ctx,
+			kbID,
+			page,
+			pageSize,
+			sdk.KnowledgeListFilter{ParseStatus: "failed"},
+		)
 		if err != nil {
 			return total, err
 		}

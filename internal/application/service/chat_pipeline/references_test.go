@@ -22,8 +22,22 @@ func TestPrepareMessagesWithReferencesUsesChunkCentricContext(t *testing.T) {
 			RenderedContexts: rendered,
 			UserContent:      "References:\n" + rendered + "\nQuestion: question",
 			MergeResult: []*types.SearchResult{
-				{ID: "chunk-1", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Doc", ChunkIndex: 1, Content: "first content"},
-				{ID: "chunk-2", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Doc", ChunkIndex: 2, Content: "second content"},
+				{
+					ID:              "chunk-1",
+					KnowledgeID:     "doc-1",
+					KnowledgeBaseID: "kb-1",
+					KnowledgeTitle:  "Doc",
+					ChunkIndex:      1,
+					Content:         "first content",
+				},
+				{
+					ID:              "chunk-2",
+					KnowledgeID:     "doc-1",
+					KnowledgeBaseID: "kb-1",
+					KnowledgeTitle:  "Doc",
+					ChunkIndex:      2,
+					Content:         "second content",
+				},
 			},
 		},
 	}
@@ -58,7 +72,8 @@ func TestPrepareMessagesWithReferencesReplacesSystemPromptContextAndHistoryCitat
 				Answer: `Previous <kb doc="Old" chunk_id="old-chunk" kb_id="old-kb" />`,
 			}},
 			MergeResult: []*types.SearchResult{{
-				ID: "current-chunk", KnowledgeID: "current-doc", KnowledgeBaseID: "current-kb", KnowledgeTitle: "Current", Content: "first content",
+				ID: "current-chunk", KnowledgeID: "current-doc", KnowledgeBaseID: "current-kb", KnowledgeTitle: "Current",
+				Content: "first content",
 			}},
 		},
 	}
@@ -98,7 +113,10 @@ func TestPrepareMessagesWithReferencesKeepsWebSeparateFromChunks(t *testing.T) {
 
 func TestPrepareMessagesWithReferencesCompactsHistoryWithoutCurrentRetrieval(t *testing.T) {
 	manage := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{Query: "follow-up", SummaryConfig: types.SummaryConfig{Prompt: "system"}},
+		PipelineRequest: types.PipelineRequest{
+			Query:         "follow-up",
+			SummaryConfig: types.SummaryConfig{Prompt: "system"},
+		},
 		PipelineState: types.PipelineState{
 			UserContent: "follow-up",
 			History: []*types.History{{

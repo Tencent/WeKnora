@@ -1,3 +1,4 @@
+// Package wechat provides wechat functionality.
 // Long-polling client for the WeChat iLink Bot API.
 //
 // Flow:
@@ -25,10 +26,10 @@ import (
 )
 
 const (
-	longPollTimeout     = 35 * time.Second
-	longPollHTTPTimeout = 40 * time.Second // slightly longer than poll timeout
-	reconnectBaseDelay  = 1 * time.Second
-	reconnectMaxDelay   = 30 * time.Second
+	longPollTimeout      = 35 * time.Second
+	longPollHTTPTimeout  = 40 * time.Second // slightly longer than poll timeout
+	reconnectBaseDelay   = 1 * time.Second
+	reconnectMaxDelay    = 30 * time.Second
 	maxReconnectAttempts = -1 // infinite
 )
 
@@ -45,7 +46,10 @@ type LongPollClient struct {
 }
 
 // NewLongPollClient creates a new WeChat long-polling client.
-func NewLongPollClient(botToken, ilinkBotID string, handler func(ctx context.Context, msg *im.IncomingMessage) error) *LongPollClient {
+func NewLongPollClient(
+	botToken, ilinkBotID string,
+	handler func(ctx context.Context, msg *im.IncomingMessage) error,
+) *LongPollClient {
 	return &LongPollClient{
 		botToken:   botToken,
 		ilinkBotID: ilinkBotID,
@@ -112,7 +116,12 @@ func (c *LongPollClient) poll(ctx context.Context) error {
 
 	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ilinkBaseURL+"/ilink/bot/getupdates", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		ilinkBaseURL+"/ilink/bot/getupdates",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -127,7 +136,7 @@ func (c *LongPollClient) poll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("poll request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -273,7 +282,7 @@ func (c *LongPollClient) parseMessage(msg *weixinMessage) *im.IncomingMessage {
 		}
 		var fileSize int64
 		if item.FileItem.Len != "" {
-			fmt.Sscanf(item.FileItem.Len, "%d", &fileSize)
+			_, _ = fmt.Sscanf(item.FileItem.Len, "%d", &fileSize)
 		}
 		return &im.IncomingMessage{
 			Platform:    im.PlatformWeChat,
@@ -316,25 +325,25 @@ func pollReconnectDelay(attempt int) time.Duration {
 // ── iLink API response types (matches proto: GetUpdatesResp, WeixinMessage) ──
 
 type getUpdatesResponse struct {
-	Ret           int              `json:"ret"`
-	ErrCode       int              `json:"errcode"`
-	ErrMsg        string           `json:"errmsg"`
-	Msgs          []weixinMessage  `json:"msgs"`
-	GetUpdatesBuf string           `json:"get_updates_buf"`
+	Ret           int             `json:"ret"`
+	ErrCode       int             `json:"errcode"`
+	ErrMsg        string          `json:"errmsg"`
+	Msgs          []weixinMessage `json:"msgs"`
+	GetUpdatesBuf string          `json:"get_updates_buf"`
 }
 
 type weixinMessage struct {
-	Seq          int              `json:"seq"`
-	MessageID    int64            `json:"message_id"`
-	FromUserID   string           `json:"from_user_id"`
-	ToUserID     string           `json:"to_user_id"`
-	ClientID     string           `json:"client_id"`
-	CreateTimeMs int64            `json:"create_time_ms"`
-	SessionID    string           `json:"session_id"`
-	MessageType  int              `json:"message_type"`  // 1=USER, 2=BOT
-	MessageState int              `json:"message_state"` // 0=NEW, 1=GENERATING, 2=FINISH
-	ItemList     []messageItem    `json:"item_list"`
-	ContextToken string           `json:"context_token"`
+	Seq          int           `json:"seq"`
+	MessageID    int64         `json:"message_id"`
+	FromUserID   string        `json:"from_user_id"`
+	ToUserID     string        `json:"to_user_id"`
+	ClientID     string        `json:"client_id"`
+	CreateTimeMs int64         `json:"create_time_ms"`
+	SessionID    string        `json:"session_id"`
+	MessageType  int           `json:"message_type"`  // 1=USER, 2=BOT
+	MessageState int           `json:"message_state"` // 0=NEW, 1=GENERATING, 2=FINISH
+	ItemList     []messageItem `json:"item_list"`
+	ContextToken string        `json:"context_token"`
 }
 
 type messageItem struct {

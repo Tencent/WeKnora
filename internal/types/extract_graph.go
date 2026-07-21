@@ -15,6 +15,7 @@ type PromptTemplateStructured struct {
 	Examples    []GraphData `json:"examples"`
 }
 
+// GraphNode represents an entity node in an extracted knowledge graph.
 type GraphNode struct {
 	Name       string   `json:"name,omitempty"`
 	Chunks     []string `json:"chunks,omitempty"`
@@ -28,6 +29,7 @@ type GraphRelation struct {
 	Type  string `json:"type,omitempty"`
 }
 
+// GraphData is the structured graph payload returned by entity extraction.
 type GraphData struct {
 	Text     string           `json:"text,omitempty"`
 	Node     []*GraphNode     `json:"node,omitempty"`

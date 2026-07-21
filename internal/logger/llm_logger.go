@@ -1,3 +1,4 @@
+// Package logger provides related functionality.
 package logger
 
 import (
@@ -106,7 +107,7 @@ func LLMDebugLog(ctx context.Context, record *LLMCallRecord) {
 		fmt.Fprintf(os.Stderr, "llm_debug: open %s: %v\n", path, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = f.WriteString(text)
 }
 
@@ -125,14 +126,14 @@ func formatRecord(r *LLMCallRecord) string {
 	b.WriteString("\n")
 	b.WriteString(separator)
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Time:     %s\n", time.Now().Format("2006-01-02 15:04:05.000")))
-	b.WriteString(fmt.Sprintf("Model:    %s\n", r.Model))
+	fmt.Fprintf(&b, "Time:     %s\n", time.Now().Format("2006-01-02 15:04:05.000"))
+	fmt.Fprintf(&b, "Model:    %s\n", r.Model)
 	if r.Duration > 0 {
-		b.WriteString(fmt.Sprintf("Duration: %s\n", r.Duration.Round(time.Millisecond)))
+		fmt.Fprintf(&b, "Duration: %s\n", r.Duration.Round(time.Millisecond))
 	}
 
 	for _, s := range r.Sections {
-		b.WriteString(fmt.Sprintf("\n---------- %s ----------\n", s.Title))
+		fmt.Fprintf(&b, "\n---------- %s ----------\n", s.Title)
 		b.WriteString(s.Content)
 		if !strings.HasSuffix(s.Content, "\n") {
 			b.WriteString("\n")
@@ -163,7 +164,7 @@ func extractRequestID(ctx context.Context) string {
 
 // LLMCallRecord holds all information for one model API call.
 type LLMCallRecord struct {
-	CallType string        // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
+	CallType string // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
 	Model    string
 	Duration time.Duration
 	Sections []RecordSection
@@ -199,12 +200,12 @@ type LLMToolCallInfo struct {
 func FormatMessages(messages []LLMMessage) string {
 	var b strings.Builder
 	for _, m := range messages {
-		b.WriteString(fmt.Sprintf("[%s]", m.Role))
+		fmt.Fprintf(&b, "[%s]", m.Role)
 		if m.Name != "" {
-			b.WriteString(fmt.Sprintf(" name=%s", m.Name))
+			fmt.Fprintf(&b, " name=%s", m.Name)
 		}
 		if m.ToolCallID != "" {
-			b.WriteString(fmt.Sprintf(" tool_call_id=%s", m.ToolCallID))
+			fmt.Fprintf(&b, " tool_call_id=%s", m.ToolCallID)
 		}
 		b.WriteString("\n")
 
@@ -214,13 +215,13 @@ func FormatMessages(messages []LLMMessage) string {
 		}
 		for _, img := range m.Images {
 			if len([]rune(img)) > 80 {
-				b.WriteString(fmt.Sprintf("[image: %s (%d bytes)]\n", TruncateRunes(img, 80), len(img)))
+				fmt.Fprintf(&b, "[image: %s (%d bytes)]\n", TruncateRunes(img, 80), len(img))
 			} else {
-				b.WriteString(fmt.Sprintf("[image: %s]\n", img))
+				fmt.Fprintf(&b, "[image: %s]\n", img)
 			}
 		}
 		for _, tc := range m.ToolCalls {
-			b.WriteString(fmt.Sprintf("  -> tool_call: id=%s, func=%s, args=%s\n", tc.ID, tc.FuncName, tc.Arguments))
+			fmt.Fprintf(&b, "  -> tool_call: id=%s, func=%s, args=%s\n", tc.ID, tc.FuncName, tc.Arguments)
 		}
 		b.WriteString("\n")
 	}
@@ -231,7 +232,7 @@ func FormatMessages(messages []LLMMessage) string {
 func FormatToolCalls(tcs []LLMToolCallInfo) string {
 	var b strings.Builder
 	for _, tc := range tcs {
-		b.WriteString(fmt.Sprintf("[tool_call] id=%s, func=%s\n%s\n\n", tc.ID, tc.FuncName, tc.Arguments))
+		fmt.Fprintf(&b, "[tool_call] id=%s, func=%s\n%s\n\n", tc.ID, tc.FuncName, tc.Arguments)
 	}
 	return b.String()
 }

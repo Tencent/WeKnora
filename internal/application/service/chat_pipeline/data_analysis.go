@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
+// PluginDataAnalysis is an exported type.
 type PluginDataAnalysis struct {
 	modelService         interfaces.ModelService
 	knowledgeBaseService interfaces.KnowledgeBaseService
@@ -26,6 +27,7 @@ type PluginDataAnalysis struct {
 	db                   *sql.DB
 }
 
+// NewPluginDataAnalysis is an exported function.
 func NewPluginDataAnalysis(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
@@ -49,13 +51,15 @@ func NewPluginDataAnalysis(
 	return p
 }
 
-func (p *PluginDataAnalysis) ActivationEvents() []types.EventType {
-	return []types.EventType{types.DATA_ANALYSIS}
+// ActivationEvents implements the required interface method.
+func (p *PluginDataAnalysis) ActivationEvents() []types.Type {
+	return []types.Type{types.DataAnalysis}
 }
 
+// OnEvent implements the required interface method.
 func (p *PluginDataAnalysis) OnEvent(
 	ctx context.Context,
-	eventType types.EventType,
+	_ types.Type,
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {
@@ -89,7 +93,14 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Initialize DataAnalysisTool
-	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisTool(
+		p.knowledgeBaseService,
+		p.knowledgeService,
+		p.tenantService,
+		p.fileService,
+		p.db,
+		chatManage.SessionID,
+	)
 	defer tool.Cleanup(ctx)
 
 	// Load data into DuckDB
@@ -121,7 +132,7 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: analysisPrompt},
-	}, &chat.ChatOptions{
+	}, &chat.Options{
 		Temperature: 0.1,
 		Format:      formatSchema,
 	})

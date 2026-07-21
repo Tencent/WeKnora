@@ -101,10 +101,13 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Knowledge base description (optional)")
-	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name (optional; makes the KB retrieval-ready at creation)")
-	cmd.Flags().StringVar(&opts.ChatModel, "chat-model", "", "Chat/LLM model id or name (optional; pre-set the KB's answer model at creation)")
+	cmd.Flags().
+		StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name (optional; makes the KB retrieval-ready at creation)")
+	cmd.Flags().
+		StringVar(&opts.ChatModel, "chat-model", "", "Chat/LLM model id or name (optional; pre-set the KB's answer model at creation)")
 	cmd.Flags().StringVar(&opts.StorageProvider, "storage-provider", "",
-		"Storage provider for documents in this KB: "+strings.Join(storageProviderValues, " | ")+" (optional; server default when unset)")
+		"Storage provider for documents in this KB: "+strings.Join(storageProviderValues, " | ")+
+			" (optional; server default when unset)")
 	cmdutil.AddFormatFlag(cmd, kbCreateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -155,7 +158,9 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	// the agent to discover a silent-draft KB via a later empty search.
 	var meta *output.Meta
 	if created.EmbeddingModelID == "" {
-		meta = &output.Meta{Hint: "retrieval_ready=false: no embedding model bound. Uploaded docs will not be searchable until you run `weknora kb config set " + created.ID + " --embedding-model <id> --chat-model <id>` (create the KB with --embedding-model/--chat-model to skip this step)."}
+		meta = &output.Meta{
+			Hint: "retrieval_ready=false: no embedding model bound. Uploaded docs will not be searchable until you run `weknora kb config set " + created.ID + " --embedding-model <id> --chat-model <id>` (create the KB with --embedding-model/--chat-model to skip this step).",
+		}
 	}
 
 	if fopts.WantsJSON() {

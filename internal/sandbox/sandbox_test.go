@@ -11,7 +11,7 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.Type != SandboxTypeLocal {
+	if config.Type != TypeLocal {
 		t.Errorf("Expected default type to be local, got %s", config.Type)
 	}
 
@@ -38,7 +38,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: &Config{
-				Type:           SandboxTypeLocal,
+				Type:           TypeLocal,
 				DefaultTimeout: 30 * time.Second,
 			},
 			wantErr: false,
@@ -53,7 +53,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "negative timeout",
 			config: &Config{
-				Type:           SandboxTypeLocal,
+				Type:           TypeLocal,
 				DefaultTimeout: -1 * time.Second,
 			},
 			wantErr: true,
@@ -76,7 +76,7 @@ func TestLocalSandboxExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write a simple test script
 	scriptPath := filepath.Join(tmpDir, "test.sh")
@@ -84,13 +84,13 @@ func TestLocalSandboxExecute(t *testing.T) {
 echo "Hello from sandbox"
 echo "Args: $@"
 `
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
 	}
 
 	// Create local sandbox
 	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
+	config.Type = TypeLocal
 	sandbox := NewLocalSandbox(config)
 
 	// Check availability
@@ -105,7 +105,6 @@ echo "Args: $@"
 		Args:    []string{"arg1", "arg2"},
 		Timeout: 10 * time.Second,
 	})
-
 	if err != nil {
 		t.Fatalf("Failed to execute script: %v", err)
 	}
@@ -128,7 +127,7 @@ func TestLocalSandboxTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write a script that sleeps
 	scriptPath := filepath.Join(tmpDir, "sleep.sh")
@@ -136,13 +135,13 @@ func TestLocalSandboxTimeout(t *testing.T) {
 sleep 10
 echo "Done"
 `
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
 	}
 
 	// Create local sandbox
 	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
+	config.Type = TypeLocal
 	sandbox := NewLocalSandbox(config)
 
 	// Execute with short timeout
@@ -151,7 +150,6 @@ echo "Done"
 		Script:  scriptPath,
 		Timeout: 1 * time.Second,
 	})
-
 	if err != nil {
 		t.Fatalf("Execute should not return error, got: %v", err)
 	}
@@ -165,14 +163,14 @@ echo "Done"
 
 func TestNewManager(t *testing.T) {
 	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
+	config.Type = TypeLocal
 
 	manager, err := NewManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
 
-	if manager.GetType() != SandboxTypeLocal {
+	if manager.GetType() != TypeLocal {
 		t.Errorf("Expected type local, got %s", manager.GetType())
 	}
 }
@@ -180,7 +178,7 @@ func TestNewManager(t *testing.T) {
 func TestNewDisabledManager(t *testing.T) {
 	manager := NewDisabledManager()
 
-	if manager.GetType() != SandboxTypeDisabled {
+	if manager.GetType() != TypeDisabled {
 		t.Errorf("Expected type disabled, got %s", manager.GetType())
 	}
 
@@ -237,7 +235,7 @@ func TestPythonScriptExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write a Python script
 	scriptPath := filepath.Join(tmpDir, "test.py")
@@ -246,13 +244,13 @@ import sys
 print("Hello from Python")
 print(f"Arguments: {sys.argv[1:]}")
 `
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
 	}
 
 	// Create local sandbox
 	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
+	config.Type = TypeLocal
 	sandbox := NewLocalSandbox(config)
 
 	// Execute Python script
@@ -262,7 +260,6 @@ print(f"Arguments: {sys.argv[1:]}")
 		Args:    []string{"test", "args"},
 		Timeout: 10 * time.Second,
 	})
-
 	if err != nil {
 		t.Fatalf("Failed to execute Python script: %v", err)
 	}

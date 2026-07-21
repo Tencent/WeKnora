@@ -182,7 +182,14 @@ without the user's explicit go-ahead.`,
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
+func runDelete(
+	ctx context.Context,
+	opts *DeleteOptions,
+	fopts *cmdutil.FormatOptions,
+	svc DeleteService,
+	p prompt.Prompter,
+	id string,
+) error {
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "document", id, "doc.delete", []string{"weknora", "doc", "delete", id, "-y"}); err != nil {
 		return err
 	}
@@ -202,7 +209,13 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 // ClearKnowledgeBaseContents call. Non-TTY/JSON mode without -y returns
 // CodeInputConfirmationRequired (exit 10) with risk metadata so agents can
 // surface the risk to the user before re-invoking with -y.
-func runDeleteAll(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc AllService, p prompt.Prompter) error {
+func runDeleteAll(
+	ctx context.Context,
+	opts *DeleteOptions,
+	fopts *cmdutil.FormatOptions,
+	svc AllService,
+	p prompt.Prompter,
+) error {
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "all docs in KB", opts.KB, "doc.delete_all", []string{"weknora", "doc", "delete", "--all", "--kb=" + opts.KB, "-y"}); err != nil {
 		return err
 	}

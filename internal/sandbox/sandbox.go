@@ -8,16 +8,16 @@ import (
 	"time"
 )
 
-// SandboxType represents the type of sandbox environment
-type SandboxType string
+// Type represents the type of sandbox environment
+type Type string
 
 const (
-	// SandboxTypeDocker uses Docker containers for isolation
-	SandboxTypeDocker SandboxType = "docker"
-	// SandboxTypeLocal uses local process with restrictions
-	SandboxTypeLocal SandboxType = "local"
-	// SandboxTypeDisabled means script execution is disabled
-	SandboxTypeDisabled SandboxType = "disabled"
+	// TypeDocker uses Docker containers for isolation
+	TypeDocker Type = "docker"
+	// TypeLocal uses local process with restrictions
+	TypeLocal Type = "local"
+	// TypeDisabled means script execution is disabled
+	TypeDisabled Type = "disabled"
 )
 
 // Default configuration values
@@ -50,7 +50,7 @@ type Sandbox interface {
 	Cleanup(ctx context.Context) error
 
 	// Type returns the sandbox type
-	Type() SandboxType
+	Type() Type
 
 	// IsAvailable checks if the sandbox is available for use
 	IsAvailable(ctx context.Context) bool
@@ -69,7 +69,7 @@ type Manager interface {
 	GetSandbox() Sandbox
 
 	// GetType returns the current sandbox type
-	GetType() SandboxType
+	GetType() Type
 }
 
 // ExecuteConfig contains configuration for script execution
@@ -152,7 +152,7 @@ func (r *ExecuteResult) GetOutput() string {
 // Config holds sandbox manager configuration
 type Config struct {
 	// Type is the preferred sandbox type
-	Type SandboxType
+	Type Type
 
 	// FallbackEnabled allows falling back to local sandbox if Docker is unavailable
 	FallbackEnabled bool
@@ -179,7 +179,7 @@ type Config struct {
 // DefaultConfig returns a default sandbox configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Type:            SandboxTypeLocal,
+		Type:            TypeLocal,
 		FallbackEnabled: true,
 		DefaultTimeout:  DefaultTimeout,
 		DockerImage:     DefaultDockerImage,
@@ -222,7 +222,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled:
+	case TypeDocker, TypeLocal, TypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

@@ -63,7 +63,10 @@ func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 	}
 	for _, dotted := range []string{"config.system_prompt", "config.model_id", "config.fallback_strategy"} {
 		if slices.Contains(agentViewFields, dotted) {
-			t.Errorf("agentViewFields must not list dotted nested key %q (the --jq projection path handles nesting directly)", dotted)
+			t.Errorf(
+				"agentViewFields must not list dotted nested key %q (the --jq projection path handles nesting directly)",
+				dotted,
+			)
 		}
 	}
 }

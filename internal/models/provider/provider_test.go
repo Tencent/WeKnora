@@ -15,7 +15,7 @@ func TestProviderRegistry(t *testing.T) {
 		assert.NotEmpty(t, providers, "should have registered providers")
 
 		// Check specific providers exist
-		for _, name := range []ProviderName{ProviderOpenAI, ProviderAliyun, ProviderZhipu, ProviderGeneric} {
+		for _, name := range []Name{ProviderOpenAI, ProviderAliyun, ProviderZhipu, ProviderGeneric} {
 			p, ok := Get(name)
 			assert.True(t, ok, "provider %s should be registered", name)
 			assert.NotNil(t, p, "provider %s should not be nil", name)
@@ -33,7 +33,7 @@ func TestProviderRegistry(t *testing.T) {
 func TestDetectProvider(t *testing.T) {
 	tests := []struct {
 		url      string
-		expected ProviderName
+		expected Name
 	}{
 		{"https://api.openai.com/v1", ProviderOpenAI},
 		{"https://api.anthropic.com/v1", ProviderAnthropic},

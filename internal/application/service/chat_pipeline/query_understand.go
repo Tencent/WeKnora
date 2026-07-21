@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -21,8 +20,6 @@ type PluginQueryUnderstand struct {
 	messageService interfaces.MessageService
 	config         *config.Config
 }
-
-var rewriteImageSepPattern = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
 
 type queryUnderstandOutput struct {
 	RewriteQuery     string            `json:"rewrite_query"`
@@ -46,8 +43,8 @@ func NewPluginQueryUnderstand(eventManager *EventManager,
 }
 
 // ActivationEvents returns the list of event types this plugin responds to.
-func (p *PluginQueryUnderstand) ActivationEvents() []types.EventType {
-	return []types.EventType{types.QUERY_UNDERSTAND}
+func (p *PluginQueryUnderstand) ActivationEvents() []types.Type {
+	return []types.Type{types.QueryUnderstand}
 }
 
 // OnEvent processes triggered events.
@@ -56,7 +53,7 @@ func (p *PluginQueryUnderstand) ActivationEvents() []types.EventType {
 //   - Text + images: multimodal rewrite + intent + image description (uses VLM/vision model)
 //   - Images only: multimodal analysis + intent + image description (uses VLM/vision model)
 func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	chatManage.RewriteQuery = chatManage.Query
 
@@ -117,7 +114,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	response, err := rewriteModel.Chat(ctx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		userMsg,
-	}, &chat.ChatOptions{
+	}, &chat.Options{
 		Temperature:         0.3,
 		MaxCompletionTokens: maxTokens,
 		Thinking:            &thinking,
@@ -179,7 +176,8 @@ func (p *PluginQueryUnderstand) updateUserMessageImageCaption(ctx context.Contex
 
 	msg.Images[0].Caption = chatManage.ImageDescription
 
-	if err := p.messageService.UpdateMessageImages(ctx, chatManage.SessionID, chatManage.UserMessageID, msg.Images); err != nil {
+	if err := p.messageService.UpdateMessageImages(ctx, chatManage.SessionID, chatManage.UserMessageID,
+		msg.Images); err != nil {
 		pipelineWarn(ctx, "QueryUnderstand", "update_image_caption", map[string]interface{}{
 			"session_id":      chatManage.SessionID,
 			"user_message_id": chatManage.UserMessageID,
@@ -223,7 +221,11 @@ func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *typ
 
 // selectModel picks the model for query understanding. When images are present
 // it prefers a vision-capable model. Returns (model, useImages).
-func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
+func (p *PluginQueryUnderstand) selectModel(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	hasImages bool,
+) (chat.Chat, bool) {
 	if hasImages {
 		if chatManage.ChatModelSupportsVision {
 			m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
@@ -280,7 +282,10 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 }
 
 // buildPrompts constructs system and user prompts with placeholder replacement.
-func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, historyList []*types.History) (string, string) {
+func (p *PluginQueryUnderstand) buildPrompts(
+	chatManage *types.ChatManage,
+	historyList []*types.History,
+) (string, string) {
 	userPrompt := p.config.Conversation.RewritePromptUser
 	if chatManage.RewritePromptUser != "" {
 		userPrompt = chatManage.RewritePromptUser

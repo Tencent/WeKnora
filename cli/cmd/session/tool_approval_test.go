@@ -21,7 +21,11 @@ type fakeResolveSvc struct {
 	gotReq       *sdk.ResolveToolApprovalRequest
 }
 
-func (s *fakeResolveSvc) ResolveToolApproval(_ context.Context, pendingID string, req *sdk.ResolveToolApprovalRequest) error {
+func (s *fakeResolveSvc) ResolveToolApproval(
+	_ context.Context,
+	pendingID string,
+	req *sdk.ResolveToolApprovalRequest,
+) error {
 	s.gotPendingID, s.gotReq = pendingID, req
 	return s.err
 }
@@ -40,7 +44,13 @@ func TestRunResolve_ApproveWithYes_ConfirmationRequiredCode(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeResolveSvc{}
 	// Verify the "no-yes" path yields CodeInputConfirmationRequired.
-	err := runResolve(context.Background(), &ResolveOptions{PendingID: "p1", Yes: false}, jsonOpts(), svc, &testutil.ConfirmPrompter{})
+	err := runResolve(
+		context.Background(),
+		&ResolveOptions{PendingID: "p1", Yes: false},
+		jsonOpts(),
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -60,7 +70,13 @@ func TestRunResolve_RejectWithReason(t *testing.T) {
 func TestRunResolve_NoYesIsConfirmationRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeResolveSvc{}
-	err := runResolve(context.Background(), &ResolveOptions{PendingID: "p1"}, jsonOpts(), svc, &testutil.ConfirmPrompter{})
+	err := runResolve(
+		context.Background(),
+		&ResolveOptions{PendingID: "p1"},
+		jsonOpts(),
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -70,7 +86,13 @@ func TestRunResolve_NoYesIsConfirmationRequired(t *testing.T) {
 
 func TestRunResolve_ModifiedArgsMustBeJSONObject(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runResolve(context.Background(), &ResolveOptions{PendingID: "p1", ModifiedArgs: `["not","an","object"]`, Yes: true}, jsonOpts(), &fakeResolveSvc{}, &testutil.ConfirmPrompter{})
+	err := runResolve(
+		context.Background(),
+		&ResolveOptions{PendingID: "p1", ModifiedArgs: `["not","an","object"]`, Yes: true},
+		jsonOpts(),
+		&fakeResolveSvc{},
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "JSON object")
 	var typed *cmdutil.Error
@@ -80,7 +102,13 @@ func TestRunResolve_ModifiedArgsMustBeJSONObject(t *testing.T) {
 
 func TestRunResolve_RejectAndModifiedArgsConflict(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runResolve(context.Background(), &ResolveOptions{PendingID: "p1", Reject: true, ModifiedArgs: `{"a":1}`, Yes: true}, jsonOpts(), &fakeResolveSvc{}, &testutil.ConfirmPrompter{})
+	err := runResolve(
+		context.Background(),
+		&ResolveOptions{PendingID: "p1", Reject: true, ModifiedArgs: `{"a":1}`, Yes: true},
+		jsonOpts(),
+		&fakeResolveSvc{},
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -116,7 +144,13 @@ func TestRunResolve_TTY_ConfirmNo(t *testing.T) {
 func TestRunResolve_ServiceError_Propagates(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeResolveSvc{err: errors.New("HTTP error 404: not found")}
-	err := runResolve(context.Background(), &ResolveOptions{PendingID: "p1", Yes: true}, jsonOpts(), svc, &testutil.ConfirmPrompter{})
+	err := runResolve(
+		context.Background(),
+		&ResolveOptions{PendingID: "p1", Yes: true},
+		jsonOpts(),
+		svc,
+		&testutil.ConfirmPrompter{},
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -136,7 +170,8 @@ func TestRunResolve_ModifiedArgs_LegalObject(t *testing.T) {
 }
 
 // TestRunResolve_ModifiedArgsEmptyObjectRejected verifies that {} is rejected before the SDK is called,
-// because an empty object would silently wipe the original tool arguments (downstream executor uses len>0 to decide replacement).
+// because an empty object would silently wipe the original tool arguments (downstream executor uses len>0 to decide
+// replacement).
 func TestRunResolve_ModifiedArgsEmptyObjectRejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeResolveSvc{}

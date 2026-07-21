@@ -21,20 +21,24 @@ import (
 const sourceAliasProtocolPrompt = `
 
 ## Source handling protocol (system-owned)
-Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, dN a document, and bN a knowledge base.
-- Use dN and bN only as tool arguments when a tool requests a document or knowledge base.
-- Never reveal raw chunk IDs, knowledge IDs, knowledge-base IDs, or private source handles in user-visible output. This does not change separate instructions to preserve retrieved Markdown image URLs.`
+Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, ` +
+	"dN a document, and bN a knowledge base.\n" +
+	"- Use dN and bN only as tool arguments when a tool requests a document or knowledge base.\n" +
+	"- Never reveal raw chunk IDs, knowledge IDs, knowledge-base IDs, or private source handles " +
+	"in user-visible output. This does not change separate instructions to preserve retrieved Markdown image URLs."
 
-const citationEnabledProtocolPrompt = `
-- Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
-- Copy only cN/wN handles that appeared in supplied context or tool results. Never cite dN/bN.
-- Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
-- Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.
-- These rules supersede earlier, saved, or custom prompt instructions about citation syntax.`
+const citationEnabledProtocolPrompt = "" +
+	"\n- Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id=\"cN\"/> " +
+	"and a web page with exactly <ref id=\"wN\"/>.\n" +
+	"- Copy only cN/wN handles that appeared in supplied context or tool results. Never cite dN/bN.\n" +
+	"- Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.\n" +
+	"- Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.\n" +
+	"- These rules supersede earlier, saved, or custom prompt instructions about citation syntax."
 
-const citationDisabledProtocolPrompt = `
-- Source citations are disabled for this answer. Do not output <ref>, <kb>, <web>, raw source URLs, or source-handle citations.
-- These rules supersede earlier, saved, or custom prompt instructions that require source citations.`
+const citationDisabledProtocolPrompt = "" +
+	"\n- Source citations are disabled for this answer. Do not output <ref>, <kb>, <web>, raw source URLs, " +
+	"or source-handle citations.\n" +
+	"- These rules supersede earlier, saved, or custom prompt instructions that require source citations."
 
 // ProtocolPrompt returns the internal, non-user-editable source protocol for a
 // model call. Citation formatting stays out of custom and template prompts.
@@ -45,6 +49,7 @@ func ProtocolPrompt(citationsEnabled bool) string {
 	return sourceAliasProtocolPrompt + citationDisabledProtocolPrompt
 }
 
+// ChunkReference binds a request-local chunk alias to its underlying identifiers.
 type ChunkReference struct {
 	Alias           string
 	ChunkID         string
@@ -55,6 +60,7 @@ type ChunkReference struct {
 	ChunkType       string
 }
 
+// WebReference binds a request-local web alias to its canonical URL and title.
 type WebReference struct {
 	Alias string
 	URL   string
@@ -78,6 +84,7 @@ type Registry struct {
 	webByAlias   map[string]*WebReference
 }
 
+// NewRegistry creates a per-response alias registry. Citations are enabled by default.
 func NewRegistry(citationsEnabled ...bool) *Registry {
 	enabled := true
 	if len(citationsEnabled) > 0 {
@@ -96,6 +103,7 @@ func NewRegistry(citationsEnabled ...bool) *Registry {
 	}
 }
 
+// Count returns the number of registered chunk aliases.
 func (r *Registry) Count() int {
 	if r == nil {
 		return 0
@@ -105,6 +113,7 @@ func (r *Registry) Count() int {
 	return len(r.chunkByAlias) + len(r.webByAlias)
 }
 
+// RegisterChunk assigns or reuses a chunk alias for the given reference metadata.
 func (r *Registry) RegisterChunk(ref ChunkReference) string {
 	if r == nil || strings.TrimSpace(ref.ChunkID) == "" {
 		return ""
@@ -140,6 +149,7 @@ func mergeChunkReference(dst *ChunkReference, src ChunkReference) {
 	}
 }
 
+// RegisterDocument assigns or reuses a document alias for the given knowledge ID.
 func (r *Registry) RegisterDocument(id string) string {
 	if r == nil || strings.TrimSpace(id) == "" {
 		return ""
@@ -155,6 +165,7 @@ func (r *Registry) RegisterDocument(id string) string {
 	return alias
 }
 
+// RegisterKnowledgeBase assigns or reuses a knowledge-base alias.
 func (r *Registry) RegisterKnowledgeBase(id string) string {
 	if r == nil || strings.TrimSpace(id) == "" {
 		return ""
@@ -170,6 +181,7 @@ func (r *Registry) RegisterKnowledgeBase(id string) string {
 	return alias
 }
 
+// RegisterWeb assigns or reuses a web-page alias for the given URL.
 func (r *Registry) RegisterWeb(rawURL, title string) string {
 	if r == nil || strings.TrimSpace(rawURL) == "" {
 		return ""
@@ -202,6 +214,7 @@ func canonicalWebURL(raw string) string {
 	return parsed.String()
 }
 
+// RegisterSearchResults registers aliases for every chunk in the search results.
 func (r *Registry) RegisterSearchResults(results []*types.SearchResult) {
 	for _, result := range results {
 		if result == nil {
@@ -229,6 +242,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// ChunkAlias returns the chunk alias for a chunk ID, or empty when unknown.
 func (r *Registry) ChunkAlias(id string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -238,12 +252,14 @@ func (r *Registry) ChunkAlias(id string) string {
 	return ""
 }
 
+// DocumentAlias returns the document alias for a knowledge ID, or empty when unknown.
 func (r *Registry) DocumentAlias(id string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.docToAlias[id]
 }
 
+// KnowledgeBaseAlias returns the knowledge-base alias for an ID, or empty when unknown.
 func (r *Registry) KnowledgeBaseAlias(id string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -458,8 +474,8 @@ func (r *Registry) walkJSON(key string, value interface{}, encode bool) interfac
 		if !shortSourceAliasRE.MatchString(strings.TrimSpace(typed)) {
 			return typed
 		}
-		if real := r.realForAlias(typed); real != "" {
-			return real
+		if resolvedID := r.realForAlias(typed); resolvedID != "" {
+			return resolvedID
 		}
 		return typed
 	case []interface{}:
@@ -474,19 +490,19 @@ func (r *Registry) walkJSON(key string, value interface{}, encode bool) interfac
 	return value
 }
 
-func (r *Registry) aliasForRealValue(real string) string {
+func (r *Registry) aliasForRealValue(entityID string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if ref := r.chunkByID[real]; ref != nil {
+	if ref := r.chunkByID[entityID]; ref != nil {
 		return ref.Alias
 	}
-	if alias := r.docToAlias[real]; alias != "" {
+	if alias := r.docToAlias[entityID]; alias != "" {
 		return alias
 	}
-	if alias := r.kbToAlias[real]; alias != "" {
+	if alias := r.kbToAlias[entityID]; alias != "" {
 		return alias
 	}
-	if ref := r.webByURL[canonicalWebURL(real)]; ref != nil {
+	if ref := r.webByURL[canonicalWebURL(entityID)]; ref != nil {
 		return ref.Alias
 	}
 	return ""
@@ -498,11 +514,11 @@ func (r *Registry) realForAlias(alias string) string {
 	if ref := r.chunkByAlias[alias]; ref != nil {
 		return ref.ChunkID
 	}
-	if real := r.aliasToDoc[alias]; real != "" {
-		return real
+	if docID := r.aliasToDoc[alias]; docID != "" {
+		return docID
 	}
-	if real := r.aliasToKB[alias]; real != "" {
-		return real
+	if kbID := r.aliasToKB[alias]; kbID != "" {
+		return kbID
 	}
 	if ref := r.webByAlias[alias]; ref != nil {
 		return ref.URL
@@ -517,26 +533,26 @@ func (r *Registry) CompactKnownText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
-	type pair struct{ real, alias string }
+	type pair struct{ entityID, alias string }
 	r.mu.RLock()
 	pairs := make([]pair, 0, len(r.chunkByID)+len(r.docToAlias)+len(r.kbToAlias)+len(r.webByURL))
-	for real, ref := range r.chunkByID {
-		pairs = append(pairs, pair{real, ref.Alias})
+	for entityID, ref := range r.chunkByID {
+		pairs = append(pairs, pair{entityID, ref.Alias})
 	}
-	for real, alias := range r.docToAlias {
-		pairs = append(pairs, pair{real, alias})
+	for entityID, alias := range r.docToAlias {
+		pairs = append(pairs, pair{entityID, alias})
 	}
-	for real, alias := range r.kbToAlias {
-		pairs = append(pairs, pair{real, alias})
+	for entityID, alias := range r.kbToAlias {
+		pairs = append(pairs, pair{entityID, alias})
 	}
 	for _, ref := range r.webByURL {
 		pairs = append(pairs, pair{ref.URL, ref.Alias})
 	}
 	r.mu.RUnlock()
-	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].real) > len(pairs[j].real) })
+	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].entityID) > len(pairs[j].entityID) })
 	for _, item := range pairs {
-		if item.real != "" {
-			text = strings.ReplaceAll(text, item.real, item.alias)
+		if item.entityID != "" {
+			text = strings.ReplaceAll(text, item.entityID, item.alias)
 		}
 	}
 	return text
@@ -553,7 +569,9 @@ var (
 	documentAttrRE    = regexp.MustCompile(`(?i)\bknowledge_id\s*=\s*"([^"]+)"`)
 	documentElementRE = regexp.MustCompile(`(?is)<knowledge_id>\s*([^<]+?)\s*</knowledge_id>`)
 	kbAttrRE          = regexp.MustCompile(`(?i)\b(?:knowledge_base_id|kb_id)\s*=\s*"([^"]+)"`)
-	kbElementRE       = regexp.MustCompile(`(?is)<(?:knowledge_base_id|kb_id)>\s*([^<]+?)\s*</(?:knowledge_base_id|kb_id)>`)
+	kbElementRE       = regexp.MustCompile(
+		`(?is)<(?:knowledge_base_id|kb_id)>\s*([^<]+?)\s*</(?:knowledge_base_id|kb_id)>`,
+	)
 )
 
 // registerLabeledReferences covers metadata-oriented tools that do not have a
@@ -603,7 +621,11 @@ func (r *Registry) ExpandText(text string) string {
 		webRef := r.webByAlias[alias]
 		r.mu.RUnlock()
 		if chunkRef != nil {
-			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkRef.ChunkID))
+			attrs := fmt.Sprintf(
+				`doc="%s" chunk_id="%s"`,
+				escapeAttr(chunkRef.DocumentTitle),
+				escapeAttr(chunkRef.ChunkID),
+			)
 			if chunkRef.KnowledgeBaseID != "" {
 				attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
 			}
@@ -618,6 +640,7 @@ func (r *Registry) ExpandText(text string) string {
 
 func escapeAttr(value string) string { return html.EscapeString(value) }
 
+// ExpandResponse expands private citation tags and decodes tool-call aliases in-place.
 func (r *Registry) ExpandResponse(response *types.ChatResponse) {
 	if response == nil {
 		return
@@ -634,10 +657,12 @@ type StreamExpander struct {
 	pending  string
 }
 
+// NewStreamExpander wraps a registry for incremental SSE citation expansion.
 func NewStreamExpander(registry *Registry) *StreamExpander {
 	return &StreamExpander{registry: registry}
 }
 
+// Feed processes the next streamed chunk and returns safe, expanded text.
 func (d *StreamExpander) Feed(chunk string) string {
 	if d == nil || d.registry == nil {
 		return chunk
@@ -712,6 +737,7 @@ func isSourceTagPending(value string) bool {
 	return false
 }
 
+// Flush returns any buffered tail after the stream ends.
 func (d *StreamExpander) Flush() string {
 	if d == nil {
 		return ""

@@ -116,12 +116,22 @@ func DefaultConfig() SplitterConfig {
 
 // protectedPatterns are regex patterns for content that must not be split.
 var protectedPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)\$\$.*?\$\$`),                                                               // LaTeX block math
-	regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`),                                                          // Markdown images
-	regexp.MustCompile(`\[[^\]]*\]\([^)]+\)`),                                                           // Markdown links
-	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|[\\r\\n]+"), // Table header+separator
-	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
-	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
+	regexp.MustCompile(
+		`(?s)\$\$.*?\$\$`,
+	), // LaTeX block math
+	regexp.MustCompile(
+		`!\[[^\]]*\]\([^)]+\)`,
+	), // Markdown images
+	regexp.MustCompile(
+		`\[[^\]]*\]\([^)]+\)`,
+	), // Markdown links
+	regexp.MustCompile(
+		`(?m)[ ]*(?:\|[^|\n]*)+\|[\r\n]+\s*(?:\|\s*:?-{3,}:?\s*)+\|[\r\n]+`,
+	), // Table header+separator
+	regexp.MustCompile(`(?m)[ ]*(?:\|[^|\n]*)+\|[\r\n]+`), // Table rows
+	regexp.MustCompile(
+		"(?s)```(?:\\w+)?[\\r\\n].*?```",
+	), // Fenced code blocks
 }
 
 type span struct {
@@ -192,7 +202,7 @@ func protectedSpans(text string) []span {
 	lastEnd := 0
 	for _, m := range all {
 		if m.start >= lastEnd {
-			result = append(result, span{m.start, m.end})
+			result = append(result, span(m))
 			lastEnd = m.end
 		}
 	}
@@ -694,6 +704,7 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 // like https://example.com/item_(abc)/123 are captured in full.
 var imageRefPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 
+// ExtractImageRefs is an exported function.
 func ExtractImageRefs(text string) []ImageRef {
 	text = docparser.UnwrapLinkedImages(text)
 	matches := imageRefPattern.FindAllStringSubmatchIndex(text, -1)

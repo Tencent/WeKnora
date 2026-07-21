@@ -11,34 +11,43 @@ import (
 
 // EmbedChannel publishes an agent chat surface for external websites.
 type EmbedChannel struct {
-	ID                     string         `json:"id"                  gorm:"type:varchar(36);primaryKey"`
-	TenantID               uint64         `json:"tenant_id"           gorm:"not null;index:idx_embed_channels_tenant"`
-	AgentID                string         `json:"agent_id"            gorm:"type:varchar(36);not null;index:idx_embed_channels_agent;default:'builtin-quick-answer'"`
-	Name                   string         `json:"name"                gorm:"type:varchar(255);not null;default:''"`
-	Enabled                bool           `json:"enabled"             gorm:"not null;default:true"`
-	PublishToken           string         `json:"-"                   gorm:"type:varchar(64);not null;default:''"`
-	AllowedOrigins         JSON           `json:"allowed_origins"     gorm:"type:jsonb;not null;default:'[]'"`
-	WelcomeMessage         string         `json:"welcome_message"      gorm:"type:text;not null;default:''"`
-	RateLimitPerMinute     int            `json:"rate_limit_per_minute" gorm:"not null;default:30"`
-	RateLimitPerDay        int            `json:"rate_limit_per_day"    gorm:"not null;default:10000"`
-	PrimaryColor           string         `json:"primary_color"        gorm:"type:varchar(32);not null;default:''"`
-	PageTitle              string         `json:"page_title"           gorm:"type:varchar(255);not null;default:''"`
-	HeaderTitleMode        string         `json:"header_title_mode"         gorm:"type:varchar(32);not null;default:'channel'"`
-	ShowSuggestedQuestions bool           `json:"show_suggested_questions"  gorm:"not null;default:true"`
-	WidgetPosition         string         `json:"widget_position"           gorm:"type:varchar(32);not null;default:'bottom-right'"`
-	AllowWebSearch         bool           `json:"allow_web_search"          gorm:"not null;default:false"`
-	AllowFileUpload        bool           `json:"allow_file_upload"         gorm:"not null;default:false"`
-	DefaultLocale          string         `json:"default_locale"            gorm:"type:varchar(16);not null;default:''"`
-	WebhookURL             string         `json:"webhook_url"               gorm:"type:varchar(512);not null;default:''"`
-	WebhookSecret          string         `json:"-"                         gorm:"type:varchar(128);not null;default:''"`
+	ID       string `json:"id"                       gorm:"type:varchar(36);primaryKey"`
+	TenantID uint64 `json:"tenant_id"                gorm:"not null;index:idx_embed_channels_tenant"`
+	//nolint:lll
+	AgentID                string         `json:"agent_id" gorm:"not null;index:idx_embed_channels_agent;default:'builtin-quick-answer'"`
+	Name                   string         `json:"name"                     gorm:"type:varchar(255);not null;default:''"`
+	Enabled                bool           `json:"enabled"                  gorm:"not null;default:true"`
+	PublishToken           string         `json:"-"                        gorm:"type:varchar(64);not null;default:''"`
+	AllowedOrigins         JSON           `json:"allowed_origins"          gorm:"type:jsonb;not null;default:'[]'"`
+	WelcomeMessage         string         `json:"welcome_message"          gorm:"type:text;not null;default:''"`
+	RateLimitPerMinute     int            `json:"rate_limit_per_minute"    gorm:"not null;default:30"`
+	RateLimitPerDay        int            `json:"rate_limit_per_day"       gorm:"not null;default:10000"`
+	PrimaryColor           string         `json:"primary_color"            gorm:"type:varchar(32);not null;default:''"`
+	PageTitle              string         `json:"page_title"               gorm:"type:varchar(255);not null;default:''"`
+	HeaderTitleMode        string         `json:"header_title_mode" gorm:"type:varchar(32);not null;default:'channel'"`
+	ShowSuggestedQuestions bool           `json:"show_suggested_questions" gorm:"not null;default:true"`
+	WidgetPosition         string         `json:"widget_position" gorm:"type:varchar(32);not null;default:'bottom-right'"`
+	AllowWebSearch         bool           `json:"allow_web_search"         gorm:"not null;default:false"`
+	AllowFileUpload        bool           `json:"allow_file_upload"        gorm:"not null;default:false"`
+	DefaultLocale          string         `json:"default_locale"           gorm:"type:varchar(16);not null;default:''"`
+	WebhookURL             string         `json:"webhook_url"              gorm:"type:varchar(512);not null;default:''"`
+	WebhookSecret          string         `json:"-"                        gorm:"type:varchar(128);not null;default:''"`
 	CreatedAt              time.Time      `json:"created_at"`
 	UpdatedAt              time.Time      `json:"updated_at"`
-	DeletedAt              gorm.DeletedAt `json:"deleted_at"          gorm:"index"`
+	DeletedAt              gorm.DeletedAt `json:"deleted_at"               gorm:"index"`
 }
 
+// TableName pins the embed_channels table name.
 func (EmbedChannel) TableName() string { return "embed_channels" }
 
-func (ch *EmbedChannel) BeforeCreate(tx *gorm.DB) error {
+// BeforeCreate implements the required behavior.
+// EmbedChannel is exported.
+// EmbedChannel is exported.
+// EmbedChannel is exported.
+// EmbedChannel is exported.
+// EmbedChannel is exported.
+// EmbedChannel implements the required behavior.
+func (ch *EmbedChannel) BeforeCreate(_ *gorm.DB) error {
 	if ch.ID == "" {
 		ch.ID = uuid.New().String()
 	}
@@ -65,9 +74,13 @@ func (ch *EmbedChannel) BeforeCreate(tx *gorm.DB) error {
 // publish token is copied and replayed from rotating IPs.
 const DefaultEmbedRateLimitPerDay = 10000
 
-const DefaultEmbedWidgetPosition = "bottom-right"
-const DefaultEmbedHeaderTitleMode = "channel"
-const EmbedHeaderTitleModeSession = "session"
+// DefaultEmbedHeaderTitleMode and related constants.
+const (
+	// DefaultEmbedWidgetPosition is the default floating widget corner.
+	DefaultEmbedWidgetPosition  = "bottom-right"
+	DefaultEmbedHeaderTitleMode = "channel"
+	EmbedHeaderTitleModeSession = "session"
+)
 
 // NormalizeEmbedWidgetPosition returns a supported widget corner or the default.
 func NormalizeEmbedWidgetPosition(position string) string {

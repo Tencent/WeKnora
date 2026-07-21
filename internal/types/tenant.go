@@ -85,25 +85,25 @@ func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 // Tenant represents the tenant
 type Tenant struct {
 	// ID
-	ID uint64 `yaml:"id"                  json:"id"                  gorm:"primaryKey"`
+	ID uint64 `yaml:"id"                         json:"id"                                   gorm:"primaryKey"`
 	// Name
-	Name string `yaml:"name"                json:"name"`
+	Name string `yaml:"name"                       json:"name"`
 	// Description
-	Description string `yaml:"description"         json:"description"`
+	Description string `yaml:"description"                json:"description"`
 	// Status
-	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
+	Status string `yaml:"status"                     json:"status"                               gorm:"default:'active'"`
 	// Retriever engines
-	RetrieverEngines RetrieverEngines `yaml:"retriever_engines"   json:"retriever_engines"   gorm:"type:json"`
+	RetrieverEngines RetrieverEngines `yaml:"retriever_engines" json:"retriever_engines" gorm:"type:json"`
 	// Business
-	Business string `yaml:"business"            json:"business"`
+	Business string `yaml:"business"                   json:"business"`
 	// Storage quota (Bytes), default is 10GB, including vector, original file, text, index, etc.
-	StorageQuota int64 `yaml:"storage_quota"       json:"storage_quota"       gorm:"default:10737418240"`
+	StorageQuota int64 `yaml:"storage_quota" json:"storage_quota" gorm:"default:10737418240"`
 	// Storage used (Bytes)
-	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
+	StorageUsed int64 `yaml:"storage_used"               json:"storage_used"                         gorm:"default:0"`
 	// Global Context configuration for this workspace (default for all sessions)
-	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
+	ContextConfig *ContextConfig `yaml:"context_config" json:"context_config" gorm:"type:jsonb"`
 	// Global WebSearch configuration for this workspace
-	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
+	WebSearchConfig *WebSearchConfig `yaml:"web_search_config" json:"web_search_config" gorm:"type:jsonb"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
 	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
@@ -111,7 +111,7 @@ type Tenant struct {
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
 	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:jsonb"`
 	// DefaultStorageBackendID is the workspace default concrete storage instance.
-	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"`
+	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"` //nolint:lll // long struct tag or string
 	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
@@ -119,11 +119,11 @@ type Tenant struct {
 	// API principal config: controls how X-API-Key requests map to terminal principals.
 	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
 	// Creation time
-	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
+	CreatedAt time.Time `yaml:"created_at"                 json:"created_at"`
 	// Last updated time
-	UpdatedAt time.Time `yaml:"updated_at"          json:"updated_at"`
+	UpdatedAt time.Time `yaml:"updated_at"                 json:"updated_at"`
 	// Deletion time
-	DeletedAt gorm.DeletedAt `yaml:"deleted_at"          json:"deleted_at"          gorm:"index"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at"                 json:"deleted_at"                           gorm:"index"`
 }
 
 // RetrieverEngines represents the retriever engines for a tenant
@@ -140,7 +140,7 @@ func (t *Tenant) GetEffectiveEngines() []RetrieverEngineParams {
 }
 
 // BeforeCreate is a hook function that is called before creating a tenant
-func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
+func (t *Tenant) BeforeCreate(_ *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
@@ -192,8 +192,10 @@ type WeKnoraCloudCredentials struct {
 	AppSecret string `json:"app_secret"`
 }
 
+// APIPrincipalMode is an exported type.
 type APIPrincipalMode string
 
+// APIPrincipalModeTenant and related constants.
 const (
 	APIPrincipalModeTenant      APIPrincipalMode = "tenant"
 	APIPrincipalModeDirect      APIPrincipalMode = "direct_header"
@@ -214,6 +216,7 @@ type APIPrincipalConfig struct {
 	HMACSecret          string `json:"hmac_secret,omitempty"`
 }
 
+// Value implements the required interface method.
 func (c *APIPrincipalConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
@@ -229,6 +232,7 @@ func (c *APIPrincipalConfig) Value() (driver.Value, error) {
 	return json.Marshal(&cp)
 }
 
+// Scan implements the required interface method.
 func (c *APIPrincipalConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -243,7 +247,7 @@ func (c *APIPrincipalConfig) Scan(value interface{}) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(c.HMACSecret); ok {
 		c.HMACSecret = plain
 	} else {
-		log.Printf("[crypto] tenant api_principal_config.hmac_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf("[crypto] tenant api_principal_config.hmac_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured") //nolint:lll // long struct tag or string
 		c.HMACSecret = ""
 	}
 	return nil
@@ -292,7 +296,7 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 		if plain, ok := utils.DecryptStoredSecretLenient(c.WeKnoraCloud.AppSecret); ok {
 			c.WeKnoraCloud.AppSecret = plain
 		} else {
-			log.Printf("[crypto] tenant credentials we_knora_cloud.app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+			log.Printf("[crypto] tenant credentials we_knora_cloud.app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured") //nolint:lll // long struct tag or string
 			c.WeKnoraCloud.AppSecret = ""
 		}
 	}
@@ -309,8 +313,9 @@ type ParserEngineConfig struct {
 	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
-	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
-	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
+	MinerUModel string `json:"mineru_model,omitempty"` // backend: pipeline, vlm-*, hybrid-*
+	// vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
+	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"`
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
 	MinerUEnableTable   *bool  `json:"mineru_enable_table,omitempty"`
 	MinerUEnableOCR     *bool  `json:"mineru_enable_ocr,omitempty"`
@@ -342,6 +347,7 @@ type ParserEngineConfig struct {
 	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
 }
 
+// ResolveChatParserEngine implements the required interface method.
 func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
 	if c == nil {
 		return ""
@@ -468,7 +474,8 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 // StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, KS3, and OBS.
 // Knowledge bases select which provider to use; parameters are read from here.
 type StorageEngineConfig struct {
-	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
+	// "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
+	DefaultProvider string             `json:"default_provider"`
 	Local           *LocalEngineConfig `json:"local,omitempty"`
 	MinIO           *MinIOEngineConfig `json:"minio,omitempty"`
 	COS             *COSEngineConfig   `json:"cos,omitempty"`

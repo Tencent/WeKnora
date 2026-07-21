@@ -212,7 +212,8 @@ func resolveKB(cmd *cobra.Command, f *cmdutil.Factory) (id, source string) {
 func resolveLogLevel(cmd *cobra.Command) (level, source string) {
 	level, _ = cmdutil.ResolveLogLevel(cmd, iostreams.IO.Err)
 	if cmd != nil {
-		if fl := cmd.Flags().Lookup("log-level"); fl != nil && fl.Changed && cmdutil.IsValidLogLevel(fl.Value.String()) {
+		if fl := cmd.Flags().Lookup("log-level"); fl != nil && fl.Changed &&
+			cmdutil.IsValidLogLevel(fl.Value.String()) {
 			return level, "--log-level flag"
 		}
 	}

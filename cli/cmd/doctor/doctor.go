@@ -124,8 +124,10 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
-	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
+	cmd.Flags().
+		BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
+	cmd.Flags().
+		BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
 	cmdutil.AddFormatFlag(cmd, doctorFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "run self-checks: base-url reachability, auth credential, server version, credential storage",
@@ -308,7 +310,11 @@ func fillCredentialStorageCheck(c *Check) {
 // else call compat.Probe (which wraps svc.GetSystemInfo) and persist. Cache
 // write is best-effort. Returns fromCache so the caller can render the
 // "cached" presentation hint without a brittle ProbedAt heuristic.
-func loadOrProbeServerInfo(ctx context.Context, opts *Options, svc Services) (info *compat.Info, fromCache bool, err error) {
+func loadOrProbeServerInfo(
+	ctx context.Context,
+	opts *Options,
+	svc Services,
+) (info *compat.Info, fromCache bool, err error) {
 	if !opts.NoCache {
 		if cached, fresh, _ := compat.LoadCache(); fresh && cached != nil {
 			return cached, true, nil
@@ -456,7 +462,7 @@ func (s *realServices) PingBaseURL(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("server returned %d", resp.StatusCode)
 	}

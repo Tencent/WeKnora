@@ -82,7 +82,14 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 	return cmd
 }
 
-func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions, svc PinService, id string, want bool) error {
+func runPin(
+	ctx context.Context,
+	opts *PinOptions,
+	fopts *cmdutil.FormatOptions,
+	svc PinService,
+	id string,
+	want bool,
+) error {
 	verb := "pin"
 	if !want {
 		verb = "unpin"

@@ -63,18 +63,18 @@ func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	if h.invitationSvc == nil {
-		c.Error(apperrors.NewInternalServerError("invitation service unavailable"))
+		_ = c.Error(apperrors.NewInternalServerError("invitation service unavailable"))
 		return
 	}
 
 	var req invitationLookupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
 		return
 	}
 	token := strings.TrimSpace(req.Token)
 	if token == "" {
-		c.Error(apperrors.NewValidationError("token is required"))
+		_ = c.Error(apperrors.NewValidationError("token is required"))
 		return
 	}
 
@@ -82,7 +82,7 @@ func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 	if err != nil {
 		// Collapse "unknown / expired / revoked" into 410 to avoid
 		// leaking which slot a stolen token used to occupy.
-		c.Error(&apperrors.AppError{
+		_ = c.Error(&apperrors.AppError{
 			Code:     apperrors.ErrNotFound,
 			Message:  "invitation link is invalid or has been revoked",
 			HTTPCode: http.StatusGone,
@@ -125,13 +125,13 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	if h.invitationSvc == nil {
-		c.Error(apperrors.NewInternalServerError("invitation service unavailable"))
+		_ = c.Error(apperrors.NewInternalServerError("invitation service unavailable"))
 		return
 	}
 
 	var req registerByInviteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid registration parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid registration parameters").WithDetails(err.Error()))
 		return
 	}
 	req.Token = strings.TrimSpace(req.Token)
@@ -143,13 +143,13 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	// rewrite the stored credential and lock the user out. Passwords
 	// must never be logged, so they don't need that defence here.
 	if req.Token == "" || req.Email == "" || req.Username == "" || req.Password == "" {
-		c.Error(apperrors.NewValidationError("token, email, username and password are required"))
+		_ = c.Error(apperrors.NewValidationError("token, email, username and password are required"))
 		return
 	}
 
 	inv, err := h.invitationSvc.LookupByToken(ctx, req.Token)
 	if err != nil {
-		c.Error(&apperrors.AppError{
+		_ = c.Error(&apperrors.AppError{
 			Code:     apperrors.ErrNotFound,
 			Message:  "invitation link is invalid or has been revoked",
 			HTTPCode: http.StatusGone,
@@ -164,7 +164,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	// log in instead, and the invitation can be applied to their
 	// existing account via /me/invitations once we wire that path.
 	if existing, _ := h.userService.GetUserByEmail(ctx, req.Email); existing != nil {
-		c.Error(apperrors.NewConflictError(
+		_ = c.Error(apperrors.NewConflictError(
 			"this email already has an account; please log in to join the workspace"))
 		return
 	}
@@ -178,7 +178,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "register-by-invite: user create failed for %s: %v",
 			secutils.SanitizeForLog(req.Email), err)
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -187,7 +187,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	if err := h.userService.UpdateUser(ctx, user); err != nil {
 		logger.Errorf(ctx, "register-by-invite: failed to set home tenant for user %s: %v", user.ID, err)
 		_ = h.userService.DeleteUser(ctx, user.ID)
-		c.Error(apperrors.NewInternalServerError("failed to finalise invited account").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("failed to finalise invited account").WithDetails(err.Error()))
 		return
 	}
 
@@ -202,7 +202,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 			logger.Errorf(ctx, "register-by-invite: failed to restore tenantless user %s: %v", user.ID, rollbackErr)
 			_ = h.userService.DeleteUser(ctx, user.ID)
 		}
-		c.Error(&apperrors.AppError{
+		_ = c.Error(&apperrors.AppError{
 			Code:     apperrors.ErrNotFound,
 			Message:  "invitation link is no longer valid; please log in to your new account",
 			HTTPCode: http.StatusGone,
@@ -213,7 +213,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	accessToken, refreshToken, err := h.userService.GenerateTokens(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "register-by-invite: token generation failed for user %s: %v", user.ID, err)
-		c.Error(apperrors.NewInternalServerError("token generation failed").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("token generation failed").WithDetails(err.Error()))
 		return
 	}
 

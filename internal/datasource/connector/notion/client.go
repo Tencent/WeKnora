@@ -101,7 +101,7 @@ func (c *notionClient) doRequest(ctx context.Context, method, path string, body 
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read response: %w", err)
 		}
@@ -270,8 +270,10 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 	return allBlocks, nil
 }
 
-const maxBlockDepth = 5    // Limit recursion depth — deeper content has diminishing value for knowledge bases
-const maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
+const (
+	maxBlockDepth    = 5    // Limit recursion depth — deeper content has diminishing value for knowledge bases
+	maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
+)
 
 // GetBlockChildrenAll recursively fetches all blocks under a given block ID,
 // building a tree structure with Children populated for blocks with has_children=true.
@@ -281,7 +283,11 @@ func (c *notionClient) GetBlockChildrenAll(ctx context.Context, blockID string) 
 	return c.getBlockChildrenRecursive(ctx, blockID, 0)
 }
 
-func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID string, depth int) ([]notionBlock, error) {
+func (c *notionClient) getBlockChildrenRecursive(
+	ctx context.Context,
+	blockID string,
+	depth int,
+) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
 
@@ -329,7 +335,13 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 		children, err := c.getBlockChildrenRecursive(ctx, allBlocks[i].ID, depth+1)
 		if err != nil {
-			logger.Warnf(ctx, "[Notion] failed to get children for block %s (depth %d): %v", allBlocks[i].ID, depth, err)
+			logger.Warnf(
+				ctx,
+				"[Notion] failed to get children for block %s (depth %d): %v",
+				allBlocks[i].ID,
+				depth,
+				err,
+			)
 			continue
 		}
 		allBlocks[i].Children = children
@@ -402,7 +414,7 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("download failed with status %d", resp.StatusCode)
 			if resp.StatusCode >= 500 && attempt < maxRetries {
 				if sErr := sleepWithContext(ctx, time.Duration(1<<attempt)*time.Second); sErr != nil {
@@ -414,7 +426,7 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 		}
 
 		data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize+1))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -521,7 +533,8 @@ func extractTitle(page *notionPage) string {
 
 func joinPlainText(segments []struct {
 	PlainText string `json:"plain_text"`
-}) string {
+},
+) string {
 	var sb strings.Builder
 	for _, s := range segments {
 		sb.WriteString(s.PlainText)

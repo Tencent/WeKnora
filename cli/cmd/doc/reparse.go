@@ -72,7 +72,13 @@ keeps its id; parsing restarts asynchronously, so follow with
 	return cmd
 }
 
-func runReparse(ctx context.Context, opts *ReparseOptions, fopts *cmdutil.FormatOptions, svc ReparseService, id string) error {
+func runReparse(
+	ctx context.Context,
+	opts *ReparseOptions,
+	fopts *cmdutil.FormatOptions,
+	svc ReparseService,
+	id string,
+) error {
 	k, err := svc.ReparseKnowledge(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "reparse document %s", id)

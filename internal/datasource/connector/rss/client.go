@@ -70,15 +70,17 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 		req.Header.Set("User-Agent", defaultUserAgent)
 	}
 	if req.Header.Get("Accept") == "" {
-		req.Header.Set("Accept",
-			"application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, text/html;q=0.9, */*;q=0.8")
+		req.Header.Set(
+			"Accept",
+			"application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, text/html;q=0.9, */*;q=0.8",
+		)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)

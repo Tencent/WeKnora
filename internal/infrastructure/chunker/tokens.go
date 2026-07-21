@@ -68,6 +68,7 @@ func DetectLanguage(s string) string {
 	var cjk, latin, umlaut int
 	for _, r := range s {
 		switch {
+		//nolint:lll
 		case unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r):
 			cjk++
 		case isGermanUmlaut(r):

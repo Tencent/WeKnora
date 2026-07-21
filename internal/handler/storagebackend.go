@@ -23,18 +23,23 @@ func storageTestErrorMessage(err error) string {
 	return sanitizeStorageCheckError(err)
 }
 
+// StorageBackendHandler is an exported type.
 type StorageBackendHandler struct {
 	repo    interfaces.StorageBackendRepository
 	service interfaces.StorageBackendService
 }
 
-func NewStorageBackendHandler(repo interfaces.StorageBackendRepository, service interfaces.StorageBackendService) *StorageBackendHandler {
+// NewStorageBackendHandler is an exported function.
+func NewStorageBackendHandler(
+	repo interfaces.StorageBackendRepository,
+	service interfaces.StorageBackendService,
+) *StorageBackendHandler {
 	return &StorageBackendHandler{repo: repo, service: service}
 }
 
 type storageBackendRequest struct {
-	Name     string                     `json:"name" binding:"required"`
-	Provider string                     `json:"provider" binding:"required"`
+	Name     string                     `json:"name"             binding:"required"`
+	Provider string                     `json:"provider"         binding:"required"`
 	Config   types.StorageBackendConfig `json:"config"`
 	Status   string                     `json:"status,omitempty"`
 }
@@ -43,7 +48,8 @@ func storageTenantID(c *gin.Context) uint64 { return c.GetUint64(types.TenantIDC
 
 // List godoc
 // @Summary      List storage backends
-// @Description  List all storage backend instances for the current workspace, with credentials masked. The workspace default backend id is returned alongside the list.
+// @Description  List all storage backend instances for the current workspace, with credentials masked. The workspace
+// default backend id is returned alongside the list.
 // @Tags         StorageBackend
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "List of storage backends and default_storage_backend_id"
@@ -55,7 +61,7 @@ func (h *StorageBackendHandler) List(c *gin.Context) {
 	tenantID := storageTenantID(c)
 	backends, err := h.repo.List(c.Request.Context(), tenantID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	result := make([]types.StorageBackend, 0, len(backends))
@@ -85,11 +91,11 @@ func (h *StorageBackendHandler) List(c *gin.Context) {
 func (h *StorageBackendHandler) Get(c *gin.Context) {
 	backend, err := h.repo.GetByID(c.Request.Context(), storageTenantID(c), c.Param("id"))
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if backend == nil {
-		c.Error(apperrors.NewNotFoundError("storage backend not found"))
+		_ = c.Error(apperrors.NewNotFoundError("storage backend not found"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": types.NewStorageBackendResponse(backend)})
@@ -97,13 +103,15 @@ func (h *StorageBackendHandler) Get(c *gin.Context) {
 
 // Create godoc
 // @Summary      Create storage backend
-// @Description  Register a new object/file storage instance for the current workspace. The configuration is validated and a connectivity test is run before the backend is persisted.
+// @Description  Register a new object/file storage instance for the current workspace. The configuration is validated
+// and a connectivity test is run before the backend is persisted.
 // @Tags         StorageBackend
 // @Accept       json
 // @Produce      json
 // @Param        request  body      storageBackendRequest    true  "Storage backend configuration"
 // @Success      201      {object}  map[string]interface{}   "Created storage backend"
-// @Failure      400      {object}  apperrors.AppError          "Invalid request, validation, or connectivity test failure"
+// @Failure      400      {object}  apperrors.AppError          "Invalid request, validation, or connectivity test
+// failure"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Failure      409      {object}  apperrors.AppError          "A storage backend with this name already exists"
 // @Security     Bearer
@@ -112,12 +120,18 @@ func (h *StorageBackendHandler) Get(c *gin.Context) {
 func (h *StorageBackendHandler) Create(c *gin.Context) {
 	var req storageBackendRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	backend := &types.StorageBackend{TenantID: storageTenantID(c), Name: req.Name, Provider: req.Provider, Config: req.Config, Status: req.Status}
+	backend := &types.StorageBackend{
+		TenantID: storageTenantID(c),
+		Name:     req.Name,
+		Provider: req.Provider,
+		Config:   req.Config,
+		Status:   req.Status,
+	}
 	if err := h.service.Create(c.Request.Context(), backend); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": types.NewStorageBackendResponse(backend)})
@@ -125,14 +139,17 @@ func (h *StorageBackendHandler) Create(c *gin.Context) {
 
 // Update godoc
 // @Summary      Update storage backend
-// @Description  Update a storage backend's mutable fields (name, credentials, status). Provider and physical location (endpoint, region, bucket, path prefix) are immutable; use storage migration to move data. Environment-sourced backends are read-only. Redacted secret placeholders preserve the stored credentials.
+// @Description  Update a storage backend's mutable fields (name, credentials, status). Provider and physical location
+// (endpoint, region, bucket, path prefix) are immutable; use storage migration to move data. Environment-sourced
+// backends are read-only. Redacted secret placeholders preserve the stored credentials.
 // @Tags         StorageBackend
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                   true  "Storage backend ID"
 // @Param        request  body      storageBackendRequest    true  "Updated storage backend fields"
 // @Success      200      {object}  map[string]interface{}   "Updated storage backend"
-// @Failure      400      {object}  apperrors.AppError          "Immutable field change, read-only backend, validation, or connectivity failure"
+// @Failure      400      {object}  apperrors.AppError          "Immutable field change, read-only backend, validation,
+// or connectivity failure"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError          "Storage backend not found"
 // @Security     Bearer
@@ -141,17 +158,24 @@ func (h *StorageBackendHandler) Create(c *gin.Context) {
 func (h *StorageBackendHandler) Update(c *gin.Context) {
 	var req storageBackendRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	backend := &types.StorageBackend{ID: c.Param("id"), TenantID: storageTenantID(c), Name: req.Name, Provider: req.Provider, Config: req.Config, Status: req.Status}
+	backend := &types.StorageBackend{
+		ID:       c.Param("id"),
+		TenantID: storageTenantID(c),
+		Name:     req.Name,
+		Provider: req.Provider,
+		Config:   req.Config,
+		Status:   req.Status,
+	}
 	if err := h.service.Update(c.Request.Context(), backend); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	updated, err := h.repo.GetByID(c.Request.Context(), backend.TenantID, backend.ID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": types.NewStorageBackendResponse(updated)})
@@ -159,7 +183,8 @@ func (h *StorageBackendHandler) Update(c *gin.Context) {
 
 // Delete godoc
 // @Summary      Delete storage backend
-// @Description  Soft-delete a storage backend. A backend that is the workspace default, still bound to knowledge bases, environment-sourced, or a legacy alias cannot be deleted.
+// @Description  Soft-delete a storage backend. A backend that is the workspace default, still bound to knowledge bases,
+// environment-sourced, or a legacy alias cannot be deleted.
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
@@ -172,7 +197,7 @@ func (h *StorageBackendHandler) Update(c *gin.Context) {
 // @Router       /storage-backends/{id} [delete]
 func (h *StorageBackendHandler) Delete(c *gin.Context) {
 	if err := h.service.Delete(c.Request.Context(), storageTenantID(c), c.Param("id")); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -180,7 +205,8 @@ func (h *StorageBackendHandler) Delete(c *gin.Context) {
 
 // SetDefault godoc
 // @Summary      Set default storage backend
-// @Description  Mark a storage backend as the workspace default. Only an active backend can become the default. New knowledge bases without an explicit binding use the default.
+// @Description  Mark a storage backend as the workspace default. Only an active backend can become the default. New
+// knowledge bases without an explicit binding use the default.
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
@@ -193,7 +219,7 @@ func (h *StorageBackendHandler) Delete(c *gin.Context) {
 // @Router       /storage-backends/{id}/default [put]
 func (h *StorageBackendHandler) SetDefault(c *gin.Context) {
 	if err := h.service.SetDefault(c.Request.Context(), storageTenantID(c), c.Param("id")); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -201,7 +227,8 @@ func (h *StorageBackendHandler) SetDefault(c *gin.Context) {
 
 // TestRaw godoc
 // @Summary      Test storage backend with raw config
-// @Description  Test connectivity for the provided storage configuration without persisting it. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).
+// @Description  Test connectivity for the provided storage configuration without persisting it. Returns success=false
+// with a sanitized error message on failure (the HTTP status stays 200).
 // @Tags         StorageBackend
 // @Accept       json
 // @Produce      json
@@ -215,12 +242,17 @@ func (h *StorageBackendHandler) SetDefault(c *gin.Context) {
 func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 	var req storageBackendRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	backend := &types.StorageBackend{TenantID: storageTenantID(c), Name: req.Name, Provider: req.Provider, Config: req.Config}
+	backend := &types.StorageBackend{
+		TenantID: storageTenantID(c),
+		Name:     req.Name,
+		Provider: req.Provider,
+		Config:   req.Config,
+	}
 	if err := backend.Validate(); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if err := h.service.Test(c.Request.Context(), backend); err != nil {
@@ -232,7 +264,8 @@ func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 
 // TestByID godoc
 // @Summary      Test storage backend by ID
-// @Description  Test connectivity of an existing saved storage backend using its stored credentials. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).
+// @Description  Test connectivity of an existing saved storage backend using its stored credentials. Returns
+// success=false with a sanitized error message on failure (the HTTP status stays 200).
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
@@ -245,11 +278,11 @@ func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 func (h *StorageBackendHandler) TestByID(c *gin.Context) {
 	backend, err := h.repo.GetByID(c.Request.Context(), storageTenantID(c), c.Param("id"))
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if backend == nil {
-		c.Error(apperrors.NewNotFoundError("storage backend not found"))
+		_ = c.Error(apperrors.NewNotFoundError("storage backend not found"))
 		return
 	}
 	if err := h.service.Test(c.Request.Context(), backend); err != nil {
@@ -261,7 +294,8 @@ func (h *StorageBackendHandler) TestByID(c *gin.Context) {
 
 // Types godoc
 // @Summary      List allowed storage provider types
-// @Description  Return the storage provider types allowed by STORAGE_ALLOW_LIST for UI form generation (e.g. local, minio, cos, tos, s3, oss, ks3, obs).
+// @Description  Return the storage provider types allowed by STORAGE_ALLOW_LIST for UI form generation (e.g. local,
+// minio, cos, tos, s3, oss, ks3, obs).
 // @Tags         StorageBackend
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "List of allowed storage provider types"

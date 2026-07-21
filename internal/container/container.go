@@ -17,7 +17,8 @@ import (
 	"strings"
 	"time"
 
-	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo" // sqlite-vec CGO bindings
+	// register side effects
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
@@ -128,7 +129,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
 	must(container.Provide(docparser.NewImageResolver))
-	must(container.Provide(initOllamaService))
+	must(container.Provide(initService))
 	must(container.Provide(initNeo4jClient))
 	must(container.Provide(stream.NewStreamManager))
 	logger.Debugf(ctx, "[Container] Initializing DuckDB...")
@@ -154,7 +155,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
-	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(neo4jRepo.NewRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -188,7 +189,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
-	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
+	must(
+		container.Provide(service.NewKBShareService),
+	) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
@@ -251,18 +254,22 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendResolver { return s }))
 
 	// Agent service layer (requires event bus, web search service)
-	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
+	// SessionService is passed as parameter to CreateEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
-	must(container.Provide(event.NewEventBus))
-	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
-	}))
+	must(container.Provide(event.NewBus))
+	must(
+		container.Provide(
+			func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
+				return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
+			},
+		),
+	)
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
-	// SessionService is created after AgentService and passes itself to AgentService.CreateAgentEngine when needed
+	// SessionService is created after AgentService and passes itself to AgentService.CreateEngine when needed
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
 
@@ -455,7 +462,7 @@ func registerChatLocalImageResolver(
 		if err != nil {
 			return nil, false
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		data, err := io.ReadAll(rc)
 		if err != nil {
 			return nil, false
@@ -569,7 +576,7 @@ func initRedisClient() (*redis.Client, error) {
 // Returns:
 //   - Configured database connection
 //   - Error if connection fails
-func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+func initDatabase(_ *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
 	var sqliteDBPath string
@@ -651,7 +658,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Name(); name != "postgres" && name != "sqlite" {
 		return nil, fmt.Errorf(
 			"unsupported gorm dialector %q; expected postgres or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
@@ -697,7 +704,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrateLegacyStorageBackends(db)
 
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
-		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
+		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.Dir()); err != nil {
 			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
 		}
 	} else {
@@ -735,13 +742,15 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	storageType = strings.ToLower(storageType)
 
 	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		`UPDATE knowledge_bases SET storage_provider_config = ? `+
+			`WHERE storage_provider_config IS NOT NULL `+
+			`AND storage_provider_config->>'provider' = '__pending_env__'`,
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
 	} else if result.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType) //nolint:lll
 	}
 
 	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
@@ -785,7 +794,9 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 		backendIDs := make(map[string]string)
 		for _, provider := range storageallowlist.Supported() {
 			var existing types.StorageBackend
-			err := db.Where("tenant_id = ? AND provider = ? AND legacy_alias = ?", tenant.ID, provider, true).First(&existing).Error
+			err := db.Where("tenant_id = ? AND provider = ? AND legacy_alias = ?", tenant.ID, provider, true).
+				First(&existing).
+				Error
 			if err == nil {
 				// Environment-backed aliases are snapshots, not user-owned config.
 				// Refresh them at every startup so credential rotation does not
@@ -798,9 +809,13 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 						desired = types.StorageBackendFromEnvironment(tenant.ID)
 					}
 					if desired != nil && desired.Provider == provider {
-						_ = db.Model(&types.StorageBackend{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
-							"name": desired.Name, "config": desired.Config, "source": desired.Source, "status": desired.Status, "updated_at": time.Now(),
-						}).Error
+						_ = db.Model(&types.StorageBackend{}).
+							Where("id = ?", existing.ID).
+							Updates(map[string]interface{}{
+								//nolint:lll
+								"name": desired.Name, "config": desired.Config, "source": desired.Source, "status": desired.Status, "updated_at": time.Now(),
+							}).
+							Error
 					}
 				}
 				backendIDs[provider] = existing.ID
@@ -814,15 +829,27 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 				continue
 			}
 			if err := db.Create(backend).Error; err != nil {
-				logger.Warnf(context.Background(), "Failed to migrate %s storage for workspace %d: %v", provider, tenant.ID, err)
+				logger.Warnf(
+					context.Background(),
+					"Failed to migrate %s storage for workspace %d: %v",
+					provider,
+					tenant.ID,
+					err,
+				)
 				continue
 			}
 			backendIDs[provider] = backend.ID
 		}
 		if tenant.DefaultStorageBackendID == nil {
 			if id := backendIDs[defaultProvider]; id != "" {
+				//nolint:lll
 				if err := db.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Update("default_storage_backend_id", id).Error; err != nil {
-					logger.Warnf(context.Background(), "Failed to set default storage backend for workspace %d: %v", tenant.ID, err)
+					logger.Warnf(
+						context.Background(),
+						"Failed to set default storage backend for workspace %d: %v",
+						tenant.ID,
+						err,
+					)
 				}
 			}
 		}
@@ -837,7 +864,10 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 				provider = defaultProvider
 			}
 			if id := backendIDs[provider]; id != "" {
-				_ = db.Model(&types.KnowledgeBase{}).Where("id = ? AND storage_backend_id IS NULL", kb.ID).Update("storage_backend_id", id).Error
+				_ = db.Model(&types.KnowledgeBase{}).
+					Where("id = ? AND storage_backend_id IS NULL", kb.ID).
+					Update("storage_backend_id", id).
+					Error
 			}
 		}
 	}
@@ -848,7 +878,7 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 // because older code assigned seq_id via application-level MAX()+1, which could
 // advance values past the DB sequence counter and cause duplicate key errors.
 func syncSequences(db *gorm.DB) {
-	if db.Dialector.Name() != "postgres" {
+	if db.Name() != "postgres" {
 		return
 	}
 	pairs := [][2]string{
@@ -1217,7 +1247,9 @@ func initRetrieveEngineRegistry(
 	}
 	if slices.Contains(retrieveDriver, "milvus") {
 		milvusCfg := milvusclient.ClientConfig{
-			DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
+			DialOptions: []grpc.DialOption{
+				grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 5 * time.Second}),
+			},
 		}
 		milvusAddress := os.Getenv("MILVUS_ADDRESS")
 		if milvusAddress == "" {
@@ -1377,7 +1409,7 @@ func loadDBStoresIntoRegistry(
 // Returns:
 //   - Configured goroutine pool
 //   - Error if initialization fails
-func initAntsPool(cfg *config.Config) (*ants.Pool, error) {
+func initAntsPool(_ *config.Config) (*ants.Pool, error) {
 	// Default to 5 if not specified in config
 	poolSize := os.Getenv("CONCURRENCY_POOL_SIZE")
 	if poolSize == "" {
@@ -1418,7 +1450,7 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 }
 
 // initDocReaderClient initializes the DocumentReader client (lightweight API).
-func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) {
+func initDocReaderClient(_ *config.Config) (interfaces.DocumentReader, error) {
 	addr := strings.TrimSpace(os.Getenv("DOCREADER_ADDR"))
 	transport := strings.TrimSpace(os.Getenv("DOCREADER_TRANSPORT"))
 	if transport == "" {
@@ -1439,7 +1471,7 @@ func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) 
 	}
 }
 
-// initOllamaService initializes the Ollama service client
+// initService initializes the Ollama service client
 // Creates a client for interacting with Ollama API for model inference
 // Parameters:
 //   - None
@@ -1447,9 +1479,9 @@ func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) 
 // Returns:
 //   - Configured Ollama service client
 //   - Error if initialization fails
-func initOllamaService() (*ollama.OllamaService, error) {
+func initService() (*ollama.Service, error) {
 	// Get Ollama service from existing factory function
-	return ollama.GetOllamaService()
+	return ollama.GetService()
 }
 
 func initNeo4jClient() (neo4j.Driver, error) {
@@ -1486,13 +1518,16 @@ func initNeo4jClient() (neo4j.Driver, error) {
 		}
 
 		logger.Warnf(ctx, "Failed to verify Neo4j authentication (attempt %d/%d): %v", attempt, maxRetries, err)
-		driver.Close(ctx)
+		_ = driver.Close(ctx)
 		time.Sleep(retryInterval)
 	}
 
 	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
 }
 
+// NewDuckDB is exported.
+
+// NewDuckDB implements the required behavior.
 func NewDuckDB() (*sql.DB, error) {
 	sqlDB, err := sql.Open("duckdb", ":memory:")
 	if err != nil {

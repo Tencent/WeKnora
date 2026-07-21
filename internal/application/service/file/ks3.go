@@ -31,7 +31,9 @@ type ks3FileService struct {
 }
 
 // NewKS3FileService creates a KS3 file service and ensures the bucket exists.
-func NewKS3FileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
+func NewKS3FileService(
+	endpoint, region, accessKey, secretKey, bucketName, pathPrefix string,
+) (interfaces.FileService, error) {
 	client, err := newKS3Client(endpoint, region, accessKey, secretKey)
 	if err != nil {
 		return nil, err
@@ -129,7 +131,12 @@ func parseKS3FilePath(filePath string) (bucket, objectKey string, err error) {
 	return parts[0], parts[1], nil
 }
 
-func (s *ks3FileService) SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error) {
+func (s *ks3FileService) SaveFile(
+	_ context.Context,
+	file *multipart.FileHeader,
+	tenantID uint64,
+	knowledgeID string,
+) (string, error) {
 	ext := filepath.Ext(file.Filename)
 	objectKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), knowledgeID, uuid.New().String()+ext)
 
@@ -137,7 +144,7 @@ func (s *ks3FileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	contentType := file.Header.Get("Content-Type")
 	if contentType == "" {
@@ -157,7 +164,13 @@ func (s *ks3FileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 	return fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, objectKey), nil
 }
 
-func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *ks3FileService) SaveBytes(
+	_ context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	_ bool,
+) (string, error) {
 	safeName, err := utils.SafeFileName(fileName)
 	if err != nil {
 		return "", fmt.Errorf("invalid file name: %w", err)
@@ -210,7 +223,7 @@ func (s *ks3FileService) CopyFile(ctx context.Context,
 	return newPath, nil
 }
 
-func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (s *ks3FileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
 	_, objectKey, err := parseKS3FilePath(filePath)
 	if err != nil {
 		return nil, err
@@ -230,7 +243,7 @@ func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 	return resp.Body, nil
 }
 
-func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error {
+func (s *ks3FileService) DeleteFile(_ context.Context, filePath string) error {
 	_, objectKey, err := parseKS3FilePath(filePath)
 	if err != nil {
 		return err
@@ -265,7 +278,7 @@ func (s *ks3FileService) CheckConnectivity(ctx context.Context) error {
 	}
 }
 
-func (s *ks3FileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (s *ks3FileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	_, objectKey, err := parseKS3FilePath(filePath)
 	if err != nil {
 		return "", err

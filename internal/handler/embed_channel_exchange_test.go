@@ -19,18 +19,39 @@ type exchangeEmbedSvc struct {
 	err          error
 }
 
-func (f *exchangeEmbedSvc) Create(context.Context, uint64, string, *types.EmbedChannel) (*types.EmbedChannel, string, error) {
+func (f *exchangeEmbedSvc) Create(
+	context.Context,
+	uint64,
+	string,
+	*types.EmbedChannel,
+) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
+
 func (f *exchangeEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
-func (f *exchangeEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+
+func (f *exchangeEmbedSvc) Update(
+	context.Context,
+	uint64,
+	string,
+	*types.EmbedChannel,
+	*bool,
+	*bool,
+	*bool,
+	*bool,
+	*string,
+	*string,
+	*string,
+) (*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) GetOwnedChannel(context.Context, uint64, string) (*types.EmbedChannel, error) {
 	return nil, service.ErrEmbedChannelNotFound
 }
@@ -38,33 +59,46 @@ func (f *exchangeEmbedSvc) Delete(context.Context, uint64, string) error { retur
 func (f *exchangeEmbedSvc) RotateToken(context.Context, uint64, string) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
 }
+
 func (f *exchangeEmbedSvc) LookupForEmbed(context.Context, string, string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) LookupEnabledChannel(context.Context, string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) IssueSessionToken(context.Context, string) (string, int, error) {
 	if f.err != nil {
 		return "", 0, f.err
 	}
 	return f.sessionToken, f.expiresIn, nil
 }
+
 func (f *exchangeEmbedSvc) IssuePreviewSession(context.Context, uint64, string) (string, int, error) {
 	return f.IssueSessionToken(context.Background(), "")
 }
+
 func (f *exchangeEmbedSvc) ResolveSessionToken(context.Context, string) (string, error) {
 	return "", nil
 }
+
 func (f *exchangeEmbedSvc) PublicConfig(context.Context, *types.EmbedChannel) types.EmbedChannelPublicConfig {
 	return types.EmbedChannelPublicConfig{}
 }
-func (f *exchangeEmbedSvc) SuggestedQuestions(context.Context, *types.EmbedChannel, int) ([]types.SuggestedQuestion, error) {
+
+func (f *exchangeEmbedSvc) SuggestedQuestions(
+	context.Context,
+	*types.EmbedChannel,
+	int,
+) ([]types.SuggestedQuestion, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) EmbedChunk(context.Context, *types.EmbedChannel, string) (*types.Chunk, error) {
 	return nil, nil
 }
+
 func (f *exchangeEmbedSvc) EmbedDisplayTitle(context.Context, *types.EmbedChannel) string {
 	return "AI Assistant"
 }

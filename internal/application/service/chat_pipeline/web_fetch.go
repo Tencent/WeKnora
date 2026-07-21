@@ -23,14 +23,14 @@ func NewPluginWebFetch(eventManager *EventManager) *PluginWebFetch {
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginWebFetch) ActivationEvents() []types.EventType {
-	return []types.EventType{types.WEB_FETCH}
+func (p *PluginWebFetch) ActivationEvents() []types.Type {
+	return []types.Type{types.WebFetch}
 }
 
 // OnEvent handles the WEB_FETCH event
 func (p *PluginWebFetch) OnEvent(
 	ctx context.Context,
-	eventType types.EventType,
+	_ types.Type,
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {

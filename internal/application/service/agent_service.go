@@ -24,7 +24,8 @@ import (
 	"gorm.io/gorm"
 )
 
-const MAX_ITERATIONS = 100 // Max iterations for agent execution
+// maxIterations is an exported constant.
+const maxIterations = 100 // Max iterations for agent execution
 
 // dedupStrings removes duplicate strings while preserving the first occurrence order.
 func dedupStrings(in []string) []string {
@@ -89,8 +90,8 @@ type agentService struct {
 	cfg                   *config.Config
 	modelService          interfaces.ModelService
 	mcpServiceService     interfaces.MCPServiceService
-	mcpManager            *mcp.MCPManager
-	eventBus              *event.EventBus
+	mcpManager            *mcp.Manager
+	eventBus              *event.Bus
 	db                    *gorm.DB
 	webSearchService      interfaces.WebSearchService
 	knowledgeBaseService  interfaces.KnowledgeBaseService
@@ -114,8 +115,8 @@ func NewAgentService(
 	fileService interfaces.FileService,
 	chunkService interfaces.ChunkService,
 	mcpServiceService interfaces.MCPServiceService,
-	mcpManager *mcp.MCPManager,
-	eventBus *event.EventBus,
+	mcpManager *mcp.Manager,
+	eventBus *event.Bus,
 	db *gorm.DB,
 	webSearchService interfaces.WebSearchService,
 	duckdb *sql.DB,
@@ -146,18 +147,18 @@ func NewAgentService(
 	}
 }
 
-// CreateAgentEngine creates an agent engine with the given configuration and EventBus.
+// CreateEngine creates an agent engine with the given configuration and Bus.
 // History is loaded once per turn by the caller (see service.LoadAgentHistory)
-// and handed to AgentEngine.Execute as llmContext; the engine is stateless across turns.
-func (s *agentService) CreateAgentEngine(
+// and handed to Engine.Execute as llmContext; the engine is stateless across turns.
+func (s *agentService) CreateEngine(
 	ctx context.Context,
 	config *types.AgentConfig,
 	chatModel chat.Chat,
 	rerankModel rerank.Reranker,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 	sessionID, assistantMessageID string,
-) (interfaces.AgentEngine, error) {
-	logger.Infof(ctx, "Creating agent engine with custom EventBus")
+) (interfaces.Engine, error) {
+	logger.Infof(ctx, "Creating agent engine with custom Bus")
 
 	// 1. Validate config
 	if err := s.ValidateConfig(config); err != nil {
@@ -187,7 +188,7 @@ func (s *agentService) CreateAgentEngine(
 	}
 
 	// 5. Create engine
-	engine := agent.NewAgentEngine(
+	engine := agent.NewEngine(
 		config, chatModel, toolRegistry, eventBus,
 		kbInfos, selectedDocs, sessionID,
 		systemPromptTemplate,
@@ -235,7 +236,7 @@ func (s *agentService) registerMCPTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 	sessionID, assistantMessageID string,
 ) {
 	tenantID := uint64(0)
@@ -287,7 +288,7 @@ func (s *agentService) registerMCPTools(
 		var regCtx *tools.MCPOAuthSession
 		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
 			regCtx = &tools.MCPOAuthSession{
-				EventBus:               eventBus,
+				Bus:                    eventBus,
 				SessionID:              sessionID,
 				AssistantMessageID:     assistantMessageID,
 				ApprovalCtx:            ctx,
@@ -619,14 +620,28 @@ func (s *agentService) registerTools(
 				config.WebSearchMaxResults,
 				config.WebSearchProviderID,
 			)
-			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
+			logger.Infof(
+				ctx,
+				"Registered web_search tool for session: %s, maxResults: %d, providerID: %s",
+				sessionID,
+				config.WebSearchMaxResults,
+				config.WebSearchProviderID,
+			)
 
 		case tools.ToolWebFetch:
 			toolToRegister = tools.NewWebFetchTool(chatModel)
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver)
+			toolToRegister = tools.NewDataAnalysisTool(
+				s.knowledgeBaseService,
+				s.knowledgeService,
+				s.tenantService,
+				s.fileService,
+				s.duckdb,
+				sessionID,
+				s.storageResolver,
+			)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
@@ -681,8 +696,8 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 		config.MaxIterations = 5 // Default
 	}
 
-	if config.MaxIterations > MAX_ITERATIONS {
-		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, MAX_ITERATIONS)
+	if config.MaxIterations > maxIterations {
+		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, maxIterations)
 	}
 
 	return nil
@@ -826,7 +841,10 @@ func kbRetrievalCapabilities(kb *types.KnowledgeBase) []string {
 
 // getSelectedDocumentInfos retrieves detailed information for user-selected documents (via @ mention)
 // This loads the actual content of the documents to include in the system prompt
-func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {
+func (s *agentService) getSelectedDocumentInfos(
+	ctx context.Context,
+	knowledgeIDs []string,
+) ([]*agent.SelectedDocumentInfo, error) {
 	if len(knowledgeIDs) == 0 {
 		return []*agent.SelectedDocumentInfo{}, nil
 	}

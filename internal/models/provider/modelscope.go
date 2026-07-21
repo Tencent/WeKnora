@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回 ModelScope provider 的元数据
-func (p *ModelScopeProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *ModelScopeProvider) Info() Info {
+	return Info{
 		Name:        ProviderModelScope,
 		DisplayName: "魔搭 ModelScope",
 		Description: "Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.",

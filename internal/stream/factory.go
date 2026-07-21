@@ -1,3 +1,4 @@
+// Package stream provides streaming response factories.
 package stream
 
 import (

@@ -7,11 +7,12 @@
 package proto
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -82,7 +83,7 @@ type ReadRequest struct {
 	Url           string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
 	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
 	Config        *ReadConfig            `protobuf:"bytes,6,opt,name=config,proto3" json:"config,omitempty"`
-	RequestId     string                 `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestID     string                 `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -159,9 +160,9 @@ func (x *ReadRequest) GetConfig() *ReadConfig {
 	return nil
 }
 
-func (x *ReadRequest) GetRequestId() string {
+func (x *ReadRequest) GetRequestID() string {
 	if x != nil {
-		return x.RequestId
+		return x.RequestID
 	}
 	return ""
 }
@@ -728,22 +729,25 @@ func file_docreader_proto_rawDescGZIP() []byte {
 	return file_docreader_proto_rawDescData
 }
 
-var file_docreader_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
-var file_docreader_proto_goTypes = []any{
-	(*ReadConfig)(nil),          // 0: docreader.ReadConfig
-	(*ReadRequest)(nil),         // 1: docreader.ReadRequest
-	(*ImageRef)(nil),            // 2: docreader.ImageRef
-	(*ReadResponse)(nil),        // 3: docreader.ReadResponse
-	(*ReadStreamMeta)(nil),      // 4: docreader.ReadStreamMeta
-	(*ReadStreamResponse)(nil),  // 5: docreader.ReadStreamResponse
-	(*ListEnginesRequest)(nil),  // 6: docreader.ListEnginesRequest
-	(*ParserEngineInfo)(nil),    // 7: docreader.ParserEngineInfo
-	(*ListEnginesResponse)(nil), // 8: docreader.ListEnginesResponse
-	nil,                         // 9: docreader.ReadConfig.ParserEngineOverridesEntry
-	nil,                         // 10: docreader.ReadResponse.MetadataEntry
-	nil,                         // 11: docreader.ReadStreamMeta.MetadataEntry
-	nil,                         // 12: docreader.ListEnginesRequest.ConfigOverridesEntry
-}
+var (
+	file_docreader_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+	file_docreader_proto_goTypes  = []any{
+		(*ReadConfig)(nil),          // 0: docreader.ReadConfig
+		(*ReadRequest)(nil),         // 1: docreader.ReadRequest
+		(*ImageRef)(nil),            // 2: docreader.ImageRef
+		(*ReadResponse)(nil),        // 3: docreader.ReadResponse
+		(*ReadStreamMeta)(nil),      // 4: docreader.ReadStreamMeta
+		(*ReadStreamResponse)(nil),  // 5: docreader.ReadStreamResponse
+		(*ListEnginesRequest)(nil),  // 6: docreader.ListEnginesRequest
+		(*ParserEngineInfo)(nil),    // 7: docreader.ParserEngineInfo
+		(*ListEnginesResponse)(nil), // 8: docreader.ListEnginesResponse
+		nil,                         // 9: docreader.ReadConfig.ParserEngineOverridesEntry
+		nil,                         // 10: docreader.ReadResponse.MetadataEntry
+		nil,                         // 11: docreader.ReadStreamMeta.MetadataEntry
+		nil,                         // 12: docreader.ListEnginesRequest.ConfigOverridesEntry
+	}
+)
+
 var file_docreader_proto_depIdxs = []int32{
 	9,  // 0: docreader.ReadConfig.parser_engine_overrides:type_name -> docreader.ReadConfig.ParserEngineOverridesEntry
 	0,  // 1: docreader.ReadRequest.config:type_name -> docreader.ReadConfig

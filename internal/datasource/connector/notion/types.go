@@ -254,8 +254,9 @@ type notionCursor struct {
 
 // --- Attachment ---
 
+// Attachment is exported.
 // attachment represents a file to be downloaded from a Notion page.
-type attachment struct {
+type Attachment struct {
 	URL      string // Notion S3 signed URL (expires in 1 hour)
 	FileName string
 	Type     string // "image" | "file" | "pdf" | "video" | "audio"
@@ -270,4 +271,3 @@ type paginatedResponse struct {
 	HasMore    bool            `json:"has_more"`
 	NextCursor string          `json:"next_cursor,omitempty"`
 }
-

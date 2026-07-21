@@ -165,7 +165,10 @@ func TestImageMultimodalHandlePropagatesTransientKnowledgeError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); !errors.Is(err, dbErr) {
+	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); !errors.Is(
+		err,
+		dbErr,
+	) {
 		t.Fatalf("transient error should propagate: %v", err)
 	}
 }

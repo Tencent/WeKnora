@@ -67,7 +67,10 @@ var defaultAPIKeyValidator apiKeyValidator = func(ctx context.Context, host, api
 
 // NewCmdLogin builds the `weknora auth login` command. runF is the testable
 // entrypoint (left nil for production; see cli/cmd/auth/login_test.go).
-func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *cmdutil.FormatOptions, *cmdutil.Factory, LoginService) error) *cobra.Command {
+func NewCmdLogin(
+	f *cmdutil.Factory,
+	runF func(context.Context, *LoginOptions, *cmdutil.FormatOptions, *cmdutil.Factory, LoginService) error,
+) *cobra.Command {
 	opts := &LoginOptions{}
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -99,7 +102,8 @@ Credentials are persisted to the OS keyring when available; otherwise to a
 			return runLogin(c.Context(), opts, fopts, f, nil)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
+	cmd.Flags().
+		BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmdutil.AddFormatFlag(cmd, authLoginFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "authenticate the active profile; --with-token reads an API key from stdin (non-interactive)",
@@ -156,7 +160,13 @@ func loginServiceFor(host string) LoginService {
 	return sdk.NewClient(host)
 }
 
-func runLogin(ctx context.Context, opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, svc LoginService) error {
+func runLogin(
+	ctx context.Context,
+	opts *LoginOptions,
+	fopts *cmdutil.FormatOptions,
+	f *cmdutil.Factory,
+	svc LoginService,
+) error {
 	// Resolve the target profile + host from the active profile in config.
 	// `auth login` no longer takes --host / --name; it authenticates the
 	// already-existing active profile (override via the global --profile).
@@ -330,7 +340,14 @@ type loginResult struct {
 // the credential refs + any server-returned user, so re-login never clobbers
 // the host or wipes an existing user. cfg.CurrentProfile is left untouched -
 // `auth login` authenticates the already-active profile, it doesn't switch.
-func saveProfileRef(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, mutate func(*config.Profile), mode string, user *sdk.AuthUser) error {
+func saveProfileRef(
+	opts *LoginOptions,
+	fopts *cmdutil.FormatOptions,
+	f *cmdutil.Factory,
+	mutate func(*config.Profile),
+	mode string,
+	user *sdk.AuthUser,
+) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -381,8 +398,14 @@ func warnOnFileFallback(store secrets.Store) {
 	if _, isFile := store.(*secrets.FileStore); !isFile {
 		return
 	}
-	fmt.Fprintln(iostreams.IO.Err, "warning: OS keychain unavailable - credentials will be saved to a 0600 file under $XDG_CONFIG_HOME/weknora/secrets/.")
-	fmt.Fprintln(iostreams.IO.Err, "         install / unlock the keyring (or use `weknora doctor` to inspect) for OS-backed storage.")
+	fmt.Fprintln(
+		iostreams.IO.Err,
+		"warning: OS keychain unavailable - credentials will be saved to a 0600 file under $XDG_CONFIG_HOME/weknora/secrets/.",
+	)
+	fmt.Fprintln(
+		iostreams.IO.Err,
+		"         install / unlock the keyring (or use `weknora doctor` to inspect) for OS-backed storage.",
+	)
 }
 
 // readStdinTrimmed reads all of r and returns the result with surrounding

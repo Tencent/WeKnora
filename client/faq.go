@@ -38,7 +38,8 @@ type FAQEntry struct {
 
 // FAQEntryPayload is used to create or update a FAQ entry.
 type FAQEntryPayload struct {
-	// ID is optional, used for data migration to specify seq_id (must be less than auto-increment start value 100000000)
+	// ID is optional, used for data migration to specify seq_id (must be less than auto-increment start value
+	// 100000000)
 	ID                *int64   `json:"id,omitempty"`
 	StandardQuestion  string   `json:"standard_question"`
 	SimilarQuestions  []string `json:"similar_questions,omitempty"`
@@ -294,11 +295,21 @@ func (c *Client) AddSimilarQuestions(ctx context.Context,
 // Supports two modes:
 //   - byID: update by entry seq_id, key is entry seq_id
 //   - byTag: update all entries under a tag, key is tag seq_id (0 for uncategorized)
-func (c *Client) UpdateFAQEntryFieldsBatch(ctx context.Context,
-	knowledgeBaseID string, byID map[int64]FAQEntryFieldsUpdate, byTag map[int64]FAQEntryFieldsUpdate, excludeIDs []int64,
+func (c *Client) UpdateFAQEntryFieldsBatch(
+	ctx context.Context,
+	knowledgeBaseID string,
+	byID map[int64]FAQEntryFieldsUpdate,
+	byTag map[int64]FAQEntryFieldsUpdate,
+	excludeIDs []int64,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/fields", knowledgeBaseID)
-	resp, err := c.doRequest(ctx, http.MethodPut, path, &FAQEntryFieldsBatchRequest{ByID: byID, ByTag: byTag, ExcludeIDs: excludeIDs}, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPut,
+		path,
+		&FAQEntryFieldsBatchRequest{ByID: byID, ByTag: byTag, ExcludeIDs: excludeIDs},
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -365,7 +376,7 @@ func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the raw CSV data from response body
 	data, err := io.ReadAll(resp.Body)
@@ -399,26 +410,27 @@ type FAQSuccessEntry struct {
 }
 
 // FAQImportProgress represents the progress of an async FAQ import task.
-// When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
+// When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime)
+// are populated.
 type FAQImportProgress struct {
-	TaskID           string           `json:"task_id"`
-	KBID             string           `json:"kb_id"`
-	KnowledgeID      string           `json:"knowledge_id"`
-	Status           string           `json:"status"`
-	Progress         int              `json:"progress"`
-	Total            int              `json:"total"`
-	Processed        int              `json:"processed"`
-	SuccessCount     int              `json:"success_count"`
-	FailedCount      int              `json:"failed_count"`
-	SkippedCount     int              `json:"skipped_count,omitempty"`
+	TaskID           string            `json:"task_id"`
+	KBID             string            `json:"kb_id"`
+	KnowledgeID      string            `json:"knowledge_id"`
+	Status           string            `json:"status"`
+	Progress         int               `json:"progress"`
+	Total            int               `json:"total"`
+	Processed        int               `json:"processed"`
+	SuccessCount     int               `json:"success_count"`
+	FailedCount      int               `json:"failed_count"`
+	SkippedCount     int               `json:"skipped_count,omitempty"`
 	FailedEntries    []FAQFailedEntry  `json:"failed_entries,omitempty"`
-	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`   // Successfully imported entries (when count is small)
+	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`    // Successfully imported entries (when count is small)
 	FailedEntriesURL string            `json:"failed_entries_url,omitempty"` // CSV download URL when too many failures
-	Message          string           `json:"message"`
-	Error            string           `json:"error,omitempty"`
-	CreatedAt        int64            `json:"created_at"`
-	UpdatedAt        int64            `json:"updated_at"`
-	DryRun           bool             `json:"dry_run,omitempty"` // Whether this is a dry run validation
+	Message          string            `json:"message"`
+	Error            string            `json:"error,omitempty"`
+	CreatedAt        int64             `json:"created_at"`
+	UpdatedAt        int64             `json:"updated_at"`
+	DryRun           bool              `json:"dry_run,omitempty"` // Whether this is a dry run validation
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`
@@ -456,9 +468,19 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 }
 
 // UpdateLastFAQImportResultDisplayStatus updates the display status (open/close) of the last FAQ import result.
-func (c *Client) UpdateLastFAQImportResultDisplayStatus(ctx context.Context, knowledgeBaseID string, displayStatus string) error {
+func (c *Client) UpdateLastFAQImportResultDisplayStatus(
+	ctx context.Context,
+	knowledgeBaseID string,
+	displayStatus string,
+) error {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/import/last-result/display", knowledgeBaseID)
-	resp, err := c.doRequest(ctx, http.MethodPut, path, &updateLastFAQImportResultDisplayStatusRequest{DisplayStatus: displayStatus}, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPut,
+		path,
+		&updateLastFAQImportResultDisplayStatusRequest{DisplayStatus: displayStatus},
+		nil,
+	)
 	if err != nil {
 		return err
 	}

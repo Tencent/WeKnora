@@ -33,7 +33,7 @@ end
 return 0
 `)
 
-// Limiter enforces per-key sliding-window limits. max is evaluated per Allow
+// Limiter enforces per-key sliding-window limits. The limit argument is evaluated per Allow
 // call so callers (e.g. embed channels) can vary budgets without rebuilding
 // the limiter.
 type Limiter struct {
@@ -63,20 +63,20 @@ func New(redisClient *redis.Client, keyPrefix string, window time.Duration, inst
 }
 
 // Allow reports whether key is within budget for the current window.
-func (l *Limiter) Allow(ctx context.Context, key string, max int) bool {
-	if max <= 0 {
+func (l *Limiter) Allow(ctx context.Context, key string, limit int) bool {
+	if limit <= 0 {
 		return true
 	}
 	if l.redis != nil {
-		allowed, err := l.redisAllow(ctx, key, max)
+		allowed, err := l.redisAllow(ctx, key, limit)
 		if err == nil {
 			return allowed
 		}
 	}
-	return l.local.allow(key, l.window, max)
+	return l.local.allow(key, l.window, limit)
 }
 
-func (l *Limiter) redisAllow(ctx context.Context, key string, max int) (bool, error) {
+func (l *Limiter) redisAllow(ctx context.Context, key string, limit int) (bool, error) {
 	redisKey := l.keyPrefix + key
 	nowMs := time.Now().UnixMilli()
 	windowMs := l.window.Milliseconds()
@@ -84,7 +84,7 @@ func (l *Limiter) redisAllow(ctx context.Context, key string, max int) (bool, er
 
 	result, err := rateLimitScript.Run(ctx, l.redis,
 		[]string{redisKey},
-		nowMs, windowMs, max, member,
+		nowMs, windowMs, limit, member,
 	).Int64()
 	if err != nil {
 		return false, err
@@ -112,7 +112,7 @@ func newLocalLimiter() *localLimiter {
 	return &localLimiter{}
 }
 
-func (l *localLimiter) allow(key string, window time.Duration, max int) bool {
+func (l *localLimiter) allow(key string, window time.Duration, limit int) bool {
 	now := time.Now()
 	cutoff := now.Add(-window)
 
@@ -135,7 +135,7 @@ func (l *localLimiter) allow(key string, window time.Duration, max int) bool {
 		}
 		entry.timestamps = valid
 
-		if len(entry.timestamps) >= max {
+		if len(entry.timestamps) >= limit {
 			entry.mu.Unlock()
 			return false
 		}

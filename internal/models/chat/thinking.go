@@ -8,7 +8,7 @@ import (
 )
 
 // ExtraConfigThinkingControl is the model parameters.extra_config key for
-// selecting how ChatOptions.Thinking is translated to provider HTTP fields.
+// selecting how Options.Thinking is translated to provider HTTP fields.
 // The accepted values mirror the strings the frontend writes (see
 // ModelEditorDialog.vue): "none", "enable_thinking", "thinking_type",
 // "chat_template_kwargs".
@@ -37,7 +37,7 @@ type ThinkingChatCompletionRequest struct {
 	Thinking *ThinkingConfig `json:"thinking,omitempty"`
 }
 
-// ThinkingStrategy encodes how ChatOptions.Thinking is mapped onto a provider's
+// ThinkingStrategy encodes how Options.Thinking is mapped onto a provider's
 // HTTP request. Apply returns (customBody, useRawHTTP):
 //   - (nil, false) means "send the standard OpenAI request unchanged" (the
 //     caller keeps using the SDK path).
@@ -48,13 +48,13 @@ type ThinkingChatCompletionRequest struct {
 // model's own default; the exception is enableThinking{alwaysSend: true}
 // (Aliyun Qwen), which must always pin the field.
 type ThinkingStrategy interface {
-	Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (customBody any, useRawHTTP bool)
+	Apply(req *openai.ChatCompletionRequest, opts *Options, isStream bool) (customBody any, useRawHTTP bool)
 }
 
 // noThinking sends no thinking-related fields at all.
 type noThinking struct{}
 
-func (noThinking) Apply(*openai.ChatCompletionRequest, *ChatOptions, bool) (any, bool) {
+func (noThinking) Apply(*openai.ChatCompletionRequest, *Options, bool) (any, bool) {
 	return nil, false
 }
 
@@ -69,7 +69,7 @@ type enableThinking struct {
 	disableOnNonStream bool
 }
 
-func (s enableThinking) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool) {
+func (s enableThinking) Apply(req *openai.ChatCompletionRequest, opts *Options, isStream bool) (any, bool) {
 	thinking := false
 	switch {
 	case opts != nil && opts.Thinking != nil:
@@ -89,7 +89,7 @@ func (s enableThinking) Apply(req *openai.ChatCompletionRequest, opts *ChatOptio
 // object (LKEAP / Volcengine). Emits nothing when opts.Thinking is unset.
 type thinkingTypeField struct{}
 
-func (thinkingTypeField) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+func (thinkingTypeField) Apply(req *openai.ChatCompletionRequest, opts *Options, _ bool) (any, bool) {
 	if opts == nil || opts.Thinking == nil {
 		return nil, false
 	}
@@ -107,7 +107,7 @@ func (thinkingTypeField) Apply(req *openai.ChatCompletionRequest, opts *ChatOpti
 // deployments). Emits nothing when opts.Thinking is unset.
 type chatTemplateKwargs struct{}
 
-func (chatTemplateKwargs) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+func (chatTemplateKwargs) Apply(req *openai.ChatCompletionRequest, opts *Options, _ bool) (any, bool) {
 	if opts == nil || opts.Thinking == nil {
 		return nil, false
 	}
@@ -141,17 +141,17 @@ func parseThinkingOverride(extraConfig map[string]string) ThinkingStrategy {
 }
 
 // EffectiveThinkingControl reports the provider field that will carry
-// ChatOptions.Thinking. It intentionally shares the same adapter/override
+// Options.Thinking. It intentionally shares the same adapter/override
 // resolution as the real request path so diagnostics do not guess from the
 // frontend selection.
-func EffectiveThinkingControl(config *ChatConfig) string {
+func EffectiveThinkingControl(config *Config) string {
 	if config == nil {
 		return "none"
 	}
 	if override := parseThinkingOverride(config.ExtraConfig); override != nil {
 		return thinkingStrategyName(override)
 	}
-	providerName := provider.ProviderName(config.Provider)
+	providerName := provider.Name(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}

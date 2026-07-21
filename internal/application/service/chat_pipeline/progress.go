@@ -37,16 +37,16 @@ func ShouldEmitQueryUnderstandProgress(chatManage *types.ChatManage) bool {
 
 // IsConsolidatedRetrievalStage reports whether a pipeline stage belongs to the
 // single user-visible "knowledge search" progress window (search → rerank → merge).
-func IsConsolidatedRetrievalStage(stage types.EventType, chatManage *types.ChatManage) bool {
+func IsConsolidatedRetrievalStage(stage types.Type, chatManage *types.ChatManage) bool {
 	if chatManage == nil {
 		return false
 	}
 	switch stage {
-	case types.CHUNK_SEARCH_PARALLEL, types.CHUNK_RERANK, types.CHUNK_MERGE, types.FILTER_TOP_K:
+	case types.ChunkSearchParallel, types.ChunkRerank, types.ChunkMerge, types.FilterTopK:
 		return chatManage.NeedsRetrieval()
-	case types.WEB_FETCH:
+	case types.WebFetch:
 		return chatManage.WebSearchEnabled
-	case types.DATA_ANALYSIS:
+	case types.DataAnalysis:
 		return chatManage.DataAnalysisEnabled && chatManage.NeedsRetrieval()
 	default:
 		return false
@@ -55,8 +55,8 @@ func IsConsolidatedRetrievalStage(stage types.EventType, chatManage *types.ChatM
 
 // LastConsolidatedRetrievalStage returns the last retrieval-related stage in the
 // assembled pipeline, or empty when none apply.
-func LastConsolidatedRetrievalStage(eventList []types.EventType, chatManage *types.ChatManage) types.EventType {
-	var last types.EventType
+func LastConsolidatedRetrievalStage(eventList []types.Type, chatManage *types.ChatManage) types.Type {
+	var last types.Type
 	for _, stage := range eventList {
 		if IsConsolidatedRetrievalStage(stage, chatManage) {
 			last = stage
@@ -72,13 +72,13 @@ func LastConsolidatedRetrievalStage(eventList []types.EventType, chatManage *typ
 // which routes into the fallback response. Closing on the error paths prevents
 // the frontend "knowledge_search" spinner from hanging forever when the
 // pipeline early-returns before reaching the last retrieval stage.
-func ShouldCloseRetrievalProgress(stage, lastRetrievalStage types.EventType, stageErr *PluginError) bool {
+func ShouldCloseRetrievalProgress(stage, lastRetrievalStage types.Type, stageErr *PluginError) bool {
 	return stage == lastRetrievalStage || stageErr != nil
 }
 
 // BeginRetrievalProgress emits a single pending knowledge_search tool_call.
 func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *StageProgress {
-	if chatManage == nil || chatManage.EventBus == nil {
+	if chatManage == nil || chatManage.Bus == nil {
 		return nil
 	}
 
@@ -92,8 +92,8 @@ func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *
 		args["query"] = chatManage.Query
 	}
 
-	_ = chatManage.EventBus.Emit(ctx, types.Event{
-		Type:      types.EventType(event.EventAgentToolCall),
+	_ = chatManage.Bus.Emit(ctx, types.Event{
+		Type:      types.Type(event.EventAgentToolCall),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentToolCallData{
 			ToolCallID: toolCallID,
@@ -107,7 +107,7 @@ func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *
 
 // BeginQueryUnderstandProgress emits a pending query_understand tool_call.
 func BeginQueryUnderstandProgress(ctx context.Context, chatManage *types.ChatManage) *StageProgress {
-	if chatManage == nil || chatManage.EventBus == nil || !ShouldEmitQueryUnderstandProgress(chatManage) {
+	if chatManage == nil || chatManage.Bus == nil || !ShouldEmitQueryUnderstandProgress(chatManage) {
 		return nil
 	}
 
@@ -120,8 +120,8 @@ func BeginQueryUnderstandProgress(ctx context.Context, chatManage *types.ChatMan
 		args["has_images"] = true
 	}
 
-	_ = chatManage.EventBus.Emit(ctx, types.Event{
-		Type:      types.EventType(event.EventAgentToolCall),
+	_ = chatManage.Bus.Emit(ctx, types.Event{
+		Type:      types.Type(event.EventAgentToolCall),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentToolCallData{
 			ToolCallID: toolCallID,
@@ -141,7 +141,7 @@ func EndQueryUnderstandProgress(
 	start time.Time,
 	stageErr *PluginError,
 ) {
-	if progress == nil || chatManage == nil || chatManage.EventBus == nil {
+	if progress == nil || chatManage == nil || chatManage.Bus == nil {
 		return
 	}
 
@@ -156,8 +156,8 @@ func EndQueryUnderstandProgress(
 		errMsg = stageErr.Err.Error()
 	}
 
-	_ = chatManage.EventBus.Emit(ctx, types.Event{
-		Type:      types.EventType(event.EventAgentToolResult),
+	_ = chatManage.Bus.Emit(ctx, types.Event{
+		Type:      types.Type(event.EventAgentToolResult),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentToolResultData{
 			ToolCallID: progress.toolCallID,
@@ -178,7 +178,7 @@ func EndRetrievalProgress(
 	start time.Time,
 	stageErr *PluginError,
 ) {
-	if progress == nil || chatManage == nil || chatManage.EventBus == nil {
+	if progress == nil || chatManage == nil || chatManage.Bus == nil {
 		return
 	}
 
@@ -209,8 +209,8 @@ func EndRetrievalProgress(
 		errMsg = stageErr.Err.Error()
 	}
 
-	_ = chatManage.EventBus.Emit(ctx, types.Event{
-		Type:      types.EventType(event.EventAgentToolResult),
+	_ = chatManage.Bus.Emit(ctx, types.Event{
+		Type:      types.Type(event.EventAgentToolResult),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentToolResultData{
 			ToolCallID: progress.toolCallID,

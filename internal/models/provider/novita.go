@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回 Novita provider 的元数据
-func (p *NovitaProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *NovitaProvider) Info() Info {
+	return Info{
 		Name:        ProviderNovita,
 		DisplayName: "Novita AI",
 		Description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.",

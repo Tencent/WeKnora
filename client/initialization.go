@@ -26,11 +26,11 @@ type InitializationConfig struct {
 // CLI. Field tags are snake_case (the CLI envelope convention), remapped from
 // the server's camelCase.
 type KBModelConfigView struct {
-	RetrievalReady bool                  `json:"retrieval_ready"` // embedding model bound → KB can embed/retrieve
-	Embedding      ModelSlotView         `json:"embedding"`
-	LLM            ModelSlotView         `json:"llm"`
-	Rerank         RerankSlotView        `json:"rerank"`
-	Multimodal     MultimodalSlotView    `json:"multimodal"`
+	RetrievalReady bool               `json:"retrieval_ready"` // embedding model bound → KB can embed/retrieve
+	Embedding      ModelSlotView      `json:"embedding"`
+	LLM            ModelSlotView      `json:"llm"`
+	Rerank         RerankSlotView     `json:"rerank"`
+	Multimodal     MultimodalSlotView `json:"multimodal"`
 }
 
 // ModelSlotView is one non-secret model slot (embedding / llm).
@@ -52,8 +52,8 @@ type MultimodalSlotView struct {
 	Enabled bool `json:"enabled"`
 }
 
-// OllamaModelInfo represents info about an Ollama model
-type OllamaModelInfo struct {
+// ModelInfo represents info about an Ollama model
+type ModelInfo struct {
 	Name       string `json:"name"`
 	Size       int64  `json:"size"`
 	ModifiedAt string `json:"modified_at"`
@@ -114,17 +114,32 @@ func (c *Client) GetInitializationConfig(ctx context.Context, kbID string) (*KBM
 	d := result.Data
 	view := &KBModelConfigView{
 		RetrievalReady: d.Embedding.ModelName != "",
-		Embedding:      ModelSlotView{Configured: d.Embedding.ModelName != "", ModelName: d.Embedding.ModelName, Source: d.Embedding.Source, Dimension: d.Embedding.Dimension},
-		LLM:            ModelSlotView{Configured: d.LLM.ModelName != "", ModelName: d.LLM.ModelName, Source: d.LLM.Source},
-		Rerank:         RerankSlotView{Enabled: d.Rerank.Enabled, ModelName: d.Rerank.ModelName},
-		Multimodal:     MultimodalSlotView{Enabled: d.Multimodal.Enabled},
+		Embedding: ModelSlotView{
+			Configured: d.Embedding.ModelName != "",
+			ModelName:  d.Embedding.ModelName,
+			Source:     d.Embedding.Source,
+			Dimension:  d.Embedding.Dimension,
+		},
+		LLM: ModelSlotView{
+			Configured: d.LLM.ModelName != "",
+			ModelName:  d.LLM.ModelName,
+			Source:     d.LLM.Source,
+		},
+		Rerank:     RerankSlotView{Enabled: d.Rerank.Enabled, ModelName: d.Rerank.ModelName},
+		Multimodal: MultimodalSlotView{Enabled: d.Multimodal.Enabled},
 	}
 	return view, nil
 }
 
 // InitializeByKB initializes a knowledge base with model configuration
 func (c *Client) InitializeByKB(ctx context.Context, kbID string, config *InitializationConfig) error {
-	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/initialization/initialize/%s", kbID), config, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodPost,
+		fmt.Sprintf("/api/v1/initialization/initialize/%s", kbID),
+		config,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -184,14 +199,14 @@ func (c *Client) CheckOllamaStatus(ctx context.Context) (bool, error) {
 }
 
 // ListOllamaModels lists all locally available Ollama models
-func (c *Client) ListOllamaModels(ctx context.Context) ([]OllamaModelInfo, error) {
+func (c *Client) ListOllamaModels(ctx context.Context) ([]ModelInfo, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/initialization/ollama/models", nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	var result struct {
-		Success bool              `json:"success"`
-		Data    []OllamaModelInfo `json:"data"`
+		Success bool        `json:"success"`
+		Data    []ModelInfo `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
@@ -235,7 +250,13 @@ func (c *Client) DownloadOllamaModel(ctx context.Context, modelName string) (*Do
 
 // GetOllamaDownloadProgress gets the download progress of an Ollama model
 func (c *Client) GetOllamaDownloadProgress(ctx context.Context, taskID string) (*DownloadTask, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/initialization/ollama/download/progress/%s", taskID), nil, nil)
+	resp, err := c.doRequest(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("/api/v1/initialization/ollama/download/progress/%s", taskID),
+		nil,
+		nil,
+	)
 	if err != nil {
 		return nil, err
 	}

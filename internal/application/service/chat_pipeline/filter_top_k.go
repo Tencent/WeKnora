@@ -18,14 +18,14 @@ func NewPluginFilterTopK(eventManager *EventManager) *PluginFilterTopK {
 }
 
 // ActivationEvents returns the event types that this plugin responds to
-func (p *PluginFilterTopK) ActivationEvents() []types.EventType {
-	return []types.EventType{types.FILTER_TOP_K}
+func (p *PluginFilterTopK) ActivationEvents() []types.Type {
+	return []types.Type{types.FilterTopK}
 }
 
 // OnEvent handles the FILTER_TOP_K event by filtering results to keep only the top K items
 // It can filter MergeResult, RerankResult, or SearchResult depending on which is available
 func (p *PluginFilterTopK) OnEvent(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	_ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	if !chatManage.NeedsRetrieval() {
 		return next()

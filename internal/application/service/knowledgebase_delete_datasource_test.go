@@ -45,6 +45,7 @@ func (r *kbDeleteDSRepo) FindByID(_ context.Context, id string) (*types.DataSour
 	}
 	return nil, errors.New("data source not found")
 }
+
 func (r *kbDeleteDSRepo) FindByKnowledgeBase(_ context.Context, kbID string) ([]*types.DataSource, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -60,6 +61,7 @@ func (r *kbDeleteDSRepo) Update(_ context.Context, _ *types.DataSource) error { 
 func (r *kbDeleteDSRepo) UpdateSyncState(_ context.Context, _ *types.DataSource) error {
 	return nil
 }
+
 func (r *kbDeleteDSRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -67,6 +69,7 @@ func (r *kbDeleteDSRepo) Delete(_ context.Context, id string) error {
 	r.deleteIDs = append(r.deleteIDs, id)
 	return nil
 }
+
 func (r *kbDeleteDSRepo) FindActive(_ context.Context) ([]*types.DataSource, error) {
 	return nil, nil
 }
@@ -82,12 +85,15 @@ func (r *kbDeleteSyncLogRepo) Create(_ context.Context, _ *types.SyncLog) error 
 func (r *kbDeleteSyncLogRepo) FindByID(_ context.Context, _ string) (*types.SyncLog, error) {
 	return nil, errors.New("not found")
 }
+
 func (r *kbDeleteSyncLogRepo) FindByDataSource(_ context.Context, _ string, _, _ int) ([]*types.SyncLog, error) {
 	return nil, nil
 }
+
 func (r *kbDeleteSyncLogRepo) FindLatest(_ context.Context, _ string) (*types.SyncLog, error) {
 	return nil, nil
 }
+
 func (r *kbDeleteSyncLogRepo) HasRunningSync(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
@@ -95,6 +101,7 @@ func (r *kbDeleteSyncLogRepo) Update(_ context.Context, _ *types.SyncLog) error 
 func (r *kbDeleteSyncLogRepo) UpdateResult(_ context.Context, _ *types.SyncLog) error {
 	return nil
 }
+
 func (r *kbDeleteSyncLogRepo) CancelPendingByDataSource(_ context.Context, dsID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -124,8 +131,14 @@ func (kbDeleteTaskEnqueuer) Enqueue(_ *asynq.Task, _ ...asynq.Option) (*asynq.Ta
 
 func TestDeleteDataSourcesForKnowledgeBase(t *testing.T) {
 	const kbID = "kb-1"
-	dsRepo := newKBDeleteDSRepo(kbID,
-		&types.DataSource{ID: "ds-1", KnowledgeBaseID: kbID, Status: types.DataSourceStatusActive, SyncSchedule: "0 0 * * * *"},
+	dsRepo := newKBDeleteDSRepo(
+		kbID,
+		&types.DataSource{
+			ID:              "ds-1",
+			KnowledgeBaseID: kbID,
+			Status:          types.DataSourceStatusActive,
+			SyncSchedule:    "0 0 * * * *",
+		},
 		&types.DataSource{ID: "ds-2", KnowledgeBaseID: kbID, Status: types.DataSourceStatusActive},
 	)
 	syncLogRepo := &kbDeleteSyncLogRepo{}
@@ -150,8 +163,14 @@ func TestDeleteDataSourcesForKnowledgeBase(t *testing.T) {
 
 func TestDeleteKnowledgeBaseCleansUpDataSources(t *testing.T) {
 	const kbID = "kb-1"
-	dsRepo := newKBDeleteDSRepo(kbID,
-		&types.DataSource{ID: "ds-1", KnowledgeBaseID: kbID, Status: types.DataSourceStatusActive, SyncSchedule: "0 0 * * * *"},
+	dsRepo := newKBDeleteDSRepo(
+		kbID,
+		&types.DataSource{
+			ID:              "ds-1",
+			KnowledgeBaseID: kbID,
+			Status:          types.DataSourceStatusActive,
+			SyncSchedule:    "0 0 * * * *",
+		},
 	)
 	syncLogRepo := &kbDeleteSyncLogRepo{}
 	kbRepo := &kbDeleteKBRepo{fakeKBRepo: *newFakeKBRepo()}

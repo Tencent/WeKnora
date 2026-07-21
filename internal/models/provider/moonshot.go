@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// MoonshotBaseURL and related constants.
 const (
 	MoonshotBaseURL = "https://api.moonshot.ai/v1"
 )
@@ -39,8 +40,8 @@ func init() {
 }
 
 // Info 返回 Moonshot provider 的元数据
-func (p *MoonshotProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *MoonshotProvider) Info() Info {
+	return Info{
 		Name:        ProviderMoonshot,
 		DisplayName: "月之暗面 Moonshot",
 		Description: "kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.",

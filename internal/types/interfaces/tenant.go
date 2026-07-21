@@ -33,7 +33,12 @@ type TenantService interface {
 	// callers are responsible for resolving GB→bytes.
 	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
 	// SearchTenants searches tenants with pagination and filters
-	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
+	SearchTenants(
+		ctx context.Context,
+		keyword string,
+		tenantID uint64,
+		page, pageSize int,
+	) ([]*types.Tenant, int64, error)
 	// GetTenantByIDForUser gets a tenant by ID with permission check
 	GetTenantByIDForUser(ctx context.Context, tenantID uint64, userID string) (*types.Tenant, error)
 	// GetWeKnoraCloudCredentials returns the decrypted WeKnoraCloud credentials for the current tenant.
@@ -51,7 +56,12 @@ type TenantRepository interface {
 	// ListTenants lists all tenants
 	ListTenants(ctx context.Context) ([]*types.Tenant, error)
 	// SearchTenants searches tenants with pagination and filters
-	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
+	SearchTenants(
+		ctx context.Context,
+		keyword string,
+		tenantID uint64,
+		page, pageSize int,
+	) ([]*types.Tenant, int64, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) error
 	// DeleteTenant deletes a tenant
@@ -62,6 +72,7 @@ type TenantRepository interface {
 	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
 }
 
+// TenantAPIKeyCreateRequest is an exported type.
 type TenantAPIKeyCreateRequest struct {
 	TenantID         uint64
 	Name             string
@@ -71,11 +82,13 @@ type TenantAPIKeyCreateRequest struct {
 	ExpiresAt        *time.Time
 }
 
+// TenantAPIKeyCreateResult is an exported type.
 type TenantAPIKeyCreateResult struct {
 	APIKey *types.TenantAPIKey
 	Token  string
 }
 
+// TenantAPIKeyRepository is an exported type.
 type TenantAPIKeyRepository interface {
 	CreateAPIKey(ctx context.Context, key *types.TenantAPIKey) error
 	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
@@ -92,6 +105,7 @@ type TenantAPIKeyRepository interface {
 	HasKeysWithPlaceholderHash(ctx context.Context) (bool, error)
 }
 
+// TenantAPIKeyService is an exported type.
 type TenantAPIKeyService interface {
 	CreateAPIKey(ctx context.Context, req TenantAPIKeyCreateRequest) (*TenantAPIKeyCreateResult, error)
 	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)

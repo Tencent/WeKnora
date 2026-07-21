@@ -21,6 +21,7 @@ import (
 	"go.uber.org/dig"
 )
 
+// AsynqTaskParams is an exported type.
 type AsynqTaskParams struct {
 	dig.In
 
@@ -89,6 +90,7 @@ func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 	return opt
 }
 
+// NewAsyncqClient is an exported function.
 func NewAsyncqClient() (*asynq.Client, error) {
 	opt := getAsynqRedisClientOpt()
 	client := asynq.NewClient(opt)
@@ -223,6 +225,7 @@ func NewWikiAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
 	return newAsynqServer(concurrency, types.QueueWeightsForPool(types.WorkerPoolWiki))
 }
 
+// RunAsynqServer is an exported function.
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
@@ -448,13 +451,27 @@ func markKnowledgeListDeleteFailed(
 			"error_message": errMsg,
 		})
 		if err != nil {
-			logger.Warnf(ctx, "dead-letter callback: failed to mark delete failure for knowledge %s: %v", knowledgeID, err)
+			logger.Warnf(
+				ctx,
+				"dead-letter callback: failed to mark delete failure for knowledge %s: %v",
+				knowledgeID,
+				err,
+			)
 			continue
 		}
 		if !updated {
-			logger.Infof(ctx, "dead-letter callback: skipped marking knowledge %s after delete task exhaustion because it is no longer active deleting", knowledgeID)
+			logger.Infof(
+				ctx,
+				//nolint:lll
+				"dead-letter callback: skipped marking knowledge %s after delete task exhaustion because it is no longer active deleting",
+				knowledgeID,
+			)
 			continue
 		}
-		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed after delete task exhausted retries", knowledgeID)
+		logger.Infof(
+			ctx,
+			"dead-letter callback: marked knowledge %s as failed after delete task exhausted retries",
+			knowledgeID,
+		)
 	}
 }

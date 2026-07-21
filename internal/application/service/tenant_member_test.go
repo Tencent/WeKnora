@@ -39,7 +39,7 @@ type fakeTenantMemberRepo struct {
 
 func newFakeRepo() *fakeTenantMemberRepo { return &fakeTenantMemberRepo{} }
 
-func (r *fakeTenantMemberRepo) Create(ctx context.Context, m *types.TenantMember) error {
+func (r *fakeTenantMemberRepo) Create(_ context.Context, m *types.TenantMember) error {
 	if r.failCreate != nil {
 		return r.failCreate
 	}
@@ -57,7 +57,7 @@ func (r *fakeTenantMemberRepo) Create(ctx context.Context, m *types.TenantMember
 	return nil
 }
 
-func (r *fakeTenantMemberRepo) Get(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error) {
+func (r *fakeTenantMemberRepo) Get(_ context.Context, userID string, tenantID uint64) (*types.TenantMember, error) {
 	if r.failGet != nil {
 		return nil, r.failGet
 	}
@@ -70,7 +70,7 @@ func (r *fakeTenantMemberRepo) Get(ctx context.Context, userID string, tenantID 
 	return nil, nil
 }
 
-func (r *fakeTenantMemberRepo) ListByUser(ctx context.Context, userID string) ([]*types.TenantMember, error) {
+func (r *fakeTenantMemberRepo) ListByUser(_ context.Context, userID string) ([]*types.TenantMember, error) {
 	var out []*types.TenantMember
 	for _, e := range r.rows {
 		if e.UserID == userID && !e.DeletedAt.Valid {
@@ -81,7 +81,7 @@ func (r *fakeTenantMemberRepo) ListByUser(ctx context.Context, userID string) ([
 	return out, nil
 }
 
-func (r *fakeTenantMemberRepo) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
+func (r *fakeTenantMemberRepo) ListByTenant(_ context.Context, tenantID uint64) ([]*types.TenantMember, error) {
 	var out []*types.TenantMember
 	for _, e := range r.rows {
 		if e.TenantID == tenantID && !e.DeletedAt.Valid {
@@ -117,13 +117,13 @@ func (r *fakeTenantMemberRepo) filterTenantRows(tenantID uint64, search string) 
 }
 
 func (r *fakeTenantMemberRepo) CountFilteredByTenant(
-	ctx context.Context, tenantID uint64, search string,
+	_ context.Context, tenantID uint64, search string,
 ) (int64, error) {
 	return int64(len(r.filterTenantRows(tenantID, search))), nil
 }
 
 func (r *fakeTenantMemberRepo) ListPagedByTenant(
-	ctx context.Context, tenantID uint64, search string, offset, limit int,
+	_ context.Context, tenantID uint64, search string, offset, limit int,
 ) ([]*types.TenantMember, error) {
 	all := r.filterTenantRows(tenantID, search)
 	if offset >= len(all) {
@@ -136,7 +136,12 @@ func (r *fakeTenantMemberRepo) ListPagedByTenant(
 	return append([]*types.TenantMember(nil), all[offset:end]...), nil
 }
 
-func (r *fakeTenantMemberRepo) UpdateRole(ctx context.Context, userID string, tenantID uint64, role types.TenantRole) error {
+func (r *fakeTenantMemberRepo) UpdateRole(
+	_ context.Context,
+	userID string,
+	tenantID uint64,
+	role types.TenantRole,
+) error {
 	if r.failUpdateRole != nil {
 		return r.failUpdateRole
 	}
@@ -149,7 +154,7 @@ func (r *fakeTenantMemberRepo) UpdateRole(ctx context.Context, userID string, te
 	return errors.New("not found")
 }
 
-func (r *fakeTenantMemberRepo) SoftDelete(ctx context.Context, userID string, tenantID uint64) error {
+func (r *fakeTenantMemberRepo) SoftDelete(_ context.Context, userID string, tenantID uint64) error {
 	if r.failSoftDelete != nil {
 		return r.failSoftDelete
 	}
@@ -162,7 +167,7 @@ func (r *fakeTenantMemberRepo) SoftDelete(ctx context.Context, userID string, te
 	return errors.New("not found")
 }
 
-func (r *fakeTenantMemberRepo) CountActiveOwners(ctx context.Context, tenantID uint64) (int64, error) {
+func (r *fakeTenantMemberRepo) CountActiveOwners(_ context.Context, tenantID uint64) (int64, error) {
 	if r.failCountOwners != nil {
 		return 0, r.failCountOwners
 	}
@@ -176,7 +181,7 @@ func (r *fakeTenantMemberRepo) CountActiveOwners(ctx context.Context, tenantID u
 	return n, nil
 }
 
-func (r *fakeTenantMemberRepo) HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error) {
+func (r *fakeTenantMemberRepo) HasAnyMembers(_ context.Context, tenantID uint64) (bool, error) {
 	if r.failHasAny != nil {
 		return false, r.failHasAny
 	}
@@ -195,7 +200,7 @@ func (r *fakeTenantMemberRepo) HasAnyMembers(ctx context.Context, tenantID uint6
 // because every Go test is single-goroutine here; the production
 // transaction is exercised via the repo tests against a real DB.
 func (r *fakeTenantMemberRepo) DemoteOwnerAtomically(
-	ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole,
+	_ context.Context, userID string, tenantID uint64, newRole types.TenantRole,
 ) error {
 	others := int64(0)
 	var target *types.TenantMember
@@ -222,7 +227,7 @@ func (r *fakeTenantMemberRepo) DemoteOwnerAtomically(
 }
 
 func (r *fakeTenantMemberRepo) RemoveOwnerAtomically(
-	ctx context.Context, userID string, tenantID uint64,
+	_ context.Context, userID string, tenantID uint64,
 ) error {
 	others := int64(0)
 	var target *types.TenantMember
@@ -365,7 +370,10 @@ func TestTenantMemberService_UpdateRole_RejectsInvalidRole(t *testing.T) {
 
 func TestTenantMemberService_UpdateRole_ReturnsNotFound(t *testing.T) {
 	svc, _ := newServiceWithRepo()
-	if err := svc.UpdateRole(context.Background(), "ghost", 1, types.TenantRoleAdmin); !errors.Is(err, ErrMembershipNotFound) {
+	if err := svc.UpdateRole(context.Background(), "ghost", 1, types.TenantRoleAdmin); !errors.Is(
+		err,
+		ErrMembershipNotFound,
+	) {
 		t.Fatalf("want ErrMembershipNotFound, got %v", err)
 	}
 }

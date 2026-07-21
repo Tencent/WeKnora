@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	_ "image/gif"
+	_ "image/gif" // register image formats
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
@@ -855,7 +855,11 @@ func (r *ImageResolver) ResolveRemoteImages(
 
 // downloadImage fetches an image from remoteURL using the provided SSRF-safe
 // client. It validates Content-Type and enforces maxRemoteImageSize.
-func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (data []byte, mimeType string, err error) {
+func downloadImage(
+	ctx context.Context,
+	client *http.Client,
+	remoteURL string,
+) (data []byte, mimeType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
@@ -867,7 +871,7 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 	if err != nil {
 		return nil, "", fmt.Errorf("HTTP GET: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("unexpected status %d", resp.StatusCode)

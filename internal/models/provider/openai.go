@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// OpenAIBaseURL and related constants.
 const (
 	OpenAIBaseURL = "https://api.openai.com/v1"
 )
@@ -19,8 +20,8 @@ func init() {
 }
 
 // Info 返回 OpenAI provider 的元数据
-func (p *OpenAIProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *OpenAIProvider) Info() Info {
+	return Info{
 		Name:        ProviderOpenAI,
 		DisplayName: "OpenAI",
 		Description: "gpt-5.2, gpt-5-mini, etc.",

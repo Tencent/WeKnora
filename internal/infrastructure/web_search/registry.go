@@ -34,7 +34,9 @@ func (r *Registry) Register(id string, factory ProviderFactory) {
 }
 
 // CreateProvider creates a provider instance by type with the given parameters.
-func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func (r *Registry) CreateProvider(
+	providerType string, params types.WebSearchProviderParameters,
+) (interfaces.WebSearchProvider, error) {
 	r.mu.RLock()
 	factory, ok := r.factories[providerType]
 	r.mu.RUnlock()

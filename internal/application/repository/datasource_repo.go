@@ -174,7 +174,12 @@ func (r *SyncLogRepository) FindByID(ctx context.Context, id string) (*types.Syn
 }
 
 // FindByDataSource lists sync logs for a data source with pagination
-func (r *SyncLogRepository) FindByDataSource(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
+func (r *SyncLogRepository) FindByDataSource(
+	ctx context.Context,
+	dsID string,
+	limit int,
+	offset int,
+) ([]*types.SyncLog, error) {
 	if dsID == "" {
 		return nil, errors.New("data source id is empty")
 	}

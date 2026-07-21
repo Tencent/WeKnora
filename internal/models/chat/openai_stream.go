@@ -115,7 +115,7 @@ func (c *RemoteAPIChat) processStream(
 	dumper *streamPacketDumper,
 ) {
 	defer close(streamChan)
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	state := newStreamState()
 
@@ -157,7 +157,13 @@ func (c *RemoteAPIChat) processStream(
 		}
 
 		if len(response.Choices) > 0 {
-			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan, response.Choices[0].Delta.ReasoningContent)
+			c.processStreamDelta(
+				ctx,
+				&response.Choices[0],
+				state,
+				streamChan,
+				response.Choices[0].Delta.ReasoningContent,
+			)
 		}
 	}
 }
@@ -170,7 +176,7 @@ func (c *RemoteAPIChat) processRawHTTPStream(
 	dumper *streamPacketDumper,
 ) {
 	defer close(streamChan)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	state := newStreamState()
 	reader := NewSSEReader(resp.Body)

@@ -98,7 +98,7 @@ func (c *LongConnClient) getUpdates(ctx context.Context) ([]telegramUpdate, erro
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var apiResp struct {
 		OK          bool             `json:"ok"`

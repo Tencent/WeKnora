@@ -32,6 +32,7 @@ type Embedder interface {
 	EmbedderPooler
 }
 
+// EmbedderPooler is an exported type.
 type EmbedderPooler interface {
 	BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error)
 }
@@ -86,7 +87,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 }
 
 // NewEmbedder creates an embedder based on the configuration
-func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
+func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Service) (Embedder, error) {
 	e, err := newEmbedder(config, pooler, ollamaService)
 	if err != nil {
 		return e, err
@@ -107,7 +108,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	return e, nil
 }
 
-func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
+func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Service) (Embedder, error) {
 	var embedder Embedder
 	var err error
 	switch strings.ToLower(string(config.Source)) {
@@ -117,7 +118,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 		return embedder, err
 	case string(types.ModelSourceRemote):
 		// Detect or use configured provider for routing
-		providerName := provider.ProviderName(config.Provider)
+		providerName := provider.Name(config.Provider)
 		if providerName == "" {
 			providerName = provider.DetectProvider(config.BaseURL)
 		}

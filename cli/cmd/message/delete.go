@@ -102,7 +102,13 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
+func runDelete(
+	ctx context.Context,
+	opts *DeleteOptions,
+	fopts *cmdutil.FormatOptions,
+	svc DeleteService,
+	p prompt.Prompter,
+) error {
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "message", opts.MessageID, "message.delete", []string{"weknora", "message", "delete", opts.MessageID, "--session", opts.SessionID, "-y"}); err != nil {
 		return err
 	}

@@ -26,18 +26,18 @@ import (
 // span input — long quoted-context queries can be many KB of prose.
 const langfuseQueryPreview = 2000
 
-// AgentEngine is the core engine for running ReAct agents.
+// Engine is the core engine for running ReAct agents.
 //
 // History persistence note: the engine is stateless across turns. Conversation
 // history is rebuilt from the DB once per turn by the caller
 // (see service.LoadAgentHistory) and passed into Execute as llmContext. The
 // engine therefore does not maintain its own cache, system-prompt store, or
 // cross-turn buffer.
-type AgentEngine struct {
+type Engine struct {
 	config               *types.AgentConfig
 	toolRegistry         *agenttools.ToolRegistry
 	chatModel            chat.Chat
-	eventBus             *event.EventBus
+	eventBus             *event.Bus
 	knowledgeBasesInfo   []*KnowledgeBaseInfo      // Detailed knowledge base information for prompt
 	selectedDocs         []*SelectedDocumentInfo   // User-selected documents (via @ mention)
 	pinnedMCPServices    []*PinnedMCPServiceInfo   // User @mentioned MCP services for this turn
@@ -59,25 +59,25 @@ type AgentEngine struct {
 // Signature matches vlm.VLM.Predict so it can be injected without importing the vlm package.
 type ImageDescriberFunc func(ctx context.Context, imgBytes []byte, prompt string) (string, error)
 
-// NewAgentEngine creates a new agent engine
-func NewAgentEngine(
+// NewEngine creates a new agent engine
+func NewEngine(
 	config *types.AgentConfig,
 	chatModel chat.Chat,
 	toolRegistry *agenttools.ToolRegistry,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
 	sessionID string,
 	systemPromptTemplate string,
-) *AgentEngine {
+) *Engine {
 	if eventBus == nil {
-		eventBus = event.NewEventBus()
+		eventBus = event.NewBus()
 	}
 	tokenEst, err := agenttoken.NewEstimator()
 	if err != nil {
 		return nil
 	}
-	engine := &AgentEngine{
+	engine := &Engine{
 		config:               config,
 		toolRegistry:         toolRegistry,
 		chatModel:            chatModel,
@@ -102,12 +102,12 @@ func NewAgentEngine(
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
-func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) {
+func (e *Engine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) {
 	e.pinnedMCPServices = mcpServices
 	e.pinnedSkills = skills
 }
 
-func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
+func (e *Engine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
 		Language: types.LanguageNameFromContext(ctx),
 		Config:   e.appConfig,
@@ -118,7 +118,7 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 	return opts
 }
 
-func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
+func (e *Engine) buildSystemPrompt(ctx context.Context) string {
 	prompt := BuildSystemPromptWithOptions(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
@@ -128,19 +128,19 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	return strings.TrimRight(prompt, " \t\r\n") + llmreference.ProtocolPrompt(e.config.CitationsEnabled())
 }
 
-// NewAgentEngineWithSkills creates a new agent engine with skills support
-func NewAgentEngineWithSkills(
+// NewEngineWithSkills creates a new agent engine with skills support
+func NewEngineWithSkills(
 	config *types.AgentConfig,
 	chatModel chat.Chat,
 	toolRegistry *agenttools.ToolRegistry,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
 	sessionID string,
 	systemPromptTemplate string,
 	skillsManager *skills.Manager,
-) *AgentEngine {
-	engine := NewAgentEngine(
+) *Engine {
+	engine := NewEngine(
 		config,
 		chatModel,
 		toolRegistry,
@@ -156,7 +156,7 @@ func NewAgentEngineWithSkills(
 
 // SetAppConfig sets the application config for prompt template resolution.
 // This allows the engine to read default prompts from config/prompt_templates/ YAML files.
-func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
+func (e *Engine) SetAppConfig(cfg *appconfig.Config) {
 	e.appConfig = cfg
 }
 
@@ -164,17 +164,17 @@ func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
 // in tool results. When set, MCP tool result images are automatically analyzed and
 // their descriptions are appended to the tool message content.
 // This follows the same pattern as Handler.analyzeImageAttachments() in the handler layer.
-func (e *AgentEngine) SetImageDescriber(fn ImageDescriberFunc) {
+func (e *Engine) SetImageDescriber(fn ImageDescriberFunc) {
 	e.imageDescriber = fn
 }
 
 // SetSkillsManager sets the skills manager for the engine
-func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
+func (e *Engine) SetSkillsManager(manager *skills.Manager) {
 	e.skillsManager = manager
 }
 
 // GetSkillsManager returns the skills manager
-func (e *AgentEngine) GetSkillsManager() *skills.Manager {
+func (e *Engine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
 }
 
@@ -182,7 +182,7 @@ func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 // When API-reported usage from a previous round is available, it uses that as a
 // baseline and only BPE-estimates the delta (newly appended messages). Otherwise it
 // falls back to a full BPE estimation of all messages.
-func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
+func (e *Engine) estimateCurrentTokens(messages []chat.Message) int {
 	if e.lastUsage.TotalTokens > 0 && e.lastSentMsgCount > 0 && e.lastSentMsgCount < len(messages) {
 		delta := e.tokenEstimator.EstimateMessages(messages[e.lastSentMsgCount:])
 		return e.lastUsage.TotalTokens + delta
@@ -191,8 +191,8 @@ func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
 }
 
 // Execute executes the agent with conversation history and streaming output
-// All events are emitted to EventBus and handled by subscribers (like Handler layer)
-func (e *AgentEngine) Execute(
+// All events are emitted to Bus and handled by subscribers (like Handler layer)
+func (e *Engine) Execute(
 	ctx context.Context,
 	sessionID, messageID, query string,
 	llmContext []chat.Message,
@@ -279,7 +279,7 @@ func (e *AgentEngine) Execute(
 	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent] Execution failed: %v", err)
-		e.eventBus.Emit(ctx, event.Event{
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("error"),
 			Type:      event.EventError,
 			SessionID: sessionID,
@@ -347,8 +347,8 @@ func truncateRunes(s string, n int) string {
 }
 
 // executeLoop executes the main ReAct loop
-// All events are emitted through EventBus with the given sessionID
-func (e *AgentEngine) executeLoop(
+// All events are emitted through Bus with the given sessionID
+func (e *Engine) executeLoop(
 	ctx context.Context,
 	state *types.AgentState,
 	query string,
@@ -393,7 +393,7 @@ loop:
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
 					totalTC)
-				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
+				_ = e.streamFinalAnswerToBus(ctx, query, state, sessionID)
 				state.IsComplete = true
 			}
 			return state, ctx.Err()
@@ -454,7 +454,7 @@ const (
 //
 // The mutable loop state (messages, empty-retry counter, stuck-loop detector)
 // is passed by pointer so iterations share progress.
-func (e *AgentEngine) runReActIteration(
+func (e *Engine) runReActIteration(
 	parentCtx context.Context,
 	state *types.AgentState,
 	messagesPtr *[]chat.Message,
@@ -563,8 +563,13 @@ func (e *AgentEngine) runReActIteration(
 		}
 		*lastResponseContent = response.Content
 		if *consecutiveSameContent >= maxRepeatedResponseRounds {
-			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
-				round, *consecutiveSameContent+1, response.FinishReason)
+			logger.Warnf(
+				ctx,
+				"[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
+				round,
+				*consecutiveSameContent+1,
+				response.FinishReason,
+			)
 			state.FinalAnswer = response.Content
 			state.IsComplete = true
 			return iterOutcomeBreak, nil
@@ -687,14 +692,18 @@ const toolImageAnalysisPrompt = "Describe the content of this image in detail. "
 // configured imageDescriber (VLM). Each image is decoded from a data URI and
 // analyzed independently. Failures are logged and skipped gracefully.
 // This follows the same pattern as Handler.analyzeImageAttachments().
-func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string) []string {
+func (e *Engine) describeImages(ctx context.Context, imageDataURIs []string) []string {
 	if e.imageDescriber == nil {
 		return nil
 	}
 	var descriptions []string
 	for i, dataURI := range imageDataURIs {
 		if ctx.Err() != nil {
-			logger.Warnf(ctx, "[Agent] Context cancelled, skipping remaining %d tool result images", len(imageDataURIs)-i)
+			logger.Warnf(
+				ctx,
+				"[Agent] Context cancelled, skipping remaining %d tool result images",
+				len(imageDataURIs)-i,
+			)
 			break
 		}
 		imgBytes, err := decodeDataURIBytes(dataURI)

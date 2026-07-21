@@ -149,7 +149,7 @@ func TestLoadFromExcel_MultiSheet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("group-by query: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var name string
 		var cnt int

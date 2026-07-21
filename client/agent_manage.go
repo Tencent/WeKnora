@@ -332,7 +332,11 @@ type SuggestedQuestionsResponse struct {
 // displayed as quick-start prompts in the chat UI.
 //
 // When request is nil, uses the agent's default knowledge base configuration.
-func (c *Client) GetSuggestedQuestions(ctx context.Context, agentID string, request *SuggestedQuestionsRequest) ([]SuggestedQuestion, error) {
+func (c *Client) GetSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	request *SuggestedQuestionsRequest,
+) ([]SuggestedQuestion, error) {
 	path := fmt.Sprintf("/api/v1/agents/%s/suggested-questions", agentID)
 
 	query := url.Values{}

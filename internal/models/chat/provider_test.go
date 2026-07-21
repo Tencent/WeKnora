@@ -17,7 +17,7 @@ import (
 func TestResolveProvider(t *testing.T) {
 	cases := []struct {
 		name  string
-		prov  provider.ProviderName
+		prov  provider.Name
 		model string
 		want  providerAdapter
 	}{
@@ -36,7 +36,7 @@ func TestResolveProvider(t *testing.T) {
 		{"moonshot fixed temp", provider.ProviderMoonshot, "moonshot-v1-8k", moonshotProvider{}},
 		{"moonshot other falls back", provider.ProviderMoonshot, "kimi-latest", baseProvider{}},
 		{"weknora cloud", provider.ProviderWeKnoraCloud, "anything", weKnoraCloudProvider{}},
-		{"unknown falls back", provider.ProviderName("nope"), "x", baseProvider{}},
+		{"unknown falls back", provider.Name("nope"), "x", baseProvider{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestResolveProvider(t *testing.T) {
 
 func newOutboundChat(t *testing.T, providerName, model string, extra map[string]string) *RemoteAPIChat {
 	t.Helper()
-	c, err := NewRemoteAPIChat(&ChatConfig{
+	c, err := NewRemoteAPIChat(&Config{
 		Source:      types.ModelSourceRemote,
 		ModelName:   model,
 		APIKey:      "k",
@@ -68,7 +68,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 	t.Run("generic explicit thinking_type overrides legacy kwargs", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderGeneric), "deepseek-v4-flash",
 			map[string]string{ExtraConfigThinkingControl: "thinking_type"})
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(false)}, true)
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		js := mustJSON(t, body)
@@ -79,7 +79,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 
 	t.Run("generic legacy chat_template_kwargs", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderGeneric), "qwen", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(false)}, true)
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		assert.Contains(t, mustJSON(t, body), "chat_template_kwargs")
@@ -88,7 +88,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 	t.Run("none keeps the standard SDK request", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderGeneric), "x",
 			map[string]string{ExtraConfigThinkingControl: "none"})
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(false)}, true)
 		require.NoError(t, err)
 		assert.False(t, useRaw)
 		_, ok := body.(*openai.ChatCompletionRequest)
@@ -97,7 +97,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 
 	t.Run("qwen non-stream forces disabled", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, false)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(true)}, false)
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		assert.Contains(t, mustJSON(t, body), `"enable_thinking":false`)
@@ -105,14 +105,14 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 
 	t.Run("qwen stream honors requested true", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b", nil)
-		body, _, _, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		body, _, _, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(true)}, true)
 		require.NoError(t, err)
 		assert.Contains(t, mustJSON(t, body), `"enable_thinking":true`)
 	})
 
 	t.Run("volcengine thinking enabled", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderVolcengine), "doubao", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(true)}, true)
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		js := mustJSON(t, body)
@@ -122,7 +122,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 
 	t.Run("lkeap deepseek-v3 emits thinking type", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderLKEAP), "deepseek-v3.1", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(false)}, true)
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		assert.Contains(t, mustJSON(t, body), `"thinking"`)
@@ -130,7 +130,7 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 
 	t.Run("lkeap r1 left untouched", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderLKEAP), "deepseek-r1", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{Thinking: ptrBool(false)}, true)
 		require.NoError(t, err)
 		assert.False(t, useRaw)
 		_, ok := body.(*openai.ChatCompletionRequest)
@@ -145,7 +145,7 @@ func TestBuildOutbound_ShapeRequest(t *testing.T) {
 
 	t.Run("deepseek strips tool_choice", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-chat", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{ToolChoice: "auto"}, false)
+		body, _, useRaw, err := c.buildOutbound(msgs, &Options{ToolChoice: "auto"}, false)
 		require.NoError(t, err)
 		assert.False(t, useRaw)
 		req := body.(*openai.ChatCompletionRequest)
@@ -154,7 +154,7 @@ func TestBuildOutbound_ShapeRequest(t *testing.T) {
 
 	t.Run("moonshot pins temperature to 1", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderMoonshot), "moonshot-v1-8k", nil)
-		body, _, _, err := c.buildOutbound(msgs, &ChatOptions{Temperature: 0.7, TopP: 0.9}, false)
+		body, _, _, err := c.buildOutbound(msgs, &Options{Temperature: 0.7, TopP: 0.9}, false)
 		require.NoError(t, err)
 		req := body.(*openai.ChatCompletionRequest)
 		assert.EqualValues(t, 1, req.Temperature)
@@ -169,9 +169,11 @@ func TestBuildOutbound_GeminiProviderMetadata(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []ToolCall{{
-				ID:               "call_1",
-				Type:             "function",
-				ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-signature"}`)},
+				ID:   "call_1",
+				Type: "function",
+				ProviderMetadata: types.ToolCallMetadata{
+					"google": json.RawMessage(`{"thought_signature":"gemini-signature"}`),
+				},
 				Function: FunctionCall{
 					Name:      "wiki_search",
 					Arguments: `{"query":"MACS"}`,
@@ -180,7 +182,7 @@ func TestBuildOutbound_GeminiProviderMetadata(t *testing.T) {
 		},
 	}
 
-	body, _, useRaw, err := c.buildOutbound(messages, &ChatOptions{}, false)
+	body, _, useRaw, err := c.buildOutbound(messages, &Options{}, false)
 	require.NoError(t, err)
 	require.True(t, useRaw)
 

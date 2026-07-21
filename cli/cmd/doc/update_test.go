@@ -69,7 +69,13 @@ func TestDocUpdate_DescriptionOnly_PreservesTitle(t *testing.T) {
 func TestDocUpdate_NoFlags_MissingFlag(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUpdateSvc{current: &sdk.Knowledge{}}
-	err := runUpdate(context.Background(), &UpdateOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_abc")
+	err := runUpdate(
+		context.Background(),
+		&UpdateOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"doc_abc",
+	)
 	var typed *cmdutil.Error
 	require.True(t, errors.As(err, &typed))
 	assert.Equal(t, cmdutil.CodeInputMissingFlag, typed.Code)
@@ -89,7 +95,15 @@ func TestDocUpdate_NotFound(t *testing.T) {
 // without reaching the server.
 func TestDocUpdate_DryRun_NoServerCall(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	root := withRootHarnessDoc(NewCmdUpdate(docDryRunFactory(t)), "doc_x", "--title", "T", "--dry-run", "--format", "json")
+	root := withRootHarnessDoc(
+		NewCmdUpdate(docDryRunFactory(t)),
+		"doc_x",
+		"--title",
+		"T",
+		"--dry-run",
+		"--format",
+		"json",
+	)
 	require.NoError(t, root.Execute(), "dry-run must succeed without a client")
 	var env struct {
 		OK   bool `json:"ok"`

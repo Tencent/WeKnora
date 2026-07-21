@@ -18,7 +18,9 @@ type langfuseASR struct {
 func (l *langfuseASR) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseASR) GetModelID() string   { return l.inner.GetModelID() }
 
-func (l *langfuseASR) Transcribe(ctx context.Context, audioBytes []byte, fileName string) (*TranscriptionResult, error) {
+func (l *langfuseASR) Transcribe(
+	ctx context.Context, audioBytes []byte, fileName string,
+) (*TranscriptionResult, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
 		return l.inner.Transcribe(ctx, audioBytes, fileName)

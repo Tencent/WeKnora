@@ -19,11 +19,23 @@ func TestStorageBackendResolverScopesPathsAndTenant(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.StorageBackend{}))
 	repo := repository.NewStorageBackendRepository(db)
-	backend := &types.StorageBackend{TenantID: 7, Name: "Local A", Provider: "local", Config: types.StorageBackendConfig{}, LegacyAlias: true}
+	backend := &types.StorageBackend{
+		TenantID:    7,
+		Name:        "Local A",
+		Provider:    "local",
+		Config:      types.StorageBackendConfig{},
+		LegacyAlias: true,
+	}
 	require.NoError(t, repo.Create(context.Background(), backend))
 
 	resolver := service.NewStorageBackendService(repo, db)
-	svc, provider, err := resolver.ResolveFileService(context.Background(), &types.Tenant{ID: 7}, backend.ID, "local", t.TempDir())
+	svc, provider, err := resolver.ResolveFileService(
+		context.Background(),
+		&types.Tenant{ID: 7},
+		backend.ID,
+		"local",
+		t.TempDir(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "local", provider)
 
@@ -32,11 +44,17 @@ func TestStorageBackendResolverScopesPathsAndTenant(t *testing.T) {
 	assert.Contains(t, path, "storage://"+backend.ID+"/local://")
 	reader, err := svc.GetFile(context.Background(), path)
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	assert.Equal(t, "scoped", string(data))
 
-	_, _, err = resolver.ResolveFileService(context.Background(), &types.Tenant{ID: 8}, backend.ID, "local", t.TempDir())
+	_, _, err = resolver.ResolveFileService(
+		context.Background(),
+		&types.Tenant{ID: 8},
+		backend.ID,
+		"local",
+		t.TempDir(),
+	)
 	require.Error(t, err)
 }

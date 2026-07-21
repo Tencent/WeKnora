@@ -61,7 +61,12 @@ type Options struct {
 // of this file.
 type ChatService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error
+	KnowledgeQAStream(
+		ctx context.Context,
+		sessionID string,
+		req *sdk.KnowledgeQARequest,
+		cb func(*sdk.StreamResponse) error,
+	) error
 }
 
 // NewCmd builds `weknora chat <text>`.
@@ -112,7 +117,8 @@ both flags for the complete projected stream.`,
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
-	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
+	cmd.Flags().
+		BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
 	cmdutil.AddFormatFlag(cmd, chatFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Ask a RAG question against a knowledge base. Default JSON returns a bounded answer-event projection. --reference adds indexed citations; --verbose adds reasoning, tools, and lifecycle events. --format ndjson streams raw SDK events; --format text renders the selected events live.",
@@ -282,7 +288,13 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 
 // runChatJSON handles the --format json path (the default): collect the
 // projection and emit it in one normal success envelope.
-func runChatJSON(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, sessionID string, svc ChatService) error {
+func runChatJSON(
+	ctx context.Context,
+	opts *Options,
+	fopts *cmdutil.FormatOptions,
+	sessionID string,
+	svc ChatService,
+) error {
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
@@ -302,9 +314,17 @@ func runChatJSON(ctx context.Context, opts *Options, fopts *cmdutil.FormatOption
 
 	if err := svc.KnowledgeQAStream(ctx, sessionID, req, cb); err != nil {
 		if cmdutil.IsCancelled(ctx, err) {
-			return chatStreamError(cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "chat cancelled"), sessionID, projector.AssistantMessageID())
+			return chatStreamError(
+				cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "chat cancelled"),
+				sessionID,
+				projector.AssistantMessageID(),
+			)
 		}
-		return chatStreamError(cmdutil.WrapStream(err, "knowledge qa stream"), sessionID, projector.AssistantMessageID())
+		return chatStreamError(
+			cmdutil.WrapStream(err, "knowledge qa stream"),
+			sessionID,
+			projector.AssistantMessageID(),
+		)
 	}
 	if !projector.Done() {
 		return chatStreamError(

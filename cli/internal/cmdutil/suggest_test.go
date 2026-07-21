@@ -32,13 +32,13 @@ func TestSuggestClosest(t *testing.T) {
 		target string
 		want   []string
 	}{
-		{"lst", []string{"list"}},                 // 1 edit
-		{"listt", []string{"list"}},               // 1 edit
-		{"vieww", []string{"view"}},               // 1 edit
-		{"creat", []string{"create"}},             // 1 edit
-		{"xyzzy", nil},                            // nothing close
-		{"", nil},                                 // empty
-		{"pinn", []string{"pin"}},                 // 1 edit (pin), unpin is 2
+		{"lst", []string{"list"}},     // 1 edit
+		{"listt", []string{"list"}},   // 1 edit
+		{"vieww", []string{"view"}},   // 1 edit
+		{"creat", []string{"create"}}, // 1 edit
+		{"xyzzy", nil},                // nothing close
+		{"", nil},                     // empty
+		{"pinn", []string{"pin"}},     // 1 edit (pin), unpin is 2
 	}
 	for _, tc := range cases {
 		got := SuggestClosest(tc.target, subs)

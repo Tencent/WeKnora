@@ -7,7 +7,7 @@ import (
 // scopeKnowledgeBasesByModelID filters knowledge_bases rows that reference
 // modelID in any model-binding field.
 func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
+	if db.Name() == "postgres" {
 		return db.Where(
 			"embedding_model_id = ? OR summary_model_id = ? OR "+
 				"image_processing_config->>'model_id' = ? OR "+
@@ -30,7 +30,7 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 // scopeCustomAgentsByModelID filters custom_agents rows whose config JSON
 // references modelID in any model-binding field.
 func scopeCustomAgentsByModelID(db *gorm.DB, modelID string) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
+	if db.Name() == "postgres" {
 		return db.Where(
 			"config->>'model_id' = ? OR config->>'rerank_model_id' = ? OR "+
 				"config->>'vlm_model_id' = ? OR config->>'asr_model_id' = ? OR "+

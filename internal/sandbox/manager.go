@@ -43,11 +43,11 @@ func NewManager(config *Config) (Manager, error) {
 // initializeSandbox creates and configures the sandbox based on configuration
 func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 	switch m.config.Type {
-	case SandboxTypeDisabled:
+	case TypeDisabled:
 		m.sandbox = &disabledSandbox{}
 		return nil
 
-	case SandboxTypeDocker:
+	case TypeDocker:
 		dockerSandbox := NewDockerSandbox(m.config)
 		if dockerSandbox.IsAvailable(ctx) {
 			m.sandbox = dockerSandbox
@@ -70,7 +70,7 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 
 		return fmt.Errorf("docker is not available and fallback is disabled")
 
-	case SandboxTypeLocal:
+	case TypeLocal:
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
 
@@ -91,7 +91,7 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 	}
 
 	// Check if sandbox is disabled - return early without validation
-	if sandbox.Type() == SandboxTypeDisabled {
+	if sandbox.Type() == TypeDisabled {
 		return nil, ErrSandboxDisabled
 	}
 
@@ -193,46 +193,46 @@ func (m *DefaultManager) GetSandbox() Sandbox {
 }
 
 // GetType returns the current sandbox type
-func (m *DefaultManager) GetType() SandboxType {
+func (m *DefaultManager) GetType() Type {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if m.sandbox != nil {
 		return m.sandbox.Type()
 	}
-	return SandboxTypeDisabled
+	return TypeDisabled
 }
 
 // disabledSandbox is a no-op sandbox that rejects all execution requests
 type disabledSandbox struct{}
 
-func (s *disabledSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error) {
+func (s *disabledSandbox) Execute(_ context.Context, _ *ExecuteConfig) (*ExecuteResult, error) {
 	return nil, ErrSandboxDisabled
 }
 
-func (s *disabledSandbox) Cleanup(ctx context.Context) error {
+func (s *disabledSandbox) Cleanup(_ context.Context) error {
 	return nil
 }
 
-func (s *disabledSandbox) Type() SandboxType {
-	return SandboxTypeDisabled
+func (s *disabledSandbox) Type() Type {
+	return TypeDisabled
 }
 
-func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
+func (s *disabledSandbox) IsAvailable(_ context.Context) bool {
 	return false
 }
 
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
 func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
-	var sType SandboxType
+	var sType Type
 	switch sandboxType {
 	case "docker":
-		sType = SandboxTypeDocker
+		sType = TypeDocker
 	case "local":
-		sType = SandboxTypeLocal
+		sType = TypeLocal
 	case "disabled", "":
-		sType = SandboxTypeDisabled
+		sType = TypeDisabled
 	default:
 		return nil, fmt.Errorf("unknown sandbox type: %s", sandboxType)
 	}

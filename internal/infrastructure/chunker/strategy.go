@@ -42,11 +42,11 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 	var lastOut []Chunk
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg, profile)
-		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
+		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
+		if v.OK {
 			return out
-		} else {
-			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
 		}
+		logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
 		if tier == TierLegacy && i == len(chain)-1 {
 			lastOut = out
 		}

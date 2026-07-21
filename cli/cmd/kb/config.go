@@ -77,7 +77,10 @@ func runConfig(ctx context.Context, fopts *cmdutil.FormatOptions, svc ConfigServ
 	fmt.Fprintf(w, "%-13s %s\n", "RERANK:", rerankLabel(cfg.Rerank))
 	fmt.Fprintf(w, "%-13s %v\n", "MULTIMODAL:", cfg.Multimodal.Enabled)
 	if !cfg.RetrievalReady {
-		fmt.Fprintln(w, "\n(not retrieval-ready — no embedding model; run `weknora kb config set <kb-id> --chat-model <id> --embedding-model <id>`)")
+		fmt.Fprintln(
+			w,
+			"\n(not retrieval-ready — no embedding model; run `weknora kb config set <kb-id> --chat-model <id> --embedding-model <id>`)",
+		)
 	}
 	return nil
 }

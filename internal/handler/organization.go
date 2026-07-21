@@ -78,7 +78,7 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	var req types.CreateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Invalid request parameters: %v", err)
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -86,10 +86,10 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
-			c.Error(apperrors.NewValidationError(err.Error()))
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to create organization").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to create organization").WithDetails(err.Error()))
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get organization: %v", err)
-		c.Error(apperrors.NewNotFoundError("Organization not found"))
+		_ = c.Error(apperrors.NewNotFoundError("Organization not found"))
 		return
 	}
 
@@ -134,7 +134,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 	// org's existence to non-members of private orgs.
 	if !org.Searchable {
 		if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
-			c.Error(apperrors.NewNotFoundError("Organization not found"))
+			_ = c.Error(apperrors.NewNotFoundError("Organization not found"))
 			return
 		}
 	}
@@ -146,7 +146,8 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 }
 
 // ListMyOrganizations lists organizations that the current tenant belongs to.
-// Response includes resource_counts (per-org KB/agent counts) for list sidebar so frontend does not need a separate GET /me/resource-counts.
+// Response includes resource_counts (per-org KB/agent counts) for list sidebar so frontend does not need a separate GET
+// /me/resource-counts.
 // @Summary      获取我的组织列表
 // @Description  获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量
 // @Tags         组织管理
@@ -162,7 +163,7 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 	orgs, err := h.orgService.ListTenantOrganizations(ctx, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organizations: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
 		return
 	}
 
@@ -197,7 +198,12 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 
 // buildResourceCountsByOrg 返回各空间内知识库数与智能体数，供 ListMyOrganizations 和侧栏使用；失败时返回 nil。
 // 使用批量接口：一次拉取所有空间的直接共享 KB ID、一次拉取所有空间的智能体列表，再在内存中按空间合并计数。
-func (h *OrganizationHandler) buildResourceCountsByOrg(ctx context.Context, orgs []*types.Organization, userID string, tenantID uint64) *types.ResourceCountsByOrgResponse {
+func (h *OrganizationHandler) buildResourceCountsByOrg(
+	ctx context.Context,
+	orgs []*types.Organization,
+	userID string,
+	tenantID uint64,
+) *types.ResourceCountsByOrgResponse {
 	orgIDs := make([]string, 0, len(orgs))
 	for _, o := range orgs {
 		orgIDs = append(orgIDs, o.ID)
@@ -315,7 +321,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 
 	var req types.UpdateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -323,14 +329,14 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to update organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
-			c.Error(apperrors.NewValidationError(err.Error()))
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
 			return
 		}
 		if errors.Is(err, service.ErrOrgMemberLimitTooLow) {
-			c.Error(apperrors.NewValidationError("当前成员数已超过新的上限，请先移除成员或设置更大的上限"))
+			_ = c.Error(apperrors.NewValidationError("当前成员数已超过新的上限，请先移除成员或设置更大的上限"))
 			return
 		}
-		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
 		return
 	}
 
@@ -358,7 +364,7 @@ func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
 
 	if err := h.orgService.DeleteOrganization(ctx, orgID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to delete organization: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
 		return
 	}
 
@@ -389,14 +395,14 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	// get 403 — mirrors ListOrgShares / ListOrgAgentShares which already
 	// gate on GetTenantMember.
 	if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
-		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
+		_ = c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 
 	members, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list members: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list members").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list members").WithDetails(err.Error()))
 		return
 	}
 
@@ -457,7 +463,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 	memberTenantIDStr := c.Param("tenant_id")
 	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
 	if err != nil {
-		c.Error(apperrors.NewValidationError("Invalid workspace ID"))
+		_ = c.Error(apperrors.NewValidationError("Invalid workspace ID"))
 		return
 	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
@@ -465,13 +471,13 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 
 	var req types.UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
-	if err := h.orgService.UpdateTenantMemberRole(ctx, orgID, memberTenantID, req.Role, operatorUserID, operatorTenantID); err != nil {
+	if err := h.orgService.UpdateTenantMemberRole(ctx, orgID, memberTenantID, req.Role, operatorUserID, operatorTenantID); err != nil { //nolint:lll
 		logger.Errorf(ctx, "Failed to update member role: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
 
@@ -498,7 +504,7 @@ func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 	memberTenantIDStr := c.Param("tenant_id")
 	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
 	if err != nil {
-		c.Error(apperrors.NewValidationError("Invalid workspace ID"))
+		_ = c.Error(apperrors.NewValidationError("Invalid workspace ID"))
 		return
 	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
@@ -506,7 +512,7 @@ func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 
 	if err := h.orgService.RemoveTenantMember(ctx, orgID, memberTenantID, operatorUserID, operatorTenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove member: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
 
@@ -536,7 +542,7 @@ func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
 	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate invite code: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
 	}
 
@@ -565,7 +571,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	// Get organization by invite code
 	org, err := h.orgService.GetOrganizationByInviteCode(ctx, inviteCode)
 	if err != nil {
-		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		_ = c.Error(apperrors.NewNotFoundError("Invalid invite code"))
 		return
 	}
 
@@ -620,7 +626,7 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 
 	var req types.JoinOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -628,10 +634,10 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to join organization: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
-			c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
+			_ = c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
 			return
 		}
-		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		_ = c.Error(apperrors.NewNotFoundError("Invalid invite code"))
 		return
 	}
 
@@ -661,34 +667,36 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 
 	var req types.SubmitJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
 	// Get organization by invite code
 	org, err := h.orgService.GetOrganizationByInviteCode(ctx, req.InviteCode)
 	if err != nil {
-		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		_ = c.Error(apperrors.NewNotFoundError("Invalid invite code"))
 		return
 	}
 
 	// Check if organization requires approval
 	if !org.RequireApproval {
-		c.Error(apperrors.NewValidationError("This organization does not require approval. Use the join endpoint instead."))
+		_ = c.Error(
+			apperrors.NewValidationError("This organization does not require approval. Use the join endpoint instead."),
+		)
 		return
 	}
 
 	// Check if caller's tenant is already a member
 	_, memberErr := h.orgService.GetTenantMember(ctx, org.ID, tenantID)
 	if memberErr == nil {
-		c.Error(apperrors.NewValidationError("Your workspace is already a member of this organization"))
+		_ = c.Error(apperrors.NewValidationError("Your workspace is already a member of this organization"))
 		return
 	}
 
 	// Validate requested role: only viewer/editor/admin allowed
 	requestedRole := req.Role
 	if requestedRole != "" && !requestedRole.IsValid() {
-		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		_ = c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 		return
 	}
 
@@ -697,14 +705,14 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to submit join request: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
-			c.Error(apperrors.NewValidationError("该空间成员已满，无法提交加入申请"))
+			_ = c.Error(apperrors.NewValidationError("该空间成员已满，无法提交加入申请"))
 			return
 		}
 		if err.Error() == "pending request already exists" {
-			c.Error(apperrors.NewValidationError("You have already submitted a request to join this organization"))
+			_ = c.Error(apperrors.NewValidationError("You have already submitted a request to join this organization"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to submit join request"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to submit join request"))
 		return
 	}
 
@@ -738,7 +746,7 @@ func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 	resp, err := h.orgService.SearchSearchableOrganizations(ctx, tenantID, query, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search organizations: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search organizations"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to search organizations"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -765,35 +773,35 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req types.JoinByOrganizationIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	// Validate requested role if provided
 	requestedRole := req.Role
 	if requestedRole != "" && !requestedRole.IsValid() {
-		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		_ = c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 		return
 	}
 	org, err := h.orgService.JoinByOrganizationID(ctx, req.OrganizationID, userID, tenantID, req.Message, requestedRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to join organization by ID: %v", err)
 		if errors.Is(err, service.ErrOrgNotFound) {
-			c.Error(apperrors.NewNotFoundError("Organization not found or not open for search"))
+			_ = c.Error(apperrors.NewNotFoundError("Organization not found or not open for search"))
 			return
 		}
 		if errors.Is(err, service.ErrOrgPermissionDenied) {
-			c.Error(apperrors.NewForbiddenError("Organization not open for search"))
+			_ = c.Error(apperrors.NewForbiddenError("Organization not open for search"))
 			return
 		}
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
-			c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
+			_ = c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
 			return
 		}
 		if errors.Is(err, service.ErrInvalidRole) {
-			c.Error(apperrors.NewValidationError("Invalid role"))
+			_ = c.Error(apperrors.NewValidationError("Invalid role"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to join organization"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to join organization"))
 		return
 	}
 	logger.Infof(ctx, "User %s joined organization %s by ID", secutils.SanitizeForLog(userID), org.ID)
@@ -824,13 +832,13 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 
 	var req types.RequestRoleUpgradeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
 	// Validate requested role
 	if !req.RequestedRole.IsValid() {
-		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		_ = c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 		return
 	}
 
@@ -838,26 +846,31 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to submit role upgrade request: %v", err)
 		if err.Error() == "pending request already exists" {
-			c.Error(apperrors.NewValidationError("You already have a pending upgrade request"))
+			_ = c.Error(apperrors.NewValidationError("You already have a pending upgrade request"))
 			return
 		}
 		if err.Error() == "user is not a member of this organization" {
-			c.Error(apperrors.NewValidationError("You are not a member of this organization"))
+			_ = c.Error(apperrors.NewValidationError("You are not a member of this organization"))
 			return
 		}
 		if err.Error() == "user is already an admin" {
-			c.Error(apperrors.NewValidationError("You are already an admin"))
+			_ = c.Error(apperrors.NewValidationError("You are already an admin"))
 			return
 		}
 		if err.Error() == "cannot request upgrade to same or lower role" {
-			c.Error(apperrors.NewValidationError("Cannot request upgrade to same or lower role"))
+			_ = c.Error(apperrors.NewValidationError("Cannot request upgrade to same or lower role"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to submit upgrade request"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to submit upgrade request"))
 		return
 	}
 
-	logger.Infof(ctx, "User %s submitted role upgrade request for organization %s", secutils.SanitizeForLog(userID), orgID)
+	logger.Infof(
+		ctx,
+		"User %s submitted role upgrade request for organization %s",
+		secutils.SanitizeForLog(userID),
+		orgID,
+	)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    request,
@@ -886,20 +899,24 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 	// fall back to the user-level rule so we don't break pre-000046 data.
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
-		c.Error(apperrors.NewNotFoundError("Organization not found"))
+		_ = c.Error(apperrors.NewNotFoundError("Organization not found"))
 		return
 	}
 
 	isOwnerTenant := org.OwnerTenantID != 0 && org.OwnerTenantID == tenantID
 	if isOwnerTenant || (org.OwnerTenantID == 0 && org.OwnerID == userID) {
-		c.Error(apperrors.NewForbiddenError("Organization owner cannot leave. Please transfer ownership or delete the organization."))
+		_ = c.Error(
+			apperrors.NewForbiddenError(
+				"Organization owner cannot leave. Please transfer ownership or delete the organization.",
+			),
+		)
 		return
 	}
 
 	// Remove the caller's tenant from the organization (self-leave)
 	if err := h.orgService.RemoveTenantMember(ctx, orgID, tenantID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to leave organization: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to leave organization"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to leave organization"))
 		return
 	}
 
@@ -928,14 +945,14 @@ func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
 	// Check admin: caller's tenant must be admin in the org
 	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
-		c.Error(apperrors.NewForbiddenError("Only organization admins can view join requests"))
+		_ = c.Error(apperrors.NewForbiddenError("Only organization admins can view join requests"))
 		return
 	}
 
 	requests, err := h.orgService.ListJoinRequests(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list join requests: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list join requests"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list join requests"))
 		return
 	}
 
@@ -1000,35 +1017,36 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 	// Check admin: caller's tenant must be admin in the org
 	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
-		c.Error(apperrors.NewForbiddenError("Only organization admins can review join requests"))
+		_ = c.Error(apperrors.NewForbiddenError("Only organization admins can review join requests"))
 		return
 	}
 
 	var req types.ReviewJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	var assignRole *types.OrgMemberRole
 	if req.Role != "" {
 		if !req.Role.IsValid() {
-			c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+			_ = c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 			return
 		}
 		assignRole = &req.Role
 	}
 
+	//nolint:lll
 	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID, tenantID, req.Message, assignRole); err != nil {
 		logger.Errorf(ctx, "Failed to review join request: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
-			c.Error(apperrors.NewValidationError("空间成员已满，无法通过该加入申请"))
+			_ = c.Error(apperrors.NewValidationError("空间成员已满，无法通过该加入申请"))
 			return
 		}
 		if err.Error() == "request has already been reviewed" {
-			c.Error(apperrors.NewValidationError("Request has already been reviewed"))
+			_ = c.Error(apperrors.NewValidationError("Request has already been reviewed"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to review join request"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to review join request"))
 		return
 	}
 
@@ -1059,7 +1077,7 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -1067,10 +1085,12 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to share knowledge base: %v", err)
 		if errors.Is(err, service.ErrOrgRoleCannotShare) {
-			c.Error(apperrors.NewForbiddenError("Only editors and admins can share knowledge bases to this organization"))
+			_ = c.Error(
+				apperrors.NewForbiddenError("Only editors and admins can share knowledge bases to this organization"),
+			)
 			return
 		}
-		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
 
@@ -1095,22 +1115,22 @@ func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
 	kbID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		_ = c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 
 	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID, tenantID)
 	if err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
-			c.Error(apperrors.NewNotFoundError("Knowledge base not found"))
+			_ = c.Error(apperrors.NewNotFoundError("Knowledge base not found"))
 			return
 		}
 		if errors.Is(err, service.ErrNotKBOwner) {
-			c.Error(apperrors.NewForbiddenError("Only the knowledge base owner can list its shares"))
+			_ = c.Error(apperrors.NewForbiddenError("Only the knowledge base owner can list its shares"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list shares: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return
 	}
 
@@ -1162,13 +1182,13 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 
 	var req types.UpdateSharePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
 	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to update share permission: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
 	}
 
@@ -1197,7 +1217,7 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 
 	if err := h.shareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
 	}
 
@@ -1225,7 +1245,7 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 	// Check if caller's tenant is a member and get its role for effective-permission calculation
 	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
+		_ = c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
@@ -1233,7 +1253,7 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 	shares, err := h.shareService.ListSharesByOrganization(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organization shares: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return
 	}
 
@@ -1259,7 +1279,8 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 			resp.KnowledgeBaseName = s.KnowledgeBase.Name
 			resp.KnowledgeBaseType = s.KnowledgeBase.Type
 			// Get knowledge count for document type
-			if count, err := h.knowledgeRepo.CountKnowledgeByKnowledgeBaseID(ctx, s.SourceTenantID, s.KnowledgeBaseID); err == nil {
+			if count, err := h.knowledgeRepo.CountKnowledgeByKnowledgeBaseID(ctx, s.SourceTenantID,
+				s.KnowledgeBaseID); err == nil {
 				resp.KnowledgeCount = count
 			}
 			// Get chunk count for FAQ type
@@ -1300,7 +1321,7 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared knowledge bases: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
 		return
 	}
 
@@ -1331,7 +1352,7 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -1339,14 +1360,19 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to share agent: %v", err)
 		if errors.Is(err, service.ErrOrgRoleCannotShareAgent) {
-			c.Error(apperrors.NewForbiddenError("Only editors and admins can share agents to this organization"))
+			_ = c.Error(apperrors.NewForbiddenError("Only editors and admins can share agents to this organization"))
 			return
 		}
 		if errors.Is(err, service.ErrAgentNotConfigured) {
-			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
+			_ = c.Error(
+				apperrors.NewValidationError(
+					"Agent is not fully configured. Please set the chat model, and set the " +
+						"rerank model if the knowledge_search tool is enabled in agent settings.",
+				),
+			)
 			return
 		}
-		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": share})
@@ -1358,21 +1384,21 @@ func (h *OrganizationHandler) ListAgentShares(c *gin.Context) {
 	agentID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		_ = c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 	shares, err := h.agentShareService.ListSharesByAgent(ctx, agentID, tenantID)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentNotFoundForShare) {
-			c.Error(apperrors.NewNotFoundError("Agent not found"))
+			_ = c.Error(apperrors.NewNotFoundError("Agent not found"))
 			return
 		}
 		if errors.Is(err, service.ErrNotAgentOwner) {
-			c.Error(apperrors.NewForbiddenError("Only the agent owner can list its shares"))
+			_ = c.Error(apperrors.NewForbiddenError("Only the agent owner can list its shares"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list agent shares: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return
 	}
 	response := make([]types.AgentShareResponse, 0, len(shares))
@@ -1411,7 +1437,7 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if err := h.agentShareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
-		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		_ = c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Share removed successfully"})
@@ -1436,14 +1462,14 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
+		_ = c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
 	shares, err := h.agentShareService.ListSharesByOrganization(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organization agent shares: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return
 	}
 	response := make([]types.AgentShareResponse, 0, len(shares))
@@ -1455,7 +1481,9 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 		resp := types.AgentShareResponse{
 			ID: s.ID, AgentID: s.AgentID, OrganizationID: s.OrganizationID,
 			SharedByUserID: s.SharedByUserID, SourceTenantID: s.SourceTenantID,
-			Permission: string(s.Permission), MyRoleInOrg: string(myRoleInOrg), MyPermission: string(effectivePerm), CreatedAt: s.CreatedAt,
+			Permission: string(
+				s.Permission,
+			), MyRoleInOrg: string(myRoleInOrg), MyPermission: string(effectivePerm), CreatedAt: s.CreatedAt,
 		}
 		if s.Agent != nil {
 			resp.AgentName = s.Agent.Name
@@ -1509,14 +1537,20 @@ func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	list, err := h.agentShareService.ListSharedAgents(ctx, tenantID, callerTenantRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
 }
 
-// listSpaceKnowledgeBasesInOrganization returns merged list of direct shared KBs and agent-carried KBs in the org (for list and count).
-func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.Context, orgID string, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+// listSpaceKnowledgeBasesInOrganization returns merged list of direct shared KBs and agent-carried KBs in the org (for
+// list and count).
+func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(
+	ctx context.Context,
+	orgID string,
+	tenantID uint64,
+	callerTenantRole types.TenantRole,
+) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	directList, err := h.shareService.ListSharedKnowledgeBasesInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		return nil, err
@@ -1638,7 +1672,8 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 	return merged, nil
 }
 
-// ListOrganizationSharedKnowledgeBases lists all knowledge bases in the given organization (including those shared by the current tenant and those from shared agents), for the list page when a space is selected.
+// ListOrganizationSharedKnowledgeBases lists all knowledge bases in the given organization (including those shared by
+// the current tenant and those from shared agents), for the list page when a space is selected.
 // @Summary      获取空间内全部知识库（含我共享的、含智能体携带的）
 // @Description  获取指定空间下所有共享知识库，包含直接共享的与通过共享智能体可见的，用于列表页空间视角
 // @Tags         组织管理
@@ -1656,11 +1691,11 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 	list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		if errors.Is(err, service.ErrTenantNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
+			_ = c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared knowledge bases: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
 		return
 	}
 
@@ -1685,7 +1720,8 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows, "total": len(rows)})
 }
 
-// ListOrganizationSharedAgents lists all agents in the given organization (including those shared by the current tenant), for the list page when a space is selected.
+// ListOrganizationSharedAgents lists all agents in the given organization (including those shared by the current
+// tenant), for the list page when a space is selected.
 // @Summary      获取空间内全部智能体（含我共享的）
 // @Description  获取指定空间下所有共享智能体，包含他人共享的与我共享的，用于列表页空间视角
 // @Tags         组织管理
@@ -1703,11 +1739,11 @@ func (h *OrganizationHandler) ListOrganizationSharedAgents(c *gin.Context) {
 	list, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		if errors.Is(err, service.ErrTenantNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
+			_ = c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared agents: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
@@ -1719,7 +1755,8 @@ type SetSharedAgentDisabledByMeRequest struct {
 	Disabled bool   `json:"disabled"`
 }
 
-// SetSharedAgentDisabledByMe sets whether the current tenant has disabled this shared agent for their conversation dropdown
+// SetSharedAgentDisabledByMe sets whether the current tenant has disabled this shared agent for their conversation
+// dropdown
 func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString(types.UserIDContextKey.String())
@@ -1729,7 +1766,7 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 
 	var req SetSharedAgentDisabledByMeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError("Invalid request").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request").WithDetails(err.Error()))
 		return
 	}
 	// Derive sourceTenantID: own agent (current tenant) or from shared list
@@ -1740,22 +1777,27 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 	} else {
 		share, err := h.agentShareService.GetShareByAgentIDForTenant(ctx, tid, req.AgentID, tid)
 		if err != nil || share == nil {
-			c.Error(apperrors.NewForbiddenError("No access to this agent"))
+			_ = c.Error(apperrors.NewForbiddenError("No access to this agent"))
 			return
 		}
 		sourceTenantID = share.SourceTenantID
 	}
 	_ = uid
+	//nolint:lll
 	if err := h.agentShareService.SetSharedAgentDisabledByMe(ctx, tid, req.AgentID, sourceTenantID, req.Disabled); err != nil {
 		logger.Errorf(ctx, "SetSharedAgentDisabledByMe failed: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to update preference"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to update preference"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // toOrgResponse converts an organization to response format
-func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Organization, currentUserID string) types.OrganizationResponse {
+func (h *OrganizationHandler) toOrgResponse(
+	ctx context.Context,
+	org *types.Organization,
+	currentUserID string,
+) types.OrganizationResponse {
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	// Post-Plan-3 the canonical "is the caller the owner side?" check
 	// is tenant-based: org.OwnerTenantID is the pinned column; legacy
@@ -1854,7 +1896,7 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	// Check admin permission: caller's tenant must be org admin.
 	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
-		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
+		_ = c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
 	}
 
@@ -1888,7 +1930,7 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search users: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
 		return
 	}
 
@@ -2017,19 +2059,19 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 	// Check admin permission: caller's tenant must be org admin
 	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
-		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
+		_ = c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
 	}
 
 	var req types.InviteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
 	// Validate role
 	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		_ = c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 		return
 	}
 
@@ -2048,7 +2090,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		// Tenant-id path: validate the tenant exists; pick a sensible
 		// representative when the caller didn't pin one.
 		if _, err := h.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
-			c.Error(apperrors.NewNotFoundError("Workspace not found"))
+			_ = c.Error(apperrors.NewNotFoundError("Workspace not found"))
 			return
 		}
 		if representativeUserID == "" {
@@ -2062,7 +2104,8 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 			// the membership row is keyed by tenant_id, the rep field
 			// is informational — but we strip the inconsistent value
 			// so the audit log doesn't lie.
-			if u, err := h.userService.GetUserByID(ctx, representativeUserID); err != nil || u == nil || u.TenantID != targetTenantID {
+			if u, err := h.userService.GetUserByID(ctx, representativeUserID); err != nil || u == nil ||
+				u.TenantID != targetTenantID {
 				logger.Warnf(ctx, "representative_user_id %s does not belong to tenant %d; dropping",
 					secutils.SanitizeForLog(representativeUserID), targetTenantID)
 				representativeUserID = ""
@@ -2072,7 +2115,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		// Legacy path: resolve target tenant from the user.
 		invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
 		if err != nil {
-			c.Error(apperrors.NewNotFoundError("User not found"))
+			_ = c.Error(apperrors.NewNotFoundError("User not found"))
 			return
 		}
 		targetTenantID = invitedUser.TenantID
@@ -2080,13 +2123,13 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 			representativeUserID = req.UserID
 		}
 	default:
-		c.Error(apperrors.NewValidationError("Either tenant_id or user_id is required"))
+		_ = c.Error(apperrors.NewValidationError("Either tenant_id or user_id is required"))
 		return
 	}
 
 	// Check if target tenant is already a member of this org.
 	if _, memberErr := h.orgService.GetTenantMember(ctx, orgID, targetTenantID); memberErr == nil {
-		c.Error(apperrors.NewValidationError("Workspace is already a member of this organization"))
+		_ = c.Error(apperrors.NewValidationError("Workspace is already a member of this organization"))
 		return
 	}
 
@@ -2094,10 +2137,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 	if err := h.orgService.AddTenantMember(ctx, orgID, targetTenantID, representativeUserID, req.Role); err != nil {
 		logger.Errorf(ctx, "Failed to add member: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
-			c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
+			_ = c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to add member"))
+		_ = c.Error(apperrors.NewInternalServerError("Failed to add member"))
 		return
 	}
 

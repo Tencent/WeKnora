@@ -39,7 +39,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	if sessionID == "" {
 		logger.Error(ctx, "Session ID is empty")
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -47,7 +47,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	messageID := secutils.SanitizeForLog(c.Query("message_id"))
 	if messageID == "" {
 		logger.Error(ctx, "Message ID is empty")
-		c.Error(errors.NewBadRequestError("Missing message ID"))
+		_ = c.Error(errors.NewBadRequestError("Missing message ID"))
 		return
 	}
 
@@ -58,10 +58,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	if err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
 		}
 		return
 	}
@@ -75,7 +75,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// surface as ErrSessionNotFound. Map to 404 so clients can tell
 			// "wrong URL" from a real 5xx instead of seeing a generic 500.
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -85,11 +85,11 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// they must not retry) instead of a retryable 5xx. Mirrors the
 			// ErrSessionNotFound branch above and the kb/doc/chunk not-found fix.
 			logger.Warnf(ctx, "Message not found, session ID: %s, message ID: %s", sessionID, messageID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -106,7 +106,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	events, currentOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(fmt.Sprintf("Failed to get stream data: %s", err.Error())))
+		_ = c.Error(errors.NewInternalServerError(fmt.Sprintf("Failed to get stream data: %s", err.Error())))
 		return
 	}
 
@@ -324,7 +324,7 @@ func (h *Handler) handleAgentEventsForSSE(
 	ctx context.Context,
 	c *gin.Context,
 	sessionID, assistantMessageID, requestID string,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 	waitForTitle bool,
 ) {
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -360,11 +360,11 @@ func (h *Handler) handleAgentEventsForSSE(
 			for _, evt := range events {
 				// Check for stop event
 				if evt.Type == types.ResponseType(event.EventStop) {
-					log.Infof("Detected stop event, triggering stop via EventBus for session=%s", sessionID)
+					log.Infof("Detected stop event, triggering stop via Bus for session=%s", sessionID)
 
-					// Emit stop event to the EventBus to trigger context cancellation
+					// Emit stop event to the Bus to trigger context cancellation
 					if eventBus != nil {
-						eventBus.Emit(ctx, event.Event{
+						_ = eventBus.Emit(ctx, event.Event{
 							Type:      event.EventStop,
 							SessionID: sessionID,
 							Data: event.StopData{
@@ -415,7 +415,11 @@ func (h *Handler) handleAgentEventsForSSE(
 			// Check if stream is completed - wait for title event only if needed and not already received
 			if streamCompleted {
 				if waitForTitle && !titleReceived {
-					log.Infof("Stream completed for session=%s, message=%s, waiting for title event", sessionID, assistantMessageID)
+					log.Infof(
+						"Stream completed for session=%s, message=%s, waiting for title event",
+						sessionID,
+						assistantMessageID,
+					)
 					// Wait up to 3 seconds for title event after completion
 					titleTimeout := time.After(3 * time.Second)
 				titleWaitLoop:

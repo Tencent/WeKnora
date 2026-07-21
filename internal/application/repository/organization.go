@@ -11,11 +11,16 @@ import (
 )
 
 var (
-	ErrOrganizationNotFound   = errors.New("organization not found")
-	ErrOrgMemberNotFound      = errors.New("organization member not found")
+	// ErrOrganizationNotFound is an exported constant.
+	ErrOrganizationNotFound = errors.New("organization not found")
+	// ErrOrgMemberNotFound implements the required behavior.
+	ErrOrgMemberNotFound = errors.New("organization member not found")
+	// ErrOrgMemberAlreadyExists is exported for use by other packages.
 	ErrOrgMemberAlreadyExists = errors.New("member already exists in organization")
-	ErrInviteCodeNotFound     = errors.New("invite code not found")
-	ErrInviteCodeExpired      = errors.New("invite code has expired")
+	// ErrInviteCodeNotFound is exported for use by other packages.
+	ErrInviteCodeNotFound = errors.New("invite code not found")
+	// ErrInviteCodeExpired is a sentinel error.
+	ErrInviteCodeExpired = errors.New("invite code has expired")
 )
 
 // organizationRepository implements OrganizationRepository.
@@ -74,15 +79,19 @@ func (r *organizationRepository) ListByTenantID(ctx context.Context, tenantID ui
 		Where("otm.tenant_id = ?", tenantID).
 		Order("organizations.created_at DESC").
 		Find(&orgs).Error
-
 	if err != nil {
 		return nil, err
 	}
 	return orgs, nil
 }
 
-// ListSearchable lists organizations that are searchable (open for discovery), optionally filtered by name/description/ID
-func (r *organizationRepository) ListSearchable(ctx context.Context, query string, limit int) ([]*types.Organization, error) {
+// ListSearchable lists organizations that are searchable (open for discovery), optionally filtered by
+// name/description/ID
+func (r *organizationRepository) ListSearchable(
+	ctx context.Context,
+	query string,
+	limit int,
+) ([]*types.Organization, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -103,7 +112,8 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 // Update updates an organization (Select ensures zero values like invite_code_validity_days=0 are persisted)
 func (r *organizationRepository) Update(ctx context.Context, org *types.Organization) error {
 	return r.db.WithContext(ctx).Model(&types.Organization{}).Where("id = ?", org.ID).
-		Select("name", "description", "avatar", "require_approval", "searchable", "invite_code_validity_days", "member_limit", "updated_at").
+		Select("name", "description", "avatar", "require_approval", "searchable", "invite_code_validity_days",
+			"member_limit", "updated_at").
 		Updates(org).Error
 }
 
@@ -145,7 +155,12 @@ func (r *organizationRepository) RemoveTenantMember(ctx context.Context, orgID s
 }
 
 // UpdateTenantMemberRole updates the role for a (org, tenant) membership.
-func (r *organizationRepository) UpdateTenantMemberRole(ctx context.Context, orgID string, tenantID uint64, role types.OrgMemberRole) error {
+func (r *organizationRepository) UpdateTenantMemberRole(
+	ctx context.Context,
+	orgID string,
+	tenantID uint64,
+	role types.OrgMemberRole,
+) error {
 	result := r.db.WithContext(ctx).
 		Model(&types.OrganizationTenantMember{}).
 		Where("organization_id = ? AND tenant_id = ?", orgID, tenantID).
@@ -161,14 +176,16 @@ func (r *organizationRepository) UpdateTenantMemberRole(ctx context.Context, org
 }
 
 // ListTenantMembers lists all tenant memberships for an organization.
-func (r *organizationRepository) ListTenantMembers(ctx context.Context, orgID string) ([]*types.OrganizationTenantMember, error) {
+func (r *organizationRepository) ListTenantMembers(
+	ctx context.Context,
+	orgID string,
+) ([]*types.OrganizationTenantMember, error) {
 	var members []*types.OrganizationTenantMember
 	err := r.db.WithContext(ctx).
 		Preload("RepresentativeUser").
 		Where("organization_id = ?", orgID).
 		Order("created_at ASC").
 		Find(&members).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +196,15 @@ func (r *organizationRepository) ListTenantMembers(ctx context.Context, orgID st
 // ErrOrgMemberNotFound when missing. This is the canonical permission
 // check primitive — callers compose this with the share permission
 // to compute effective access.
-func (r *organizationRepository) GetTenantMember(ctx context.Context, orgID string, tenantID uint64) (*types.OrganizationTenantMember, error) {
+func (r *organizationRepository) GetTenantMember(
+	ctx context.Context,
+	orgID string,
+	tenantID uint64,
+) (*types.OrganizationTenantMember, error) {
 	var member types.OrganizationTenantMember
 	err := r.db.WithContext(ctx).
 		Where("organization_id = ? AND tenant_id = ?", orgID, tenantID).
 		First(&member).Error
-
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrOrgMemberNotFound
@@ -196,7 +216,11 @@ func (r *organizationRepository) GetTenantMember(ctx context.Context, orgID stri
 
 // ListTenantMembersByTenantForOrgs returns one membership row per org where
 // the tenant participates (batch).
-func (r *organizationRepository) ListTenantMembersByTenantForOrgs(ctx context.Context, tenantID uint64, orgIDs []string) (map[string]*types.OrganizationTenantMember, error) {
+func (r *organizationRepository) ListTenantMembersByTenantForOrgs(
+	ctx context.Context,
+	tenantID uint64,
+	orgIDs []string,
+) (map[string]*types.OrganizationTenantMember, error) {
 	if len(orgIDs) == 0 {
 		return make(map[string]*types.OrganizationTenantMember), nil
 	}
@@ -227,7 +251,12 @@ func (r *organizationRepository) CountTenantMembers(ctx context.Context, orgID s
 }
 
 // UpdateInviteCode updates the invite code and optional expiry for an organization (expiresAt nil = never expire)
-func (r *organizationRepository) UpdateInviteCode(ctx context.Context, orgID string, inviteCode string, expiresAt *time.Time) error {
+func (r *organizationRepository) UpdateInviteCode(
+	ctx context.Context,
+	orgID string,
+	inviteCode string,
+	expiresAt *time.Time,
+) error {
 	updates := map[string]interface{}{"invite_code": inviteCode, "invite_code_expires_at": expiresAt}
 	return r.db.WithContext(ctx).
 		Model(&types.Organization{}).
@@ -239,6 +268,7 @@ func (r *organizationRepository) UpdateInviteCode(ctx context.Context, orgID str
 // Join Requests
 // ----------------
 
+// ErrJoinRequestNotFound is exported.
 var ErrJoinRequestNotFound = errors.New("join request not found")
 
 // CreateJoinRequest creates a new join request
@@ -247,7 +277,10 @@ func (r *organizationRepository) CreateJoinRequest(ctx context.Context, request 
 }
 
 // GetJoinRequestByID gets a join request by ID
-func (r *organizationRepository) GetJoinRequestByID(ctx context.Context, id string) (*types.OrganizationJoinRequest, error) {
+func (r *organizationRepository) GetJoinRequestByID(
+	ctx context.Context,
+	id string,
+) (*types.OrganizationJoinRequest, error) {
 	var request types.OrganizationJoinRequest
 	err := r.db.WithContext(ctx).
 		Preload("User").
@@ -267,7 +300,11 @@ func (r *organizationRepository) GetJoinRequestByID(ctx context.Context, id stri
 // — the user requesting and the user reviewing may be different humans
 // in the same tenant, but the resource being granted is tenant-level
 // access.
-func (r *organizationRepository) GetPendingJoinRequestByTenant(ctx context.Context, orgID string, tenantID uint64) (*types.OrganizationJoinRequest, error) {
+func (r *organizationRepository) GetPendingJoinRequestByTenant(
+	ctx context.Context,
+	orgID string,
+	tenantID uint64,
+) (*types.OrganizationJoinRequest, error) {
 	var request types.OrganizationJoinRequest
 	err := r.db.WithContext(ctx).
 		Where("organization_id = ? AND tenant_id = ? AND status = ?", orgID, tenantID, types.JoinRequestStatusPending).
@@ -283,10 +320,15 @@ func (r *organizationRepository) GetPendingJoinRequestByTenant(ctx context.Conte
 
 // GetPendingRequestByTenantAndType narrows the (org, tenant) pending
 // dedup query to a specific request_type (join | upgrade).
-func (r *organizationRepository) GetPendingRequestByTenantAndType(ctx context.Context, orgID string, tenantID uint64, requestType types.JoinRequestType) (*types.OrganizationJoinRequest, error) {
+func (r *organizationRepository) GetPendingRequestByTenantAndType(
+	ctx context.Context,
+	orgID string,
+	tenantID uint64,
+	requestType types.JoinRequestType,
+) (*types.OrganizationJoinRequest, error) {
 	var request types.OrganizationJoinRequest
 	err := r.db.WithContext(ctx).
-		Where("organization_id = ? AND tenant_id = ? AND status = ? AND request_type = ?", orgID, tenantID, types.JoinRequestStatusPending, requestType).
+		Where("organization_id = ? AND tenant_id = ? AND status = ? AND request_type = ?", orgID, tenantID, types.JoinRequestStatusPending, requestType). //nolint:lll
 		First(&request).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -298,7 +340,11 @@ func (r *organizationRepository) GetPendingRequestByTenantAndType(ctx context.Co
 }
 
 // ListJoinRequests lists join requests for an organization
-func (r *organizationRepository) ListJoinRequests(ctx context.Context, orgID string, status types.JoinRequestStatus) ([]*types.OrganizationJoinRequest, error) {
+func (r *organizationRepository) ListJoinRequests(
+	ctx context.Context,
+	orgID string,
+	status types.JoinRequestStatus,
+) ([]*types.OrganizationJoinRequest, error) {
 	var requests []*types.OrganizationJoinRequest
 	query := r.db.WithContext(ctx).
 		Preload("User").
@@ -316,7 +362,11 @@ func (r *organizationRepository) ListJoinRequests(ctx context.Context, orgID str
 }
 
 // CountJoinRequests counts join requests for an organization by status
-func (r *organizationRepository) CountJoinRequests(ctx context.Context, orgID string, status types.JoinRequestStatus) (int64, error) {
+func (r *organizationRepository) CountJoinRequests(
+	ctx context.Context,
+	orgID string,
+	status types.JoinRequestStatus,
+) (int64, error) {
 	var count int64
 	query := r.db.WithContext(ctx).Model(&types.OrganizationJoinRequest{}).Where("organization_id = ?", orgID)
 	if status != "" {
@@ -327,7 +377,13 @@ func (r *organizationRepository) CountJoinRequests(ctx context.Context, orgID st
 }
 
 // UpdateJoinRequestStatus updates the status of a join request
-func (r *organizationRepository) UpdateJoinRequestStatus(ctx context.Context, id string, status types.JoinRequestStatus, reviewedBy string, reviewMessage string) error {
+func (r *organizationRepository) UpdateJoinRequestStatus(
+	ctx context.Context,
+	id string,
+	status types.JoinRequestStatus,
+	reviewedBy string,
+	reviewMessage string,
+) error {
 	return r.db.WithContext(ctx).
 		Model(&types.OrganizationJoinRequest{}).
 		Where("id = ?", id).

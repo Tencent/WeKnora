@@ -97,7 +97,9 @@ func (r *dorisRepository) tableExists(ctx context.Context, tableName string) (bo
 
 // createTable 发出 CREATE TABLE DDL。Doris DDL 是同步的（除 ANN 索引构建外），
 // 返回成功即代表表已可写。
-func (r *dorisRepository) createTable(ctx context.Context, tableName string, dimension int, compatMode dorisCompatMode) error {
+func (r *dorisRepository) createTable(
+	ctx context.Context, tableName string, dimension int, compatMode dorisCompatMode,
+) error {
 	buckets := r.bucketsNum
 	if buckets <= 0 {
 		buckets = defaultBucketsNum
@@ -111,7 +113,9 @@ func (r *dorisRepository) createTable(ctx context.Context, tableName string, dim
 	_, err := r.db.ExecContext(ctx, ddl)
 	if err != nil && compatMode == dorisCompatModeLegacy {
 		return fmt.Errorf(
-			"legacy Doris table creation failed: %w. If your Doris build rejects ANN indexes on UNIQUE KEY tables, set %s=%s before creating embedding tables. %s is not interchangeable after %s_* tables are created",
+			"legacy Doris table creation failed: %w. "+
+				"If your Doris build rejects ANN indexes on UNIQUE KEY tables, set %s=%s before creating embedding tables. "+
+				"%s is not interchangeable after %s_* tables are created",
 			err,
 			envDorisCompatMode,
 			dorisCompatModeInnerProductDuplicate,
@@ -140,7 +144,10 @@ func buildCreateTableDDL(tableName string, dimension, buckets, replication int, 
 	if compatMode == dorisCompatModeLegacy {
 		metricType = "cosine_distance"
 		keyMode = "UNIQUE KEY(id)"
-		properties = fmt.Sprintf("\t\"replication_num\"=\"%d\",\n\t\"enable_unique_key_merge_on_write\"=\"true\"", replication)
+		properties = fmt.Sprintf(
+			"\t\"replication_num\"=\"%d\",\n\t\"enable_unique_key_merge_on_write\"=\"true\"",
+			replication,
+		)
 	}
 
 	const tpl = `CREATE TABLE IF NOT EXISTS ` + "`%s`" + ` (
@@ -216,7 +223,7 @@ func (r *dorisRepository) annIndexReady(ctx context.Context, tableName string) (
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -282,7 +289,7 @@ func (r *dorisRepository) listEmbeddingTables(ctx context.Context) ([]string, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var names []string
 	for rows.Next() {
 		var n string

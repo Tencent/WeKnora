@@ -42,21 +42,25 @@ func NewDorisRetrieveEngineRepository(
 	}
 
 	repo := &dorisRepository{
-		db:             db,
-		httpClient:     &http.Client{},
-		feHTTPBase:     strings.TrimRight(feHTTPBase, "/"),
-		username:       username,
-		password:       password,
-		database:       database,
-		tableBaseName:  tableBaseName,
-		bucketsNum:     indexCfg.GetBucketsNum(0),
-		replicationNum: indexCfg.GetReplicationNum(0),
+		db:                  db,
+		httpClient:          &http.Client{},
+		feHTTPBase:          strings.TrimRight(feHTTPBase, "/"),
+		username:            username,
+		password:            password,
+		database:            database,
+		tableBaseName:       tableBaseName,
+		bucketsNum:          indexCfg.GetBucketsNum(0),
+		replicationNum:      indexCfg.GetReplicationNum(0),
 		compatModeRequested: compatMode,
 	}
 	log.Infof("[Doris] Repository initialized: db=%s, base=%s, fe_http=%s, compat_mode=%s",
 		database, tableBaseName, repo.feHTTPBase, repo.compatModeRequested)
 	if os.Getenv(envDorisCompatMode) == "" {
-		log.Infof("[Doris] %s not set, defaulting to %s and probing on first use", envDorisCompatMode, dorisCompatModeAuto)
+		log.Infof(
+			"[Doris] %s not set, defaulting to %s and probing on first use",
+			envDorisCompatMode,
+			dorisCompatModeAuto,
+		)
 	}
 	return repo
 }
@@ -77,7 +81,7 @@ func (r *dorisRepository) EstimateStorageSize(_ context.Context,
 ) int64 {
 	var total int64
 	for _, info := range indexInfoList {
-		emb := toDorisVectorEmbedding(info, params, dorisCompatModeInnerProductDuplicate)
+		emb := toVectorEmbedding(info, params, dorisCompatModeInnerProductDuplicate)
 		total += calculateStorageSize(emb)
 	}
 	return total
@@ -104,9 +108,9 @@ func (r *dorisRepository) BatchSave(ctx context.Context,
 		return err
 	}
 
-	groups := make(map[int][]*DorisVectorEmbedding)
+	groups := make(map[int][]*VectorEmbedding)
 	for _, info := range indexInfoList {
-		emb := toDorisVectorEmbedding(info, additionalParams, compatMode)
+		emb := toVectorEmbedding(info, additionalParams, compatMode)
 		if len(emb.Embedding) == 0 {
 			log.Warnf("[Doris] Skipping empty embedding for chunk %s", info.ChunkID)
 			continue
@@ -146,7 +150,7 @@ func (r *dorisRepository) BatchSave(ctx context.Context,
 // insertRows 按列序拼一条多 VALUES 的 INSERT。embedding 列由于
 // go-sql-driver/mysql 不支持 ARRAY 占位符，必须以字面量形式拼到 SQL 文本中。
 func (r *dorisRepository) insertRows(ctx context.Context,
-	table string, rows []*DorisVectorEmbedding,
+	table string, rows []*VectorEmbedding,
 ) error {
 	if len(rows) == 0 {
 		return nil
@@ -177,7 +181,7 @@ func (r *dorisRepository) insertRows(ctx context.Context,
 
 // replaceRows 在 DUPLICATE KEY 表上显式模拟“按 id 覆盖”的语义。
 func (r *dorisRepository) replaceRows(ctx context.Context,
-	table string, rows []*DorisVectorEmbedding,
+	table string, rows []*VectorEmbedding,
 ) error {
 	rows = dedupeRowsByID(rows)
 	if len(rows) == 0 {
@@ -214,12 +218,12 @@ func (r *dorisRepository) deleteRowsByID(ctx context.Context,
 	return err
 }
 
-func dedupeRowsByID(rows []*DorisVectorEmbedding) []*DorisVectorEmbedding {
+func dedupeRowsByID(rows []*VectorEmbedding) []*VectorEmbedding {
 	if len(rows) < 2 {
 		return rows
 	}
 
-	out := make([]*DorisVectorEmbedding, 0, len(rows))
+	out := make([]*VectorEmbedding, 0, len(rows))
 	positions := make(map[string]int, len(rows))
 	for _, row := range rows {
 		if idx, ok := positions[row.ID]; ok {
@@ -331,7 +335,10 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 	// 使用 HAVING 是因为 score 是 SELECT 列别名，WHERE 阶段还看不到。
 	scoreExpr := fmt.Sprintf("inner_product_approximate(`%s`, %s)", fieldEmbedding, embeddingLiteral(queryEmbedding))
 	if compatMode == dorisCompatModeLegacy {
-		scoreExpr = fmt.Sprintf("(1 - cosine_distance_approximate(`%s`, %s))", fieldEmbedding, embeddingLiteral(queryEmbedding))
+		scoreExpr = fmt.Sprintf(
+			"(1 - cosine_distance_approximate(`%s`, %s))",
+			fieldEmbedding, embeddingLiteral(queryEmbedding),
+		)
 	}
 	stmt := fmt.Sprintf(
 		"SELECT %s, %s AS score "+
@@ -350,7 +357,7 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 	if err != nil {
 		return nil, r.wrapVectorRetrieveError(table, compatMode, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results, err := scanRetrieveRows(rows, types.MatchTypeEmbedding)
 	if err != nil {
@@ -462,7 +469,7 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 			break
 		}
 
-		var targets []*DorisVectorEmbedding
+		var targets []*VectorEmbedding
 		for _, src := range batch {
 			targetChunkID, ok := sourceToTargetChunkIDMap[src.ChunkID]
 			if !ok {
@@ -476,7 +483,7 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 			}
 
 			targetSourceID := translateSourceID(src.SourceID, src.ChunkID, targetChunkID)
-			targets = append(targets, &DorisVectorEmbedding{
+			targets = append(targets, &VectorEmbedding{
 				ID:              uuid.New().String(),
 				Content:         src.Content,
 				SourceID:        targetSourceID,
@@ -513,16 +520,16 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 // 私有辅助
 // ---------------------------------------------------------------------------
 
-// toDorisVectorEmbedding 把 IndexInfo + 上层传入的 embedding 映射 转换为
+// toVectorEmbedding 把 IndexInfo + 上层传入的 embedding 映射 转换为
 // Doris 行模型。Embedding 通过 additionalParams[fieldEmbedding] 中的
 // map[string][]float32 按 SourceID 取出，与 Qdrant/Milvus 完全一致。
 // inner_product_duplicate 模式会先单位化，legacy 模式保留原始向量。
-func toDorisVectorEmbedding(
+func toVectorEmbedding(
 	info *types.IndexInfo,
 	additionalParams map[string]any,
 	compatMode dorisCompatMode,
-) *DorisVectorEmbedding {
-	emb := &DorisVectorEmbedding{
+) *VectorEmbedding {
+	emb := &VectorEmbedding{
 		ID:              info.ID,
 		Content:         info.Content,
 		SourceID:        info.SourceID,
@@ -549,7 +556,10 @@ func toDorisVectorEmbedding(
 func (r *dorisRepository) wrapVectorRetrieveError(table string, compatMode dorisCompatMode, err error) error {
 	if compatMode == dorisCompatModeLegacy {
 		return fmt.Errorf(
-			"vector retrieve %s in Doris compat mode %s: %w. If your Doris build does not support cosine_distance_approximate or ANN on UNIQUE KEY tables, set %s=%s before creating embedding tables. %s is not interchangeable after %s_* tables are created",
+			"vector retrieve %s in Doris compat mode %s: %w. "+
+				"If your Doris build does not support cosine_distance_approximate or ANN on UNIQUE KEY tables, "+
+				"set %s=%s before creating embedding tables. "+
+				"%s is not interchangeable after %s_* tables are created",
 			table,
 			compatMode,
 			err,
@@ -631,8 +641,8 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 //
 // 与 scanRetrieveRows 不同，这里需要 embedding 字段（去复制原始向量）。
 // Doris 的 ARRAY<FLOAT> 通过 mysql 协议返回的是字符串字面量 "[1,2,3]"。
-func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
-	var out []*DorisVectorEmbedding
+func scanCopyRows(rows *sql.Rows) ([]*VectorEmbedding, error) {
+	var out []*VectorEmbedding
 	for rows.Next() {
 		var (
 			id, content, sourceID, chunkID      string
@@ -649,7 +659,7 @@ func scanCopyRows(rows *sql.Rows) ([]*DorisVectorEmbedding, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse embedding: %w", err)
 		}
-		out = append(out, &DorisVectorEmbedding{
+		out = append(out, &VectorEmbedding{
 			ID:              id,
 			Content:         content,
 			SourceID:        sourceID,
@@ -678,7 +688,7 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 // calculateStorageSize 估算单行的存储成本。
 //
 // 与 Qdrant 一致：payload 字符串字节 + 向量 (dim*4) + HNSW M*2*8 + 元数据 24。
-func calculateStorageSize(emb *DorisVectorEmbedding) int64 {
+func calculateStorageSize(emb *VectorEmbedding) int64 {
 	var payload int64
 	payload += int64(len(emb.Content))
 	payload += int64(len(emb.SourceID))

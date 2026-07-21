@@ -55,7 +55,7 @@ func (m *Manager) IsEnabled() bool {
 
 // Initialize discovers all skills and caches their metadata
 // This should be called at startup
-func (m *Manager) Initialize(ctx context.Context) error {
+func (m *Manager) Initialize(_ context.Context) error {
 	if !m.enabled {
 		return nil
 	}
@@ -114,7 +114,7 @@ func (m *Manager) GetAllMetadata() []*SkillMetadata {
 }
 
 // LoadSkill loads the full instructions of a skill (Level 2)
-func (m *Manager) LoadSkill(ctx context.Context, skillName string) (*Skill, error) {
+func (m *Manager) LoadSkill(_ context.Context, skillName string) (*Skill, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -141,7 +141,7 @@ func (m *Manager) isSkillAllowed(skillName string) bool {
 }
 
 // ReadSkillFile reads an additional file from a skill directory (Level 3)
-func (m *Manager) ReadSkillFile(ctx context.Context, skillName, filePath string) (string, error) {
+func (m *Manager) ReadSkillFile(_ context.Context, skillName, filePath string) (string, error) {
 	if !m.enabled {
 		return "", fmt.Errorf("skills are not enabled")
 	}
@@ -159,7 +159,7 @@ func (m *Manager) ReadSkillFile(ctx context.Context, skillName, filePath string)
 }
 
 // ListSkillFiles lists all files in a skill directory
-func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]string, error) {
+func (m *Manager) ListSkillFiles(_ context.Context, skillName string) ([]string, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -172,7 +172,12 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 }
 
 // ExecuteScript executes a script from a skill in the sandbox
-func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
+func (m *Manager) ExecuteScript(
+	ctx context.Context,
+	skillName, scriptPath string,
+	args []string,
+	stdin string,
+) (*sandbox.ExecuteResult, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -215,7 +220,7 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 }
 
 // GetSkillInfo returns detailed information about a skill
-func (m *Manager) GetSkillInfo(ctx context.Context, skillName string) (*SkillInfo, error) {
+func (m *Manager) GetSkillInfo(_ context.Context, skillName string) (*SkillInfo, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -253,7 +258,7 @@ type SkillInfo struct {
 }
 
 // Reload refreshes the skill cache by rediscovering all skills
-func (m *Manager) Reload(ctx context.Context) error {
+func (m *Manager) Reload(_ context.Context) error {
 	if !m.enabled {
 		return nil
 	}

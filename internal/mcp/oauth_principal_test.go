@@ -71,7 +71,12 @@ func (r *fakeOAuthRepo) SaveTokenForPrincipal(_ context.Context, token *types.MC
 func (r *fakeOAuthRepo) DeleteToken(
 	ctx context.Context, tenantID uint64, userID, serviceID string,
 ) error {
-	return r.DeleteTokenForPrincipal(ctx, tenantID, types.Principal{Type: types.PrincipalWebUser, ID: userID}, serviceID)
+	return r.DeleteTokenForPrincipal(
+		ctx,
+		tenantID,
+		types.Principal{Type: types.PrincipalWebUser, ID: userID},
+		serviceID,
+	)
 }
 
 func (r *fakeOAuthRepo) DeleteTokenForPrincipal(

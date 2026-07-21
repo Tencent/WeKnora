@@ -20,9 +20,11 @@ func (f *fakeAuditSvc) Log(_ context.Context, e *types.AuditLog) error {
 	f.logged = append(f.logged, e)
 	return f.err
 }
+
 func (f *fakeAuditSvc) LogDenied(context.Context, *gin.Context, uint64, string, string, types.TenantRole) error {
 	return nil
 }
+
 func (f *fakeAuditSvc) List(context.Context, uint64, *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
 	return nil, nil
 }
@@ -68,7 +70,7 @@ func TestAuditSinkAdapter_SkipsWithoutTenant(t *testing.T) {
 	}
 }
 
-func TestAuditSinkAdapter_NilServiceNoPanic(t *testing.T) {
+func TestAuditSinkAdapter_NilServiceNoPanic(_ *testing.T) {
 	sink := newAuditSinkAdapter(nil)
 	sink.EmitIndexCreated(ctxWithTenant(1), "x", 1) // must not panic
 }

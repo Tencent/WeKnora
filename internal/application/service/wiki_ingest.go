@@ -255,6 +255,7 @@ type WikiRetractPayload struct {
 	PageSlugs       []string `json:"page_slugs"`
 }
 
+// WikiOpIngest and related constants.
 const (
 	WikiOpIngest  = "ingest"
 	WikiOpRetract = "retract"
@@ -637,7 +638,11 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 // matches the legacy "LTrim peekedCount entries" semantics, where
 // duplicates collapsed by the consumer were also drained from the
 // list once their canonical sibling had been processed.
-func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64, err error) {
+func (s *wikiIngestService) peekPendingList(
+	ctx context.Context,
+	kbID string,
+	limit int,
+) (ops []WikiPendingOp, peekedIDs []int64, err error) {
 	if s.pendingRepo == nil {
 		return nil, nil, nil
 	}
@@ -664,7 +669,11 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, li
 // a crashed worker) are recovered. Dedup / peekedIDs semantics match
 // peekPendingList; the returned peekedIDs are the claimed rows that the
 // caller must DeleteByIDs on success or ReleaseByIDs to retry.
-func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64, err error) {
+func (s *wikiIngestService) claimPendingList(
+	ctx context.Context,
+	kbID string,
+	limit int,
+) (ops []WikiPendingOp, peekedIDs []int64, err error) {
 	if s.pendingRepo == nil {
 		return nil, nil, nil
 	}
@@ -845,7 +854,12 @@ func (s *wikiIngestService) scheduleStaleClaimRecheck(ctx context.Context, paylo
 		return false
 	}
 
-	logger.Infof(ctx, "wiki ingest: %d rows for KB %s held by fresh claims, arming stale-claim recheck", count, payload.KnowledgeBaseID)
+	logger.Infof(
+		ctx,
+		"wiki ingest: %d rows for KB %s held by fresh claims, arming stale-claim recheck",
+		count,
+		payload.KnowledgeBaseID,
+	)
 
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
@@ -871,7 +885,10 @@ func (s *wikiIngestService) scheduleStaleClaimRecheck(ctx context.Context, paylo
 // db ids of EVERY row (including dedup-collapsed ones) so the caller can
 // drain them all at trim time. Shared by peekPendingList (no claim) and
 // claimPendingList (claimed rows).
-func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types.TaskPendingOp) (ops []WikiPendingOp, peekedIDs []int64) {
+func (s *wikiIngestService) decodePendingRows(
+	ctx context.Context,
+	rows []*types.TaskPendingOp,
+) (ops []WikiPendingOp, peekedIDs []int64) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -975,7 +992,11 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 //     task_dead_letters and DeleteByIDs to remove it from the queue.
 //     Settlement failures are returned so the caller does not mark claims
 //     settled while rows are still claimed or undeleted.
-func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp) error {
+func (s *wikiIngestService) requeueFailedOps(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	ops []WikiPendingOp,
+) error {
 	if s.pendingRepo == nil || len(ops) == 0 {
 		return nil
 	}
@@ -988,7 +1009,13 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		}
 		count, err := s.pendingRepo.IncrFailCount(ctx, op.dbID)
 		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s (id=%d): %v", op.KnowledgeID, op.dbID, err)
+			logger.Warnf(
+				ctx,
+				"wiki ingest: failed to increment fail count for %s (id=%d): %v",
+				op.KnowledgeID,
+				op.dbID,
+				err,
+			)
 			settleErrs = append(settleErrs, fmt.Errorf("increment fail count id=%d: %w", op.dbID, err))
 			// Without a fresh count we can't tell whether to drop. Be
 			// conservative: leave the row in place; the next PeekBatch
@@ -1005,7 +1032,14 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
 				settleErrs = append(settleErrs, fmt.Errorf("release retry claim id=%d: %w", op.dbID, err))
 			}
-			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+			logger.Infof(
+				ctx,
+				"wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)",
+				op.KnowledgeID,
+				op.DocTitle,
+				count,
+				wikiMaxFailRetries,
+			)
 			continue
 		}
 
@@ -1017,7 +1051,14 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		if op.Op == WikiOpIngest {
 			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
 		}
-		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+		logger.Warnf(
+			ctx,
+			"wiki ingest: dropping op %s (%s) after %d failures (limit %d)",
+			op.KnowledgeID,
+			op.DocTitle,
+			count,
+			wikiMaxFailRetries,
+		)
 		if s.deadLetterRepo != nil {
 			payloadBytes, _ := json.Marshal(op)
 			if dlErr := s.deadLetterRepo.Insert(ctx, &types.TaskDeadLetter{
@@ -1481,7 +1522,12 @@ func stripDeadWikiLinks(
 //  4. Persist the rewritten content via UpdateAutoLinkedContent so
 //     the version counter stays unchanged (this is a maintenance
 //     pass, not a user-visible edit).
-func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, affectedSlugs []string, batchCtx *WikiBatchContext) {
+func (s *wikiIngestService) cleanDeadLinks(
+	ctx context.Context,
+	kbID string,
+	affectedSlugs []string,
+	batchCtx *WikiBatchContext,
+) {
 	if len(affectedSlugs) == 0 {
 		return
 	}
@@ -1769,7 +1815,10 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 // a defense-in-depth measure: an old buggy ingest that mistakenly
 // stamped a system page with a knowledge ref would otherwise show up
 // in the reparse "old set" and confuse the reduce stage.
-func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context, kbID, knowledgeID string) map[string]bool {
+func (s *wikiIngestService) getExistingPageSlugsForKnowledge(
+	ctx context.Context,
+	kbID, knowledgeID string,
+) map[string]bool {
 	slugs, err := s.wikiService.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: ListSlugsBySourceRef(%s) failed: %v", knowledgeID, err)
@@ -1904,13 +1953,23 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// pages via the lite projection. CountByType lets us tell the
 		// LLM "showing N of M" so it can frame the intro honestly when
 		// the KB is bigger than what we're sampling.
-		recentSummaries, listErr := s.wikiService.ListByTypeRecent(ctx, payload.KnowledgeBaseID, types.WikiPageTypeSummary, indexIntroSummaryCap)
+		recentSummaries, listErr := s.wikiService.ListByTypeRecent(
+			ctx,
+			payload.KnowledgeBaseID,
+			types.WikiPageTypeSummary,
+			indexIntroSummaryCap,
+		)
 		if listErr != nil {
 			return listErr
 		}
 		var docSummaries strings.Builder
 		for _, e := range recentSummaries {
-			fmt.Fprintf(&docSummaries, "<document>\n<title>%s</title>\n<summary>%s</summary>\n</document>\n\n", e.Title, e.Summary)
+			fmt.Fprintf(
+				&docSummaries,
+				"<document>\n<title>%s</title>\n<summary>%s</summary>\n</document>\n\n",
+				e.Title,
+				e.Summary,
+			)
 		}
 		// Best-effort total count for the framing hint. CountByType
 		// counts every page type; we need just summary, so we read
@@ -1923,7 +1982,11 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		}
 		framing := ""
 		if int(totalSummaries) > len(recentSummaries) && len(recentSummaries) > 0 {
-			framing = fmt.Sprintf("(showing %d most recent of %d total documents)\n\n", len(recentSummaries), totalSummaries)
+			framing = fmt.Sprintf(
+				"(showing %d most recent of %d total documents)\n\n",
+				len(recentSummaries),
+				totalSummaries,
+			)
 		}
 		if docSummaries.Len() == 0 {
 			docSummaries.WriteString("(no documents yet)")
@@ -1946,14 +2009,19 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// would re-flood the context every batch, and the
 		// change-description block already encodes the "what just
 		// changed" signal the prompt is asking for.
-		updatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroUpdatePrompt, map[string]string{
-			"ExistingIntro":      existingIntro,
-			"ChangeDescription":  changeDesc,
-			"DocumentSummaries":  "",
-			"Language":           lang,
-			"CustomInstructions": customInstructions,
-			"InstructionScope":   "wiki_content",
-		})
+		updatedIntro, genErr := s.generateWithTemplate(
+			ctx,
+			chatModel,
+			agent.WikiIndexIntroUpdatePrompt,
+			map[string]string{
+				"ExistingIntro":      existingIntro,
+				"ChangeDescription":  changeDesc,
+				"DocumentSummaries":  "",
+				"Language":           lang,
+				"CustomInstructions": customInstructions,
+				"InstructionScope":   "wiki_content",
+			},
+		)
 		if genErr != nil {
 			intro = existingIntro // keep existing on error
 		} else {
@@ -2006,7 +2074,11 @@ func splitSummaryLine(raw string) (summary string, content string) {
 // rewrote the entire log page's TEXT column on every ingest/retract op —
 // O(n^2) write amplification as the log grew. The batch writer now uses
 // wikiLogEntryService.AppendBatch instead; see ProcessWikiIngest.
-func (s *wikiIngestService) buildLogEntry(tenantID uint64, kbID, action, knowledgeID, docTitle, summary string, pagesAffected []types.WikiLogPageRef) *types.WikiLogEntry {
+func (s *wikiIngestService) buildLogEntry(
+	tenantID uint64,
+	kbID, action, knowledgeID, docTitle, summary string,
+	pagesAffected []types.WikiLogPageRef,
+) *types.WikiLogEntry {
 	// Copy pagesAffected so the entry does not alias caller-owned slices.
 	// The batch accumulates SlugUpdate results that may be reused downstream.
 	var pages types.WikiLogPageRefs
@@ -2194,7 +2266,12 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 
 	validMerge := func(srcSlug, dstSlug string) bool {
 		if !existingSlugs[dstSlug] {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (target slug does not exist in candidate set)", srcSlug, dstSlug)
+			logger.Warnf(
+				ctx,
+				"wiki ingest: dedup rejected %s → %s (target slug does not exist in candidate set)",
+				srcSlug,
+				dstSlug,
+			)
 			return false
 		}
 		srcSlash := strings.Index(srcSlug, "/")
@@ -2211,7 +2288,14 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		srcPrefix := srcSlug[:srcSlash+1]
 		dstPrefix := dstSlug[:dstSlash+1]
 		if srcPrefix != dstPrefix {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (type mismatch: %s vs %s)", srcSlug, dstSlug, srcPrefix, dstPrefix)
+			logger.Warnf(
+				ctx,
+				"wiki ingest: dedup rejected %s → %s (type mismatch: %s vs %s)",
+				srcSlug,
+				dstSlug,
+				srcPrefix,
+				dstPrefix,
+			)
 			return false
 		}
 		return true
@@ -2250,7 +2334,12 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 // transient 504 from the upstream gateway used to drop the document's
 // summary page permanently. Retries plus failedOps requeuing (see
 // mapOneDocument) turn those events into at-most-a-few-minute hiccups.
-func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, error) {
+func (s *wikiIngestService) generateWithTemplate(
+	ctx context.Context,
+	chatModel chat.Chat,
+	promptTpl string,
+	data map[string]string,
+) (string, error) {
 	tmpl, err := template.New("wiki").Parse(promptTpl)
 	if err != nil {
 		return "", fmt.Errorf("parse template: %w", err)
@@ -2271,7 +2360,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
 		response, err := chatModel.Chat(ctx, []chat.Message{
 			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
+		}, &chat.Options{
 			Temperature: 0.3,
 			Thinking:    &thinking,
 		})
@@ -2373,7 +2462,8 @@ func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledge
 		return true
 	}
 	if s.redisClient != nil {
-		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil && exists > 0 {
+		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil &&
+			exists > 0 {
 			return true
 		}
 	}
@@ -2778,13 +2868,14 @@ func sanitizeJSONString(s string) string {
 	escape := false
 	for _, r := range s {
 		if escape {
-			if r == '\n' {
+			switch r {
+			case '\n':
 				buf.WriteString(`n`)
-			} else if r == '\r' {
+			case '\r':
 				buf.WriteString(`r`)
-			} else if r == '\t' {
+			case '\t':
 				buf.WriteString(`t`)
-			} else {
+			default:
 				buf.WriteRune(r)
 			}
 			escape = false

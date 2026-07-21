@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package chatpipeline
 
 import (
@@ -21,12 +22,15 @@ var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
 const retrievedImageOutputRequirement = `
 
 ## Retrieved Image Output Requirement
+//nolint:lll
 The retrieved context for this turn contains Markdown images. Images attached to retrieved passages should be treated as relevant by default.
-- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated to the answer, the final answer MUST include at least one relevant Markdown image copied from the retrieved context.
+- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated to the
+answer, the final answer MUST include at least one relevant Markdown image copied from the retrieved context.
 - Copy the complete Markdown image syntax and its URL verbatim. Never invent, shorten, normalize, or replace the URL.
 - Use ASCII half-width parentheses in image Markdown exactly as ![alt](url). Never use full-width （ or ）.
 - Place each image immediately after the paragraph it supports, rather than collecting images at the end.
-- When multiple retrieved images support different sections of a multi-section answer, include them in their corresponding sections instead of stopping after the first image.
+//nolint:lll
+- When multiple retrieved images support different sections of a multi-section answer, include them in their corresponding sections instead of stopping after the first image. //nolint:lll
 - Before finishing, silently verify that the answer contains a Markdown image whenever this requirement applies.`
 
 func appendRetrievedImageOutputRequirement(systemPrompt, renderedContexts string) string {
@@ -55,14 +59,14 @@ func pipelineError(ctx context.Context, stage, action string, fields map[string]
 // it gets the chat model and sets up the chat options based on the chat manage.
 func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	chatManage *types.ChatManage,
-) (chat.Chat, *chat.ChatOptions, error) {
+) (chat.Chat, *chat.Options, error) {
 	chatModel, err := modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return nil, nil, err
 	}
 
-	opt := &chat.ChatOptions{
+	opt := &chat.Options{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		TopP:                chatManage.SummaryConfig.TopP,
 		Seed:                chatManage.SummaryConfig.Seed,

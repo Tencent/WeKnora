@@ -33,15 +33,18 @@ import (
 	"strings"
 )
 
+// Ngrams is an exported type.
 type Ngrams struct {
 	ngrams    map[string]int
 	exclusive bool
 }
 
+// NewNgrams is an exported function.
 func NewNgrams(exclusive bool) *Ngrams {
 	return &Ngrams{ngrams: make(map[string]int), exclusive: exclusive}
 }
 
+// Add implements the required interface method.
 func (n *Ngrams) Add(o string) {
 	if n.exclusive {
 		n.ngrams[o] = 1
@@ -50,10 +53,12 @@ func (n *Ngrams) Add(o string) {
 	}
 }
 
+// Len implements the required interface method.
 func (n *Ngrams) Len() int {
 	return len(n.ngrams)
 }
 
+// Intersection implements the required interface method.
 func (n *Ngrams) Intersection(o *Ngrams) *Ngrams {
 	intersection := NewNgrams(n.exclusive)
 	for k := range n.ngrams {
@@ -64,12 +69,14 @@ func (n *Ngrams) Intersection(o *Ngrams) *Ngrams {
 	return intersection
 }
 
+// BatchAdd implements the required interface method.
 func (n *Ngrams) BatchAdd(o []string) {
 	for _, v := range o {
 		n.Add(v)
 	}
 }
 
+// Union implements the required interface method.
 func (n *Ngrams) Union(others ...*Ngrams) *Ngrams {
 	union := NewNgrams(n.exclusive)
 	for k := range n.ngrams {
@@ -107,7 +114,7 @@ func lcs(x, y []string) [][]int {
 			if x[i-1] == y[j-1] {
 				table[i][j] = table[i-1][j-1] + 1
 			} else {
-				table[i][j] = max(table[i-1][j], table[i][j-1])
+				table[i][j] = maxInt(table[i-1][j], table[i][j-1])
 			}
 		}
 	}
@@ -126,9 +133,8 @@ func reconLcs(x, y []string, exclusive bool) *Ngrams {
 			return append(reconFunc(i-1, j-1), x[i-1])
 		} else if table[i-1][j] > table[i][j-1] {
 			return reconFunc(i-1, j)
-		} else {
-			return reconFunc(i, j-1)
 		}
+		return reconFunc(i, j-1)
 	}
 
 	reconList := reconFunc(i, j)
@@ -154,9 +160,8 @@ func rougeN(evaluatedSentences, referenceSentences []string, n int, rawResults, 
 		results["ref"] = float64(referenceCount)
 		results["overlap"] = float64(overlappingCount)
 		return results
-	} else {
-		return calculateRougeN(evaluatedCount, referenceCount, overlappingCount)
 	}
+	return calculateRougeN(evaluatedCount, referenceCount, overlappingCount)
 }
 
 func calculateRougeN(evaluatedCount, referenceCount, overlappingCount int) map[string]float64 {
@@ -241,10 +246,9 @@ func rougeLSummaryLevel(
 		results["ref"] = float64(m)
 		results["overlap"] = float64(llcs)
 		return results
-	} else {
-		results["f"] = fLcs
-		results["p"] = pLcs
-		results["r"] = rLcs
-		return results
 	}
+	results["f"] = fLcs
+	results["p"] = pLcs
+	results["r"] = rLcs
+	return results
 }

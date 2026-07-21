@@ -26,12 +26,12 @@ type streamLLMResult struct {
 	StreamError      string // error message from stream (e.g., timeout), kept separate from Content
 }
 
-// streamLLMToEventBus streams LLM response through EventBus (generic method)
+// streamLLMToBus streams LLM response through Bus (generic method)
 // emitFunc: callback to emit each chunk event
-func (e *AgentEngine) streamLLMToEventBus(
+func (e *Engine) streamLLMToBus(
 	ctx context.Context,
 	messages []chat.Message,
-	opts *chat.ChatOptions,
+	opts *chat.Options,
 	emitFunc func(chunk *types.StreamResponse, fullContent string),
 ) (*streamLLMResult, error) {
 	logger.Debugf(ctx, "[Agent][Stream] Starting LLM stream with %d messages", len(messages))
@@ -138,8 +138,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	return result, nil
 }
 
-// streamThinkingToEventBus streams the thinking process through EventBus
-func (e *AgentEngine) streamThinkingToEventBus(
+// streamThinkingToBus streams the thinking process through Bus
+func (e *Engine) streamThinkingToBus(
 	ctx context.Context,
 	messages []chat.Message,
 	tools []chat.Tool,
@@ -150,7 +150,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking)
 
 	parallelToolCalls := true
-	opts := &chat.ChatOptions{
+	opts := &chat.Options{
 		Temperature:       e.config.Temperature,
 		Tools:             tools,
 		Thinking:          e.config.Thinking,
@@ -161,7 +161,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	thinkingToolIDs := make(map[string]string) // tool_call_id -> event ID for thinking tool streams
 
 	// Track which event types we emitted for diagnostics
-	emittedEventTypes := make(map[string]int)
+	emittedTypes := make(map[string]int)
 
 	// Generate IDs for this stream
 	thinkingID := generateEventID("thinking")
@@ -181,8 +181,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		if content == "" && !done {
 			return
 		}
-		emittedEventTypes["thought_chunk"]++
-		e.eventBus.Emit(ctx, event.Event{
+		emittedTypes["thought_chunk"]++
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        thinkingID,
 			Type:      event.EventAgentThought,
 			SessionID: sessionID,
@@ -218,8 +218,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		}
 		closeThinking()
 		answerStreamed = true
-		emittedEventTypes["final_answer_chunk"]++
-		e.eventBus.Emit(ctx, event.Event{
+		emittedTypes["final_answer_chunk"]++
+		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
 			Type:      event.EventAgentFinalAnswer,
 			SessionID: sessionID,
@@ -230,19 +230,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		})
 	}
 
-	llmResult, err := e.streamLLMToEventBus(
+	llmResult, err := e.streamLLMToBus(
 		ctx,
 		messages,
 		opts,
-		func(chunk *types.StreamResponse, fullContent string) {
+		func(chunk *types.StreamResponse, _ string) {
 			if chunk.ResponseType == types.ResponseTypeToolCall && chunk.Data != nil {
 				toolCallID, _ := chunk.Data["tool_call_id"].(string)
 				toolName, _ := chunk.Data["tool_name"].(string)
 
 				if toolCallID != "" && toolName != "" && !pendingToolCalls[toolCallID] {
 					pendingToolCalls[toolCallID] = true
-					emittedEventTypes["tool_call_pending"]++
-					e.eventBus.Emit(ctx, event.Event{
+					emittedTypes["tool_call_pending"]++
+					_ = e.eventBus.Emit(ctx, event.Event{
 						ID:        fmt.Sprintf("%s-tool-call-pending", toolCallID),
 						Type:      event.EventAgentToolCall,
 						SessionID: sessionID,
@@ -264,8 +264,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 						eventID = generateEventID("thinking-tool")
 						thinkingToolIDs[toolCallID] = eventID
 					}
-					emittedEventTypes["thinking_tool_chunk"]++
-					e.eventBus.Emit(ctx, event.Event{
+					emittedTypes["thinking_tool_chunk"]++
+					_ = e.eventBus.Emit(ctx, event.Event{
 						ID:        eventID,
 						Type:      event.EventAgentThought,
 						SessionID: sessionID,
@@ -324,7 +324,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 
 	// Emit diagnostics: helps identify when answer content went to "thought" vs "final_answer" events
 	logger.Infof(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d, emitted_events=%v",
-		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
+		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedTypes)
 
 	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
 
@@ -356,7 +356,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 // and handles graceful degradation when prior tool results exist.
 // Returns nil response (with state.IsComplete=true) when graceful degradation succeeds.
 // Returns a non-nil error only when the call fails irrecoverably.
-func (e *AgentEngine) callLLMWithRetry(
+func (e *Engine) callLLMWithRetry(
 	ctx context.Context, messages []chat.Message, tools []chat.Tool,
 	state *types.AgentState, query string, iteration int, sessionID string,
 ) (*types.ChatResponse, error) {
@@ -402,7 +402,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	// Sanitize messages before sending to LLM (fix consecutive roles, orphaned tool results)
 	messages = agenttools.SanitizeMessages(messages)
 
-	response, err := e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
+	response, err := e.streamThinkingToBus(ctx, messages, tools, iteration, sessionID)
 	if err != nil && isTransientError(err) {
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
@@ -411,7 +411,7 @@ func (e *AgentEngine) callLLMWithRetry(
 				round, retry, maxLLMRetries, retryDelay, err)
 			time.Sleep(retryDelay)
 
-			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
+			response, err = e.streamThinkingToBus(ctx, messages, tools, iteration, sessionID)
 			if err == nil || !isTransientError(err) {
 				break
 			}
@@ -434,7 +434,7 @@ func (e *AgentEngine) callLLMWithRetry(
 				"steps":      len(state.RoundSteps),
 				"tool_calls": totalTC,
 			})
-			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); synthErr != nil {
+			if synthErr := e.streamFinalAnswerToBus(ctx, query, state, sessionID); synthErr != nil {
 				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}

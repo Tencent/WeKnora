@@ -7,12 +7,12 @@ import (
 	"os"
 	"testing"
 
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }
@@ -41,7 +41,7 @@ func TestConnector_Validate_Success(t *testing.T) {
 }
 
 func TestConnector_Validate_Bad401(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
 	}))
 	defer srv.Close()
@@ -130,12 +130,31 @@ func TestConnector_FetchAll_Markdown(t *testing.T) {
 	defer f.Close()
 	// Book 7 → 2 docs; one published Doc, one draft (filtered)
 	f.handleJSON("/api/v2/repos/7/docs", 200, v2DocListResponse{Data: []v2Doc{
-		{ID: 101, Type: "Doc", Status: "1", Title: "Hello", Slug: "hello", BookID: 7, ContentUpdatedAt: "2026-04-20T10:00:00Z", WordCount: 42},
-		{ID: 102, Type: "Doc", Status: "0", Title: "Draft", Slug: "draft", BookID: 7, ContentUpdatedAt: "2026-04-20T11:00:00Z"}, // draft, skipped
+		{
+			ID:               101,
+			Type:             "Doc",
+			Status:           "1",
+			Title:            "Hello",
+			Slug:             "hello",
+			BookID:           7,
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+			WordCount:        42,
+		},
+		{
+			ID:               102,
+			Type:             "Doc",
+			Status:           "0",
+			Title:            "Draft",
+			Slug:             "draft",
+			BookID:           7,
+			ContentUpdatedAt: "2026-04-20T11:00:00Z",
+		}, // draft, skipped
 	}})
 	f.handleJSON("/api/v2/repos/docs/101", 200, v2DocDetailResponse{
-		Data: v2DocDetail{ID: 101, Title: "Hello", Body: "# Hello\n\nworld", Format: "markdown", Status: "1",
-			ContentUpdatedAt: "2026-04-20T10:00:00Z", Book: v2Repo{Namespace: "alice/demo"}},
+		Data: v2DocDetail{
+			ID: 101, Title: "Hello", Body: "# Hello\n\nworld", Format: "markdown", Status: "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z", Book: v2Repo{Namespace: "alice/demo"},
+		},
 	})
 
 	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"7"}), []string{"7"})
@@ -173,7 +192,7 @@ func TestConnector_FetchAll_DocDetailError_EmitsPlaceholder(t *testing.T) {
 		{ID: 301, Type: "Doc", Status: "1", Title: "Broken", Slug: "broken", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 		{ID: 302, Type: "Doc", Status: "1", Title: "OK", Slug: "ok", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 	}})
-	f.mux.HandleFunc("/api/v2/repos/docs/301", func(w http.ResponseWriter, r *http.Request) {
+	f.mux.HandleFunc("/api/v2/repos/docs/301", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest) // 4xx is non-retriable, bubbles up as an error
 		_, _ = w.Write([]byte(`{"message":"broken"}`))
 	})
@@ -204,7 +223,8 @@ func TestConnector_FetchAll_DocDetailError_EmitsPlaceholder(t *testing.T) {
 	if placeholder.Metadata["channel"] != types.ChannelYuque {
 		t.Errorf("placeholder channel = %q", placeholder.Metadata["channel"])
 	}
-	if placeholder.Metadata["book_id"] != "9" || placeholder.Metadata["doc_id"] != "301" || placeholder.Metadata["slug"] != "broken" {
+	if placeholder.Metadata["book_id"] != "9" || placeholder.Metadata["doc_id"] != "301" ||
+		placeholder.Metadata["slug"] != "broken" {
 		t.Errorf("placeholder missing traceability metadata: %+v", placeholder.Metadata)
 	}
 	if len(placeholder.Content) != 0 {
@@ -224,10 +244,24 @@ func TestConnector_FetchAll_LakeFormatIngestedAsMarkdown(t *testing.T) {
 		{ID: 402, Type: "Doc", Status: "1", Title: "MD Doc", Slug: "md", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 	}})
 	f.handleJSON("/api/v2/repos/docs/401", 200, v2DocDetailResponse{
-		Data: v2DocDetail{ID: 401, Title: "Lake Doc", Format: "lake", Body: "# lake body as markdown", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		Data: v2DocDetail{
+			ID:               401,
+			Title:            "Lake Doc",
+			Format:           "lake",
+			Body:             "# lake body as markdown",
+			Status:           "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+		},
 	})
 	f.handleJSON("/api/v2/repos/docs/402", 200, v2DocDetailResponse{
-		Data: v2DocDetail{ID: 402, Title: "MD Doc", Format: "markdown", Body: "# MD", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		Data: v2DocDetail{
+			ID:               402,
+			Title:            "MD Doc",
+			Format:           "markdown",
+			Body:             "# MD",
+			Status:           "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+		},
 	})
 
 	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"12"}), []string{"12"})
@@ -259,10 +293,24 @@ func TestConnector_FetchAll_SkipsUnsupportedFormats(t *testing.T) {
 		{ID: 502, Type: "Doc", Status: "1", Title: "OK Doc", Slug: "ok", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 	}})
 	f.handleJSON("/api/v2/repos/docs/501", 200, v2DocDetailResponse{
-		Data: v2DocDetail{ID: 501, Title: "HTML Doc", Format: "html", Body: "<p>raw html</p>", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		Data: v2DocDetail{
+			ID:               501,
+			Title:            "HTML Doc",
+			Format:           "html",
+			Body:             "<p>raw html</p>",
+			Status:           "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+		},
 	})
 	f.handleJSON("/api/v2/repos/docs/502", 200, v2DocDetailResponse{
-		Data: v2DocDetail{ID: 502, Title: "OK Doc", Format: "lake", Body: "# ok", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		Data: v2DocDetail{
+			ID:               502,
+			Title:            "OK Doc",
+			Format:           "lake",
+			Body:             "# ok",
+			Status:           "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+		},
 	})
 
 	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"13"}), []string{"13"})
@@ -324,8 +372,20 @@ func TestConnector_FetchIncremental_FirstSync(t *testing.T) {
 		{ID: 1, Type: "Doc", Status: "1", Title: "A", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 		{ID: 2, Type: "Doc", Status: "1", Title: "B", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
 	}})
-	f.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"}})
-	f.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T11:00:00Z"}})
+	f.handleJSON(
+		"/api/v2/repos/docs/1",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		},
+	)
+	f.handleJSON(
+		"/api/v2/repos/docs/2",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
+		},
+	)
 
 	items, cursor, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f, []string{"10"}), nil)
 	if err != nil {
@@ -345,7 +405,13 @@ func TestConnector_FetchIncremental_NoChanges(t *testing.T) {
 	f.handleJSON("/api/v2/repos/10/docs", 200, v2DocListResponse{Data: []v2Doc{
 		{ID: 1, Type: "Doc", Status: "1", Title: "A", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 	}})
-	f.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"}})
+	f.handleJSON(
+		"/api/v2/repos/docs/1",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		},
+	)
 
 	// First sync → establish cursor
 	_, cursor1, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f, []string{"10"}), nil)
@@ -370,8 +436,20 @@ func TestConnector_FetchIncremental_ReturnsOnlyChanged(t *testing.T) {
 		{ID: 1, Type: "Doc", Status: "1", Title: "A", Slug: "a", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 		{ID: 2, Type: "Doc", Status: "1", Title: "B", Slug: "b", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 	}})
-	f1.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"}})
-	f1.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"}})
+	f1.handleJSON(
+		"/api/v2/repos/docs/1",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		},
+	)
+	f1.handleJSON(
+		"/api/v2/repos/docs/2",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		},
+	)
 
 	_, cursor1, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f1, []string{"11"}), nil)
 	if err != nil {
@@ -389,7 +467,19 @@ func TestConnector_FetchIncremental_ReturnsOnlyChanged(t *testing.T) {
 	// Only doc 2's detail should be fetched; if the implementation incorrectly
 	// fetches doc 1, the test will still pass metadata-wise — but this handler
 	// makes the expected single call clear.
-	f2.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 2, Title: "B2", Body: "b2 updated", Status: "1", ContentUpdatedAt: "2026-04-20T12:00:00Z"}})
+	f2.handleJSON(
+		"/api/v2/repos/docs/2",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{
+				ID:               2,
+				Title:            "B2",
+				Body:             "b2 updated",
+				Status:           "1",
+				ContentUpdatedAt: "2026-04-20T12:00:00Z",
+			},
+		},
+	)
 
 	items, _, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f2, []string{"11"}), cursor1)
 	if err != nil {
@@ -413,8 +503,20 @@ func TestConnector_FetchIncremental_DetectsDeletion(t *testing.T) {
 		{ID: 1, Type: "Doc", Status: "1", Title: "A", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 		{ID: 2, Type: "Doc", Status: "1", Title: "B", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
 	}})
-	f1.handleJSON("/api/v2/repos/docs/1", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"}})
-	f1.handleJSON("/api/v2/repos/docs/2", 200, v2DocDetailResponse{Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T11:00:00Z"}})
+	f1.handleJSON(
+		"/api/v2/repos/docs/1",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 1, Title: "A", Body: "a", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		},
+	)
+	f1.handleJSON(
+		"/api/v2/repos/docs/2",
+		200,
+		v2DocDetailResponse{
+			Data: v2DocDetail{ID: 2, Title: "B", Body: "b", Status: "1", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
+		},
+	)
 
 	_, cursor1, err := NewConnector().FetchIncremental(context.Background(), makeDSConfig(f1, []string{"10"}), nil)
 	if err != nil {
@@ -460,7 +562,7 @@ func TestConnector_ListResources_ContinuesOnGroupFailure(t *testing.T) {
 		{ID: 20, Slug: "ok", Name: "OK Book", Type: "Book", Namespace: "team-ok/ok"},
 	}})
 	// team-forbidden returns 403 — should be skipped, not abort the whole call.
-	f.mux.HandleFunc("/api/v2/groups/team-forbidden/repos", func(w http.ResponseWriter, r *http.Request) {
+	f.mux.HandleFunc("/api/v2/groups/team-forbidden/repos", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
 	})

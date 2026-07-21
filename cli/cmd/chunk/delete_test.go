@@ -178,7 +178,16 @@ func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiChunkDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, fopts.WantsJSON(), "delete", "chunk", 2, "chunk.delete", nil)
+	err := cmdutil.ConfirmDestructiveBatch(
+		&testutil.ConfirmPrompter{},
+		false,
+		fopts.WantsJSON(),
+		"delete",
+		"chunk",
+		2,
+		"chunk.delete",
+		nil,
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -208,7 +217,10 @@ func TestChunkDelete_MultiID_PartialFailure_BatchEnvelope(t *testing.T) {
 	require.Len(t, outcomes, 3)
 
 	var buf bytes.Buffer
-	require.NoError(t, cmdutil.EmitBatch(outcomes, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &buf, cmdutil.DeletedAtNow))
+	require.NoError(
+		t,
+		cmdutil.EmitBatch(outcomes, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &buf, cmdutil.DeletedAtNow),
+	)
 
 	var env struct {
 		OK   bool `json:"ok"`

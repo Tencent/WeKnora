@@ -73,33 +73,33 @@ func (p *UserPreferences) Scan(value interface{}) error {
 // User represents a user in the system
 type User struct {
 	// Unique identifier of the user
-	ID string `json:"id"         gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                     gorm:"type:varchar(36);primaryKey"`
 	// Username of the user
-	Username string `json:"username"   gorm:"type:varchar(100);uniqueIndex;not null"`
+	Username string `json:"username"               gorm:"type:varchar(100);uniqueIndex;not null"`
 	// Email address of the user
-	Email string `json:"email"      gorm:"type:varchar(255);uniqueIndex;not null"`
+	Email string `json:"email"                  gorm:"type:varchar(255);uniqueIndex;not null"`
 	// Hashed password of the user
-	PasswordHash string `json:"-"          gorm:"type:varchar(255);not null"`
+	PasswordHash string `json:"-"                      gorm:"type:varchar(255);not null"`
 	// Avatar URL of the user
-	Avatar string `json:"avatar"     gorm:"type:varchar(500)"`
+	Avatar string `json:"avatar"                 gorm:"type:varchar(500)"`
 	// Workspace ID that the user belongs to
-	TenantID uint64 `json:"tenant_id"  gorm:"index"`
+	TenantID uint64 `json:"tenant_id"              gorm:"index"`
 	// Whether the user is active
-	IsActive bool `json:"is_active"  gorm:"default:true"`
+	IsActive bool `json:"is_active"              gorm:"default:true"`
 	// Whether the user can access all workspaces (cross-workspace access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
 	// Whether the user is a system administrator (independent of workspace roles)
-	IsSystemAdmin bool `json:"is_system_admin" gorm:"default:false;index"`
+	IsSystemAdmin bool `json:"is_system_admin"        gorm:"default:false;index"`
 	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
-	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
+	Preferences UserPreferences `json:"preferences"            gorm:"type:jsonb;not null;default:'{}'"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user
 	UpdatedAt time.Time `json:"updated_at"`
 	// Deletion time of the user
-	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 
 	// Association relationship, not stored in the database
 	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
@@ -134,6 +134,7 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
+// OIDCAuthURLResponse is an exported type.
 type OIDCAuthURLResponse struct {
 	Success             bool   `json:"success"`
 	ProviderDisplayName string `json:"provider_display_name,omitempty"`
@@ -144,12 +145,14 @@ type OIDCAuthURLResponse struct {
 	Nonce string `json:"-"`
 }
 
+// OIDCConfigResponse is an exported type.
 type OIDCConfigResponse struct {
 	Success             bool   `json:"success"`
 	Enabled             bool   `json:"enabled"`
 	ProviderDisplayName string `json:"provider_display_name,omitempty"`
 }
 
+// OIDCCallbackResponse is an exported type.
 type OIDCCallbackResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
@@ -168,6 +171,7 @@ type OIDCCallbackResponse struct {
 	IsNewUser    bool         `json:"is_new_user,omitempty"`
 }
 
+// OIDCUserInfo is an exported type.
 type OIDCUserInfo struct {
 	Subject  string                 `json:"subject,omitempty"`
 	Username string                 `json:"username,omitempty"`
@@ -194,11 +198,13 @@ type RegisterRequest struct {
 // authority for the target tenant and role.
 type TenantProvisioningMode string
 
+// TenantProvisioningCreatePersonal and related constants.
 const (
 	TenantProvisioningCreatePersonal TenantProvisioningMode = "create_personal"
 	TenantProvisioningTenantless     TenantProvisioningMode = "tenantless"
 )
 
+// IsValid implements the required interface method.
 func (m TenantProvisioningMode) IsValid() bool {
 	return m == TenantProvisioningCreatePersonal || m == TenantProvisioningTenantless
 }

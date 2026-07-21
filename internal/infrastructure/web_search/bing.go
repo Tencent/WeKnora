@@ -22,24 +22,9 @@ const (
 )
 
 var (
-	defaultUserAgentHeader = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
-	defaultBingTimeout     = 10 * time.Second
-)
-
-type bingSafeSearch string
-
-const (
-	bingSafeSearchOff      bingSafeSearch = "Off"
-	bingSafeSearchModerate bingSafeSearch = "Moderate"
-	bingSafeSearchStrict   bingSafeSearch = "Strict"
-)
-
-type bingFreshness string
-
-const (
-	bingFreshnessDay   = "Day"
-	bingFreshnessWeek  = "Week"
-	bingFreshnessMonth = "Month"
+	defaultUserAgentHeader = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+	defaultBingTimeout = 10 * time.Second
 )
 
 // BingProvider implements web search using Bing Search API
@@ -99,7 +84,7 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -183,7 +168,7 @@ type bingSearchResponse struct {
 	} `json:"rankingResponse"`
 }
 
-func (p *BingProvider) buildParams(ctx context.Context, query string, maxResults int, includeDate bool) (*http.Request, error) {
+func (p *BingProvider) buildParams(ctx context.Context, query string, maxResults int, _ bool) (*http.Request, error) {
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("count", strconv.Itoa(maxResults))

@@ -30,6 +30,7 @@ type MessageSuggestionRepository interface {
 	DeleteBySessionID(ctx context.Context, tenantID uint64, sessionID string) error
 }
 
+// MessageSuggestionService is an exported type.
 type MessageSuggestionService interface {
 	EnsureFollowUps(
 		ctx context.Context,
@@ -49,5 +50,10 @@ type MessageSuggestionService interface {
 		questionID string,
 		eventType string,
 	) error
-	ValidateAttribution(ctx context.Context, sessionID string, query string, attribution *types.SuggestionAttribution) error
+	ValidateAttribution(
+		ctx context.Context,
+		sessionID string,
+		query string,
+		attribution *types.SuggestionAttribution,
+	) error
 }

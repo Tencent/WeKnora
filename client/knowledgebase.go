@@ -358,7 +358,10 @@ type ClearKnowledgeBaseContentsResponse struct {
 
 // ClearKnowledgeBaseContents deletes all knowledge entries in a knowledge base (async).
 // The knowledge base itself is preserved; only its contents are removed.
-func (c *Client) ClearKnowledgeBaseContents(ctx context.Context, knowledgeBaseID string) (*ClearKnowledgeBaseContentsResponse, error) {
+func (c *Client) ClearKnowledgeBaseContents(
+	ctx context.Context,
+	knowledgeBaseID string,
+) (*ClearKnowledgeBaseContentsResponse, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge", knowledgeBaseID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil, nil)
 	if err != nil {
@@ -389,7 +392,11 @@ type SearchParams struct {
 }
 
 // HybridSearch performs hybrid search.
-func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, params *SearchParams) ([]*SearchResult, error) {
+func (c *Client) HybridSearch(
+	ctx context.Context,
+	knowledgeBaseID string,
+	params *SearchParams,
+) ([]*SearchResult, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/hybrid-search", knowledgeBaseID)
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, params, nil)
@@ -449,7 +456,10 @@ func (c *Client) ListMoveTargets(ctx context.Context, knowledgeBaseID string) ([
 }
 
 // CopyKnowledgeBase copies a knowledge base asynchronously and returns task info
-func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBaseRequest) (*CopyKnowledgeBaseResponse, error) {
+func (c *Client) CopyKnowledgeBase(
+	ctx context.Context,
+	request *CopyKnowledgeBaseRequest,
+) (*CopyKnowledgeBaseResponse, error) {
 	path := "/api/v1/knowledge-bases/copy"
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)

@@ -65,6 +65,7 @@ const (
 	colorReset  = "\033[0m"
 )
 
+// CustomFormatter is an exported type.
 type CustomFormatter struct {
 	ForceColor bool   // 是否强制使用颜色，即使在非终端环境下
 	Template   string // 自定义日志格式模板，通过 LOG_FORMAT 环境变量配置，为空则使用内置默认格式
@@ -91,6 +92,7 @@ func levelColorFor(level logrus.Level) string {
 	return ""
 }
 
+// Format implements the required interface method.
 func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	timestamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	level := strings.ToUpper(entry.Level.String())

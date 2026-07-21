@@ -106,7 +106,7 @@ func seedService(t *testing.T, repo *fakeMCPRepo, apiKey, token string) string {
 }
 
 // newTestService wires up a mcpServiceService with a fresh fake repo and a
-// real (empty) MCPManager. CloseClient on an empty manager is a no-op.
+// real (empty) Manager. CloseClient on an empty manager is a no-op.
 func newTestService() (*mcpServiceService, *fakeMCPRepo) {
 	repo := newFakeMCPRepo()
 	svc := &mcpServiceService{

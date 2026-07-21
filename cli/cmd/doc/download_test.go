@@ -86,7 +86,13 @@ func TestDownload_NoFilenameFromServer_DefaultPath_Errors(t *testing.T) {
 func TestDownload_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDownloadSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDownload(context.Background(), &DownloadOptions{Output: filepath.Join(t.TempDir(), "x")}, textFopts(), svc, "doc_missing")
+	err := runDownload(
+		context.Background(),
+		&DownloadOptions{Output: filepath.Join(t.TempDir(), "x")},
+		textFopts(),
+		svc,
+		"doc_missing",
+	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -150,7 +156,10 @@ func TestDownload_ForceOverwrites(t *testing.T) {
 	require.NoError(t, os.WriteFile(dest, []byte("OLD"), 0o644))
 
 	svc := &fakeDownloadSvc{content: "NEW", filename: ""}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest, Clobber: true}, textFopts(), svc, "doc_abc"))
+	require.NoError(
+		t,
+		runDownload(context.Background(), &DownloadOptions{Output: dest, Clobber: true}, textFopts(), svc, "doc_abc"),
+	)
 	got, _ := os.ReadFile(dest)
 	assert.Equal(t, "NEW", string(got))
 }

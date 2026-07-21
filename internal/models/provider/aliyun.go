@@ -22,8 +22,8 @@ func init() {
 }
 
 // Info 返回阿里云 provider 的元数据
-func (p *AliyunProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *AliyunProvider) Info() Info {
+	return Info{
 		Name:        ProviderAliyun,
 		DisplayName: "阿里云 DashScope",
 		Description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",

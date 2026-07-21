@@ -125,7 +125,11 @@ func TestStripImageMarkup(t *testing.T) {
 			"![MX5280_page_1.png](images/MX5280_page_1.png)\n\n![MX5280_page_2.png](images/MX5280_page_2.png)",
 			"\n\n",
 		},
-		{"mixed text and image keeps text", "Intro paragraph.\n![fig](a.png)\nConclusion.", "Intro paragraph.\n\nConclusion."},
+		{
+			"mixed text and image keeps text",
+			"Intro paragraph.\n![fig](a.png)\nConclusion.",
+			"Intro paragraph.\n\nConclusion.",
+		},
 		{"html img tag stripped", `Before <img src="x.png" alt="y"/> after`, "Before  after"},
 		{
 			// Regression guard: an earlier version stripped the WHOLE
@@ -339,7 +343,7 @@ type templateCaptureChatModel struct {
 func (m *templateCaptureChatModel) Chat(
 	_ context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	_ *chat.Options,
 ) (*types.ChatResponse, error) {
 	if len(messages) > 0 {
 		m.prompt = messages[0].Content
@@ -350,7 +354,7 @@ func (m *templateCaptureChatModel) Chat(
 func (m *templateCaptureChatModel) ChatStream(
 	context.Context,
 	[]chat.Message,
-	*chat.ChatOptions,
+	*chat.Options,
 ) (<-chan types.StreamResponse, error) {
 	return nil, nil
 }

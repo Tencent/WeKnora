@@ -34,13 +34,17 @@ type concurrencyChat struct {
 func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 
-func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+func (w *concurrencyChat) Chat(
+	ctx context.Context, messages []Message, opts *Options,
+) (*types.ChatResponse, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
 	return w.inner.Chat(ctx, messages, opts)
 }
 
-func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+func (w *concurrencyChat) ChatStream(
+	ctx context.Context, messages []Message, opts *Options,
+) (<-chan types.StreamResponse, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
@@ -62,6 +66,7 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 			case <-ctx.Done():
 				go func() {
 					for range ch {
+						_ = struct{}{} // drain unread stream after cancel
 					}
 				}()
 				return

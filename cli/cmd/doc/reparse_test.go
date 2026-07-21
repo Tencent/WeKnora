@@ -33,7 +33,16 @@ func (f *fakeReparseSvc) ReparseKnowledge(_ context.Context, id string) (*sdk.Kn
 func TestDocReparse_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeReparseSvc{k: &sdk.Knowledge{FileName: "runbook.md", ParseStatus: "processing"}}
-	require.NoError(t, runReparse(context.Background(), &ReparseOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_abc"))
+	require.NoError(
+		t,
+		runReparse(
+			context.Background(),
+			&ReparseOptions{},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			svc,
+			"doc_abc",
+		),
+	)
 	assert.True(t, svc.called)
 	got := out.String()
 	assert.Contains(t, got, "doc_abc")
@@ -45,7 +54,16 @@ func TestDocReparse_Text(t *testing.T) {
 func TestDocReparse_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeReparseSvc{k: &sdk.Knowledge{ParseStatus: "processing"}}
-	require.NoError(t, runReparse(context.Background(), &ReparseOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "doc_abc"))
+	require.NoError(
+		t,
+		runReparse(
+			context.Background(),
+			&ReparseOptions{},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+			"doc_abc",
+		),
+	)
 	var env struct {
 		OK   bool          `json:"ok"`
 		Data sdk.Knowledge `json:"data"`
@@ -59,7 +77,13 @@ func TestDocReparse_JSON(t *testing.T) {
 func TestDocReparse_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeReparseSvc{err: errors.New("HTTP error 404: not found")}
-	err := runReparse(context.Background(), &ReparseOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "missing")
+	err := runReparse(
+		context.Background(),
+		&ReparseOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"missing",
+	)
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsNotFound(err))
 }

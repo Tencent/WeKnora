@@ -82,7 +82,13 @@ func TestRemove_NotFound_WithDidYouMean(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	err := runRemove(&RemoveOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "prodution", secrets.NewMemStore(), &testutil.ConfirmPrompter{})
+	err := runRemove(
+		&RemoveOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		"prodution",
+		secrets.NewMemStore(),
+		&testutil.ConfirmPrompter{},
+	)
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -114,7 +120,13 @@ func TestRemove_Current_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	err := runRemove(&RemoveOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "production", store, &testutil.ConfirmPrompter{})
+	err := runRemove(
+		&RemoveOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		"production",
+		store,
+		&testutil.ConfirmPrompter{},
+	)
 	if err == nil {
 		t.Fatal("expected confirmation-required error")
 	}
@@ -182,7 +194,13 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 	}
 
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runRemove(&RemoveOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "production", secrets.NewMemStore(), p)
+	err := runRemove(
+		&RemoveOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		"production",
+		secrets.NewMemStore(),
+		p,
+	)
 	if err == nil {
 		t.Fatal("expected user-aborted error")
 	}

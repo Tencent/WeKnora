@@ -26,7 +26,7 @@ func TestSetChannelAgentID(t *testing.T) {
 			agent: &types.CustomAgent{ID: "agent-new", TenantID: 42},
 		},
 	}
-	channel := &IMChannel{
+	channel := &Channel{
 		ID:       "im-1",
 		TenantID: 42,
 		AgentID:  "agent-old",
@@ -46,7 +46,7 @@ func TestSetChannelAgentIDRejectsForeignTenant(t *testing.T) {
 			agent: &types.CustomAgent{ID: "agent-new", TenantID: 99},
 		},
 	}
-	channel := &IMChannel{
+	channel := &Channel{
 		ID:       "im-1",
 		TenantID: 42,
 		AgentID:  "agent-old",
@@ -62,7 +62,7 @@ func TestSetChannelAgentIDRejectsForeignTenant(t *testing.T) {
 
 func TestSetChannelAgentIDRequiresAgentID(t *testing.T) {
 	svc := &Service{agentService: &stubIMAgentService{}}
-	channel := &IMChannel{ID: "im-1", TenantID: 42, AgentID: "agent-old"}
+	channel := &Channel{ID: "im-1", TenantID: 42, AgentID: "agent-old"}
 
 	if err := svc.SetChannelAgentID(context.Background(), channel, "  "); err == nil {
 		t.Fatal("SetChannelAgentID() expected error for empty agent_id")

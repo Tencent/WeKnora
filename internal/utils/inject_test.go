@@ -424,7 +424,8 @@ func TestInjectAndConditions(t *testing.T) {
 			name:   "existing WHERE with ORDER BY",
 			sql:    "SELECT id, title FROM knowledges WHERE parse_status = 'completed' ORDER BY created_at DESC LIMIT 10",
 			filter: "knowledges.tenant_id = 123",
-			want:   "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 AND (parse_status = 'completed') ORDER BY created_at DESC LIMIT 10",
+			want: "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 " +
+				"AND (parse_status = 'completed') ORDER BY created_at DESC LIMIT 10",
 		},
 		{
 			name:   "existing WHERE without tail clauses",
@@ -490,12 +491,24 @@ func TestValidateSQL_JSONNodeBypass(t *testing.T) {
 		name string
 		sql  string
 	}{
-		{"JSON_SCALAR + pg_read_file", "SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) AS data FROM knowledge_bases LIMIT 1"},
-		{"JSON_VALUE + pg_read_file", "SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
-		{"JSON_QUERY + pg_read_file", "SELECT JSON_QUERY(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
+		{
+			"JSON_SCALAR + pg_read_file",
+			"SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) AS data FROM knowledge_bases LIMIT 1",
+		},
+		{
+			"JSON_VALUE + pg_read_file",
+			"SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1",
+		},
+		{
+			"JSON_QUERY + pg_read_file",
+			"SELECT JSON_QUERY(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1",
+		},
 		{"JSON scalar + lo_export", "SELECT JSON_SCALAR(lo_export(1, '/tmp/x')) FROM knowledge_bases LIMIT 1"},
 		{"JSON() parse + pg_read_file", "SELECT JSON(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
-		{"JSON_SERIALIZE + pg_read_file", "SELECT JSON_SERIALIZE(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
+		{
+			"JSON_SERIALIZE + pg_read_file",
+			"SELECT JSON_SERIALIZE(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1",
+		},
 	}
 
 	for _, tt := range dangerous {
@@ -516,6 +529,7 @@ func TestValidateSQL_DefaultDenyAllowsLegitimate(t *testing.T) {
 		"SELECT COUNT(*) AS c FROM knowledges WHERE parse_status = 'completed'",
 		"SELECT COALESCE(title, 'untitled') FROM knowledges LIMIT 5",
 		"SELECT CASE WHEN file_size > 100 THEN 'big' ELSE 'small' END FROM knowledges LIMIT 5",
+		//nolint:lll
 		"SELECT kb.name, COUNT(k.id) FROM knowledge_bases kb LEFT JOIN knowledges k ON kb.id = k.knowledge_base_id GROUP BY kb.id, kb.name",
 	}
 	for _, sql := range legit {
@@ -543,10 +557,16 @@ func TestValidateSQL_DuckDBFileRead(t *testing.T) {
 		name string
 		sql  string
 	}{
-		{"read_text in FROM subquery", "SELECT * FROM (SELECT * FROM read_text('/etc/passwd')) AS f, k_data AS k LIMIT 1"},
+		{
+			"read_text in FROM subquery",
+			"SELECT * FROM (SELECT * FROM read_text('/etc/passwd')) AS f, k_data AS k LIMIT 1",
+		},
 		{"read_text in target list", "SELECT read_text('/etc/passwd') FROM k_data LIMIT 1"},
 		{"read_blob in FROM subquery", "SELECT * FROM (SELECT * FROM read_blob('/etc/passwd')) AS f LIMIT 1"},
-		{"nested subquery read_csv", "SELECT * FROM (SELECT * FROM (SELECT * FROM read_csv('/etc/passwd')) AS a) AS b LIMIT 1"},
+		{
+			"nested subquery read_csv",
+			"SELECT * FROM (SELECT * FROM (SELECT * FROM read_csv('/etc/passwd')) AS a) AS b LIMIT 1",
+		},
 	}
 	for _, tt := range dangerous {
 		t.Run(tt.name, func(t *testing.T) {

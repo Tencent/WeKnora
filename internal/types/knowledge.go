@@ -111,13 +111,13 @@ type KnowledgeListFilter struct {
 // and references to the physical file if applicable.
 type Knowledge struct {
 	// Unique identifier of the knowledge
-	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey"`
+	ID string `json:"id"                     gorm:"type:varchar(36);primaryKey"`
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
-	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
+	Tags []*KnowledgeTag `json:"tags"                   gorm:"-"`
 	// Type of the knowledge
 	Type string `json:"type"`
 	// Title of the knowledge
@@ -125,9 +125,9 @@ type Knowledge struct {
 	// Description of the knowledge
 	Description string `json:"description"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
-	Source string `json:"source"             gorm:"type:varchar(2048)"`
+	Source string `json:"source"                 gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
-	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
+	Channel string `json:"channel"                gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status"`
 	// PendingSubtasksCount is the outstanding enrichment subtask count
@@ -135,7 +135,7 @@ type Knowledge struct {
 	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
 	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
-	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
+	SummaryStatus string `json:"summary_status"         gorm:"type:varchar(32);default:none"`
 	// Enable status of the knowledge
 	EnableStatus string `json:"enable_status"`
 	// ID of the embedding model
@@ -153,7 +153,7 @@ type Knowledge struct {
 	// Storage size of the knowledge
 	StorageSize int64 `json:"storage_size"`
 	// Metadata of the knowledge
-	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	Metadata JSON `json:"metadata"               gorm:"type:json"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
@@ -165,9 +165,9 @@ type Knowledge struct {
 	// Error message of the knowledge
 	ErrorMessage string `json:"error_message"`
 	// Deletion time of the knowledge
-	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
-	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	KnowledgeBaseName string `json:"knowledge_base_name"    gorm:"-"`
 }
 
 // GetMetadata returns the metadata as a map[string]string.
@@ -187,7 +187,7 @@ func (k *Knowledge) GetMetadata() map[string]string {
 }
 
 // BeforeCreate hook generates a UUID for new Knowledge entities before they are created.
-func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
+func (k *Knowledge) BeforeCreate(_ *gorm.DB) (err error) {
 	if k.ID == "" {
 		k.ID = uuid.New().String()
 	}

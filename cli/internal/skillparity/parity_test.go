@@ -133,7 +133,12 @@ func TestSkillsReferenceLiveCommandsAndFlags(t *testing.T) {
 				for _, m := range longFlag.FindAllString(inv, -1) {
 					name := strings.TrimPrefix(m, "--")
 					if !flags[name] {
-						t.Errorf("%s: skill references unknown flag --%s (renamed/removed? line: %q)", rel, name, strings.TrimSpace(line))
+						t.Errorf(
+							"%s: skill references unknown flag --%s (renamed/removed? line: %q)",
+							rel,
+							name,
+							strings.TrimSpace(line),
+						)
 					}
 				}
 			}

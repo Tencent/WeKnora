@@ -88,6 +88,7 @@ func (e *OpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetSupportsDimensionOverride implements the required interface method.
 func (e *OpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }
@@ -160,6 +161,7 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
+// BatchEmbed implements the required interface method.
 func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Create request body
 	reqBody := OpenAIEmbedRequest{
@@ -194,8 +196,9 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		// Log warning if length is outside valid range [1, 8192]
 		if textLen == 0 || textLen > 8192 {
 			hasInvalidLength = true
-			logger.GetLogger(ctx).Errorf("OpenAIEmbedder BatchEmbed input[%d]: INVALID length=%d (must be [1, 8192]), preview=%s",
-				i, textLen, textPreview)
+			logger.GetLogger(ctx).
+				Errorf("OpenAIEmbedder BatchEmbed input[%d]: INVALID length=%d (must be [1, 8192]), preview=%s",
+					i, textLen, textPreview)
 		} else {
 			logger.GetLogger(ctx).Debugf("OpenAIEmbedder BatchEmbed input[%d]: length=%d, preview=%s",
 				i, textLen, textPreview)
@@ -203,7 +206,8 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	}
 
 	if hasInvalidLength {
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder BatchEmbed: Found invalid input lengths, this will likely cause API error")
+		logger.GetLogger(ctx).
+			Errorf("OpenAIEmbedder BatchEmbed: Found invalid input lengths, this will likely cause API error")
 	}
 
 	// Send request (passing jsonData instead of constructing http.Request)
@@ -213,7 +217,7 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 
 	// Read response
@@ -229,7 +233,8 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
+		logger.GetLogger(ctx).
+			Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
 		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr)
 	}
 

@@ -82,7 +82,10 @@ func runList(fopts *cmdutil.FormatOptions) error {
 		return fopts.Emit(iostreams.IO.Out, entries, meta)
 	}
 	if len(entries) == 0 {
-		fmt.Fprintln(iostreams.IO.Out, "No profiles configured. Run `weknora auth login` (or `weknora profile add`) to create one.")
+		fmt.Fprintln(
+			iostreams.IO.Out,
+			"No profiles configured. Run `weknora auth login` (or `weknora profile add`) to create one.",
+		)
 		return nil
 	}
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)

@@ -1,3 +1,4 @@
+// Package vlm provides vision-language model adapters.
 package vlm
 
 import (

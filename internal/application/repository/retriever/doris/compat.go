@@ -1,3 +1,4 @@
+// Package doris implements vector retrieval storage on Apache Doris.
 package doris
 
 import (
@@ -16,13 +17,13 @@ const envDorisCompatMode = "DORIS_COMPAT_MODE"
 type dorisCompatMode string
 
 const (
-	dorisCompatModeAuto                   dorisCompatMode = "auto"
-	dorisCompatModeLegacy                 dorisCompatMode = "legacy"
-	dorisCompatModeInnerProductDuplicate  dorisCompatMode = "inner_product_duplicate"
+	dorisCompatModeAuto                  dorisCompatMode = "auto"
+	dorisCompatModeLegacy                dorisCompatMode = "legacy"
+	dorisCompatModeInnerProductDuplicate dorisCompatMode = "inner_product_duplicate"
 )
 
 type dorisCompatProbe struct {
-	innerProductApproximate  bool
+	innerProductApproximate   bool
 	cosineDistanceApproximate bool
 }
 
@@ -62,7 +63,9 @@ func (r *dorisRepository) resolveCompatMode(ctx context.Context) (dorisCompatMod
 		if foundExisting {
 			if requested != dorisCompatModeAuto && requested != existingMode {
 				r.compatResolveErr = fmt.Errorf(
-					"Doris compat mode %q does not match existing embedding tables (detected %q from %s). %s is not interchangeable after %s_* tables are created. Recreate the existing %s_* tables before switching modes, or set %s=%s",
+					"doris compat mode %q does not match existing embedding tables "+
+						"(detected %q from %s). %s is not interchangeable after %s_* tables are created. "+
+						"Recreate the existing %s_* tables before switching modes, or set %s=%s",
 					requested,
 					existingMode,
 					exampleTable,
@@ -78,7 +81,9 @@ func (r *dorisRepository) resolveCompatMode(ctx context.Context) (dorisCompatMod
 
 			r.compatModeResolved = existingMode
 			log.Warnf(
-				"[Doris] Using compat mode %s from existing embedding tables (%s). %s is not interchangeable after %s_* tables are created; recreate those tables before switching modes.",
+				"[Doris] Using compat mode %s from existing embedding tables (%s). "+
+					"%s is not interchangeable after %s_* tables are created; "+
+					"recreate those tables before switching modes.",
 				existingMode,
 				exampleTable,
 				envDorisCompatMode,
@@ -107,7 +112,9 @@ func (r *dorisRepository) resolveCompatMode(ctx context.Context) (dorisCompatMod
 				r.compatModeResolved = dorisCompatModeLegacy
 			default:
 				r.compatResolveErr = fmt.Errorf(
-					"Doris compatibility auto-detection could not find a supported vector function. Set %s=%s or %s=%s explicitly after verifying your Doris build. %s is not interchangeable after %s_* tables are created",
+					"doris compatibility auto-detection could not find a supported vector function. "+
+						"Set %s=%s or %s=%s explicitly after verifying your Doris build. "+
+						"%s is not interchangeable after %s_* tables are created",
 					envDorisCompatMode,
 					dorisCompatModeInnerProductDuplicate,
 					envDorisCompatMode,
@@ -120,7 +127,9 @@ func (r *dorisRepository) resolveCompatMode(ctx context.Context) (dorisCompatMod
 			}
 
 			log.Warnf(
-				"[Doris] Auto-selected compat mode %s for new embedding tables. %s is not interchangeable after %s_* tables are created; recreate those tables before switching modes.",
+				"[Doris] Auto-selected compat mode %s for new embedding tables. "+
+					"%s is not interchangeable after %s_* tables are created; "+
+					"recreate those tables before switching modes.",
 				r.compatModeResolved,
 				envDorisCompatMode,
 				r.tableBaseName,
@@ -130,7 +139,9 @@ func (r *dorisRepository) resolveCompatMode(ctx context.Context) (dorisCompatMod
 
 		r.compatModeResolved = requested
 		log.Warnf(
-			"[Doris] Using configured compat mode %s for new embedding tables. %s is not interchangeable after %s_* tables are created; recreate those tables before switching modes.",
+			"[Doris] Using configured compat mode %s for new embedding tables. "+
+				"%s is not interchangeable after %s_* tables are created; "+
+				"recreate those tables before switching modes.",
 			r.compatModeResolved,
 			envDorisCompatMode,
 			r.tableBaseName,
@@ -166,7 +177,9 @@ func (r *dorisRepository) detectExistingCompatMode(ctx context.Context) (dorisCo
 		}
 		if detected != mode {
 			return "", "", false, fmt.Errorf(
-				"existing Doris embedding tables use mixed compat modes (%s and %s). %s is not interchangeable after %s_* tables are created; recreate the existing %s_* tables with a single mode",
+				"existing Doris embedding tables use mixed compat modes (%s and %s). "+
+					"%s is not interchangeable after %s_* tables are created; "+
+					"recreate the existing %s_* tables with a single mode",
 				detected,
 				mode,
 				envDorisCompatMode,

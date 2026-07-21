@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -84,7 +85,7 @@ func renderIndexOverviewForAgent(resp *types.WikiIndexResponse) string {
 	if nonEmpty == 0 {
 		sb.WriteString("\n*No wiki pages yet. Upload documents to get started.*\n")
 	} else {
-		sb.WriteString("\n_To explore more pages under any category, use wiki_search with a query, or read a specific slug directly._\n")
+		sb.WriteString("\n_To explore more pages under any category, use wiki_search with a query, or read a specific slug directly._\n") //nolint:lll
 	}
 	return sb.String()
 }
@@ -274,6 +275,7 @@ type wikiReadPageTool struct {
 	mu               sync.Mutex
 }
 
+// NewWikiReadPageTool is an exported function.
 func NewWikiReadPageTool(
 	wikiService interfaces.WikiPageService,
 	knowledgeService interfaces.KnowledgeService,
@@ -284,7 +286,7 @@ func NewWikiReadPageTool(
 			ToolWikiReadPage,
 			`Read one or more wiki pages by their slugs. Returns the full markdown content, metadata, and links.
 Use this to read specific wiki pages when you know their slug (e.g. "entity/acme-corp", "concept/rag").
-When the same slug exists in multiple knowledge bases, all matching pages are returned (each tagged with its short bN knowledge_base_id). Pass that bN value in "knowledge_base_id" to limit to a specific KB.`,
+When the same slug exists in multiple knowledge bases, all matching pages are returned (each tagged with its short bN knowledge_base_id). Pass that bN value in "knowledge_base_id" to limit to a specific KB.`, //nolint:lll
 			json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -295,7 +297,8 @@ When the same slug exists in multiple knowledge bases, all matching pages are re
     },
     "knowledge_base_id": {
       "type": "string",
-      "description": "Optional: specific short bN knowledge base ID. If omitted, reads the slug from every wiki KB in scope (all matches returned)."
+      "description": "Optional: specific short bN knowledge base ID. If omitted,
+      	reads the slug from every wiki KB in scope (all matches returned)."
     }
   },
   "required": ["slugs"]
@@ -418,7 +421,8 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		// steers the model to wiki_search for deeper exploration.
 		contentBody := page.Content
 		if page.PageType == types.WikiPageTypeIndex {
-			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil && overview != nil {
+			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil &&
+				overview != nil {
 				contentBody = renderIndexOverviewForAgent(overview)
 			}
 		}
@@ -485,7 +489,10 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			// exposed to the model as a tool argument).
 			passesScope, scopeErr := pagePassesWikiScope(ctx, page, sc, fetchTags)
 			if scopeErr != nil {
-				errs = append(errs, fmt.Sprintf("Failed to validate wiki scope for '%s' in KB %s: %v", slug, actualKBID, scopeErr))
+				errs = append(
+					errs,
+					fmt.Sprintf("Failed to validate wiki scope for '%s' in KB %s: %v", slug, actualKBID, scopeErr),
+				)
 				continue
 			}
 			if !passesScope {
@@ -511,7 +518,8 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			if kbs := filteredOut[slug]; len(kbs) > 0 {
 				errs = append(errs, fmt.Sprintf(
 					"Wiki page '%s' exists in %v but none of its source documents are within the scope pinned by the user",
-					slug, kbs,
+					slug,
+					kbs,
 				))
 			} else {
 				errs = append(errs, fmt.Sprintf("Wiki page '%s' not found", slug))
@@ -566,6 +574,7 @@ type wikiSearchTool struct {
 	mu               sync.Mutex
 }
 
+// NewWikiSearchTool is an exported function.
 func NewWikiSearchTool(
 	wikiService interfaces.WikiPageService,
 	knowledgeService interfaces.KnowledgeService,
@@ -582,7 +591,8 @@ Examples:
 - Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
 - Prefix matching: "^entity/.*" (finds all entities)
 - Plain text: "engine" (matches anywhere in title/content/slug/summary)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
+//nolint:lll
+IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse. //nolint:lll
 Use this to find relevant wiki pages when you don't know the exact slug.`,
 			json.RawMessage(`{
   "type": "object",
@@ -728,9 +738,17 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			if seen {
 				summary = "(summary omitted, already seen in previous search)"
 			}
-			fmt.Fprintf(&sb,
+			fmt.Fprintf(
+				&sb,
+				//nolint:lll
 				"<page>\n<knowledge_base_id>%s</knowledge_base_id>\n<link>[[%s|%s]]</link>\n<type>%s</type>%s\n<summary>%s</summary>%s\n</page>\n",
-				h.kbID, p.Slug, p.Title, p.PageType, aliasesTag, summary, snippetTag,
+				h.kbID,
+				p.Slug,
+				p.Title,
+				p.PageType,
+				aliasesTag,
+				summary,
+				snippetTag,
 			)
 		}
 		sb.WriteString("</search_results>")

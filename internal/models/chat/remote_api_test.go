@@ -16,7 +16,7 @@ import (
 func newTestRemoteChat(t *testing.T) *RemoteAPIChat {
 	t.Helper()
 
-	chat, err := NewRemoteAPIChat(&ChatConfig{
+	chat, err := NewRemoteAPIChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   "",
 		ModelName: "test-model",
@@ -32,14 +32,14 @@ func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
 	messages := []Message{{Role: "user", Content: "hello"}}
 
 	t.Run("nil ParallelToolCalls leaves default", func(t *testing.T) {
-		opts := &ChatOptions{Temperature: 0.7}
+		opts := &Options{Temperature: 0.7}
 		req := chat.BuildChatCompletionRequest(messages, opts, false)
 		assert.Nil(t, req.ParallelToolCalls, "should be nil when not set")
 	})
 
 	t.Run("ParallelToolCalls true is propagated", func(t *testing.T) {
 		ptc := true
-		opts := &ChatOptions{
+		opts := &Options{
 			Temperature:       0.7,
 			ParallelToolCalls: &ptc,
 			Tools: []Tool{{
@@ -67,7 +67,7 @@ func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
 
 	t.Run("ParallelToolCalls false is propagated", func(t *testing.T) {
 		ptc := false
-		opts := &ChatOptions{
+		opts := &Options{
 			Temperature:       0.7,
 			ParallelToolCalls: &ptc,
 		}
@@ -101,13 +101,15 @@ func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
 			Function: FunctionDef{
 				Name:        "mcp_hazardous_chemicals_gethazardouschemicalbybizid",
 				Description: "[MCP Service: hazardous_chemicals (external)] Get hazardous chemical by biz ID",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"bizId":{"type":"string"}},"required":["bizId"]}`),
+				Parameters: json.RawMessage(
+					`{"type":"object","properties":{"bizId":{"type":"string"}},"required":["bizId"]}`,
+				),
 			},
 		},
 	}
 
 	ptc := true
-	opts := &ChatOptions{
+	opts := &Options{
 		Temperature:       0.7,
 		Tools:             mcpTools,
 		ParallelToolCalls: &ptc,
@@ -135,7 +137,7 @@ func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
 func TestBuildChatCompletionRequest_GPT5MaxCompletionTokens(t *testing.T) {
 	build := func(t *testing.T, providerName, modelName string) *RemoteAPIChat {
 		t.Helper()
-		c, err := NewRemoteAPIChat(&ChatConfig{
+		c, err := NewRemoteAPIChat(&Config{
 			Source:    types.ModelSourceRemote,
 			BaseURL:   "https://example.openai.azure.com",
 			ModelName: modelName,
@@ -171,7 +173,7 @@ func TestBuildChatCompletionRequest_GPT5MaxCompletionTokens(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := build(t, tc.provider, tc.model)
-			opts := &ChatOptions{
+			opts := &Options{
 				Temperature:      0.7,
 				TopP:             0.9,
 				MaxTokens:        128,
@@ -197,7 +199,7 @@ func TestBuildChatCompletionRequest_GPT5MaxCompletionTokens(t *testing.T) {
 
 	t.Run("MaxCompletionTokens takes precedence over MaxTokens", func(t *testing.T) {
 		c := build(t, "openai", "gpt-5.2")
-		opts := &ChatOptions{
+		opts := &Options{
 			MaxTokens:           128,
 			MaxCompletionTokens: 2048,
 		}
@@ -212,13 +214,13 @@ func TestBuildChatCompletionRequest_ToolChoice(t *testing.T) {
 	messages := []Message{{Role: "user", Content: "test"}}
 
 	t.Run("auto tool choice", func(t *testing.T) {
-		opts := &ChatOptions{ToolChoice: "auto"}
+		opts := &Options{ToolChoice: "auto"}
 		req := chat.BuildChatCompletionRequest(messages, opts, false)
 		assert.Equal(t, "auto", req.ToolChoice)
 	})
 
 	t.Run("specific tool choice", func(t *testing.T) {
-		opts := &ChatOptions{ToolChoice: "mcp_svc_tool"}
+		opts := &Options{ToolChoice: "mcp_svc_tool"}
 		req := chat.BuildChatCompletionRequest(messages, opts, false)
 		assert.NotNil(t, req.ToolChoice)
 	})
@@ -339,13 +341,13 @@ func TestRemoteAPIChat(t *testing.T) {
 	testConfigs := []struct {
 		name    string
 		apiKey  string
-		config  *ChatConfig
+		config  *Config
 		skipMsg string
 	}{
 		{
 			name:   "DeepSeek API",
 			apiKey: deepseekAPIKey,
-			config: &ChatConfig{
+			config: &Config{
 				Source:    types.ModelSourceRemote,
 				BaseURL:   "https://api.deepseek.com/v1",
 				ModelName: "deepseek-chat",
@@ -357,7 +359,7 @@ func TestRemoteAPIChat(t *testing.T) {
 		{
 			name:   "Aliyun DeepSeek",
 			apiKey: aliyunAPIKey,
-			config: &ChatConfig{
+			config: &Config{
 				Source:    types.ModelSourceRemote,
 				BaseURL:   "https://dashscope.aliyuncs.com/compatible-mode/v1",
 				ModelName: "deepseek-v3.1",
@@ -369,7 +371,7 @@ func TestRemoteAPIChat(t *testing.T) {
 		{
 			name:   "Aliyun Qwen3-32b",
 			apiKey: aliyunAPIKey,
-			config: &ChatConfig{
+			config: &Config{
 				Source:    types.ModelSourceRemote,
 				BaseURL:   "https://dashscope.aliyuncs.com/compatible-mode/v1",
 				ModelName: "qwen3-32b",
@@ -381,7 +383,7 @@ func TestRemoteAPIChat(t *testing.T) {
 		{
 			name:   "Aliyun Qwen-max",
 			apiKey: aliyunAPIKey,
-			config: &ChatConfig{
+			config: &Config{
 				Source:    types.ModelSourceRemote,
 				BaseURL:   "https://dashscope.aliyuncs.com/compatible-mode/v1",
 				ModelName: "qwen-max",
@@ -401,7 +403,7 @@ func TestRemoteAPIChat(t *testing.T) {
 	}
 
 	// 测试选项
-	testOptions := &ChatOptions{
+	testOptions := &Options{
 		Temperature: 0.7,
 		MaxTokens:   100,
 	}

@@ -14,8 +14,10 @@ import (
 // ModelType represents the type of AI model
 type ModelType string
 
+// ModelTypeRerank and related constants.
 const (
-	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
+	// ModelTypeEmbedding identifies an embedding model.
+	ModelTypeEmbedding   ModelType = "Embedding"
 	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
 	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
 	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
@@ -25,8 +27,10 @@ const (
 // ModelStatus represents the status of the model
 type ModelStatus string
 
+// ModelStatusDownloading and related constants.
 const (
-	ModelStatusActive         ModelStatus = "active"          // Model is active
+	// ModelStatusActive means the model is ready for use.
+	ModelStatusActive         ModelStatus = "active"
 	ModelStatusDownloading    ModelStatus = "downloading"     // Model is downloading
 	ModelStatusDownloadFailed ModelStatus = "download_failed" // Model download failed
 )
@@ -34,8 +38,10 @@ const (
 // ModelSource represents the source of the model
 type ModelSource string
 
+// ModelSourceRemote and related constants.
 const (
-	ModelSourceLocal       ModelSource = "local"        // Local model
+	// ModelSourceLocal identifies a locally hosted model.
+	ModelSourceLocal       ModelSource = "local"
 	ModelSourceRemote      ModelSource = "remote"       // Remote model
 	ModelSourceAliyun      ModelSource = "aliyun"       // Aliyun DashScope model
 	ModelSourceZhipu       ModelSource = "zhipu"        // Zhipu model
@@ -62,20 +68,21 @@ type EmbeddingParameters struct {
 	SupportsDimensionOverride bool `yaml:"supports_dimension_override" json:"supports_dimension_override"`
 }
 
+// ModelParameters stores provider-specific connection and runtime settings.
 type ModelParameters struct {
-	BaseURL             string              `yaml:"base_url"             json:"base_url"`
-	APIKey              string              `yaml:"api_key"              json:"api_key"`
-	InterfaceType       string              `yaml:"interface_type"       json:"interface_type"`
-	EmbeddingParameters EmbeddingParameters `yaml:"embedding_parameters" json:"embedding_parameters"`
-	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"` // Ollama model parameter size (e.g., "7B", "13B", "70B")
-	Provider            string              `yaml:"provider"             json:"provider"`       // Provider identifier: openai, aliyun, zhipu, generic
-	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`   // Provider-specific configuration
-	// CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，
-	// 用途类似 Python OpenAI SDK 的 extra_headers 参数，
-	// 常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
-	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
-	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
-	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	BaseURL             string              `yaml:"base_url"                  json:"base_url"`
+	APIKey              string              `yaml:"api_key"                   json:"api_key"`
+	InterfaceType       string              `yaml:"interface_type"            json:"interface_type"`
+	EmbeddingParameters EmbeddingParameters `yaml:"embedding_parameters"      json:"embedding_parameters"`
+	// e.g. "7B", "13B", "70B"
+	ParameterSize string `yaml:"parameter_size" json:"parameter_size"`
+	// openai, aliyun, zhipu, generic
+	Provider    string            `yaml:"provider" json:"provider"`
+	ExtraConfig map[string]string `yaml:"extra_config"              json:"extra_config"`
+	// CustomHeaders adds extra HTTP headers for remote model API calls.
+	CustomHeaders map[string]string `yaml:"custom_headers,omitempty"  json:"custom_headers,omitempty"`
+	// Whether the model accepts image/multimodal input
+	SupportsVision bool `yaml:"supports_vision" json:"supports_vision"`
 	// MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
 	// enrichment) calls to THIS specific model, keyed by model ID and shared
 	// across all replicas. 0 (the default) means "fall back to the
@@ -83,8 +90,8 @@ type ModelParameters struct {
 	// never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
 	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
 	// WeKnoraCloud 厂商专用凭证
-	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
-	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
+	AppID     string `yaml:"app_id,omitempty"          json:"app_id,omitempty"`
+	AppSecret string `yaml:"app_secret,omitempty"      json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
 }
 
 // Per-response redaction for Model now lives in dto.NewModelResponse. The
@@ -114,25 +121,25 @@ type Model struct {
 	// varchar(64) on both PostgreSQL and SQLite (see ModelIDMaxLen);
 	// GORM's struct tag is documented to match so AutoMigrate paths
 	// produce the same shape.
-	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(64);primaryKey"`
+	ID string `yaml:"id"           json:"id"                   gorm:"type:varchar(64);primaryKey"`
 	// Workspace ID
-	TenantID uint64 `yaml:"tenant_id"   json:"tenant_id"`
+	TenantID uint64 `yaml:"tenant_id"    json:"tenant_id"`
 	// Name of the model
-	Name string `yaml:"name"        json:"name"`
+	Name string `yaml:"name"         json:"name"`
 	// Optional user-facing display name. Runtime calls still use Name.
-	DisplayName string `yaml:"display_name" json:"display_name" gorm:"type:varchar(255);default:''"`
+	DisplayName string `yaml:"display_name" json:"display_name"         gorm:"type:varchar(255);default:''"`
 	// Type of the model
-	Type ModelType `yaml:"type"        json:"type"`
+	Type ModelType `yaml:"type"         json:"type"`
 	// Source of the model
-	Source ModelSource `yaml:"source"      json:"source"`
+	Source ModelSource `yaml:"source"       json:"source"`
 	// Description of the model
-	Description string `yaml:"description" json:"description"`
+	Description string `yaml:"description"  json:"description"`
 	// Model parameters in JSON format
-	Parameters ModelParameters `yaml:"parameters"  json:"parameters"  gorm:"type:json"`
+	Parameters ModelParameters `yaml:"parameters"   json:"parameters"           gorm:"type:json"`
 	// Whether the model is the default model
-	IsDefault bool `yaml:"is_default"  json:"is_default"`
+	IsDefault bool `yaml:"is_default"   json:"is_default"`
 	// Whether the model is a builtin model (visible to all tenants)
-	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
+	IsBuiltin bool `yaml:"is_builtin"   json:"is_builtin"           gorm:"default:false"`
 	// ManagedBy identifies which subsystem owns this row's lifecycle.
 	// Empty / "" = manually created (UI / API / hand-written SQL); the YAML
 	// builtin-models loader leaves these untouched.
@@ -140,15 +147,15 @@ type Model struct {
 	// loader UPSERTs the YAML set and soft-deletes YAML-managed rows whose
 	// id is no longer present in the file. Future origins (e.g. "helm",
 	// "operator") can claim their own slice without interfering.
-	ManagedBy string `yaml:"managed_by"  json:"managed_by,omitempty"  gorm:"type:varchar(32);default:''"`
+	ManagedBy string `yaml:"managed_by"   json:"managed_by,omitempty" gorm:"type:varchar(32);default:''"`
 	// Model status, default: active, possible: downloading, download_failed
-	Status ModelStatus `yaml:"status"      json:"status"`
+	Status ModelStatus `yaml:"status"       json:"status"`
 	// Creation time of the model
-	CreatedAt time.Time `yaml:"created_at"  json:"created_at"`
+	CreatedAt time.Time `yaml:"created_at"   json:"created_at"`
 	// Last updated time of the model
-	UpdatedAt time.Time `yaml:"updated_at"  json:"updated_at"`
+	UpdatedAt time.Time `yaml:"updated_at"   json:"updated_at"`
 	// Deletion time of the model
-	DeletedAt gorm.DeletedAt `yaml:"deleted_at"  json:"deleted_at"  gorm:"index"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at"   json:"deleted_at"           gorm:"index"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.
@@ -188,13 +195,17 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
 		c.APIKey = plain
 	} else {
-		log.Printf("[crypto] model parameters api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf(
+			"[crypto] model parameters api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured",
+		)
 		c.APIKey = ""
 	}
 	if plain, ok := utils.DecryptStoredSecretLenient(c.AppSecret); ok {
 		c.AppSecret = plain
 	} else {
-		log.Printf("[crypto] model parameters app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		log.Printf(
+			"[crypto] model parameters app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured",
+		)
 		c.AppSecret = ""
 	}
 	return nil
@@ -204,7 +215,7 @@ func (c *ModelParameters) Scan(value interface{}) error {
 // Generates a UUID only when the caller has not supplied an ID — preserves
 // stable IDs declared in built-in model YAML config while keeping the
 // existing UUID behaviour for API-driven model creation.
-func (m *Model) BeforeCreate(tx *gorm.DB) (err error) {
+func (m *Model) BeforeCreate(_ *gorm.DB) (err error) {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}

@@ -2,11 +2,19 @@ package notion
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	os.Exit(m.Run())
+}
 
 func makeNotionConfig(cfg *Config, baseURL string, resourceIDs []string) *types.DataSourceConfig {
 	return &types.DataSourceConfig{
@@ -78,7 +86,11 @@ func TestConnectorFetchAll(t *testing.T) {
 	defer ts.Close()
 
 	c := NewConnector()
-	items, err := c.FetchAll(context.Background(), makeNotionConfig(cfg, ts.URL, []string{"page-1"}), []string{"page-1"})
+	items, err := c.FetchAll(
+		context.Background(),
+		makeNotionConfig(cfg, ts.URL, []string{"page-1"}),
+		[]string{"page-1"},
+	)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -156,7 +168,11 @@ func TestConnectorFetchAll_SingleRecord(t *testing.T) {
 	defer ts.Close()
 
 	c := NewConnector()
-	items, err := c.FetchAll(context.Background(), makeNotionConfig(cfg, ts.URL, []string{"record-1"}), []string{"record-1"})
+	items, err := c.FetchAll(
+		context.Background(),
+		makeNotionConfig(cfg, ts.URL, []string{"record-1"}),
+		[]string{"record-1"},
+	)
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}

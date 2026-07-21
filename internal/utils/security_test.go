@@ -197,9 +197,9 @@ func TestValidateURLForSSRF_IPv6Whitelist(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset whitelist singleton so we can set a new value
 			ResetSSRFWhitelistForTest()
-			os.Setenv("SSRF_WHITELIST", tt.whitelist)
+			_ = os.Setenv("SSRF_WHITELIST", tt.whitelist)
 			defer func() {
-				os.Unsetenv("SSRF_WHITELIST")
+				_ = os.Unsetenv("SSRF_WHITELIST")
 				ResetSSRFWhitelistForTest()
 			}()
 
@@ -234,11 +234,11 @@ func TestSSRFWhitelistExtraMerge(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ResetSSRFWhitelistForTest()
-			os.Setenv("SSRF_WHITELIST", tc.main)
-			os.Setenv("SSRF_WHITELIST_EXTRA", tc.extra)
+			_ = os.Setenv("SSRF_WHITELIST", tc.main)
+			_ = os.Setenv("SSRF_WHITELIST_EXTRA", tc.extra)
 			defer func() {
-				os.Unsetenv("SSRF_WHITELIST")
-				os.Unsetenv("SSRF_WHITELIST_EXTRA")
+				_ = os.Unsetenv("SSRF_WHITELIST")
+				_ = os.Unsetenv("SSRF_WHITELIST_EXTRA")
 				ResetSSRFWhitelistForTest()
 			}()
 			if got := IsSSRFWhitelisted(tc.host); got != tc.want {

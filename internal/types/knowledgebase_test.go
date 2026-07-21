@@ -150,7 +150,10 @@ func TestKnowledgeBase_UnmarshalJSON_WithVectorStoreID(t *testing.T) {
 		t.Errorf("expected legacy StorageConfig.Provider = cos, got %q", kb.StorageConfig.Provider)
 	}
 	if kb.StorageProviderConfig == nil || kb.StorageProviderConfig.Provider != "cos" {
-		t.Errorf("expected StorageProviderConfig.Provider auto-populated from cos_config, got %v", kb.StorageProviderConfig)
+		t.Errorf(
+			"expected StorageProviderConfig.Provider auto-populated from cos_config, got %v",
+			kb.StorageProviderConfig,
+		)
 	}
 
 	// Regression guard: the aux struct inside UnmarshalJSON must not shadow vector_store_id.
@@ -190,7 +193,7 @@ func TestKnowledgeBase_HasVectorStore(t *testing.T) {
 // TestKnowledgeBase_Normalize covers the empty-string -> nil fold used to
 // keep a single representation between the create path and the factory.
 func TestKnowledgeBase_Normalize(t *testing.T) {
-	t.Run("nil receiver is no-op", func(t *testing.T) {
+	t.Run("nil receiver is no-op", func(_ *testing.T) {
 		var kb *KnowledgeBase
 		kb.Normalize() // must not panic
 	})

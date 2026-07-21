@@ -125,9 +125,11 @@ Server-side ingestion knobs:
 		},
 	}
 	cmdutil.AddKBFlag(cmd)
-	cmd.Flags().StringVar(&opts.Name, "name", "", "File name hint (also used as file-type hint when extension is recognisable)")
+	cmd.Flags().
+		StringVar(&opts.Name, "name", "", "File name hint (also used as file-type hint when extension is recognisable)")
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Display title for the new entry")
-	cmd.Flags().StringVar(&opts.FileType, "file-type", "", "File-type hint such as \"pdf\" when the URL has no extension")
+	cmd.Flags().
+		StringVar(&opts.FileType, "file-type", "", "File-type hint such as \"pdf\" when the URL has no extension")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmd.Flags().String("enable-multimodel", "", "Toggle multimodal extraction (true|false); unset ⇒ server default")
@@ -146,7 +148,13 @@ Server-side ingestion knobs:
 }
 
 // runFetch ingests a remote URL via SDK CreateKnowledgeFromURL.
-func runFetch(ctx context.Context, opts *FetchOptions, fopts *cmdutil.FormatOptions, svc FetchService, kbID string) error {
+func runFetch(
+	ctx context.Context,
+	opts *FetchOptions,
+	fopts *cmdutil.FormatOptions,
+	svc FetchService,
+	kbID string,
+) error {
 	req := sdk.CreateKnowledgeFromURLRequest{
 		URL:              opts.URL,
 		FileName:         opts.Name,

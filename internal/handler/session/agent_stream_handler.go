@@ -1,3 +1,4 @@
+// Package session provides related functionality.
 package session
 
 import (
@@ -16,7 +17,7 @@ import (
 )
 
 // AgentStreamHandler handles agent events for SSE streaming
-// It uses a dedicated EventBus per request to avoid SessionID filtering
+// It uses a dedicated Bus per request to avoid SessionID filtering
 // Events are appended to StreamManager without accumulation
 type AgentStreamHandler struct {
 	ctx                context.Context
@@ -28,7 +29,7 @@ type AgentStreamHandler struct {
 	assistantMessage   *types.Message
 	streamManager      interfaces.StreamManager
 
-	eventBus *event.EventBus
+	eventBus *event.Bus
 
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
@@ -79,7 +80,7 @@ func NewAgentStreamHandler(
 	receivedAt time.Time,
 	assistantMessage *types.Message,
 	streamManager interfaces.StreamManager,
-	eventBus *event.EventBus,
+	eventBus *event.Bus,
 ) *AgentStreamHandler {
 	return &AgentStreamHandler{
 		ctx:                ctx,
@@ -95,10 +96,10 @@ func NewAgentStreamHandler(
 	}
 }
 
-// Subscribe subscribes to all agent streaming events on the dedicated EventBus
-// No SessionID filtering needed since we have a dedicated EventBus per request
+// Subscribe subscribes to all agent streaming events on the dedicated Bus
+// No SessionID filtering needed since we have a dedicated Bus per request
 func (h *AgentStreamHandler) Subscribe() {
-	// Subscribe to all agent streaming events on the dedicated EventBus
+	// Subscribe to all agent streaming events on the dedicated Bus
 	h.eventBus.On(event.EventAgentThought, h.handleThought)
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
@@ -115,7 +116,7 @@ func (h *AgentStreamHandler) Subscribe() {
 }
 
 // handleThought handles agent thought events
-func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleThought(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentThoughtData)
 	if !ok {
 		return nil
@@ -163,7 +164,7 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 }
 
 // handleToolCall handles tool call events
-func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleToolCall(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentToolCallData)
 	if !ok {
 		return nil
@@ -210,7 +211,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 }
 
 // handleToolResult handles tool result events
-func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleToolResult(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentToolResultData)
 	if !ok {
 		return nil
@@ -285,7 +286,7 @@ func toolApprovalDataToMap(v interface{}) map[string]interface{} {
 }
 
 // handleToolApprovalRequired persists MCP tool human-approval prompts for SSE / replay (issue #1173).
-func (h *AgentStreamHandler) handleToolApprovalRequired(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleToolApprovalRequired(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ToolApprovalRequiredData)
 	if !ok {
 		return nil
@@ -306,7 +307,7 @@ func (h *AgentStreamHandler) handleToolApprovalRequired(ctx context.Context, evt
 }
 
 // handleToolApprovalResolved persists the outcome of a tool approval (issue #1173).
-func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleToolApprovalResolved(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ToolApprovalResolvedData)
 	if !ok {
 		return nil
@@ -328,7 +329,7 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 
 // handleMCPOAuthRequired forwards an in-conversation "authorize this MCP
 // service" prompt to the SSE stream so the UI can render an Authorize card.
-func (h *AgentStreamHandler) handleMCPOAuthRequired(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleMCPOAuthRequired(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.MCPOAuthRequiredData)
 	if !ok {
 		return nil
@@ -349,7 +350,7 @@ func (h *AgentStreamHandler) handleMCPOAuthRequired(ctx context.Context, evt eve
 }
 
 // handleMCPOAuthResolved forwards the outcome of an in-conversation OAuth prompt.
-func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleMCPOAuthResolved(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.MCPOAuthResolvedData)
 	if !ok {
 		return nil
@@ -370,7 +371,7 @@ func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt eve
 }
 
 // handleReferences handles knowledge references events
-func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleReferences(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentReferencesData)
 	if !ok {
 		return nil
@@ -437,7 +438,7 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 }
 
 // handleFinalAnswer handles final answer events
-func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleFinalAnswer(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentFinalAnswerData)
 	if !ok {
 		return nil
@@ -513,7 +514,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 }
 
 // handleReflection handles agent reflection events
-func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleReflection(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentReflectionData)
 	if !ok {
 		return nil
@@ -534,7 +535,7 @@ func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Eve
 }
 
 // handleError handles error events
-func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleError(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ErrorData)
 	if !ok {
 		return nil
@@ -562,7 +563,7 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 }
 
 // handleSessionTitle handles session title update events
-func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleSessionTitle(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.SessionTitleData)
 	if !ok {
 		return nil
@@ -583,14 +584,15 @@ func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.E
 			"title":      data.Title,
 		},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Warn("Append session title event to stream failed (stream may have ended)", "error", err)
+		logger.GetLogger(h.ctx).
+			Warn("Append session title event to stream failed (stream may have ended)", "error", err)
 	}
 
 	return nil
 }
 
 // handleComplete handles agent complete events
-func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleComplete(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentCompleteData)
 	if !ok {
 		return nil

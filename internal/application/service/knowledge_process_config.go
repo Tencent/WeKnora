@@ -10,7 +10,10 @@ import (
 )
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
-func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
+func ResolveProcessConfig(
+	kb *types.KnowledgeBase,
+	overrides *types.KnowledgeProcessOverrides,
+) types.EffectiveProcessConfig {
 	eff := types.EffectiveProcessConfig{
 		ChunkingConfig:           kb.ChunkingConfig,
 		EnableMultimodel:         kb.IsMultimodalEnabled(),
@@ -274,7 +277,10 @@ func validateImageMultimodalConfig(ctx context.Context, kb *types.KnowledgeBase)
 }
 
 // MergeParserEngineOverrides merges upload overrides on top of tenant overrides safely.
-func MergeParserEngineOverrides(tenantOverrides map[string]string, uploadOverrides map[string]string) map[string]string {
+func MergeParserEngineOverrides(
+	tenantOverrides map[string]string,
+	uploadOverrides map[string]string,
+) map[string]string {
 	merged := make(map[string]string)
 	for k, v := range tenantOverrides {
 		merged[k] = v

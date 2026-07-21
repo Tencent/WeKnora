@@ -97,7 +97,7 @@ func TestResetPendingTasks_KnowledgeFindThenUpdate(t *testing.T) {
 		"k-stuck", types.ParseStatusProcessing, stale,
 	).Error)
 
-	os.Unsetenv("REDIS_ADDR")
+	_ = os.Unsetenv("REDIS_ADDR")
 	resetPendingTasks(db)
 
 	var status, errMsg string
@@ -191,7 +191,7 @@ func TestResetPendingTasks_DurableWikiOpSurvivesLiteRestart(t *testing.T) {
 		types.TypeWikiIngest, types.TaskScopeKnowledgeBase,
 	).Error)
 
-	os.Unsetenv("REDIS_ADDR")
+	_ = os.Unsetenv("REDIS_ADDR")
 	resetPendingTasks(db)
 
 	var status string
@@ -216,7 +216,7 @@ func TestResetPendingTasks_LiteWikiDoesNotHideOtherLostSubtasks(t *testing.T) {
 		types.TypeWikiIngest, types.TaskScopeKnowledgeBase,
 	).Error)
 
-	os.Unsetenv("REDIS_ADDR")
+	_ = os.Unsetenv("REDIS_ADDR")
 	resetPendingTasks(db)
 
 	var status string
@@ -249,7 +249,7 @@ func TestResetPendingTasks_SyncLogStaleRunning(t *testing.T) {
 
 func TestResetPendingTasks_SyncLogLiteMode(t *testing.T) {
 	db := setupResetPendingDB(t)
-	os.Unsetenv("REDIS_ADDR")
+	_ = os.Unsetenv("REDIS_ADDR")
 	require.NoError(t, db.Exec(
 		`INSERT INTO sync_logs (id, status, started_at) VALUES (?, ?, ?)`,
 		"sync-lite", types.SyncLogStatusRunning, time.Now(),

@@ -14,7 +14,9 @@ import (
 var _ im.FileDownloader = (*Adapter)(nil)
 
 func TestParseFileContent_File(t *testing.T) {
-	content := json.RawMessage(`{"spaceId":"223573","fileName":"foobar.zip","downloadCode":"LJYYbw==","fileId":"117848"}`)
+	content := json.RawMessage(
+		`{"spaceId":"223573","fileName":"foobar.zip","downloadCode":"LJYYbw==","fileId":"117848"}`,
+	)
 	msgType, fileName, downloadCode, ok := parseFileContent("file", content)
 	if !ok {
 		t.Fatalf("expected ok=true for file message")
@@ -123,7 +125,7 @@ func TestParseCallbackMessage_File(t *testing.T) {
 		MsgID:            "m1",
 		Msgtype:          "file",
 		RobotCode:        "robot-123",
-		SenderStaffId:    "staff-1",
+		SenderStaffID:    "staff-1",
 		SenderNick:       "Alice",
 		ConversationType: "1",
 		Content:          json.RawMessage(`{"fileName":"spec.pdf","downloadCode":"CODE1","spaceId":"s1"}`),
@@ -168,7 +170,7 @@ func TestParseCallbackMessage_TextStillWorks(t *testing.T) {
 	msg := &callbackMessage{
 		MsgID:         "m2",
 		Msgtype:       "text",
-		SenderStaffId: "staff-1",
+		SenderStaffID: "staff-1",
 		Text:          &textContent{Content: "  hello  "},
 	}
 	got := parseCallbackMessage(msg)

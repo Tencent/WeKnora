@@ -14,8 +14,8 @@ func init() {
 }
 
 // Info 返回通用 provider 的元数据
-func (p *GenericProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *GenericProvider) Info() Info {
+	return Info{
 		Name:        ProviderGeneric,
 		DisplayName: "自定义 (OpenAI兼容接口)",
 		Description: "Generic API endpoint (OpenAI-compatible)",

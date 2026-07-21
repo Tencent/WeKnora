@@ -103,7 +103,13 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 	return cmd
 }
 
-func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, store secrets.Store, p prompt.Prompter) error {
+func runRemove(
+	opts *RemoveOptions,
+	fopts *cmdutil.FormatOptions,
+	name string,
+	store secrets.Store,
+	p prompt.Prompter,
+) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -139,7 +145,11 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 		return fopts.Emit(iostreams.IO.Out, result, nil)
 	}
 	if wasCurrent {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Removed profile %s (current profile cleared - run `weknora profile use <name>` to pick another)\n", name)
+		fmt.Fprintf(
+			iostreams.IO.Out,
+			"✓ Removed profile %s (current profile cleared - run `weknora profile use <name>` to pick another)\n",
+			name,
+		)
 	} else {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed profile %s\n", name)
 	}

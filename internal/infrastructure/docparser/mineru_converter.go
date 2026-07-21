@@ -68,7 +68,13 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		return &types.ReadResult{Error: "no file content provided"}, nil
 	}
 
-	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
+	logger.Infof(
+		context.Background(),
+		"[MinerU] Parsing file=%s size=%d via %s",
+		req.FileName,
+		len(content),
+		c.endpoint,
+	)
 
 	mdContent, imagesB64, err := c.callFileParse(ctx, content)
 	if err != nil {
@@ -85,7 +91,12 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
 
-	logger.Infof(context.Background(), "[MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
+	logger.Infof(
+		context.Background(),
+		"[MinerU] Parsed successfully, markdown=%d chars, images=%d",
+		len(mdContent),
+		len(imageRefs),
+	)
 
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
@@ -132,7 +143,8 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	if c.language != "" {
 		fields["lang_list"] = c.language
 	}
-	if c.vlmServerURL != "" && (strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
+	if c.vlmServerURL != "" &&
+		(strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
 		fields["server_url"] = c.vlmServerURL
 	}
 	for k, v := range fields {
@@ -147,7 +159,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	if _, err := part.Write(content); err != nil {
 		return "", nil, fmt.Errorf("write file content: %w", err)
 	}
-	writer.Close()
+	_ = writer.Close()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/file_parse", &body)
 	if err != nil {
@@ -163,7 +175,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	if err != nil {
 		return "", nil, fmt.Errorf("HTTP request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -207,7 +219,10 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		return result.Results.Files.MDContent, result.Results.Files.Images, nil
 	}
 
-	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
+	logger.Errorf(
+		context.Background(),
+		"[MinerU] Response has no markdown/images under results.document or results.files",
+	)
 	return "", nil, nil
 }
 
@@ -300,7 +315,7 @@ func PingMinerU(endpoint string) (bool, string) {
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return false, fmt.Sprintf("MinerU 服务返回状态 %d", resp.StatusCode)
 	}

@@ -42,7 +42,7 @@ func (r *fakeDataSourceRepo) FindByID(_ context.Context, id string) (*types.Data
 	return ds, nil
 }
 
-func (r *fakeDataSourceRepo) FindByKnowledgeBase(_ context.Context, kbID string) ([]*types.DataSource, error) {
+func (r *fakeDataSourceRepo) FindByKnowledgeBase(_ context.Context, _ string) ([]*types.DataSource, error) {
 	return nil, nil
 }
 
@@ -106,11 +106,11 @@ func (r *fakeSyncLogRepo) FindByID(_ context.Context, id string) (*types.SyncLog
 	return l, nil
 }
 
-func (r *fakeSyncLogRepo) FindByDataSource(_ context.Context, dsID string, limit, offset int) ([]*types.SyncLog, error) {
+func (r *fakeSyncLogRepo) FindByDataSource(_ context.Context, _ string, _, _ int) ([]*types.SyncLog, error) {
 	return nil, nil
 }
 
-func (r *fakeSyncLogRepo) FindLatest(_ context.Context, dsID string) (*types.SyncLog, error) {
+func (r *fakeSyncLogRepo) FindLatest(_ context.Context, _ string) (*types.SyncLog, error) {
 	return nil, nil
 }
 
@@ -125,11 +125,11 @@ func (r *fakeSyncLogRepo) UpdateResult(ctx context.Context, log *types.SyncLog) 
 	return r.Update(ctx, log)
 }
 
-func (r *fakeSyncLogRepo) CancelPendingByDataSource(_ context.Context, dsID string) error {
+func (r *fakeSyncLogRepo) CancelPendingByDataSource(_ context.Context, _ string) error {
 	return nil
 }
 
-func (r *fakeSyncLogRepo) CleanupOldLogs(_ context.Context, retentionDays int) error {
+func (r *fakeSyncLogRepo) CleanupOldLogs(_ context.Context, _ int) error {
 	return nil
 }
 
@@ -150,7 +150,7 @@ type fakeTaskEnqueuer struct {
 	lastQueue atomic.Value
 }
 
-func (e *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+func (e *fakeTaskEnqueuer) Enqueue(_ *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	e.count.Add(1)
 	for _, opt := range opts {
 		if opt.Type() == asynq.QueueOpt {

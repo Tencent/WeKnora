@@ -46,15 +46,27 @@ func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
 	if len(missingIDs) == 0 {
 		return knowledgeMap, nil
 	}
-	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] %d knowledge IDs not found in current tenant, attempting shared KB lookup", len(missingIDs))
+	logger.Infof(
+		ctx,
+		"[fetchKnowledgeDataWithShared] %d knowledge IDs not found in current tenant, attempting shared KB lookup",
+		len(missingIDs),
+	)
 
 	userID, ok := s.extractUserID(ctx)
 	if !ok {
-		logger.Warnf(ctx, "[fetchKnowledgeDataWithShared] userID not found or empty in context, skipping shared KB lookup")
+		logger.Warnf(
+			ctx,
+			"[fetchKnowledgeDataWithShared] userID not found or empty in context, skipping shared KB lookup",
+		)
 		return knowledgeMap, nil
 	}
 
-	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] Looking up %d missing knowledge IDs with userID=%s", len(missingIDs), userID)
+	logger.Infof(
+		ctx,
+		"[fetchKnowledgeDataWithShared] Looking up %d missing knowledge IDs with userID=%s",
+		len(missingIDs),
+		userID,
+	)
 	callerTenantRole := types.TenantRoleFromContext(ctx)
 	for _, id := range missingIDs {
 		k, err := s.kgRepo.GetKnowledgeByIDOnly(ctx, id)
@@ -62,9 +74,20 @@ func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
 			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Knowledge %s not found or has no KB", id)
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, k.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(
+			ctx,
+			k.KnowledgeBaseID,
+			tenantID,
+			callerTenantRole,
+			types.OrgRoleViewer,
+		)
 		if err != nil {
-			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Permission check error for KB %s: %v", k.KnowledgeBaseID, err)
+			logger.Debugf(
+				ctx,
+				"[fetchKnowledgeDataWithShared] Permission check error for KB %s: %v",
+				k.KnowledgeBaseID,
+				err,
+			)
 			continue
 		}
 		if !hasPermission {
@@ -75,7 +98,11 @@ func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
 		knowledgeMap[k.ID] = k
 	}
 
-	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] After shared lookup, total knowledge found: %d", len(knowledgeMap))
+	logger.Infof(
+		ctx,
+		"[fetchKnowledgeDataWithShared] After shared lookup, total knowledge found: %d",
+		len(knowledgeMap),
+	)
 	return knowledgeMap, nil
 }
 
@@ -102,7 +129,11 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 	if len(missing) == 0 {
 		return chunks, nil
 	}
-	logger.Infof(ctx, "[listChunksByIDWithShared] %d chunks not found in current tenant, attempting shared KB lookup", len(missing))
+	logger.Infof(
+		ctx,
+		"[listChunksByIDWithShared] %d chunks not found in current tenant, attempting shared KB lookup",
+		len(missing),
+	)
 
 	userID, ok := s.extractUserID(ctx)
 	if !ok {
@@ -123,9 +154,20 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 		if c == nil || c.KnowledgeBaseID == "" {
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, c.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(
+			ctx,
+			c.KnowledgeBaseID,
+			tenantID,
+			callerTenantRole,
+			types.OrgRoleViewer,
+		)
 		if err != nil {
-			logger.Debugf(ctx, "[listChunksByIDWithShared] Permission check error for KB %s: %v", c.KnowledgeBaseID, err)
+			logger.Debugf(
+				ctx,
+				"[listChunksByIDWithShared] Permission check error for KB %s: %v",
+				c.KnowledgeBaseID,
+				err,
+			)
 			continue
 		}
 		if !hasPermission {

@@ -83,7 +83,8 @@ Pass --full to also load the chat history (LoadMessages SDK call). Use
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Full, "full", false, "Also load chat history via LoadMessages")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultFullLimit, "Max messages to load when --full is set (1..1000)")
+	cmd.Flags().
+		IntVarP(&opts.Limit, "limit", "L", defaultFullLimit, "Max messages to load when --full is set (1..1000)")
 	cmdutil.AddFormatFlag(cmd, sessionViewFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "fetch one chat session by id; --full also loads its message history",

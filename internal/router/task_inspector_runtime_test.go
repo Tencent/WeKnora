@@ -48,9 +48,15 @@ func TestProjectRuntimeTaskActionsFollowCurrentState(t *testing.T) {
 		state asynq.TaskState
 		want  []types.RuntimeTaskAction
 	}{
-		{asynq.TaskStateScheduled, []types.RuntimeTaskAction{types.RuntimeTaskActionCancel, types.RuntimeTaskActionRunNow}},
+		{
+			asynq.TaskStateScheduled,
+			[]types.RuntimeTaskAction{types.RuntimeTaskActionCancel, types.RuntimeTaskActionRunNow},
+		},
 		{asynq.TaskStateRetry, []types.RuntimeTaskAction{types.RuntimeTaskActionCancel, types.RuntimeTaskActionRunNow}},
-		{asynq.TaskStateArchived, []types.RuntimeTaskAction{types.RuntimeTaskActionRunNow, types.RuntimeTaskActionDelete}},
+		{
+			asynq.TaskStateArchived,
+			[]types.RuntimeTaskAction{types.RuntimeTaskActionRunNow, types.RuntimeTaskActionDelete},
+		},
 		{asynq.TaskStateCompleted, []types.RuntimeTaskAction{}},
 	}
 	for _, tc := range cases {

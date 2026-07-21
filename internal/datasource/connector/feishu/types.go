@@ -7,7 +7,9 @@
 //   - Wiki nodes:       https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/list
 //   - Export tasks:     https://open.feishu.cn/document/server-docs/docs/drive-v1/export_task/export-user-guide
 //   - File download:    https://open.feishu.cn/document/server-docs/docs/drive-v1/file/download
-//   - Auth:             https://open.feishu.cn/document/server-docs/authentication-management/access-token/tenant_access_token_internal
+//
+// - Auth:
+// https://open.feishu.cn/document/server-docs/authentication-management/access-token/tenant_access_token_internal
 package feishu
 
 import "time"
@@ -95,14 +97,14 @@ type tokenResponse struct {
 type wikiSpaceListResponse struct {
 	apiResponse
 	Data struct {
-		Items     []wikiSpace `json:"items"`
+		Items     []WikiSpace `json:"items"`
 		HasMore   bool        `json:"has_more"`
 		PageToken string      `json:"page_token"`
 	} `json:"data"`
 }
 
-// wikiSpace represents a Feishu Wiki space.
-type wikiSpace struct {
+// WikiSpace represents a Feishu Wiki space.
+type WikiSpace struct {
 	SpaceID     string `json:"space_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -113,37 +115,39 @@ type wikiSpace struct {
 type wikiNodeListResponse struct {
 	apiResponse
 	Data struct {
-		Items     []wikiNode `json:"items"`
+		Items     []WikiNode `json:"items"`
 		HasMore   bool       `json:"has_more"`
 		PageToken string     `json:"page_token"`
 	} `json:"data"`
 }
 
-// wikiNode represents a node (document or folder) in a Feishu Wiki space.
-type wikiNode struct {
-	SpaceID        string `json:"space_id"`
-	NodeToken      string `json:"node_token"`
-	ObjToken       string `json:"obj_token"` // document token
-	ObjType        string `json:"obj_type"`  // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
-	ParentNodeID   string `json:"parent_node_token"`
-	NodeType       string `json:"node_type"` // "origin" or "shortcut"
-	OriginNodeID   string `json:"origin_node_id"`
-	OriginSpaceID  string `json:"origin_space_id"`
-	HasChild       bool   `json:"has_child"`
-	Title          string `json:"title"`
-	Creator        string `json:"creator"`
-	Owner          string `json:"owner"`
-	ObjCreateTime  string `json:"obj_create_time"`  // document creation time (unix timestamp string)
-	ObjEditTime    string `json:"obj_edit_time"`    // document last edit time (unix timestamp string) — tracks content changes
+// WikiNode represents a node (document or folder) in a Feishu Wiki space.
+type WikiNode struct {
+	SpaceID       string `json:"space_id"`
+	NodeToken     string `json:"node_token"`
+	ObjToken      string `json:"obj_token"` // document token
+	ObjType       string `json:"obj_type"`  // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
+	ParentNodeID  string `json:"parent_node_token"`
+	NodeType      string `json:"node_type"` // "origin" or "shortcut"
+	OriginNodeID  string `json:"origin_node_id"`
+	OriginSpaceID string `json:"origin_space_id"`
+	HasChild      bool   `json:"has_child"`
+	Title         string `json:"title"`
+	Creator       string `json:"creator"`
+	Owner         string `json:"owner"`
+	ObjCreateTime string `json:"obj_create_time"` // document creation time (unix timestamp string)
+	// document last edit time (unix timestamp string) — tracks content changes
+	ObjEditTime    string `json:"obj_edit_time"`
 	NodeCreateTime string `json:"node_create_time"` // node creation time (unix timestamp string)
-	NodeEditTime   string `json:"node_edit_time"`   // node edit time (unix timestamp string) — only tracks node attribute changes
+	// node edit time (unix timestamp string) — only tracks node attribute changes
+	NodeEditTime string `json:"node_edit_time"`
 }
 
 // wikiNodeInfoResponse is the response for GET /open-apis/wiki/v2/spaces/get_node.
 type wikiNodeInfoResponse struct {
 	apiResponse
 	Data struct {
-		Node wikiNode `json:"node"`
+		Node WikiNode `json:"node"`
 	} `json:"data"`
 }
 
@@ -174,24 +178,10 @@ type exportTaskStatusResponse struct {
 			FileToken string `json:"file_token"`
 			FileSize  int64  `json:"file_size"`
 			// JobStatus: 0=success, 1=initializing, 2=processing
-			JobStatus    int    `json:"job_status"`
-			JobErrorMsg  string `json:"job_error_msg"`
-			FileName     string `json:"file_name"`
+			JobStatus   int    `json:"job_status"`
+			JobErrorMsg string `json:"job_error_msg"`
+			FileName    string `json:"file_name"`
 		} `json:"result"`
-	} `json:"data"`
-}
-
-// --- File download response ---
-
-// driveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
-type driveFileMetaResponse struct {
-	apiResponse
-	Data struct {
-		Metas []struct {
-			DocToken string `json:"doc_token"`
-			DocType  string `json:"doc_type"`
-			Title    string `json:"title"`
-		} `json:"metas"`
 	} `json:"data"`
 }
 

@@ -8,12 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 )
 
-// Middleware is a function that wraps an EventHandler
-type Middleware func(EventHandler) EventHandler
+// Middleware is a function that wraps an Handler
+type Middleware func(Handler) Handler
 
 // WithLogging creates a middleware that logs event handling
 func WithLogging() Middleware {
-	return func(next EventHandler) EventHandler {
+	return func(next Handler) Handler {
 		return func(ctx context.Context, event Event) error {
 			logger.Infof(ctx, "Event triggered: type=%s, session=%s, request=%s",
 				event.Type, event.SessionID, event.RequestID)
@@ -33,7 +33,7 @@ func WithLogging() Middleware {
 
 // WithTiming creates a middleware that tracks event handling duration
 func WithTiming() Middleware {
-	return func(next EventHandler) EventHandler {
+	return func(next Handler) Handler {
 		return func(ctx context.Context, event Event) error {
 			start := time.Now()
 			err := next(ctx, event)
@@ -54,7 +54,7 @@ func WithTiming() Middleware {
 
 // WithRecovery creates a middleware that recovers from panics
 func WithRecovery() Middleware {
-	return func(next EventHandler) EventHandler {
+	return func(next Handler) Handler {
 		return func(ctx context.Context, event Event) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -79,7 +79,7 @@ func (e *PanicError) Error() string {
 
 // Chain combines multiple middlewares into a single middleware
 func Chain(middlewares ...Middleware) Middleware {
-	return func(handler EventHandler) EventHandler {
+	return func(handler Handler) Handler {
 		// Apply middlewares in reverse order so they execute in the correct order
 		for i := len(middlewares) - 1; i >= 0; i-- {
 			handler = middlewares[i](handler)
@@ -89,6 +89,6 @@ func Chain(middlewares ...Middleware) Middleware {
 }
 
 // ApplyMiddleware applies middleware to an event handler
-func ApplyMiddleware(handler EventHandler, middlewares ...Middleware) EventHandler {
+func ApplyMiddleware(handler Handler, middlewares ...Middleware) Handler {
 	return Chain(middlewares...)(handler)
 }

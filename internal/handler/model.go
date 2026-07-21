@@ -43,12 +43,12 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 // CreateModelRequest defines the structure for model creation requests
 // Contains all fields required to create a new model in the system
 type CreateModelRequest struct {
-	Name        string                `json:"name"        binding:"required"`
+	Name        string                `json:"name"         binding:"required"`
 	DisplayName string                `json:"display_name"`
-	Type        types.ModelType       `json:"type"        binding:"required"`
-	Source      types.ModelSource     `json:"source"      binding:"required"`
+	Type        types.ModelType       `json:"type"         binding:"required"`
+	Source      types.ModelSource     `json:"source"       binding:"required"`
 	Description string                `json:"description"`
-	Parameters  types.ModelParameters `json:"parameters"  binding:"required"`
+	Parameters  types.ModelParameters `json:"parameters"   binding:"required"`
 }
 
 // CreateModel godoc
@@ -71,13 +71,13 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	var req CreateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
@@ -88,7 +88,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
+			_ = c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}
@@ -105,7 +105,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Model ID is empty")
-		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
 		return
 	}
 
@@ -151,11 +151,11 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			logger.Warnf(ctx, "Model not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError("Model not found"))
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -186,14 +186,14 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
 	models, err := h.service.ListModels(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -261,7 +261,14 @@ func redactedDebugConfig(config map[string]string) map[string]string {
 	return out
 }
 
-func modelDebugRequestPreview(model *types.Model, input string, documents []string, opts ModelDebugOptions, fileName string, fileSize int64) gin.H {
+func modelDebugRequestPreview(
+	model *types.Model,
+	input string,
+	documents []string,
+	opts ModelDebugOptions,
+	fileName string,
+	fileSize int64,
+) gin.H {
 	preview := gin.H{
 		"model_id":   model.ID,
 		"model_name": model.Name,
@@ -290,7 +297,14 @@ func modelDebugRequestPreview(model *types.Model, input string, documents []stri
 	return preview
 }
 
-func writeModelDebugResult(c *gin.Context, started time.Time, request gin.H, response any, callErr error, observations gin.H) {
+func writeModelDebugResult(
+	c *gin.Context,
+	started time.Time,
+	request gin.H,
+	response any,
+	callErr error,
+	observations gin.H,
+) {
 	data := gin.H{
 		"ok":           callErr == nil,
 		"elapsed_ms":   time.Since(started).Milliseconds(),
@@ -352,38 +366,38 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 	started := time.Now()
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
-		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
 		return
 	}
 
 	model, err := h.service.GetModelByID(ctx, id)
 	if err != nil {
 		if err == service.ErrModelNotFound {
-			c.Error(errors.NewNotFoundError("Model not found"))
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	input := c.PostForm("input")
 	if len(input) > modelDebugMaxInputBytes {
-		c.Error(errors.NewBadRequestError("input is too long"))
+		_ = c.Error(errors.NewBadRequestError("input is too long"))
 		return
 	}
 	opts, err := parseModelDebugOptions(c.PostForm("options"))
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	var documents []string
 	if rawDocuments := c.PostForm("documents"); strings.TrimSpace(rawDocuments) != "" {
 		if err := json.Unmarshal([]byte(rawDocuments), &documents); err != nil {
-			c.Error(errors.NewBadRequestError("documents must be a JSON string array"))
+			_ = c.Error(errors.NewBadRequestError("documents must be a JSON string array"))
 			return
 		}
 		if len(documents) > 100 {
-			c.Error(errors.NewBadRequestError("documents cannot exceed 100 items"))
+			_ = c.Error(errors.NewBadRequestError("documents cannot exceed 100 items"))
 			return
 		}
 	}
@@ -394,20 +408,20 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		fileSize  int64
 	)
 	if file, header, fileErr := c.Request.FormFile("file"); fileErr == nil {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		fileName = header.Filename
 		fileSize = header.Size
 		if fileSize > modelDebugMaxFileBytes {
-			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+			_ = c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
 			return
 		}
 		fileBytes, err = io.ReadAll(io.LimitReader(file, modelDebugMaxFileBytes+1))
 		if err != nil {
-			c.Error(errors.NewBadRequestError("failed to read uploaded file"))
+			_ = c.Error(errors.NewBadRequestError("failed to read uploaded file"))
 			return
 		}
 		if len(fileBytes) > modelDebugMaxFileBytes {
-			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+			_ = c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
 			return
 		}
 		fileSize = int64(len(fileBytes))
@@ -419,7 +433,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 	switch model.Type {
 	case types.ModelTypeKnowledgeQA:
 		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("query cannot be empty"))
+			_ = c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetChatModel(ctx, id)
@@ -432,7 +446,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
 		}
 		messages = append(messages, chat.Message{Role: "user", Content: input})
-		chatOpts := &chat.ChatOptions{}
+		chatOpts := &chat.Options{}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature
 		}
@@ -464,7 +478,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		writeModelDebugResult(c, started, requestPreview, resp, callErr, observations)
 	case types.ModelTypeEmbedding:
 		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("input cannot be empty"))
+			_ = c.Error(errors.NewBadRequestError("input cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetEmbeddingModel(ctx, id)
@@ -477,7 +491,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		writeModelDebugResult(c, started, requestPreview, vector, callErr, observations)
 	case types.ModelTypeRerank:
 		if strings.TrimSpace(input) == "" || len(documents) == 0 {
-			c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
+			_ = c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetRerankModel(ctx, id)
@@ -490,7 +504,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		writeModelDebugResult(c, started, requestPreview, results, callErr, observations)
 	case types.ModelTypeVLLM:
 		if len(fileBytes) == 0 {
-			c.Error(errors.NewBadRequestError("image file is required"))
+			_ = c.Error(errors.NewBadRequestError("image file is required"))
 			return
 		}
 		instance, callErr := h.service.GetVLMModel(ctx, id)
@@ -503,7 +517,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeASR:
 		if len(fileBytes) == 0 {
-			c.Error(errors.NewBadRequestError("audio file is required"))
+			_ = c.Error(errors.NewBadRequestError("audio file is required"))
 			return
 		}
 		instance, callErr := h.service.GetASRModel(ctx, id)
@@ -518,7 +532,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		}
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	default:
-		c.Error(errors.NewBadRequestError("unsupported model type"))
+		_ = c.Error(errors.NewBadRequestError("unsupported model type"))
 	}
 }
 
@@ -554,14 +568,14 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Model ID is empty")
-		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
 		return
 	}
 
 	var req UpdateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -570,11 +584,11 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			logger.Warnf(ctx, "Model not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError("Model not found"))
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -591,7 +605,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
+			_ = c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}
@@ -632,11 +646,11 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -668,7 +682,7 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Model ID is empty")
-		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
 		return
 	}
 
@@ -676,15 +690,15 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	if err := h.service.DeleteModel(ctx, id); err != nil {
 		if err == service.ErrModelNotFound {
 			logger.Warnf(ctx, "Model not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError("Model not found"))
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -759,7 +773,7 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendModelType = types.ModelType(modelType)
 	}
 
-	var providers []provider.ProviderInfo
+	var providers []provider.Info
 	if modelType != "" {
 		// 按模型类型过滤
 		providers = provider.ListByModelType(backendModelType)

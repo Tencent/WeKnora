@@ -20,7 +20,7 @@ func TestIntoChatMessage_NoKBRetrieval(t *testing.T) {
 	}
 	plugin := &PluginIntoChatMessage{messageService: nil}
 	nextCalled := false
-	err := plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
+	err := plugin.OnEvent(context.Background(), types.IntoChatMessage, cm, func() *PluginError {
 		nextCalled = true
 		return nil
 	})
@@ -52,7 +52,7 @@ func TestIntoChatMessage_WithMergeResults(t *testing.T) {
 	}
 	plugin := &PluginIntoChatMessage{messageService: nil}
 	nextCalled := false
-	err := plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
+	err := plugin.OnEvent(context.Background(), types.IntoChatMessage, cm, func() *PluginError {
 		nextCalled = true
 		return nil
 	})
@@ -85,7 +85,7 @@ func TestIntoChatMessage_ImageDescriptionAppended(t *testing.T) {
 		},
 	}
 	plugin := &PluginIntoChatMessage{messageService: nil}
-	_ = plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
+	_ = plugin.OnEvent(context.Background(), types.IntoChatMessage, cm, func() *PluginError {
 		return nil
 	})
 	if !contains(cm.UserContent, "a cat sitting on a mat") {
@@ -97,30 +97,30 @@ func TestIntoChatMessage_ImageDescriptionAppended(t *testing.T) {
 
 func TestPipelineBuilder_Basic(t *testing.T) {
 	pipeline := types.NewPipelineBuilder().
-		Add(types.LOAD_HISTORY).
-		Add(types.CHAT_COMPLETION_STREAM).
+		Add(types.LoadHistory).
+		Add(types.ChatCompletionStream).
 		Build()
 
 	if len(pipeline) != 2 {
 		t.Fatalf("expected 2 stages, got %d", len(pipeline))
 	}
-	if pipeline[0] != types.LOAD_HISTORY {
-		t.Errorf("stage 0: got %v, want %v", pipeline[0], types.LOAD_HISTORY)
+	if pipeline[0] != types.LoadHistory {
+		t.Errorf("stage 0: got %v, want %v", pipeline[0], types.LoadHistory)
 	}
 }
 
 func TestPipelineBuilder_AddIf(t *testing.T) {
 	pipeline := types.NewPipelineBuilder().
-		Add(types.LOAD_HISTORY).
-		AddIf(false, types.QUERY_UNDERSTAND).
-		AddIf(true, types.CHAT_COMPLETION_STREAM).
+		Add(types.LoadHistory).
+		AddIf(false, types.QueryUnderstand).
+		AddIf(true, types.ChatCompletionStream).
 		Build()
 
 	if len(pipeline) != 2 {
 		t.Fatalf("expected 2 stages (QUERY_UNDERSTAND skipped), got %d", len(pipeline))
 	}
-	if pipeline[1] != types.CHAT_COMPLETION_STREAM {
-		t.Errorf("stage 1: got %v, want %v", pipeline[1], types.CHAT_COMPLETION_STREAM)
+	if pipeline[1] != types.ChatCompletionStream {
+		t.Errorf("stage 1: got %v, want %v", pipeline[1], types.ChatCompletionStream)
 	}
 }
 

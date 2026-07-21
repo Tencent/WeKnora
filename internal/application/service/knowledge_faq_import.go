@@ -205,7 +205,14 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		logger.Errorf(ctx, "Failed to enqueue FAQ import task: %v", err)
 		return "", fmt.Errorf("failed to enqueue task: %w", err)
 	}
-	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
+	logger.Infof(
+		ctx,
+		"Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v",
+		info.ID,
+		info.Queue,
+		taskID,
+		payload.DryRun,
+	)
 
 	return taskID, nil
 }
@@ -221,7 +228,9 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 	buf.WriteString("\xEF\xBB\xBF")
 
 	// 写入表头
-	buf.WriteString("错误原因,分类(必填),问题(必填),相似问题(选填-多个用##分隔),反例问题(选填-多个用##分隔),机器人回答(必填-多个用##分隔),是否全部回复(选填-默认FALSE),是否停用(选填-默认FALSE)\n")
+	buf.WriteString(
+		"错误原因,分类(必填),问题(必填),相似问题(选填-多个用##分隔),反例问题(选填-多个用##分隔),机器人回答(必填-多个用##分隔),是否全部回复(选填-默认FALSE),是否停用(选填-默认FALSE)\n",
+	)
 
 	// 写入数据行
 	for _, entry := range failedEntries {
@@ -250,8 +259,8 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 			isDisabled = "true"
 		}
 
-		buf.WriteString(fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s,%s\n",
-			reason, tagName, standardQ, similarQs, negativeQs, answers, answerAll, isDisabled))
+		fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s,%s,%s\n",
+			reason, tagName, standardQ, similarQs, negativeQs, answers, answerAll, isDisabled)
 	}
 
 	// 上传 CSV 文件到临时存储（会自动过期）
@@ -325,22 +334,26 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		return fmt.Errorf("failed to update knowledge with import result: %w", err)
 	}
 
-	logger.Infof(ctx, "Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, success=%d, failed=%d, skipped=%d",
-		payload.KnowledgeID, payload.TaskID, originalTotalEntries, progress.SuccessCount, progress.FailedCount, skippedCount)
+	logger.Infof(
+		ctx,
+		"Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, success=%d, failed=%d, skipped=%d",
+		payload.KnowledgeID,
+		payload.TaskID,
+		originalTotalEntries,
+		progress.SuccessCount,
+		progress.FailedCount,
+		skippedCount,
+	)
 
 	return nil
 }
 
 // buildFAQFailedEntry 构建 FAQFailedEntry
 func buildFAQFailedEntry(idx int, reason string, entry *types.FAQEntryPayload) types.FAQFailedEntry {
-	answerAll := false
-	if entry.AnswerStrategy != nil && *entry.AnswerStrategy == types.AnswerStrategyAll {
-		answerAll = true
-	}
-	isDisabled := false
-	if entry.IsEnabled != nil && !*entry.IsEnabled {
-		isDisabled = true
-	}
+	answerAll := entry.AnswerStrategy != nil && *entry.AnswerStrategy == types.AnswerStrategyAll
+
+	isDisabled := entry.IsEnabled != nil && !*entry.IsEnabled
+
 	return types.FAQFailedEntry{
 		Index:             idx,
 		Reason:            reason,
@@ -360,12 +373,16 @@ func (s *knowledgeService) executeFAQDryRunValidation(ctx context.Context,
 ) []int {
 	entries := payload.Entries
 
-	// 用于记录已通过基本验证和重复检查的条目索引，后续进行安全检查
-	validEntryIndices := make([]int, 0, len(entries))
-
 	// 根据模式选择不同的验证逻辑
+	var validEntryIndices []int
 	if payload.Mode == types.FAQBatchModeAppend {
-		validEntryIndices = s.validateEntriesForAppendModeWithProgress(ctx, payload.TenantID, payload.KBID, entries, progress)
+		validEntryIndices = s.validateEntriesForAppendModeWithProgress(
+			ctx,
+			payload.TenantID,
+			payload.KBID,
+			entries,
+			progress,
+		)
 	} else {
 		validEntryIndices = s.validateEntriesForReplaceModeWithProgress(ctx, entries, progress)
 	}
@@ -427,7 +444,10 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		// 检查标准问是否与同批次重复
 		if firstIdx, exists := batchQuestions[standardQ]; exists {
 			progress.FailedCount++
-			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry))
+			progress.FailedEntries = append(
+				progress.FailedEntries,
+				buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry),
+			)
 			continue
 		}
 
@@ -440,13 +460,19 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			}
 			if existingQuestions[q] {
 				progress.FailedCount++
-				progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与知识库中已有问题重复", q), &entry))
+				progress.FailedEntries = append(
+					progress.FailedEntries,
+					buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与知识库中已有问题重复", q), &entry),
+				)
 				hasDuplicate = true
 				break
 			}
 			if firstIdx, exists := batchQuestions[q]; exists {
 				progress.FailedCount++
-				progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与批次内第 %d 条重复", q, firstIdx+1), &entry))
+				progress.FailedEntries = append(
+					progress.FailedEntries,
+					buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与批次内第 %d 条重复", q, firstIdx+1), &entry),
+				)
 				hasDuplicate = true
 				break
 			}
@@ -503,7 +529,10 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 		// 检查标准问是否与同批次重复
 		if firstIdx, exists := batchQuestions[standardQ]; exists {
 			progress.FailedCount++
-			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry))
+			progress.FailedEntries = append(
+				progress.FailedEntries,
+				buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry),
+			)
 			continue
 		}
 
@@ -516,7 +545,10 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			}
 			if firstIdx, exists := batchQuestions[q]; exists {
 				progress.FailedCount++
-				progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与批次内第 %d 条重复", q, firstIdx+1), &entry))
+				progress.FailedEntries = append(
+					progress.FailedEntries,
+					buildFAQFailedEntry(i, fmt.Sprintf("相似问 \"%s\" 与批次内第 %d 条重复", q, firstIdx+1), &entry),
+				)
 				hasDuplicate = true
 				break
 			}
@@ -635,7 +667,12 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		for _, q := range meta.SimilarQuestions {
 			if existingQuestions[q] || batchQuestions[q] {
 				hasDuplicateSimilar = true
-				logger.Infof(ctx, "Skipping FAQ entry with duplicate similar question: %s (standard: %s)", q, meta.StandardQuestion)
+				logger.Infof(
+					ctx,
+					"Skipping FAQ entry with duplicate similar question: %s (standard: %s)",
+					q,
+					meta.StandardQuestion,
+				)
 				break
 			}
 		}
@@ -706,7 +743,12 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		for _, q := range meta.SimilarQuestions {
 			if batchQuestions[q] {
 				hasDuplicateSimilar = true
-				logger.Infof(ctx, "Skipping FAQ entry with duplicate similar question in batch: %s (standard: %s)", q, meta.StandardQuestion)
+				logger.Infof(
+					ctx,
+					"Skipping FAQ entry with duplicate similar question in batch: %s (standard: %s)",
+					q,
+					meta.StandardQuestion,
+				)
 				break
 			}
 		}
@@ -915,7 +957,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		// 构建chunks
 		buildStartTime := time.Now()
 		chunks := make([]*types.Chunk, 0, len(batch))
-		chunkIds := make([]string, 0, len(batch))
+		chunkIDs := make([]string, 0, len(batch))
 		for idx, entry := range batch {
 			meta, err := sanitizeFAQEntryPayload(&entry)
 			if err != nil {
@@ -961,11 +1003,11 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				return fmt.Errorf("failed to set FAQ metadata: %w", err)
 			}
 			chunks = append(chunks, chunk)
-			chunkIds = append(chunkIds, chunk.ID)
+			chunkIDs = append(chunkIDs, chunk.ID)
 		}
 		buildDuration := time.Since(buildStartTime)
 		logger.Debugf(ctx, "FAQ import task %s: batch %d-%d built %d chunks in %v, chunk IDs: %v",
-			taskID, i+1, end, len(chunks), buildDuration, chunkIds)
+			taskID, i+1, end, len(chunks), buildDuration, chunkIDs)
 		// 创建chunks
 		createStartTime := time.Now()
 		if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
@@ -1038,7 +1080,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		actualProcessed += len(batch)
 		// 更新任务进度
 		progress := int(float64(actualProcessed) / float64(totalEntries) * 100)
-		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
+		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil { //nolint:lll
 			logger.Errorf(ctx, "Failed to update task progress: %v", err)
 		}
 
@@ -1122,7 +1164,11 @@ func (s *knowledgeService) updateFAQImportProgressStatus(
 
 // cleanupFAQEntriesFileOnFinalFailure 在任务最终失败时清理对象存储中的 entries 文件
 // 只有当 retryCount >= maxRetry 时才执行清理，否则重试时还需要使用这个文件
-func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(ctx context.Context, entriesURL string, retryCount, maxRetry int) {
+func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(
+	ctx context.Context,
+	entriesURL string,
+	retryCount, maxRetry int,
+) {
 	if entriesURL == "" || retryCount < maxRetry {
 		return
 	}
@@ -1322,7 +1368,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 			sourceIDsToDelete = append(sourceIDsToDelete, fmt.Sprintf("%s-%d", chunk.ID, i))
 		}
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete source IDs", len(sourceIDsToDelete))
-		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
+		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil { //nolint:lll
 			logger.Warnf(ctx, "incrementalIndexFAQEntry: failed to delete obsolete source IDs: %v", delErr)
 		}
 	}
@@ -1407,7 +1453,8 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	var deleteDuration time.Duration
 	if needDelete {
 		deleteStartTime := time.Now()
-		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(),
+			types.KnowledgeTypeFAQ); err != nil {
 			logger.Warnf(ctx, "Delete FAQ vectors failed: %v", err)
 		}
 		deleteDuration = time.Since(deleteStartTime)
@@ -1495,7 +1542,7 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	}
 
 	size := retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfo)
-	if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
+	if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil { //nolint:lll
 		return err
 	}
 	if size > 0 {
@@ -1547,7 +1594,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: %v", err)
 			return fmt.Errorf("failed to download entries: %w", err)
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 
 		entriesData, err := io.ReadAll(reader)
 		if err != nil {
@@ -1657,7 +1704,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil { //nolint:lll
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
@@ -1686,7 +1733,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil { //nolint:lll
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
@@ -1706,6 +1753,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 				for _, chunk := range chunksDeleted {
 					chunkIDs = append(chunkIDs, chunk.ID)
 				}
+				//nolint:lll
 				if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 					logger.Warnf(ctx, "Failed to delete index data for chunks (may not exist): %v", err)
 				} else {
@@ -1728,7 +1776,12 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			importMode = types.FAQBatchModeAppend
 			logger.Infof(ctx, "Switching to Append mode for retry, original mode was Replace")
 		}
-		logger.Infof(ctx, "Continuing FAQ import from entry %d, remaining: %d entries", processedCount, len(entriesToImport))
+		logger.Infof(
+			ctx,
+			"Continuing FAQ import from entry %d, remaining: %d entries",
+			processedCount,
+			len(entriesToImport),
+		)
 	}
 
 	// 构建FAQBatchUpsertPayload（使用验证通过的有效条目）
@@ -1738,10 +1791,11 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
-	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil {
+	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil { //nolint:lll
 		logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
+			//nolint:lll
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
@@ -1893,7 +1947,11 @@ func (s *knowledgeService) GetFAQImportProgress(ctx context.Context, taskID stri
 }
 
 // UpdateLastFAQImportResultDisplayStatus updates the display status of FAQ import result
-func (s *knowledgeService) UpdateLastFAQImportResultDisplayStatus(ctx context.Context, kbID string, displayStatus string) error {
+func (s *knowledgeService) UpdateLastFAQImportResultDisplayStatus(
+	ctx context.Context,
+	kbID string,
+	displayStatus string,
+) error {
 	// 验证displayStatus参数
 	if displayStatus != "open" && displayStatus != "close" {
 		return werrors.NewBadRequestError("invalid display status, must be 'open' or 'close'")

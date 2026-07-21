@@ -102,7 +102,8 @@ func TestAuthRetry_PassThrough_NonAuthError(t *testing.T) {
 }
 
 func TestAuthRetry_401_RefreshAndReplay(t *testing.T) {
-	base := &stubTransport{t: t,
+	base := &stubTransport{
+		t:     t,
 		resps: []*http.Response{resp(401, "expired"), resp(200, "ok-after-retry")},
 	}
 	refreshCalls := atomic.Int32{}

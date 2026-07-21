@@ -167,7 +167,7 @@ func TestRequireOwnershipOrRole_AdminBypassesLookup(t *testing.T) {
 	// Admin / Owner clear the role gate without touching the lookup,
 	// so an erroring lookup still passes when the caller has the role.
 	called := false
-	lookup := func(c *gin.Context) (string, error) {
+	lookup := func(_ *gin.Context) (string, error) {
 		called = true
 		return "", errors.New("must not be called")
 	}
@@ -182,7 +182,7 @@ func TestRequireOwnershipOrRole_AdminBypassesLookup(t *testing.T) {
 }
 
 func TestRequireOwnershipOrRole_CreatorAllowed(t *testing.T) {
-	lookup := func(c *gin.Context) (string, error) { return "u1", nil }
+	lookup := func(_ *gin.Context) (string, error) { return "u1", nil }
 	w := rbacTestHarness(types.TenantRoleContributor, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)))
 	if w.Code != http.StatusOK {
@@ -193,7 +193,7 @@ func TestRequireOwnershipOrRole_CreatorAllowed(t *testing.T) {
 func TestRequireOwnershipOrRole_NonCreatorContributorRejected(t *testing.T) {
 	// Contributor editing someone else's resource is the exact case the
 	// matrix targets: only the original creator OR Admin+ may proceed.
-	lookup := func(c *gin.Context) (string, error) { return "someone-else", nil }
+	lookup := func(_ *gin.Context) (string, error) { return "someone-else", nil }
 	w := rbacTestHarness(types.TenantRoleContributor, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)))
 	if w.Code != http.StatusForbidden {
@@ -205,7 +205,7 @@ func TestRequireOwnershipOrRole_LegacyEmptyCreatorTreatedAsTenantOwned(t *testin
 	// Pre-migration rows (or rows the backfill couldn't resolve) carry
 	// creator_id = "". Per the contract those are tenant-owned: only the
 	// role check decides.
-	lookup := func(c *gin.Context) (string, error) { return "", nil }
+	lookup := func(_ *gin.Context) (string, error) { return "", nil }
 	// Contributor on a tenant-owned row -> rejected, only Admin+ can mutate.
 	w := rbacTestHarness(types.TenantRoleContributor, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)))
@@ -219,7 +219,7 @@ func TestRequireOwnershipOrRole_LookupErrorReturns503(t *testing.T) {
 	// and clients can tell "your permission was denied" from "the server
 	// briefly couldn't verify ownership". Failing open here would mean
 	// any DB hiccup on the creator query becomes a free pass.
-	lookup := func(c *gin.Context) (string, error) { return "", errors.New("boom") }
+	lookup := func(_ *gin.Context) (string, error) { return "", errors.New("boom") }
 	w := rbacTestHarness(types.TenantRoleContributor, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)))
 	if w.Code != http.StatusServiceUnavailable {
@@ -234,7 +234,7 @@ func TestRequireOwnershipOrRole_NotFoundPassesThroughTo404(t *testing.T) {
 	// error handling honest and avoids hiding "wrong URL" behind a
 	// permissions error.
 	called := false
-	lookup := func(c *gin.Context) (string, error) {
+	lookup := func(_ *gin.Context) (string, error) {
 		return "", ErrResourceNotFound
 	}
 	router := gin.New()
@@ -268,7 +268,7 @@ func TestRequireOwnershipOrRole_SkipsLookupWhenRBACDisabled(t *testing.T) {
 	// all. Hooking up RBAC pre-rollout used to add a hidden DB roundtrip
 	// to every mutating request even though the result was thrown away.
 	calls := 0
-	lookup := func(c *gin.Context) (string, error) {
+	lookup := func(_ *gin.Context) (string, error) {
 		calls++
 		return "someone-else", nil
 	}
@@ -287,7 +287,7 @@ func TestRequireOwnershipOrRole_CrossTenantSuperuserBypass(t *testing.T) {
 	// resolveTenantRole). For Owner-only gates we additionally let them
 	// through to preserve the pre-RBAC ability to administer any tenant.
 	calls := 0
-	lookup := func(c *gin.Context) (string, error) {
+	lookup := func(_ *gin.Context) (string, error) {
 		calls++
 		return "", nil
 	}
@@ -321,7 +321,7 @@ func TestRequireOwnershipOrRole_FailOpenWhenRBACDisabled(t *testing.T) {
 	// Enforcement off: even a failing lookup + non-creator + low role lets
 	// the request through. This preserves today's "anyone in the tenant
 	// can edit anything" behaviour while we ship the schema.
-	lookup := func(c *gin.Context) (string, error) { return "someone-else", nil }
+	lookup := func(_ *gin.Context) (string, error) { return "someone-else", nil }
 	w := rbacTestHarness(types.TenantRoleViewer, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(false)))
 	if w.Code != http.StatusOK {
@@ -333,7 +333,7 @@ func TestRequireOwnershipOrRole_FailOpenOnLookupErrorWhenRBACDisabled(t *testing
 	// Lookup errors in fail-open mode also let the request through —
 	// otherwise turning RBAC off wouldn't actually unblock anything that
 	// needs the lookup.
-	lookup := func(c *gin.Context) (string, error) { return "", errors.New("boom") }
+	lookup := func(_ *gin.Context) (string, error) { return "", errors.New("boom") }
 	w := rbacTestHarness(types.TenantRoleViewer, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(false)))
 	if w.Code != http.StatusOK {

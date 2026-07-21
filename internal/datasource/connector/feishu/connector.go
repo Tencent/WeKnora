@@ -162,7 +162,11 @@ func (c *Connector) ResolveResourceAncestors(
 }
 
 // FetchAll performs a full sync of all documents from the specified wiki spaces.
-func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
+func (c *Connector) FetchAll(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	resourceIDs []string,
+) ([]types.FetchedItem, error) {
 	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
@@ -210,7 +214,11 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 
 // FetchIncremental performs an incremental sync by comparing node edit times
 // against the previously recorded state.
-func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+func (c *Connector) FetchIncremental(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	cursor *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, nil, err
@@ -334,7 +342,12 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	return changedItems, nextSyncCursor, nil
 }
 
-func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []wikiNodeListFailure) []types.FetchedItem {
+func appendWikiNodeListFailureItems(
+	items []types.FetchedItem,
+	spaceID string,
+	resourceID string,
+	failures []WikiNodeListFailure,
+) []types.FetchedItem {
 	for _, failure := range failures {
 		node := failure.Node
 		title := node.Title
@@ -365,7 +378,13 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → skip (no API)
 //   - slides     → skip (no API)
-func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string) (*types.FetchedItem, error) {
+func (c *Connector) fetchNodeContent(
+	ctx context.Context,
+	client *Client,
+	node WikiNode,
+	spaceID string,
+	resourceID string,
+) (*types.FetchedItem, error) {
 	if !isSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -451,7 +470,7 @@ func parseWikiResourceID(resourceID string) (spaceID string, nodeToken string) {
 	return spaceID, nodeToken
 }
 
-func (c *Connector) wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
+func (c *Connector) wikiNodeToResource(spaceID string, node WikiNode) types.Resource {
 	parentID := spaceID
 	if node.ParentNodeID != "" {
 		parentID = makeWikiNodeResourceID(spaceID, node.ParentNodeID)

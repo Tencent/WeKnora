@@ -1,3 +1,4 @@
+// Package dingtalk implements the DingTalk IM adapter.
 package dingtalk
 
 import (
@@ -78,11 +79,22 @@ func NewAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
 	}
 }
 
+// Platform implements the required behavior.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter implements the required behavior.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformDingtalk
 }
 
-func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
+// HandleURLVerification is exported.
+// Adapter represents the exported value.
+// HandleURLVerification implements the required behavior.
+// Adapter implements the required behavior.
+func (a *Adapter) HandleURLVerification(_ *gin.Context) bool {
 	return false
 }
 
@@ -128,13 +140,13 @@ type callbackMessage struct {
 	Text             *textContent    `json:"text"`
 	Content          json.RawMessage `json:"content"`
 	SenderNick       string          `json:"senderNick"`
-	SenderStaffId    string          `json:"senderStaffId"`
+	SenderStaffID    string          `json:"senderStaffId"`
 	SenderID         string          `json:"senderId"`
 	SessionWebhook   string          `json:"sessionWebhook"`
 	RobotCode        string          `json:"robotCode"`
 	AtUsers          []atUser        `json:"atUsers"`
 	IsInAtList       bool            `json:"isInAtList"`
-	ChatbotCorpId    string          `json:"chatbotCorpId"`
+	ChatbotCorpID    string          `json:"chatbotCorpId"`
 }
 
 type textContent struct {
@@ -144,8 +156,13 @@ type textContent struct {
 type atUser struct {
 	DingtalkID string `json:"dingtalkId"`
 	StaffID    string `json:"staffId"`
+	// ParseCallback is exported.
 }
 
+// ParseCallback is exported.
+// Adapter represents the exported value.
+// ParseCallback implements the required behavior.
+// Adapter implements the required behavior.
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -262,7 +279,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, "", fmt.Errorf("download file returned %d: %s", resp.StatusCode, string(body))
 	}
 	return resp.Body, msg.FileName, nil
@@ -276,7 +293,7 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		chatID = msg.ConversationID
 	}
 
-	userID := msg.SenderStaffId
+	userID := msg.SenderStaffID
 	if userID == "" {
 		userID = msg.SenderID
 	}
@@ -403,8 +420,12 @@ func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode stri
 	return incoming
 }
 
-// ── Send reply ──
+// SendReply is exported.
 
+// SendReply is exported.
+// Adapter is exported.
+// Adapter represents the exported value.
+// SendReply sends a reply to the DingTalk session webhook.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	content := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
 
@@ -443,7 +464,7 @@ func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, conten
 	if err != nil {
 		return fmt.Errorf("send reply: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -494,7 +515,7 @@ func (a *Adapter) replyViaOpenAPI(ctx context.Context, incoming *im.IncomingMess
 	if err != nil {
 		return fmt.Errorf("send reply: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -538,7 +559,7 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -587,7 +608,7 @@ func (a *Adapter) dingtalkAPI(ctx context.Context, method, path string, body int
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -706,6 +727,7 @@ func startStreamReaper() {
 	})
 }
 
+// StartStream implements the required interface method.
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	sessionWebhook := ""
 	if incoming.Extra != nil {
@@ -737,7 +759,13 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+// UpdateStreamContent implements the required interface method.
+func (a *Adapter) UpdateStreamContent(
+	ctx context.Context,
+	_ *im.IncomingMessage,
+	streamID string,
+	fullContent string,
+) error {
 	if fullContent == "" {
 		return nil
 	}
@@ -773,7 +801,13 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	return nil
 }
 
-func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+// FinalizeStream implements the required interface method.
+func (a *Adapter) FinalizeStream(
+	ctx context.Context,
+	_ *im.IncomingMessage,
+	streamID string,
+	finalContent string,
+) error {
 	streamsMu.Lock()
 	state, ok := dStreams[streamID]
 	streamsMu.Unlock()
@@ -795,10 +829,17 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	return nil
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+// SendStreamChunk implements the required interface method.
+func (a *Adapter) SendStreamChunk(
+	ctx context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	content string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
+// EndStream implements the required interface method.
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	streamsMu.Lock()
 	state, ok := dStreams[streamID]

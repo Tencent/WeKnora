@@ -53,7 +53,10 @@ func AddFormatFlag(cmd *cobra.Command, fieldHints ...string) {
 		// envelope top level and silently returns null — spell out the path so
 		// agents don't ship broken projections.
 		hdr := "\n\nJSON fields available under .data (project with --jq '.data.<field>', or '.data[].<field>' for lists):\n  " +
-			strings.Join(sorted, "\n  ")
+			strings.Join(
+				sorted,
+				"\n  ",
+			)
 		if cmd.Long != "" {
 			cmd.Long += hdr
 		} else {
@@ -126,7 +129,9 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 		}
 		return format.WriteNDJSON(w, data)
 	case FormatText:
-		return fmt.Errorf("FormatOptions.Emit: cannot emit text mode as JSON; caller must render human-readable separately")
+		return fmt.Errorf(
+			"FormatOptions.Emit: cannot emit text mode as JSON; caller must render human-readable separately",
+		)
 	default:
 		return fmt.Errorf("FormatOptions.Emit: unknown mode %q", o.Mode)
 	}

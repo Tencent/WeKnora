@@ -18,7 +18,8 @@ var databaseQueryTool = BaseTool{
 
 ## Security Features
 - Automatic tenant_id injection: All queries are automatically filtered by the logged-in user's tenant_id
-- Automatic soft-delete filtering: All queries are automatically filtered to include only records with deleted_at IS NULL
+- Automatic soft-delete filtering: All queries are automatically filtered to include only records with deleted_at
+IS NULL
 - Read-only queries: Only SELECT statements are allowed
 - Safe tables: Only allow queries on authorized tables (knowledge_bases, knowledges, chunks)
 
@@ -84,7 +85,8 @@ Get storage usage:
 
 Join knowledge bases and documents:
 {
-  "sql": "SELECT kb.name as kb_name, COUNT(k.id) as doc_count FROM knowledge_bases kb LEFT JOIN knowledges k ON kb.id = k.knowledge_base_id GROUP BY kb.id, kb.name"
+  "sql": "SELECT kb.name as kb_name, COUNT(k.id) as doc_count FROM knowledge_bases kb " +
+  	"LEFT JOIN knowledges k ON kb.id = k.knowledge_base_id GROUP BY kb.id, kb.name"
 }
 
 ## Important Notes
@@ -97,7 +99,9 @@ Join knowledge bases and documents:
 	schema: utils.GenerateSchema[DatabaseQueryInput](),
 }
 
+// DatabaseQueryInput is an exported type.
 type DatabaseQueryInput struct {
+	//nolint:lll
 	SQL string `json:"sql" jsonschema:"The SELECT SQL query to execute. DO NOT include tenant_id condition - it will be automatically added for security."`
 }
 
@@ -173,7 +177,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 			Error:   fmt.Sprintf("Query execution failed: %v", err),
 		}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Query executed successfully, processing rows...")
 
@@ -338,7 +342,11 @@ func (t *DatabaseQueryTool) formatQueryResults(
 
 	// Add summary statistics if applicable
 	if len(results) > 10 {
-		output += fmt.Sprintf("Note: Showing %d records out of %d total. Consider using a LIMIT clause to restrict the result count.\n", len(results), len(results))
+		output += fmt.Sprintf(
+			"Note: Showing %d records out of %d total. Consider using a LIMIT clause to restrict the result count.\n",
+			len(results),
+			len(results),
+		)
 	}
 
 	return output

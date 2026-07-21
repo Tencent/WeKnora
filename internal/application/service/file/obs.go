@@ -27,28 +27,16 @@ type obsFileService struct {
 	proxyDomain string
 }
 
-type obsEndpointResolver struct {
-	url string
-}
-
-func (r *obsEndpointResolver) ResolveEndpoint(region string, options s3.EndpointResolverOptions) (aws.Endpoint, error) {
-	return aws.Endpoint{
-		URL:               r.url,
-		SigningRegion:     region,
-		HostnameImmutable: true,
-	}, nil
-}
-
+// NewObsFileService is an exported function.
 func NewObsFileService(
 	endpoint, region, accessKeyID, secretAccessKey, bucketName string,
 	pathPrefix string,
 ) (interfaces.FileService, error) {
-
 	client := s3.New(s3.Options{
-		Region:           region,
-		EndpointResolver: &obsEndpointResolver{url: endpoint},
-		Credentials:      credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
-		UsePathStyle:     true,
+		Region:       region,
+		BaseEndpoint: aws.String(endpoint),
+		Credentials:  credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
+		UsePathStyle: true,
 	})
 
 	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
@@ -75,15 +63,16 @@ func NewObsFileService(
 	}, nil
 }
 
+// CheckObsConnectivity is an exported function.
 func CheckObsConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	client := s3.New(s3.Options{
-		Region:           region,
-		EndpointResolver: &obsEndpointResolver{url: endpoint},
-		Credentials:      credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		UsePathStyle:     true,
+		Region:       region,
+		BaseEndpoint: aws.String(endpoint),
+		Credentials:  credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		UsePathStyle: true,
 	})
 
 	_, err := client.HeadBucket(checkCtx, &s3.HeadBucketInput{
@@ -154,7 +143,7 @@ func (s *obsFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	contentType := file.Header.Get("Content-Type")
 	if contentType == "" {
@@ -213,7 +202,7 @@ func (s *obsFileService) DeleteFile(ctx context.Context, filePath string) error 
 	return nil
 }
 
-func (s *obsFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (s *obsFileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
 		return filePath, nil
 	}
@@ -278,7 +267,13 @@ func (s *obsFileService) CopyFile(ctx context.Context,
 	return newPath, nil
 }
 
-func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *obsFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	temp bool,
+) (string, error) {
 	ext := filepath.Ext(fileName)
 
 	var objectKey string

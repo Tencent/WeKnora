@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// AnthropicBaseURL is an exported constant.
 const AnthropicBaseURL = "https://api.anthropic.com/v1"
 
 // AnthropicProvider implements native Anthropic Messages API metadata.
@@ -15,8 +16,9 @@ func init() {
 	Register(&AnthropicProvider{})
 }
 
-func (p *AnthropicProvider) Info() ProviderInfo {
-	return ProviderInfo{
+// Info implements the required interface method.
+func (p *AnthropicProvider) Info() Info {
+	return Info{
 		Name:        ProviderAnthropic,
 		DisplayName: "Anthropic",
 		Description: "Claude models via native Anthropic Messages API",
@@ -30,6 +32,7 @@ func (p *AnthropicProvider) Info() ProviderInfo {
 	}
 }
 
+// ValidateConfig implements the required interface method.
 func (p *AnthropicProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Anthropic provider")

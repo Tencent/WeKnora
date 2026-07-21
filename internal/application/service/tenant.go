@@ -26,7 +26,10 @@ type tenantService struct {
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
+func NewTenantService(
+	repo interfaces.TenantRepository,
+	storageRepo interfaces.StorageBackendRepository,
+) interfaces.TenantService {
 	return &tenantService{repo: repo, storageRepo: storageRepo}
 }
 
@@ -233,7 +236,12 @@ func (s *tenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes int6
 }
 
 // SearchTenants searches tenants with pagination and filters
-func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
+func (s *tenantService) SearchTenants(
+	ctx context.Context,
+	keyword string,
+	tenantID uint64,
+	page, pageSize int,
+) ([]*types.Tenant, int64, error) {
 	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, page, pageSize)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -245,14 +253,26 @@ func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenan
 		return nil, 0, err
 	}
 
-	logger.Infof(ctx, "Tenants search completed, keyword: %s, tenantID: %d, page: %d, pageSize: %d, total: %d, found: %d",
-		keyword, tenantID, page, pageSize, total, len(tenants))
+	logger.Infof(
+		ctx,
+		"Tenants search completed, keyword: %s, tenantID: %d, page: %d, pageSize: %d, total: %d, found: %d",
+		keyword,
+		tenantID,
+		page,
+		pageSize,
+		total,
+		len(tenants),
+	)
 	return tenants, total, nil
 }
 
 // GetTenantByIDForUser gets a tenant by ID with permission check
 // This method verifies that the user has permission to access the tenant
-func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint64, userID string) (*types.Tenant, error) {
+func (s *tenantService) GetTenantByIDForUser(
+	ctx context.Context,
+	tenantID uint64,
+	userID string,
+) (*types.Tenant, error) {
 	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

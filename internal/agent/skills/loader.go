@@ -273,7 +273,6 @@ func (l *Loader) ListSkillFiles(skillName string) ([]string, error) {
 		files = append(files, relPath)
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to list skill files: %w", err)
 	}

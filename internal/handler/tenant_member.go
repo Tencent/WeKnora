@@ -59,7 +59,7 @@ func NewTenantMemberHandler(
 // PR 4 candidate.
 type addMemberRequest struct {
 	Email string           `json:"email" binding:"required,email"`
-	Role  types.TenantRole `json:"role" binding:"required"`
+	Role  types.TenantRole `json:"role"  binding:"required"`
 }
 
 // updateMemberRoleRequest is the JSON body for PUT /tenants/:id/members/:user_id.
@@ -73,12 +73,12 @@ type updateMemberRoleRequest struct {
 func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 	raw := strings.TrimSpace(c.Param("id"))
 	if raw == "" {
-		c.Error(apperrors.NewValidationError("workspace id is required"))
+		_ = c.Error(apperrors.NewValidationError("workspace id is required"))
 		return 0, false
 	}
 	v, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil || v == 0 {
-		c.Error(apperrors.NewValidationError("workspace id must be a positive integer"))
+		_ = c.Error(apperrors.NewValidationError("workspace id must be a positive integer"))
 		return 0, false
 	}
 	return v, true
@@ -112,7 +112,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	members, total, err := h.memberService.ListMembersPage(ctx, tenantID, q, page, pageSize)
 	if err != nil {
 		logger.Errorf(ctx, "ListMembersPage failed: tenant=%d err=%v", tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to list members").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("failed to list members").WithDetails(err.Error()))
 		return
 	}
 
@@ -195,14 +195,14 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 
 	var req addMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
 	// Defence in depth — service also re-validates, but rejecting early
 	// gives the client a better error message than the generic service
 	// sentinel-mapped 400.
 	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+		_ = c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
 		return
 	}
 
@@ -212,13 +212,13 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		// mapping it to 404 lets the UI render "ask them to sign up first"
 		// instead of a generic failure.
 		if errors.Is(err, apprepo.ErrUserNotFound) {
-			c.Error(apperrors.NewNotFoundError(
+			_ = c.Error(apperrors.NewNotFoundError(
 				"user with this email is not registered; ask them to sign up first"))
 			return
 		}
 		logger.Errorf(ctx, "GetUserByEmail failed: email=%s err=%v",
 			secutils.SanitizeForLog(req.Email), err)
-		c.Error(apperrors.NewInternalServerError("failed to look up user").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError("failed to look up user").WithDetails(err.Error()))
 		return
 	}
 
@@ -238,15 +238,15 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidTenantRole):
-			c.Error(apperrors.NewValidationError(err.Error()))
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
 		case errors.Is(err, service.ErrMembershipAlreadyExists):
 			// 409 reads better than 400 here: the request was syntactically
 			// fine, the conflict is semantic ("already a member").
-			c.Error(apperrors.NewConflictError(err.Error()))
+			_ = c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
+			_ = c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -290,32 +290,32 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 	}
 	userID := strings.TrimSpace(c.Param("user_id"))
 	if userID == "" {
-		c.Error(apperrors.NewValidationError("user_id is required"))
+		_ = c.Error(apperrors.NewValidationError("user_id is required"))
 		return
 	}
 
 	var req updateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
 	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+		_ = c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
 		return
 	}
 
 	if err := h.memberService.UpdateRole(ctx, userID, tenantID, req.Role); err != nil {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
-			c.Error(apperrors.NewNotFoundError("membership not found"))
+			_ = c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			_ = c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvalidTenantRole):
-			c.Error(apperrors.NewValidationError(err.Error()))
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
 		default:
 			logger.Errorf(ctx, "UpdateRole failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to update member role").WithDetails(err.Error()))
+			_ = c.Error(apperrors.NewInternalServerError("failed to update member role").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -341,20 +341,20 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 	}
 	userID := strings.TrimSpace(c.Param("user_id"))
 	if userID == "" {
-		c.Error(apperrors.NewValidationError("user_id is required"))
+		_ = c.Error(apperrors.NewValidationError("user_id is required"))
 		return
 	}
 
 	if err := h.memberService.RemoveMember(ctx, userID, tenantID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
-			c.Error(apperrors.NewNotFoundError("membership not found"))
+			_ = c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			_ = c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "RemoveMember failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to remove member").WithDetails(err.Error()))
+			_ = c.Error(apperrors.NewInternalServerError("failed to remove member").WithDetails(err.Error()))
 		}
 		return
 	}
@@ -383,20 +383,20 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 	}
 	caller, ok := types.UserIDFromContext(ctx)
 	if !ok || caller == "" {
-		c.Error(apperrors.NewUnauthorizedError("caller user id missing from context"))
+		_ = c.Error(apperrors.NewUnauthorizedError("caller user id missing from context"))
 		return
 	}
 
 	if err := h.memberService.RemoveMember(ctx, caller, tenantID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
-			c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))
+			_ = c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			_ = c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "LeaveTenant failed: user=%s tenant=%d err=%v",
 				caller, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to leave workspace").WithDetails(err.Error()))
+			_ = c.Error(apperrors.NewInternalServerError("failed to leave workspace").WithDetails(err.Error()))
 		}
 		return
 	}

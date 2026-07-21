@@ -88,7 +88,17 @@ human help prose.`,
 			return emitCommandSchema(target, fopts)
 		},
 	}
-	cmdutil.AddFormatFlag(cmd, "command", "used_for", "required_flags", "examples", "output", "warnings", "risk", "flags")
+	cmdutil.AddFormatFlag(
+		cmd,
+		"command",
+		"used_for",
+		"required_flags",
+		"examples",
+		"output",
+		"warnings",
+		"risk",
+		"flags",
+	)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "introspect the CLI surface: list every command (no args) or print one command's contract (used_for, flags, examples, output, risk).",
 		Examples: []string{

@@ -26,7 +26,12 @@ func (f *fakeCheckSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.Know
 	return f.kb, nil
 }
 
-func (f *fakeCheckSvc) ListKnowledgeWithFilter(_ context.Context, _ string, page, pageSize int, _ sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error) {
+func (f *fakeCheckSvc) ListKnowledgeWithFilter(
+	_ context.Context,
+	_ string,
+	page, pageSize int,
+	_ sdk.KnowledgeListFilter,
+) ([]sdk.Knowledge, int64, error) {
 	if f.listErr != nil {
 		return nil, 0, f.listErr
 	}

@@ -251,7 +251,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 					targetTagID = mappedTagID
 				} else {
 					// Try to find or create the tag in target knowledge base
-					targetTagID = s.getOrCreateTagInTarget(ctx, src.TenantID, dst.TenantID, dst.KnowledgeBaseID, sourceChunk.TagID, tagIDMapping)
+					targetTagID = s.getOrCreateTagInTarget(ctx, src.TenantID, dst.TenantID, dst.KnowledgeBaseID, sourceChunk.TagID, tagIDMapping) //nolint:lll
 				}
 			}
 
@@ -495,7 +495,11 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 				progress.Progress = processedCount * 100 / totalOperations
 			}
 			progress.Processed = processedCount
-			progress.Message = fmt.Sprintf("Cloned %d/%d knowledge", processedCount-len(delKnowledge), len(addKnowledge))
+			progress.Message = fmt.Sprintf(
+				"Cloned %d/%d knowledge",
+				processedCount-len(delKnowledge),
+				len(addKnowledge),
+			)
 			progress.UpdatedAt = time.Now().Unix()
 			_ = s.saveKBCloneProgress(ctx, progress)
 
@@ -560,7 +564,13 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	srcKnowledge := srcKnowledgeList[0]
 
 	// Get chunk-level differences based on content_hash
-	chunksToAdd, chunksToDelete, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
+	chunksToAdd, chunksToDelete, err := s.chunkRepo.FAQChunkDiff(
+		ctx,
+		srcKB.TenantID,
+		srcKB.ID,
+		dstKB.TenantID,
+		dstKB.ID,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to calculate FAQ chunk difference: %v", err)
 		handleError(progress, err, "Failed to calculate FAQ chunk difference")
@@ -613,7 +623,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Delete FAQ chunks that don't exist in source
 	if len(chunksToDelete) > 0 {
 		// Delete from vector store
-		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil { //nolint:lll
 			logger.Errorf(ctx, "Failed to delete FAQ chunks from vector store: %v", err)
 			handleError(progress, err, "Failed to delete FAQ entries from vector store")
 			return err
@@ -756,7 +766,11 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 // getOrCreateFAQKnowledge gets or creates the FAQ knowledge entry for a knowledge base
 // If srcKnowledge is provided, it will copy relevant fields from source when creating new knowledge
-func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *types.KnowledgeBase, srcKnowledge *types.Knowledge) (*types.Knowledge, error) {
+func (s *knowledgeService) getOrCreateFAQKnowledge(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	srcKnowledge *types.Knowledge,
+) (*types.Knowledge, error) {
 	// FAQ knowledge base should have exactly one Knowledge entry
 	knowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
 	if err != nil {
@@ -852,7 +866,10 @@ func (s *knowledgeService) SaveKnowledgeMoveProgress(ctx context.Context, progre
 }
 
 // GetKnowledgeMoveProgress retrieves the progress of a knowledge move task
-func (s *knowledgeService) GetKnowledgeMoveProgress(ctx context.Context, taskID string) (*types.KnowledgeMoveProgress, error) {
+func (s *knowledgeService) GetKnowledgeMoveProgress(
+	ctx context.Context,
+	taskID string,
+) (*types.KnowledgeMoveProgress, error) {
 	key := getKnowledgeMoveProgressKey(taskID)
 	data, err := s.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
@@ -892,8 +909,17 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
-	logger.Infof(ctx, "ProcessKnowledgeMove: task=%s, source=%s, target=%s, mode=%s, count=%d, retry=%d/%d",
-		payload.TaskID, payload.SourceKBID, payload.TargetKBID, payload.Mode, len(payload.KnowledgeIDs), retryCount, maxRetry)
+	logger.Infof(
+		ctx,
+		"ProcessKnowledgeMove: task=%s, source=%s, target=%s, mode=%s, count=%d, retry=%d/%d",
+		payload.TaskID,
+		payload.SourceKBID,
+		payload.TargetKBID,
+		payload.Mode,
+		len(payload.KnowledgeIDs),
+		retryCount,
+		maxRetry,
+	)
 
 	// Helper function to handle errors - only mark as failed on last retry
 	handleError := func(progress *types.KnowledgeMoveProgress, err error, message string) {
@@ -938,7 +964,11 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 		return err
 	}
 	if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
-		err := fmt.Errorf("embedding model mismatch: source=%s, target=%s", sourceKB.EmbeddingModelID, targetKB.EmbeddingModelID)
+		err := fmt.Errorf(
+			"embedding model mismatch: source=%s, target=%s",
+			sourceKB.EmbeddingModelID,
+			targetKB.EmbeddingModelID,
+		)
 		handleError(progress, err, "Source and target must use the same embedding model")
 		return err
 	}
@@ -965,13 +995,20 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 		progress.Message = fmt.Sprintf("Knowledge move failed: all %d items failed", progress.Total)
 	} else {
 		progress.Status = types.KBCloneStatusCompleted
-		progress.Message = fmt.Sprintf("Knowledge move completed: %d/%d succeeded", progress.Processed-progress.Failed, progress.Total)
+		progress.Message = fmt.Sprintf("Knowledge move completed: %d/%d succeeded", progress.Processed-progress.Failed,
+			progress.Total)
 	}
 	progress.Progress = 100
 	progress.UpdatedAt = time.Now().Unix()
 	_ = s.saveKnowledgeMoveProgress(ctx, progress)
 
-	logger.Infof(ctx, "ProcessKnowledgeMove: task=%s completed, processed=%d, failed=%d", payload.TaskID, progress.Processed, progress.Failed)
+	logger.Infof(
+		ctx,
+		"ProcessKnowledgeMove: task=%s completed, processed=%d, failed=%d",
+		payload.TaskID,
+		progress.Processed,
+		progress.Failed,
+	)
 	return nil
 }
 
@@ -1088,7 +1125,12 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID},
 			embeddingModel.GetDimensions(), sourceKB.Type,
 		); err != nil {
-			logger.Warnf(ctx, "moveKnowledgeReuseVectors: failed to delete old indices for knowledge %s: %v", knowledge.ID, err)
+			logger.Warnf(
+				ctx,
+				"moveKnowledgeReuseVectors: failed to delete old indices for knowledge %s: %v",
+				knowledge.ID,
+				err,
+			)
 			// Non-fatal: indices will be orphaned but won't affect correctness
 		}
 	}

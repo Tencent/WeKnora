@@ -23,7 +23,12 @@ type WikiLogEntryRepository interface {
 	//
 	// The returned nextCursor is empty when no further rows remain; the
 	// caller can treat that as end-of-stream.
-	List(ctx context.Context, kbID string, cursor string, limit int) (entries []*types.WikiLogEntry, nextCursor string, err error)
+	List(
+		ctx context.Context,
+		kbID string,
+		cursor string,
+		limit int,
+	) (entries []*types.WikiLogEntry, nextCursor string, err error)
 
 	// DeleteByKB removes every log entry belonging to the given KB. Used
 	// when a wiki KB is deleted so the log table does not accumulate

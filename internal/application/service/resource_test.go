@@ -26,7 +26,12 @@ func TestResourceCatalogRegisterResolveAndDeduplicate(t *testing.T) {
 	ctx := context.Background()
 	physical := "storage://backend-a/local://7/exports/a.png"
 
-	ref, err := catalog.Register(ctx, 7, physical, interfaces.ResourceRegistration{Kind: "image", OriginalName: "a.png"})
+	ref, err := catalog.Register(
+		ctx,
+		7,
+		physical,
+		interfaces.ResourceRegistration{Kind: "image", OriginalName: "a.png"},
+	)
 	require.NoError(t, err)
 	require.Regexp(t, `^resource://[0-9A-Za-z_-]{22}$`, ref)
 

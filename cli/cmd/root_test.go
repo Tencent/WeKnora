@@ -123,7 +123,9 @@ func TestMapCobraError(t *testing.T) {
 	})
 	t.Run("pflag invalid argument wraps as FlagError", func(t *testing.T) {
 		// pflag emits: `invalid argument "foo" for "--limit" flag`
-		err := MapCobraError(errors.New(`invalid argument "foo" for "--limit" flag: strconv.ParseInt: parsing "foo": invalid syntax`))
+		err := MapCobraError(
+			errors.New(`invalid argument "foo" for "--limit" flag: strconv.ParseInt: parsing "foo": invalid syntax`),
+		)
 		var fe *cmdutil.FlagError
 		assert.True(t, errors.As(err, &fe), "pflag-shaped invalid argument should become FlagError")
 	})

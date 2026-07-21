@@ -65,7 +65,7 @@ func isTransientError(err error) bool {
 }
 
 // getLLMCallTimeout returns the configured LLM call timeout, falling back to default.
-func (e *AgentEngine) getLLMCallTimeout() time.Duration {
+func (e *Engine) getLLMCallTimeout() time.Duration {
 	if e.config.LLMCallTimeout > 0 {
 		return time.Duration(e.config.LLMCallTimeout) * time.Second
 	}

@@ -1,3 +1,4 @@
+// Package milvus provides milvus functionality.
 package milvus
 
 import (
@@ -6,7 +7,6 @@ import (
 	"maps"
 	"reflect"
 	"strings"
-	"time"
 )
 
 const (
@@ -204,33 +204,6 @@ func (c *filter) convertBetweenCondition(
 	}, nil
 }
 
-func formatValue(value any) string {
-	switch v := value.(type) {
-	case string:
-		return fmt.Sprintf("\"%s\"", escapeDoubleQuotes(v))
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	case time.Time:
-		return fmt.Sprintf("%d", v.Unix())
-	default:
-		return fmt.Sprintf("\"%v\"", value)
-	}
-}
-
-// escapeDoubleQuotes escapes double quotes in a string for use in Milvus expressions.
-func escapeDoubleQuotes(s string) string {
-	return strings.ReplaceAll(s, "\"", "\\\"")
-}
-
 // convertParamName converts field name to a valid Milvus template parameter name.
 // Milvus template parameters don't support '.' character, so we replace it with '_'.
 func (c *filter) convertParamName(field string, counter *int) string {
@@ -239,9 +212,11 @@ func (c *filter) convertParamName(field string, counter *int) string {
 }
 
 type universalFilterCondition struct {
-	Field    string `json:"field,omitempty" jsonschema:"description=The metadata field to filter on (required for comparison operators)"`
+	Field string `json:"field,omitempty" jsonschema:"description=Metadata field to filter (required for comparison ops)"`
+	//nolint:lll
 	Operator string `json:"operator" jsonschema:"description=The operator to use,enum=eq,enum=ne,enum=gt,enum=gte,enum=lt,enum=lte,enum=in,enum=not in,enum=like,enum=not like,enum=between,enum=and,enum=or"`
-	Value    any    `json:"value,omitempty" jsonschema:"description=The value to compare against (for comparison operators) or array of sub-conditions (for logical operators and/or)"`
+	//nolint:lll
+	Value any `json:"value,omitempty" jsonschema:"description=The value to compare against (for comparison operators) or array of sub-conditions (for logical operators and/or)"`
 }
 
 func (c *universalFilterCondition) UnmarshalJSON(data []byte) error {

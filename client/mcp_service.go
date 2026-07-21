@@ -137,7 +137,11 @@ func (c *Client) GetMCPService(ctx context.Context, serviceID string) (*MCPServi
 }
 
 // UpdateMCPService updates an MCP service
-func (c *Client) UpdateMCPService(ctx context.Context, serviceID string, updates map[string]interface{}) (*MCPService, error) {
+func (c *Client) UpdateMCPService(
+	ctx context.Context,
+	serviceID string,
+	updates map[string]interface{},
+) (*MCPService, error) {
 	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/mcp-services/%s", serviceID), updates, nil)
 	if err != nil {
 		return nil, err

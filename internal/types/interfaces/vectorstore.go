@@ -40,11 +40,19 @@ type VectorStoreService interface {
 	// Validation-free: intended for trusted configs (env stores, stored
 	// configs already validated at create time). Handlers receiving raw
 	// user input MUST use TestRawConnection instead.
-	TestConnection(ctx context.Context, engineType types.RetrieverEngineType, config types.ConnectionConfig) (string, error)
+	TestConnection(
+		ctx context.Context,
+		engineType types.RetrieverEngineType,
+		config types.ConnectionConfig,
+	) (string, error)
 	// TestRawConnection validates raw user-supplied connection config
 	// (engine-type allowlist, required fields, SSRF policy) and then delegates
 	// to TestConnection. This is the entry point for unpersisted user input.
-	TestRawConnection(ctx context.Context, engineType types.RetrieverEngineType, config types.ConnectionConfig) (string, error)
+	TestRawConnection(
+		ctx context.Context,
+		engineType types.RetrieverEngineType,
+		config types.ConnectionConfig,
+	) (string, error)
 	// SaveDetectedVersion updates the connection_config.version for a stored vector store.
 	SaveDetectedVersion(ctx context.Context, store *types.VectorStore, version string) error
 
@@ -64,7 +72,11 @@ type VectorStoreService interface {
 	//
 	// Intended for list endpoints that need store metadata for many KBs at
 	// once without incurring N+1 ResolveStoreView calls.
-	BatchResolveStoreView(ctx context.Context, tenantID uint64, storeIDs []string) (map[string]types.StoreDisplay, error)
+	BatchResolveStoreView(
+		ctx context.Context,
+		tenantID uint64,
+		storeIDs []string,
+	) (map[string]types.StoreDisplay, error)
 
 	// EnvDefaultStoreView returns the display payload for KBs that fall
 	// back to the env-configured store. Unlike DefaultStoreDisplay() in
@@ -91,5 +103,11 @@ type VectorStoreRepository interface {
 	// Delete soft-deletes a vector store
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ExistsByEndpointAndIndex checks if a store with the same endpoint and index already exists
-	ExistsByEndpointAndIndex(ctx context.Context, tenantID uint64, engineType types.RetrieverEngineType, endpoint string, indexName string) (bool, error)
+	ExistsByEndpointAndIndex(
+		ctx context.Context,
+		tenantID uint64,
+		engineType types.RetrieverEngineType,
+		endpoint string,
+		indexName string,
+	) (bool, error)
 }

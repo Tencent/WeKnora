@@ -83,7 +83,11 @@ func (s *minioFileService) CheckConnectivity(ctx context.Context) error {
 
 // CheckMinioConnectivity tests MinIO connectivity using the provided credentials.
 // It creates a temporary service instance internally and delegates to CheckConnectivity.
-func CheckMinioConnectivity(ctx context.Context, endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool) error {
+func CheckMinioConnectivity(
+	ctx context.Context,
+	endpoint, accessKeyID, secretAccessKey, bucketName string,
+	useSSL bool,
+) error {
 	svc, err := newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName, useSSL)
 	if err != nil {
 		return err
@@ -125,7 +129,7 @@ func (s *minioFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Upload file to MinIO
 	_, err = s.client.PutObject(ctx, s.bucketName, objectName, src, file.Size, minio.PutObjectOptions{
@@ -194,7 +198,13 @@ func (s *minioFileService) CopyFile(ctx context.Context,
 
 // SaveBytes saves bytes data to MinIO and returns the file path
 // temp parameter is ignored for MinIO (no auto-expiration support in this implementation)
-func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *minioFileService) SaveBytes(
+	ctx context.Context,
+	data []byte,
+	tenantID uint64,
+	fileName string,
+	_ bool,
+) (string, error) {
 	safeName, err := utils.SafeFileName(fileName)
 	if err != nil {
 		return "", fmt.Errorf("invalid file name: %w", err)

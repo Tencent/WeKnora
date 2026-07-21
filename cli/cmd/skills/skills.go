@@ -142,9 +142,12 @@ Existing files are left untouched unless --force is passed.`,
 	cmdutil.AddFormatFlag(cmd, "dir", "installed", "skills")
 	cmdutil.AddDryRunFlag(cmd, &dryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:  "write the bundled Agent Skills to an agent's skills directory (default ~/.claude/skills) so the agent can load them; --dry-run previews the file list",
-		Examples: []string{"weknora skills install --dry-run --format json", "weknora skills install --dir ~/.claude/skills --force"},
-		Output:   "envelope.data is {dir, installed:[paths], skills:[names]}",
+		UsedFor: "write the bundled Agent Skills to an agent's skills directory (default ~/.claude/skills) so the agent can load them; --dry-run previews the file list",
+		Examples: []string{
+			"weknora skills install --dry-run --format json",
+			"weknora skills install --dir ~/.claude/skills --force",
+		},
+		Output: "envelope.data is {dir, installed:[paths], skills:[names]}",
 	})
 	return cmd
 }

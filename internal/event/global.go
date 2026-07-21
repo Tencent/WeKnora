@@ -6,52 +6,52 @@ import (
 )
 
 var (
-	// globalEventBus is the global event bus instance
-	globalEventBus *EventBus
-	once           sync.Once
+	// globalBus is the global event bus instance
+	globalBus *Bus
+	once      sync.Once
 )
 
-// GetGlobalEventBus returns the global event bus instance
+// GetGlobalBus returns the global event bus instance
 // It uses singleton pattern to ensure only one instance exists
-func GetGlobalEventBus() *EventBus {
+func GetGlobalBus() *Bus {
 	once.Do(func() {
-		globalEventBus = NewEventBus()
+		globalBus = NewBus()
 	})
-	return globalEventBus
+	return globalBus
 }
 
-// SetGlobalEventBus sets the global event bus instance
+// SetGlobalBus sets the global event bus instance
 // This is useful for testing or custom configurations
-func SetGlobalEventBus(bus *EventBus) {
-	globalEventBus = bus
+func SetGlobalBus(bus *Bus) {
+	globalBus = bus
 }
 
 // On registers an event handler on the global event bus
-func On(eventType EventType, handler EventHandler) {
-	GetGlobalEventBus().On(eventType, handler)
+func On(eventType Type, handler Handler) {
+	GetGlobalBus().On(eventType, handler)
 }
 
 // Off removes all handlers for a specific event type from the global event bus
-func Off(eventType EventType) {
-	GetGlobalEventBus().Off(eventType)
+func Off(eventType Type) {
+	GetGlobalBus().Off(eventType)
 }
 
 // Emit publishes an event to the global event bus
 func Emit(ctx context.Context, event Event) error {
-	return GetGlobalEventBus().Emit(ctx, event)
+	return GetGlobalBus().Emit(ctx, event)
 }
 
 // EmitAndWait publishes an event to the global event bus and waits for all handlers
 func EmitAndWait(ctx context.Context, event Event) error {
-	return GetGlobalEventBus().EmitAndWait(ctx, event)
+	return GetGlobalBus().EmitAndWait(ctx, event)
 }
 
 // HasHandlers checks if there are any handlers registered for an event type
-func HasHandlers(eventType EventType) bool {
-	return GetGlobalEventBus().HasHandlers(eventType)
+func HasHandlers(eventType Type) bool {
+	return GetGlobalBus().HasHandlers(eventType)
 }
 
 // Clear removes all event handlers from the global event bus
 func Clear() {
-	GetGlobalEventBus().Clear()
+	GetGlobalBus().Clear()
 }

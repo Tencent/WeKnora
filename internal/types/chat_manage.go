@@ -83,7 +83,9 @@ func (c *PipelineRequest) CitationsEnabled() bool {
 // QueryIntent represents the classified intent of a user query.
 type QueryIntent string
 
+// IntentWebSearch and related constants.
 const (
+	// IntentKBSearch means the query should search the knowledge base.
 	IntentKBSearch      QueryIntent = "kb_search"
 	IntentWebSearch     QueryIntent = "web_search"
 	IntentGreeting      QueryIntent = "greeting"
@@ -132,9 +134,9 @@ type PipelineState struct {
 
 // PipelineContext holds runtime context for the current pipeline execution.
 type PipelineContext struct {
-	EventBus      EventBusInterface `json:"-"`
-	MessageID     string            `json:"-"`
-	UserMessageID string            `json:"-"`
+	Bus           BusInterface `json:"-"`
+	MessageID     string       `json:"-"`
+	UserMessageID string       `json:"-"`
 }
 
 // ChatManage represents the full configuration, state and runtime context
@@ -158,7 +160,7 @@ func (c *ChatManage) NeedsRetrieval() bool {
 }
 
 // Clone creates a deep copy of the ChatManage object.
-// PipelineContext fields (EventBus, MessageID, etc.) are NOT copied because they
+// PipelineContext fields (Bus, MessageID, etc.) are NOT copied because they
 // are per-execution handles that should not be shared across clones.
 func (c *ChatManage) Clone() *ChatManage {
 	knowledgeBaseIDs := make([]string, len(c.KnowledgeBaseIDs))
@@ -256,28 +258,29 @@ func (c *ChatManage) Clone() *ChatManage {
 	}
 }
 
-// EventType represents different stages in the RAG (Retrieval Augmented Generation) pipeline
-type EventType string
+// Type represents different stages in the RAG (Retrieval Augmented Generation) pipeline
+type Type string
 
+// LoadHistory and related constants.
 const (
-	LOAD_HISTORY           EventType = "load_history"
-	QUERY_UNDERSTAND       EventType = "query_understand"
-	CHUNK_SEARCH           EventType = "chunk_search"
-	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"
-	ENTITY_SEARCH          EventType = "entity_search"
-	CHUNK_RERANK           EventType = "chunk_rerank"
-	WEB_FETCH              EventType = "web_fetch"
-	CHUNK_MERGE            EventType = "chunk_merge"
-	DATA_ANALYSIS          EventType = "data_analysis"
-	INTO_CHAT_MESSAGE      EventType = "into_chat_message"
-	CHAT_COMPLETION        EventType = "chat_completion"
-	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
-	FILTER_TOP_K           EventType = "filter_top_k"
+	LoadHistory          Type = "load_history"
+	QueryUnderstand      Type = "query_understand"
+	ChunkSearch          Type = "chunk_search"
+	ChunkSearchParallel  Type = "chunk_search_parallel"
+	EntitySearch         Type = "entity_search"
+	ChunkRerank          Type = "chunk_rerank"
+	WebFetch             Type = "web_fetch"
+	ChunkMerge           Type = "chunk_merge"
+	DataAnalysis         Type = "data_analysis"
+	IntoChatMessage      Type = "into_chat_message"
+	ChatCompletion       Type = "chat_completion"
+	ChatCompletionStream Type = "chat_completion_stream"
+	FilterTopK           Type = "filter_top_k"
 )
 
-// PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
+// PipelineBuilder dynamically assembles a pipeline as an ordered list of Types.
 type PipelineBuilder struct {
-	stages []EventType
+	stages []Type
 }
 
 // NewPipelineBuilder returns an empty builder.
@@ -286,13 +289,13 @@ func NewPipelineBuilder() *PipelineBuilder {
 }
 
 // Add appends one or more stages unconditionally.
-func (b *PipelineBuilder) Add(stages ...EventType) *PipelineBuilder {
+func (b *PipelineBuilder) Add(stages ...Type) *PipelineBuilder {
 	b.stages = append(b.stages, stages...)
 	return b
 }
 
 // AddIf appends stages only when the condition is true.
-func (b *PipelineBuilder) AddIf(cond bool, stages ...EventType) *PipelineBuilder {
+func (b *PipelineBuilder) AddIf(cond bool, stages ...Type) *PipelineBuilder {
 	if cond {
 		b.stages = append(b.stages, stages...)
 	}
@@ -300,42 +303,42 @@ func (b *PipelineBuilder) AddIf(cond bool, stages ...EventType) *PipelineBuilder
 }
 
 // Build returns the final event list.  The builder must not be reused.
-func (b *PipelineBuilder) Build() []EventType {
-	out := make([]EventType, len(b.stages))
+func (b *PipelineBuilder) Build() []Type {
+	out := make([]Type, len(b.stages))
 	copy(out, b.stages)
 	return out
 }
 
 // Pipeline defines the sequence of events for different chat modes.
 // Kept as a convenience lookup for callers that don't need dynamic composition.
-var Pipeline = map[string][]EventType{
+var Pipeline = map[string][]Type{
 	"chat": {
-		CHAT_COMPLETION,
+		ChatCompletion,
 	},
 	"chat_stream": {
-		CHAT_COMPLETION_STREAM,
+		ChatCompletionStream,
 	},
 	"chat_history_stream": {
-		LOAD_HISTORY,
-		CHAT_COMPLETION_STREAM,
+		LoadHistory,
+		ChatCompletionStream,
 	},
 	"rag": {
-		CHUNK_SEARCH,
-		CHUNK_RERANK,
-		CHUNK_MERGE,
-		INTO_CHAT_MESSAGE,
-		CHAT_COMPLETION,
+		ChunkSearch,
+		ChunkRerank,
+		ChunkMerge,
+		IntoChatMessage,
+		ChatCompletion,
 	},
 	"rag_stream": {
-		LOAD_HISTORY,
-		QUERY_UNDERSTAND,
-		CHUNK_SEARCH_PARALLEL,
-		CHUNK_RERANK,
-		CHUNK_MERGE,
-		FILTER_TOP_K,
-		DATA_ANALYSIS,
-		INTO_CHAT_MESSAGE,
-		CHAT_COMPLETION_STREAM,
+		LoadHistory,
+		QueryUnderstand,
+		ChunkSearchParallel,
+		ChunkRerank,
+		ChunkMerge,
+		FilterTopK,
+		DataAnalysis,
+		IntoChatMessage,
+		ChatCompletionStream,
 	},
 }
 

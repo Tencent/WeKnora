@@ -14,7 +14,7 @@ import (
 type OllamaEmbedder struct {
 	modelName                 string
 	truncatePromptTokens      int
-	ollamaService             *ollama.OllamaService
+	ollamaService             *ollama.Service
 	dimensions                int
 	modelID                   string
 	supportsDimensionOverride bool
@@ -34,13 +34,13 @@ type OllamaEmbedResponse struct {
 }
 
 // NewOllamaEmbedder creates a new Ollama embedder
-func NewOllamaEmbedder(baseURL,
+func NewOllamaEmbedder(_ string,
 	modelName string,
 	truncatePromptTokens int,
 	dimensions int,
 	modelID string,
 	pooler EmbedderPooler,
-	ollamaService *ollama.OllamaService,
+	ollamaService *ollama.Service,
 ) (*OllamaEmbedder, error) {
 	if modelName == "" {
 		modelName = "nomic-embed-text"
@@ -66,6 +66,7 @@ func (e *OllamaEmbedder) ensureModelAvailable(ctx context.Context) error {
 	return e.ollamaService.EnsureModelAvailable(ctx, e.modelName)
 }
 
+// SetSupportsDimensionOverride records whether the model accepts a dimensions parameter.
 func (e *OllamaEmbedder) SetSupportsDimensionOverride(supported bool) {
 	e.supportsDimensionOverride = supported
 }

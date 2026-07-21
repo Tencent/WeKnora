@@ -44,6 +44,7 @@ func (f *fakeServices) GetSystemInfo(ctx context.Context) (*sdk.SystemInfo, erro
 	f.systemInfoHits.Add(1)
 	return f.systemInfo, f.systemErr
 }
+
 func (f *fakeServices) GetCurrentUser(ctx context.Context) (*sdk.CurrentUserResponse, error) {
 	return f.userResp, f.userErr
 }

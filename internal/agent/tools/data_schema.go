@@ -11,15 +11,18 @@ import (
 )
 
 var dataSchemaTool = BaseTool{
-	name:        ToolDataSchema,
-	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. It returns the table name, columns, and row count.",
-	schema:      utils.GenerateSchema[DataSchemaInput](),
+	name: ToolDataSchema,
+	description: "Use this tool to get the schema information of a CSV or Excel file l" +
+		"oaded into DuckDB. It returns the table name, columns, and row count.",
+	schema: utils.GenerateSchema[DataSchemaInput](),
 }
 
+// DataSchemaInput is an exported type.
 type DataSchemaInput struct {
 	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
 }
 
+// DataSchemaTool is an exported type.
 type DataSchemaTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
@@ -27,7 +30,12 @@ type DataSchemaTool struct {
 	targetChunkTypes []types.ChunkType
 }
 
-func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo interfaces.ChunkRepository, targetChunkTypes ...types.ChunkType) *DataSchemaTool {
+// NewDataSchemaTool is an exported function.
+func NewDataSchemaTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkRepo interfaces.ChunkRepository,
+	targetChunkTypes ...types.ChunkType,
+) *DataSchemaTool {
 	if len(targetChunkTypes) == 0 {
 		targetChunkTypes = []types.ChunkType{types.ChunkTypeTableSummary, types.ChunkTypeTableColumn}
 	}
@@ -87,9 +95,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 
 	var summaryContent, columnContent string
 	for _, chunk := range chunks {
-		if chunk.ChunkType == types.ChunkTypeTableSummary {
+		switch chunk.ChunkType {
+		case types.ChunkTypeTableSummary:
 			summaryContent = chunk.Content
-		} else if chunk.ChunkType == types.ChunkTypeTableColumn {
+		case types.ChunkTypeTableColumn:
 			columnContent = chunk.Content
 		}
 	}

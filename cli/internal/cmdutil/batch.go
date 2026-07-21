@@ -44,7 +44,13 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 			// operation.cancelled / operation.timeout (ClassifyContextErr)
 			// instead of the generic internal.error, and an all-aborted batch
 			// exits by that class. Cause preserved so errors.Is still matches.
-			outcomes = append(outcomes, BatchOutcome{ID: id, Err: Wrapf(ClassifyContextErr(ctx.Err()), ctx.Err(), "operation on %s aborted", id)})
+			outcomes = append(
+				outcomes,
+				BatchOutcome{
+					ID:  id,
+					Err: Wrapf(ClassifyContextErr(ctx.Err()), ctx.Err(), "operation on %s aborted", id),
+				},
+			)
 			failed++
 			continue
 		default:

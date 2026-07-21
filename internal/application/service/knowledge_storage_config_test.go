@@ -200,7 +200,7 @@ func TestBuildStorageConfig_LegacyPathOnlyForCOSAndMinIO(t *testing.T) {
 
 	// Legacy StorageConfig with full COS-shape fields. cos+minio should pick it
 	// up; everything else falls through to the tenant merge.
-	legacy := types.StorageConfig{
+	legacy := types.StorageConfig{ //nolint:staticcheck // tests legacy cos_config column compatibility
 		SecretID:   "legacy-sid",
 		SecretKey:  "legacy-sk",
 		Region:     "ap-guangzhou",
@@ -217,8 +217,20 @@ func TestBuildStorageConfig_LegacyPathOnlyForCOSAndMinIO(t *testing.T) {
 		wantAppID   string
 		wantTenants bool // true when the test should fall through to tenant merge (empty result)
 	}{
-		{name: "cos uses legacy", provider: "cos", wantBucket: "legacy-bucket", wantSecret: "legacy-sid", wantAppID: "1255000000"},
-		{name: "minio uses legacy", provider: "minio", wantBucket: "legacy-bucket", wantSecret: "legacy-sid", wantAppID: "1255000000"},
+		{
+			name:       "cos uses legacy",
+			provider:   "cos",
+			wantBucket: "legacy-bucket",
+			wantSecret: "legacy-sid",
+			wantAppID:  "1255000000",
+		},
+		{
+			name:       "minio uses legacy",
+			provider:   "minio",
+			wantBucket: "legacy-bucket",
+			wantSecret: "legacy-sid",
+			wantAppID:  "1255000000",
+		},
 		{name: "local skips legacy", provider: "local", wantTenants: true},
 		{name: "tos skips legacy", provider: "tos", wantTenants: true},
 		{name: "s3 skips legacy", provider: "s3", wantTenants: true},

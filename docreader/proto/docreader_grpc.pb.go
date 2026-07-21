@@ -8,6 +8,7 @@ package proto
 
 import (
 	context "context"
+
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -112,9 +113,11 @@ type UnimplementedDocReaderServer struct{}
 func (UnimplementedDocReaderServer) Read(context.Context, *ReadRequest) (*ReadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Read not implemented")
 }
+
 func (UnimplementedDocReaderServer) ReadStream(*ReadRequest, grpc.ServerStreamingServer[ReadStreamResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method ReadStream not implemented")
 }
+
 func (UnimplementedDocReaderServer) ListEngines(context.Context, *ListEnginesRequest) (*ListEnginesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListEngines not implemented")
 }

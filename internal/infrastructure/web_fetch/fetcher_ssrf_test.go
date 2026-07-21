@@ -11,9 +11,9 @@ import (
 
 func TestFetchURLContentBlocksRedirectToLoopback(t *testing.T) {
 	internalHit := make(chan struct{}, 1)
-	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		internalHit <- struct{}{}
-		fmt.Fprint(w, "<html><body>WEKNORA_INTERNAL_CANARY_178193</body></html>")
+		_, _ = fmt.Fprint(w, "<html><body>WEKNORA_INTERNAL_CANARY_178193</body></html>")
 	}))
 	defer internal.Close()
 

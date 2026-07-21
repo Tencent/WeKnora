@@ -45,12 +45,12 @@ func (f *fakeEmbedder) track() {
 	atomic.AddInt32(&f.inFlight, -1)
 }
 
-func (f *fakeEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
 	f.track()
 	return []float32{1}, nil
 }
 
-func (f *fakeEmbedder) BatchEmbed(ctx context.Context, _ []string) ([][]float32, error) {
+func (f *fakeEmbedder) BatchEmbed(_ context.Context, _ []string) ([][]float32, error) {
 	f.track()
 	return [][]float32{{1}}, nil
 }

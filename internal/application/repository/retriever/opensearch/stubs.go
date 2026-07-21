@@ -13,6 +13,7 @@ import (
 // remaining stub returns ErrFeatureNotEnabled (or, for EstimateStorageSize, a
 // conservative lower-bound) so any accidental invocation surfaces loudly.
 
+// EstimateStorageSize implements the required interface method.
 // EstimateStorageSize: the real implementation that reads cluster
 // `_stats` for the per-dim alias arrives in a later change. For now we
 // return a conservative lower-bound estimate using the HNSW memory

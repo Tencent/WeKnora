@@ -11,10 +11,12 @@ import (
 
 const storageBackendScheme = "storage://"
 
+// BuildStorageBackendPath is an exported function.
 func BuildStorageBackendPath(backendID, providerPath string) string {
 	return storageBackendScheme + strings.TrimSpace(backendID) + "/" + providerPath
 }
 
+// ParseStorageBackendPath is an exported function.
 func ParseStorageBackendPath(path string) (backendID, providerPath string, ok bool) {
 	if !strings.HasPrefix(path, storageBackendScheme) {
 		return "", "", false
@@ -58,40 +60,40 @@ const (
 // KnowledgeBase represents a knowledge base entity
 type KnowledgeBase struct {
 	// Unique identifier of the knowledge base
-	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id"                         json:"id"                           gorm:"type:varchar(36);primaryKey"`
 	// Name of the knowledge base
-	Name string `yaml:"name"                    json:"name"`
+	Name string `yaml:"name"                       json:"name"`
 	// Type of the knowledge base (document, faq, etc.)
-	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'"`
+	Type string `yaml:"type" json:"type" gorm:"type:varchar(32);default:'document'"`
 	// Whether this knowledge base is temporary (ephemeral) and should be hidden from UI
-	IsTemporary bool `yaml:"is_temporary"            json:"is_temporary"            gorm:"default:false"`
+	IsTemporary bool `yaml:"is_temporary"               json:"is_temporary"                 gorm:"default:false"`
 	// Description of the knowledge base
-	Description string `yaml:"description"             json:"description"`
+	Description string `yaml:"description"                json:"description"`
 	// Workspace ID
-	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
+	TenantID uint64 `yaml:"tenant_id"                  json:"tenant_id"`
 	// CreatorID records the user ID of whoever originally created the KB.
 	// Used by the workspace-level RBAC middleware to let Contributors edit
 	// their own KBs without granting them access to everyone else's.
 	// Nullable for backward compatibility with rows created before the
 	// RBAC migration backfilled the column to the workspace Owner.
-	CreatorID string `yaml:"creator_id"              json:"creator_id"              gorm:"type:varchar(36);index"`
+	CreatorID string `yaml:"creator_id"                 json:"creator_id"                   gorm:"type:varchar(36);index"`
 	// Chunking configuration
-	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
-	// Image processing configuration
-	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json"`
+	ChunkingConfig ChunkingConfig `yaml:"chunking_config"            json:"chunking_config"              gorm:"type:json"`
+	// ImageProcessingConfig stores image preprocessing settings for this knowledge base.
+	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json"` //nolint:lll // long struct tag or string
 	// ID of the embedding model
-	EmbeddingModelID string `yaml:"embedding_model_id"      json:"embedding_model_id"`
+	EmbeddingModelID string `yaml:"embedding_model_id"         json:"embedding_model_id"`
 	// Summary model ID
-	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
+	SummaryModelID string `yaml:"summary_model_id"           json:"summary_model_id"`
 	// VLM config
-	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
+	VLMConfig VLMConfig `yaml:"vlm_config"                 json:"vlm_config"                   gorm:"type:json"`
 	// ASR config (Automatic Speech Recognition)
-	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
+	ASRConfig ASRConfig `yaml:"asr_config"                 json:"asr_config"                   gorm:"type:json"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
-	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
+	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config" gorm:"column:storage_provider_config;type:jsonb"` //nolint:lll // long struct tag or string
 	// StorageBackendID binds this KB to one concrete storage instance. The
 	// legacy provider field remains readable during migration only.
-	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null"`
+	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null"` //nolint:lll // long struct tag or string
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
 	// VectorStoreID references the VectorStore this knowledge base is bound to.
@@ -100,18 +102,18 @@ type KnowledgeBase struct {
 	// This field is set once at creation time and must not be modified afterwards;
 	// enforcement lives at the GORM layer (`<-:create`) plus the service-layer
 	// KB update path, which omits this field from its update DTO.
-	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
+	VectorStoreID *string `yaml:"vector_store_id" json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"` //nolint:lll // long struct tag or string
 	// Extract config
-	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
+	ExtractConfig *ExtractConfig `yaml:"extract_config" json:"extract_config" gorm:"column:extract_config;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
-	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
+	FAQConfig *FAQConfig `yaml:"faq_config" json:"faq_config" gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
-	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
+	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"` //nolint:lll // long struct tag or string
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
-	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
+	WikiConfig *WikiConfig `yaml:"wiki_config" json:"wiki_config" gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
-	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
+	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy" json:"indexing_strategy" gorm:"column:indexing_strategy;type:json"` //nolint:lll // long struct tag or string
 	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
 	// (see migration 000050). They used to be stored on the row itself,
 	// which made pinning a workspace-wide ordering decision gated behind
@@ -120,30 +122,30 @@ type KnowledgeBase struct {
 	// the application — both fields are tagged `gorm:"-"` so GORM
 	// ignores them on every CRUD call and the list handler stamps them
 	// after enriching with the caller's pin set.
-	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"-"`
+	IsPinned bool `yaml:"is_pinned"                  json:"is_pinned"                    gorm:"-"`
 	// PinnedAt records when the current caller pinned this knowledge
 	// base; nil when they have not.
-	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"               gorm:"-"`
+	PinnedAt *time.Time `yaml:"pinned_at"                  json:"pinned_at"                    gorm:"-"`
 	// Creation time of the knowledge base
-	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
+	CreatedAt time.Time `yaml:"created_at"                 json:"created_at"`
 	// Last updated time of the knowledge base
-	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at"`
+	UpdatedAt time.Time `yaml:"updated_at"                 json:"updated_at"`
 	// Deletion time of the knowledge base
-	DeletedAt gorm.DeletedAt `yaml:"deleted_at"              json:"deleted_at"              gorm:"index"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at"                 json:"deleted_at"                   gorm:"index"`
 	// Knowledge count (not stored in database, calculated on query)
-	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-"`
+	KnowledgeCount int64 `yaml:"knowledge_count"            json:"knowledge_count"              gorm:"-"`
 	// Chunk count (not stored in database, calculated on query)
-	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-"`
+	ChunkCount int64 `yaml:"chunk_count"                json:"chunk_count"                  gorm:"-"`
 	// IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)
-	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-"`
+	IsProcessing bool `yaml:"is_processing"              json:"is_processing"                gorm:"-"`
 	// ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)
-	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
+	ProcessingCount int64 `yaml:"processing_count"           json:"processing_count"             gorm:"-"`
 	// ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)
-	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
+	ShareCount int64 `yaml:"share_count"                json:"share_count"                  gorm:"-"`
 	// CreatorName 是 CreatorID 对应用户的展示名（username / email 等），
 	// 仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、
 	// CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs workspace 的二分。
-	CreatorName string `yaml:"-"                       json:"creator_name,omitempty"  gorm:"-"`
+	CreatorName string `yaml:"-"                          json:"creator_name,omitempty"       gorm:"-"`
 }
 
 // KnowledgeBaseConfig represents the knowledge base configuration
@@ -170,39 +172,37 @@ type ParserEngineRule struct {
 // ChunkingConfig represents the document splitting configuration
 type ChunkingConfig struct {
 	// Chunk size
-	ChunkSize int `yaml:"chunk_size"    json:"chunk_size"`
+	ChunkSize int `yaml:"chunk_size"                            json:"chunk_size"`
 	// Chunk overlap
-	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
+	ChunkOverlap int `yaml:"chunk_overlap"                         json:"chunk_overlap"`
 	// Separators
-	Separators []string `yaml:"separators"    json:"separators"`
+	Separators []string `yaml:"separators"                            json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, the builtin engine is used for all types.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
 	// are used for vector matching. Retrieval matches on child but returns parent content.
-	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty"`
+	EnableParentChild bool `yaml:"enable_parent_child,omitempty"         json:"enable_parent_child,omitempty"`
 	// ParentChunkSize is the size of parent chunks (default: 4096).
 	// Only used when EnableParentChild is true.
-	ParentChunkSize int `yaml:"parent_chunk_size,omitempty" json:"parent_chunk_size,omitempty"`
+	ParentChunkSize int `yaml:"parent_chunk_size,omitempty"           json:"parent_chunk_size,omitempty"`
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
-	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
+	ChildChunkSize int `yaml:"child_chunk_size,omitempty"            json:"child_chunk_size,omitempty"`
 	// Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
 	// the historical recursive splitter; "auto" lets a profiler pick between
 	// heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
 	// "recursive" pin the tier explicitly.
-	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	Strategy string `yaml:"strategy,omitempty"                    json:"strategy,omitempty"`
 	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
 	// as a character count.
-	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty"`
+	TokenLimit int `yaml:"token_limit,omitempty"                 json:"token_limit,omitempty"`
 	// Languages hints the heuristic patterns. Empty = auto-detect from content.
 	// Examples: ["de"], ["en", "zh"].
-	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
-	// TableMetadataInstructions contains optional business guidance used when
-	// generating searchable summaries for CSV/Excel tables. The system-owned
-	// output contract remains fixed; these instructions only add domain context.
-	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
+	Languages []string `yaml:"languages,omitempty"                   json:"languages,omitempty"`
+	// TableMetadataInstructions adds optional business guidance for CSV/Excel summaries.
+	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"` //nolint:lll // long struct tag or string
 }
 
 // ResolveParserEngine returns the engine name for the given file type
@@ -225,10 +225,12 @@ type StorageProviderConfig struct {
 	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 }
 
+// Value implements the required interface method.
 func (c StorageProviderConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
+// Scan implements the required interface method.
 func (c *StorageProviderConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -240,35 +242,37 @@ func (c *StorageProviderConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
-// New code should use StorageProviderConfig. Kept for backward compatibility with old data.
+// StorageConfig holds legacy object-storage settings for a knowledge base.
+// Deprecated: use StorageProviderConfig for new code.
 type StorageConfig struct {
 	// Secret ID (COS) / Access Key ID (S3, MinIO)
-	SecretID string `yaml:"secret_id"   json:"secret_id"`
+	SecretID string `yaml:"secret_id"        json:"secret_id"`
 	// Secret Key (COS) / Secret Access Key (S3, MinIO)
-	SecretKey string `yaml:"secret_key"  json:"secret_key"`
+	SecretKey string `yaml:"secret_key"       json:"secret_key"`
 	// Region
-	Region string `yaml:"region"      json:"region"`
+	Region string `yaml:"region"           json:"region"`
 	// Bucket Name
-	BucketName string `yaml:"bucket_name" json:"bucket_name"`
+	BucketName string `yaml:"bucket_name"      json:"bucket_name"`
 	// App ID (COS specific)
-	AppID string `yaml:"app_id"      json:"app_id"`
+	AppID string `yaml:"app_id"           json:"app_id"`
 	// Path Prefix
-	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
+	PathPrefix string `yaml:"path_prefix"      json:"path_prefix"`
 	// Provider: "cos", "minio", "s3"
-	Provider string `yaml:"provider"    json:"provider"`
+	Provider string `yaml:"provider"         json:"provider"`
 	// Endpoint (S3 specific) - e.g., s3.amazonaws.com, oss-cn-hangzhou.aliyuncs.com
-	Endpoint string `yaml:"endpoint"    json:"endpoint,omitempty"`
+	Endpoint string `yaml:"endpoint"         json:"endpoint,omitempty"`
 	// UseSSL (S3 specific) - whether to use HTTPS
-	UseSSL bool `yaml:"use_ssl"     json:"use_ssl,omitempty"`
+	UseSSL bool `yaml:"use_ssl"          json:"use_ssl,omitempty"`
 	// ForcePathStyle (S3 specific) - whether to use path-style URLs
 	ForcePathStyle bool `yaml:"force_path_style" json:"force_path_style,omitempty"`
 }
 
+// Value implements the required interface method.
 func (c StorageConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
+// Scan implements the required interface method.
 func (c *StorageConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -434,22 +438,22 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 
 // VLMConfig represents the VLM configuration
 type VLMConfig struct {
-	Enabled bool   `yaml:"enabled"  json:"enabled"`
-	ModelID string `yaml:"model_id" json:"model_id"`
+	Enabled bool   `yaml:"enabled"                        json:"enabled"`
+	ModelID string `yaml:"model_id"                       json:"model_id"`
 	// DescriptionLanguage controls the language used for generated image
 	// captions. Empty means follow the document/request language.
 	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty"`
 	// CustomInstructions adds KB-specific image interpretation guidance without
 	// replacing the system-owned OCR and Markdown output contract.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	CustomInstructions string `yaml:"custom_instructions,omitempty"  json:"custom_instructions,omitempty"`
 
 	// 兼容老版本
 	// Model Name
-	ModelName string `yaml:"model_name" json:"model_name"`
+	ModelName string `yaml:"model_name"     json:"model_name"`
 	// Base URL
-	BaseURL string `yaml:"base_url" json:"base_url"`
+	BaseURL string `yaml:"base_url"       json:"base_url"`
 	// API Key
-	APIKey string `yaml:"api_key" json:"api_key"`
+	APIKey string `yaml:"api_key"        json:"api_key"`
 	// Interface Type: "ollama" or "openai"
 	InterfaceType string `yaml:"interface_type" json:"interface_type"`
 }
@@ -473,9 +477,9 @@ func (c VLMConfig) IsEnabled() bool {
 // When enabled, the system will use LLM to generate questions for each chunk during document parsing
 // These generated questions will be indexed separately to improve recall
 type QuestionGenerationConfig struct {
-	Enabled bool `yaml:"enabled"  json:"enabled"`
+	Enabled bool `yaml:"enabled"                       json:"enabled"`
 	// Number of questions to generate per chunk (default: 3, max: 10)
-	QuestionCount int `yaml:"question_count" json:"question_count"`
+	QuestionCount int `yaml:"question_count"                json:"question_count"`
 	// CustomInstructions describes the intended audience or question style.
 	// It is appended to the stable system question-generation template.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
@@ -546,11 +550,11 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `yaml:"enabled"   json:"enabled"`
-	Text      string           `yaml:"text"      json:"text,omitempty"`
-	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
-	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
-	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	Enabled   bool             `yaml:"enabled"                       json:"enabled"`
+	Text      string           `yaml:"text"                          json:"text,omitempty"`
+	Tags      []string         `yaml:"tags"                          json:"tags,omitempty"`
+	Nodes     []*GraphNode     `yaml:"nodes"                         json:"nodes,omitempty"`
+	Relations []*GraphRelation `yaml:"relations"                     json:"relations,omitempty"`
 	// CustomInstructions adds domain-specific extraction guidance while the
 	// system keeps ownership of the structured graph output protocol.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`

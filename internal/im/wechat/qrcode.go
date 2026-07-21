@@ -1,8 +1,10 @@
+// Package wechat provides wechat functionality.
 // QR code login flow for WeChat iLink Bot API.
 //
 // API endpoints (all relative to the iLink base URL):
-//   GET  /ilink/bot/get_bot_qrcode?bot_type=3   → returns {qrcode, qrcode_img_content}
-//   GET  /ilink/bot/get_qrcode_status?qrcode=xxx → returns {status, bot_token, ilink_bot_id, ...}
+//
+//	GET  /ilink/bot/get_bot_qrcode?bot_type=3   → returns {qrcode, qrcode_img_content}
+//	GET  /ilink/bot/get_qrcode_status?qrcode=xxx → returns {status, bot_token, ilink_bot_id, ...}
 //
 // Flow:
 //  1. Call GetLoginQRCode to obtain a QR code URL and opaque qrcode token
@@ -64,7 +66,7 @@ func (s *QRCodeService) GetLoginQRCode(ctx context.Context) (*QRCodeResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("request qrcode: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -76,7 +78,7 @@ func (s *QRCodeService) GetLoginQRCode(ctx context.Context) (*QRCodeResult, erro
 	}
 
 	var result struct {
-		QRCode          string `json:"qrcode"`
+		QRCode           string `json:"qrcode"`
 		QRCodeImgContent string `json:"qrcode_img_content"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -104,7 +106,7 @@ const pollTimeout = 38 * time.Second
 // This is a long-poll endpoint: the server holds the connection until there
 // is a status change or ~35 seconds elapse.
 // Status values: "wait", "scaned", "confirmed", "expired"
-func (s *QRCodeService) PollQRCodeStatus(ctx context.Context, qrcode string) (*LoginResult, error) {
+func (s *QRCodeService) PollQRCodeStatus(_ context.Context, qrcode string) (*LoginResult, error) {
 	u := ilinkBaseURL + "/ilink/bot/get_qrcode_status?qrcode=" + url.QueryEscape(qrcode)
 
 	// Use a DETACHED context with our own timeout so we are not bound by the
@@ -127,7 +129,7 @@ func (s *QRCodeService) PollQRCodeStatus(ctx context.Context, qrcode string) (*L
 		}
 		return nil, fmt.Errorf("request qrcode status: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

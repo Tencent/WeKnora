@@ -36,7 +36,7 @@ func TestAnthropicChat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chat, err := NewAnthropicChat(&ChatConfig{
+	chat, err := NewAnthropicChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   server.URL,
 		ModelName: "claude-sonnet-4-5",
@@ -51,7 +51,7 @@ func TestAnthropicChat(t *testing.T) {
 	resp, err := chat.Chat(context.Background(), []Message{
 		{Role: "system", Content: "You are helpful."},
 		{Role: "user", Content: "Hi"},
-	}, &ChatOptions{MaxTokens: 7, Temperature: 0.2})
+	}, &Options{MaxTokens: 7, Temperature: 0.2})
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-key", capturedHeaders.Get("x-api-key"))
@@ -88,7 +88,7 @@ func TestAnthropicChat_FullEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chat, err := NewAnthropicChat(&ChatConfig{
+	chat, err := NewAnthropicChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   server.URL + "/api/proxy/forward",
 		ModelName: "gpt-5.5",
@@ -122,7 +122,7 @@ func TestAnthropicChat_MessagesEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chat, err := NewAnthropicChat(&ChatConfig{
+	chat, err := NewAnthropicChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   server.URL + "/api/v1/messages",
 		ModelName: "gpt-5.5",
@@ -160,7 +160,7 @@ data: {"type":"message_stop"}
 	}))
 	defer server.Close()
 
-	chat, err := NewAnthropicChat(&ChatConfig{
+	chat, err := NewAnthropicChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   server.URL,
 		ModelName: "gpt-5.5",
@@ -204,7 +204,7 @@ data: {"type":"message_stop"}
 	}))
 	defer server.Close()
 
-	chat, err := NewAnthropicChat(&ChatConfig{
+	chat, err := NewAnthropicChat(&Config{
 		Source:    types.ModelSourceRemote,
 		BaseURL:   server.URL,
 		ModelName: "gpt-5.5",
@@ -234,7 +234,7 @@ data: {"type":"message_stop"}
 }
 
 func TestNewRemoteChat_AnthropicProvider(t *testing.T) {
-	chat, err := NewRemoteChat(&ChatConfig{
+	chat, err := NewRemoteChat(&Config{
 		Source:    types.ModelSourceRemote,
 		ModelName: "claude-sonnet-4-5",
 		APIKey:    "test-key",

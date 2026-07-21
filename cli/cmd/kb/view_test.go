@@ -72,7 +72,13 @@ func TestGet_OK_JSON(t *testing.T) {
 func TestGet_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeGetSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "missing")
+	err := runView(
+		context.Background(),
+		&ViewOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"missing",
+	)
 	if err == nil {
 		t.Fatal("expected error")
 	}

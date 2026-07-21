@@ -1,3 +1,4 @@
+// Package storageallowlist provides related functionality.
 package storageallowlist
 
 import (
@@ -5,7 +6,8 @@ import (
 	"strings"
 )
 
-const AllowListEnv = "STORAGE_ALLOW_LIST"
+// AllowListEnv is an exported constant.
+const AllowListEnv = "STORAGE_ALLOW_LIST" // env var listing allowed storage providers
 
 var supported = []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"}
 

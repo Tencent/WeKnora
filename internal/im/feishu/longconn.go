@@ -271,7 +271,8 @@ func convertPostEvent(
 		return nil
 	}
 
-	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"a","href":"...","text":"..."}]]}
+	// Post content structure:
+	// {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"a","href":"...","text":"..."}]]}
 	var postContent struct {
 		Title   string              `json:"title"`
 		Content [][]json.RawMessage `json:"content"`

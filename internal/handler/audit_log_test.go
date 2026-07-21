@@ -47,7 +47,7 @@ func TestAuditLogHandler_ReturnsEnvelopeAndCursor(t *testing.T) {
 	// Two rows: smallest id appears in the next_cursor field so the
 	// frontend can re-request older pages without re-parsing the body.
 	svc := &stubAuditService{
-		list: func(_ context.Context, tenantID uint64, q *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		list: func(_ context.Context, tenantID uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
 			if tenantID != 7 {
 				t.Fatalf("expected tenant 7, got %d", tenantID)
 			}

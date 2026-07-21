@@ -15,10 +15,45 @@ import (
 func TestBuildSpanTree_AssemblesParentChild(t *testing.T) {
 	now := time.Now()
 	rows := []types.KnowledgeProcessingSpan{
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "mm", ParentSpanID: "root", Name: types.StageMultimodal, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "img0", ParentSpanID: "mm", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusRunning, StartedAt: &now},
+		{
+			KnowledgeID: "kid",
+			Attempt:     1,
+			SpanID:      "root",
+			Name:        "knowledge_processing",
+			Kind:        types.SpanKindRoot,
+			Status:      types.SpanStatusRunning,
+			StartedAt:   &now,
+		},
+		{
+			KnowledgeID:  "kid",
+			Attempt:      1,
+			SpanID:       "doc",
+			ParentSpanID: "root",
+			Name:         types.StageDocReader,
+			Kind:         types.SpanKindStage,
+			Status:       types.SpanStatusDone,
+			StartedAt:    &now,
+		},
+		{
+			KnowledgeID:  "kid",
+			Attempt:      1,
+			SpanID:       "mm",
+			ParentSpanID: "root",
+			Name:         types.StageMultimodal,
+			Kind:         types.SpanKindStage,
+			Status:       types.SpanStatusRunning,
+			StartedAt:    &now,
+		},
+		{
+			KnowledgeID:  "kid",
+			Attempt:      1,
+			SpanID:       "img0",
+			ParentSpanID: "mm",
+			Name:         "multimodal.image[0]",
+			Kind:         types.SpanKindGeneration,
+			Status:       types.SpanStatusRunning,
+			StartedAt:    &now,
+		},
 	}
 
 	tree, currentStage, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusProcessing)
@@ -111,9 +146,39 @@ func TestBuildSpanTree_LastFailureSurfaces(t *testing.T) {
 	now := time.Now()
 	finished := now.Add(5 * time.Second)
 	rows := []types.KnowledgeProcessingSpan{
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusFailed, StartedAt: &now, FinishedAt: &finished},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT", ErrorMessage: "slow", StartedAt: &now, FinishedAt: &finished},
-		{KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusCancelled, ErrorCode: "UPSTREAM_FAILED"},
+		{
+			KnowledgeID: "kid",
+			Attempt:     1,
+			SpanID:      "root",
+			Name:        "knowledge_processing",
+			Kind:        types.SpanKindRoot,
+			Status:      types.SpanStatusFailed,
+			StartedAt:   &now,
+			FinishedAt:  &finished,
+		},
+		{
+			KnowledgeID:  "kid",
+			Attempt:      1,
+			SpanID:       "doc",
+			ParentSpanID: "root",
+			Name:         types.StageDocReader,
+			Kind:         types.SpanKindStage,
+			Status:       types.SpanStatusFailed,
+			ErrorCode:    "DOCREADER_TIMEOUT",
+			ErrorMessage: "slow",
+			StartedAt:    &now,
+			FinishedAt:   &finished,
+		},
+		{
+			KnowledgeID:  "kid",
+			Attempt:      1,
+			SpanID:       "chunk",
+			ParentSpanID: "root",
+			Name:         types.StageChunking,
+			Kind:         types.SpanKindStage,
+			Status:       types.SpanStatusCancelled,
+			ErrorCode:    "UPSTREAM_FAILED",
+		},
 	}
 	_, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
 	a := assert.New(t)

@@ -92,9 +92,17 @@ func TestRunStatus_NoSDKClient(t *testing.T) {
 func TestRunStatus_SDKError_Transport(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
+	require.NoError(
+		t,
+		config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}),
+	)
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: assert.AnError})
+	err := runStatus(
+		context.Background(),
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		f,
+		&fakeStatusService{err: assert.AnError},
+	)
 	require.Error(t, err)
 	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems -
 	// classify network.error so retry logic / exit code 7 / IsTransient apply.
@@ -104,9 +112,17 @@ func TestRunStatus_SDKError_Transport(t *testing.T) {
 func TestRunStatus_SDKError_HTTP401(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
+	require.NoError(
+		t,
+		config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}),
+	)
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
+	err := runStatus(
+		context.Background(),
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		f,
+		&fakeStatusService{err: errors.New("HTTP error 401: invalid token")},
+	)
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsAuthError(err))
 }

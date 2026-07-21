@@ -53,7 +53,7 @@ func (n *NDCGMetric) Compute(metricInput *types.MetricInput) float64 {
 	}
 
 	// Create ideal ranking (all relevant docs first)
-	idealLen := min(countGt, len(ids))
+	idealLen := minInt(countGt, len(ids))
 	idealPred := make([]int, len(ids))
 	for i := 0; i < len(ids); i++ {
 		if i < idealLen {

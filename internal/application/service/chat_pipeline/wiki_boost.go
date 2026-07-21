@@ -34,14 +34,14 @@ func NewPluginWikiBoost(eventManager *EventManager, kbService interfaces.Knowled
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginWikiBoost) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHUNK_RERANK}
+func (p *PluginWikiBoost) ActivationEvents() []types.Type {
+	return []types.Type{types.ChunkRerank}
 }
 
 // OnEvent boosts wiki page chunk scores after reranking
 func (p *PluginWikiBoost) OnEvent(
 	ctx context.Context,
-	eventType types.EventType,
+	_ types.Type,
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {

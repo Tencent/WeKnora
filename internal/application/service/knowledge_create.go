@@ -24,8 +24,15 @@ import (
 )
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
-func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
+func (s *knowledgeService) CreateKnowledgeFromFile(
+	ctx context.Context,
+	kbID string,
+	file *multipart.FileHeader,
+	metadata map[string]string,
+	enableMultimodel *bool,
+	customFileName string,
+	tagIDs []string,
+	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
@@ -228,7 +235,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
-			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
+			logger.Errorf(
+				ctx,
+				"Failed to delete saved file after knowledge creation failed, path: %s, error: %v",
+				filePath,
+				deleteErr,
+			)
 		}
 		return nil, err
 	}
@@ -291,7 +303,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	)
 
 	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
-		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+		_ = NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
 	}
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
@@ -314,8 +326,16 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 	return fileName != "" || fileType != ""
 }
 
-func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
+func (s *knowledgeService) CreateKnowledgeFromURL(
+	ctx context.Context,
+	kbID string,
+	rawURL string,
+	fileName string,
+	fileType string,
+	enableMultimodel *bool,
+	title string,
+	tagIDs []string,
+	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
@@ -504,9 +524,7 @@ func extractFileNameFromContentDisposition(header string) string {
 	for _, part := range strings.Split(header, ";") {
 		part = strings.TrimSpace(part)
 		if strings.HasPrefix(strings.ToLower(part), "filename=") {
-			name := strings.TrimPrefix(part, "filename=")
-			name = strings.TrimPrefix(part[len("filename="):], "")
-			name = strings.Trim(name, `"'`)
+			name := strings.Trim(strings.TrimPrefix(part, "filename="), `"'`)
 			if name != "" {
 				return name
 			}
@@ -701,7 +719,13 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		return knowledge, nil
 	}
-	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+	logger.Infof(
+		ctx,
+		"Enqueued file URL process task: id=%s queue=%s knowledge_id=%s",
+		info.ID,
+		info.Queue,
+		knowledge.ID,
+	)
 
 	logger.Infof(ctx, "Knowledge from file URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -822,7 +846,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 			// Non-fatal: mark as failed so user can retry
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "Failed to enqueue processing task"
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			_ = s.repo.UpdateKnowledge(ctx, knowledge)
 		}
 	}
 
@@ -1048,7 +1072,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		// Non-fatal: mark as failed so user can retry
 		existing.ParseStatus = "failed"
 		existing.ErrorMessage = "Failed to enqueue processing task"
-		s.repo.UpdateKnowledge(ctx, existing)
+		_ = s.repo.UpdateKnowledge(ctx, existing)
 		return nil, werrors.NewInternalServerError("Failed to submit processing task")
 	}
 	return existing, nil
@@ -1060,7 +1084,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 ) error {
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
-		RequestId:       requestID,
+		RequestID:       requestID,
 		TenantID:        knowledge.TenantID,
 		KnowledgeID:     knowledge.ID,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -1130,7 +1154,12 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			clean = afterDataURI
 			resolvedImages = append(resolvedImages, fromDataURI...)
 		}
-		updatedContent, storedImages, resolveErr := s.imageResolver.ResolveRemoteImages(ctx, clean, fileSvc, knowledge.TenantID)
+		updatedContent, storedImages, resolveErr := s.imageResolver.ResolveRemoteImages(
+			ctx,
+			clean,
+			fileSvc,
+			knowledge.TenantID,
+		)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", resolveErr)
 		}

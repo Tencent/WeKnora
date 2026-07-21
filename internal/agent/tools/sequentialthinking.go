@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package tools
 
 import (
@@ -37,7 +38,9 @@ Each thought can build on, question, or revise previous insights as understandin
 - Generates a solution hypothesis
 - Verifies the hypothesis based on the Chain of Thought steps
 - Repeats the process until satisfied
-- When your thinking is complete, deliver your answer by writing it as your plain reply and stopping (no further tool calls). NEVER include the final answer directly in a thought.
+- When your thinking is complete,
+	//nolint:lll
+	deliver your answer by writing it as your plain reply and stopping (no further tool calls). NEVER include the final answer directly in a thought.
 
 ## Parameters Explained
 
@@ -50,13 +53,15 @@ Each thought can build on, question, or revise previous insights as understandin
   * Hypothesis generation
   * Hypothesis verification
   
-  **CRITICAL - User-Friendly Thinking**: Write your thoughts in natural, user-friendly language. NEVER mention tool names (like "grep_chunks", "knowledge_search", "web_search", etc.) in your thinking process. Instead, describe your actions in plain language:
+  //nolint:lll
+  **CRITICAL - User-Friendly Thinking**: Write your thoughts in natural, user-friendly language. NEVER mention tool names (like "grep_chunks", "knowledge_search", "web_search", etc.) in your thinking process. Instead, describe your actions in plain language: //nolint:lll
   - ❌ BAD: "I'll use grep_chunks to search for keywords, then knowledge_search for semantic understanding"
   - ✅ GOOD: "I'll start by searching for key terms in the knowledge base, then explore related concepts"
   - ❌ BAD: "After grep_chunks returns results, I'll use knowledge_search"
   - ✅ GOOD: "After finding relevant documents, I'll search for semantically related content"
   
-  Write thinking as if explaining your reasoning to a user, not documenting technical steps. Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use).
+  //nolint:lll
+  Write thinking as if explaining your reasoning to a user, not documenting technical steps. Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use). //nolint:lll
 
 - **next_thought_needed**: True if you need more thinking, even if at what seemed like the end
 - **thought_number**: Current number in sequence (can go beyond initial total if needed)
@@ -79,13 +84,15 @@ Each thought can build on, question, or revise previous insights as understandin
 8. Verify the hypothesis based on the Chain of Thought steps
 9. Repeat the process until satisfied with the solution
 10. Only set next_thought_needed to false when truly done and a satisfactory answer is reached
-11. NEVER include the final answer in the thought content. When thinking is complete, deliver the final answer by writing it as your plain reply and stopping (no further tool calls)`,
+11. NEVER include the final answer in the thought content. When thinking is complete, deliver the final answer by writing it as your plain reply and stopping (no further tool calls)`, //nolint:lll
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "thought": {
       "type": "string",
-      "description": "Your current thinking step. Write in natural, user-friendly language. NEVER mention tool names (like \"grep_chunks\", \"knowledge_search\", \"web_search\", etc.). Instead, describe actions in plain language (e.g., \"I'll search for key terms\" instead of \"I'll use grep_chunks\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)."
+      "description": "Your current thinking step. Write in natural, user-" +
+      	//nolint:lll
+      	"friendly language. NEVER mention tool names (like \"grep_chunks\", \"knowledge_search\", \"web_search\", etc.). Instead, describe actions in plain language (e.g., \"I'll search for key terms\" instead of \"I'll use grep_chunks\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)." //nolint:lll
     },
     "next_thought_needed": {
       "type": "boolean",

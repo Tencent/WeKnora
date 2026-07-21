@@ -21,6 +21,7 @@ const (
 	embedSessionTTL         = 30 * time.Minute
 )
 
+// ErrEmbedSessionUnavailable is exported.
 var ErrEmbedSessionUnavailable = errors.New("embed session tokens unavailable")
 
 func generateEmbedSessionToken() (string, error) {

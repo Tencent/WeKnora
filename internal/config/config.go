@@ -17,22 +17,22 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation    *ConversationConfig    `yaml:"conversation"      json:"conversation"`
+	Server          *ServerConfig          `yaml:"server"            json:"server"`
+	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"    json:"knowledge_base"`
+	Tenant          *TenantConfig          `yaml:"tenant"            json:"tenant"`
+	Auth            *AuthConfig            `yaml:"auth"              json:"auth"`
+	Audit           *AuditConfig           `yaml:"audit"             json:"audit"`
+	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"         json:"oidc_auth"`
+	Models          []ModelConfig          `yaml:"models"            json:"models"`
+	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"   json:"vector_database"`
+	DocReader       *DocReaderConfig       `yaml:"docreader"         json:"docreader"`
+	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"    json:"stream_manager"`
+	ExtractManager  *ExtractManagerConfig  `yaml:"extract"           json:"extract"`
+	WebSearch       *WebSearchConfig       `yaml:"web_search"        json:"web_search"`
+	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates"  json:"prompt_templates"`
+	IM              *IMConfig              `yaml:"im"                json:"im"`
+	Agent           *AgentConfig           `yaml:"agent"             json:"agent"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -45,7 +45,7 @@ type Config struct {
 type AgentConfig struct {
 	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
 	// Default: 120 (standard agents) or 300 (can be overridden by Env).
-	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout"`
+	LLMCallTimeout int `yaml:"llm_call_timeout"              json:"llm_call_timeout"`
 	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
 	// 0 means default 600 (10 minutes).
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
@@ -57,7 +57,7 @@ type AgentConfig struct {
 type IMConfig struct {
 	// Workers is the number of concurrent QA worker goroutines per instance.
 	// Default: 5.
-	Workers int `yaml:"workers" json:"workers"`
+	Workers int `yaml:"workers"            json:"workers"`
 	// GlobalMaxWorkers is the maximum number of QA requests that can execute
 	// concurrently across ALL instances. Enforced via a Redis counter; when the
 	// global limit is reached, local workers wait until a slot opens.
@@ -66,53 +66,55 @@ type IMConfig struct {
 	GlobalMaxWorkers int `yaml:"global_max_workers" json:"global_max_workers"`
 	// MaxQueueSize is the maximum number of pending QA requests per instance.
 	// Default: 50.
-	MaxQueueSize int `yaml:"max_queue_size" json:"max_queue_size"`
+	MaxQueueSize int `yaml:"max_queue_size"     json:"max_queue_size"`
 	// MaxPerUser limits how many requests a single user can have queued globally.
 	// Default: 3.
-	MaxPerUser int `yaml:"max_per_user" json:"max_per_user"`
+	MaxPerUser int `yaml:"max_per_user"       json:"max_per_user"`
 	// RateLimitWindow is the sliding window duration for per-user rate limiting.
 	// Default: 60s.
-	RateLimitWindow time.Duration `yaml:"rate_limit_window" json:"rate_limit_window"`
+	RateLimitWindow time.Duration `yaml:"rate_limit_window"  json:"rate_limit_window"`
 	// RateLimitMax is the maximum number of requests allowed per window per user.
 	// Default: 10.
-	RateLimitMax int `yaml:"rate_limit_max" json:"rate_limit_max"`
+	RateLimitMax int `yaml:"rate_limit_max"     json:"rate_limit_max"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
 type DocReaderConfig struct {
-	// Addr: for gRPC it is the server address (e.g. "localhost:50051"); for HTTP it is the base URL (e.g. "http://localhost:8080").
-	Addr string `yaml:"addr" json:"addr"`
+	// Addr: for gRPC it is the server address (e.g. "localhost:50051");
+	// for HTTP it is the base URL (e.g. "http://localhost:8080").
+	Addr string `yaml:"addr"      json:"addr"`
 	// Transport: "grpc" (default) or "http"
 	Transport string `yaml:"transport" json:"transport"`
 }
 
+// VectorDatabaseConfig selects the vector store driver (e.g. milvus, sqlite).
 type VectorDatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
 }
 
 // ConversationConfig 对话服务配置
 type ConversationConfig struct {
-	MaxRounds            int            `yaml:"max_rounds"                       json:"max_rounds"`
-	KeywordThreshold     float64        `yaml:"keyword_threshold"                json:"keyword_threshold"`
-	EmbeddingTopK        int            `yaml:"embedding_top_k"                  json:"embedding_top_k"`
-	VectorThreshold      float64        `yaml:"vector_threshold"                 json:"vector_threshold"`
-	RerankTopK           int            `yaml:"rerank_top_k"                     json:"rerank_top_k"`
-	RerankThreshold      float64        `yaml:"rerank_threshold"                 json:"rerank_threshold"`
-	FallbackStrategy     string         `yaml:"fallback_strategy"                json:"fallback_strategy"`
-	FallbackResponse     string         `yaml:"fallback_response"                json:"fallback_response"`
-	EnableRewrite        bool           `yaml:"enable_rewrite"                   json:"enable_rewrite"`
-	EnableQueryExpansion bool           `yaml:"enable_query_expansion"           json:"enable_query_expansion"`
-	EnableRerank         bool           `yaml:"enable_rerank"                    json:"enable_rerank"`
-	Summary              *SummaryConfig `yaml:"summary"                          json:"summary"`
+	MaxRounds            int            `yaml:"max_rounds"             json:"max_rounds"`
+	KeywordThreshold     float64        `yaml:"keyword_threshold"      json:"keyword_threshold"`
+	EmbeddingTopK        int            `yaml:"embedding_top_k"        json:"embedding_top_k"`
+	VectorThreshold      float64        `yaml:"vector_threshold"       json:"vector_threshold"`
+	RerankTopK           int            `yaml:"rerank_top_k"           json:"rerank_top_k"`
+	RerankThreshold      float64        `yaml:"rerank_threshold"       json:"rerank_threshold"`
+	FallbackStrategy     string         `yaml:"fallback_strategy"      json:"fallback_strategy"`
+	FallbackResponse     string         `yaml:"fallback_response"      json:"fallback_response"`
+	EnableRewrite        bool           `yaml:"enable_rewrite"         json:"enable_rewrite"`
+	EnableQueryExpansion bool           `yaml:"enable_query_expansion" json:"enable_query_expansion"`
+	EnableRerank         bool           `yaml:"enable_rerank"          json:"enable_rerank"`
+	Summary              *SummaryConfig `yaml:"summary"                json:"summary"`
 
 	// Prompt template ID fields — resolved to text by backfillConversationDefaults
-	FallbackPromptID             string `yaml:"fallback_prompt_id"                json:"fallback_prompt_id"`
-	RewritePromptID              string `yaml:"rewrite_prompt_id"                 json:"rewrite_prompt_id"`
-	GenerateSessionTitlePromptID string `yaml:"generate_session_title_prompt_id"  json:"generate_session_title_prompt_id"`
-	GenerateSummaryPromptID      string `yaml:"generate_summary_prompt_id"        json:"generate_summary_prompt_id"`
-	ExtractEntitiesPromptID      string `yaml:"extract_entities_prompt_id"        json:"extract_entities_prompt_id"`
-	ExtractRelationshipsPromptID string `yaml:"extract_relationships_prompt_id"   json:"extract_relationships_prompt_id"`
-	GenerateQuestionsPromptID    string `yaml:"generate_questions_prompt_id"      json:"generate_questions_prompt_id"`
+	FallbackPromptID             string `yaml:"fallback_prompt_id"               json:"fallback_prompt_id"`
+	RewritePromptID              string `yaml:"rewrite_prompt_id"                json:"rewrite_prompt_id"`
+	GenerateSessionTitlePromptID string `yaml:"generate_session_title_prompt_id" json:"generate_session_title_prompt_id"`
+	GenerateSummaryPromptID      string `yaml:"generate_summary_prompt_id"       json:"generate_summary_prompt_id"`
+	ExtractEntitiesPromptID      string `yaml:"extract_entities_prompt_id"       json:"extract_entities_prompt_id"`
+	ExtractRelationshipsPromptID string `yaml:"extract_relationships_prompt_id"  json:"extract_relationships_prompt_id"`
+	GenerateQuestionsPromptID    string `yaml:"generate_questions_prompt_id"     json:"generate_questions_prompt_id"`
 
 	// Resolved prompt text fields (populated by backfill, not from YAML)
 	FallbackPrompt             string `yaml:"-" json:"fallback_prompt"`
@@ -131,7 +133,8 @@ type ConversationConfig struct {
 
 // SummaryConfig 摘要配置
 type SummaryConfig struct {
-	MaxInputChars       int     `yaml:"max_input_chars"       json:"max_input_chars"` // Max input characters for summary generation (default: 16384)
+	// MaxInputChars caps summary input size (default: 16384).
+	MaxInputChars       int     `yaml:"max_input_chars"       json:"max_input_chars"`
 	MaxTokens           int     `yaml:"max_tokens"            json:"max_tokens"`
 	RepeatPenalty       float64 `yaml:"repeat_penalty"        json:"repeat_penalty"`
 	TopK                int     `yaml:"top_k"                 json:"top_k"`
@@ -163,12 +166,12 @@ type ServerConfig struct {
 
 // KnowledgeBaseConfig 知识库配置
 type KnowledgeBaseConfig struct {
-	ChunkSize              int                    `yaml:"chunk_size"       json:"chunk_size"`
-	ChunkOverlap           int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
-	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`
-	KeepSeparator          bool                   `yaml:"keep_separator"   json:"keep_separator"`
-	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
-	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout"  json:"document_process_timeout"`
+	ChunkSize              int                    `yaml:"chunk_size"               json:"chunk_size"`
+	ChunkOverlap           int                    `yaml:"chunk_overlap"            json:"chunk_overlap"`
+	SplitMarkers           []string               `yaml:"split_markers"            json:"split_markers"`
+	KeepSeparator          bool                   `yaml:"keep_separator"           json:"keep_separator"`
+	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing"         json:"image_processing"`
+	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout" json:"document_process_timeout"`
 	// DocReaderCallTimeout caps a single DocReader RPC. Without this the
 	// gRPC call inherits the asynq task context (whole DocumentProcessTimeout,
 	// default 2h+), so a hung docreader would block a worker for hours and
@@ -197,11 +200,11 @@ type ImageProcessingConfig struct {
 
 // TenantConfig 空间配置
 type TenantConfig struct {
-	DefaultSessionName        string `yaml:"default_session_name"        json:"default_session_name"`
-	DefaultSessionTitle       string `yaml:"default_session_title"       json:"default_session_title"`
-	DefaultSessionDescription string `yaml:"default_session_description" json:"default_session_description"`
+	DefaultSessionName        string `yaml:"default_session_name"          json:"default_session_name"`
+	DefaultSessionTitle       string `yaml:"default_session_title"         json:"default_session_title"`
+	DefaultSessionDescription string `yaml:"default_session_description"   json:"default_session_description"`
 	// EnableCrossTenantAccess enables cross-tenant access for users with permission
-	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
+	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access"    json:"enable_cross_tenant_access"`
 	// EnableRBAC turns on tenant-level role enforcement (issue #1303).
 	// Pointer so we can distinguish "unset" from "explicit false":
 	//   nil           — fall back to the built-in default (true) applied
@@ -211,7 +214,7 @@ type TenantConfig struct {
 	//                   or env `WEKNORA_TENANT_ENABLE_RBAC=false`).
 	//   pointer true  — enforcement on (the new default).
 	// Read through IsRBACEnforced so callers stay nil-safe.
-	EnableRBAC *bool `yaml:"enable_rbac" json:"enable_rbac"`
+	EnableRBAC *bool `yaml:"enable_rbac"                   json:"enable_rbac"`
 	// MaxOwnedPerUser caps how many tenants a single non-superuser can
 	// create (and Own) via self-service POST /tenants. Counts only Owner
 	// memberships so being invited as Admin/Editor/Viewer in another
@@ -229,7 +232,7 @@ type TenantConfig struct {
 	// SelfServiceCreationEnabled controls whether ordinary authenticated
 	// users may create a workspace for themselves. Nil preserves the
 	// historical default (enabled); cross-tenant superusers are exempt.
-	SelfServiceCreationEnabled *bool `yaml:"self_service_creation_enabled" json:"self_service_creation_enabled" mapstructure:"self_service_creation_enabled"`
+	SelfServiceCreationEnabled *bool `yaml:"self_service_creation_enabled" json:"self_service_creation_enabled" mapstructure:"self_service_creation_enabled"` //nolint:lll // struct tag
 }
 
 // IsRBACEnforced reports whether tenant-level role enforcement is
@@ -274,7 +277,7 @@ type AuthConfig struct {
 	//   "invite_only"          — public registration is rejected; new
 	//                            users only enter through the invitation
 	//                            flow added in PR 3.
-	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
+	RegistrationMode string `yaml:"registration_mode"   json:"registration_mode"`
 	// DefaultTenantMode controls public password-registration provisioning.
 	// create_personal preserves the historical one-user-one-workspace default;
 	// tenantless creates only the identity and waits for an invitation or an
@@ -301,11 +304,13 @@ func (c *AuthConfig) IsInviteOnly() bool {
 	return c.RegistrationMode == AuthRegistrationModeInviteOnly
 }
 
+// OIDCUserInfoMapping maps OIDC userinfo JSON fields to WeKnora user attributes.
 type OIDCUserInfoMapping struct {
 	Username string `yaml:"username" json:"username"`
 	Email    string `yaml:"email"    json:"email"`
 }
 
+// OIDCAuthConfig holds OpenID Connect login integration settings.
 type OIDCAuthConfig struct {
 	Enable                bool                 `yaml:"enable"                 json:"enable"`
 	IssuerURL             string               `yaml:"issuer_url"             json:"issuer_url"`
@@ -353,9 +358,9 @@ type PromptTemplatesConfig struct {
 	SystemPrompt    []PromptTemplate `yaml:"system_prompt"    json:"system_prompt"`
 	ContextTemplate []PromptTemplate `yaml:"context_template" json:"context_template"`
 	// Rewrite 合并了前端可选模板和运行时默认模板，每个模板同时包含 content + user
-	Rewrite []PromptTemplate `yaml:"rewrite" json:"rewrite"`
+	Rewrite []PromptTemplate `yaml:"rewrite"          json:"rewrite"`
 	// Fallback 合并了固定回复模板和模型兜底 prompt（通过 mode:"model" 区分）
-	Fallback []PromptTemplate `yaml:"fallback" json:"fallback"`
+	Fallback []PromptTemplate `yaml:"fallback"         json:"fallback"`
 
 	GenerateSessionTitle []PromptTemplate `yaml:"generate_session_title" json:"generate_session_title,omitempty"`
 	GenerateSummary      []PromptTemplate `yaml:"generate_summary"       json:"generate_summary,omitempty"`
@@ -364,7 +369,7 @@ type PromptTemplatesConfig struct {
 	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
 	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
 	// IntentPrompts holds per-intent system prompt overrides (template ID = intent value).
-	IntentPrompts []PromptTemplate `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
+	IntentPrompts []PromptTemplate `yaml:"intent_prompts"         json:"intent_prompts,omitempty"`
 }
 
 // DefaultTemplate returns the first template marked as default in the list,
@@ -464,20 +469,21 @@ type ExtractManagerConfig struct {
 	FabriText     *FebriText                      `yaml:"fabri_text"     json:"fabri_text"`
 }
 
+// FebriText holds prompt fragments for fabric-text extraction modes.
 type FebriText struct {
 	WithTag   string `yaml:"with_tag"    json:"with_tag"`
 	WithNoTag string `yaml:"with_no_tag" json:"with_no_tag"`
 }
 
 // resolvedConfigDir holds the directory of the loaded config file. Populated by
-// LoadConfig and read by ConfigDir(); empty until LoadConfig has run.
+// LoadConfig and read by Dir(); empty until LoadConfig has run.
 var resolvedConfigDir string
 
-// ConfigDir returns the directory containing the loaded config.yaml. Other
+// Dir returns the directory containing the loaded config.yaml. Other
 // startup code (e.g. builtin model loader) uses this to locate sibling config
 // files like builtin_models.yaml without re-implementing viper search rules.
 // Falls back to "./config" when LoadConfig has not been called yet.
-func ConfigDir() string {
+func Dir() string {
 	if resolvedConfigDir != "" {
 		return resolvedConfigDir
 	}
@@ -525,7 +531,7 @@ func LoadConfig() (*Config, error) {
 	})
 
 	// 使用处理后的配置内容
-	viper.ReadConfig(strings.NewReader(result))
+	_ = viper.ReadConfig(strings.NewReader(result))
 
 	// 解析配置到结构体
 	var cfg Config
@@ -621,8 +627,11 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, "oidc_auth.client_secret is required when OIDC is enabled")
 		}
 		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
-			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
-			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
+			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" ||
+				strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
+			errs = append(errs,
+				"oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and "+
+					"oidc_auth.token_endpoint are required when OIDC is enabled")
 		}
 	}
 
@@ -633,7 +642,9 @@ func ValidateConfig(cfg *Config) error {
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
 		tenantMode := strings.TrimSpace(cfg.Auth.DefaultTenantMode)
-		if tenantMode != "" && tenantMode != AuthDefaultTenantModeCreatePersonal && tenantMode != AuthDefaultTenantModeTenantless {
+		if tenantMode != "" &&
+			tenantMode != AuthDefaultTenantModeCreatePersonal &&
+			tenantMode != AuthDefaultTenantModeTenantless {
 			errs = append(errs, fmt.Sprintf("auth.default_tenant_mode must be %q or %q, got %q",
 				AuthDefaultTenantModeCreatePersonal, AuthDefaultTenantModeTenantless, tenantMode))
 		}

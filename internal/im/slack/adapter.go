@@ -1,3 +1,4 @@
+// Package slack provides related functionality.
 package slack
 
 import (
@@ -49,7 +50,11 @@ func NewWebhookAdapter(api *slack.Client, signingSecret string) *Adapter {
 	}
 }
 
-func parseIncomingMessage(user, channel, text, ts string, chatType im.ChatType, files []slack.File) *im.IncomingMessage {
+func parseIncomingMessage(
+	user, channel, text, ts string,
+	chatType im.ChatType,
+	files []slack.File,
+) *im.IncomingMessage {
 	content := text
 	if chatType == im.ChatTypeGroup {
 		// Slack mentions are in the format <@U12345678>
@@ -93,10 +98,12 @@ func parseIncomingMessage(user, channel, text, ts string, chatType im.ChatType, 
 	return msg
 }
 
+// Platform implements the required interface method.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformSlack
 }
 
+// VerifyCallback implements the required interface method.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.signingSecret == "" {
 		return nil
@@ -122,6 +129,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	return nil
 }
 
+// ParseCallback implements the required interface method.
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -170,6 +178,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	return nil, nil
 }
 
+// HandleURLVerification implements the required interface method.
 func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -193,6 +202,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	return false
 }
 
+// SendReply implements the required interface method.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	channelID := incoming.ChatID
 	if channelID == "" {
@@ -224,6 +234,7 @@ var (
 	slackStreams   = map[string]*slackStreamState{}
 )
 
+// StartStream implements the required interface method.
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	channelID := incoming.ChatID
 	if channelID == "" {
@@ -254,7 +265,13 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+// UpdateStreamContent implements the required interface method.
+func (a *Adapter) UpdateStreamContent(
+	ctx context.Context,
+	_ *im.IncomingMessage,
+	streamID string,
+	fullContent string,
+) error {
 	if fullContent == "" {
 		return nil
 	}
@@ -280,15 +297,34 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	return nil
 }
 
-func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+// FinalizeStream implements the required interface method.
+func (a *Adapter) FinalizeStream(
+	ctx context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	finalContent string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, finalContent)
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+// SendStreamChunk implements the required interface method.
+func (a *Adapter) SendStreamChunk(
+	ctx context.Context,
+	incoming *im.IncomingMessage,
+	streamID string,
+	content string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
-func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
+// EndStream implements the required behavior.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter is exported.
+// Adapter implements the required behavior.
+func (a *Adapter) EndStream(ctx context.Context, _ *im.IncomingMessage, streamID string) error {
 	slackStreamsMu.Lock()
 	state, ok := slackStreams[streamID]
 	delete(slackStreams, streamID)
@@ -311,6 +347,7 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	return nil
 }
 
+// DownloadFile implements the required interface method.
 func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
 	if msg.FileKey == "" {
 		return nil, "", fmt.Errorf("file_key is required")

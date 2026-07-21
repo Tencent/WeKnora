@@ -114,14 +114,25 @@ func (s *WebSearchService) resolveProvider(
 	}
 
 	// Backward compatibility: use the deprecated config.Provider field
-	if cfg.Provider != "" {
-		logger.Warnf(ctx, "Using deprecated WebSearchConfig.Provider field: %s. Please migrate to WebSearchProviderEntity.", cfg.Provider)
+	if cfg.Provider != "" { //nolint:staticcheck // legacy tenant web search config
+		logger.Warnf(
+			ctx,
+			"Using deprecated WebSearchConfig.Provider field: %s. Please migrate to WebSearchProviderEntity.",
+			cfg.Provider, //nolint:staticcheck // legacy tenant web search config
+		)
 		params := mergeProxyFromWebSearchConfig(types.WebSearchProviderParameters{
-			APIKey: cfg.APIKey,
+			APIKey: cfg.APIKey, //nolint:staticcheck // legacy tenant web search config
 		}, cfg)
-		provider, err := s.registry.CreateProvider(cfg.Provider, params)
+		provider, err := s.registry.CreateProvider(
+			cfg.Provider, //nolint:staticcheck // legacy tenant web search config
+			params,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("web search provider %s is not available: %w", cfg.Provider, err)
+			return nil, fmt.Errorf(
+				"web search provider %s is not available: %w",
+				cfg.Provider, //nolint:staticcheck // legacy tenant web search config
+				err,
+			) //nolint:staticcheck // legacy tenant web search config
 		}
 		return provider, nil
 	}
@@ -130,7 +141,10 @@ func (s *WebSearchService) resolveProvider(
 }
 
 // mergeProxyFromWebSearchConfig applies cfg.ProxyURL over stored provider params when non-empty (call-time override).
-func mergeProxyFromWebSearchConfig(base types.WebSearchProviderParameters, cfg *types.WebSearchConfig) types.WebSearchProviderParameters {
+func mergeProxyFromWebSearchConfig(
+	base types.WebSearchProviderParameters,
+	cfg *types.WebSearchConfig,
+) types.WebSearchProviderParameters {
 	if cfg != nil {
 		if pu := strings.TrimSpace(cfg.ProxyURL); pu != "" {
 			base.ProxyURL = pu
@@ -142,7 +156,7 @@ func mergeProxyFromWebSearchConfig(base types.WebSearchProviderParameters, cfg *
 // CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base.
 // The temporary knowledge base is deleted after use. The UI will not list it due to repo filtering.
 func (s *WebSearchService) CompressWithRAG(
-	ctx context.Context, sessionID string, tempKBID string, questions []string,
+	ctx context.Context, _ string, tempKBID string, questions []string,
 	webSearchResults []*types.WebSearchResult, cfg *types.WebSearchConfig,
 	kbSvc interfaces.KnowledgeBaseService, knowSvc interfaces.KnowledgeService,
 	seenURLs map[string]bool, knowledgeIDs []string,

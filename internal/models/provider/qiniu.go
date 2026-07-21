@@ -19,8 +19,8 @@ func init() {
 }
 
 // Info 返回七牛云 provider 的元数据
-func (p *QiniuProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *QiniuProvider) Info() Info {
+	return Info{
 		Name:        ProviderQiniu,
 		DisplayName: "七牛云 Qiniu",
 		Description: "deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.",

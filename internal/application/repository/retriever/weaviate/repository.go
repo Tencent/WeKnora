@@ -1,3 +1,4 @@
+// Package weaviate implements the Weaviate vector retriever.
 package weaviate
 
 import (
@@ -6,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -36,7 +36,10 @@ const (
 
 // NewWeaviateRetrieveEngineRepository creates and initializes a new Weaviate repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
-func NewWeaviateRetrieveEngineRepository(client *weaviate.Client, indexCfg *types.IndexConfig) interfaces.RetrieveEngineRepository {
+func NewWeaviateRetrieveEngineRepository(
+	client *weaviate.Client,
+	indexCfg *types.IndexConfig,
+) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Weaviate] Initializing Weaviate retriever engine repository")
 
@@ -60,14 +63,14 @@ func (w *weaviateRepository) getCollectionName(dimension int) string {
 func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := w.getCollectionName(dimension)
 
-	//Check cache first
+	// Check cache first
 	if _, ok := w.initializedCollections.Load(dimension); ok {
 		return nil
 	}
 
 	log := logger.GetLogger(ctx)
 
-	//Check if collection exists
+	// Check if collection exists
 	exists, err := w.client.Schema().ClassExistenceChecker().WithClassName(collectionName).Do(ctx)
 	if err != nil {
 		log.Errorf("[Weaviate] Failed to check collection existence: %v", err)
@@ -77,7 +80,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 	if !exists {
 		log.Infof("[Weaviate] Creating collection %s with dimension %d", collectionName, dimension)
 
-		//定义class结构
+		// 定义class结构
 		classObj := models.Class{
 			Class:       collectionName,
 			Description: fmt.Sprintf("WeKnora embeddings collection with dimension %d", dimension),
@@ -148,7 +151,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 				"desiredCount": w.desiredShardCount,
 			}
 		}
-		//创建collection
+		// 创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
 			log.Errorf("[Weaviate] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
@@ -173,7 +176,7 @@ func (w *weaviateRepository) EstimateStorageSize(ctx context.Context,
 ) int64 {
 	var totalStorageSize int64
 	for _, embedding := range indexInfoList {
-		embeddingDB := toWeaviateVectorEmbedding(embedding, params)
+		embeddingDB := toVectorEmbedding(embedding, params)
 		totalStorageSize += w.calculateStorageSize(embeddingDB)
 	}
 	logger.GetLogger(ctx).Infof(
@@ -189,7 +192,7 @@ func (w *weaviateRepository) Save(ctx context.Context,
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Weaviate] Saving index for chunk ID: %s", embedding.ChunkID)
 
-	embeddingDB := toWeaviateVectorEmbedding(embedding, additionalParams)
+	embeddingDB := toVectorEmbedding(embedding, additionalParams)
 	if len(embeddingDB.Embedding) == 0 {
 		err := fmt.Errorf("empty embedding vector for chunk ID: %s", embedding.ChunkID)
 		log.Errorf("[Weaviate] %v", err)
@@ -211,7 +214,6 @@ func (w *weaviateRepository) Save(ctx context.Context,
 		WithProperties(dataSchema).
 		WithVector(embeddingDB.Embedding).
 		Do(ctx)
-
 	if err != nil {
 		log.Errorf("[Weaviate] Failed to save index: %v", err)
 		return err
@@ -236,7 +238,7 @@ func (w *weaviateRepository) BatchSave(ctx context.Context,
 	embeddingsByDimension := make(map[int][]*types.IndexInfo)
 
 	for _, embedding := range embeddingList {
-		embeddingDB := toWeaviateVectorEmbedding(embedding, additionalParams)
+		embeddingDB := toVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
 			log.Warnf("[Weaviate] Skipping empty embedding for chunk ID: %s", embedding.ChunkID)
 			continue
@@ -261,7 +263,7 @@ func (w *weaviateRepository) BatchSave(ctx context.Context,
 		}
 		collectionName := w.getCollectionName(dimension)
 		for _, embedding := range embeddings {
-			embeddingDB := toWeaviateVectorEmbedding(embedding, additionalParams)
+			embeddingDB := toVectorEmbedding(embedding, additionalParams)
 			dataSchema := createPayload(embeddingDB)
 
 			obj := &models.Object{
@@ -286,7 +288,12 @@ func (w *weaviateRepository) BatchSave(ctx context.Context,
 }
 
 // DeleteByChunkIDList removes points from the collection based on chunk IDs
-func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
+func (w *weaviateRepository) DeleteByChunkIDList(
+	ctx context.Context,
+	chunkIDList []string,
+	dimension int,
+	_ string,
+) error {
 	log := logger.GetLogger(ctx)
 	if len(chunkIDList) == 0 {
 		log.Warn("[Weaviate] Empty chunk ID list provided for deletion, skipping")
@@ -296,7 +303,7 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -316,7 +323,7 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 
 // DeleteByKnowledgeIDList removes points from the collection based on knowledge IDs
 func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int, knowledgeType string,
+	knowledgeIDList []string, dimension int, _ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(knowledgeIDList) == 0 {
@@ -327,7 +334,7 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -347,7 +354,7 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 // DeleteBySourceIDList removes points from the collection based on source IDs
 func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
-	sourceIDList []string, dimension int, knowledgeType string,
+	sourceIDList []string, dimension int, _ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(sourceIDList) == 0 {
@@ -357,7 +364,7 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	//define filter
+	// define filter
 	filter := w.client.Batch().ObjectsBatchDeleter().
 		WithClassName(collectionName).
 		WithWhere(filters.Where().
@@ -471,7 +478,6 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 	}
 	log.Infof("[Weaviate] Batch update chunk tag ID completed")
 	return nil
-
 }
 
 func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters.WhereBuilder {
@@ -572,7 +578,6 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 			WithVector(params.Embedding).
 			WithCertainty(scoreThreshold)).
 		Do(ctx)
-
 	if err != nil {
 		log.Errorf("[Weaviate] Vector search failed: %v", err)
 		return nil, fmt.Errorf("failed to search: %w", err)
@@ -622,13 +627,17 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 		// Only process collections that start with our base name
 		if len(collectionName) <= len(w.collectionBaseName) ||
 			collectionName[:len(w.collectionBaseName)] != w.collectionBaseName {
-			log.Debugf("[Weaviate] Skipping collection %s (doesn't match base name %s)", collectionName, w.collectionBaseName)
+			log.Debugf(
+				"[Weaviate] Skipping collection %s (doesn't match base name %s)",
+				collectionName,
+				w.collectionBaseName,
+			)
 			continue
 		}
 
 		filter := w.getBaseFilter(params)
 
-		//bm25 search
+		// bm25 search
 		bm25 := w.client.GraphQL().Bm25ArgBuilder().
 			WithQuery(params.Query).
 			WithProperties([]string{fieldContent}...)
@@ -641,7 +650,6 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 			WithFields(fields...).
 			WithBM25(bm25).
 			Do(ctx)
-
 		if err != nil {
 			log.Errorf("[Weaviate] keywords search failed: %v", err)
 			return nil, fmt.Errorf("failed to search: %w", err)
@@ -680,7 +688,7 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
-	knowledgeType string,
+	_ string,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof("[Weaviate] Copying indices from %s to %s, count: %d",
@@ -828,7 +836,7 @@ func (w *weaviateRepository) ListCollections(ctx context.Context) ([]string, err
 	return collectionNames, nil
 }
 
-func createPayload(embedding *WeaviateVectorEmbedding) map[string]interface{} {
+func createPayload(embedding *VectorEmbedding) map[string]interface{} {
 	payload := map[string]any{
 		fieldContent:         embedding.Content,
 		fieldSourceID:        embedding.SourceID,
@@ -911,7 +919,11 @@ func getVectorFields() []graphql.Field {
 }
 
 // parseGraphQLResponse parses the GraphQL response for vector embeddings or keyword search results.
-func parseGraphQLResponse(items []interface{}, collectionName string, matchType types.MatchType) []*types.IndexWithScore {
+func parseGraphQLResponse(
+	items []interface{},
+	_ string,
+	matchType types.MatchType,
+) []*types.IndexWithScore {
 	var results []*types.IndexWithScore
 	var additionalName string
 	if matchType == types.MatchTypeEmbedding {
@@ -946,8 +958,8 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 			return 0
 		}
 
-		embedding := &WeaviateVectorEmbeddingWithScore{
-			WeaviateVectorEmbedding{
+		embedding := &VectorEmbeddingWithScore{
+			VectorEmbedding{
 				Content:         getString(fieldContent),
 				SourceID:        getString(fieldSourceID),
 				SourceType:      getInt(fieldSourceType),
@@ -959,13 +971,17 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 			float64(score),
 		}
 
-		results = append(results, fromWeaviateVectorEmbedding(pointID, embedding, matchType))
+		results = append(results, fromVectorEmbedding(pointID, embedding, matchType))
 	}
 	return results
 }
 
-// Ref: https://github.com/weaviate/weaviate/blob/b4aec91c6fe464df50e9fa1e2d643322fbb85679/entities/vectorindex/hnsw/config.go#L27
-func (w *weaviateRepository) calculateStorageSize(embedding *WeaviateVectorEmbedding) int64 {
+// Ref:
+//
+// https://github.com/weaviate/weaviate/blob/b4aec91c6fe464df50e9fa1e2d643322fbb85679/entities/vectorindex/hnsw/config.go#L27
+//
+//nolint:lll
+func (w *weaviateRepository) calculateStorageSize(embedding *VectorEmbedding) int64 {
 	// Payload fields
 	payloadSizeBytes := int64(0)
 	payloadSizeBytes += int64(len(embedding.Content))         // content string
@@ -976,8 +992,8 @@ func (w *weaviateRepository) calculateStorageSize(embedding *WeaviateVectorEmbed
 	payloadSizeBytes += 8                                     // source_type int64
 
 	// Vector storage and index
-	var vectorSizeBytes int64 = 0
-	var hnswIndexBytes int64 = 0
+	var vectorSizeBytes int64
+	var hnswIndexBytes int64
 	if embedding.Embedding != nil {
 		dimensions := int64(len(embedding.Embedding))
 		vectorSizeBytes = dimensions * 4
@@ -997,9 +1013,12 @@ func (w *weaviateRepository) calculateStorageSize(embedding *WeaviateVectorEmbed
 	return totalSizeBytes
 }
 
-// toWeaviateVectorEmbedding converts IndexInfo to Weaviate payload format
-func toWeaviateVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string]interface{}) *WeaviateVectorEmbedding {
-	vector := &WeaviateVectorEmbedding{
+// toVectorEmbedding converts IndexInfo to Weaviate payload format
+func toVectorEmbedding(
+	embedding *types.IndexInfo,
+	additionalParams map[string]interface{},
+) *VectorEmbedding {
+	vector := &VectorEmbedding{
 		Content:         embedding.Content,
 		SourceID:        embedding.SourceID,
 		SourceType:      int(embedding.SourceType),
@@ -1017,9 +1036,9 @@ func toWeaviateVectorEmbedding(embedding *types.IndexInfo, additionalParams map[
 	return vector
 }
 
-// fromWeaviateVectorEmbedding converts Weaviate point to IndexWithScore domain model
-func fromWeaviateVectorEmbedding(id string,
-	embedding *WeaviateVectorEmbeddingWithScore,
+// fromVectorEmbedding converts Weaviate point to IndexWithScore domain model
+func fromVectorEmbedding(id string,
+	embedding *VectorEmbeddingWithScore,
 	matchType types.MatchType,
 ) *types.IndexWithScore {
 	return &types.IndexWithScore{
@@ -1034,31 +1053,4 @@ func fromWeaviateVectorEmbedding(id string,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 	}
-}
-
-// tokenizeQuery splits a query string into tokens for OR-based full-text search.
-// It uses jieba for professional Chinese word segmentation.
-func tokenizeQuery(query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil
-	}
-
-	// Use jieba for segmentation (search mode for better recall)
-	words := types.Jieba.CutForSearch(query, true)
-
-	// Filter and deduplicate
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(words))
-	for _, word := range words {
-		word = strings.TrimSpace(strings.ToLower(word))
-		// Skip empty, single-char, and already seen words
-		if utf8.RuneCountInString(word) < 2 || seen[word] {
-			continue
-		}
-		seen[word] = true
-		result = append(result, word)
-	}
-
-	return result
 }

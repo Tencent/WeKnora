@@ -36,8 +36,10 @@ import (
 )
 
 // Compile-time check that Adapter implements im.StreamSender and im.FileDownloader.
-var _ im.StreamSender = (*Adapter)(nil)
-var _ im.FileDownloader = (*Adapter)(nil)
+var (
+	_ im.StreamSender   = (*Adapter)(nil)
+	_ im.FileDownloader = (*Adapter)(nil)
+)
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
@@ -208,8 +210,8 @@ type feishuEventBody struct {
 }
 
 type feishuEventHeader struct {
-	EventType string `json:"event_type"`
-	Token     string `json:"token"`
+	Type  string `json:"event_type"`
+	Token string `json:"token"`
 }
 
 type feishuEvent struct {
@@ -266,9 +268,14 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Token verification is handled by VerifyCallback; no need to re-check here.
 
 	// Check event type
-	if eventBody.Header == nil || eventBody.Header.EventType != "im.message.receive_v1" {
+	if eventBody.Header == nil || eventBody.Header.Type != "im.message.receive_v1" {
 		if eventBody.Header != nil {
-			logger.Infof(c.Request.Context(), "[%s] Ignoring event type: %s", a.region.Label, eventBody.Header.EventType)
+			logger.Infof(
+				c.Request.Context(),
+				"[%s] Ignoring event type: %s",
+				a.region.Label,
+				eventBody.Header.Type,
+			)
 		}
 		return nil, nil
 	}
@@ -566,7 +573,9 @@ func (a *Adapter) sendWithFallback(
 
 // postFeishuMessage POSTs a JSON payload to a Feishu IM message API and returns
 // the (code, msg) from the response body. Shared by reply and send paths.
-func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string, payload map[string]interface{}) (code int, msg string, err error) {
+func (a *Adapter) postFeishuMessage(
+	ctx context.Context, accessToken, url string, payload map[string]interface{},
+) (code int, msg string, err error) {
 	payloadBytes, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -579,7 +588,7 @@ func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string
 	if err != nil {
 		return 0, "", fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code int    `json:"code"`
@@ -600,7 +609,7 @@ func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string
 // traversal attacks via crafted callback payloads.
 func feishuSafePathParam(s string) bool {
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			return false
 		}
 	}
@@ -645,7 +654,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, "", fmt.Errorf("download file failed: status=%d", resp.StatusCode)
 	}
 
@@ -771,7 +780,9 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 }
 
 // UpdateStreamContent replaces the card element with the full visible content so far.
-func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+func (a *Adapter) UpdateStreamContent(
+	ctx context.Context, _ *im.IncomingMessage, streamID string, fullContent string,
+) error {
 	if fullContent == "" {
 		return nil
 	}
@@ -806,17 +817,21 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 }
 
 // FinalizeStream replaces the card with answer-only content.
-func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+func (a *Adapter) FinalizeStream(
+	ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, finalContent)
 }
 
 // SendStreamChunk is an alias for UpdateStreamContent.
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+func (a *Adapter) SendStreamChunk(
+	ctx context.Context, incoming *im.IncomingMessage, streamID string, content string,
+) error {
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 // EndStream disables streaming_mode and cleans up state.
-func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
+func (a *Adapter) EndStream(ctx context.Context, _ *im.IncomingMessage, streamID string) error {
 	feishuStreamsMu.Lock()
 	state, ok := feishuStreams[streamID]
 	delete(feishuStreams, streamID)
@@ -865,7 +880,7 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -899,7 +914,9 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 // message API so it lands under the original message / thread. Falls back to
 // the plain send-message API on fallback-eligible errors (e.g. group does not
 // support reply-in-thread).
-func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, incoming *im.IncomingMessage, cardID string) error {
+func (a *Adapter) sendCardByCardID(
+	ctx context.Context, accessToken string, incoming *im.IncomingMessage, cardID string,
+) error {
 	receiveIDType, receiveID := a.resolveReceiveID(incoming)
 
 	// Key: type must be "card" (not "card_id")
@@ -925,7 +942,9 @@ func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, inco
 
 // cardkitUpdateElement updates a card element's content for streaming.
 // PUT /open-apis/cardkit/v1/cards/:card_id/elements/:element_id/content
-func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID, elementID, content string, sequence int) error {
+func (a *Adapter) cardkitUpdateElement(
+	ctx context.Context, accessToken, cardID, elementID, content string, sequence int,
+) error {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"content":  content,
 		"sequence": sequence,
@@ -943,7 +962,7 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code int    `json:"code"`
@@ -1059,7 +1078,7 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 	if err != nil {
 		return "", fmt.Errorf("download image: %w", err)
 	}
-	defer imgResp.Body.Close()
+	defer func() { _ = imgResp.Body.Close() }()
 	if imgResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download image: status=%d", imgResp.StatusCode)
 	}
@@ -1103,7 +1122,7 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 	if err != nil {
 		return "", fmt.Errorf("upload image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code int    `json:"code"`
@@ -1126,7 +1145,9 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 
 // cardkitSetStreaming updates the card's streaming_mode setting.
 // PATCH /open-apis/cardkit/v1/cards/:card_id/settings
-func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID string, streaming bool, sequence int) error {
+func (a *Adapter) cardkitSetStreaming(
+	ctx context.Context, accessToken, cardID string, streaming bool, sequence int,
+) error {
 	settings, _ := json.Marshal(map[string]interface{}{
 		"streaming_mode": streaming,
 	})
@@ -1147,7 +1168,7 @@ func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code int    `json:"code"`
@@ -1189,7 +1210,7 @@ func (a *Adapter) getTenantAccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code              int    `json:"code"`

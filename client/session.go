@@ -277,7 +277,7 @@ func (c *Client) KnowledgeQAStream(
 		debugLogger.Debug("request_failed", "error", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
@@ -366,7 +366,7 @@ func (c *Client) ContinueStream(
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
@@ -476,7 +476,7 @@ func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRe
 		debugLogger.Debug("request_failed", "error", err)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)

@@ -60,9 +60,14 @@ is present anywhere in the parent chain.`,
 			}
 			if !found {
 				return &cmdutil.Error{
-					Code:    cmdutil.CodeInputInvalidArgument,
-					Message: fmt.Sprintf("no %s/%s found at or above %s", projectlink.DirName, projectlink.FileName, cwd),
-					Hint:    "run `weknora link --kb <id>` first, or check you're in the right directory",
+					Code: cmdutil.CodeInputInvalidArgument,
+					Message: fmt.Sprintf(
+						"no %s/%s found at or above %s",
+						projectlink.DirName,
+						projectlink.FileName,
+						cwd,
+					),
+					Hint: "run `weknora link --kb <id>` first, or check you're in the right directory",
 				}
 			}
 			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{

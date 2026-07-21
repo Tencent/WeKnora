@@ -19,7 +19,8 @@ func TestAzureOpenAIEmbedderBatchEmbedSendsConfiguredDimensions(t *testing.T) {
 		}
 
 		if got, want := r.URL.String(),
-			"https://example-resource.openai.azure.com/openai/deployments/text-embedding-3-large-deployment/embeddings?api-version=2024-10-21"; got != want {
+			"https://example-resource.openai.azure.com/openai/deployments/tex"+
+				"t-embedding-3-large-deployment/embeddings?api-version=2024-10-21"; got != want {
 			t.Fatalf("unexpected request path: got %s want %s", got, want)
 		}
 

@@ -22,30 +22,46 @@ type countingFileService struct {
 	deleteCalls int
 }
 
-func (c *countingFileService) CheckConnectivity(ctx context.Context) error { return nil }
+func (c *countingFileService) CheckConnectivity(_ context.Context) error { return nil }
 
-func (c *countingFileService) SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error) {
+func (c *countingFileService) SaveFile(
+	_ context.Context,
+	_ *multipart.FileHeader,
+	_ uint64,
+	_ string,
+) (string, error) {
 	return "", nil
 }
 
-func (c *countingFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (c *countingFileService) SaveBytes(
+	_ context.Context,
+	_ []byte,
+	_ uint64,
+	_ string,
+	_ bool,
+) (string, error) {
 	return "", nil
 }
 
-func (c *countingFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (c *countingFileService) GetFile(_ context.Context, _ string) (io.ReadCloser, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (c *countingFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (c *countingFileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	return filePath, nil
 }
 
-func (c *countingFileService) DeleteFile(ctx context.Context, filePath string) error {
+func (c *countingFileService) DeleteFile(_ context.Context, _ string) error {
 	c.deleteCalls++
 	return nil
 }
 
-func (c *countingFileService) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
+func (c *countingFileService) CopyFile(
+	_ context.Context,
+	srcPath string,
+	tenantID uint64,
+	knowledgeID string,
+) (string, error) {
 	if c.failOnURL != "" && srcPath == c.failOnURL {
 		return "", fmt.Errorf("simulated copy failure for %s", srcPath)
 	}

@@ -118,7 +118,10 @@ func TestUse_CaseSensitive(t *testing.T) {
 	}}
 	_ = config.Save(cfg)
 
-	err := runUse("production", &cmdutil.FormatOptions{Mode: cmdutil.FormatText}) // lowercase - must NOT match "Production"
+	err := runUse(
+		"production",
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+	) // lowercase - must NOT match "Production"
 	if err == nil {
 		t.Fatal("expected case-sensitive miss")
 	}

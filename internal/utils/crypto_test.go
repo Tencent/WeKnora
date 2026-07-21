@@ -133,7 +133,12 @@ func TestDecryptStoredSecret(t *testing.T) {
 		t.Setenv("SYSTEM_AES_KEY", "abcdefghijklmnopqrstuvwxyz123456")
 		out, err := DecryptStoredSecret(encrypted)
 		require.Error(t, err)
-		assert.NotErrorIs(t, err, ErrEncryptedDataMissingKey, "should be a real auth failure, not the missing-key sentinel")
+		assert.NotErrorIs(
+			t,
+			err,
+			ErrEncryptedDataMissingKey,
+			"should be a real auth failure, not the missing-key sentinel",
+		)
 		assert.Equal(t, "", out, "ciphertext must NOT leak when decryption fails")
 	})
 }

@@ -12,37 +12,37 @@ type Plugin interface {
 	// OnEvent handles the event with given context and chat management object
 	OnEvent(
 		ctx context.Context,
-		eventType types.EventType,
+		eventType types.Type,
 		chatManage *types.ChatManage,
 		next func() *PluginError,
 	) *PluginError
 	// ActivationEvents returns the event types this plugin can handle
-	ActivationEvents() []types.EventType
+	ActivationEvents() []types.Type
 }
 
 // EventManager manages plugins and their event handling
 type EventManager struct {
 	// Map of event types to registered plugins
-	listeners map[types.EventType][]Plugin
+	listeners map[types.Type][]Plugin
 	// Map of event types to handler functions
-	handlers map[types.EventType]func(context.Context, types.EventType, *types.ChatManage) *PluginError
+	handlers map[types.Type]func(context.Context, types.Type, *types.ChatManage) *PluginError
 }
 
 // NewEventManager creates and initializes a new EventManager
 func NewEventManager() *EventManager {
 	return &EventManager{
-		listeners: make(map[types.EventType][]Plugin),
-		handlers:  make(map[types.EventType]func(context.Context, types.EventType, *types.ChatManage) *PluginError),
+		listeners: make(map[types.Type][]Plugin),
+		handlers:  make(map[types.Type]func(context.Context, types.Type, *types.ChatManage) *PluginError),
 	}
 }
 
 // Register adds a plugin to the EventManager and sets up its event handlers
 func (e *EventManager) Register(plugin Plugin) {
 	if e.listeners == nil {
-		e.listeners = make(map[types.EventType][]Plugin)
+		e.listeners = make(map[types.Type][]Plugin)
 	}
 	if e.handlers == nil {
-		e.handlers = make(map[types.EventType]func(context.Context, types.EventType, *types.ChatManage) *PluginError)
+		e.handlers = make(map[types.Type]func(context.Context, types.Type, *types.ChatManage) *PluginError)
 	}
 	for _, eventType := range plugin.ActivationEvents() {
 		e.listeners[eventType] = append(e.listeners[eventType], plugin)
@@ -52,13 +52,13 @@ func (e *EventManager) Register(plugin Plugin) {
 
 // buildHandler constructs a handler chain for the given plugins
 func (e *EventManager) buildHandler(plugins []Plugin) func(
-	ctx context.Context, eventType types.EventType, chatManage *types.ChatManage,
+	ctx context.Context, eventType types.Type, chatManage *types.ChatManage,
 ) *PluginError {
-	next := func(context.Context, types.EventType, *types.ChatManage) *PluginError { return nil }
+	next := func(context.Context, types.Type, *types.ChatManage) *PluginError { return nil }
 	for i := len(plugins) - 1; i >= 0; i-- {
 		current := plugins[i]
 		prevNext := next
-		next = func(ctx context.Context, eventType types.EventType, chatManage *types.ChatManage) *PluginError {
+		next = func(ctx context.Context, eventType types.Type, chatManage *types.ChatManage) *PluginError {
 			return current.OnEvent(ctx, eventType, chatManage, func() *PluginError {
 				return prevNext(ctx, eventType, chatManage)
 			})
@@ -69,7 +69,7 @@ func (e *EventManager) buildHandler(plugins []Plugin) func(
 
 // Trigger invokes the handler for the specified event type
 func (e *EventManager) Trigger(ctx context.Context,
-	eventType types.EventType, chatManage *types.ChatManage,
+	eventType types.Type, chatManage *types.ChatManage,
 ) *PluginError {
 	if handler, ok := e.handlers[eventType]; ok {
 		return handler(ctx, eventType, chatManage)

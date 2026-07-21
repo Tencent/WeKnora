@@ -12,7 +12,7 @@ const (
 	maxLogTextRunes = 120
 )
 
-func buildRerankRequestDebug(model, endpoint, query string, documents []string) string {
+func buildRequestDebug(model, endpoint, query string, documents []string) string {
 	previews := make([]string, 0, maxLogDocuments)
 	for i, doc := range documents {
 		if i >= maxLogDocuments {

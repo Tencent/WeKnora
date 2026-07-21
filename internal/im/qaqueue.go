@@ -40,7 +40,7 @@ type qaRequest struct {
 	session   *types.Session
 	agent     *types.CustomAgent
 	adapter   Adapter
-	channel   *IMChannel
+	channel   *Channel
 	channelID string
 
 	// tenant is used to resolve provider:// URLs in outbound replies (scheme-aware).
@@ -101,7 +101,11 @@ type qaQueue struct {
 // newQAQueue creates a new bounded queue with the given worker count.
 // globalMaxWorkers controls cross-instance concurrency (0 = no limit).
 // redisClient may be nil for single-instance mode.
-func newQAQueue(workers, maxSize, maxPerUser, globalMaxWorkers int, handler func(req *qaRequest), redisClient *redis.Client) *qaQueue {
+func newQAQueue(
+	workers, maxSize, maxPerUser, globalMaxWorkers int,
+	handler func(req *qaRequest),
+	redisClient *redis.Client,
+) *qaQueue {
 	q := &qaQueue{
 		queue:            make([]*qaRequest, 0, maxSize),
 		maxSize:          maxSize,

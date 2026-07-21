@@ -67,8 +67,10 @@ func newMoveGateRouter(kb interfaces.KnowledgeBaseService, kg interfaces.Knowled
 func TestMoveKnowledge_CrossStoreGate(t *testing.T) {
 	storeA, storeB := "store-a", "store-b"
 	kbWith := func(id string, store *string) *types.KnowledgeBase {
-		return &types.KnowledgeBase{ID: id, TenantID: 1, Type: "document",
-			EmbeddingModelID: "m1", VectorStoreID: store}
+		return &types.KnowledgeBase{
+			ID: id, TenantID: 1, Type: "document",
+			EmbeddingModelID: "m1", VectorStoreID: store,
+		}
 	}
 
 	tests := []struct {

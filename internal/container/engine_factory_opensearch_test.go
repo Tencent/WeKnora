@@ -56,8 +56,10 @@ func TestCreateOpenSearchEngine_RejectsBadCluster(t *testing.T) {
 	ts := httptest.NewServer(osClusterHandler("elasticsearch", "8.10.4", true))
 	defer ts.Close()
 	_, err := createOpenSearchEngine(context.Background(),
-		types.VectorStore{EngineType: types.OpenSearchRetrieverEngineType,
-			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}}, nil)
+		types.VectorStore{
+			EngineType:       types.OpenSearchRetrieverEngineType,
+			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL},
+		}, nil)
 	if err == nil {
 		t.Error("elasticsearch cluster should be rejected at engine creation")
 	}
@@ -67,8 +69,10 @@ func TestCreateEngineServiceFromStore_OpenSearchCaseReached(t *testing.T) {
 	ts := httptest.NewServer(osClusterHandler("opensearch", "2.11.0", true))
 	defer ts.Close()
 	svc, err := createEngineServiceFromStore(context.Background(),
-		types.VectorStore{EngineType: types.OpenSearchRetrieverEngineType,
-			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}},
+		types.VectorStore{
+			EngineType:       types.OpenSearchRetrieverEngineType,
+			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL},
+		},
 		nil, &config.Config{}, nil)
 	if err != nil {
 		t.Fatalf("createEngineServiceFromStore (opensearch case): %v", err)

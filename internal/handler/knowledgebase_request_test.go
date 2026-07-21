@@ -38,7 +38,7 @@ func assertNoVectorStoreIDField(t *testing.T, typ reflect.Type) {
 	t.Helper()
 	var visit func(rt reflect.Type, path string)
 	visit = func(rt reflect.Type, path string) {
-		for rt.Kind() == reflect.Ptr {
+		for rt.Kind() == reflect.Pointer {
 			rt = rt.Elem()
 		}
 		if rt.Kind() != reflect.Struct {

@@ -30,10 +30,12 @@ func TestTruncateForSummary(t *testing.T) {
 			want:    "Section",
 		},
 		{
-			name:    "truncates long content",
+			name: "truncates long content",
+			//nolint:lll
 			content: "This is a very long paragraph that should be truncated at some point because it exceeds the maximum length",
 			maxLen:  20,
-			want:    "This is a very long ..."},
+			want:    "This is a very long ...",
+		},
 		{
 			name:    "takes first paragraph",
 			content: "First paragraph.\n\nSecond paragraph.",

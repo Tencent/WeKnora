@@ -11,11 +11,17 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrTokenNotFound      = errors.New("token not found")
-	ErrCannotRevokeSelf   = errors.New("cannot revoke your own system admin privileges")
-	ErrLastSystemAdmin    = errors.New("cannot revoke the last remaining system administrator")
+	// ErrUserNotFound is an exported constant.
+	ErrUserNotFound = errors.New("user not found")
+	// ErrUserAlreadyExists implements the required behavior.
+	ErrUserAlreadyExists = errors.New("user already exists")
+	// ErrTokenNotFound is exported for use by other packages.
+	ErrTokenNotFound = errors.New("token not found")
+	// ErrCannotRevokeSelf is exported for use by other packages.
+	ErrCannotRevokeSelf = errors.New("cannot revoke your own system admin privileges")
+	// ErrLastSystemAdmin is a sentinel error.
+	ErrLastSystemAdmin = errors.New("cannot revoke the last remaining system administrator")
+	// ErrUserNotSystemAdmin is a sentinel error.
 	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
 )
 
@@ -101,7 +107,8 @@ func (r *userRepository) GetUserByUsername(ctx context.Context, username string)
 // GetUserByTenantID gets the first user (owner) of a tenant
 func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error) {
 	var user types.User
-	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Order("created_at ASC").First(&user).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?",
+		tenantID).Order("created_at ASC").First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -205,7 +212,7 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 	var revoked *types.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		locking := func(db *gorm.DB) *gorm.DB {
-			switch tx.Dialector.Name() {
+			switch tx.Name() {
 			case "postgres", "mysql":
 				return db.Clauses(clause.Locking{Strength: "UPDATE"})
 			default:

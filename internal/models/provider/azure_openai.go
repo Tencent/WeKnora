@@ -14,8 +14,8 @@ func init() {
 }
 
 // Info 返回 Azure OpenAI provider 的元数据
-func (p *AzureOpenAIProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *AzureOpenAIProvider) Info() Info {
+	return Info{
 		Name:        ProviderAzureOpenAI,
 		DisplayName: "Azure OpenAI",
 		Description: "gpt-4o, gpt-4, text-embedding-ada-002, etc.",
@@ -55,7 +55,7 @@ func (p *AzureOpenAIProvider) ValidateConfig(config *Config) error {
 		return fmt.Errorf("deployment name (model name) is required")
 	}
 	if config.BaseURL == "" {
-		return fmt.Errorf("Azure resource endpoint (base URL) is required")
+		return fmt.Errorf("azure resource endpoint (base URL) is required")
 	}
 	return nil
 }

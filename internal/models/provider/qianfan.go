@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// QianfanBaseURL and related constants.
 const (
 	QianfanBaseURL = "https://qianfan.baidubce.com/v2"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回百度千帆 provider 的元数据
-func (p *QianfanProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *QianfanProvider) Info() Info {
+	return Info{
 		Name:        ProviderQianfan,
 		DisplayName: "百度千帆 Baidu Cloud",
 		Description: "ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.",

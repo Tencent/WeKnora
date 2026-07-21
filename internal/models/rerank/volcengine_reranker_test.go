@@ -90,7 +90,7 @@ func newTestVolcengineReranker(t *testing.T, handler http.HandlerFunc) *Volcengi
 }
 
 func TestVolcengineReranker_EmptyDocuments(t *testing.T) {
-	reranker := newTestVolcengineReranker(t, func(w http.ResponseWriter, r *http.Request) {
+	reranker := newTestVolcengineReranker(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatalf("rerank endpoint should not be called for empty documents")
 	})
 
@@ -155,7 +155,7 @@ func TestVolcengineReranker_BatchesOverLimit(t *testing.T) {
 }
 
 func TestVolcengineReranker_APIErrorCode(t *testing.T) {
-	reranker := newTestVolcengineReranker(t, func(w http.ResponseWriter, r *http.Request) {
+	reranker := newTestVolcengineReranker(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":100004,"message":"quota exceeded","data":{}}`))
 	})
@@ -167,7 +167,7 @@ func TestVolcengineReranker_APIErrorCode(t *testing.T) {
 }
 
 func TestVolcengineReranker_ScoreCountMismatch(t *testing.T) {
-	reranker := newTestVolcengineReranker(t, func(w http.ResponseWriter, r *http.Request) {
+	reranker := newTestVolcengineReranker(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"scores":[0.9]}}`))
 	})

@@ -112,8 +112,11 @@ silently treated as NDJSON.`,
 	_ = cmd.MarkFlagRequired("message")
 	cmdutil.AddFormatFlag(cmd, resumeFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Resume an SSE event stream for an in-progress or completed assistant message. Produces an NDJSON event stream: init line (session_id, message_id) then raw SDK StreamResponse events.",
-		RequiredFlags: []string{"<session-id> (positional)", "--message (persisted assistant message id — get it from `weknora message list --session <id>`; a live stream's assistant_message_id is not resumable once the message persists)"},
+		UsedFor: "Resume an SSE event stream for an in-progress or completed assistant message. Produces an NDJSON event stream: init line (session_id, message_id) then raw SDK StreamResponse events.",
+		RequiredFlags: []string{
+			"<session-id> (positional)",
+			"--message (persisted assistant message id — get it from `weknora message list --session <id>`; a live stream's assistant_message_id is not resumable once the message persists)",
+		},
 		Examples: []string{
 			"weknora session resume sess_xyz --message msg_abc --format json",
 			"# Get the message id from: weknora message list --session <session-id> (the persisted assistant message)",

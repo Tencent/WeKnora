@@ -25,14 +25,14 @@ func NewPluginChatCompletion(eventManager *EventManager, modelService interfaces
 }
 
 // ActivationEvents returns the event types this plugin handles
-func (p *PluginChatCompletion) ActivationEvents() []types.EventType {
-	return []types.EventType{types.CHAT_COMPLETION}
+func (p *PluginChatCompletion) ActivationEvents() []types.Type {
+	return []types.Type{types.ChatCompletion}
 }
 
 // OnEvent handles chat completion events
 // It prepares the chat model, messages, and calls the model to generate responses
 func (p *PluginChatCompletion) OnEvent(
-	ctx context.Context, eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+	ctx context.Context, _ types.Type, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	pipelineInfo(ctx, "Completion", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,

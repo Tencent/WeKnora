@@ -10,12 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrTenantAPIKeyNotFound is exported.
 var ErrTenantAPIKeyNotFound = errors.New("tenant api key not found")
 
 type tenantAPIKeyRepository struct {
 	db *gorm.DB
 }
 
+// NewTenantAPIKeyRepository is an exported function.
 func NewTenantAPIKeyRepository(db *gorm.DB) interfaces.TenantAPIKeyRepository {
 	return &tenantAPIKeyRepository{db: db}
 }

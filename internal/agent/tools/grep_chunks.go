@@ -1,3 +1,4 @@
+//nolint:lll // agent tool prompt strings exceed line length
 package tools
 
 import (
@@ -18,26 +19,32 @@ import (
 
 var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
-	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
+	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly` +
+		`in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
 Pack multiple concepts into ONE regex using ` + "`|`" + ` alternation — do not call this tool repeatedly for synonyms.
-Returns matching chunks with a short cN chunk source ID, a parent dN document ID, and a <match> snippet around the first match.
+//nolint:lll
+Returns matching chunks with a short cN chunk source ID, a parent dN document ID, and a <match> snippet around the first match. //nolint:lll
 Examples:
 - Alternation (RECOMMENDED): "stardust|skyvault|psionic" (matches any of the words)
 - Multiple terms in order: "psionic.*engine" (matches both words in order)
 - Word boundary / anchor: "\\brag\\b" or "^chapter\\s+\\d+"
 - Plain text: "engine" (matches literal substring anywhere in chunk content)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
+//nolint:lll
+IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse. //nolint:lll
 Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
 
 ## Deep read after grep:
-- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id=cN** from the grep result (NOT the parent dN document ID).
-- **Document hit**: call list_knowledge_chunks with **knowledge_id=dN**, or get_document_info with **knowledge_ids=[dN]**.`,
+//nolint:lll
+- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id=cN** from the grep result (NOT the parent dN document ID). //nolint:lll
+- **Document hit**: call list_knowledge_chunks with **knowledge_id=dN**, or get_document_info with **knowledge_ids=[dN]**.`, //nolint:lll
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "query": {
       "type": "string",
-      "description": "A single POSIX regex applied directly to chunk content (case-insensitive). Combine multiple concepts with \"|\" alternation in ONE regex (e.g. \"stardust|skyvault|psionic\") — do not split into multiple calls.",
+      "description": "A single POSIX regex applied directly to chunk conten" +
+      	//nolint:lll
+      	"t (case-insensitive). Combine multiple concepts with \"|\" alternation in ONE regex (e.g. \"stardust|skyvault|psionic\") — do not split into multiple calls.", //nolint:lll
       "minLength": 1
     }
   },
@@ -241,7 +248,7 @@ type chunkWithTitle struct {
 // PostgreSQL ~* is case-insensitive by default; MySQL/SQLite REGEXP relies on
 // collation / driver extensions.
 func (t *GrepChunksTool) regexOperatorForDialect() string {
-	switch t.db.Dialector.Name() {
+	switch t.db.Name() {
 	case "postgres":
 		return "~*"
 	default:
@@ -473,9 +480,9 @@ func (t *GrepChunksTool) formatOutput(
 ) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("<grep_results chunk_count=\"%d\">\n", len(results)))
+	fmt.Fprintf(&b, "<grep_results chunk_count=\"%d\">\n", len(results))
 	for _, q := range queries {
-		b.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
+		fmt.Fprintf(&b, "<query>%s</query>\n", xmlEscape(q))
 	}
 
 	if len(results) == 0 {
@@ -512,7 +519,7 @@ func (t *GrepChunksTool) formatOutput(
 			}
 		} else if seen {
 			fmt.Fprintf(&b,
-				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
+				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n", //nolint:lll
 				xmlEscape(r.ID), xmlEscape(r.KnowledgeID), xmlEscape(r.KnowledgeTitle),
 				extraAttr, r.ChunkIndex, r.MatchScore)
 		} else {
@@ -524,14 +531,16 @@ func (t *GrepChunksTool) formatOutput(
 
 		for _, q := range queries {
 			if c := counts[q]; c > 0 {
-				b.WriteString(fmt.Sprintf("<query_hit query=\"%s\" count=\"%d\" />\n",
-					xmlEscape(q), c))
+				fmt.Fprintf(&b, "<query_hit query=\"%s\" count=\"%d\" />\n",
+					xmlEscape(q), c)
 			}
 		}
 		if seen {
-			b.WriteString("<note>(snippet omitted, already returned in a previous grep_chunks call this session)</note>\n")
+			b.WriteString(
+				"<note>(snippet omitted, already returned in a previous grep_chunks call this session)</note>\n",
+			)
 		} else if snippet != "" {
-			b.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
+			fmt.Fprintf(&b, "<match_snippet>%s</match_snippet>\n", xmlEscape(snippet))
 		}
 		if isFAQ {
 			b.WriteString("</faq>\n")

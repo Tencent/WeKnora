@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// RequestyBaseURL and related constants.
 const (
 	RequestyBaseURL = "https://router.requesty.ai/v1"
 )
@@ -18,8 +19,8 @@ func init() {
 }
 
 // Info 返回 Requesty provider 的元数据
-func (p *RequestyProvider) Info() ProviderInfo {
-	return ProviderInfo{
+func (p *RequestyProvider) Info() Info {
+	return Info{
 		Name:        ProviderRequesty,
 		DisplayName: "Requesty",
 		Description: "openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.",

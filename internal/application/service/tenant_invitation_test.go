@@ -25,7 +25,7 @@ type fakeInvitationRepo struct {
 
 func newFakeInvitationRepo() *fakeInvitationRepo { return &fakeInvitationRepo{} }
 
-func (r *fakeInvitationRepo) Create(ctx context.Context, inv *types.TenantInvitation) error {
+func (r *fakeInvitationRepo) Create(_ context.Context, inv *types.TenantInvitation) error {
 	for _, e := range r.rows {
 		if e.TenantID == inv.TenantID &&
 			e.InviteeUserID == inv.InviteeUserID &&
@@ -42,7 +42,7 @@ func (r *fakeInvitationRepo) Create(ctx context.Context, inv *types.TenantInvita
 	return nil
 }
 
-func (r *fakeInvitationRepo) GetByID(ctx context.Context, id uint64) (*types.TenantInvitation, error) {
+func (r *fakeInvitationRepo) GetByID(_ context.Context, id uint64) (*types.TenantInvitation, error) {
 	for _, e := range r.rows {
 		if e.ID == id {
 			cp := *e
@@ -53,7 +53,7 @@ func (r *fakeInvitationRepo) GetByID(ctx context.Context, id uint64) (*types.Ten
 }
 
 func (r *fakeInvitationRepo) GetPendingByPair(
-	ctx context.Context, tenantID uint64, inviteeUserID string,
+	_ context.Context, tenantID uint64, inviteeUserID string,
 ) (*types.TenantInvitation, error) {
 	for _, e := range r.rows {
 		if e.TenantID == tenantID &&
@@ -67,7 +67,7 @@ func (r *fakeInvitationRepo) GetPendingByPair(
 }
 
 func (r *fakeInvitationRepo) GetActiveByToken(
-	ctx context.Context, token string,
+	_ context.Context, token string,
 ) (*types.TenantInvitation, error) {
 	if token == "" {
 		return nil, nil
@@ -103,13 +103,13 @@ func (r *fakeInvitationRepo) filteredTenantRows(
 }
 
 func (r *fakeInvitationRepo) ListByTenant(
-	ctx context.Context, tenantID uint64, includeTerminal bool,
+	_ context.Context, tenantID uint64, includeTerminal bool,
 ) ([]*types.TenantInvitation, error) {
 	return r.filteredTenantRows(tenantID, includeTerminal), nil
 }
 
 func (r *fakeInvitationRepo) CountByTenantList(
-	ctx context.Context,
+	_ context.Context,
 	tenantID uint64,
 	includeTerminal bool,
 ) (int64, error) {
@@ -117,7 +117,7 @@ func (r *fakeInvitationRepo) CountByTenantList(
 }
 
 func (r *fakeInvitationRepo) ListByTenantPage(
-	ctx context.Context,
+	_ context.Context,
 	tenantID uint64,
 	includeTerminal bool,
 	offset, limit int,
@@ -134,7 +134,7 @@ func (r *fakeInvitationRepo) ListByTenantPage(
 }
 
 func (r *fakeInvitationRepo) ListByInvitee(
-	ctx context.Context, inviteeUserID string, includeTerminal bool,
+	_ context.Context, inviteeUserID string, includeTerminal bool,
 ) ([]*types.TenantInvitation, error) {
 	var out []*types.TenantInvitation
 	for _, e := range r.rows {
@@ -151,7 +151,7 @@ func (r *fakeInvitationRepo) ListByInvitee(
 }
 
 func (r *fakeInvitationRepo) CountPendingByInvitee(
-	ctx context.Context, inviteeUserID string,
+	_ context.Context, inviteeUserID string,
 ) (int64, error) {
 	var n int64
 	for _, e := range r.rows {
@@ -164,7 +164,7 @@ func (r *fakeInvitationRepo) CountPendingByInvitee(
 }
 
 func (r *fakeInvitationRepo) MarkStatusIfPending(
-	ctx context.Context,
+	_ context.Context,
 	id uint64,
 	status types.TenantInvitationStatus,
 	respondedAt time.Time,
@@ -181,7 +181,7 @@ func (r *fakeInvitationRepo) MarkStatusIfPending(
 }
 
 func (r *fakeInvitationRepo) SweepExpired(
-	ctx context.Context, now time.Time,
+	_ context.Context, now time.Time,
 ) (int64, error) {
 	var n int64
 	for _, e := range r.rows {
@@ -196,7 +196,7 @@ func (r *fakeInvitationRepo) SweepExpired(
 }
 
 func (r *fakeInvitationRepo) IncrementAcceptedCount(
-	ctx context.Context, id uint64,
+	_ context.Context, id uint64,
 ) error {
 	for _, e := range r.rows {
 		if e.ID == id {

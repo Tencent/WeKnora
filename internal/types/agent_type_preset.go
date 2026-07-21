@@ -53,17 +53,17 @@ type AgentTypePresetEntry struct {
 // We mirror json tags (not yaml tags) directly from CustomAgentConfig so the
 // frontend can apply them via simple Object.assign.
 type AgentTypePresetConfig struct {
-	SystemPromptID         string   `yaml:"system_prompt_id"       json:"system_prompt_id,omitempty"`
-	Temperature            float64  `yaml:"temperature"            json:"temperature,omitempty"`
-	MaxIterations          int      `yaml:"max_iterations"         json:"max_iterations,omitempty"`
-	AllowedTools           []string `yaml:"allowed_tools"          json:"allowed_tools,omitempty"`
+	SystemPromptID         string   `yaml:"system_prompt_id"         json:"system_prompt_id,omitempty"`
+	Temperature            float64  `yaml:"temperature"              json:"temperature,omitempty"`
+	MaxIterations          int      `yaml:"max_iterations"           json:"max_iterations,omitempty"`
+	AllowedTools           []string `yaml:"allowed_tools"            json:"allowed_tools,omitempty"`
 	RetainRetrievalHistory bool     `yaml:"retain_retrieval_history" json:"retain_retrieval_history,omitempty"`
-	FAQPriorityEnabled     bool     `yaml:"faq_priority_enabled"   json:"faq_priority_enabled,omitempty"`
-	WebSearchEnabled       bool     `yaml:"web_search_enabled"     json:"web_search_enabled,omitempty"`
-	SupportedFileTypes     []string `yaml:"supported_file_types"   json:"supported_file_types,omitempty"`
+	FAQPriorityEnabled     bool     `yaml:"faq_priority_enabled"     json:"faq_priority_enabled,omitempty"`
+	WebSearchEnabled       bool     `yaml:"web_search_enabled"       json:"web_search_enabled,omitempty"`
+	SupportedFileTypes     []string `yaml:"supported_file_types"     json:"supported_file_types,omitempty"`
 	// KBSelectionMode presets the KB picker mode: "all" | "selected" | "none".
 	// When empty, the user's current value stays untouched.
-	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode,omitempty"`
+	KBSelectionMode string `yaml:"kb_selection_mode"        json:"kb_selection_mode,omitempty"`
 }
 
 // agentTypePresetsFile is the top-level YAML structure.

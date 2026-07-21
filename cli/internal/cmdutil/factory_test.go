@@ -338,7 +338,13 @@ func TestResolveKB_Chain(t *testing.T) {
 		dir := t.TempDir()
 		resolveKBChdir(t, dir)
 		// Drop a project link too - must be ignored.
-		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+		require.NoError(
+			t,
+			projectlink.Save(
+				filepath.Join(dir, ".weknora", "project.yaml"),
+				&projectlink.Project{KBID: "kb_disk_should_lose"},
+			),
+		)
 
 		clientCalls := 0
 		f := &Factory{
@@ -385,7 +391,13 @@ func TestResolveKB_Chain(t *testing.T) {
 		t.Setenv("WEKNORA_KB_ID", "kb_env")
 		dir := t.TempDir()
 		resolveKBChdir(t, dir)
-		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+		require.NoError(
+			t,
+			projectlink.Save(
+				filepath.Join(dir, ".weknora", "project.yaml"),
+				&projectlink.Project{KBID: "kb_disk_should_lose"},
+			),
+		)
 
 		f := &Factory{}
 		got, err := f.ResolveKB(makeResolveKBCmd(t, ""))
@@ -396,7 +408,10 @@ func TestResolveKB_Chain(t *testing.T) {
 	t.Run("project_link_walk_up", func(t *testing.T) {
 		t.Setenv("WEKNORA_KB_ID", "")
 		root := t.TempDir()
-		require.NoError(t, projectlink.Save(filepath.Join(root, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_proj"}))
+		require.NoError(
+			t,
+			projectlink.Save(filepath.Join(root, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_proj"}),
+		)
 		// Run from a deep child to exercise walk-up.
 		deep := filepath.Join(root, "a", "b", "c")
 		require.NoError(t, os.MkdirAll(deep, 0o755))

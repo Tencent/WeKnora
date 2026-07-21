@@ -283,7 +283,7 @@ func extractServerCode(body []byte) int {
 
 // parseResponse parses an HTTP response
 func parseResponse(resp *http.Response, target interface{}) error {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)

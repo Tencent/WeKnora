@@ -51,6 +51,7 @@ type ParserEngineInfo struct {
 
 // --- Internal types used by chunking pipeline ---
 
+// DocParserStorageConfig carries object-storage settings for the doc parser pipeline.
 type DocParserStorageConfig struct {
 	Provider        string
 	Region          string
@@ -62,6 +63,7 @@ type DocParserStorageConfig struct {
 	Endpoint        string
 }
 
+// DocParserVLMConfig carries vision-language model settings for doc parsing.
 type DocParserVLMConfig struct {
 	ModelName     string
 	BaseURL       string
@@ -69,6 +71,7 @@ type DocParserVLMConfig struct {
 	InterfaceType string
 }
 
+// ParsedChunk is a text segment produced by the document parser before indexing.
 type ParsedChunk struct {
 	Content string
 	// ContextHeader is an optional context string (e.g. a Markdown heading
@@ -112,6 +115,7 @@ type ParsedParentChunk struct {
 	End     int
 }
 
+// ParsedImage is an image extracted from a parsed document with optional OCR text.
 type ParsedImage struct {
 	URL         string
 	Caption     string

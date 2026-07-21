@@ -25,7 +25,7 @@ func parseListPagination(c *gin.Context) (page, pageSize int, ok bool) {
 	if s := strings.TrimSpace(c.Query("page")); s != "" {
 		p, err := strconv.Atoi(s)
 		if err != nil || p < 1 {
-			c.Error(apperrors.NewValidationError("page must be a positive integer"))
+			_ = c.Error(apperrors.NewValidationError("page must be a positive integer"))
 			return 0, 0, false
 		}
 		page = p
@@ -33,7 +33,9 @@ func parseListPagination(c *gin.Context) (page, pageSize int, ok bool) {
 	if s := strings.TrimSpace(c.Query("page_size")); s != "" {
 		ps, err := strconv.Atoi(s)
 		if err != nil || ps < 1 || ps > maxListPageSize {
-			c.Error(apperrors.NewValidationError(fmt.Sprintf("page_size must be between 1 and %d", maxListPageSize)))
+			_ = c.Error(
+				apperrors.NewValidationError(fmt.Sprintf("page_size must be between 1 and %d", maxListPageSize)),
+			)
 			return 0, 0, false
 		}
 		pageSize = ps

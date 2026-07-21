@@ -46,7 +46,12 @@ type AskOptions struct {
 // agent / KB-chat invocations.
 type AskService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
-	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+	AgentQAStreamWithRequest(
+		ctx context.Context,
+		sessionID string,
+		req *sdk.AgentQARequest,
+		cb sdk.AgentEventCallback,
+	) error
 }
 
 // NewCmdAsk builds `weknora session ask --agent <agent-id> "<text>"`.
@@ -94,7 +99,8 @@ both flags for the complete projected stream.`,
 	_ = cmd.MarkFlagRequired("agent")
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
-	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
+	cmd.Flags().
+		BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
 	cmdutil.AddFormatFlag(cmd, sessionAskFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Invoke a custom agent in a session context. Default JSON returns a bounded answer-event projection. --reference adds indexed citations; --verbose adds reasoning, tools, and lifecycle events. --format ndjson streams raw SDK agent events; --format text renders the selected events live.",
@@ -239,7 +245,13 @@ func runAskText(ctx context.Context, opts *AskOptions, sessionID string, autoCre
 
 // runAskJSON handles the --format json path (the default): collect the
 // projection and emit it in one normal success envelope.
-func runAskJSON(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions, sessionID string, svc AskService) error {
+func runAskJSON(
+	ctx context.Context,
+	opts *AskOptions,
+	fopts *cmdutil.FormatOptions,
+	sessionID string,
+	svc AskService,
+) error {
 	req := &sdk.AgentQARequest{
 		Query:        opts.Query,
 		AgentEnabled: true,
@@ -258,7 +270,10 @@ func runAskJSON(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOpti
 
 	if err := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb); err != nil {
 		if cmdutil.IsCancelled(ctx, err) {
-			return askStreamError(cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session ask cancelled"), sessionID)
+			return askStreamError(
+				cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session ask cancelled"),
+				sessionID,
+			)
 		}
 		return askStreamError(cmdutil.WrapStream(err, "agent-chat stream"), sessionID)
 	}

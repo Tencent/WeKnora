@@ -53,7 +53,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		return nil, err
 	}
 
-	providerName := provider.ProviderName(config.Provider)
+	providerName := provider.Name(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}
@@ -164,8 +164,11 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	return content, nil
 }
 
+// GetModelName implements the required interface method.
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }
-func (v *RemoteAPIVLM) GetModelID() string   { return v.modelID }
+
+// GetModelID implements the required interface method.
+func (v *RemoteAPIVLM) GetModelID() string { return v.modelID }
 
 // detectImageMIME returns the MIME type for the given image bytes.
 func detectImageMIME(data []byte) string {

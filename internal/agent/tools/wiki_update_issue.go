@@ -15,6 +15,7 @@ type wikiUpdateIssueTool struct {
 	kbIDs       []string
 }
 
+// NewWikiUpdateIssueTool is an exported function.
 func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []string) types.Tool {
 	return &wikiUpdateIssueTool{
 		BaseTool: NewBaseTool(

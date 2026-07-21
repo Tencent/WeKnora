@@ -36,7 +36,11 @@ func (c *Client) EnsureMessageSuggestions(
 	messageID string,
 	regenerate bool,
 ) (*MessageSuggestionSet, error) {
-	path := fmt.Sprintf("/api/v1/sessions/%s/messages/%s/suggestions", url.PathEscape(sessionID), url.PathEscape(messageID))
+	path := fmt.Sprintf(
+		"/api/v1/sessions/%s/messages/%s/suggestions",
+		url.PathEscape(sessionID),
+		url.PathEscape(messageID),
+	)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, map[string]bool{"regenerate": regenerate}, nil)
 	if err != nil {
 		return nil, err
@@ -53,7 +57,11 @@ func (c *Client) GetMessageSuggestions(
 	sessionID string,
 	messageID string,
 ) (*MessageSuggestionSet, error) {
-	path := fmt.Sprintf("/api/v1/sessions/%s/messages/%s/suggestions", url.PathEscape(sessionID), url.PathEscape(messageID))
+	path := fmt.Sprintf(
+		"/api/v1/sessions/%s/messages/%s/suggestions",
+		url.PathEscape(sessionID),
+		url.PathEscape(messageID),
+	)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
 		return nil, err

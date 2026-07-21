@@ -122,12 +122,14 @@ const (
 	// session revocation, but never contain the old or new password.
 	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
 
-	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
-	// archived task can repeat its original side effects; deleting one removes
-	// the Redis failure record. Both must leave a platform audit trail.
-	AuditActionSystemQueueTaskRetried   AuditAction = "system.queue_task_retried"
-	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
-	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
+	// AuditActionSystemQueueTaskRetried records a SystemAdmin retry of an archived
+	// queue task, which may repeat the task's original side effects.
+	AuditActionSystemQueueTaskRetried AuditAction = "system.queue_task_retried"
+	// AuditActionSystemQueueTaskDeleted records removal of a failed queue task record.
+	AuditActionSystemQueueTaskDeleted AuditAction = "system.queue_task_deleted"
+	// AuditActionSystemQueueTaskRunNow records a SystemAdmin immediate queue run.
+	AuditActionSystemQueueTaskRunNow AuditAction = "system.queue_task_run_now"
+	// AuditActionSystemQueueTaskCancelled records a SystemAdmin queue task cancellation.
 	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
 )
 
@@ -136,7 +138,9 @@ const (
 // without needing to enumerate every action class.
 type AuditOutcome string
 
+// AuditOutcomeDenied and related constants.
 const (
+	// AuditOutcomeSuccess marks an audited mutation that completed successfully.
 	AuditOutcomeSuccess AuditOutcome = "success"
 	AuditOutcomeDenied  AuditOutcome = "denied"
 )
@@ -150,11 +154,12 @@ const (
 // monotonic ID acts as both primary key and pagination cursor (newest-
 // first is `WHERE id < AfterID ORDER BY id DESC`).
 type AuditLog struct {
-	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement"`
-	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1"`
-	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
-	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''"`
-	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2"`
+	ID          uint64 `json:"id"             gorm:"primaryKey;autoIncrement"`
+	TenantID    uint64 `json:"tenant_id"      gorm:"not null"`
+	ActorUserID string `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
+	ActorRole   string `json:"actor_role"     gorm:"type:varchar(32);default:''"`
+	//nolint:lll
+	Action        AuditAction  `json:"action" gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2"`
 	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''"`
 	TargetID      string       `json:"target_id"      gorm:"type:varchar(64);default:''"`
 	TargetUserID  string       `json:"target_user_id" gorm:"type:varchar(36);default:''"`

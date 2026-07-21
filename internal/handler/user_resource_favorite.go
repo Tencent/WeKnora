@@ -24,6 +24,7 @@ type UserResourceFavoriteHandler struct {
 	service interfaces.UserResourceFavoriteService
 }
 
+// NewUserResourceFavoriteHandler is an exported function.
 func NewUserResourceFavoriteHandler(svc interfaces.UserResourceFavoriteService) *UserResourceFavoriteHandler {
 	return &UserResourceFavoriteHandler{service: svc}
 }
@@ -34,17 +35,17 @@ func NewUserResourceFavoriteHandler(svc interfaces.UserResourceFavoriteService) 
 func favoriteContext(c *gin.Context) (string, uint64, bool) {
 	uidVal, ok := c.Get(types.UserIDContextKey.String())
 	if !ok {
-		c.Error(apperrors.NewUnauthorizedError("user ID not found"))
+		_ = c.Error(apperrors.NewUnauthorizedError("user ID not found"))
 		return "", 0, false
 	}
 	userID, _ := uidVal.(string)
 	if userID == "" {
-		c.Error(apperrors.NewUnauthorizedError("user ID not found"))
+		_ = c.Error(apperrors.NewUnauthorizedError("user ID not found"))
 		return "", 0, false
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(apperrors.NewUnauthorizedError("workspace ID not found"))
+		_ = c.Error(apperrors.NewUnauthorizedError("workspace ID not found"))
 		return "", 0, false
 	}
 	return userID, tenantID, true
@@ -68,11 +69,11 @@ func (h *UserResourceFavoriteHandler) ListFavorites(c *gin.Context) {
 	list, err := h.service.List(ctx, userID, tenantID, resourceType)
 	if err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
@@ -100,16 +101,16 @@ func (h *UserResourceFavoriteHandler) AddFavorite(c *gin.Context) {
 	}
 	var req AddFavoriteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
 		return
 	}
 	if err := h.service.Add(ctx, userID, tenantID, req.ResourceType, req.ResourceID); err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) || stderrors.Is(err, service.ErrFavoriteEmptyID) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -133,11 +134,11 @@ func (h *UserResourceFavoriteHandler) RemoveFavorite(c *gin.Context) {
 
 	if err := h.service.Remove(ctx, userID, tenantID, resourceType, resourceID); err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) || stderrors.Is(err, service.ErrFavoriteEmptyID) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

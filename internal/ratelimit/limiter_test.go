@@ -9,13 +9,13 @@ import (
 func TestLocalLimiterAllowsWithinBudget(t *testing.T) {
 	l := New(nil, "test:", time.Minute, "inst")
 	ctx := context.Background()
-	const max = 3
-	for i := 0; i < max; i++ {
-		if !l.Allow(ctx, "k1", max) {
+	const limit = 3
+	for i := 0; i < limit; i++ {
+		if !l.Allow(ctx, "k1", limit) {
 			t.Fatalf("request %d should be allowed", i+1)
 		}
 	}
-	if l.Allow(ctx, "k1", max) {
+	if l.Allow(ctx, "k1", limit) {
 		t.Fatal("request over budget should be denied")
 	}
 }

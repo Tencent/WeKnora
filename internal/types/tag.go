@@ -35,7 +35,7 @@ type KnowledgeTag struct {
 // On PostgreSQL/MySQL the DB sequence handles this, so we skip to avoid
 // duplicate key races under concurrent inserts.
 func (t *KnowledgeTag) BeforeCreate(tx *gorm.DB) error {
-	if tx.Dialector.Name() != "sqlite" {
+	if tx.Name() != "sqlite" {
 		return nil
 	}
 	if t.SeqID == 0 {

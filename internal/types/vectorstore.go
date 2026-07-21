@@ -38,21 +38,21 @@ type EnvLookupFunc func(string) string
 // to support multi-store scenarios (e.g., ES-hot + ES-warm clusters).
 type VectorStore struct {
 	// Unique identifier (UUID, auto-generated)
-	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id"                json:"id"                gorm:"type:varchar(36);primaryKey"`
 	// Workspace ID for scoping
-	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
+	TenantID uint64 `yaml:"tenant_id"         json:"tenant_id"`
 	// User-friendly name, e.g., "elasticsearch-hot"
-	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
+	Name string `yaml:"name"              json:"name"              gorm:"type:varchar(255);not null"`
 	// Engine type: postgres, elasticsearch, qdrant, milvus, weaviate, sqlite
-	EngineType RetrieverEngineType `yaml:"engine_type" json:"engine_type" gorm:"type:varchar(50);not null"`
+	EngineType RetrieverEngineType `yaml:"engine_type"       json:"engine_type"       gorm:"type:varchar(50);not null"`
 	// Driver-specific connection parameters (sensitive fields encrypted with AES-GCM)
 	ConnectionConfig ConnectionConfig `yaml:"connection_config" json:"connection_config" gorm:"type:json"`
 	// Optional index/collection configuration (engine-specific defaults if empty)
-	IndexConfig IndexConfig `yaml:"index_config" json:"index_config" gorm:"type:json"`
+	IndexConfig IndexConfig `yaml:"index_config"      json:"index_config"      gorm:"type:json"`
 	// Timestamps
-	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
-	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
-	DeletedAt gorm.DeletedAt `yaml:"deleted_at" json:"deleted_at" gorm:"index"`
+	CreatedAt time.Time      `yaml:"created_at"        json:"created_at"`
+	UpdatedAt time.Time      `yaml:"updated_at"        json:"updated_at"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at"        json:"deleted_at"        gorm:"index"`
 }
 
 // TableName returns the table name for VectorStore
@@ -62,7 +62,7 @@ func (VectorStore) TableName() string {
 
 // BeforeCreate is a GORM hook that runs before creating a new record.
 // Automatically generates a UUID for new vector stores.
-func (v *VectorStore) BeforeCreate(tx *gorm.DB) error {
+func (v *VectorStore) BeforeCreate(_ *gorm.DB) error {
 	if v.ID == "" {
 		v.ID = uuid.New().String()
 	}
@@ -121,10 +121,10 @@ func (v *VectorStore) Validate() error {
 // Sensitive fields (Password, APIKey) are encrypted with AES-GCM at rest.
 type ConnectionConfig struct {
 	// Common
-	Addr     string `yaml:"addr" json:"addr,omitempty"`
-	Username string `yaml:"username" json:"username,omitempty"`
-	Password string `yaml:"password" json:"password,omitempty"` // AES-GCM encrypted
-	APIKey   string `yaml:"api_key" json:"api_key,omitempty"`   // AES-GCM encrypted
+	Addr     string `yaml:"addr"                   json:"addr,omitempty"`
+	Username string `yaml:"username"               json:"username,omitempty"`
+	Password string `yaml:"password"               json:"password,omitempty"` // AES-GCM encrypted
+	APIKey   string `yaml:"api_key"                json:"api_key,omitempty"`  // AES-GCM encrypted
 	// InsecureSkipVerify disables TLS certificate verification when
 	// talking to the backing store over HTTPS. Defaults to false
 	// (secure). Set to true ONLY for self-signed development clusters;
@@ -134,26 +134,26 @@ type ConnectionConfig struct {
 	// differs from the Qdrant-specific UseTLS below, which *enables*
 	// TLS on gRPC connections — InsecureSkipVerify only controls
 	// *verification* of an already-TLS connection.
-	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify,omitempty"`
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"   json:"insecure_skip_verify,omitempty"`
 	// Qdrant
-	Host   string `yaml:"host" json:"host,omitempty"`
-	Port   int    `yaml:"port" json:"port,omitempty"`
-	UseTLS bool   `yaml:"use_tls" json:"use_tls,omitempty"`
+	Host   string `yaml:"host"                   json:"host,omitempty"`
+	Port   int    `yaml:"port"                   json:"port,omitempty"`
+	UseTLS bool   `yaml:"use_tls"                json:"use_tls,omitempty"`
 	// Weaviate
-	GrpcAddress string `yaml:"grpc_address" json:"grpc_address,omitempty"`
-	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
+	GrpcAddress string `yaml:"grpc_address"           json:"grpc_address,omitempty"`
+	Scheme      string `yaml:"scheme"                 json:"scheme,omitempty"`
 	// Database name used by engines that support database-level namespaces
 	// (currently Milvus, Tencent VectorDB, and Doris).
-	Database string `yaml:"database" json:"database,omitempty"`
+	Database string `yaml:"database"               json:"database,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
 	// Doris: HTTP port for Stream Load API (FE default 8030).
 	// Addr is reused for the MySQL protocol "host:9030"; HTTPPort + the host of Addr
 	// together form the FE HTTP endpoint used by Stream Load.
-	HTTPPort int `yaml:"http_port" json:"http_port,omitempty"`
+	HTTPPort int `yaml:"http_port"              json:"http_port,omitempty"`
 	// Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
 	// Auto-populated by TestConnection on successful connectivity check.
-	Version string `yaml:"version" json:"version,omitempty"`
+	Version string `yaml:"version"                json:"version,omitempty"`
 }
 
 // Value implements the driver.Valuer interface.
@@ -243,28 +243,39 @@ func (c ConnectionConfig) MaskSensitiveFields() ConnectionConfig {
 // If empty, engine-specific defaults are used.
 type IndexConfig struct {
 	// --- Existing fields ---
-	IndexName        string `yaml:"index_name" json:"index_name,omitempty"`                 // ES, OpenSearch
-	NumberOfShards   int    `yaml:"number_of_shards" json:"number_of_shards,omitempty"`     // ES, OpenSearch
+	IndexName        string `yaml:"index_name"         json:"index_name,omitempty"`         // ES, OpenSearch
+	NumberOfShards   int    `yaml:"number_of_shards"   json:"number_of_shards,omitempty"`   // ES, OpenSearch
 	NumberOfReplicas int    `yaml:"number_of_replicas" json:"number_of_replicas,omitempty"` // ES, OpenSearch
-	CollectionPrefix string `yaml:"collection_prefix" json:"collection_prefix,omitempty"`   // Qdrant, Weaviate
-	CollectionName   string `yaml:"collection_name" json:"collection_name,omitempty"`       // Milvus
+	CollectionPrefix string `yaml:"collection_prefix"  json:"collection_prefix,omitempty"`  // Qdrant, Weaviate
+	CollectionName   string `yaml:"collection_name"    json:"collection_name,omitempty"`    // Milvus
 
 	// --- Scalability fields ---
-	ShardNumber       int `yaml:"shard_number" json:"shard_number,omitempty"`               // Qdrant: number of shards per collection
-	ReplicationFactor int `yaml:"replication_factor" json:"replication_factor,omitempty"`   // Qdrant, Weaviate: number of replicas
-	ShardsNum         int `yaml:"shards_num" json:"shards_num,omitempty"`                   // Milvus: number of shards per collection (CreateCollection)
-	ReplicaNumber     int `yaml:"replica_number" json:"replica_number,omitempty"`           // Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
-	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"` // Weaviate: number of shards per collection
-	BucketsNum        int `yaml:"buckets_num" json:"buckets_num,omitempty"`                 // Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
-	ReplicationNum    int `yaml:"replication_num" json:"replication_num,omitempty"`         // Doris: replication_num PROPERTIES
+	// Qdrant: number of shards per collection
+	ShardNumber int `yaml:"shard_number" json:"shard_number,omitempty"`
+	// Qdrant, Weaviate: number of replicas
+	ReplicationFactor int `yaml:"replication_factor" json:"replication_factor,omitempty"`
+	// Milvus: number of shards per collection (CreateCollection)
+	ShardsNum int `yaml:"shards_num" json:"shards_num,omitempty"`
+	// Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
+	ReplicaNumber int `yaml:"replica_number" json:"replica_number,omitempty"`
+	// Weaviate: number of shards per collection
+	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"`
+	// Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
+	BucketsNum int `yaml:"buckets_num" json:"buckets_num,omitempty"`
+	// Doris: replication_num PROPERTIES
+	ReplicationNum int `yaml:"replication_num" json:"replication_num,omitempty"`
 
 	// --- OpenSearch k-NN HNSW fields ---
 	// All omitempty so other engines' serialized IndexConfig is unchanged.
 	// Zero / empty values fall back to the driver defaults in buildInternalCfg.
-	HNSWM              int    `yaml:"hnsw_m" json:"hnsw_m,omitempty"`                             // OpenSearch: HNSW graph degree (M)
-	HNSWEFConstruction int    `yaml:"hnsw_ef_construction" json:"hnsw_ef_construction,omitempty"` // OpenSearch: HNSW index-build candidate list size
-	HNSWEFSearch       int    `yaml:"hnsw_ef_search" json:"hnsw_ef_search,omitempty"`             // OpenSearch: HNSW search candidate list size (faiss; lucene reads at query time)
-	KNNEngine          string `yaml:"knn_engine" json:"knn_engine,omitempty"`                     // OpenSearch: k-NN backend ("lucene" | "faiss")
+	// OpenSearch: HNSW graph degree (M)
+	HNSWM int `yaml:"hnsw_m" json:"hnsw_m,omitempty"`
+	// OpenSearch: HNSW index-build candidate list size
+	HNSWEFConstruction int `yaml:"hnsw_ef_construction" json:"hnsw_ef_construction,omitempty"`
+	// OpenSearch: HNSW search candidate list size (faiss; lucene reads at query time)
+	HNSWEFSearch int `yaml:"hnsw_ef_search" json:"hnsw_ef_search,omitempty"`
+	// OpenSearch: k-NN backend ("lucene" | "faiss")
+	KNNEngine string `yaml:"knn_engine" json:"knn_engine,omitempty"`
 }
 
 // Value implements the driver.Valuer interface.
@@ -476,15 +487,18 @@ func ValidateIndexConfig(ic IndexConfig) error {
 	// Validate string fields (index/collection names)
 	if ic.IndexName != "" && !validIndexNamePattern.MatchString(ic.IndexName) {
 		return errors.NewValidationError(
-			"index_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+			"index_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)",
+		)
 	}
 	if ic.CollectionPrefix != "" && !validIndexNamePattern.MatchString(ic.CollectionPrefix) {
 		return errors.NewValidationError(
-			"collection_prefix must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+			"collection_prefix must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)", //nolint:lll // long struct tag or string
+		)
 	}
 	if ic.CollectionName != "" && !validIndexNamePattern.MatchString(ic.CollectionName) {
 		return errors.NewValidationError(
-			"collection_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+			"collection_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)",
+		)
 	}
 
 	// Validate numeric fields (shards/replicas) — must be within safe bounds
@@ -694,9 +708,21 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "use_tls", Type: "boolean", Required: false, Description: "Use TLS", Default: false},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
+				{
+					Name:        "collection_prefix",
+					Type:        "string",
+					Required:    false,
+					Description: "Collection Prefix",
+					Default:     "weknora_embeddings",
+				},
 				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
-				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
+				{
+					Name:        "replication_factor",
+					Type:        "number",
+					Required:    false,
+					Description: "Replication Factor",
+					Default:     1,
+				},
 			},
 		},
 		{
@@ -709,24 +735,60 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
-				{Name: "shards_num", Type: "number", Required: false, Description: "Shards (write parallelism)", Default: 1},
-				{Name: "replica_number", Type: "number", Required: false, Description: "In-memory Replicas (read HA)", Default: 1},
+				{
+					Name:        "collection_name",
+					Type:        "string",
+					Required:    false,
+					Description: "Collection Name",
+					Default:     "weknora_embeddings",
+				},
+				{
+					Name:        "shards_num",
+					Type:        "number",
+					Required:    false,
+					Description: "Shards (write parallelism)",
+					Default:     1,
+				},
+				{
+					Name:        "replica_number",
+					Type:        "number",
+					Required:    false,
+					Description: "In-memory Replicas (read HA)",
+					Default:     1,
+				},
 			},
 		},
 		{
 			Type:        "tencent_vectordb",
 			DisplayName: "Tencent VectorDB",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Address", Default: "http://localhost:8080"},
+				{
+					Name:        "addr",
+					Type:        "string",
+					Required:    true,
+					Description: "Address",
+					Default:     "http://localhost:8080",
+				},
 				{Name: "username", Type: "string", Required: true, Description: "Username"},
 				{Name: "api_key", Type: "string", Required: true, Sensitive: true, Description: "API Key"},
 				{Name: "database", Type: "string", Required: false, Description: "Database", Default: "weknora"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
+				{
+					Name:        "collection_name",
+					Type:        "string",
+					Required:    false,
+					Description: "Collection Name",
+					Default:     "weknora_embeddings",
+				},
 				{Name: "shards_num", Type: "number", Required: false, Description: "Shards", Default: 1},
-				{Name: "replica_number", Type: "number", Required: false, Description: "Replicas", Default: tencentVectorDBReplicaNumber},
+				{
+					Name:        "replica_number",
+					Type:        "number",
+					Required:    false,
+					Description: "Replicas",
+					Default:     tencentVectorDBReplicaNumber,
+				},
 			},
 		},
 		{
@@ -734,28 +796,64 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			DisplayName: "Weaviate",
 			ConnectionFields: []VectorStoreFieldInfo{
 				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "weaviate:8080"},
-				{Name: "grpc_address", Type: "string", Required: false, Description: "gRPC Address", Default: "weaviate:50051"},
+				{
+					Name:        "grpc_address",
+					Type:        "string",
+					Required:    false,
+					Description: "gRPC Address",
+					Default:     "weaviate:50051",
+				},
 				{Name: "scheme", Type: "string", Required: false, Description: "Scheme", Default: "http"},
 				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "Weknora_embeddings"},
+				{
+					Name:        "collection_prefix",
+					Type:        "string",
+					Required:    false,
+					Description: "Collection Prefix",
+					Default:     "Weknora_embeddings",
+				},
 				{Name: "desired_shard_count", Type: "number", Required: false, Description: "Shard Count", Default: 1},
-				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
+				{
+					Name:        "replication_factor",
+					Type:        "number",
+					Required:    false,
+					Description: "Replication Factor",
+					Default:     1,
+				},
 			},
 		},
 		{
 			Type:        "doris",
 			DisplayName: "Apache Doris",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "FE MySQL Address (host:port)", Default: "doris-fe:9030"},
-				{Name: "http_port", Type: "number", Required: false, Description: "FE HTTP Port (Stream Load)", Default: 8030},
+				{
+					Name:        "addr",
+					Type:        "string",
+					Required:    true,
+					Description: "FE MySQL Address (host:port)",
+					Default:     "doris-fe:9030",
+				},
+				{
+					Name:        "http_port",
+					Type:        "number",
+					Required:    false,
+					Description: "FE HTTP Port (Stream Load)",
+					Default:     8030,
+				},
 				{Name: "database", Type: "string", Required: true, Description: "Database", Default: "weknora"},
 				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
 				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
+				{
+					Name:        "collection_prefix",
+					Type:        "string",
+					Required:    false,
+					Description: "Table Prefix",
+					Default:     "weknora_embeddings",
+				},
 				{Name: "buckets_num", Type: "number", Required: false, Description: "Buckets per table", Default: 10},
 				{Name: "replication_num", Type: "number", Required: false, Description: "Replication Num", Default: 1},
 			},
@@ -767,17 +865,70 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "addr", Type: "string", Required: true, Description: "URL", Default: "https://localhost:9200"},
 				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "admin"},
 				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
-				{Name: "insecure_skip_verify", Type: "boolean", Required: false, Default: false,
-					Description: "Skip TLS certificate verification. For self-signed dev clusters only — never enable in production."},
+				{
+					Name: "insecure_skip_verify", Type: "boolean", Required: false, Default: false,
+					Description: "Skip TLS certificate verification. For self-signed dev clusters only — never enable in production.",
+				},
 			},
 			IndexFields: []VectorStoreFieldInfo{
 				{Name: "index_name", Type: "string", Required: false, Description: "Index Name", Default: "weknora"},
-				{Name: "number_of_shards", Type: "number", Required: false, Description: "Shards", Default: 4, Min: floatPtr(1), Max: floatPtr(64)},
-				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1, Min: floatPtr(0), Max: floatPtr(10)},
-				{Name: "hnsw_m", Type: "number", Required: false, Description: "HNSW graph degree (M). Immutable after index creation.", Default: 16, Min: floatPtr(2), Max: floatPtr(100), Immutable: true},
-				{Name: "hnsw_ef_construction", Type: "number", Required: false, Description: "HNSW build candidate list. Higher (e.g. 200-512) improves recall at the cost of build time. Immutable after creation.", Default: 100, Min: floatPtr(2), Max: floatPtr(4096), Immutable: true},
-				{Name: "hnsw_ef_search", Type: "number", Required: false, Description: "HNSW search candidate list. Effective on the faiss engine; the lucene engine reads it at query time. Immutable (no settings-update path).", Default: 100, Min: floatPtr(1), Max: floatPtr(10000), Immutable: true},
-				{Name: "knn_engine", Type: "string", Required: false, Description: "k-NN backend.", Default: "lucene", Enum: []string{"lucene", "faiss"}, Immutable: true},
+				{
+					Name:        "number_of_shards",
+					Type:        "number",
+					Required:    false,
+					Description: "Shards",
+					Default:     4,
+					Min:         floatPtr(1),
+					Max:         floatPtr(64),
+				},
+				{
+					Name:        "number_of_replicas",
+					Type:        "number",
+					Required:    false,
+					Description: "Replicas",
+					Default:     1,
+					Min:         floatPtr(0),
+					Max:         floatPtr(10),
+				},
+				{
+					Name:        "hnsw_m",
+					Type:        "number",
+					Required:    false,
+					Description: "HNSW graph degree (M). Immutable after index creation.",
+					Default:     16,
+					Min:         floatPtr(2),
+					Max:         floatPtr(100),
+					Immutable:   true,
+				},
+				{
+					Name:        "hnsw_ef_construction",
+					Type:        "number",
+					Required:    false,
+					Description: "HNSW build candidate list. Higher (e.g. 200-512) improves recall at the cost of build time. Immutable after creation.", //nolint:lll // long struct tag or string
+					Default:     100,
+					Min:         floatPtr(2),
+					Max:         floatPtr(4096),
+					Immutable:   true,
+				},
+				{
+					Name:        "hnsw_ef_search",
+					Type:        "number",
+					Required:    false,
+					Description: "HNSW search candidate list. Effective on the faiss engine; the lucene engine reads it at query time. Immutable (no settings-update path).", //nolint:lll // long struct tag or string
+					Default:     100,
+					Min:         floatPtr(1),
+					Max:         floatPtr(10000),
+					Immutable:   true,
+				},
+				{
+					Name:        "knn_engine",
+					Type:        "string",
+					Required:    false,
+					Description: "k-NN backend.",
+					Default:     "lucene",
+					Enum:        []string{"lucene", "faiss"},
+					Immutable:   true,
+				},
 			},
 		},
 	}

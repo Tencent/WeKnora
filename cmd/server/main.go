@@ -98,7 +98,7 @@ func main() {
 
 			// Close listener first to release port immediately,
 			// so the next process can bind during our graceful drain.
-			listener.Close()
+			_ = listener.Close()
 
 			shutdownTimeout := cfg.Server.ShutdownTimeout
 			if shutdownTimeout == 0 {
@@ -111,12 +111,12 @@ func main() {
 			go func() {
 				sig := <-signals
 				logger.Warnf(context.Background(), "Received second signal: %v, forcing shutdown...", sig)
-				server.Close()
+				_ = server.Close()
 			}()
 
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
-				server.Close()
+				_ = server.Close()
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")

@@ -13,11 +13,11 @@ import (
 type OllamaVLM struct {
 	modelName     string
 	modelID       string
-	ollamaService *ollama.OllamaService
+	ollamaService *ollama.Service
 }
 
 // NewOllamaVLM creates an Ollama-backed VLM instance.
-func NewOllamaVLM(config *Config, ollamaService *ollama.OllamaService) (*OllamaVLM, error) {
+func NewOllamaVLM(config *Config, ollamaService *ollama.Service) (*OllamaVLM, error) {
 	if ollamaService == nil {
 		return nil, fmt.Errorf("ollama service is required for local VLM model")
 	}
@@ -37,7 +37,7 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 			images = append(images, imgBytes)
 		}
 	}
-	
+
 	chatReq := &ollamaapi.ChatRequest{
 		Model: v.modelName,
 		Messages: []ollamaapi.Message{
@@ -55,7 +55,13 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 	for _, img := range imgBytesList {
 		totalImageSize += len(img)
 	}
-	logger.Infof(ctx, "[VLM] Calling Ollama API, model=%s, numImages=%d, totalImageSize=%d", v.modelName, len(images), totalImageSize)
+	logger.Infof(
+		ctx,
+		"[VLM] Calling Ollama API, model=%s, numImages=%d, totalImageSize=%d",
+		v.modelName,
+		len(images),
+		totalImageSize,
+	)
 
 	var result string
 	err := v.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
@@ -63,12 +69,15 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("Ollama VLM request: %w", err)
+		return "", fmt.Errorf("ollama VLM request: %w", err)
 	}
 
 	logger.Infof(ctx, "[VLM] Ollama response received, len=%d", len(result))
 	return result, nil
 }
 
+// GetModelName implements the required interface method.
 func (v *OllamaVLM) GetModelName() string { return v.modelName }
-func (v *OllamaVLM) GetModelID() string   { return v.modelID }
+
+// GetModelID implements the required interface method.
+func (v *OllamaVLM) GetModelID() string { return v.modelID }

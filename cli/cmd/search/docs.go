@@ -56,7 +56,12 @@ type DocsSearchOptions struct {
 // ?keyword= query param, so the CLI just forwards opts.Query as
 // filter.Keyword and accumulates the (already-filtered) pages.
 type DocsSearchService interface {
-	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
+	ListKnowledgeWithFilter(
+		ctx context.Context,
+		kbID string,
+		page, pageSize int,
+		filter sdk.KnowledgeListFilter,
+	) ([]sdk.Knowledge, int64, error)
 }
 
 // NewCmdDocs builds `weknora search docs "<query>" --kb <id-or-name>`.
@@ -126,7 +131,12 @@ reached or the KB is exhausted. Pass --all-pages=false to stop after one page.`,
 	return cmd
 }
 
-func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, fopts *cmdutil.FormatOptions, svc DocsSearchService) error {
+func runDocsSearch(
+	ctx context.Context,
+	opts *DocsSearchOptions,
+	fopts *cmdutil.FormatOptions,
+	svc DocsSearchService,
+) error {
 	if opts.PageSize < 1 || opts.PageSize > docsMaxPageSize {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			fmt.Sprintf("--page-size must be in 1..%d, got %d", docsMaxPageSize, opts.PageSize))
@@ -172,7 +182,12 @@ done:
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		meta := &output.Meta{Count: output.IntPtr(len(matches)), TotalCount: output.IntPtr(int(serverTotal)), HasMore: truncated, Hint: emptyContentSearchHint(len(matches))}
+		meta := &output.Meta{
+			Count:      output.IntPtr(len(matches)),
+			TotalCount: output.IntPtr(int(serverTotal)),
+			HasMore:    truncated,
+			Hint:       emptyContentSearchHint(len(matches)),
+		}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

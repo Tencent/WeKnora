@@ -98,7 +98,7 @@ func TestGeminiEmbedderBatchEmbedSendsOutputDimensionalityWhenOverrideEnabled(t 
 func TestGeminiEmbedderReturnsAPIErrorBody(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}))
 	defer server.Close()

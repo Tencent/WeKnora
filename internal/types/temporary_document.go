@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// TemporaryDocumentStatusUploaded and related constants.
 const (
 	TemporaryDocumentStatusUploaded   = "uploaded"
 	TemporaryDocumentStatusProcessing = "processing"
@@ -22,33 +23,35 @@ const (
 // Parsed artifacts are retained separately from the source file so a question
 // can select only the useful parts without parsing the upload again.
 type TemporaryDocument struct {
-	ID                string         `json:"id" gorm:"type:varchar(36);primaryKey"`
-	TenantID          uint64         `json:"tenant_id" gorm:"not null;index"`
-	SessionID         string         `json:"session_id" gorm:"type:varchar(36);not null;index"`
-	ResourceRef       string         `json:"-" gorm:"type:text;not null"`
-	FileName          string         `json:"file_name" gorm:"type:varchar(1024);not null"`
-	FileType          string         `json:"file_type" gorm:"type:varchar(32);not null"`
-	MimeType          string         `json:"mime_type" gorm:"type:varchar(255);not null;default:''"`
-	FileSize          int64          `json:"file_size" gorm:"not null"`
-	Status            string         `json:"status" gorm:"type:varchar(16);not null;index"`
-	Content           string         `json:"-" gorm:"type:text"`
-	Chunks            JSON           `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
-	ImageRefs         JSON           `json:"image_refs,omitempty" gorm:"type:jsonb;not null;default:'[]'"`
-	Metadata          JSON           `json:"metadata,omitempty" gorm:"type:jsonb;not null;default:'{}'"`
-	ProcessingOptions JSON           `json:"-" gorm:"type:jsonb;not null;default:'{}'"`
-	TokenCount        int            `json:"token_count" gorm:"not null;default:0"`
-	ChunkCount        int            `json:"chunk_count" gorm:"not null;default:0"`
+	ID                string         `json:"id"                      gorm:"type:varchar(36);primaryKey"`
+	TenantID          uint64         `json:"tenant_id"               gorm:"not null;index"`
+	SessionID         string         `json:"session_id"              gorm:"type:varchar(36);not null;index"`
+	ResourceRef       string         `json:"-"                       gorm:"type:text;not null"`
+	FileName          string         `json:"file_name"               gorm:"type:varchar(1024);not null"`
+	FileType          string         `json:"file_type"               gorm:"type:varchar(32);not null"`
+	MimeType          string         `json:"mime_type"               gorm:"type:varchar(255);not null;default:''"`
+	FileSize          int64          `json:"file_size"               gorm:"not null"`
+	Status            string         `json:"status"                  gorm:"type:varchar(16);not null;index"`
+	Content           string         `json:"-"                       gorm:"type:text"`
+	Chunks            JSON           `json:"-"                       gorm:"type:jsonb;not null;default:'[]'"`
+	ImageRefs         JSON           `json:"image_refs,omitempty"    gorm:"type:jsonb;not null;default:'[]'"`
+	Metadata          JSON           `json:"metadata,omitempty"      gorm:"type:jsonb;not null;default:'{}'"`
+	ProcessingOptions JSON           `json:"-"                       gorm:"type:jsonb;not null;default:'{}'"`
+	TokenCount        int            `json:"token_count"             gorm:"not null;default:0"`
+	ChunkCount        int            `json:"chunk_count"             gorm:"not null;default:0"`
 	ErrorMessage      string         `json:"error_message,omitempty" gorm:"type:text"`
-	ExpiresAt         time.Time      `json:"expires_at" gorm:"not null;index"`
+	ExpiresAt         time.Time      `json:"expires_at"              gorm:"not null;index"`
 	StartedAt         *time.Time     `json:"started_at,omitempty"`
 	ReadyAt           *time.Time     `json:"ready_at,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
-	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`
+	DeletedAt         gorm.DeletedAt `json:"-"                       gorm:"index"`
 }
 
+// TableName implements the required interface method.
 func (TemporaryDocument) TableName() string { return "temporary_documents" }
 
+// BeforeCreate implements the required interface method.
 func (d *TemporaryDocument) BeforeCreate(_ *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.NewString()
@@ -71,6 +74,7 @@ func (d *TemporaryDocument) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// TemporaryDocumentChunk is an exported type.
 type TemporaryDocumentChunk struct {
 	Seq           int    `json:"seq"`
 	Content       string `json:"content"`
@@ -80,17 +84,20 @@ type TemporaryDocumentChunk struct {
 	TokenCount    int    `json:"token_count"`
 }
 
+// TemporaryDocumentImage is an exported type.
 type TemporaryDocumentImage struct {
 	OriginalRef string `json:"original_ref,omitempty"`
 	URL         string `json:"url"`
 	MimeType    string `json:"mime_type,omitempty"`
 }
 
+// TemporaryDocumentTaskPayload is an exported type.
 type TemporaryDocumentTaskPayload struct {
 	TenantID   uint64 `json:"tenant_id"`
 	DocumentID string `json:"document_id"`
 }
 
+// TemporaryDocumentCreateOptions is an exported type.
 type TemporaryDocumentCreateOptions struct {
 	ASRModelID   string `json:"asr_model_id,omitempty"`
 	ParserEngine string `json:"parser_engine,omitempty"`
@@ -106,6 +113,7 @@ type TemporaryDocumentCreateOptions struct {
 	OCRMaxPages int `json:"ocr_max_pages,omitempty"`
 }
 
+// TemporaryDocumentPromptResult is an exported type.
 type TemporaryDocumentPromptResult struct {
 	Attachments MessageAttachments
 	ImageURLs   []string

@@ -12,7 +12,9 @@ import (
 )
 
 var (
-	ErrTenantNotFound         = errors.New("tenant not found")
+	// ErrTenantNotFound is an exported constant.
+	ErrTenantNotFound = errors.New("tenant not found")
+	// ErrTenantHasKnowledgeBase implements the required behavior.
 	ErrTenantHasKnowledgeBase = errors.New("tenant has associated knowledge bases")
 )
 
@@ -74,7 +76,12 @@ func (r *tenantRepository) ListTenants(ctx context.Context) ([]*types.Tenant, er
 }
 
 // SearchTenants searches tenants with pagination and filters
-func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
+func (r *tenantRepository) SearchTenants(
+	ctx context.Context,
+	keyword string,
+	tenantID uint64,
+	page, pageSize int,
+) ([]*types.Tenant, int64, error) {
 	var tenants []*types.Tenant
 	var total int64
 

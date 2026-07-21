@@ -1,3 +1,4 @@
+//nolint:lll // long lines
 package opensearch
 
 import (
@@ -33,11 +34,19 @@ func TestTransformSourceID(t *testing.T) {
 // TestCopyIndices_EmptyMapping_NoOp verifies an empty chunk map short-circuits
 // before any HTTP call.
 func TestCopyIndices_EmptyMapping_NoOp(t *testing.T) {
-	repo, ts := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+	repo, ts := newTestRepo(t, func(_ http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
 	})
 	defer ts.Close()
-	err := repo.CopyIndices(context.Background(), "kbSrc", map[string]string{}, map[string]string{}, "kbDst", 768, "manual")
+	err := repo.CopyIndices(
+		context.Background(),
+		"kbSrc",
+		map[string]string{},
+		map[string]string{},
+		"kbDst",
+		768,
+		"manual",
+	)
 	if err != nil {
 		t.Fatalf("want nil, got %v", err)
 	}
@@ -62,9 +71,11 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 			first := searchCnt == 1
 			mu.Unlock()
 			if first {
-				_, _ = w.Write([]byte(`{"hits":{"hits":[
-					{"_source":{"content":"c","source_id":"srcChunk","source_type":1,"chunk_id":"srcChunk","knowledge_id":"srcKnow","knowledge_base_id":"kbSrc","tag_id":"t","is_enabled":true,"is_recommended":false,"embedding":[0.1,0.2,0.3]}}
-				]}}`))
+				_, _ = w.Write([]byte(`{"hits":{"hits":[` +
+					`{"_source":{"content":"c","source_id":"srcChunk","source_type":1,` +
+					`"chunk_id":"srcChunk","knowledge_id":"srcKnow","knowledge_base_id":"kbSrc",` +
+					`"tag_id":"t","is_enabled":true,"is_recommended":false,"embedding":[0.1,0.2,0.3]}}` +
+					`]}}`))
 			} else {
 				_, _ = w.Write([]byte(`{"hits":{"hits":[]}}`))
 			}
@@ -83,10 +94,17 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 	spy := &spySink{}
 	repo.sink = spy
 
-	err := repo.CopyIndices(context.Background(), "kbSrc",
-		map[string]string{"srcKnow": "tgtKnow"}, // knowledge_id remap (sourceToTargetKBIDMap is keyed by knowledge_id, mirroring ES)
+	err := repo.CopyIndices(
+		context.Background(),
+		"kbSrc",
+		map[string]string{
+			"srcKnow": "tgtKnow",
+		}, // knowledge_id remap (sourceToTargetKBIDMap is keyed by knowledge_id, mirroring ES)
 		map[string]string{"srcChunk": "tgtChunk"},
-		"kbDst", 768, "manual")
+		"kbDst",
+		768,
+		"manual",
+	)
 	if err != nil {
 		t.Fatalf("CopyIndices: %v", err)
 	}
@@ -97,7 +115,7 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 		t.Fatal("no bulk request captured")
 	}
 	// Target IDs present, source IDs gone from the written doc.
-	for _, want := range []string{`"chunk_id":"tgtChunk"`, `"knowledge_id":"tgtKnow"`, `"knowledge_base_id":"kbDst"`, `"source_id":"tgtChunk"`} {
+	for _, want := range []string{`"chunk_id":"tgtChunk"`, `"knowledge_id":"tgtKnow"`, `"knowledge_base_id":"kbDst"`, `"source_id":"tgtChunk"`} { //nolint:lll
 		if !strings.Contains(bulkBody, want) {
 			t.Errorf("bulk body missing %q\n%s", want, bulkBody)
 		}
@@ -157,7 +175,7 @@ func TestBatchUpdateChunkEnabledStatus_GroupedUpdateByQuery(t *testing.T) {
 }
 
 func TestBatchUpdateChunkEnabledStatus_Empty_NoOp(t *testing.T) {
-	repo, ts := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+	repo, ts := newTestRepo(t, func(_ http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
 	})
 	defer ts.Close()

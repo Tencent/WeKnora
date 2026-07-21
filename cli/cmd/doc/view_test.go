@@ -122,7 +122,13 @@ func TestView_JSON_BareObject(t *testing.T) {
 func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "missing")
+	err := runView(
+		context.Background(),
+		&ViewOptions{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc,
+		"missing",
+	)
 	if err == nil {
 		t.Fatal("expected error")
 	}

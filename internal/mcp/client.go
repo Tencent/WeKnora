@@ -1,3 +1,4 @@
+// Package mcp manages Model Context Protocol client connections and tool calls.
 package mcp
 
 import (
@@ -17,8 +18,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// MCPClient defines the interface for MCP client implementations
-type MCPClient interface {
+// Client defines the interface for MCP client implementations
+type Client interface {
 	// Connect establishes connection to the MCP service
 	Connect(ctx context.Context) error
 
@@ -62,7 +63,7 @@ type ClientConfig struct {
 	OAuthRepo interfaces.MCPOAuthRepository
 }
 
-// mcpGoClient wraps mark3labs/mcp-go client to implement our MCPClient interface
+// mcpGoClient wraps mark3labs/mcp-go client to implement our Client interface
 type mcpGoClient struct {
 	service     *types.MCPService
 	client      *client.Client
@@ -145,7 +146,7 @@ func asOAuthRequired(err error) *OAuthRequiredError {
 }
 
 // NewMCPClient creates a new MCP client based on the transport type
-func NewMCPClient(config *ClientConfig) (MCPClient, error) {
+func NewMCPClient(config *ClientConfig) (Client, error) {
 	// Create HTTP client with timeout
 	timeout := 30 * time.Second
 	if config.Service.AdvancedConfig != nil && config.Service.AdvancedConfig.Timeout > 0 {
@@ -214,7 +215,10 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		}
 	case types.MCPTransportStdio:
 		// Stdio transport is disabled for security reasons (potential command injection vulnerabilities)
-		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
+		return nil, fmt.Errorf(
+			"stdio transport is disabled for security reasons; " +
+				"please use SSE or HTTP Streamable transport instead",
+		)
 	default:
 		return nil, ErrUnsupportedTransport
 	}
@@ -244,7 +248,9 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 		principal = types.Principal{Type: types.PrincipalWebUser, ID: config.UserID}.Normalize()
 	}
 	if !principal.Valid() {
-		return transport.OAuthConfig{}, false, fmt.Errorf("principal context is required to connect to an OAuth MCP service")
+		return transport.OAuthConfig{}, false, fmt.Errorf(
+			"principal context is required to connect to an OAuth MCP service",
+		)
 	}
 
 	oauthCfg := transport.OAuthConfig{
@@ -254,7 +260,9 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,
 	}
-	if regClient, err := config.OAuthRepo.GetClient(context.Background(), config.TenantID, svc.ID); err == nil && regClient != nil {
+	if regClient, err := config.OAuthRepo.GetClient(
+		context.Background(), config.TenantID, svc.ID,
+	); err == nil && regClient != nil {
 		oauthCfg.ClientID = regClient.ClientID
 		oauthCfg.ClientSecret = regClient.ClientSecret
 		oauthCfg.RedirectURI = regClient.RedirectURI
@@ -319,7 +327,7 @@ func (c *mcpGoClient) Disconnect() error {
 
 	// Close the client
 	if c.client != nil {
-		c.client.Close()
+		_ = c.client.Close()
 	}
 	c.connected = false
 	c.initialized = false

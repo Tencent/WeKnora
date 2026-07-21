@@ -125,11 +125,11 @@ func TestKnowledgeSpanRepo_CancelDescendants(t *testing.T) {
 	// Tree: chunking → embedding (running) → batch[0] (running)
 	//                → multimodal (running) → image[0] (done)
 	for _, r := range []*types.KnowledgeProcessingSpan{
-		{KnowledgeID: kid, Attempt: 1, SpanID: "chunking", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "embedding", ParentSpanID: "chunking", Name: types.StageEmbedding, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "batch0", ParentSpanID: "embedding", Name: "embedding.batch[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "multimodal", ParentSpanID: "chunking", Name: types.StageMultimodal, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "image0", ParentSpanID: "multimodal", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusDone, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "chunking", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},                                //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "embedding", ParentSpanID: "chunking", Name: types.StageEmbedding, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},    //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "batch0", ParentSpanID: "embedding", Name: "embedding.batch[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusRunning, StartedAt: &now}, //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "multimodal", ParentSpanID: "chunking", Name: types.StageMultimodal, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},  //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "image0", ParentSpanID: "multimodal", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusDone, StartedAt: &now},  //nolint:lll
 	} {
 		require.NoError(t, repo.Upsert(ctx, r))
 	}
@@ -146,7 +146,12 @@ func TestKnowledgeSpanRepo_CancelDescendants(t *testing.T) {
 	for _, r := range rows {
 		statusBy[r.SpanID] = r.Status
 	}
-	assert.Equal(t, types.SpanStatusRunning, statusBy["chunking"], "the failed span itself stays untouched (FailSpan layer flips it)")
+	assert.Equal(
+		t,
+		types.SpanStatusRunning,
+		statusBy["chunking"],
+		"the failed span itself stays untouched (FailSpan layer flips it)",
+	)
 	assert.Equal(t, types.SpanStatusCancelled, statusBy["embedding"])
 	assert.Equal(t, types.SpanStatusCancelled, statusBy["batch0"])
 	assert.Equal(t, types.SpanStatusCancelled, statusBy["multimodal"])
@@ -160,9 +165,9 @@ func TestKnowledgeSpanRepo_CancelOpenSpansByName(t *testing.T) {
 	now := time.Now()
 
 	for _, r := range []*types.KnowledgeProcessingSpan{
-		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-old", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-done", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusDone, StartedAt: &now},
-		{KnowledgeID: kid, Attempt: 1, SpanID: "q-old", Name: "postprocess.question", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-old", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now}, //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-done", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusDone, StartedAt: &now},   //nolint:lll
+		{KnowledgeID: kid, Attempt: 1, SpanID: "q-old", Name: "postprocess.question", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},  //nolint:lll
 	} {
 		require.NoError(t, repo.Upsert(ctx, r))
 	}

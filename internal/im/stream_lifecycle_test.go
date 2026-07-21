@@ -13,9 +13,9 @@ type imStreamDisplayState struct {
 	agentInner        streamSection
 	agentLiveAnswer   strings.Builder
 	answerOuter       strings.Builder
-	agentToolSteps    []IMToolStep
+	agentToolSteps    []ToolStep
 	agentToolIdx      map[string]int
-	pipelineToolSteps []IMToolStep
+	pipelineToolSteps []ToolStep
 	pipelineIdx       map[string]int
 }
 
@@ -38,12 +38,12 @@ func (s *imStreamDisplayState) retractAgentLiveAnswer() {
 	s.agentLiveAnswer.Reset()
 }
 
-func (s *imStreamDisplayState) parts() IMStreamParts {
-	mode := IMStreamModeQuickQA
+func (s *imStreamDisplayState) parts() StreamParts {
+	mode := StreamModeQuickQA
 	if s.useAgent {
-		mode = IMStreamModeAgent
+		mode = StreamModeAgent
 	}
-	return IMStreamParts{
+	return StreamParts{
 		Mode:              mode,
 		PipelineToolSteps: s.pipelineToolSteps,
 		AgentInner:        s.agentInner.text.String(),
@@ -76,7 +76,7 @@ func TestIMStreamLifecycle_agentToolRetract(t *testing.T) {
 	}
 
 	state.retractAgentLiveAnswer()
-	upsertIMToolStep(&state.agentToolSteps, state.agentToolIdx, "tool-1", func(step *IMToolStep) {
+	upsertToolStep(&state.agentToolSteps, state.agentToolIdx, "tool-1", func(step *ToolStep) {
 		step.ToolName = "grep_chunks"
 		step.Pending = true
 	})
@@ -88,7 +88,7 @@ func TestIMStreamLifecycle_agentToolRetract(t *testing.T) {
 		t.Fatalf("retracted preamble missing, got: %q", duringTools)
 	}
 
-	upsertIMToolStep(&state.agentToolSteps, state.agentToolIdx, "tool-1", func(step *IMToolStep) {
+	upsertToolStep(&state.agentToolSteps, state.agentToolIdx, "tool-1", func(step *ToolStep) {
 		step.ToolName = "grep_chunks"
 		step.Pending = false
 		step.Success = true
@@ -139,12 +139,12 @@ func TestIMStreamLifecycle_agentToolRetract(t *testing.T) {
 func TestIMStreamLifecycle_quickQAPipeline(t *testing.T) {
 	state := newIMStreamDisplayState(false)
 
-	upsertIMToolStep(&state.pipelineToolSteps, state.pipelineIdx, "qu-1", func(step *IMToolStep) {
+	upsertToolStep(&state.pipelineToolSteps, state.pipelineIdx, "qu-1", func(step *ToolStep) {
 		step.ToolName = "query_understand"
 		step.Pending = false
 		step.Success = true
 	})
-	upsertIMToolStep(&state.pipelineToolSteps, state.pipelineIdx, "ks-1", func(step *IMToolStep) {
+	upsertToolStep(&state.pipelineToolSteps, state.pipelineIdx, "ks-1", func(step *ToolStep) {
 		step.ToolName = "knowledge_search"
 		step.Pending = true
 		step.Arguments = map[string]any{"query": "文明6"}

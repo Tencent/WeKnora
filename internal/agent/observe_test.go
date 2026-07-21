@@ -82,7 +82,7 @@ func TestAnalyzeResponse_NaturalStop_Terminates(t *testing.T) {
 // "The reasoning_content in the thinking mode must be passed back to the API."
 // (issue #1302).
 func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
-	engine := &AgentEngine{}
+	engine := &Engine{}
 
 	t.Run("assistant message carries reasoning_content alongside thought and tool_calls", func(t *testing.T) {
 		step := types.AgentStep{
@@ -90,10 +90,12 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 			Thought:          "I will call search.",
 			ReasoningContent: "Detailed chain of thought from MiMo/DeepSeek.",
 			ToolCalls: []types.ToolCall{{
-				ID:               "call_1",
-				Name:             "knowledge_search",
-				Args:             map[string]interface{}{"query": "hi"},
-				ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-thought-signature"}`)},
+				ID:   "call_1",
+				Name: "knowledge_search",
+				Args: map[string]interface{}{"query": "hi"},
+				ProviderMetadata: types.ToolCallMetadata{
+					"google": json.RawMessage(`{"thought_signature":"gemini-thought-signature"}`),
+				},
 				Result: &types.ToolResult{
 					Success: true,
 					Output:  "result text",
@@ -165,7 +167,7 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 }
 
 func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
-	engine := &AgentEngine{}
+	engine := &Engine{}
 	prior := []chat.Message{
 		{Role: "system", Content: "Custom agent prompt."},
 		{Role: "user", Content: "解释流程"},
@@ -262,7 +264,7 @@ func TestBuildMustUseBlock_SkipsMCPWithoutTools(t *testing.T) {
 }
 
 func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
-	engine := &AgentEngine{
+	engine := &Engine{
 		knowledgeBasesInfo: []*KnowledgeBaseInfo{{ID: "kb-1", Name: "Docs"}},
 		pinnedSkills:       []*PinnedSkillInfo{{Name: "analysis"}},
 	}
@@ -273,7 +275,7 @@ func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
 }
 
 func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *testing.T) {
-	engine := &AgentEngine{
+	engine := &Engine{
 		sourceRefs: llmreference.NewRegistry(),
 		knowledgeBasesInfo: []*KnowledgeBaseInfo{{
 			ID:   "kb-real-id",

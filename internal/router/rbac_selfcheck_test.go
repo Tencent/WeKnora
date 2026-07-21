@@ -10,13 +10,13 @@ import (
 // TestAssertAPIKeyPoliciesMatchRoutes_TrailingSlash guards the class of bug
 // where a route registered with a "/" rel (gin path ".../x/") was flagged as
 // missing against the normalized policy key (".../x"), panicking at startup.
-func TestAssertAPIKeyPoliciesMatchRoutes_TrailingSlash(t *testing.T) {
+func TestAssertAPIKeyPoliciesMatchRoutes_TrailingSlash(_ *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	v1 := engine.Group("/api/v1")
 
 	g := &rbacGuards{}
-	noop := func(c *gin.Context) {}
+	noop := func(_ *gin.Context) {}
 
 	// Register through the apiKey helpers using both "" and "/" rel plus a
 	// nested path, mirroring real route declarations.

@@ -52,7 +52,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 // ResolveResourceAncestors has nothing to do: feeds are a flat list with no
 // nesting, so a selection has no ancestors to reveal.
 func (c *Connector) ResolveResourceAncestors(
-	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	_ context.Context, _ *types.DataSourceConfig, _ []string,
 ) ([]string, error) {
 	return []string{}, nil
 }

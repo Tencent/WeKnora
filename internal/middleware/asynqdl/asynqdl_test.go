@@ -21,7 +21,7 @@ type fakeRepo struct {
 	fail error
 }
 
-func (f *fakeRepo) Insert(ctx context.Context, dl *types.TaskDeadLetter) error {
+func (f *fakeRepo) Insert(_ context.Context, dl *types.TaskDeadLetter) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fail != nil {

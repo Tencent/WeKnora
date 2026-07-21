@@ -17,7 +17,11 @@ type UserService interface {
 	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login.
 	// provisioning is the default tenant mode for a newly auto-created user
 	// (resolved by the caller from auth.default_tenant_mode).
-	LoginWithOIDC(ctx context.Context, code, redirectURI string, provisioning types.TenantProvisioningMode) (*types.OIDCCallbackResponse, error)
+	LoginWithOIDC(
+		ctx context.Context,
+		code, redirectURI string,
+		provisioning types.TenantProvisioningMode,
+	) (*types.OIDCCallbackResponse, error)
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
 	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
@@ -55,7 +59,12 @@ type UserService interface {
 	// returns the corresponding LoginResponse. The caller's previous
 	// refresh token (passed in for revocation) is invalidated. Membership
 	// is verified via the TenantMember service before tokens are issued.
-	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
+	SwitchTenant(
+		ctx context.Context,
+		user *types.User,
+		targetTenantID uint64,
+		currentRefreshToken string,
+	) (*types.LoginResponse, error)
 	// ValidateToken validates an access token. It returns the user
 	// referenced by the token plus the active tenant ID encoded in the
 	// JWT's `tenant_id` claim — the latter lets the auth middleware
@@ -85,7 +94,11 @@ type UserService interface {
 	// UpdateUserPreferences partially updates the calling user's
 	// preferences blob (PATCH semantics: only keys present in `patch`
 	// overwrite existing values). Returns the updated, persisted prefs.
-	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
+	UpdateUserPreferences(
+		ctx context.Context,
+		userID string,
+		patch types.UserPreferences,
+	) (types.UserPreferences, error)
 }
 
 // UserRepository defines the user repository interface

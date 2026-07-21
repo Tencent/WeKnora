@@ -68,7 +68,8 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 // @Param        page_size    query     int     false  "每页数量"
 // @Param        tag_id       query     int     false  "标签ID筛选(seq_id)"
 // @Param        keyword      query     string  false  "关键词搜索"
-// @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
+// @Param        search_field query     string  false  "搜索字段: standard_question(标准问题),
+// similar_questions(相似问法), answers(答案), 默认搜索全部"
 // @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
 // @Success      200        {object}  map[string]interface{}  "FAQ列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
@@ -82,7 +83,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
-		c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
 		return
 	}
 
@@ -92,7 +93,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 		var err error
 		tagSeqID, err = strconv.ParseInt(tagIDStr, 10, 64)
 		if err != nil {
-			c.Error(errors.NewBadRequestError("tag_id 必须是整数"))
+			_ = c.Error(errors.NewBadRequestError("tag_id 必须是整数"))
 			return
 		}
 	}
@@ -103,7 +104,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagSeqID, keyword, searchField, sortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -135,14 +136,14 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	var req types.FAQBatchUpsertPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ upsert payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	taskID, err := h.knowledgeService.UpsertFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -174,14 +175,14 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	entry, err := h.knowledgeService.CreateFAQEntry(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -212,20 +213,20 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	entrySeqID, err := strconv.ParseInt(c.Param("entry_id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
+		_ = c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
 		return
 	}
 
 	entry, err := h.knowledgeService.UpdateFAQEntry(ctx, kbID, entrySeqID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -255,12 +256,12 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	var req faqEntryTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry tag batch payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 	if err := h.knowledgeService.UpdateFAQEntryTagBatch(ctx, kbID, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -288,12 +289,12 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	var req types.FAQEntryFieldsBatchUpdate
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry fields batch payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 	if err := h.knowledgeService.UpdateFAQEntryFieldsBatch(ctx, kbID, &req); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -321,13 +322,13 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	var req faqDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to bind FAQ delete payload: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	if err := h.knowledgeService.DeleteFAQEntries(ctx, kbID, req.IDs); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -356,7 +357,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	var req types.FAQSearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ search payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 	req.QueryText = secutils.SanitizeForLog(req.QueryText)
@@ -369,7 +370,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	entries, err := h.knowledgeService.SearchFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -398,7 +399,7 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -430,14 +431,14 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 
 	entrySeqID, err := strconv.ParseInt(c.Param("entry_id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
+		_ = c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
 		return
 	}
 
 	entry, err := h.knowledgeService.GetFAQEntry(ctx, kbID, entrySeqID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -463,14 +464,14 @@ func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	taskID := secutils.SanitizeForLog(c.Param("task_id"))
 	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	progress, err := h.knowledgeService.GetFAQImportProgress(ctx, taskID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -501,13 +502,13 @@ func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 	var req updateLastFAQImportResultDisplayStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind display status update payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	if err := h.knowledgeService.UpdateLastFAQImportResultDisplayStatus(ctx, kbID, req.DisplayStatus); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -537,21 +538,21 @@ func (h *FAQHandler) AddSimilarQuestions(c *gin.Context) {
 
 	entrySeqID, err := strconv.ParseInt(c.Param("entry_id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
+		_ = c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
 		return
 	}
 
 	var req addSimilarQuestionsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind add similar questions payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
 
 	entry, err := h.knowledgeService.AddSimilarQuestions(ctx, kbID, entrySeqID, req.SimilarQuestions)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 

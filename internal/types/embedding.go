@@ -3,16 +3,20 @@ package types
 // SourceType represents the type of content source
 type SourceType int
 
+// PassageSourceType and related constants.
 const (
-	ChunkSourceType   SourceType = iota // Source is a text chunk
-	PassageSourceType                   // Source is a passage
-	SummarySourceType                   // Source is a summary
+	// ChunkSourceType means the indexed source is a text chunk.
+	ChunkSourceType   SourceType = iota
+	PassageSourceType            // Source is a passage
+	SummarySourceType            // Source is a summary
 )
 
 // MatchType represents the type of matching algorithm
 type MatchType int
 
+// MatchTypeKeywords and related constants.
 const (
+	// MatchTypeEmbedding matches via vector embedding similarity.
 	MatchTypeEmbedding MatchType = iota
 	MatchTypeKeywords
 	MatchTypeNearByChunk

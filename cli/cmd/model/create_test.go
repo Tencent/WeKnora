@@ -35,10 +35,17 @@ func (f *fakeCreateSvc) ListModelProviders(_ context.Context, _ string) ([]sdk.M
 		return f.providers, nil
 	}
 	return []sdk.ModelProvider{
-		{Value: "openai", ModelTypes: []string{"chat", "embedding"},
-			DefaultURLs: map[string]string{"chat": "https://api.openai.com/v1", "embedding": "https://api.openai.com/v1"}},
-		{Value: "aliyun", ModelTypes: []string{"chat", "embedding", "rerank"},
-			DefaultURLs: map[string]string{"embedding": "https://dashscope.example/v1"}},
+		{
+			Value: "openai", ModelTypes: []string{"chat", "embedding"},
+			DefaultURLs: map[string]string{
+				"chat":      "https://api.openai.com/v1",
+				"embedding": "https://api.openai.com/v1",
+			},
+		},
+		{
+			Value: "aliyun", ModelTypes: []string{"chat", "embedding", "rerank"},
+			DefaultURLs: map[string]string{"embedding": "https://dashscope.example/v1"},
+		},
 	}, nil
 }
 
@@ -96,13 +103,28 @@ func TestModelCreate_RemoteProviderValidatedAndBaseURLDefaulted(t *testing.T) {
 		&CreateOptions{Name: "text-embedding-3-small", Type: "Embedding", Source: "remote", Provider: "openai"},
 		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, nil))
 	assert.Equal(t, "openai", svc.got.Parameters["provider"])
-	assert.Equal(t, "https://api.openai.com/v1", svc.got.Parameters["base_url"], "base_url defaulted from provider catalog")
+	assert.Equal(
+		t,
+		"https://api.openai.com/v1",
+		svc.got.Parameters["base_url"],
+		"base_url defaulted from provider catalog",
+	)
 
 	// Explicit --base-url is respected (not overridden by the catalog default).
 	svc2 := &fakeCreateSvc{}
-	require.NoError(t, runCreate(context.Background(),
-		&CreateOptions{Name: "m", Type: "Embedding", Source: "remote", Provider: "openai", BaseURL: "https://proxy.local/v1"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc2, nil))
+	require.NoError(t, runCreate(
+		context.Background(),
+		&CreateOptions{
+			Name:     "m",
+			Type:     "Embedding",
+			Source:   "remote",
+			Provider: "openai",
+			BaseURL:  "https://proxy.local/v1",
+		},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+		svc2,
+		nil,
+	))
 	assert.Equal(t, "https://proxy.local/v1", svc2.got.Parameters["base_url"])
 
 	// Unknown provider → input.invalid_argument, no model created.
@@ -119,7 +141,13 @@ func TestModelCreate_RemoteProviderValidatedAndBaseURLDefaulted(t *testing.T) {
 func TestModelCreate_APIKeyStdinEmpty(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	opts := &CreateOptions{Name: "m", Type: "Embedding", Source: "openai", APIKeyStdin: true, StdinReader: strings.NewReader("")}
+	opts := &CreateOptions{
+		Name:        "m",
+		Type:        "Embedding",
+		Source:      "openai",
+		APIKeyStdin: true,
+		StdinReader: strings.NewReader(""),
+	}
 	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, nil)
 	var ce *cmdutil.Error
 	require.ErrorAs(t, err, &ce)
@@ -224,9 +252,9 @@ func TestModelCreate_LocalRejectsProvider(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, ce.Code)
 }
 
-// TestModelCreate_RejectsProviderNameAsSource: a provider name is not a valid
+// TestModelCreate_RejectsNameAsSource: a provider name is not a valid
 // --source (only local/remote) — guards the misleading-source regression.
-func TestModelCreate_RejectsProviderNameAsSource(t *testing.T) {
+func TestModelCreate_RejectsNameAsSource(t *testing.T) {
 	iostreams.SetForTest(t)
 	root := withRootHarnessModel(NewCmdCreate(modelDryRunFactory(t)),
 		"x", "--type", "Embedding", "--source", "openai", "--format", "json")

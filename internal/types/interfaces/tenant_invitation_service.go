@@ -54,7 +54,12 @@ type TenantInvitationService interface {
 
 	// ListTenantInvitationsPage paginates invitations for the tenant
 	// management UI after the lazy sweep (same filtering as ListByTenant).
-	ListTenantInvitationsPage(ctx context.Context, tenantID uint64, includeTerminal bool, page, pageSize int) ([]*types.TenantInvitation, int64, error)
+	ListTenantInvitationsPage(
+		ctx context.Context,
+		tenantID uint64,
+		includeTerminal bool,
+		page, pageSize int,
+	) ([]*types.TenantInvitation, int64, error)
 
 	// ListByInvitee returns invitations addressed to the user across
 	// all tenants. Always runs the lazy sweep first.

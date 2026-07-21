@@ -1,3 +1,4 @@
+// Package datasource provides datasource functionality.
 package datasource
 
 import (
@@ -48,7 +49,11 @@ type Connector interface {
 	// FetchIncremental performs an incremental sync based on the provided cursor.
 	// Returns items that have changed since the last sync, a new cursor for the next sync,
 	// and an error if the operation fails.
-	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
+	FetchIncremental(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		cursor *types.SyncCursor,
+	) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
 // ConnectorRegistry manages the registration and lookup of available connectors
@@ -104,6 +109,9 @@ type ConnectorMetadata struct {
 	Capabilities []string `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
 }
 
+// ConnectorMetadataRegistry is exported.
+
+// ConnectorMetadataRegistry implements the required behavior.
 // GetConnectorMetadata returns metadata for all available connectors
 // This is used by the frontend to display connector options
 var ConnectorMetadataRegistry = map[string]ConnectorMetadata{

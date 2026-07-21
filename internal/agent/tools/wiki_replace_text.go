@@ -18,7 +18,11 @@ type wikiReplaceTextTool struct {
 }
 
 // NewWikiReplaceTextTool creates a new wiki_replace_text tool
-func NewWikiReplaceTextTool(wikiPageService interfaces.WikiPageService, kbIDs []string, knowledgeService interfaces.KnowledgeService) types.Tool {
+func NewWikiReplaceTextTool(
+	wikiPageService interfaces.WikiPageService,
+	kbIDs []string,
+	knowledgeService interfaces.KnowledgeService,
+) types.Tool {
 	return &wikiReplaceTextTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReplaceText,
@@ -41,7 +45,8 @@ func NewWikiReplaceTextTool(wikiPageService interfaces.WikiPageService, kbIDs []
 					"source_refs": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "An optional list of short dN source document IDs that justify this change. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
+						"description": "An optional list of short dN source document IDs that justify this change. If" +
+							" provided, these will COMPLETELY REPLACE the existing source_refs of the page."
 					}
 				},
 				"required": ["slug", "old_text", "new_text"]
@@ -77,11 +82,17 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	// Get the existing page
 	existingPage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, params.Slug)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err),
+		}, nil
 	}
 
 	if !strings.Contains(existingPage.Content, params.OldText) {
-		return &types.ToolResult{Success: false, Error: "old_text not found in the current page content. Ensure you copy it exactly as it appears."}, nil
+		return &types.ToolResult{
+			Success: false,
+			Error:   "old_text not found in the current page content. Ensure you copy it exactly as it appears.",
+		}, nil
 	}
 
 	existingPage.Content = strings.Replace(existingPage.Content, params.OldText, params.NewText, 1)
@@ -98,7 +109,12 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	oldPreview := truncateRunes(params.OldText, 80)
 	newPreview := truncateRunes(params.NewText, 80)
 
-	output := fmt.Sprintf("Successfully replaced text on page [[%s]].\n- Old: %s\n- New: %s", params.Slug, oldPreview, newPreview)
+	output := fmt.Sprintf(
+		"Successfully replaced text on page [[%s]].\n- Old: %s\n- New: %s",
+		params.Slug,
+		oldPreview,
+		newPreview,
+	)
 
 	return &types.ToolResult{
 		Success: true,

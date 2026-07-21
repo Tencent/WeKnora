@@ -28,7 +28,12 @@ type fakeListSvc struct {
 	callIdx int
 }
 
-func (f *fakeListSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, _ ...string) ([]sdk.Chunk, int64, error) {
+func (f *fakeListSvc) ListKnowledgeChunks(
+	_ context.Context,
+	docID string,
+	page, pageSize int,
+	_ ...string,
+) ([]sdk.Chunk, int64, error) {
 	f.calls = append(f.calls, listCall{docID, page, pageSize})
 	defer func() { f.callIdx++ }()
 	if f.callIdx >= len(f.pages) {
@@ -157,7 +162,12 @@ func TestList_JSON_EmitsTotalCount(t *testing.T) {
 func TestList_LimitInvalid(t *testing.T) {
 	svc := &fakeListSvc{}
 	for _, lim := range []int{0, -1, 10001} {
-		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: lim, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
+		err := runList(
+			context.Background(),
+			&ListOptions{DocID: "d", Limit: lim, PageSize: 50},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		)
 		require.Error(t, err, "expect error for --limit %d", lim)
 		assert.Contains(t, err.Error(), "input.invalid_argument")
 	}
@@ -166,7 +176,12 @@ func TestList_LimitInvalid(t *testing.T) {
 func TestList_PageSizeInvalid(t *testing.T) {
 	svc := &fakeListSvc{}
 	for _, ps := range []int{0, -1, 1001} {
-		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: 50, PageSize: ps}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
+		err := runList(
+			context.Background(),
+			&ListOptions{DocID: "d", Limit: 50, PageSize: ps},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "input.invalid_argument")
 	}
@@ -184,11 +199,26 @@ func TestList_Text_TableHeader(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{
 		pages: [][]sdk.Chunk{{
-			{ID: "c1", ChunkIndex: 0, Content: "the quick brown fox", ChunkType: "text", IsEnabled: true, UpdatedAt: "2026-05-15T12:00:00Z"},
+			{
+				ID:         "c1",
+				ChunkIndex: 0,
+				Content:    "the quick brown fox",
+				ChunkType:  "text",
+				IsEnabled:  true,
+				UpdatedAt:  "2026-05-15T12:00:00Z",
+			},
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(
+		t,
+		runList(
+			context.Background(),
+			&ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			svc,
+		),
+	)
 	body := out.String()
 	for _, want := range []string{"CHUNK_ID", "INDEX", "TYPE", "ENABLED", "PREVIEW", "UPDATED", "c1", "text"} {
 		assert.Contains(t, body, want)
@@ -202,7 +232,15 @@ func TestList_Text_PreviewTruncatedTo80(t *testing.T) {
 		pages:  [][]sdk.Chunk{{{ID: "c1", Content: long, ChunkType: "text", IsEnabled: true}}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(
+		t,
+		runList(
+			context.Background(),
+			&ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatText},
+			svc,
+		),
+	)
 	body := out.String()
 	// 80-col preview means we never see the 100th `a` from the content (only column truncation kicks in).
 	assert.NotContains(t, body, strings.Repeat("a", 100), "preview must be truncated to ~80 chars")
@@ -216,7 +254,15 @@ func TestList_JSON_BareArray(t *testing.T) {
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NoError(
+		t,
+		runList(
+			context.Background(),
+			&ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		),
+	)
 	var env struct {
 		OK   bool        `json:"ok"`
 		Data []sdk.Chunk `json:"data"`
@@ -234,7 +280,15 @@ func TestList_JSON_BareArray(t *testing.T) {
 func TestList_EmptyResultRendersBareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{pages: [][]sdk.Chunk{{}}, totals: []int64{0}, errs: []error{nil}}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NoError(
+		t,
+		runList(
+			context.Background(),
+			&ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON},
+			svc,
+		),
+	)
 	var env struct {
 		OK   bool        `json:"ok"`
 		Data []sdk.Chunk `json:"data"`

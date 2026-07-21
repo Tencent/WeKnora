@@ -17,12 +17,12 @@ import (
 // One row per (tenant_id, service_id). The client_secret is encrypted at rest
 // (AES-256-GCM) when SYSTEM_AES_KEY is configured.
 type MCPOAuthClient struct {
-	ID           string    `json:"id"            gorm:"type:varchar(36);primaryKey"`
-	TenantID     uint64    `json:"tenant_id"     gorm:"not null;uniqueIndex:idx_mcp_oauth_clients_tenant_svc"`
-	ServiceID    string    `json:"service_id"    gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_clients_tenant_svc;index"`
-	ClientID     string    `json:"client_id"     gorm:"type:varchar(512);not null"`
-	ClientSecret string    `json:"-"             gorm:"type:text"`
-	RedirectURI  string    `json:"redirect_uri"  gorm:"type:varchar(1024)"`
+	ID           string    `json:"id"           gorm:"type:varchar(36);primaryKey"`
+	TenantID     uint64    `json:"tenant_id"    gorm:"not null;uniqueIndex:idx_mcp_oauth_clients_tenant_svc"`
+	ServiceID    string    `json:"service_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_clients_tenant_svc;index"` //nolint:lll // long struct tag or string
+	ClientID     string    `json:"client_id"    gorm:"type:varchar(512);not null"`
+	ClientSecret string    `json:"-"            gorm:"type:text"`
+	RedirectURI  string    `json:"redirect_uri" gorm:"type:varchar(1024)"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -33,7 +33,7 @@ type MCPOAuthClient struct {
 func (MCPOAuthClient) TableName() string { return "mcp_oauth_clients" }
 
 // BeforeCreate sets the primary key and encrypts the client secret.
-func (m *MCPOAuthClient) BeforeCreate(tx *gorm.DB) error {
+func (m *MCPOAuthClient) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -42,13 +42,13 @@ func (m *MCPOAuthClient) BeforeCreate(tx *gorm.DB) error {
 }
 
 // BeforeSave re-encrypts the secret on update paths.
-func (m *MCPOAuthClient) BeforeSave(tx *gorm.DB) error {
+func (m *MCPOAuthClient) BeforeSave(_ *gorm.DB) error {
 	m.encryptSecret()
 	return nil
 }
 
 // AfterFind decrypts the client secret after loading.
-func (m *MCPOAuthClient) AfterFind(tx *gorm.DB) error {
+func (m *MCPOAuthClient) AfterFind(_ *gorm.DB) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(m.ClientSecret); ok {
 		m.ClientSecret = plain
 	} else {
@@ -75,15 +75,15 @@ func (m *MCPOAuthClient) encryptSecret() {
 // AccessToken and RefreshToken are encrypted at rest (AES-256-GCM) when
 // SYSTEM_AES_KEY is configured.
 type MCPOAuthToken struct {
-	ID            string    `json:"id"            gorm:"type:varchar(36);primaryKey"`
-	TenantID      uint64    `json:"tenant_id"     gorm:"not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc"`
-	UserID        string    `json:"user_id"       gorm:"type:varchar(512);not null;index"`
-	PrincipalType string    `json:"principal_type" gorm:"type:varchar(32);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
-	PrincipalID   string    `json:"principal_id"   gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
-	ServiceID     string    `json:"service_id"    gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
-	AccessToken   string    `json:"-"             gorm:"type:text"`
-	RefreshToken  string    `json:"-"             gorm:"type:text"`
-	TokenType     string    `json:"token_type"    gorm:"type:varchar(32)"`
+	ID            string    `json:"id"             gorm:"type:varchar(36);primaryKey"`
+	TenantID      uint64    `json:"tenant_id"      gorm:"not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc"`
+	UserID        string    `json:"user_id"        gorm:"type:varchar(512);not null;index"`
+	PrincipalType string    `json:"principal_type" gorm:"type:varchar(32);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"` //nolint:lll // long struct tag or string
+	PrincipalID   string    `json:"principal_id" gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`  //nolint:lll // long struct tag or string
+	ServiceID     string    `json:"service_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`     //nolint:lll // long struct tag or string
+	AccessToken   string    `json:"-"              gorm:"type:text"`
+	RefreshToken  string    `json:"-"              gorm:"type:text"`
+	TokenType     string    `json:"token_type"     gorm:"type:varchar(32)"`
 	ExpiresAt     time.Time `json:"expires_at"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -94,7 +94,7 @@ type MCPOAuthToken struct {
 func (MCPOAuthToken) TableName() string { return "mcp_oauth_tokens" }
 
 // BeforeCreate sets the primary key and encrypts secrets.
-func (m *MCPOAuthToken) BeforeCreate(tx *gorm.DB) error {
+func (m *MCPOAuthToken) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -103,13 +103,13 @@ func (m *MCPOAuthToken) BeforeCreate(tx *gorm.DB) error {
 }
 
 // BeforeSave re-encrypts secrets on update paths.
-func (m *MCPOAuthToken) BeforeSave(tx *gorm.DB) error {
+func (m *MCPOAuthToken) BeforeSave(_ *gorm.DB) error {
 	m.encryptSecrets()
 	return nil
 }
 
 // AfterFind decrypts secrets after loading.
-func (m *MCPOAuthToken) AfterFind(tx *gorm.DB) error {
+func (m *MCPOAuthToken) AfterFind(_ *gorm.DB) error {
 	if plain, ok := utils.DecryptStoredSecretLenient(m.AccessToken); ok {
 		m.AccessToken = plain
 	} else {

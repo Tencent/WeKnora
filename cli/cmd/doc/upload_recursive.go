@@ -26,7 +26,13 @@ type uploadedFile struct {
 // in one run. Exit semantics: nil error on full success, a typed *cmdutil.Error
 // when ≥1 file failed (the typed code mirrors the first failure's
 // classification so callers can still branch).
-func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOptions, svc UploadService, kbID, dir string) error {
+func runUploadRecursive(
+	ctx context.Context,
+	opts *UploadOptions,
+	fopts *cmdutil.FormatOptions,
+	svc UploadService,
+	kbID, dir string,
+) error {
 	if opts.Name != "" {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,

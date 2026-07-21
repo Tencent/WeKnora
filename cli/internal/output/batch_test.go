@@ -147,6 +147,9 @@ func TestWriteBatchEnvelope_AllFail(t *testing.T) {
 	// H3b invariant: successes:0 must appear even when all items failed.
 	// (*int semantics: nil is omitted; &0 is serialized as 0.)
 	if !strings.Contains(got, `"successes":0`) {
-		t.Errorf("all-fail batch must emit successes:0 (not omit it); invariant successes+failures==count would be broken; got %q", got)
+		t.Errorf(
+			"all-fail batch must emit successes:0 (not omit it); invariant successes+failures==count would be broken; got %q",
+			got,
+		)
 	}
 }

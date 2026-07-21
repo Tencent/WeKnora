@@ -24,20 +24,21 @@ type FunctionDef struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// ChatOptions 聊天选项
-type ChatOptions struct {
-	Temperature         float64         `json:"temperature"`                   // 温度参数
-	TopP                float64         `json:"top_p"`                         // Top P 参数
-	Seed                int             `json:"seed"`                          // 随机种子
-	MaxTokens           int             `json:"max_tokens"`                    // 最大 token 数
-	MaxCompletionTokens int             `json:"max_completion_tokens"`         // 最大完成 token 数
-	FrequencyPenalty    float64         `json:"frequency_penalty"`             // 频率惩罚
-	PresencePenalty     float64         `json:"presence_penalty"`              // 存在惩罚
-	Thinking            *bool           `json:"thinking"`                      // 是否启用思考
-	Tools               []Tool          `json:"tools,omitempty"`               // 可用工具列表
-	ToolChoice          string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
-	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
-	Format              json.RawMessage `json:"format,omitempty"`              // 响应格式定义
+// Options holds per-request generation parameters for chat completions.
+type Options struct {
+	Temperature         float64 `json:"temperature"`           // 温度参数
+	TopP                float64 `json:"top_p"`                 // Top P 参数
+	Seed                int     `json:"seed"`                  // 随机种子
+	MaxTokens           int     `json:"max_tokens"`            // 最大 token 数
+	MaxCompletionTokens int     `json:"max_completion_tokens"` // 最大完成 token 数
+	FrequencyPenalty    float64 `json:"frequency_penalty"`     // 频率惩罚
+	PresencePenalty     float64 `json:"presence_penalty"`      // 存在惩罚
+	Thinking            *bool   `json:"thinking"`              // 是否启用思考
+	Tools               []Tool  `json:"tools,omitempty"`       // 可用工具列表
+	ToolChoice          string  `json:"tool_choice,omitempty"` // "auto", "required", "none", or specific tool
+	// ParallelToolCalls 是否允许并行工具调用（默认 nil 表示由模型决定）
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
+	Format            json.RawMessage `json:"format,omitempty"` // 响应格式定义
 }
 
 // MessageContentPart represents a part of multi-content message
@@ -61,7 +62,8 @@ type Message struct {
 	Name         string               `json:"name,omitempty"`          // Function/tool name (for tool role)
 	ToolCallID   string               `json:"tool_call_id,omitempty"`  // Tool call ID (for tool role)
 	ToolCalls    []ToolCall           `json:"tool_calls,omitempty"`    // Tool calls (for assistant role)
-	Images       []string             `json:"images,omitempty"`        // Image URLs for multimodal (only for current user message)
+	// Image URLs for multimodal (only for current user message)
+	Images []string `json:"images,omitempty"`
 	// ReasoningContent 是 assistant 推理类模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
 	// 上一轮输出的思考内容。部分供应商（MiMo、DeepSeek V3.2/V4 thinking 模式）要求多轮对话中
 	// 把 assistant 的 reasoning_content 原样回传，否则会以 400 拒绝请求；其他不要求的供应商
@@ -86,10 +88,10 @@ type FunctionCall struct {
 // Chat 定义了聊天接口
 type Chat interface {
 	// Chat 进行非流式聊天
-	Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error)
+	Chat(ctx context.Context, messages []Message, opts *Options) (*types.ChatResponse, error)
 
 	// ChatStream 进行流式聊天
-	ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error)
+	ChatStream(ctx context.Context, messages []Message, opts *Options) (<-chan types.StreamResponse, error)
 
 	// GetModelName 获取模型名称
 	GetModelName() string
@@ -98,7 +100,8 @@ type Chat interface {
 	GetModelID() string
 }
 
-type ChatConfig struct {
+// Config holds connection and credential settings for a chat model instance.
+type Config struct {
 	Source    types.ModelSource
 	BaseURL   string
 	ModelName string
@@ -115,15 +118,15 @@ type ChatConfig struct {
 	AppSecret     string // 加密值，由工厂函数调用方传入，在 NewWeKnoraCloudChat 中使用前已解密
 }
 
-// ConfigFromModel 根据 types.Model 构造 ChatConfig。
+// ConfigFromModel 根据 types.Model 构造 Config。
 // 保证生产路径（service 层根据 DB 中的模型配置拉起实例）和测试路径
 // （handler 层根据前端表单临时拉起实例）走完全相同的字段映射，避免重复样板。
 // appID / appSecret 是已经解密/解析好的 WeKnoraCloud 凭证，调用方负责传入。
-func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
+func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 	if m == nil {
 		return nil
 	}
-	return &ChatConfig{
+	return &Config{
 		ModelID:        m.ID,
 		APIKey:         m.Parameters.APIKey,
 		BaseURL:        m.Parameters.BaseURL,
@@ -139,7 +142,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 }
 
 // NewChat 创建聊天实例
-func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, error) {
+func NewChat(config *Config, ollamaService *ollama.Service) (Chat, error) {
 	var c Chat
 	var err error
 	switch strings.ToLower(string(config.Source)) {
@@ -160,8 +163,8 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 // NewRemoteChat 根据 provider 创建远程聊天实例。
 // Anthropic 走独立的 Messages 协议实现；其余 OpenAI 兼容供应商统一由
 // RemoteAPIChat 处理，provider 特定行为在构造时通过 providerAdapter 解析。
-func NewRemoteChat(config *ChatConfig) (Chat, error) {
-	providerName := provider.ProviderName(config.Provider)
+func NewRemoteChat(config *Config) (Chat, error) {
+	providerName := provider.Name(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}

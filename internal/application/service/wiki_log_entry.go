@@ -28,7 +28,12 @@ func (s *wikiLogEntryService) AppendBatch(ctx context.Context, entries []*types.
 }
 
 // List paginates the per-KB event feed. See repo.List for cursor semantics.
-func (s *wikiLogEntryService) List(ctx context.Context, kbID string, cursor string, limit int) (*types.WikiLogEntryListResponse, error) {
+func (s *wikiLogEntryService) List(
+	ctx context.Context,
+	kbID string,
+	cursor string,
+	limit int,
+) (*types.WikiLogEntryListResponse, error) {
 	entries, nextCursor, err := s.repo.List(ctx, kbID, cursor, limit)
 	if err != nil {
 		return nil, err

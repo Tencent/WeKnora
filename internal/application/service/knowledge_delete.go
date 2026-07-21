@@ -123,16 +123,23 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 				boundStoreID,
 			)
 			if err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
+				logger.GetLogger(ctx).
+					WithField("error", err).
+					Errorf("DeleteKnowledge delete knowledge embedding failed")
 				return err
 			}
 			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
 			if err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
+				logger.GetLogger(ctx).
+					WithField("error", err).
+					Errorf("DeleteKnowledge delete knowledge embedding failed")
 				return err
 			}
+			//nolint:lll
 			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
+				logger.GetLogger(ctx).
+					WithField("error", err).
+					Errorf("DeleteKnowledge delete knowledge embedding failed")
 				return err
 			}
 			return nil
@@ -362,7 +369,7 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 	if s.taskPendingRepo == nil || kbID == "" || knowledgeID == "" {
 		return
 	}
-	if err := s.taskPendingRepo.DeleteByDedupKey(ctx, wikiTaskType, wikiTaskScope, kbID, knowledgeID, WikiOpIngest); err != nil {
+	if err := s.taskPendingRepo.DeleteByDedupKey(ctx, wikiTaskType, wikiTaskScope, kbID, knowledgeID, WikiOpIngest); err != nil { //nolint:lll
 		logger.Warnf(ctx, "wiki %s: failed to scrub pending ingest ops for knowledge %s: %v", reason, knowledgeID, err)
 		return
 	}
@@ -521,7 +528,11 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			// and its EmbeddingModelID is intentionally empty. Skip the whole group
 			// to avoid the spurious "model ID cannot be empty" failure.
 			if strings.TrimSpace(key.EmbeddingModelID) == "" {
-				logger.Infof(ctx, "Skipping vector store cleanup for %d knowledge entries without embedding model", len(knowledgeIDs))
+				logger.Infof(
+					ctx,
+					"Skipping vector store cleanup for %d knowledge entries without embedding model",
+					len(knowledgeIDs),
+				)
 				continue
 			}
 			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
@@ -529,7 +540,8 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge get embedding model failed")
 				return err
 			}
-			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDs, embeddingModel.GetDimensions(), key.Type); err != nil {
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDs, embeddingModel.GetDimensions(),
+				key.Type); err != nil {
 				logger.GetLogger(ctx).
 					WithField("error", err).
 					Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -632,10 +644,12 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		// transient DB error, the cleanup will delete from env engines and
 		// leave orphan vectors in the bound store. Warn so operators can spot it.
 		var boundStoreID *string
-		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil && kb != nil {
+		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil &&
+			kb != nil {
 			boundStoreID = kb.VectorStoreID
 		} else if loadErr != nil {
 			logger.GetLogger(ctx).WithField("error", loadErr).WithField("knowledge_base_id", knowledge.KnowledgeBaseID).
+				//nolint:lll
 				Warnf("cleanupKnowledgeResources: failed to load KB for vector store resolution; falling back to tenant effective engines")
 		}
 		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
@@ -649,7 +663,7 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 				logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
 				cleanupErr = errors.Join(cleanupErr, modelErr)
 			} else {
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil { //nolint:lll
 					logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge index")
 					cleanupErr = errors.Join(cleanupErr, err)
 				}
@@ -660,7 +674,8 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	// Collect image URLs before chunks are deleted
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	fileSvc := s.resolveFileService(ctx, kb)
-	chunkImageInfos, imgErr := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantInfo.ID, []string{knowledge.ID})
+	chunkImageInfos, imgErr := s.chunkService.GetRepository().
+		ListImageInfoByKnowledgeIDs(ctx, tenantInfo.ID, []string{knowledge.ID})
 	if imgErr != nil {
 		logger.GetLogger(ctx).WithField("error", imgErr).Error("Failed to collect image URLs for cleanup")
 		cleanupErr = errors.Join(cleanupErr, imgErr)

@@ -55,7 +55,7 @@ func TestWrapHTTPClientWithHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotTrace = r.Header.Get("X-Trace-Id")
 		gotAuth = r.Header.Get("Authorization")
-		io.Copy(io.Discard, r.Body)
+		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -72,7 +72,7 @@ func TestWrapHTTPClientWithHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if gotTrace != "rt-1" {
 		t.Fatalf("expected custom header injected, got %q", gotTrace)
