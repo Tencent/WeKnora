@@ -2,7 +2,6 @@ package container
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -18,9 +17,9 @@ const restartInterruptedMessage = "Task interrupted due to application restart"
 // resetPendingTasks resets the state of any knowledge items or sync logs stuck in processing
 // due to an unexpected application restart.
 //
-// In Lite mode (no REDIS_ADDR) normal queued tasks live in process memory, so
-// a "processing" row at startup is orphaned unless it has a durable wiki op
-// that can be re-triggered.
+// In Lite mode (no Redis: empty REDIS_ADDR and not REDIS_MODE=cluster)
+// normal queued tasks live in process memory, so a "processing" row at
+// startup is orphaned unless it has a durable wiki op that can be re-triggered.
 //
 // Distributed mode is intentionally different: Asynq persists queued/retry
 // tasks, and another replica may still be executing the same knowledge. A
@@ -30,7 +29,7 @@ const restartInterruptedMessage = "Task interrupted due to application restart"
 // hook never resets knowledge/summary rows in distributed mode; it only keeps
 // the separate sync-log cleanup below.
 func resetPendingTasks(db *gorm.DB) {
-	distributed := os.Getenv("REDIS_ADDR") != ""
+	distributed := redisConfigured()
 	ctx := context.Background()
 	spanRepo := repository.NewKnowledgeSpanRepository(db)
 

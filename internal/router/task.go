@@ -66,7 +66,35 @@ func readRedisOpTimeoutMs() int {
 	return defaultRedisOpTimeoutMs
 }
 
-func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
+// getAsynqRedisConnOpt returns Redis options for asynq (standalone or cluster).
+// Standalone: empty/single REDIS_MODE with REDIS_ADDR / REDIS_DB.
+// Cluster: REDIS_MODE=cluster with REDIS_CLUSTER_ADDRS (comma-separated host:port).
+func getAsynqRedisConnOpt() asynq.RedisConnOpt {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("REDIS_MODE")))
+	username := os.Getenv("REDIS_USERNAME")
+	password := os.Getenv("REDIS_PASSWORD")
+
+	if mode == "cluster" {
+		raw := os.Getenv("REDIS_CLUSTER_ADDRS")
+		parts := strings.Split(raw, ",")
+		addrs := make([]string, 0, len(parts))
+		for _, s := range parts {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				addrs = append(addrs, s)
+			}
+		}
+		timeoutMs := readRedisOpTimeoutMs()
+		return &asynq.RedisClusterClientOpt{
+			Addrs:        addrs,
+			Username:     username,
+			Password:     password,
+			ReadTimeout:  time.Duration(timeoutMs) * time.Millisecond,
+			WriteTimeout: time.Duration(timeoutMs*2) * time.Millisecond,
+			TLSConfig:    common.RedisTLSConfig(),
+		}
+	}
+
 	db := 0
 	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
 		if parsed, err := strconv.Atoi(dbStr); err == nil {
@@ -74,23 +102,19 @@ func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 		}
 	}
 	timeoutMs := readRedisOpTimeoutMs()
-	opt := &asynq.RedisClientOpt{
-		Addr:        os.Getenv("REDIS_ADDR"),
-		Username:    os.Getenv("REDIS_USERNAME"),
-		Password:    os.Getenv("REDIS_PASSWORD"),
-		ReadTimeout: time.Duration(timeoutMs) * time.Millisecond,
-		// Writes are typically more sensitive to congestion than reads
-		// (RESP pipelining, BRPOPLPUSH on Asynq dequeue), so we keep
-		// WriteTimeout slightly larger to absorb head-of-line stalls.
+	return &asynq.RedisClientOpt{
+		Addr:         os.Getenv("REDIS_ADDR"),
+		Username:     username,
+		Password:     password,
+		ReadTimeout:  time.Duration(timeoutMs) * time.Millisecond,
 		WriteTimeout: time.Duration(timeoutMs*2) * time.Millisecond,
 		DB:           db,
 		TLSConfig:    common.RedisTLSConfig(),
 	}
-	return opt
 }
 
 func NewAsyncqClient() (*asynq.Client, error) {
-	opt := getAsynqRedisClientOpt()
+	opt := getAsynqRedisConnOpt()
 	client := asynq.NewClient(opt)
 	err := client.Ping()
 	if err != nil {
@@ -131,7 +155,7 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 // concurrency. Every worker pool uses it so Redis options and retry-delay
 // policy stay consistent across the topology.
 func newAsynqServer(concurrency int, queues map[string]int) *asynq.Server {
-	opt := getAsynqRedisClientOpt()
+	opt := getAsynqRedisConnOpt()
 	return asynq.NewServer(
 		opt,
 		asynq.Config{

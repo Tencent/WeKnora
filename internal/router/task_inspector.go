@@ -15,10 +15,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// NewAsynqInspector constructs an *asynq.Inspector pointed at the same
-// Redis used by the asynq client. Only registered in asynq mode.
-func NewAsynqInspector(redisClient *redis.Client) *asynq.Inspector {
-	return asynq.NewInspectorFromRedisClient(redisClient)
+// NewAsynqInspector constructs an *asynq.Inspector on the same Redis
+// connection options as the asynq client (standalone or cluster).
+func NewAsynqInspector() *asynq.Inspector {
+	return asynq.NewInspector(getAsynqRedisConnOpt())
 }
 
 // asynqTaskInspector implements interfaces.TaskInspector backed by an
@@ -35,7 +35,7 @@ type asynqTaskInspector struct {
 // NewAsynqTaskInspector returns a TaskInspector wrapping the given
 // *asynq.Inspector. nil-safe: a nil inspector degrades to a no-op so
 // the cancel path remains usable when the inspector failed to init.
-func NewAsynqTaskInspector(inspector *asynq.Inspector, redisClient *redis.Client) interfaces.TaskInspector {
+func NewAsynqTaskInspector(inspector *asynq.Inspector, redisClient redis.UniversalClient) interfaces.TaskInspector {
 	if inspector == nil || redisClient == nil {
 		return noopTaskInspector{}
 	}

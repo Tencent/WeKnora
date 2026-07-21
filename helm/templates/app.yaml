@@ -74,8 +74,14 @@ spec:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
             # Redis configuration
+            - name: REDIS_MODE
+              value: {{ .Values.app.env.REDIS_MODE | default "" | quote }}
+            {{- if .Values.app.env.REDIS_CLUSTER_ADDRS }}
+            - name: REDIS_CLUSTER_ADDRS
+              value: {{ .Values.app.env.REDIS_CLUSTER_ADDRS | quote }}
+            {{- end }}
             - name: REDIS_ADDR
-              value: "redis:6379"
+              value: {{ .Values.app.env.REDIS_ADDR | default "redis:6379" | quote }}
             - name: REDIS_USERNAME
               valueFrom:
                 secretKeyRef:
