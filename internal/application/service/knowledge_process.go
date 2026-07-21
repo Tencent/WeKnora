@@ -388,12 +388,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			contentHash := types.StableChunkContentHash(pc.Content)
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              types.StableChunkID(knowledge.ID, pc.Seq, types.ChunkTypeParentText, contentHash),
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
 				Content:         pc.Content,
+				ContentHash:     contentHash,
 				ChunkIndex:      pc.Seq,
 				IsEnabled:       true,
 				CreatedAt:       time.Now(),
@@ -428,7 +430,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(knowledge.ID, int(chunkData.Seq), types.ChunkTypeText, types.StableChunkContentHash(chunkData.Content)),
+			ContentHash:     types.StableChunkContentHash(chunkData.Content),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -851,6 +854,65 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	return summary.Content, nil
 }
 
+// summaryCacheInputHash hashes the exact enriched document content consumed by
+// getSummary before sampling. OCR/caption changes therefore invalidate summary
+// cache entries even when base text chunks remain unchanged.
+func summaryCacheInputHash(
+	ctx context.Context,
+	chunkRepo interfaces.ChunkRepository,
+	tenantID uint64,
+	chunks []*types.Chunk,
+) string {
+	sortedChunks := append([]*types.Chunk(nil), chunks...)
+	sort.Slice(sortedChunks, func(i, j int) bool {
+		return sortedChunks[i].StartAt < sortedChunks[j].StartAt
+	})
+
+	content := ""
+	for _, chunk := range sortedChunks {
+		runes := []rune(content)
+		if chunk.StartAt <= len(runes) {
+			content = string(runes[:chunk.StartAt]) + chunk.Content
+		} else {
+			content += chunk.Content
+		}
+	}
+
+	chunkIDs := make([]string, len(sortedChunks))
+	for i, chunk := range sortedChunks {
+		chunkIDs[i] = chunk.ID
+	}
+	imageInfo := searchutil.MergeImageInfoJSON(searchutil.CollectImageInfoByChunkIDs(ctx, chunkRepo, tenantID, chunkIDs))
+	if imageInfo != "" {
+		if realTextRuneCount(content) < imageDominatedTextThreshold {
+			content = searchutil.EnrichContentCaptionAndOCR(content, imageInfo)
+		} else {
+			content = searchutil.EnrichContentCaptionOnly(content, imageInfo)
+		}
+	}
+	return types.StableChunkContentHash(content)
+}
+
+func summaryCacheConfigHash(cfg *config.Config, modelID string, ctx context.Context) string {
+	if cfg == nil {
+		return types.HashAll(modelID, "summary_v2")
+	}
+	maxInputChars := defaultMaxInputChars
+	maxTokens := 2048
+	if cfg.Conversation.Summary != nil {
+		if cfg.Conversation.Summary.MaxInputChars > 0 {
+			maxInputChars = cfg.Conversation.Summary.MaxInputChars
+		}
+		if cfg.Conversation.Summary.MaxCompletionTokens > 0 {
+			maxTokens = cfg.Conversation.Summary.MaxCompletionTokens
+		}
+	}
+	prompt := types.RenderPromptPlaceholders(cfg.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
+		"language": types.LanguageNameFromContext(ctx),
+	})
+	return types.HashAll(modelID, prompt, fmt.Sprintf("%d", maxInputChars), fmt.Sprintf("%d", maxTokens), "summary_v2")
+}
+
 // sampleLongContent returns content that fits within maxChars.
 // For short content (≤ maxChars), it is returned as-is.
 // For long content, it samples: head (60%), tail (20%), and evenly-spaced middle (20%),
@@ -1049,8 +1111,37 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
-	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	// Generate summary -- try content-addressed artifact cache first.
+	// Cache key covers (assembled chunk text, summary model, prompt template)
+	// so a reparse with identical chunks and config hits the cache.
+	var summary string
+	summaryCacheHit := false
+	if s.cacheService != nil {
+		inputHash := summaryCacheInputHash(ctx, s.chunkRepo, knowledge.TenantID, textChunks)
+		configHash := summaryCacheConfigHash(s.config, kb.SummaryModelID, ctx)
+		cacheKey := fmt.Sprintf("knowledge:%s:summary", payload.KnowledgeID)
+		if cached := s.cacheService.Lookup(ctx, payload.TenantID, cacheKey,
+			types.ArtifactCacheTypeSummary, inputHash, configHash); cached != nil && cached.OutputText != "" {
+			summary = cached.OutputText
+			summaryCacheHit = true
+			summaryOut["cache_hit"] = true
+			logger.Infof(ctx, "Summary cache hit for knowledge %s", payload.KnowledgeID)
+		}
+	}
+	if !summaryCacheHit {
+		summary, err = s.getSummary(ctx, chatModel, knowledge, textChunks)
+		if summary != "" && s.cacheService != nil && err == nil {
+			s.cacheService.Store(ctx, &types.ArtifactCache{
+				TenantID:   payload.TenantID,
+				CacheKey:   fmt.Sprintf("knowledge:%s:summary", payload.KnowledgeID),
+				CacheType:  types.ArtifactCacheTypeSummary,
+				InputHash:  summaryCacheInputHash(ctx, s.chunkRepo, knowledge.TenantID, textChunks),
+				ConfigHash: summaryCacheConfigHash(s.config, kb.SummaryModelID, ctx),
+				OutputText: summary,
+				OutputSize: int64(len(summary)),
+			})
+		}
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1123,7 +1214,8 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(knowledge.ID, maxChunkIndex+1, types.ChunkTypeSummary, types.HashString(fmt.Sprintf("# Summary\n%s", summary))),
+			ContentHash:     types.HashString(fmt.Sprintf("# Summary\n%s", summary)),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -1521,7 +1613,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
+			questionID := types.StableQuestionID(question)
 			generatedQuestions[j] = types.GeneratedQuestion{
 				ID:       questionID,
 				Question: question,
@@ -1850,7 +1942,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
+				ID:       types.StableQuestionID(question),
 				Question: question,
 			}
 		}
@@ -1891,8 +1983,65 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	return nil
 }
 
-// generateQuestionsWithContext generates questions for a chunk with surrounding context
-func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
+// generateQuestionsWithContext reuses a content-addressed question artifact when
+// available. The surrounding context and rendered prompt inputs are part of the
+// identity, so a neighboring-chunk or instruction change naturally recomputes.
+func (s *knowledgeService) generateQuestionsWithContext(
+	ctx context.Context,
+	chatModel chat.Chat,
+	content, prevContent, nextContent, docName string,
+	questionCount int,
+	customInstructions string,
+) ([]string, error) {
+	if s.cacheService == nil || content == "" || questionCount <= 0 {
+		return s.generateQuestionsWithContextUncached(
+			ctx, chatModel, content, prevContent, nextContent, docName, questionCount, customInstructions,
+		)
+	}
+
+	inputHash := types.HashAll(content, prevContent, nextContent, docName)
+	promptTemplate := ""
+	if s.config != nil {
+		promptTemplate = s.config.Conversation.GenerateQuestionsPrompt
+	}
+	configHash := types.HashAll(
+		chatModel.GetModelID(),
+		promptTemplate,
+		customInstructions,
+		types.LanguageNameFromContext(ctx),
+		fmt.Sprintf("%d", questionCount),
+		"question_v1",
+	)
+	cacheKey := "question:" + inputHash[:16]
+	if cached := s.cacheService.Lookup(ctx, types.MustTenantIDFromContext(ctx), cacheKey,
+		types.ArtifactCacheTypeQuestion, inputHash, configHash); cached != nil && cached.OutputJSON != nil {
+		var questions []string
+		if err := json.Unmarshal(cached.OutputJSON, &questions); err == nil {
+			return questions, nil
+		}
+	}
+
+	questions, err := s.generateQuestionsWithContextUncached(
+		ctx, chatModel, content, prevContent, nextContent, docName, questionCount, customInstructions,
+	)
+	if err == nil && len(questions) > 0 {
+		if output, marshalErr := json.Marshal(questions); marshalErr == nil {
+			s.cacheService.Store(ctx, &types.ArtifactCache{
+				TenantID:   types.MustTenantIDFromContext(ctx),
+				CacheKey:   cacheKey,
+				CacheType:  types.ArtifactCacheTypeQuestion,
+				InputHash:  inputHash,
+				ConfigHash: configHash,
+				OutputJSON: output,
+				OutputSize: int64(len(output)),
+			})
+		}
+	}
+	return questions, err
+}
+
+// generateQuestionsWithContextUncached generates questions for a chunk with surrounding context.
+func (s *knowledgeService) generateQuestionsWithContextUncached(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
 	customInstructions string,
 ) ([]string, error) {
@@ -2501,7 +2650,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new caption chunk if it doesn't exist and we have caption data
 	if !hasCaptionChunk && image.Caption != "" {
 		captionChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              uuid.NewString(),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2517,7 +2666,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new OCR chunk if it doesn't exist and we have OCR data
 	if !hasOCRChunk && image.OCRText != "" {
 		ocrChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              uuid.NewString(),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,

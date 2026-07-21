@@ -17,7 +17,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -68,6 +67,7 @@ type graphBuilder struct {
 	entityMap        map[string]*types.Entity       // Entities indexed by ID
 	entityMapByTitle map[string]*types.Entity       // Entities indexed by title
 	relationshipMap  map[string]*types.Relationship // Relationship mapping
+	kbID             string                         // Knowledge base ID for stable graph IDs
 	chatModel        chat.Chat
 	chunkGraph       map[string]map[string]*ChunkRelation // Document chunk relationship graph
 	mutex            sync.RWMutex                         // Mutex for concurrent operations
@@ -163,7 +163,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		}
 		if existEntity, exists := b.entityMapByTitle[entity.Title]; !exists {
 			// This is a new entity
-			entity.ID = uuid.New().String()
+			// Stable graph entity ID: derived from (kbID, title) so rebuilds preserve identity.
+			entity.ID = types.StableChunkID(b.kbID, 0, types.ChunkTypeEntity, types.HashString(entity.Title))
 			entity.ChunkIDs = []string{chunk.ID}
 			entity.Frequency = 1
 			b.entityMapByTitle[entity.Title] = entity
@@ -277,7 +278,8 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		}
 		if existingRel, exists := b.relationshipMap[key]; !exists {
 			// This is a new relationship
-			relationship.ID = uuid.New().String()
+			// Stable graph relationship ID: derived from (kbID, source, target) so rebuilds preserve identity.
+			relationship.ID = types.StableChunkID(b.kbID, 0, types.ChunkTypeRelationship, types.HashAll(relationship.Source, relationship.Target, relationship.Description))
 			relationship.ChunkIDs = relationChunkIDs
 			b.relationshipMap[key] = relationship
 			relationshipsAdded++
@@ -357,6 +359,13 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 	log := logger.GetLogger(ctx)
 	log.Infof("Building knowledge graph from %d chunks", len(chunks))
 	startTime := time.Now()
+
+	// Derive knowledge base ID from the first chunk so stable graph IDs are
+	// scoped per KB.  The builder is constructed once per call so kbID stays
+	// valid for this BuildGraph invocation.
+	if b.kbID == "" && len(chunks) > 0 {
+		b.kbID = chunks[0].KnowledgeBaseID
+	}
 
 	// Concurrently extract entities from each document chunk
 	chunkEntities := make([][]*types.Entity, len(chunks))

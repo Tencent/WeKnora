@@ -65,6 +65,10 @@ type knowledgeService struct {
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 
+	// cacheService is the best-effort content-addressed artifact cache.
+	// Nil-safe: all call sites check for nil before using.
+	cacheService interfaces.ArtifactCacheService
+
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
@@ -111,6 +115,7 @@ func NewKnowledgeService(
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
+	cacheService interfaces.ArtifactCacheService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -138,6 +143,7 @@ func NewKnowledgeService(
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
+		cacheService:    cacheService,
 	}, nil
 }
 

@@ -329,6 +329,9 @@ type wikiIngestService struct {
 	// wiki:finalize:active:<kbID> lock, keeping two finalize runs for the
 	// same KB from overlapping when there is no Redis.
 	liteFinalizeLocks sync.Map
+	// cacheService is the best-effort content-addressed artifact cache for
+	// wiki per-document map results. Nil-safe: all call sites check for nil.
+	cacheService interfaces.ArtifactCacheService
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -344,6 +347,7 @@ func NewWikiIngestService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
+	cacheService interfaces.ArtifactCacheService,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
@@ -358,6 +362,7 @@ func NewWikiIngestService(
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
+		cacheService:   cacheService,
 		spanTracker:    spanTracker,
 	}
 	return svc
@@ -1065,6 +1070,28 @@ type docIngestResult struct {
 	// ProcessWikiIngest. nil when no parent attempt was found, in which
 	// case the tracker helpers are all no-ops anyway.
 	WikiSpan *Span
+}
+
+// wikiMapCacheEntry contains only durable map output. Runtime span handles
+// belong to the current ingest attempt and must never be persisted.
+type wikiMapCacheEntry struct {
+	KnowledgeID string                 `json:"knowledge_id"`
+	DocTitle    string                 `json:"doc_title"`
+	Summary     string                 `json:"summary"`
+	Pages       []types.WikiLogPageRef `json:"pages"`
+	MapStats    types.JSONMap          `json:"map_stats"`
+	Updates     []SlugUpdate           `json:"updates"`
+}
+
+func (e wikiMapCacheEntry) result(span *Span) *docIngestResult {
+	return &docIngestResult{
+		KnowledgeID: e.KnowledgeID,
+		DocTitle:    e.DocTitle,
+		Summary:     e.Summary,
+		Pages:       e.Pages,
+		MapStats:    e.MapStats,
+		WikiSpan:    span,
+	}
 }
 
 // WikiBatchContext holds shared data across Map and Reduce phases.

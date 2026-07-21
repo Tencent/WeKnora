@@ -164,6 +164,9 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	// cacheService is the best-effort artifact cache for per-chunk graph
+	// extraction results. Nil-safe: all call sites check for nil.
+	cacheService interfaces.ArtifactCacheService
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -178,6 +181,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	cacheService interfaces.ArtifactCacheService,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -187,6 +191,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		cacheService:      cacheService,
 		spanTracker:       spanTracker,
 	}
 }
@@ -330,10 +335,43 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		},
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+
+	// Try content-addressed graph extraction cache before the LLM call.
+	// Cache key: (chunk content hash, model ID, extract config).
+	var graph *types.GraphData
+	graphCacheHit := false
+	if s.cacheService != nil {
+		chunkHash := types.HashString(chunk.Content)
+		configHash := graphExtractionConfigHash(chatModel.GetModelID(), s.template.Description, extractCfg)
+		cacheKey := fmt.Sprintf("knowledge:%s:graph:%s", p.KnowledgeID, chunkHash[:12])
+		if cached := s.cacheService.Lookup(ctx, p.TenantID, cacheKey,
+			types.ArtifactCacheTypeGraphEntity, chunkHash, configHash); cached != nil && cached.OutputJSON != nil {
+			if err := json.Unmarshal(cached.OutputJSON, &graph); err == nil && graph != nil {
+				graphCacheHit = true
+				graphOut["cache_hit"] = true
+				logger.Infof(ctx, "graph extract: cache hit for chunk %s", p.ChunkID)
+			}
+		}
+	}
+	if !graphCacheHit {
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if graph != nil && s.cacheService != nil && err == nil {
+			jsonBytes, marshalErr := json.Marshal(graph)
+			if marshalErr == nil {
+				chunkHash := types.HashString(chunk.Content)
+				configHash := graphExtractionConfigHash(chatModel.GetModelID(), s.template.Description, extractCfg)
+				cacheKey := fmt.Sprintf("knowledge:%s:graph:%s", p.KnowledgeID, chunkHash[:12])
+				s.cacheService.Store(ctx, &types.ArtifactCache{
+					TenantID:   p.TenantID,
+					CacheKey:   cacheKey,
+					CacheType:  types.ArtifactCacheTypeGraphEntity,
+					InputHash:  chunkHash,
+					ConfigHash: configHash,
+					OutputJSON: jsonBytes,
+					OutputSize: int64(len(jsonBytes)),
+				})
+			}
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -383,6 +421,14 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		graphOut["sample_relations"] = out
 	}
 	return nil
+}
+
+func graphExtractionConfigHash(modelID, baseDescription string, extractCfg types.ExtractConfig) string {
+	configJSON, err := json.Marshal(extractCfg)
+	if err != nil {
+		return types.HashAll(modelID, baseDescription, extractCfg.Text, extractCfg.CustomInstructions, "graph_extract_v2")
+	}
+	return types.HashAll(modelID, baseDescription, string(configJSON), "graph_extract_v2")
 }
 
 // DataTableExtractPayload represents the table extract task payload
@@ -667,7 +713,8 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              types.StableChunkID(resources.knowledge.ID, 0, types.ChunkTypeTableSummary, types.HashString(tableDescription)),
+		ContentHash:     types.HashString(tableDescription),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -681,7 +728,8 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              types.StableChunkID(resources.knowledge.ID, 1, types.ChunkTypeTableColumn, types.HashString(columnDescription)),
+		ContentHash:     types.HashString(columnDescription),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -769,10 +817,14 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 
 	// 删除已创建的chunks
 	if len(chunkIDs) > 0 {
-		if err := s.chunkService.DeleteChunks(ctx, chunkIDs); err != nil {
-			logger.Errorf(ctx, "Failed to delete chunks: %v", err)
+		// Stable chunk IDs require physical cleanup after a failed attempt;
+		// otherwise a retry would collide with the soft-deleted primary keys.
+		if err := s.chunkService.GetRepository().PurgeChunksByKnowledgeID(
+			ctx, resources.knowledge.TenantID, resources.knowledge.ID,
+		); err != nil {
+			logger.Errorf(ctx, "Failed to purge table chunks: %v", err)
 		} else {
-			logger.Infof(ctx, "Deleted %d chunks", len(chunkIDs))
+			logger.Infof(ctx, "Purged %d table chunks", len(chunkIDs))
 		}
 	}
 

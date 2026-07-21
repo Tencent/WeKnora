@@ -2,6 +2,8 @@ package retriever
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,14 +44,27 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 type KeywordsVectorHybridRetrieveEngineService struct {
 	indexRepository interfaces.RetrieveEngineRepository
 	engineType      types.RetrieverEngineType
+	// cacheService is the best-effort artifact cache for embedding vectors.
+	// Nil-safe: all call sites check for nil before using.
+	cacheService interfaces.ArtifactCacheService
 }
 
 // NewKVHybridRetrieveEngine creates a new instance of the hybrid retrieval engine
 // KV stands for KeywordsVector
-func NewKVHybridRetrieveEngine(indexRepository interfaces.RetrieveEngineRepository,
+func NewKVHybridRetrieveEngine(
+	indexRepository interfaces.RetrieveEngineRepository,
 	engineType types.RetrieverEngineType,
+	cacheServices ...interfaces.ArtifactCacheService,
 ) interfaces.RetrieveEngineService {
-	return &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
+	var cacheService interfaces.ArtifactCacheService
+	if len(cacheServices) > 0 {
+		cacheService = cacheServices[0]
+	}
+	return &KeywordsVectorHybridRetrieveEngineService{
+		indexRepository: indexRepository,
+		engineType:      engineType,
+		cacheService:    cacheService,
+	}
 }
 
 // EngineType returns the type of the retrieval engine
@@ -96,9 +111,25 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
-		if err != nil {
-			return err
+		// Resolve cached vectors independently so a single changed chunk only
+		// triggers embedding work for that chunk rather than the full batch.
+		embeddings, missing := v.loadEmbeddingCache(ctx, embedder, contentList)
+		if len(missing) > 0 {
+			missingContent := make([]string, len(missing))
+			for i, index := range missing {
+				missingContent[i] = contentList[index]
+			}
+			computed, err := batchEmbedWithBackoff(ctx, embedder, missingContent)
+			if err != nil {
+				return err
+			}
+			if len(computed) != len(missing) {
+				return fmt.Errorf("embedding provider returned %d vectors for %d inputs", len(computed), len(missing))
+			}
+			for i, index := range missing {
+				embeddings[index] = computed[i]
+			}
+			v.storeEmbeddingCache(ctx, embedder, indexInfoList, contentList, embeddings)
 		}
 
 		batchSize := 40
@@ -345,4 +376,77 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkTagID(
 	chunkTagMap map[string]string,
 ) error {
 	return v.indexRepository.BatchUpdateChunkTagID(ctx, chunkTagMap)
+}
+
+// loadEmbeddingCache returns cached vectors and the indexes that still need
+// provider work. A malformed or wrong-dimensional value is treated as a miss.
+func (v *KeywordsVectorHybridRetrieveEngineService) loadEmbeddingCache(
+	ctx context.Context,
+	embedder embedding.Embedder,
+	contentList []string,
+) ([][]float32, []int) {
+	result := make([][]float32, len(contentList))
+	missing := make([]int, 0)
+	if v.cacheService == nil {
+		for i := range contentList {
+			missing = append(missing, i)
+		}
+		return result, missing
+	}
+
+	modelID := embedder.GetModelID()
+	dims := embedder.GetDimensions()
+	configHash := types.HashAll(modelID, fmt.Sprintf("%d", dims))
+	for i, content := range contentList {
+		textHash := types.HashString(content)
+		cacheKey := "embedding:" + modelID + ":" + textHash[:16]
+		cached := v.cacheService.Lookup(ctx, 0, cacheKey, types.ArtifactCacheTypeChunkEmbedding, textHash, configHash)
+		if cached != nil && cached.OutputSize > 0 && cached.OutputJSON != nil {
+			var vector []float32
+			if err := json.Unmarshal(cached.OutputJSON, &vector); err == nil && len(vector) == dims {
+				result[i] = vector
+				continue
+			}
+		}
+		missing = append(missing, i)
+	}
+	return result, missing
+}
+
+// storeEmbeddingCache persists freshly computed embedding vectors in the
+// artifact cache for future re-parses. Best-effort: errors are logged.
+func (v *KeywordsVectorHybridRetrieveEngineService) storeEmbeddingCache(
+	ctx context.Context,
+	embedder embedding.Embedder,
+	indexInfoList []*types.IndexInfo,
+	contentList []string,
+	embeddings [][]float32,
+) {
+	if v.cacheService == nil || len(embeddings) != len(contentList) {
+		return
+	}
+	modelID := embedder.GetModelID()
+	dims := embedder.GetDimensions()
+	configHash := types.HashAll(modelID, fmt.Sprintf("%d", dims))
+
+	for i, vec := range embeddings {
+		if len(vec) == 0 {
+			continue
+		}
+		textHash := types.HashString(contentList[i])
+		cacheKey := "embedding:" + modelID + ":" + textHash[:16]
+		vecJSON, err := json.Marshal(vec)
+		if err != nil {
+			continue
+		}
+		v.cacheService.Store(ctx, &types.ArtifactCache{
+			TenantID:   0, // cross-document dedup
+			CacheKey:   cacheKey,
+			CacheType:  types.ArtifactCacheTypeChunkEmbedding,
+			InputHash:  textHash,
+			ConfigHash: configHash,
+			OutputJSON: vecJSON,
+			OutputSize: int64(len(vec) * 4),
+		})
+	}
 }

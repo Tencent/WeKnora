@@ -185,6 +185,12 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err = wg.Wait(); err != nil {
 		return err
 	}
+
+	// Invalidate artifact cache entries for the deleted knowledge.
+	// Best-effort: a cache failure must not prevent deletion.
+	if s.cacheService != nil {
+		s.cacheService.InvalidateByKnowledge(ctx, tenantID, id)
+	}
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
 	}
@@ -604,6 +610,15 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	if err = wg.Wait(); err != nil {
 		return err
 	}
+
+	// Invalidate artifact cache entries for the deleted knowledge.
+	// Best-effort: if the cache service is nil (e.g. Lite mode w/o table)
+	// or the call fails, deletion still succeeds.
+	if s.cacheService != nil {
+		for _, kid := range ids {
+			s.cacheService.InvalidateByKnowledge(ctx, tenantInfo.ID, kid)
+		}
+	}
 	for _, knowledgeID := range ids {
 		if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledgeID); err != nil {
 			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
@@ -671,8 +686,8 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	}
 	imageURLs := collectImageURLs(ctx, imageInfoStrs)
 
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge chunks")
+	if err := s.chunkService.GetRepository().PurgeChunksByKnowledgeID(ctx, tenantInfo.ID, knowledge.ID); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Error("Failed to purge chunks before reparse")
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
 

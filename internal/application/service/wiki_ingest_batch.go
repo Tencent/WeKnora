@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
@@ -1169,6 +1169,8 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
+	// Resolve the current title before lookup because title-bearing updates and
+	// log entries must be regenerated after a knowledge rename.
 	docTitle := knowledgeID
 	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
 		docTitle = kn.Title
@@ -1184,12 +1186,47 @@ func (s *wikiIngestService) mapOneDocument(
 		}
 	}
 
+	// Try content-addressed wiki map cache before the expensive LLM extraction +
+	// summary + classification passes. The cache covers the per-document pure
+	// computations; the stateful reduce/taxonomy/finalize stages always run fresh.
+	// Cache key: (content, title, language, model, wiki configuration, current source state).
+	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	priorContribution := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
+	oldSlugList := make([]string, 0, len(oldPageSlugs))
+	for slug := range oldPageSlugs {
+		oldSlugList = append(oldSlugList, slug)
+	}
+	sort.Strings(oldSlugList)
+	if s.cacheService != nil {
+		contentHash := types.HashString(content)
+		chatModelID := chatModel.GetModelID()
+		configHash := types.HashAll(
+			chatModelID,
+			docTitle,
+			lang,
+			string(batchCtx.ExtractionGranularity),
+			batchCtx.ContentInstructions,
+			batchCtx.ExtractionInstructions,
+			strings.Join(oldSlugList, "\n"),
+			priorContribution,
+			"wiki_map_v2",
+		)
+		cacheKey := fmt.Sprintf("knowledge:%s:wiki_map", knowledgeID)
+		if cached := s.cacheService.Lookup(ctx, payload.TenantID, cacheKey,
+			types.ArtifactCacheTypeWikiExtract, contentHash, configHash); cached != nil && cached.OutputJSON != nil {
+			var entry wikiMapCacheEntry
+			if err := json.Unmarshal(cached.OutputJSON, &entry); err == nil && entry.KnowledgeID == knowledgeID {
+				logger.Infof(ctx, "wiki ingest: cache hit for %s, skipping LLM extraction/summary/classification", knowledgeID)
+				return entry.result(wikiSpan), entry.Updates, nil
+			}
+		}
+	}
+
 	// Citation source reference. We deliberately use only the knowledge ID
 	// (not docTitle, which is typically the upload filename) so the filename
 	// does not leak into citation strings that downstream LLM prompts may
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
-	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
 	// On failure we fall back to the legacy single-shot extractor so the doc
@@ -1468,11 +1505,8 @@ func (s *wikiIngestService) mapOneDocument(
 	//      SummaryBody, so emitting an extra retract would just be
 	//      dead weight that the summary branch discards anyway.
 	//
-	// priorContribution is the doc's LAST summary body, fetched lazily
-	// at this point (rather than pre-loaded into the batch context).
-	// Empty on first-ever ingest — in that case oldPageSlugs is also
-	// empty, so we never consult it.
-	priorContribution := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
+	// priorContribution was loaded before the cache lookup because it affects
+	// the retraction updates and is part of the cache identity.
 
 	newSlugSet := make(map[string]bool, len(extractedPages))
 	for _, ns := range extractedPages {
@@ -1541,14 +1575,53 @@ func (s *wikiIngestService) mapOneDocument(
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
 
-	return &docIngestResult{
+	result := &docIngestResult{
 		KnowledgeID: knowledgeID,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
-	}, updates, nil
+	}
+
+	// Store per-document wiki map output in the content-addressed artifact cache.
+	// Covers extract + summary + classification; reduce/taxonomy/finalize are NOT cached.
+	if s.cacheService != nil {
+		entry := wikiMapCacheEntry{
+			KnowledgeID: result.KnowledgeID,
+			DocTitle:    result.DocTitle,
+			Summary:     result.Summary,
+			Pages:       result.Pages,
+			MapStats:    result.MapStats,
+			Updates:     updates,
+		}
+		if jsonBytes, marshalErr := json.Marshal(entry); marshalErr == nil {
+			contentHash := types.HashString(content)
+			chatModelID := chatModel.GetModelID()
+			configHash := types.HashAll(
+				chatModelID,
+				lang,
+				string(batchCtx.ExtractionGranularity),
+				batchCtx.ContentInstructions,
+				batchCtx.ExtractionInstructions,
+				strings.Join(oldSlugList, "\n"),
+				priorContribution,
+				"wiki_map_v2",
+			)
+			cacheKey := fmt.Sprintf("knowledge:%s:wiki_map", knowledgeID)
+			s.cacheService.Store(ctx, &types.ArtifactCache{
+				TenantID:   payload.TenantID,
+				CacheKey:   cacheKey,
+				CacheType:  types.ArtifactCacheTypeWikiExtract,
+				InputHash:  contentHash,
+				ConfigHash: configHash,
+				OutputJSON: jsonBytes,
+				OutputSize: int64(len(jsonBytes)),
+			})
+		}
+	}
+
+	return result, updates, nil
 }
 
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
@@ -1735,8 +1808,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			return false, "", false, nil
 		}
 
+		// Stable wiki page ID: derived from (kbID, slug) so the same
+		// slug in the same KB always gets the same ID after re-ingest.
 		page = &types.WikiPage{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(kbID, 0, types.ChunkTypeWikiPage, types.HashString(slug)),
 			TenantID:        tenantID,
 			KnowledgeBaseID: kbID,
 			Slug:            slug,

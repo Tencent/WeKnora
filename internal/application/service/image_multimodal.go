@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -84,6 +83,9 @@ type ImageMultimodalService struct {
 	// backend so multimodal reads target the resource's real backend instead of
 	// the knowledge base's currently configured one.
 	resourceCatalog interfaces.ResourceCatalog
+	// cacheService is the best-effort content-addressed artifact cache for
+	// VLM OCR/Caption results. nil in Lite deployments without the table.
+	cacheService interfaces.ArtifactCacheService
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
@@ -104,6 +106,7 @@ func NewImageMultimodalService(
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	cacheService interfaces.ArtifactCacheService,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
@@ -120,8 +123,76 @@ func NewImageMultimodalService(
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
+		cacheService:    cacheService,
 		spanTracker:     spanTracker,
 	}
+}
+
+// cachedVLMOCR is a shorthand for cachedVLM with OCR cache type.
+func (s *ImageMultimodalService) cachedVLMOCR(
+	ctx context.Context, vlmModel vlm.VLM, imgBytes []byte, prompt string,
+	payload *types.ImageMultimodalPayload, vlmCfg types.VLMConfig,
+) (string, error) {
+	return s.cachedVLM(ctx, prompt, vlmModel, imgBytes, payload, vlmCfg, true)
+}
+
+// cachedVLM wraps a VLM Predict call with content-addressed artifact caching.
+// The cache key is built from (image bytes hash, prompt hash, model identity).
+// On cache miss the VLM is called and the result is frozen as canonical.
+func (s *ImageMultimodalService) cachedVLM(
+	ctx context.Context,
+	prompt string,
+	vlmModel vlm.VLM,
+	imgBytes []byte,
+	payload *types.ImageMultimodalPayload,
+	vlmCfg types.VLMConfig,
+	isOCR bool,
+) (string, error) {
+	cacheType := types.ArtifactCacheTypeVLMOcr
+	if !isOCR {
+		cacheType = types.ArtifactCacheTypeVLMCaption
+	}
+
+	if s.cacheService == nil {
+		return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+	}
+
+	imgHash := types.HashBytes(imgBytes)
+	promptHash := types.HashString(prompt)
+	inputHash := types.HashAll(imgHash, promptHash)
+	modelID := vlmModel.GetModelID()
+	if modelID == "" {
+		modelID = strings.TrimSpace(vlmCfg.ModelID)
+		if modelID == "" {
+			modelID = "legacy_inline"
+		}
+	}
+	configHash := types.HashAll(modelID, vlmCfg.InterfaceType)
+	cacheKey := "image:" + imgHash[:16]
+
+	if cached := s.cacheService.Lookup(ctx, payload.TenantID, cacheKey, cacheType, inputHash, configHash); cached != nil && cached.OutputText != "" {
+		logger.Infof(ctx, "[ImageMultimodal] VLM cache hit type=%s image=%s", cacheType, payload.ImageURL)
+		return cached.OutputText, nil
+	}
+
+	result, err := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	if result != "" {
+		s.cacheService.Store(ctx, &types.ArtifactCache{
+			TenantID:   payload.TenantID,
+			CacheKey:   cacheKey,
+			CacheType:  cacheType,
+			InputHash:  inputHash,
+			ConfigHash: configHash,
+			OutputText: result,
+			OutputSize: int64(len(result)),
+		})
+	}
+
+	return result, nil
 }
 
 // tracker returns a usable SpanTracker — falls back to a no-op when the
@@ -268,7 +339,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrErr := s.cachedVLMOCR(ctx, vlmModel, imgBytes, prompt, &payload, vlmCfg)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -286,7 +357,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	caption, capErr := s.cachedVLM(ctx, buildVLMCaptionPrompt(ctx, vlmCfg), vlmModel, imgBytes, &payload, vlmCfg, false)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -296,13 +367,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imgOut["caption_preview"] = previewText(caption, 200)
 	}
 
-	// Build child chunks for OCR and caption results
+	// Build child chunks for OCR and caption results. Include the stable image
+	// occurrence so repeated identical bytes under one parent do not collide.
+	imageIdentity := types.HashAll(types.HashBytes(imgBytes), fmt.Sprintf("%d", payload.ImageIndex))
 	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
 	var newChunks []*types.Chunk
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.ImageChunkStableID(payload.ChunkID, imageIdentity, types.ChunkTypeImageOCR),
+			ContentHash:     types.HashString(imageInfo.OCRText),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -319,7 +393,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.ImageChunkStableID(payload.ChunkID, imageIdentity, types.ChunkTypeImageCaption),
+			ContentHash:     types.HashString(imageInfo.Caption),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -688,6 +763,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeID:     payload.KnowledgeID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+		Attempt:         payload.Attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
