@@ -146,18 +146,21 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, err
 	}
 
-	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
-	// regular agent picker. When the KB is shared, run it in the source tenant
-	// only if the caller has edit permission, so KB-scoped models/tools resolve
-	// without granting viewers write capability.
+	// The built-in wiki fixer carries mutating Wiki tools. It is only valid for
+	// one editable Wiki KB, and shared calls run in the source tenant so
+	// KB-scoped models and tools resolve without granting viewers write access.
 	if customAgent != nil && customAgent.ID == types.BuiltinWikiFixerID {
-		if scopedAgent, scopedTenantID := h.resolveWikiFixerTenantScope(
+		scopedAgent, scopedTenantID, err := h.resolveWikiFixerTenantScope(
 			ctx,
 			customAgent,
 			c.GetUint64(types.TenantIDContextKey.String()),
 			types.TenantRoleFromContext(ctx),
 			kbIDs,
-		); scopedTenantID != 0 {
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		if scopedTenantID != 0 {
 			customAgent = scopedAgent
 			effectiveTenantID = scopedTenantID
 		}

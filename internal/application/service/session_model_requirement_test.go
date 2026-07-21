@@ -36,6 +36,30 @@ func TestResolveChatModelIDRequiresConfiguredAgentModel(t *testing.T) {
 	assert.Contains(t, err.Error(), "model_id")
 }
 
+func TestResolveChatModelIDUsesFallbackForBuiltinWikiFixer(t *testing.T) {
+	svc := &sessionService{
+		modelService: &stubModelService{
+			models: []*types.Model{
+				{
+					ID:   "default-chat",
+					Type: types.ModelTypeKnowledgeQA,
+				},
+			},
+		},
+	}
+	req := &types.QARequest{
+		Session: &types.Session{},
+		CustomAgent: &types.CustomAgent{
+			ID: types.BuiltinWikiFixerID,
+		},
+	}
+
+	modelID, err := svc.resolveChatModelID(context.Background(), req, nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "default-chat", modelID)
+}
+
 func TestResolveChatModelIDRejectsUnavailableConfiguredAgentModel(t *testing.T) {
 	svc := &sessionService{
 		modelService: &stubModelService{modelsByID: map[string]*types.Model{}},
