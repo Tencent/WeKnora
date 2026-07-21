@@ -11,7 +11,7 @@ export interface DataSource {
   config: any
   sync_schedule: string
   sync_mode: 'incremental' | 'full'
-  status: 'active' | 'paused' | 'error'
+  status: 'active' | 'paused' | 'error' | 'reauthorization_required'
   conflict_strategy: 'overwrite' | 'skip'
   sync_deletions: boolean
   last_sync_at: string | null
@@ -22,6 +22,8 @@ export interface DataSource {
   credentials?: { credentials: { configured: boolean } }
   created_at: string
   updated_at: string
+  connection_version: number
+  has_sync_cursor: boolean
   latest_sync_log?: SyncLog
 }
 
@@ -124,6 +126,33 @@ export function resumeDataSource(id: string) {
 
 export function getSyncLogs(id: string, limit = 20, offset = 0) {
   return get(`/api/v1/datasource/${id}/logs?limit=${limit}&offset=${offset}`)
+}
+
+export interface DataSourceOAuthStatus {
+  authorized: boolean
+  provider?: string
+  account_display_name?: string
+  provider_tenant_id?: string
+  authorized_drive_id?: string
+  expires_at?: string
+  connection_version: number
+  reauthorization_required: boolean
+}
+
+export async function getDataSourceOAuthStatus(id: string): Promise<DataSourceOAuthStatus> {
+  const response: any = await get(`/api/v1/datasource/${id}/oauth/status`)
+  return (response.data ?? response) as DataSourceOAuthStatus
+}
+
+export async function getDataSourceOAuthAuthorizeURL(id: string, replaceConnection = false): Promise<string> {
+  const response: any = await post(`/api/v1/datasource/${id}/oauth/authorize-url`, {
+    replace_connection: replaceConnection,
+  })
+  return response?.data?.authorization_url ?? response?.authorization_url
+}
+
+export async function disconnectDataSourceOAuth(id: string): Promise<void> {
+  await del(`/api/v1/datasource/${id}/oauth/token`)
 }
 
 // ----------------------------------------------------------------------------
