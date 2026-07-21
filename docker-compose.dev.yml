@@ -283,8 +283,9 @@ services:
       - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
       # ========== PDF 渲染 ==========
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
-      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全；默认随 CPU min(4,cpu)）
-      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-4}
+      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全）。留空走代码默认 min(4,cpu)，
+      # 避免在低核容器上过度并行（写死数值会覆盖 CPU 感知逻辑）。
+      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
       # JPEG 质量（代码默认 85；compose 此前误写 90，已对齐）
       - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-85}

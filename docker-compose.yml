@@ -78,7 +78,8 @@ services:
       - GIN_MODE=${GIN_MODE:-release}
       # 时区，默认为Asia/Shanghai
       - TZ=${TZ:-Asia/Shanghai}
-      # 系统默认语言，默认为en-US，优先级为：Accept-Language 请求头 > 此环境变量 > 内置默认值 (en-US)
+      # 文档处理语言（问题/摘要生成）。优先级：此环境变量（部署级覆盖，非空即生效）
+      # > Accept-Language 请求头 > 内置默认值 (zh-CN)。留空则跟随请求方 Accept-Language。
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-}
       # gin 信任的代理 CIDR（逗号分隔）；显式设为空字符串则禁用代理信任。
       # 默认信任 loopback + 私网段（容器网络内 nginx 已覆盖）
@@ -427,8 +428,9 @@ services:
       - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
       # ========== PDF 渲染 ==========
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
-      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全；默认随 CPU min(4,cpu)）
-      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-4}
+      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全）。留空走代码默认 min(4,cpu)，
+      # 避免在低核容器上过度并行（写死数值会覆盖 CPU 感知逻辑）。
+      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
       # JPEG 质量（代码默认 85；compose 此前误写 90，已对齐）
       - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-85}
