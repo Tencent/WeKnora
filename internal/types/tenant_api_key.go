@@ -11,17 +11,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// TenantAPIKey is a revocable, per-tenant API key. KeyHash is used for
-// authentication lookup; APIKey is stored encrypted when SYSTEM_AES_KEY is set
-// and returned by owner-only management APIs.
+// TenantAPIKey is a revocable machine credential. Tenant-scoped and platform
+// keys intentionally share one table; platform keys have tenant_id=NULL and
+// choose a target workspace per request. KeyHash is used for authentication
+// lookup; APIKey is stored encrypted when SYSTEM_AES_KEY is set.
 type TenantAPIKey struct {
-	ID               uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	TenantID         uint64      `json:"tenant_id" gorm:"not null;index"`
-	Name             string      `json:"name" gorm:"type:varchar(128);not null"`
-	KeyHash          string      `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
-	APIKey           string      `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
-	FullAccess       bool        `json:"full_access" gorm:"not null;default:false"`
-	KnowledgeBaseIDs StringArray `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	ID               uint64          `json:"id" gorm:"primaryKey;autoIncrement"`
+	TenantID         *uint64         `json:"tenant_id,omitempty" gorm:"index"`
+	ScopeType        APIKeyScopeType `json:"scope_type" gorm:"type:varchar(16);not null;default:tenant;index"`
+	Name             string          `json:"name" gorm:"type:varchar(128);not null"`
+	KeyHash          string          `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
+	APIKey           string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
+	FullAccess       bool            `json:"full_access" gorm:"not null;default:false"`
+	KnowledgeBaseIDs StringArray     `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -33,6 +35,33 @@ type TenantAPIKey struct {
 	RevokedAt    *time.Time  `json:"revoked_at,omitempty" gorm:"index"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+type APIKeyScopeType string
+
+const (
+	APIKeyScopeTenant   APIKeyScopeType = "tenant"
+	APIKeyScopePlatform APIKeyScopeType = "platform"
+)
+
+func NormalizeAPIKeyScopeType(scope APIKeyScopeType) APIKeyScopeType {
+	switch APIKeyScopeType(strings.ToLower(strings.TrimSpace(string(scope)))) {
+	case APIKeyScopePlatform:
+		return APIKeyScopePlatform
+	default:
+		return APIKeyScopeTenant
+	}
+}
+
+func (k *TenantAPIKey) IsPlatform() bool {
+	return k != nil && NormalizeAPIKeyScopeType(k.ScopeType) == APIKeyScopePlatform
+}
+
+func (k *TenantAPIKey) TenantIDValue() uint64 {
+	if k == nil || k.TenantID == nil {
+		return 0
+	}
+	return *k.TenantID
 }
 
 func (TenantAPIKey) TableName() string {
@@ -126,6 +155,13 @@ const (
 	// principal mode, request headers, and tenant KV. It does not include API
 	// key management, member management, tenant deletion, or ownership transfer.
 	APIKeyCapabilityManageTenantSettings APIKeyCapability = "manage_tenant_settings"
+	APIKeyCapabilitySystemTenantsRead    APIKeyCapability = "system_tenants_read"
+	APIKeyCapabilitySystemTenantsManage  APIKeyCapability = "system_tenants_manage"
+	APIKeyCapabilitySystemSettingsRead   APIKeyCapability = "system_settings_read"
+	APIKeyCapabilitySystemSettingsManage APIKeyCapability = "system_settings_manage"
+	APIKeyCapabilitySystemRuntimeRead    APIKeyCapability = "system_runtime_read"
+	APIKeyCapabilitySystemRuntimeManage  APIKeyCapability = "system_runtime_manage"
+	APIKeyCapabilitySystemAuditRead      APIKeyCapability = "system_audit_read"
 )
 
 // NormalizeAPIKeyCapability maps an input capability string to a known
@@ -168,6 +204,20 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilityManageSpaces
 	case APIKeyCapabilityManageTenantSettings:
 		return APIKeyCapabilityManageTenantSettings
+	case APIKeyCapabilitySystemTenantsRead:
+		return APIKeyCapabilitySystemTenantsRead
+	case APIKeyCapabilitySystemTenantsManage:
+		return APIKeyCapabilitySystemTenantsManage
+	case APIKeyCapabilitySystemSettingsRead:
+		return APIKeyCapabilitySystemSettingsRead
+	case APIKeyCapabilitySystemSettingsManage:
+		return APIKeyCapabilitySystemSettingsManage
+	case APIKeyCapabilitySystemRuntimeRead:
+		return APIKeyCapabilitySystemRuntimeRead
+	case APIKeyCapabilitySystemRuntimeManage:
+		return APIKeyCapabilitySystemRuntimeManage
+	case APIKeyCapabilitySystemAuditRead:
+		return APIKeyCapabilitySystemAuditRead
 	default:
 		return ""
 	}
@@ -218,6 +268,7 @@ func (k *TenantAPIKey) AfterFind(tx *gorm.DB) error {
 // TenantAPIKeyScope is the request-context projection used by middleware.
 type TenantAPIKeyScope struct {
 	KeyID            uint64
+	ScopeType        APIKeyScopeType
 	FullAccess       bool
 	KnowledgeBaseIDs StringArray
 	Capabilities     StringArray
@@ -241,10 +292,15 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 	return TenantAPIKeyScope{
 		KeyID:            s.KeyID,
+		ScopeType:        NormalizeAPIKeyScopeType(s.ScopeType),
 		FullAccess:       s.FullAccess,
 		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
 		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
 	}
+}
+
+func (s TenantAPIKeyScope) IsPlatform() bool {
+	return NormalizeAPIKeyScopeType(s.ScopeType) == APIKeyScopePlatform
 }
 
 // HasCapability reports whether the scope carries the given additive grant.

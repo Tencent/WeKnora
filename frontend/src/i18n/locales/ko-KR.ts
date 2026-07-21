@@ -3014,6 +3014,8 @@ export default {
         action: {
           "system.setting_changed": "시스템 설정 변경",
           "system.admin_promoted": "시스템 관리자 부여",
+          "system.api_key_created": "플랫폼 API 키 생성",
+          "system.api_key_revoked": "플랫폼 API 키 폐기",
           "system.admin_revoked": "시스템 관리자 회수",
           "system.user_password_reset": "사용자 비밀번호 재설정",
           "system.queue_task_retried": "실패 작업 다시 실행",
@@ -6854,5 +6856,15 @@ export default {
       notFound: "초대를 찾을 수 없거나 이미 취소되었습니다.",
       generic: "작업에 실패했습니다. 다시 시도해 주세요.",
     },
+  },
+  platformApiKeys: {
+    title: "플랫폼 API 키", description: "워크스페이스 간 자동화를 위한 플랫폼 자격 증명입니다. 워크스페이스 API에는 X-Tenant-ID를 사용하세요.",
+    securityNotice: "플랫폼 API 키는 모든 워크스페이스를 선택할 수 있습니다. 필요한 권한만 부여하고, 한 번 표시되는 키를 안전하게 보관하세요.",
+    create: "플랫폼 API 키 만들기", createDescription: "플랫폼 키는 워크스페이스에 고정되지 않지만 모든 작업은 권한으로 제한됩니다.",
+    loading: "불러오는 중…", empty: "플랫폼 API 키가 없습니다", name: "이름", namePlaceholder: "예: 중앙 운영 자동화", key: "키", capability: "권한", capabilityMore: "+{count}", viewAllCapabilities: "모든 권한 보기", capabilityHint: "워크스페이스 권한은 X-Tenant-ID 대상에, 시스템 권한은 플랫폼 제어 API에 적용됩니다.", lastUsed: "마지막 사용", createdAt: "생성 시간", actions: "작업", never: "사용 안 함", systemCapabilityGroup: "플랫폼 제어 영역",
+    capabilities: { tenantsRead: "워크스페이스 조회", tenantsManage: "워크스페이스 관리", settingsRead: "시스템 설정 조회", settingsManage: "시스템 설정 관리", runtimeRead: "런타임 조회", runtimeManage: "런타임 관리", auditRead: "시스템 감사 조회" },
+    capabilityHints: { tenantsRead: "모든 워크스페이스를 조회하고 검색합니다.", tenantsManage: "워크스페이스를 생성, 수정, 삭제합니다.", settingsRead: "플랫폼 설정을 조회합니다.", settingsManage: "플랫폼 설정을 변경합니다.", runtimeRead: "작업 큐와 상세 정보를 조회합니다.", runtimeManage: "작업을 재시도, 실행, 취소 또는 삭제합니다.", auditRead: "플랫폼 감사 로그를 조회합니다." },
+    createdTitle: "플랫폼 API 키가 생성되었습니다", createdDescription: "지금 복사하여 안전하게 보관하세요. 전체 키는 다시 표시되지 않습니다.", copy: "키 복사", copySuccess: "키가 복사되었습니다",
+    deleteConfirm: "“{name}”을(를) 삭제할까요? 이 키를 사용하는 자동화가 즉시 중단됩니다.", deleteSuccess: "플랫폼 API 키가 삭제되었습니다", deleteFailed: "플랫폼 API 키를 삭제하지 못했습니다", nameRequired: "이름을 입력하세요", capabilityRequired: "권한을 하나 이상 선택하세요", loadFailed: "플랫폼 API 키를 불러오지 못했습니다", createFailed: "플랫폼 API 키를 만들지 못했습니다",
   },
 };

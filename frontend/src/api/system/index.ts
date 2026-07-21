@@ -1,4 +1,28 @@
 import { get, post, put, del } from '@/utils/request'
+import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
+
+export interface CreatePlatformAPIKeyPayload {
+  name: string
+  capabilities: TenantAPIKeyCapability[]
+  expires_at_unix?: number
+}
+
+export async function listPlatformAPIKeys(): Promise<{ success: boolean; data?: TenantAPIKey[] }> {
+  return await get('/api/v1/system/admin/api-keys') as unknown as { success: boolean; data?: TenantAPIKey[] }
+}
+
+export async function createPlatformAPIKey(
+  payload: CreatePlatformAPIKeyPayload,
+): Promise<{ success: boolean; data?: CreatedTenantAPIKey }> {
+  return await post('/api/v1/system/admin/api-keys', payload) as unknown as {
+    success: boolean
+    data?: CreatedTenantAPIKey
+  }
+}
+
+export async function deletePlatformAPIKey(keyId: number): Promise<{ success: boolean }> {
+  return await del(`/api/v1/system/admin/api-keys/${keyId}`) as unknown as { success: boolean }
+}
 
 export interface SystemInfo {
   version: string

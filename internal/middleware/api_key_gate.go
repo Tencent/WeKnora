@@ -21,6 +21,10 @@ var errTenantAPIKeyScopeForbidden = stderrors.New("workspace API key scope forbi
 // default (fail-closed), which removes the old "remember to add APIKeyDeny"
 // footgun.
 type APIKeyRoutePolicy struct {
+	// PlatformOnly rejects workspace-bound keys even when they are full-access.
+	// It is used for control-plane routes under /system/admin and cross-workspace
+	// tenant lifecycle APIs.
+	PlatformOnly bool
 	// RequireFullAccess admits only full-access tenant API keys unless one of
 	// the listed capabilities also matches. Routes with neither full-access
 	// requirement nor capabilities are open to any valid API key.
@@ -126,6 +130,12 @@ func (a *APIKeyRouteAuthorizer) Middleware() gin.HandlerFunc {
 func (a *APIKeyRouteAuthorizer) authorize(scope types.TenantAPIKeyScope, method, fullPath string) error {
 	policy, ok := a.Lookup(method, fullPath)
 	if !ok {
+		return errTenantAPIKeyScopeForbidden
+	}
+	if policy.PlatformOnly && !scope.IsPlatform() {
+		return errTenantAPIKeyScopeForbidden
+	}
+	if policy.PlatformOnly && len(policy.Capabilities) == 0 {
 		return errTenantAPIKeyScopeForbidden
 	}
 	if scope.FullAccess {

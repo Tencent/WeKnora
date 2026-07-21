@@ -654,10 +654,9 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 // EnableCrossTenantAccess flag, replacing the 12-line if-block that
 // previously opened ListAllTenants and SearchTenants.
 //
-// POST /tenants and GET /tenants stay open to authenticated users —
-// the previous handler comments claimed CanAccessAllTenants gating
-// "is in the handler" but the bodies never enforced it; this PR is a
-// pure refactor and does not introduce new gates.
+// JWT behavior for POST /tenants and GET /tenants remains unchanged. Platform
+// API keys may create tenants through system_tenants_manage; workspace keys
+// remain default-denied on tenant-catalog operations.
 func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
@@ -668,8 +667,12 @@ func RegisterTenantRoutes(
 ) {
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.
-	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
-	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/all",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.ListAllTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/search",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.SearchTenants)
 
 	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
@@ -682,7 +685,8 @@ func RegisterTenantRoutes(
 		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
 		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
 		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
-		tenantRoutes.POST("", handler.CreateTenant)
+		g.apiKeyRoute(tenantRoutes, http.MethodPost, "",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
@@ -700,9 +704,13 @@ func RegisterTenantRoutes(
 		// opts in below through the manage_members capability.
 		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
 		{
-			tenantByID.GET("", g.Viewer(), handler.GetTenant)
-			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
-			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
+			g.apiKeyRoute(tenantByID, http.MethodGet, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+				g.Viewer(), handler.GetTenant)
+			g.apiKeyRoute(tenantByID, http.MethodPut, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.UpdateTenant)
+			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
 			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
 			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
@@ -948,30 +956,43 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
+		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
+		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
+		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)
 
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
 		// wrapping), matching the project's axios interceptor convention
 		// — see frontend/src/utils/request.ts:97.
-		adminRoutes.GET("/settings", handler.ListSystemSettings)
-		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
-		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
-		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.ListSystemSettings)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.GetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodPut, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.UpdateSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodDelete, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.ResetSystemSetting)
 
 		// Runtime operations: live asynq queue depths, safe task projections,
 		// and state-checked task actions for the SystemAdmin dashboard. Lite
 		// mode returns available=false.
-		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
-		adminRoutes.GET("/runtime/queues/:queue/tasks", handler.ListRuntimeTasks)
-		adminRoutes.POST("/runtime/queues/:queue/tasks/:task_id/actions/:action", handler.MutateRuntimeTask)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.GetRuntimeQueues)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues/:queue/tasks",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.ListRuntimeTasks)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/runtime/queues/:queue/tasks/:task_id/actions/:action",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.MutateRuntimeTask)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of
 		// /settings because it changes tenants, not the setting row.
-		adminRoutes.POST(
-			"/tenants/apply-default-storage-quota",
-			handler.ApplyDefaultStorageQuotaToAllTenants,
-		)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/tenants/apply-default-storage-quota",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
+			handler.ApplyDefaultStorageQuotaToAllTenants)
 
 		// Platform-wide audit feed (tenant_id=0 rows). Covers
 		// system.setting_changed / system.admin_promoted /
@@ -981,7 +1002,8 @@ func RegisterSystemAdminRoutes(
 		// out by tenant_id). Optional: skip when audit deps are
 		// absent, matching RegisterTenantRoutes' /audit-log handling.
 		if auditLogHandler != nil {
-			adminRoutes.GET("/audit-log", auditLogHandler.ListSystemAuditLog)
+			g.apiKeyRoute(adminRoutes, http.MethodGet, "/audit-log",
+				apiKeyPlatform(types.APIKeyCapabilitySystemAuditRead), auditLogHandler.ListSystemAuditLog)
 		}
 	}
 }

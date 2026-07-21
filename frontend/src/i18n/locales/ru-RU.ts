@@ -2702,6 +2702,8 @@ export default {
         action: {
           'system.setting_changed': 'Изменена системная настройка',
           'system.admin_promoted': 'Выдан системный администратор',
+          'system.api_key_created': 'Создан платформенный API-ключ',
+          'system.api_key_revoked': 'Отозван платформенный API-ключ',
           'system.admin_revoked': 'Отозван системный администратор',
           'system.user_password_reset': 'Сброшен пароль пользователя',
           'system.queue_task_retried': 'Повторно запущена сбойная задача',
@@ -6596,5 +6598,15 @@ export default {
         details: 'Сырые детали',
       },
     },
+  },
+  platformApiKeys: {
+    title: 'Платформенные API-ключи', description: 'Учетные данные для автоматизации между рабочими пространствами. Для API пространства используйте X-Tenant-ID.',
+    securityNotice: 'Платформенный ключ может выбрать любое пространство. Выдавайте только необходимые права; секрет показывается один раз.',
+    create: 'Создать платформенный API-ключ', createDescription: 'Ключ не привязан к пространству, но каждая операция ограничена правами.',
+    loading: 'Загрузка…', empty: 'Платформенных ключей нет', name: 'Название', namePlaceholder: 'Например: центральная автоматизация', key: 'Ключ', capability: 'Права', capabilityMore: '+{count}', viewAllCapabilities: 'Показать все права', capabilityHint: 'Права пространства применяются к X-Tenant-ID, системные права — к API управления платформой.', lastUsed: 'Последнее использование', createdAt: 'Создан', actions: 'Действия', never: 'Никогда', systemCapabilityGroup: 'Управление платформой',
+    capabilities: { tenantsRead: 'Просмотр пространств', tenantsManage: 'Управление пространствами', settingsRead: 'Просмотр системных настроек', settingsManage: 'Управление системными настройками', runtimeRead: 'Просмотр очередей', runtimeManage: 'Управление очередями', auditRead: 'Просмотр аудита' },
+    capabilityHints: { tenantsRead: 'Список, поиск и просмотр всех пространств.', tenantsManage: 'Создание, изменение и удаление пространств.', settingsRead: 'Чтение настроек платформы.', settingsManage: 'Изменение настроек платформы.', runtimeRead: 'Просмотр очередей и задач.', runtimeManage: 'Повтор, запуск, отмена и удаление задач.', auditRead: 'Чтение системного журнала аудита.' },
+    createdTitle: 'Платформенный API-ключ создан', createdDescription: 'Скопируйте и сохраните ключ сейчас. Полное значение больше не будет показано.', copy: 'Копировать', copySuccess: 'Ключ скопирован',
+    deleteConfirm: 'Удалить «{name}»? Автоматизация с этим ключом сразу перестанет работать.', deleteSuccess: 'Платформенный API-ключ удалён', deleteFailed: 'Не удалось удалить API-ключ', nameRequired: 'Введите название', capabilityRequired: 'Выберите хотя бы одно право', loadFailed: 'Не удалось загрузить ключи', createFailed: 'Не удалось создать ключ',
   },
 }

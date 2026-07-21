@@ -144,6 +144,14 @@
                     <RuntimeQueues />
                   </div>
 
+                  <div v-if="currentSection === 'platform-api-keys'" class="section">
+                    <PlatformAPIKeys />
+                  </div>
+
+                  <div v-if="currentSection === 'system-audit-log'" class="section">
+                    <SystemAuditLog />
+                  </div>
+
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
                      用户的基本信息不该跟 owner 权限绑定。 -->
                   <div v-if="currentSection === 'userprofile'" class="section">
@@ -201,6 +209,8 @@ import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
+import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
+import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
   INTEGRATION_PREVIEW_ITEMS,
@@ -265,7 +275,7 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   members: 'viewer',
 }
 
-const SYSTEM_ADMIN_SECTIONS = new Set(['system-global', 'runtime-queues'])
+const SYSTEM_ADMIN_SECTIONS = new Set(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log'])
 const INTEGRATION_SECTION_PREFIX = 'integration-'
 
 const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
@@ -336,6 +346,8 @@ const navItems = computed(() => {
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
+    { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
+    { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -398,7 +410,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'system_administration',
       label: t('settings.navGroups.systemAdministration'),
-      items: pickItems(['system-global', 'runtime-queues']),
+      items: pickItems(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log']),
     },
     {
       key: 'platform',
@@ -469,7 +481,7 @@ const handleClose = () => {
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
     const sec = route.query.section
-    if (sec === 'system-global' || sec === 'runtime-queues') {
+    if (sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
       router.push('/platform/knowledge-bases')
     } else {
       router.back()

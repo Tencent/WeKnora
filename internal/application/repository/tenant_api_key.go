@@ -47,11 +47,35 @@ func (r *tenantAPIKeyRepository) ListAPIKeys(ctx context.Context, tenantID uint6
 	return keys, err
 }
 
+func (r *tenantAPIKeyRepository) ListPlatformAPIKeys(ctx context.Context) ([]*types.TenantAPIKey, error) {
+	var keys []*types.TenantAPIKey
+	err := r.db.WithContext(ctx).
+		Where("scope_type = ? AND revoked_at IS NULL", types.APIKeyScopePlatform).
+		Order("created_at DESC").
+		Find(&keys).Error
+	return keys, err
+}
+
 func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	now := time.Now()
 	res := r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).
 		Where("id = ? AND tenant_id = ? AND revoked_at IS NULL", id, tenantID).
+		Update("revoked_at", &now)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrTenantAPIKeyNotFound
+	}
+	return nil
+}
+
+func (r *tenantAPIKeyRepository) RevokePlatformAPIKey(ctx context.Context, id uint64) error {
+	now := time.Now()
+	res := r.db.WithContext(ctx).
+		Model(&types.TenantAPIKey{}).
+		Where("id = ? AND scope_type = ? AND revoked_at IS NULL", id, types.APIKeyScopePlatform).
 		Update("revoked_at", &now)
 	if res.Error != nil {
 		return res.Error
