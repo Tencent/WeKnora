@@ -107,6 +107,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
+	if _, valid := secutils.ValidateInput(request.Query); !valid {
+		logger.Error(ctx, "Query content contains invalid characters")
+		return nil, nil, errors.NewBadRequestError("Query content contains invalid characters")
+	}
 	if h.suggestionService != nil && request.SuggestionAttribution != nil {
 		if err := h.suggestionService.ValidateAttribution(ctx, sessionID, request.Query, request.SuggestionAttribution); err != nil {
 			return nil, nil, errors.NewBadRequestError("invalid suggestion attribution")

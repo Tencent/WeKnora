@@ -7,11 +7,19 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // ---------------------------------------------------------------------------
 // Shared QA helpers: KB resolution, model resolution, retrieval tenant
 // ---------------------------------------------------------------------------
+
+func validateQAQuery(query string) error {
+	if _, valid := utils.ValidateInput(query); !valid {
+		return fmt.Errorf("user query contains invalid content")
+	}
+	return nil
+}
 
 // resolveKnowledgeBases resolves the effective knowledge base IDs and knowledge IDs
 // for a QA request. Priority:

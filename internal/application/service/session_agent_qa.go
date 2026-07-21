@@ -23,6 +23,10 @@ func (s *sessionService) AgentQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
+	if err := validateQAQuery(req.Query); err != nil {
+		return err
+	}
+
 	sessionID := req.Session.ID
 	sessionJSON, err := json.Marshal(req.Session)
 	if err != nil {
