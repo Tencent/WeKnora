@@ -1,8 +1,9 @@
 package types
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -12,23 +13,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrDataSourceSettingsConflict means the saved connector changed during a selection update.
-var ErrDataSourceSettingsConflict = errors.New("data source configuration changed; reload before retrying")
-
 // Data source types and constants
 const (
 	// Connector types
-	ConnectorTypeFeishu = "feishu"
-	// ConnectorTypeLark is Feishu's international edition (open.larksuite.com).
-	// It shares the Feishu connector; only the API host and tenant differ.
-	ConnectorTypeLark = "lark"
-	// ConnectorTypeFeishuDrive is the Feishu Drive (云盘) mode: syncs documents
-	// under a user-supplied Drive folder_token, as opposed to a Wiki space.
-	// Shares the feishu connector package; only resource enumeration + fetch differ.
-	ConnectorTypeFeishuDrive = "feishu_drive"
-	// ConnectorTypeLarkDrive is the Lark (international) Drive mode, the
-	// international counterpart of ConnectorTypeFeishuDrive.
-	ConnectorTypeLarkDrive   = "lark_drive"
+	ConnectorTypeFeishu      = "feishu"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"
@@ -40,19 +28,17 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
-	ConnectorTypeGitLab      = "gitlab"
-	ConnectorTypeIMA         = "ima"
-	ConnectorTypeSeafile     = "seafile"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
 	SyncModeFull        = "full"
 
 	// Data source status
-	DataSourceStatusActive  = "active"
-	DataSourceStatusPaused  = "paused"
-	DataSourceStatusError   = "error"
-	DataSourceStatusDeleted = "deleted"
+	DataSourceStatusActive                  = "active"
+	DataSourceStatusPaused                  = "paused"
+	DataSourceStatusError                   = "error"
+	DataSourceStatusReauthorizationRequired = "reauthorization_required"
+	DataSourceStatusDeleted                 = "deleted"
 
 	// Sync log status
 	SyncLogStatusRunning  = "running"
@@ -102,6 +88,10 @@ type DataSource struct {
 	// Whether to sync deletions from source
 	SyncDeletions bool `json:"sync_deletions" gorm:"default:true"`
 
+	// ConnectionVersion is incremented whenever an OAuth connection is replaced.
+	// Sync tasks capture it and must not commit results from an older connection.
+	ConnectionVersion uint64 `json:"connection_version" gorm:"not null;default:1"`
+
 	// Last successful sync timestamp
 	LastSyncAt *time.Time `json:"last_sync_at"`
 
@@ -143,46 +133,139 @@ func (d *DataSource) BeforeCreate(tx *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.New().String()
 	}
+	if d.ConnectionVersion == 0 {
+		d.ConnectionVersion = 1
+	}
+	return nil
+}
+
+// DataSourceOAuthToken stores the delegated OAuth grant owned by a data source.
+// Secrets fail closed: unlike legacy connector credentials, plaintext fallback
+// is forbidden because refresh tokens can provide long-lived drive access.
+type DataSourceOAuthToken struct {
+	ID                 string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64    `json:"tenant_id" gorm:"not null;uniqueIndex:idx_ds_oauth_token_tenant_source"`
+	DataSourceID       string    `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_oauth_token_tenant_source;index"`
+	Provider           string    `json:"provider" gorm:"type:varchar(32);not null"`
+	AccessToken        string    `json:"-" gorm:"type:text;not null"`
+	RefreshToken       string    `json:"-" gorm:"type:text;not null"`
+	TokenType          string    `json:"token_type" gorm:"type:varchar(32)"`
+	Scopes             string    `json:"scopes" gorm:"type:text"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	ProviderAccountID  string    `json:"provider_account_id" gorm:"type:varchar(255);not null"`
+	ProviderTenantID   string    `json:"provider_tenant_id" gorm:"type:varchar(255)"`
+	AuthorizedDriveID  string    `json:"authorized_drive_id" gorm:"type:varchar(255);not null"`
+	AccountDisplayName string    `json:"account_display_name" gorm:"type:varchar(255)"`
+	AuthorizedByUserID string    `json:"authorized_by_user_id" gorm:"type:varchar(255);not null"`
+	ConnectionVersion  uint64    `json:"connection_version" gorm:"not null"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+func (DataSourceOAuthToken) TableName() string { return "data_source_oauth_tokens" }
+
+func (t *DataSourceOAuthToken) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == "" {
+		t.ID = uuid.NewString()
+	}
+	return t.encryptSecrets()
+}
+
+func (t *DataSourceOAuthToken) BeforeSave(_ *gorm.DB) error { return t.encryptSecrets() }
+
+func (t *DataSourceOAuthToken) AfterFind(_ *gorm.DB) error {
+	var err error
+	if t.AccessToken, err = utils.DecryptStoredSecret(t.AccessToken); err != nil {
+		return fmt.Errorf("decrypt data source oauth access token: %w", err)
+	}
+	if t.RefreshToken, err = utils.DecryptStoredSecret(t.RefreshToken); err != nil {
+		return fmt.Errorf("decrypt data source oauth refresh token: %w", err)
+	}
+	return nil
+}
+
+func (t *DataSourceOAuthToken) encryptSecrets() error {
+	key := utils.GetAESKey()
+	if key == nil {
+		return fmt.Errorf("data source oauth requires a 32-byte SYSTEM_AES_KEY")
+	}
+	var err error
+	if t.AccessToken, err = utils.EncryptAESGCM(t.AccessToken, key); err != nil {
+		return fmt.Errorf("encrypt data source oauth access token: %w", err)
+	}
+	if t.RefreshToken, err = utils.EncryptAESGCM(t.RefreshToken, key); err != nil {
+		return fmt.Errorf("encrypt data source oauth refresh token: %w", err)
+	}
+	return nil
+}
+
+// DataSourceItem is the durable projection used to map a drive-level delta
+// stream onto selected folders/files without relying on mutable paths.
+type DataSourceItem struct {
+	ID                 string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64     `json:"tenant_id" gorm:"not null;index:idx_ds_item_scope,priority:1"`
+	DataSourceID       string     `json:"data_source_id" gorm:"type:varchar(36);not null;uniqueIndex:idx_ds_item_identity,priority:1;index:idx_ds_item_scope,priority:2"`
+	ConnectionVersion  uint64     `json:"connection_version" gorm:"not null;uniqueIndex:idx_ds_item_identity,priority:2;index:idx_ds_item_scope,priority:3"`
+	DriveID            string     `json:"drive_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:3"`
+	ItemID             string     `json:"item_id" gorm:"type:varchar(255);not null;uniqueIndex:idx_ds_item_identity,priority:4"`
+	ParentItemID       string     `json:"parent_item_id" gorm:"type:varchar(255);index"`
+	ItemType           string     `json:"item_type" gorm:"type:varchar(16);not null"`
+	SelectedRootID     string     `json:"selected_root_id" gorm:"type:text;index"`
+	ExternalID         string     `json:"external_id" gorm:"type:text;index"`
+	LastModifiedAt     time.Time  `json:"last_modified_at"`
+	LastSeenGeneration string     `json:"last_seen_generation" gorm:"type:varchar(36);index"`
+	Ingested           bool       `json:"ingested" gorm:"not null;default:false"`
+	DeletedAt          *time.Time `json:"deleted_at" gorm:"index"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+func (DataSourceItem) TableName() string { return "data_source_items" }
+
+func (i *DataSourceItem) BeforeCreate(_ *gorm.DB) error {
+	if i.ID == "" {
+		i.ID = uuid.NewString()
+	}
 	return nil
 }
 
 // SyncLog records the execution of a sync task
 type SyncLog struct {
 	// Unique identifier
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey" extensions:"x-agent=sync_log_id"`
+	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
 
 	// Reference to the data source
-	DataSourceID string `json:"data_source_id" gorm:"index" extensions:"x-agent"`
+	DataSourceID string `json:"data_source_id" gorm:"index"`
 
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Sync status: running, success, partial, failed, canceled
-	Status string `json:"status" gorm:"type:varchar(32);index" extensions:"x-agent"`
+	Status string `json:"status" gorm:"type:varchar(32);index"`
 
 	// Sync start time
-	StartedAt time.Time `json:"started_at" extensions:"x-agent"`
+	StartedAt time.Time `json:"started_at"`
 
 	// Sync completion time
-	FinishedAt *time.Time `json:"finished_at" extensions:"x-agent"`
+	FinishedAt *time.Time `json:"finished_at"`
 
 	// Total items fetched from source
-	ItemsTotal int `json:"items_total" extensions:"x-agent"`
+	ItemsTotal int `json:"items_total"`
 
 	// New items created in knowledge base
-	ItemsCreated int `json:"items_created" extensions:"x-agent"`
+	ItemsCreated int `json:"items_created"`
 
 	// Existing items updated
-	ItemsUpdated int `json:"items_updated" extensions:"x-agent"`
+	ItemsUpdated int `json:"items_updated"`
 
 	// Items deleted from knowledge base
-	ItemsDeleted int `json:"items_deleted" extensions:"x-agent"`
+	ItemsDeleted int `json:"items_deleted"`
 
 	// Items skipped (no changes detected)
-	ItemsSkipped int `json:"items_skipped" extensions:"x-agent"`
+	ItemsSkipped int `json:"items_skipped"`
 
 	// Items that failed to sync
-	ItemsFailed int `json:"items_failed" extensions:"x-agent"`
+	ItemsFailed int `json:"items_failed"`
 
 	// Error details if status is "failed"
 	ErrorMessage string `json:"error_message"`
@@ -232,6 +315,18 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+
+	// Runtime is injected by DataSourceService and is never persisted or
+	// returned by the API. OAuth connectors use it to obtain fresh tokens.
+	Runtime *DataSourceRuntime `json:"-"`
+}
+
+type DataSourceRuntime struct {
+	DataSourceID       string
+	TenantID           uint64
+	ConnectionVersion  uint64
+	AccessToken        func(context.Context) (string, error)
+	RefreshAccessToken func(context.Context) (string, error)
 }
 
 // HasCredentials reports whether the credentials map carries any value at
@@ -279,16 +374,16 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 // Resource represents a syncable resource (document, folder, space) from external system
 type Resource struct {
 	// Unique identifier in the external system
-	ExternalID string `json:"external_id" extensions:"x-agent"`
+	ExternalID string `json:"external_id"`
 
 	// Display name
-	Name string `json:"name" extensions:"x-agent"`
+	Name string `json:"name"`
 
 	// Resource type (document, folder, space, page, etc.)
-	Type string `json:"type" extensions:"x-agent"`
+	Type string `json:"type"`
 
 	// Optional description
-	Description string `json:"description" extensions:"x-agent"`
+	Description string `json:"description"`
 
 	// URL to access in external system
 	URL string `json:"url"`
@@ -297,10 +392,10 @@ type Resource struct {
 	ModifiedAt time.Time `json:"modified_at"`
 
 	// For hierarchical resources (parent ID if applicable)
-	ParentID string `json:"parent_id,omitempty" extensions:"x-agent"`
+	ParentID string `json:"parent_id,omitempty"`
 
 	// Whether this resource has children that can be expanded
-	HasChildren bool `json:"has_children,omitempty" extensions:"x-agent"`
+	HasChildren bool `json:"has_children,omitempty"`
 
 	// Additional metadata
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
@@ -329,9 +424,6 @@ type FetchedItem struct {
 	// When last modified in external system
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// When created in external system. Zero when the source does not expose it.
-	CreatedAt time.Time `json:"created_at"`
-
 	// Additional metadata to preserve
 	Metadata map[string]string `json:"metadata"`
 
@@ -340,62 +432,6 @@ type FetchedItem struct {
 
 	// Source resource ID (e.g., folder ID this document belongs to)
 	SourceResourceID string `json:"source_resource_id"`
-
-	// ReplacesSubtree, when true, tells ingestion to reconcile this item's
-	// sub-items: after the parent is (re)ingested, every existing knowledge item
-	// whose external_id starts with SubtreeChildPrefix(ExternalID) that is NOT
-	// listed in SubtreeKeep is deleted as stale. Used by connectors that fan one
-	// source node out into a parent document plus attachment/image sub-items
-	// (e.g. Feishu docx).
-	//
-	// PRECONDITIONS the sweep relies on — a connector setting this MUST honour:
-	//   1. Child external_ids are built with SubtreeChildID, so they share the
-	//      '#' prefix the sweep matches. A child ID without that prefix is never
-	//      swept (silently orphaned); an unrelated item that happens to start
-	//      with the prefix would be wrongly swept.
-	//   2. The parent is emitted (streaming) / listed (batch) no later than its
-	//      children, and SubtreeKeep already names every still-present child when
-	//      the parent is ingested. The sweep runs at parent-ingest time against
-	//      the PRIOR sync's children, so a child emitted after its parent's sweep
-	//      but absent from SubtreeKeep could be deleted right after being added.
-	ReplacesSubtree bool `json:"replaces_subtree,omitempty"`
-
-	// SubtreeKeep lists the external_ids of sub-items that still exist in the
-	// source this sync. Consulted only when ReplacesSubtree is true: the sweep
-	// preserves these children even if they could not be re-ingested this cycle
-	// (transient download/parse failure, or an unclassifiable filename), so a
-	// still-present attachment never loses its previously-synced good copy. Only
-	// children absent from this set — genuinely removed from the source — are
-	// swept.
-	//
-	// CONTRACT: an empty (or nil) SubtreeKeep with ReplacesSubtree=true means
-	// "keep nothing" and sweeps EVERY existing child under the prefix. That is
-	// correct for a node whose attachments all vanished, so a connector setting
-	// ReplacesSubtree MUST populate SubtreeKeep with every child still present.
-	// The field is consumed in-process (fetch → ingest, no serialization), so
-	// nil and empty are equivalent here; the omitempty tag is for API/debug
-	// exposure only and must not be relied on to distinguish "unset" from "empty".
-	SubtreeKeep []string `json:"subtree_keep,omitempty"`
-}
-
-// SubtreeChildID builds the external_id of a sub-item fanned out from a parent
-// source node — e.g. a docx node's attachment or embedded image. The shape is
-// "<parentExternalID>#<kind>#<token>". The '#' separator is the contract the
-// subtree sweep depends on (see SubtreeChildPrefix and FetchedItem.ReplacesSubtree):
-// producers MUST build child IDs with this helper so the producer and the sweep
-// consumer share one source of truth. kind is a short discriminator ("file",
-// "image"); token is the source system's id for the child and is assumed to be
-// '#'-free (Feishu/Notion/etc. tokens are).
-func SubtreeChildID(parentExternalID, kind, token string) string {
-	return parentExternalID + "#" + kind + "#" + token
-}
-
-// SubtreeChildPrefix is the external_id prefix that matches every child of a
-// parent node built with SubtreeChildID. The sweep deletes prior children whose
-// external_id starts with this prefix and are absent from SubtreeKeep. It must
-// move in lockstep with SubtreeChildID: both encode the same '#' separator.
-func SubtreeChildPrefix(parentExternalID string) string {
-	return parentExternalID + "#"
 }
 
 // SyncCursor represents the position/state for incremental sync
@@ -431,76 +467,36 @@ type SyncResult struct {
 	// Items that failed
 	Failed int `json:"failed"`
 
-	// Deleted items whose KB deletion failed (a subset of Failed). Past the
-	// connector cursor, so normally only a later full sync retries them.
-	DeletionFailed int `json:"deletion_failed,omitempty"`
-
-	// Per-item failure samples (capped), shown in the sync-log UI.
-	Errors []SyncItemError `json:"errors,omitempty"`
+	// Detailed error messages
+	Errors []string `json:"errors,omitempty"`
 
 	// Updated cursor for next incremental sync
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
 }
 
-// SyncItemError is one user-facing failure sample. It carries a stable i18n
-// Code (+ interpolation Params) so the frontend localises it to the viewer's
-// language, plus a Message fallback for clients without the key. The raw API
-// status/body/log_id is never stored here — that stays in the server logs.
-type SyncItemError struct {
-	// Title is the document title (user content, not translated).
-	Title string `json:"title,omitempty"`
-	// Code is a stable key the frontend maps to a localized string, e.g.
-	// "feishu_rate_limited" → datasource.syncError.feishu_rate_limited.
-	Code string `json:"code,omitempty"`
-	// Params are interpolation values for the localized string, e.g. {"code":"1663"}.
-	Params map[string]string `json:"params,omitempty"`
-	// Message is a human fallback used when the client has no i18n key for Code.
-	Message string `json:"message,omitempty"`
+type FetchWarning struct {
+	Code       string `json:"code"`
+	ExternalID string `json:"external_id,omitempty"`
+	Message    string `json:"message"`
 }
 
-// Display renders the sample as a single plain string for server-side use
-// (logs, fatal-error detail). The localised UI string is built on the frontend
-// from Code/Params; this is only a non-localised fallback.
-func (e SyncItemError) Display() string {
-	switch {
-	case e.Title != "" && e.Message != "":
-		return e.Title + ": " + e.Message
-	case e.Message != "":
-		return e.Message
-	default:
-		return e.Title
-	}
-}
-
-// UnmarshalJSON keeps old sync logs readable: historically each error was a
-// plain JSON string, so a bare string decodes into Message.
-func (e *SyncItemError) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		e.Message = s
-		return nil
-	}
-	type alias SyncItemError
-	var a alias
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
-	}
-	*e = SyncItemError(a)
-	return nil
+type FetchResult struct {
+	Items      []FetchedItem  `json:"items"`
+	NextCursor *SyncCursor    `json:"-"`
+	Warnings   []FetchWarning `json:"warnings,omitempty"`
 }
 
 // DataSourceSyncPayload represents the asynq task payload for data source sync
 type DataSourceSyncPayload struct {
 	TracingContext
-	Initiator TaskInitiator `json:"initiator,omitempty"`
-	// Trigger distinguishes a user-requested run from a scheduler-created run.
-	Trigger string `json:"trigger,omitempty"`
 
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`
 
 	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
+
+	ConnectionVersion uint64 `json:"connection_version"`
 
 	// Sync log ID (for tracking)
 	SyncLogID string `json:"sync_log_id"`

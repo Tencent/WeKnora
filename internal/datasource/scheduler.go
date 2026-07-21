@@ -8,29 +8,12 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
 	"github.com/robfig/cron/v3"
 )
-
-var syncScheduleParser = cron.NewParser(
-	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-)
-
-// ValidateSyncSchedule accepts the same syntax as the scheduler. An empty
-// schedule disables automatic sync and remains valid for manual-only sources.
-func ValidateSyncSchedule(schedule string) error {
-	if schedule == "" {
-		return nil
-	}
-	if _, err := syncScheduleParser.Parse(schedule); err != nil {
-		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
-	}
-	return nil
-}
 
 // Scheduler manages cron-based periodic sync for data sources.
 //
@@ -58,7 +41,7 @@ func NewScheduler(
 	taskEnqueuer interfaces.TaskEnqueuer,
 ) *Scheduler {
 	return &Scheduler{
-		cron: cron.New(cron.WithParser(syncScheduleParser), cron.WithChain(
+		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
 		dsRepo:       dsRepo,
@@ -93,32 +76,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 // Stop gracefully stops the cron runner and waits for running jobs to finish.
 func (s *Scheduler) Stop() {
-	s.StopWithin(0)
-}
-
-// StopWithin is Stop with a bound. timeout <= 0 waits until in-flight jobs
-// finish. A positive timeout lets shutdown continue so one long sync cannot
-// hold every later cleanup hook, including child-process reaping.
-func (s *Scheduler) StopWithin(timeout time.Duration) {
-	if s == nil || s.cron == nil {
-		return
-	}
-	if runtime.WaitFor(s.cron.Stop().Done(), timeout) {
-		return
-	}
-	logger.Warnf(context.Background(),
-		"[Scheduler] in-flight sync still running after %s; continuing shutdown", timeout)
+	ctx := s.cron.Stop()
+	<-ctx.Done()
 }
 
 // AddOrUpdate registers (or re-registers) a cron entry for the given data source.
 func (s *Scheduler) AddOrUpdate(ds *types.DataSource) error {
-	// Reject an invalid replacement before removing the working entry. Inactive
-	// sources must still be removable even if their stored schedule is invalid.
-	if ds.Status == types.DataSourceStatusActive {
-		if err := ValidateSyncSchedule(ds.SyncSchedule); err != nil {
-			return err
-		}
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -201,11 +164,11 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	}
 
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dataSourceID,
-		TenantID:     tenantID,
-		SyncLogID:    syncLog.ID,
-		ForceFull:    false,
-		Trigger:      "schedule",
+		DataSourceID:      dataSourceID,
+		TenantID:          tenantID,
+		ConnectionVersion: ds.ConnectionVersion,
+		SyncLogID:         syncLog.ID,
+		ForceFull:         false,
 	}
 	langfuse.InjectTracing(ctx, payload)
 	payloadJSON, _ := json.Marshal(payload)

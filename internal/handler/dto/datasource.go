@@ -19,25 +19,26 @@ import (
 // authenticate. The subresource therefore exposes only one logical field,
 // "credentials", with PUT replacing the whole map and DELETE wiping it.
 type DataSourceResponse struct {
-	ID                   string               `json:"id" extensions:"x-agent=data_source_id"`
+	ID                   string               `json:"id"`
 	TenantID             uint64               `json:"tenant_id"`
-	KnowledgeBaseID      string               `json:"knowledge_base_id" extensions:"x-agent"`
-	Name                 string               `json:"name" extensions:"x-agent"`
-	Type                 string               `json:"type" extensions:"x-agent"`
-	Config               *DataSourceConfigDTO `json:"config,omitempty" extensions:"x-agent"`
-	SyncSchedule         string               `json:"sync_schedule" extensions:"x-agent"`
-	SyncMode             string               `json:"sync_mode" extensions:"x-agent"`
-	Status               string               `json:"status" extensions:"x-agent"`
-	ConflictStrategy     string               `json:"conflict_strategy" extensions:"x-agent"`
-	SyncDeletions        bool                 `json:"sync_deletions" extensions:"x-agent"`
-	LastSyncAt           *time.Time           `json:"last_sync_at" extensions:"x-agent"`
-	LastSyncCursor       json.RawMessage      `json:"last_sync_cursor,omitempty"`
+	KnowledgeBaseID      string               `json:"knowledge_base_id"`
+	Name                 string               `json:"name"`
+	Type                 string               `json:"type"`
+	Config               *DataSourceConfigDTO `json:"config,omitempty"`
+	SyncSchedule         string               `json:"sync_schedule"`
+	SyncMode             string               `json:"sync_mode"`
+	Status               string               `json:"status"`
+	ConflictStrategy     string               `json:"conflict_strategy"`
+	SyncDeletions        bool                 `json:"sync_deletions"`
+	ConnectionVersion    uint64               `json:"connection_version"`
+	LastSyncAt           *time.Time           `json:"last_sync_at"`
+	HasSyncCursor        bool                 `json:"has_sync_cursor"`
 	LastSyncResult       json.RawMessage      `json:"last_sync_result,omitempty"`
 	ErrorMessage         string               `json:"error_message,omitempty"`
 	SyncLogRetentionDays int                  `json:"sync_log_retention_days"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`
-	TotalItemsSynced     int64                `json:"total_items_synced" extensions:"x-agent"`
+	TotalItemsSynced     int64                `json:"total_items_synced"`
 	LatestSyncLog        *types.SyncLog       `json:"latest_sync_log,omitempty"`
 	// Single logical credential field — DataSource credentials are a
 	// per-connector atomic map, so "configured?" applies to the whole set.
@@ -48,7 +49,7 @@ type DataSourceResponse struct {
 // removed by construction. Type, ResourceIDs and Settings remain visible.
 type DataSourceConfigDTO struct {
 	Type        string                 `json:"type"`
-	ResourceIDs []string               `json:"resource_ids,omitempty" extensions:"x-agent"`
+	ResourceIDs []string               `json:"resource_ids,omitempty"`
 	Settings    map[string]interface{} `json:"settings,omitempty"`
 }
 
@@ -81,8 +82,9 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 		Status:               ds.Status,
 		ConflictStrategy:     ds.ConflictStrategy,
 		SyncDeletions:        ds.SyncDeletions,
+		ConnectionVersion:    ds.ConnectionVersion,
 		LastSyncAt:           ds.LastSyncAt,
-		LastSyncCursor:       json.RawMessage(ds.LastSyncCursor),
+		HasSyncCursor:        len(ds.LastSyncCursor) > 0,
 		LastSyncResult:       json.RawMessage(ds.LastSyncResult),
 		ErrorMessage:         ds.ErrorMessage,
 		SyncLogRetentionDays: ds.SyncLogRetentionDays,
@@ -122,19 +124,10 @@ func enrichRSSFeedURLsInSettings(dsType string, parsed *types.DataSourceConfig, 
 	cfgDTO.Settings["feed_urls"] = feedURLs
 }
 
-// NewDataSourceResponses converts a list of entities for the list endpoint.
-// The sync cursor is stripped from every element: the settings page polls
-// the list every few seconds during a sync, cursors can grow to megabytes,
-// and no list consumer reads them. Detail, create and update responses
-// still carry the cursor through NewDataSourceResponse.
 func NewDataSourceResponses(dss []*types.DataSource) []*DataSourceResponse {
 	out := make([]*DataSourceResponse, 0, len(dss))
 	for _, d := range dss {
-		resp := NewDataSourceResponse(d)
-		if resp != nil {
-			resp.LastSyncCursor = nil
-		}
-		out = append(out, resp)
+		out = append(out, NewDataSourceResponse(d))
 	}
 	return out
 }
