@@ -881,7 +881,9 @@ CREATE INDEX IF NOT EXISTS idx_resource_access_grants_expires
 
 CREATE TABLE IF NOT EXISTS tenant_api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    scope_type TEXT NOT NULL DEFAULT 'tenant'
+        CHECK (scope_type IN ('tenant', 'platform')),
     name TEXT NOT NULL,
     key_hash TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL DEFAULT '',
@@ -893,11 +895,16 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     revoked_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CHECK (
+        (scope_type = 'tenant' AND tenant_id IS NOT NULL)
+        OR (scope_type = 'platform' AND tenant_id IS NULL AND full_access = 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_revoked_at ON tenant_api_keys(revoked_at);
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_scope_type ON tenant_api_keys(scope_type);
 
 CREATE TABLE IF NOT EXISTS temporary_documents (
     id VARCHAR(36) PRIMARY KEY,
