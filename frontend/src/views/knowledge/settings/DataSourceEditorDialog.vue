@@ -176,7 +176,7 @@ const form = ref({
     settings: {} as Record<string, any>,
   },
   sync_schedule: '0 0 */6 * * *',
-  sync_mode: 'incremental' as 'incremental' | 'full',
+  sync_mode: 'incremental' as 'incremental' | 'full' | 'mirror',
   conflict_strategy: 'overwrite' as 'overwrite' | 'skip',
   sync_deletions: true,
 })
@@ -321,6 +321,17 @@ const prereqExpanded = ref(false)
 // Temp data source for resource listing
 const tempDsId = ref('')
 
+// Confluence edition: "server" (7.4.9) or "cloud".
+// Drives which credential fields are shown and how the backend exports pages.
+const confluenceEdition = ref('server')
+
+// Extensible list of Confluence edition options for the dropdown.
+// Add new editions here (e.g. "8.x", "Data Center") as needed.
+const confluenceEditionOptions = [
+  { label: 'Confluence 7.4.9', value: 'server' },
+  { label: 'Confluence Cloud', value: 'cloud' },
+]
+
 // Schedule presets
 const schedulePresets = computed(() => [
   { label: t('datasource.schedule30min'), value: '0 */30 * * * *' },
@@ -425,10 +436,36 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'confluence',
+    available: true,
+    docUrl: '',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: '' },
+      // password / api_token is injected dynamically via confluenceEffectiveFields
+    ],
+  },
 ])
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+// Returns the credential fields to render / validate.
+// For Confluence the secret field depends on the selected edition
+// (password for Server, api_token for Cloud); for all other connectors
+// it simply returns the static definition.
+const effectiveCredentialFields = computed(() => {
+  const base = currentDef.value?.fields || []
+  if (form.value.type !== 'confluence') return base
+  const secretField = confluenceEdition.value === 'cloud'
+    ? { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: '', secret: true }
+    : { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: '', secret: true }
+  return [...base, secretField]
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -483,9 +520,14 @@ watch(visible, async (v) => {
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
+    // Restore Confluence edition from settings (credentials are stripped
+    // from API responses, but settings survive the round-trip).
+    const savedEdition = (editConfig.settings as any)?.confluence_edition
+    syncConfluenceEdition(savedEdition === 'cloud' ? 'cloud' : 'server')
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
+    syncConfluenceEdition('server')
     form.value = {
       name: '',
       type: '',
@@ -537,7 +579,35 @@ function selectType(def: ConnectorDef) {
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
+  if (def.type === 'confluence') {
+    syncConfluenceEdition('server')
+  }
   step.value = 1
+}
+
+// Keep confluenceEdition ref and form.value.config.credentials.edition in sync.
+// All API calls spread credentials, so having edition there means no need for
+// scattered `if (type === 'confluence')` checks at every call site.
+function syncConfluenceEdition(ed: string) {
+  confluenceEdition.value = ed
+  form.value.config.credentials.edition = ed
+}
+
+// Called by the dropdown @change event (receives the new value).
+function onConfluenceEditionChange(ed: string) {
+  switchConfluenceEdition(ed)
+}
+
+// Switch Confluence edition from the dropdown.
+// Clears the secret field that is no longer relevant so stale values
+// don't get submitted accidentally.
+function switchConfluenceEdition(ed: string) {
+  if (confluenceEdition.value === ed) return
+  syncConfluenceEdition(ed)
+  delete form.value.config.credentials.password
+  delete form.value.config.credentials.api_token
+  testResult.value = ''
+  testErrorMsg.value = ''
 }
 
 // --- Test connection (stateless, no DB write) ---
@@ -545,7 +615,7 @@ async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
+    const fields = effectiveCredentialFields.value
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
@@ -559,13 +629,21 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
+    if (isEdit.value && tempDsId.value && !replaceCredentialsMode.value) {
+      // Edit mode without credential replacement: test using the stored
+      // credentials (which the backend reads from DB).  The update call
+      // persists any non-credential config changes (resource_ids, settings)
+      // so that validateConnection sees the latest state.
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        config: { ...form.value.config, settings: { ...form.value.config.settings, confluence_edition: confluenceEdition.value } },
         knowledge_base_id: props.kbId,
       } as any)
       await validateConnection(tempDsId.value)
     } else {
+      // Create mode OR edit mode with credential replacement:
+      // Use the stateless validate-credentials endpoint so we test the
+      // NEW values the user just typed, not the stale DB row.
       const creds = { ...form.value.config.credentials }
       if (form.value.type === 'rss') {
         // validate-credentials is credentials-only; feed URLs live in settings.
@@ -600,6 +678,22 @@ async function loadResources() {
         ...form.value,
         knowledge_base_id: props.kbId,
       } as any)
+    } else if (replaceCredentialsMode.value) {
+      // Edit mode with credential replacement: persist the new credentials
+      // from the form to the DB via the /credentials subresource BEFORE
+      // listing resources.  Without this, listResources reads stale (or
+      // possibly incomplete) credentials from the DB and fails with
+      // errors like "missing base_url" even though the user filled all
+      // fields correctly in the form.
+      const filled = Object.entries(form.value.config.credentials).filter(
+        ([, v]) => typeof v === 'string' ? v !== '' : v != null,
+      )
+      if (filled.length > 0) {
+        await putDataSourceCredentials(tempDsId.value, Object.fromEntries(filled))
+        credentialsConfigured.value = true
+        replaceCredentialsMode.value = false
+        form.value.config.credentials = {}
+      }
     }
 
     const res = await listResources(tempDsId.value)
@@ -741,7 +835,7 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
+  const fields = effectiveCredentialFields.value
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
@@ -780,10 +874,18 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
+  const settings = { ...form.value.config.settings }
+  // Persist the Confluence edition in settings so it survives API round-trips
+  // (credentials are stripped from responses, but settings are not).
+  if (form.value.type === 'confluence') {
+    settings.confluence_edition = confluenceEdition.value
+  }
+  // credentials already contains `edition` via syncConfluenceEdition,
+  // so no extra injection needed here.
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
-    settings: form.value.config.settings,
+    settings,
   }
 }
 
@@ -920,6 +1022,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  confluence_space: 'datasource.resourceType.confluenceSpace',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1220,8 +1323,20 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
+          <!-- Confluence edition selector (dropdown) -->
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEditionLabel') }}</label>
+            <t-select :value="confluenceEdition" @change="onConfluenceEditionChange">
+              <t-option
+                v-for="opt in confluenceEditionOptions"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </t-select>
+          </div>
           <div
-            v-for="field in currentDef?.fields || []"
+            v-for="field in effectiveCredentialFields"
             :key="field.key"
             class="form-item"
           >
@@ -1455,6 +1570,17 @@ const drawerConfirmText = computed(() => {
               @click="form.sync_mode = 'full'"
             >
               {{ t('datasource.syncMode.full') }}
+            </button>
+            <button
+              v-if="form.type === 'confluence'"
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.sync_mode === 'mirror' }"
+              role="radio"
+              :aria-checked="form.sync_mode === 'mirror'"
+              @click="form.sync_mode = 'mirror'"
+            >
+              {{ t('datasource.syncMode.mirror') }}
             </button>
           </div>
         </div>
@@ -1910,6 +2036,10 @@ const drawerConfirmText = computed(() => {
 
 .footer-test-message.error {
   color: var(--td-error-color);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  word-break: break-all;
 }
 
 /* --- Step 2: resource picker (compact flat tree, matches KB selector) --- */

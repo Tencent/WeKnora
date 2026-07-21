@@ -565,6 +565,7 @@ export default {
     noResources: '未找到可同步的知识库空间',
     noResourcesDesc: '应用需要通过群聊获得知识库访问权限才能拉取内容',
     noResourcesDesc_notion: '应用需要获得 Notion 页面的访问权限才能拉取内容',
+    noResourcesDesc_confluence: '未找到可同步的 Confluence 空间，请先在 Confluence 中创建一个 Space 并确认账号有访问权限',
     retryLoadResources: '重新加载',
     guideStep1: '在飞书中创建一个群聊，在群设置「群机器人」中添加你的应用',
     guideStep2: '打开知识库「设置」→「成员设置」→ 添加成员，搜索该群聊名称并添加',
@@ -572,6 +573,9 @@ export default {
     guideStep1_notion: '在 Notion 中打开你想要同步的页面或数据库',
     guideStep2_notion: '点击右上角的「···」菜单，选择「Connect to」或「Add connections」',
     guideStep3_notion: '搜索并选择你的集成应用（Integration），然后回到这里点重新加载',
+    guideStep1_confluence: '登录 Confluence，进入你想同步的空间（Space）',
+    guideStep2_confluence: '确认你的账号对该空间有「查看」权限',
+    guideStep3_confluence: '如果还没有空间，请先在 Confluence 中创建一个 Space，然后回到这里点重新加载',
     permissionDocLink: '查看飞书知识库权限配置文档',
     syncScheduleLabel: '同步频率',
     conflictLabel: '冲突策略',
@@ -589,6 +593,7 @@ export default {
     openDoc: '打开文档',
     prereqBarText: '首次使用？点击查看飞书应用配置指引',
     prereqBarText_yuque: '首次使用？点击查看语雀 Token 配置指引',
+    prereqBarText_confluence: '首次使用？点击查看 Confluence 配置指引',
     prereqStep1Brief_yuque: '创建语雀个人 Token',
     prereqStep1Desc_yuque: '登录语雀 → 个人头像 → 设置 → Token → 新建 Token',
     prereqStep2Brief_yuque: '为 Token 勾选所需权限',
@@ -596,6 +601,12 @@ export default {
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
+    prereqStep1Brief_confluence: '获取 Confluence 访问凭证',
+    prereqStep1Desc_confluence: 'Server/DC 版本使用用户名和密码；Cloud 版本使用邮箱和 API Token',
+    prereqStep2Brief_confluence: '确认空间访问权限',
+    prereqStep2Desc_confluence: '确保你的账号至少对一个 Confluence Space 有查看权限',
+    prereqStep3Brief_confluence: '确保至少有一个 Space',
+    prereqStep3Desc_confluence: '如果还没有 Space，请先在 Confluence 中创建一个',
     prereqBotBrief: '为应用添加「机器人」能力',
     prereqBotDesc: '开放平台 → 添加应用能力 → 机器人 → 创建版本并发布',
     prereqPermBrief: '开通 API 权限',
@@ -618,7 +629,8 @@ export default {
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      confluenceSpace: 'Confluence 空间',
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -637,21 +649,30 @@ export default {
       feedUrls: '订阅源地址',
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
-      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
+      authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx',
+      confluenceBaseUrl: 'Confluence 地址',
+      confluenceUsername: '用户名',
+      confluencePassword: '密码',
+      confluenceApiToken: 'API Token',
+      confluenceEditionLabel: 'Confluence 版本',
+      confluenceEditionServer: 'Server / Data Center',
+      confluenceEditionCloud: 'Cloud',
     },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
-      rss: '同步 RSS / Atom 订阅源中的文章'
+      rss: '同步 RSS / Atom 订阅源中的文章',
+      confluence: '同步 Atlassian Confluence 中的页面为 PDF',
     },
     connector: {
       feishu: '飞书',
       lark: 'Lark（飞书国际版）',
       notion: 'Notion',
       yuque: '语雀',
-      rss: 'RSS / Atom 订阅'
+      rss: 'RSS / Atom 订阅',
+      confluence: 'Confluence',
     },
     logDetail: {
       startTime: '开始时间',
@@ -695,7 +716,8 @@ export default {
     },
     syncMode: {
       incremental: '增量同步',
-      full: '全量同步'
+      full: '全量同步',
+      mirror: '增删同步',
     }
   },
   ollama: {
@@ -5186,6 +5208,7 @@ export default {
     channelIm: 'IM 渠道',
     channelNotion: 'Notion',
     channelYuque: '语雀',
+    channelConfluence: 'Confluence',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',
