@@ -32,6 +32,14 @@ type DataSourceService struct {
 	scheduler         *datasource.Scheduler
 	tenantRepo        interfaces.TenantRepository
 	tagService        interfaces.KnowledgeTagService
+	oauthManager      *datasource.DataSourceOAuthManager
+	itemRepo          interfaces.DataSourceItemRepository
+}
+
+type dataSourcePendingKnowledge struct {
+	id       string
+	title    string
+	isUpdate bool
 }
 
 // NewDataSourceService creates a new data source service
@@ -46,6 +54,40 @@ func NewDataSourceService(
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 ) interfaces.DataSourceService {
+	return newDataSourceService(dsRepo, syncLogRepo, knowledgeService, kbService, taskEnqueuer,
+		connectorRegistry, scheduler, tenantRepo, tagService, nil, nil)
+}
+
+func NewDataSourceServiceWithOAuth(
+	dsRepo interfaces.DataSourceRepository,
+	syncLogRepo interfaces.SyncLogRepository,
+	knowledgeService interfaces.KnowledgeService,
+	kbService interfaces.KnowledgeBaseService,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	connectorRegistry *datasource.ConnectorRegistry,
+	scheduler *datasource.Scheduler,
+	tenantRepo interfaces.TenantRepository,
+	tagService interfaces.KnowledgeTagService,
+	oauthManager *datasource.DataSourceOAuthManager,
+	itemRepo interfaces.DataSourceItemRepository,
+) interfaces.DataSourceService {
+	return newDataSourceService(dsRepo, syncLogRepo, knowledgeService, kbService, taskEnqueuer,
+		connectorRegistry, scheduler, tenantRepo, tagService, oauthManager, itemRepo)
+}
+
+func newDataSourceService(
+	dsRepo interfaces.DataSourceRepository,
+	syncLogRepo interfaces.SyncLogRepository,
+	knowledgeService interfaces.KnowledgeService,
+	kbService interfaces.KnowledgeBaseService,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	connectorRegistry *datasource.ConnectorRegistry,
+	scheduler *datasource.Scheduler,
+	tenantRepo interfaces.TenantRepository,
+	tagService interfaces.KnowledgeTagService,
+	oauthManager *datasource.DataSourceOAuthManager,
+	itemRepo interfaces.DataSourceItemRepository,
+) interfaces.DataSourceService {
 	return &DataSourceService{
 		dsRepo:            dsRepo,
 		syncLogRepo:       syncLogRepo,
@@ -56,6 +98,8 @@ func NewDataSourceService(
 		scheduler:         scheduler,
 		tenantRepo:        tenantRepo,
 		tagService:        tagService,
+		oauthManager:      oauthManager,
+		itemRepo:          itemRepo,
 	}
 }
 
@@ -64,6 +108,8 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	// Connection generations are server-owned and never accepted from clients.
+	ds.ConnectionVersion = 1
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -75,7 +121,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	}
 
 	// Validate connector type
-	_, err = s.connectorRegistry.Get(ds.Type)
+	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +133,16 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 			ds.Config = blob
 		}
 	}
-	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
-		return nil, err
+	if oauthConnector, ok := connector.(datasource.OAuthConnector); ok {
+		cfg, parseErr := ds.ParseConfig()
+		if parseErr != nil || oauthConnector.ValidateStaticConfig(cfg) != nil {
+			return nil, datasource.ErrInvalidConfig
+		}
+		ds.Status = types.DataSourceStatusPaused
+	} else {
+		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create in database
@@ -147,6 +201,20 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	if err != nil {
 		return nil, err
 	}
+	if ds.Type == "" {
+		ds.Type = existing.Type
+	}
+	if ds.Type != existing.Type {
+		return nil, fmt.Errorf("changing data source type is not allowed")
+	}
+	ds.ConnectionVersion = existing.ConnectionVersion
+	ds.LastSyncAt = existing.LastSyncAt
+	ds.LastSyncCursor = existing.LastSyncCursor
+	ds.LastSyncResult = existing.LastSyncResult
+	ds.ErrorMessage = existing.ErrorMessage
+	if ds.Status == "" {
+		ds.Status = existing.Status
+	}
 
 	if ds.KnowledgeBaseID == "" {
 		ds.KnowledgeBaseID = existing.KnowledgeBaseID
@@ -203,6 +271,11 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
 	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+			return nil, err
+		}
+	}
+	if ds.Type == types.ConnectorTypeOneDrive && ds.Status == types.DataSourceStatusActive {
+		if err := s.requireOAuthAuthorization(ctx, ds); err != nil {
 			return nil, err
 		}
 	}
@@ -306,9 +379,19 @@ func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id s
 // DeleteDataSource deletes a data source (soft delete)
 func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) error {
 	// Verify data source exists
-	_, err := s.dsRepo.FindByID(ctx, id)
+	ds, err := s.dsRepo.FindByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if ds.Type == types.ConnectorTypeOneDrive && s.oauthManager != nil {
+		if err := s.oauthManager.Revoke(ctx, ds.TenantID, ds.ID); err != nil {
+			return fmt.Errorf("revoke OneDrive connection before delete: %w", err)
+		}
+	}
+	if ds.Type == types.ConnectorTypeOneDrive {
+		if _, err := s.DeleteDataSourceKnowledge(ctx, id); err != nil {
+			return fmt.Errorf("delete data source knowledge: %w", err)
+		}
 	}
 
 	if err := s.dsRepo.Delete(ctx, id); err != nil {
@@ -326,6 +409,39 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 
 	logger.Infof(ctx, "data source deleted: id=%s", id)
 	return nil
+}
+
+// DeleteDataSourceKnowledge precisely removes knowledge whose metadata says it
+// was created by this data source. Listing is scoped to the source tenant and
+// knowledge base; metadata provides the final source boundary.
+func (s *DataSourceService) DeleteDataSourceKnowledge(ctx context.Context, id string) (int, error) {
+	ds, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
+	if s.tenantRepo != nil {
+		if tenant, tenantErr := s.tenantRepo.GetTenantByID(ctx, ds.TenantID); tenantErr == nil && tenant != nil {
+			ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+		}
+	}
+	rows, err := s.knowledgeService.GetRepository().ListKnowledgeByKnowledgeBaseID(
+		ctx, ds.TenantID, ds.KnowledgeBaseID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, knowledge := range rows {
+		if knowledge == nil || knowledge.GetMetadata()["datasource_id"] != ds.ID {
+			continue
+		}
+		if err := s.knowledgeService.DeleteKnowledge(ctx, knowledge.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 // ValidateConnection tests the connection to an external data source
@@ -346,13 +462,21 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	if err := s.injectRuntime(ds, config); err != nil {
+		return err
+	}
 
 	// Validate connection
 	if err := connector.Validate(ctx, config); err != nil {
 		// Update data source with error
-		ds.Status = types.DataSourceStatusError
+		if errors.Is(err, datasource.ErrOAuthReauthorizationRequired) {
+			ds.Status = types.DataSourceStatusReauthorizationRequired
+			s.scheduler.Remove(ds.ID)
+		} else {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = err.Error()
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -360,7 +484,7 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	if ds.Status == types.DataSourceStatusError {
 		ds.Status = types.DataSourceStatusActive
 		ds.ErrorMessage = ""
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 	}
 
 	return nil
@@ -387,6 +511,9 @@ func (s *DataSourceService) ListAvailableResources(
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
+	}
+	if err := s.injectRuntime(ds, config); err != nil {
+		return nil, err
 	}
 
 	// List resources
@@ -422,6 +549,9 @@ func (s *DataSourceService) ResolveResourceAncestors(
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
+	if err := s.injectRuntime(ds, config); err != nil {
+		return nil, err
+	}
 
 	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
 	if err != nil {
@@ -444,6 +574,11 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		ds.Status != types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
 	}
+	if ds.Type == types.ConnectorTypeOneDrive {
+		if err := s.requireOAuthAuthorization(ctx, ds); err != nil {
+			return nil, err
+		}
+	}
 
 	// Create sync log
 	syncLog := &types.SyncLog{
@@ -460,10 +595,11 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 
 	// Enqueue sync task
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dsID,
-		TenantID:     ds.TenantID,
-		SyncLogID:    syncLog.ID,
-		ForceFull:    false,
+		DataSourceID:      dsID,
+		TenantID:          ds.TenantID,
+		ConnectionVersion: ds.ConnectionVersion,
+		SyncLogID:         syncLog.ID,
+		ForceFull:         false,
 	}
 	langfuse.InjectTracing(ctx, payload)
 
@@ -482,7 +618,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return nil, err
 	}
 
@@ -515,6 +651,11 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 	ds, err := s.GetDataSource(ctx, id)
 	if err != nil {
 		return err
+	}
+	if ds.Type == types.ConnectorTypeOneDrive {
+		if err := s.requireOAuthAuthorization(ctx, ds); err != nil {
+			return err
+		}
 	}
 
 	ds.Status = types.DataSourceStatusActive
@@ -573,6 +714,16 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		return nil
 	}
+	if payload.TenantID != ds.TenantID || (payload.ConnectionVersion != 0 && payload.ConnectionVersion != ds.ConnectionVersion) {
+		logger.Warnf(ctx, "discarding stale data source sync task: ds=%s", payload.DataSourceID)
+		if syncLog, logErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); logErr == nil && syncLog != nil {
+			syncLog.Status = types.SyncLogStatusCanceled
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			syncLog.ErrorMessage = "data source connection changed"
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+		}
+		return nil
+	}
 
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
@@ -605,7 +756,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -621,7 +772,22 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
+		return err
+	}
+	if err := s.injectRuntime(ds, config); err != nil {
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = err.Error()
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if errors.Is(err, datasource.ErrOAuthReauthorizationRequired) {
+			ds.Status = types.DataSourceStatusReauthorizationRequired
+			s.scheduler.Remove(ds.ID)
+		} else if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = err.Error()
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -629,19 +795,35 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	var items []types.FetchedItem
 	var nextCursor *types.SyncCursor
 	var fetchErr error
+	var fetchWarnings []string
 
-	if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
-		// Full sync
+	if reliable, ok := connector.(datasource.FetchResultConnector); ok {
+		var fetched *types.FetchResult
+		if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+			fetched, fetchErr = reliable.FetchAllResult(ctx, config, config.ResourceIDs)
+		} else {
+			cursor, _ := ds.ParseSyncCursor()
+			fetched, fetchErr = reliable.FetchIncrementalResult(ctx, config, cursor)
+		}
+		if fetched != nil {
+			items = fetched.Items
+			nextCursor = fetched.NextCursor
+			for _, warning := range fetched.Warnings {
+				message := warning.Code
+				if warning.ExternalID != "" {
+					message += " [" + warning.ExternalID + "]"
+				}
+				fetchWarnings = append(fetchWarnings, message+": "+warning.Message)
+			}
+		}
+	} else if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
 		items, fetchErr = connector.FetchAll(ctx, config, config.ResourceIDs)
-		logger.Infof(ctx, "full sync fetched %d items", len(items))
 	} else {
-		// Incremental sync
 		cursor, _ := ds.ParseSyncCursor()
 		items, nextCursor, fetchErr = connector.FetchIncremental(ctx, config, cursor)
-		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
 	}
+	logger.Infof(ctx, "data source fetch completed: items=%d full=%t", len(items), payload.ForceFull || ds.SyncMode == types.SyncModeFull)
 
-	var fetchWarnings []string
 	var partialFetch *datasource.PartialFetchError
 	if errors.As(fetchErr, &partialFetch) {
 		fetchWarnings = partialFetch.Details
@@ -649,32 +831,65 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	if fetchErr != nil {
-		// Persist connector cursor even when fetch failed so transient outages
-		// (e.g. RSS feed downtime) do not force a full re-ingest on recovery.
-		if nextCursor != nil {
-			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
-				ds.LastSyncCursor = cursorJSON
-				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
-					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
-				}
-			}
-		}
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
+		if errors.Is(fetchErr, datasource.ErrOAuthReauthorizationRequired) {
+			ds.Status = types.DataSourceStatusReauthorizationRequired
+			s.scheduler.Remove(ds.ID)
+		} else if !wasPaused {
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return fetchErr
+	}
+	if ds.Type == types.ConnectorTypeOneDrive && ds.SyncDeletions && s.itemRepo != nil {
+		retained, retainedErr := s.itemRepo.ListRetainedDeleted(
+			ctx, ds.TenantID, ds.ID, ds.ConnectionVersion,
+		)
+		if retainedErr != nil {
+			syncLog.Status = types.SyncLogStatusFailed
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
+			syncLog.ErrorMessage = "failed to reconcile retained OneDrive deletions"
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+			return retainedErr
+		}
+		seenDeletes := make(map[string]struct{})
+		for _, item := range items {
+			if item.IsDeleted {
+				seenDeletes[item.ExternalID] = struct{}{}
+			}
+		}
+		for _, retainedItem := range retained {
+			if _, exists := seenDeletes[retainedItem.ExternalID]; exists {
+				continue
+			}
+			items = append(items, types.FetchedItem{
+				ExternalID: retainedItem.ExternalID, IsDeleted: true,
+				SourceResourceID: retainedItem.SelectedRootID,
+				Metadata:         map[string]string{"drive_id": retainedItem.DriveID, "item_id": retainedItem.ItemID},
+			})
+		}
 	}
 
 	// Process fetched items and write to knowledge base
 	var result = &types.SyncResult{
 		Total: len(items),
+	}
+	cancelForConnectionChange := func() {
+		syncLog.ItemsTotal = result.Total
+		syncLog.ItemsCreated = result.Created
+		syncLog.ItemsUpdated = result.Updated
+		syncLog.ItemsDeleted = result.Deleted
+		syncLog.ItemsSkipped = result.Skipped
+		syncLog.ItemsFailed = result.Failed
+		syncLog.Status = types.SyncLogStatusCanceled
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = "data source connection changed"
+		_ = s.syncLogRepo.UpdateResult(ctx, syncLog)
 	}
 
 	// Set tenant context so KnowledgeService can resolve tenant info correctly
@@ -691,7 +906,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
@@ -705,14 +920,29 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		autoTagIDs = append(autoTagIDs, autoTag.ID)
 		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", autoTagName, autoTag.ID)
 	}
+	pendingKnowledgeItems := make([]dataSourcePendingKnowledge, 0, len(items))
 
 	for _, item := range items {
+		if ds.Type == types.ConnectorTypeOneDrive {
+			current, currentErr := s.GetDataSource(ctx, ds.ID)
+			if currentErr != nil || current.ConnectionVersion != ds.ConnectionVersion {
+				cancelForConnectionChange()
+				return nil
+			}
+		}
 		if item.IsDeleted {
 			if ds.SyncDeletions {
-				// Count only — actual KB deletion is intentionally not performed.
-				// Users manage knowledge removal explicitly via the KB UI to avoid
-				// accidental data loss from connector misdetection or reconfiguration.
-				result.Deleted++
+				if err := s.deleteFetchedItem(ctx, ds, &item); err != nil {
+					result.Failed++
+					result.Errors = append(result.Errors, fmt.Sprintf("delete %s: %v", item.ExternalID, err))
+				} else {
+					result.Deleted++
+				}
+			} else if err := s.markSourceItemDeleted(ctx, ds, &item); err != nil {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("record retained deletion %s: %v", item.ExternalID, err))
+			} else {
+				result.Skipped++
 			}
 			continue
 		}
@@ -730,7 +960,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			continue
 		}
 
-		isUpdate, err := s.ingestItem(ctx, ds, &item, autoTagIDs)
+		isUpdate, knowledgeID, err := s.ingestItem(ctx, ds, &item, autoTagIDs)
+		if ds.Type == types.ConnectorTypeOneDrive && err == nil {
+			current, currentErr := s.GetDataSource(ctx, ds.ID)
+			if currentErr != nil || current.ConnectionVersion != ds.ConnectionVersion {
+				if knowledgeID != "" {
+					_ = s.knowledgeService.DeleteKnowledge(ctx, knowledgeID)
+				}
+				cancelForConnectionChange()
+				return nil
+			}
+		}
 		if err != nil {
 			// Duplicate file/URL is not a failure — count as skipped
 			var dupErr *types.DuplicateKnowledgeError
@@ -747,6 +987,34 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		} else {
 			result.Created++
 		}
+		if err == nil {
+			if ds.Type == types.ConnectorTypeOneDrive && knowledgeID != "" {
+				pendingKnowledgeItems = append(pendingKnowledgeItems, dataSourcePendingKnowledge{
+					id: knowledgeID, title: item.Title, isUpdate: isUpdate,
+				})
+			}
+			if markErr := s.markSourceItemIngested(ctx, ds, &item); markErr != nil {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("record ingestion %s: %v", item.ExternalID, markErr))
+			}
+		}
+	}
+
+	if ds.Type == types.ConnectorTypeOneDrive && len(pendingKnowledgeItems) > 0 {
+		failed := s.waitForKnowledgeProcessing(ctx, ds, pendingKnowledgeItems)
+		for _, pending := range pendingKnowledgeItems {
+			failure, ok := failed[pending.id]
+			if !ok {
+				continue
+			}
+			if pending.isUpdate && result.Updated > 0 {
+				result.Updated--
+			} else if !pending.isUpdate && result.Created > 0 {
+				result.Created--
+			}
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", pending.title, failure))
+		}
 	}
 
 	resultJSON, _ := result.ToJSON()
@@ -757,7 +1025,14 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Update cursor for next incremental sync
-	if nextCursor != nil {
+	if nextCursor != nil && result.Failed == 0 {
+		if ds.Type == types.ConnectorTypeOneDrive {
+			current, currentErr := s.GetDataSource(ctx, ds.ID)
+			if currentErr != nil || current.ConnectionVersion != ds.ConnectionVersion {
+				cancelForConnectionChange()
+				return nil
+			}
+		}
 		cursorJSON, _ := nextCursor.ToJSON()
 		ds.LastSyncCursor = cursorJSON
 	}
@@ -765,9 +1040,18 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	ds.LastSyncAt = timePtr(time.Now().UTC())
 	syncStatus := types.SyncLogStatusSuccess
 	syncErrorMessage := ""
+	if result.Failed > 0 {
+		syncStatus = types.SyncLogStatusPartial
+		syncErrorMessage = fmt.Sprintf("%d item(s) failed; cursor was not advanced", result.Failed)
+	}
 	if len(fetchWarnings) > 0 {
 		syncStatus = types.SyncLogStatusPartial
-		syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
+		warningMessage := fmt.Sprintf("Some items were skipped: %s", strings.Join(fetchWarnings, "; "))
+		if syncErrorMessage == "" {
+			syncErrorMessage = warningMessage
+		} else {
+			syncErrorMessage += "; " + warningMessage
+		}
 		for _, w := range fetchWarnings {
 			result.Errors = append(result.Errors, w)
 		}
@@ -818,7 +1102,76 @@ func (s *DataSourceService) updateSyncRunResult(
 	ds.LastSyncResult = resultJSON
 	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", err)
+		if ds.Type == types.ConnectorTypeOneDrive {
+			current, currentErr := s.GetDataSource(ctx, ds.ID)
+			if currentErr == nil && current.ConnectionVersion != ds.ConnectionVersion {
+				syncLog.Status = types.SyncLogStatusCanceled
+				syncLog.ErrorMessage = "data source connection changed before cursor commit"
+				_ = s.syncLogRepo.UpdateResult(ctx, syncLog)
+			}
+		}
 	}
+}
+
+// waitForKnowledgeProcessing turns the asynchronous knowledge pipeline into a
+// reliable cursor barrier for OneDrive. Finalizing is accepted because primary
+// parsing and vector indexing are complete at that point; only optional
+// enrichment subtasks remain.
+func (s *DataSourceService) waitForKnowledgeProcessing(
+	ctx context.Context, ds *types.DataSource, items []dataSourcePendingKnowledge,
+) map[string]string {
+	pending := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		pending[item.id] = struct{}{}
+	}
+	failed := make(map[string]string)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	timeout := time.NewTimer(90 * time.Minute)
+	defer timeout.Stop()
+
+	check := func() {
+		for id := range pending {
+			knowledge, err := s.knowledgeService.GetRepository().GetKnowledgeByID(ctx, ds.TenantID, id)
+			if err != nil || knowledge == nil {
+				failed[id] = "cannot read knowledge processing status"
+				delete(pending, id)
+				continue
+			}
+			switch knowledge.ParseStatus {
+			case types.ParseStatusCompleted, types.ParseStatusFinalizing:
+				delete(pending, id)
+			case types.ParseStatusFailed, types.ParseStatusCancelled, types.ParseStatusDeleting:
+				message := strings.TrimSpace(knowledge.ErrorMessage)
+				if message == "" {
+					message = "knowledge processing ended with status " + knowledge.ParseStatus
+				}
+				failed[id] = message
+				delete(pending, id)
+			}
+		}
+	}
+
+	for len(pending) > 0 {
+		check()
+		if len(pending) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			for id := range pending {
+				failed[id] = ctx.Err().Error()
+			}
+			return failed
+		case <-timeout.C:
+			for id := range pending {
+				failed[id] = "knowledge processing did not finish within 90 minutes"
+			}
+			return failed
+		case <-ticker.C:
+		}
+	}
+	return failed
 }
 
 func allFetchedItemsFailedError(result *types.SyncResult) error {
@@ -875,8 +1228,124 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	if err := s.injectRuntime(ds, config); err != nil {
+		return err
+	}
 
 	return connector.Validate(ctx, config)
+}
+
+func (s *DataSourceService) injectRuntime(ds *types.DataSource, config *types.DataSourceConfig) error {
+	if ds == nil || config == nil {
+		return datasource.ErrInvalidConfig
+	}
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return err
+	}
+	if _, ok := connector.(datasource.OAuthConnector); !ok {
+		return nil
+	}
+	if s.oauthManager == nil {
+		return datasource.ErrOAuthNotConfigured
+	}
+	config.Runtime = &types.DataSourceRuntime{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, ConnectionVersion: ds.ConnectionVersion,
+		AccessToken: func(ctx context.Context) (string, error) {
+			return s.oauthManager.AccessToken(ctx, ds.TenantID, ds.ID, ds.ConnectionVersion)
+		},
+		RefreshAccessToken: func(ctx context.Context) (string, error) {
+			return s.oauthManager.RefreshAccessToken(ctx, ds.TenantID, ds.ID, ds.ConnectionVersion)
+		},
+	}
+	return nil
+}
+
+func (s *DataSourceService) requireOAuthAuthorization(ctx context.Context, ds *types.DataSource) error {
+	if s.oauthManager == nil {
+		return datasource.ErrOAuthNotConfigured
+	}
+	status, err := s.oauthManager.Status(ctx, ds.TenantID, ds.ID)
+	if err != nil {
+		return err
+	}
+	if status == nil || !status.Authorized || status.ReauthorizationNeeded ||
+		status.ConnectionVersion != ds.ConnectionVersion {
+		return datasource.ErrOAuthReauthorizationRequired
+	}
+	return nil
+}
+
+type metadataFilterFinder interface {
+	FindByMetadataFilters(context.Context, uint64, string, map[string]string) (*types.Knowledge, error)
+}
+
+func (s *DataSourceService) findDataSourceKnowledge(
+	ctx context.Context, ds *types.DataSource, externalID string,
+) (*types.Knowledge, error) {
+	repo := s.knowledgeService.GetRepository()
+	if finder, ok := repo.(metadataFilterFinder); ok {
+		return finder.FindByMetadataFilters(ctx, ds.TenantID, ds.KnowledgeBaseID, map[string]string{
+			"datasource_id": ds.ID,
+			"external_id":   externalID,
+		})
+	}
+	existing, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", externalID)
+	if err != nil || existing == nil {
+		return existing, err
+	}
+	if existing.GetMetadata()["datasource_id"] != ds.ID {
+		return nil, nil
+	}
+	return existing, nil
+}
+
+func (s *DataSourceService) deleteFetchedItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
+) error {
+	existing, err := s.findDataSourceKnowledge(ctx, ds, item.ExternalID)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
+			return err
+		}
+	}
+	if err := s.markSourceItemDeleted(ctx, ds, item); err != nil {
+		return err
+	}
+	if ds.Type == types.ConnectorTypeOneDrive && s.itemRepo != nil {
+		return s.itemRepo.SetIngested(ctx, ds.TenantID, ds.ID, ds.ConnectionVersion,
+			item.Metadata["drive_id"], item.Metadata["item_id"], false)
+	}
+	return nil
+}
+
+func (s *DataSourceService) markSourceItemDeleted(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
+) error {
+	if ds.Type != types.ConnectorTypeOneDrive || s.itemRepo == nil {
+		return nil
+	}
+	driveID, itemID := item.Metadata["drive_id"], item.Metadata["item_id"]
+	if driveID == "" || itemID == "" {
+		return fmt.Errorf("OneDrive deletion is missing drive/item identity")
+	}
+	return s.itemRepo.MarkDeleted(ctx, ds.TenantID, ds.ID, ds.ConnectionVersion, driveID, itemID, time.Now().UTC())
+}
+
+func (s *DataSourceService) markSourceItemIngested(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
+) error {
+	if ds.Type != types.ConnectorTypeOneDrive || s.itemRepo == nil {
+		return nil
+	}
+	driveID, itemID := item.Metadata["drive_id"], item.Metadata["item_id"]
+	if driveID == "" || itemID == "" {
+		return fmt.Errorf("OneDrive item is missing drive/item identity")
+	}
+	return s.itemRepo.SetIngested(ctx, ds.TenantID, ds.ID, ds.ConnectionVersion, driveID, itemID, true)
 }
 
 // ingestItem writes a single FetchedItem into the knowledge base.
@@ -886,8 +1355,11 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
 //   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
 //
-// Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
-func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+// Returns (isUpdate, knowledgeID, error). knowledgeID is used as the reliable
+// cursor barrier for asynchronous parsing.
+func (s *DataSourceService) ingestItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string,
+) (bool, string, error) {
 	channel := ds.Type // e.g. "feishu", "notion"
 
 	metadata := map[string]string{
@@ -902,11 +1374,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	// Check if a knowledge item with this external_id already exists → delete it first (update)
 	isUpdate := false
 	if item.ExternalID != "" {
-		repo := s.knowledgeService.GetRepository()
-		existing, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
+		existing, err := s.findDataSourceKnowledge(ctx, ds, item.ExternalID)
 		if err != nil {
-			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
-			// Non-fatal: proceed with creation (may produce duplicate)
+			return false, "", fmt.Errorf("find existing knowledge for external_id %s: %w", item.ExternalID, err)
 		} else if existing != nil {
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
@@ -921,9 +1391,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	if len(item.Content) > 0 {
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
-			return isUpdate, fmt.Errorf("build file header: %w", err)
+			return isUpdate, "", fmt.Errorf("build file header: %w", err)
 		}
-		_, err = s.knowledgeService.CreateKnowledgeFromFile(
+		knowledge, createErr := s.knowledgeService.CreateKnowledgeFromFile(
 			ctx,
 			ds.KnowledgeBaseID,
 			fh,
@@ -934,12 +1404,18 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			channel,
 			nil,
 		)
-		return isUpdate, err
+		if createErr != nil {
+			return isUpdate, "", createErr
+		}
+		if knowledge == nil {
+			return isUpdate, "", fmt.Errorf("knowledge service returned no created item")
+		}
+		return isUpdate, knowledge.ID, nil
 	}
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
 	if item.URL != "" {
-		_, err := s.knowledgeService.CreateKnowledgeFromURL(
+		knowledge, createErr := s.knowledgeService.CreateKnowledgeFromURL(
 			ctx,
 			ds.KnowledgeBaseID,
 			item.URL,
@@ -951,10 +1427,16 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			channel,
 			nil,
 		)
-		return isUpdate, err
+		if createErr != nil {
+			return isUpdate, "", createErr
+		}
+		if knowledge == nil {
+			return isUpdate, "", fmt.Errorf("knowledge service returned no created item")
+		}
+		return isUpdate, knowledge.ID, nil
 	}
 
-	return isUpdate, fmt.Errorf("item has neither content nor URL")
+	return isUpdate, "", fmt.Errorf("item has neither content nor URL")
 }
 
 // bytesToFileHeader wraps a []byte into a *multipart.FileHeader so it can be

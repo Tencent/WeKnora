@@ -88,6 +88,7 @@ type RouterParams struct {
 	EmbedChannelService          interfaces.EmbedChannelService
 	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
+	DataSourceOAuthHandler       *handler.DataSourceOAuthHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
@@ -264,7 +265,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
+		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, params.DataSourceOAuthHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
@@ -2232,8 +2233,10 @@ func RegisterDataSourceRoutes(
 	r *gin.RouterGroup,
 	handler *handler.DataSourceHandler,
 	credHandler *handler.DataSourceCredentialsHandler,
+	oauthHandler *handler.DataSourceOAuthHandler,
 	g *rbacGuards,
 ) {
+	r.GET("/datasource-oauth/onedrive/callback", oauthHandler.Callback)
 	// Data source routes
 	ds := g.apiKeyGroup(r.Group("/datasource"), apiKeyManageDataSources(apiKeyFullAccess()))
 	{
@@ -2255,6 +2258,9 @@ func RegisterDataSourceRoutes(
 		// internal/handler/datasource_credentials.go). — Admin+
 		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
 		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		ds.POST("/:id/oauth/authorize-url", g.Admin(), oauthHandler.AuthorizeURL)
+		ds.GET("/:id/oauth/status", g.Admin(), oauthHandler.Status)
+		ds.DELETE("/:id/oauth/token", g.Admin(), oauthHandler.Revoke)
 
 		// Connection and resource management — Admin+
 		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)

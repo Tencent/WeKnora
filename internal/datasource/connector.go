@@ -51,6 +51,23 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// OAuthConnector allows an OAuth-backed data source to be created in a
+// paused, not-yet-authorized state after validating only non-secret settings.
+type OAuthConnector interface {
+	Connector
+	ValidateStaticConfig(config *types.DataSourceConfig) error
+	OAuthProvider() string
+}
+
+// FetchResultConnector opts into the reliable cursor protocol without forcing
+// legacy connectors to change atomically. DataSourceService treats NextCursor
+// as a candidate and commits it only after all required item work succeeds.
+type FetchResultConnector interface {
+	Connector
+	FetchAllResult(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) (*types.FetchResult, error)
+	FetchIncrementalResult(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (*types.FetchResult, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector
@@ -157,11 +174,11 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	},
 	types.ConnectorTypeOneDrive: {
 		Type:         types.ConnectorTypeOneDrive,
-		Name:         "OneDrive / SharePoint",
+		Name:         "Microsoft OneDrive",
 		Description:  "Sync documents and files from Microsoft OneDrive",
 		Priority:     6,
 		AuthType:     "oauth2",
-		Capabilities: []string{"incremental"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,

@@ -58,6 +58,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	onedriveConnector "github.com/Tencent/WeKnora/internal/datasource/connector/onedrive"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -170,6 +171,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
 	must(container.Provide(service.NewWebSearchStateService))
 	must(container.Provide(repository.NewDataSourceRepository))
+	must(container.Provide(repository.NewDataSourceOAuthRepository))
+	must(container.Provide(repository.NewDataSourceItemRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewWikiLogEntryRepository))
@@ -313,7 +316,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
 	must(container.Provide(initConnectorRegistry))
 	must(container.Provide(datasource.NewScheduler))
-	must(container.Provide(service.NewDataSourceService))
+	must(container.Provide(service.NewDataSourceServiceWithOAuth))
+	must(container.Provide(datasource.NewDataSourceOAuthManager))
+	must(container.Provide(handler.NewDataSourceOAuthHandler))
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
@@ -1567,7 +1572,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
 // Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
 // container initialization loudly instead of silently disabling the feature at runtime.
-func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
+func initConnectorRegistry(items interfaces.DataSourceItemRepository) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1582,6 +1587,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(rssConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
+	}
+	if err := registry.Register(onedriveConnector.NewConnector(items)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register onedrive connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

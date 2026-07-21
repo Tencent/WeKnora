@@ -164,10 +164,11 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	}
 
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dataSourceID,
-		TenantID:     tenantID,
-		SyncLogID:    syncLog.ID,
-		ForceFull:    false,
+		DataSourceID:      dataSourceID,
+		TenantID:          tenantID,
+		ConnectionVersion: ds.ConnectionVersion,
+		SyncLogID:         syncLog.ID,
+		ForceFull:         false,
 	}
 	langfuse.InjectTracing(ctx, payload)
 	payloadJSON, _ := json.Marshal(payload)
