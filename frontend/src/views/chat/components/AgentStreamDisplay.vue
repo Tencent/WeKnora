@@ -36,19 +36,24 @@
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
               <div v-if="event.type === 'thinking'" class="tool-event">
-                <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+                <div class="action-card thinking-event-card"
+                  :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                   <div class="action-header" @click="toggleEvent(event.event_id)">
-                    <div class="action-title">
+                    <div class="action-title" :class="{
+                      'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                    }">
                       <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                      }}</span>
+                      <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                        class="thinking-inline-content markdown-content">
+                        <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                      </div>
                       <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                         }}</span>
                     </div>
                   </div>
-                  <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                  <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
                       <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
@@ -230,17 +235,23 @@
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
             <div v-if="event.type === 'thinking'" class="tool-event">
-              <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+              <div class="action-card thinking-event-card"
+                :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                 <div class="action-header" @click="toggleEvent(event.event_id)">
-                  <div class="action-title">
+                  <div class="action-title" :class="{
+                    'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                  }">
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                    <span v-else class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)"
+                    <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                      class="thinking-inline-content markdown-content">
+                      <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                    </div>
+                    <span v-else-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
                 </div>
-                <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                   <div class="thinking-detail-content markdown-content">
                     <div v-html="renderMarkdownContent(event.content)"></div>
                   </div>
@@ -1299,6 +1310,12 @@ const hasPendingStreamingActivity = computed(() => {
   return displayEvents.value.some((event: any) => {
     if (!event) return false;
     if (event.pending === true) return true;
+    if (
+      event.type === 'thinking' &&
+      (event.thinking === true || isThinkingActive(event.event_id))
+    ) {
+      return true;
+    }
     return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
   });
 });
@@ -1665,14 +1682,10 @@ const intermediateEvents = computed(() => {
   });
 });
 
-const visibleIntermediateEvents = computed(() => {
-  return intermediateEvents.value.filter((e: any) => {
-    if (!e) return false;
-    if (e.type === 'thinking') return false;
-    if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-    return true;
-  });
-});
+// Keep reasoning in the same compact timeline as tool calls. The template
+// auto-expands the active reasoning event and folds it again once a tool or
+// answer follows, so tool activity remains the primary structure.
+const visibleIntermediateEvents = computed(() => intermediateEvents.value);
 
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
@@ -1689,15 +1702,10 @@ const displayEvents = computed(() => {
     return result.filter((e: any) => e.type === 'answer');
   }
 
-  // While the conversation is still running, keep the same lightweight tool-log
-  // surface as the completed tree. Raw thinking narration is noisy during
-  // streaming; real tool rows carry their own pending state.
+  // Keep the active reasoning event inline with tool activity. It uses the same
+  // compact timeline card and is auto-collapsed when a tool or answer follows.
   if (!isConversationDone.value) {
-    return result.filter((e: any) => {
-      if (e.type === 'thinking') return false;
-      if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-      return true;
-    });
+    return result;
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
@@ -3363,6 +3371,34 @@ const handleAddToKnowledge = (answerEvent: any) => {
     color: var(--td-text-color-secondary);
     max-height: none;
     overflow-y: visible;
+  }
+
+  .thinking-inline-title {
+    align-items: flex-start;
+  }
+
+  // Anchor the bulb to the fixed header instead of the variable-height title.
+  // Otherwise expanding inline reasoning shifts the icon along the timeline.
+  .tree-child .thinking-event-card .action-title {
+    position: static;
+  }
+
+  .thinking-inline-content {
+    flex: 1;
+    min-width: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--agent-step-summary-size);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    user-select: text;
+
+    :deep(.thinking-inline-markdown > :first-child) {
+      margin-top: 0;
+    }
+
+    :deep(.thinking-inline-markdown > :last-child) {
+      margin-bottom: 0;
+    }
   }
 
   .search-results-summary-fixed,
