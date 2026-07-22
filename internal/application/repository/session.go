@@ -157,6 +157,14 @@ func (r *sessionRepository) QueryPaged(
 		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
 	}
 
+	sessionAgentExpr := "json_extract(s.agent_config, '$.agent_id') = ?"
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		sessionAgentExpr = "s.agent_config ->> 'agent_id' = ?"
+	case "mysql":
+		sessionAgentExpr = "JSON_UNQUOTE(JSON_EXTRACT(s.agent_config, '$.agent_id')) = ?"
+	}
+
 	// Base filter shared by count and list queries.
 	applyBase := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("s.tenant_id = ? AND s.deleted_at IS NULL", q.TenantID)
@@ -217,8 +225,8 @@ func (r *sessionRepository) QueryPaged(
 		}
 	}
 	applyAgent := func(db *gorm.DB) *gorm.DB {
-		if q.AgentID != "" {
-			return db.Where("ics.agent_id = ?", q.AgentID)
+		if agentID := strings.TrimSpace(q.AgentID); agentID != "" {
+			return db.Where("(ics.agent_id = ? OR "+sessionAgentExpr+")", agentID, agentID)
 		}
 		return db
 	}
