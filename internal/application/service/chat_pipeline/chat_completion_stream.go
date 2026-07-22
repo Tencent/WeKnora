@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/llmresource"
@@ -117,6 +118,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
+		inlineThinkSplitter := agenttools.NewThinkStreamSplitter()
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -133,12 +135,53 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			thinkingOpen = false
 		}
 
+		emitThinking := func(content string) {
+			content = thinkingRefExpander.Feed(thinkingDecoder.Feed(content))
+			if content == "" {
+				return
+			}
+			thinkingOpen = true
+			eventBus.Emit(ctx, types.Event{
+				ID:        thinkingID,
+				Type:      types.EventType(event.EventAgentThought),
+				SessionID: chatManage.SessionID,
+				Data: event.AgentThoughtData{
+					Content: content,
+					Done:    false,
+				},
+			})
+		}
+
+		emitAnswer := func(content string, done bool) {
+			content = answerRefExpander.Feed(answerDecoder.Feed(content))
+			if content == "" && !done {
+				return
+			}
+			closeThinking()
+			eventBus.Emit(ctx, types.Event{
+				ID:        answerID,
+				Type:      types.EventType(event.EventAgentFinalAnswer),
+				SessionID: chatManage.SessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: content,
+					Done:    done,
+				},
+			})
+		}
+
 		// flushDecoders drains any alias suffix the stream decoders held back to
 		// bridge references split across provider chunks. Both the normal close
 		// and the cancellation path must call this, otherwise a resource
 		// reference in flight at teardown is silently dropped (and never
 		// persisted, since the assistant message is saved from these events).
 		flushDecoders := func() {
+			thinkTail, answerTailFromThink := inlineThinkSplitter.Flush()
+			if thinkTail != "" {
+				emitThinking(thinkTail)
+			}
+			if answerTailFromThink != "" {
+				emitAnswer(answerTailFromThink, false)
+			}
 			thinkingTail := thinkingRefExpander.Feed(thinkingDecoder.Flush()) + thinkingRefExpander.Flush()
 			if thinkingTail != "" {
 				_ = eventBus.Emit(ctx, types.Event{
@@ -198,19 +241,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
-					response.Content = thinkingRefExpander.Feed(thinkingDecoder.Feed(response.Content))
-					if response.Content != "" {
-						thinkingOpen = true
-						eventBus.Emit(ctx, types.Event{
-							ID:        thinkingID,
-							Type:      types.EventType(event.EventAgentThought),
-							SessionID: chatManage.SessionID,
-							Data: event.AgentThoughtData{
-								Content: response.Content,
-								Done:    false,
-							},
-						})
-					}
+					emitThinking(response.Content)
 					if response.Done {
 						closeThinking()
 					}
@@ -218,17 +249,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
-					response.Content = answerRefExpander.Feed(answerDecoder.Feed(response.Content))
-					closeThinking()
-					eventBus.Emit(ctx, types.Event{
-						ID:        answerID,
-						Type:      types.EventType(event.EventAgentFinalAnswer),
-						SessionID: chatManage.SessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: response.Content,
-							Done:    response.Done,
-						},
-					})
+					thinkingPart, answerPart := inlineThinkSplitter.Feed(response.Content)
+					if thinkingPart != "" {
+						emitThinking(thinkingPart)
+					}
+					emitAnswer(answerPart, response.Done)
 				}
 			}
 		}
