@@ -16,6 +16,12 @@ const (
 	KnowledgeTypeFAQ = "faq"
 )
 
+// MetadataHashIDKey is the knowledge.metadata key that stores a stable document
+// identity declared on the first line of an uploaded text file
+// (e.g. "hash_id = alarm-policy"). Used to upsert on re-upload instead of
+// creating a duplicate entry when content changes.
+const MetadataHashIDKey = "hash_id"
+
 // Channel constants identify through which channel a knowledge entry was ingested.
 // Aligned with Message.Channel values ("web", "api", "im") but allows finer granularity.
 const (

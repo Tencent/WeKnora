@@ -76,27 +76,69 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 
-	// Check if file already exists
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
-	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
-		Type:     "file",
-		FileName: fileName,
-		FileSize: file.Size,
-		FileHash: hash,
-	})
+
+	// Stable document identity from first line: "hash_id = <id>".
+	// When present, re-uploads with the same id replace the previous entry
+	// instead of creating a duplicate (content-hash dedupe still applies when
+	// the bytes are unchanged).
+	docHashID, err := extractDocumentHashID(file, fileName)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
+		logger.Errorf(ctx, "Failed to extract document hash_id: %v", err)
 		return nil, err
 	}
-	if exists {
-		logger.Infof(ctx, "File already exists: %s", fileName)
-		// Update creation time for existing knowledge
-		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
-			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+	if docHashID != "" {
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		metadata[types.MetadataHashIDKey] = docHashID
+		logger.Infof(ctx, "Document hash_id declared: %s", docHashID)
+
+		existingByHashID, err := s.repo.FindByMetadataKey(ctx, tenantID, kbID, types.MetadataHashIDKey, docHashID)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to look up knowledge by hash_id: %v", err)
 			return nil, err
 		}
-		return existingKnowledge, types.NewDuplicateFileError(existingKnowledge)
+		if existingByHashID != nil {
+			if existingByHashID.FileHash == hash {
+				logger.Infof(ctx, "File already exists for hash_id=%s (identical content): %s", docHashID, fileName)
+				if err := s.repo.UpdateKnowledgeColumn(ctx, existingByHashID.ID, "created_at", time.Now()); err != nil {
+					logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+					return nil, err
+				}
+				return existingByHashID, types.NewDuplicateFileError(existingByHashID)
+			}
+			logger.Infof(ctx, "Updating knowledge %s for hash_id=%s (content changed)", existingByHashID.ID, docHashID)
+			deleteFn := s.DeleteKnowledge
+			if s.deleteKnowledgeHook != nil {
+				deleteFn = s.deleteKnowledgeHook
+			}
+			if err := deleteFn(ctx, existingByHashID.ID); err != nil {
+				logger.Errorf(ctx, "Failed to delete existing knowledge for hash_id upsert: %v", err)
+				return nil, err
+			}
+		}
+	} else {
+		// Legacy path: identical content (by file hash) is treated as a duplicate.
+		logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
+		exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type:     "file",
+			FileName: fileName,
+			FileSize: file.Size,
+			FileHash: hash,
+		})
+		if err != nil {
+			logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
+			return nil, err
+		}
+		if exists {
+			logger.Infof(ctx, "File already exists: %s", fileName)
+			if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
+				logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+				return nil, err
+			}
+			return existingKnowledge, types.NewDuplicateFileError(existingKnowledge)
+		}
 	}
 
 	// Check storage quota

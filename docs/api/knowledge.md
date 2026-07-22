@@ -58,6 +58,28 @@
 
 `process_config` 可选字段包括：`parser_engine_rules`、`chunking_config`、`enable_multimodel`、`vlm_config`、`asr_config`、`question_generation_config`、`graph_enabled`、`extract_config`。若同时传 `enable_multimodel` 与 `process_config.enable_multimodel`，以 `process_config` 为准。
 
+### 文档身份 `hash_id`（文本文件 upsert）
+
+对 `md` / `markdown` / `txt` / `csv` / `json` / `html` / `mhtml`，若**正文第一行**声明稳定身份，系统会按该身份做新增或更新，而不是仅凭文件名/内容哈希新建：
+
+```text
+hash_id = alarm-policy
+
+# 告警策略
+...
+```
+
+也支持 `# hash_id = alarm-policy`（Markdown 注释风格）与 `hash_id=alarm-policy`。
+
+| 情况 | 行为 |
+| ---- | ---- |
+| 库内无同 `hash_id` | 新建，并写入 `metadata.hash_id` |
+| 已有同 `hash_id`，内容未变 | 返回 `409 duplicate_file`（与现有内容去重一致） |
+| 已有同 `hash_id`，内容已变 | 删除旧条目后创建新条目（覆盖更新） |
+| 未声明 `hash_id` | 保持原行为：相同内容哈希视为重复 |
+
+`hash_id` 会写入知识条目的 `metadata.hash_id`，便于 OpenClaw / CLI / API 反复同步同一篇文档。
+
 **请求**:
 
 ```curl

@@ -21,6 +21,13 @@ type createKnowledgeFileRepoStub struct {
 	createCalls      int
 	createErr        error
 	createdKnowledge *types.Knowledge
+
+	byHashID            map[string]*types.Knowledge
+	findByHashIDCalls   int
+	checkExistsCalls    int
+	updateColumnCalls   int
+	duplicateKnowledge  *types.Knowledge
+	checkExistsFileHash string
 }
 
 func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
@@ -29,7 +36,35 @@ func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
 	kbID string,
 	params *types.KnowledgeCheckParams,
 ) (bool, *types.Knowledge, error) {
+	r.checkExistsCalls++
+	if r.duplicateKnowledge != nil && (r.checkExistsFileHash == "" || r.checkExistsFileHash == params.FileHash) {
+		return true, r.duplicateKnowledge, nil
+	}
 	return false, nil, nil
+}
+
+func (r *createKnowledgeFileRepoStub) FindByMetadataKey(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	key string,
+	value string,
+) (*types.Knowledge, error) {
+	r.findByHashIDCalls++
+	if r.byHashID == nil {
+		return nil, nil
+	}
+	return r.byHashID[value], nil
+}
+
+func (r *createKnowledgeFileRepoStub) UpdateKnowledgeColumn(
+	ctx context.Context,
+	id string,
+	column string,
+	value interface{},
+) error {
+	r.updateColumnCalls++
+	return nil
 }
 
 func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
@@ -267,6 +302,127 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	metadataMap, err := repo.createdKnowledge.Metadata.Map()
 	require.NoError(t, err)
 	require.Equal(t, "test", metadataMap["source"])
+}
+
+func TestCreateKnowledgeFromFile_PersistsHashIDFromFirstLine(t *testing.T) {
+	t.Parallel()
+
+	repo := &createKnowledgeFileRepoStub{}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+	}
+
+	content := "hash_id = alarm-policy\n\n# 告警策略\n"
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "告警策略.md", content),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.Equal(t, 1, repo.findByHashIDCalls)
+	require.Zero(t, repo.checkExistsCalls)
+	require.Equal(t, 1, repo.createCalls)
+
+	metadataMap, err := repo.createdKnowledge.Metadata.Map()
+	require.NoError(t, err)
+	require.Equal(t, "alarm-policy", metadataMap[types.MetadataHashIDKey])
+}
+
+func TestCreateKnowledgeFromFile_HashIDIdenticalContentIsDuplicate(t *testing.T) {
+	t.Parallel()
+
+	content := "hash_id = alarm-policy\nbody"
+	fh := newMultipartFileHeader(t, "告警策略.md", content)
+	hash, err := calculateFileHash(fh)
+	require.NoError(t, err)
+
+	existing := &types.Knowledge{ID: "k-existing", FileHash: hash, FileName: "告警策略.md"}
+	repo := &createKnowledgeFileRepoStub{
+		byHashID: map[string]*types.Knowledge{"alarm-policy": existing},
+	}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   &createKnowledgeFileServiceStub{},
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "告警策略.md", content),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+	)
+
+	require.Error(t, err)
+	var dup *types.DuplicateKnowledgeError
+	require.ErrorAs(t, err, &dup)
+	require.Equal(t, existing, knowledge)
+	require.Zero(t, repo.createCalls)
+	require.Equal(t, 1, repo.updateColumnCalls)
+}
+
+func TestCreateKnowledgeFromFile_HashIDContentChangeReplaces(t *testing.T) {
+	t.Parallel()
+
+	existing := &types.Knowledge{ID: "k-old", FileHash: "old-hash", FileName: "告警策略.md"}
+	repo := &createKnowledgeFileRepoStub{
+		byHashID: map[string]*types.Knowledge{"alarm-policy": existing},
+	}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	var deletedID string
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+		deleteKnowledgeHook: func(ctx context.Context, id string) error {
+			deletedID = id
+			delete(repo.byHashID, "alarm-policy")
+			return nil
+		},
+	}
+
+	content := "hash_id = alarm-policy\nupdated body"
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "告警策略.md", content),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.Equal(t, "k-old", deletedID)
+	require.Equal(t, 1, repo.createCalls)
+	require.NotEqual(t, "k-old", knowledge.ID)
+
+	metadataMap, err := repo.createdKnowledge.Metadata.Map()
+	require.NoError(t, err)
+	require.Equal(t, "alarm-policy", metadataMap[types.MetadataHashIDKey])
 }
 
 func newCreateKnowledgeFileContext() context.Context {
