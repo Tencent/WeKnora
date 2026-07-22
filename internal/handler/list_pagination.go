@@ -38,5 +38,10 @@ func parseListPagination(c *gin.Context) (page, pageSize int, ok bool) {
 		}
 		pageSize = ps
 	}
+	maxInt := int(^uint(0) >> 1)
+	if page > 1 && page-1 > maxInt/pageSize {
+		c.Error(apperrors.NewValidationError("page and page_size exceed the supported pagination range"))
+		return 0, 0, false
+	}
 	return page, pageSize, true
 }

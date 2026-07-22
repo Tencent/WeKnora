@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    folder_id VARCHAR(36) NOT NULL DEFAULT '',
+    folder_version INTEGER NOT NULL DEFAULT 1,
+    folder_indexed_version INTEGER NOT NULL DEFAULT 0,
     type VARCHAR(50) NOT NULL DEFAULT '',
     title VARCHAR(255) NOT NULL DEFAULT '',
     description TEXT,
@@ -89,6 +92,21 @@ func reloadKnowledgeRow(t *testing.T, db *gorm.DB, id string) (status string, co
 	row := db.Raw(`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, id).Row()
 	require.NoError(t, row.Scan(&status, &count))
 	return status, count
+}
+
+func reloadKnowledgeFolderState(
+	t *testing.T,
+	db *gorm.DB,
+	id string,
+) (title string, folderID string, folderVersion uint64, folderIndexedVersion uint64) {
+	t.Helper()
+	row := db.Raw(`
+		SELECT title, folder_id, folder_version, folder_indexed_version
+		FROM knowledges
+		WHERE id = ?
+	`, id).Row()
+	require.NoError(t, row.Scan(&title, &folderID, &folderVersion, &folderIndexedVersion))
+	return title, folderID, folderVersion, folderIndexedVersion
 }
 
 func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {
@@ -250,6 +268,176 @@ func TestUpdateKnowledge_DoesNotClobberPendingCounter(t *testing.T) {
 	reloaded, err := repo.GetKnowledgeByID(ctx, 1, id)
 	require.NoError(t, err)
 	assert.Equal(t, "renamed-after-stale-load", reloaded.Title)
+}
+
+func TestUpdateKnowledge_DoesNotClobberFolderState(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	stale, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	require.Equal(t, types.KnowledgeFolderRootID, stale.FolderID)
+	require.Equal(t, uint64(1), stale.FolderVersion)
+	require.Equal(t, uint64(0), stale.FolderIndexedVersion)
+
+	require.NoError(t, db.Exec(`
+		UPDATE knowledges
+		SET folder_id = 'folder-new', folder_version = 2, folder_indexed_version = 2
+		WHERE id = ?
+	`, id).Error)
+
+	stale.Title = "title-from-stale-object"
+	require.NoError(t, repo.UpdateKnowledge(ctx, stale))
+
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "title-from-stale-object", title)
+	assert.Equal(t, "folder-new", folderID)
+	assert.Equal(t, uint64(2), folderVersion)
+	assert.Equal(t, uint64(2), folderIndexedVersion)
+}
+
+func TestUpdateKnowledge_CannotExplicitlyChangeFolderState(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	loaded, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	loaded.Title = "ordinary update"
+	loaded.FolderID = "folder-forbidden"
+	loaded.FolderVersion = 9
+	loaded.FolderIndexedVersion = 9
+
+	require.NoError(t, repo.UpdateKnowledge(ctx, loaded))
+
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "ordinary update", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
+}
+
+func TestUpdateKnowledgeBatch_DoesNotClobberFolderState(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	stale, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+		UPDATE knowledges
+		SET folder_id = 'folder-new', folder_version = 2, folder_indexed_version = 2
+		WHERE id = ?
+	`, id).Error)
+
+	stale.Title = "batch-title-from-stale-object"
+	require.NoError(t, repo.UpdateKnowledgeBatch(ctx, []*types.Knowledge{stale}))
+
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "batch-title-from-stale-object", title)
+	assert.Equal(t, "folder-new", folderID)
+	assert.Equal(t, uint64(2), folderVersion)
+	assert.Equal(t, uint64(2), folderIndexedVersion)
+}
+
+func TestUpdateKnowledgeColumn_RejectsFolderStateColumns(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+
+	columns := []string{
+		"folder_id",
+		"FolderID",
+		" FOLDER_ID ",
+		"folder_version",
+		"FolderVersion",
+		" FoLdEr_VeRsIoN ",
+		"folder_indexed_version",
+		"FolderIndexedVersion",
+		" FOLDER_INDEXED_VERSION ",
+	}
+	for _, column := range columns {
+		t.Run(column, func(t *testing.T) {
+			err := repo.UpdateKnowledgeColumn(ctx, id, column, 9)
+			require.ErrorIs(t, err, ErrKnowledgeFolderStateUpdateForbidden)
+		})
+	}
+
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "finalize-test", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
+}
+
+func TestUpdateKnowledgeColumns_RejectsFolderStateAtomically(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+
+	err := repo.UpdateKnowledgeColumns(ctx, id, map[string]interface{}{
+		"title":           "must-not-persist",
+		" FolderVersion ": uint64(2),
+	})
+	require.ErrorIs(t, err, ErrKnowledgeFolderStateUpdateForbidden)
+
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "finalize-test", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
+}
+
+func TestGenericKnowledgeUpdatesAllowOrdinaryColumns(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+
+	require.NoError(t, repo.UpdateKnowledgeColumn(ctx, id, "title", "single-column"))
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "single-column", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
+
+	require.NoError(t, repo.UpdateKnowledgeColumns(ctx, id, map[string]interface{}{
+		"title":       "multi-column",
+		"description": "allowed",
+	}))
+	title, folderID, folderVersion, folderIndexedVersion = reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "multi-column", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
+}
+
+func TestUpdateActiveDeletingKnowledgeColumns_RejectsFolderStateAtomically(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertKnowledgeWithStatus(t, db, types.ParseStatusDeleting, false)
+
+	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, id, map[string]interface{}{
+		"parse_status":             types.ParseStatusFailed,
+		" FOLDER_INDEXED_VERSION ": uint64(2),
+	})
+	require.ErrorIs(t, err, ErrKnowledgeFolderStateUpdateForbidden)
+	assert.False(t, updated)
+
+	status, _ := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusDeleting, status)
+	title, folderID, folderVersion, folderIndexedVersion := reloadKnowledgeFolderState(t, db, id)
+	assert.Equal(t, "delete-test", title)
+	assert.Equal(t, types.KnowledgeFolderRootID, folderID)
+	assert.Equal(t, uint64(1), folderVersion)
+	assert.Equal(t, uint64(0), folderIndexedVersion)
 }
 
 // TestUpdateKnowledge_PendingCounterOmittedOnReset verifies the inverse

@@ -18,7 +18,6 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: "1.24"
   NODE_VERSION: "22"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -74,8 +73,14 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
+
+      - name: Validate SQLite migrations
+        run: |
+          go run ./cmd/sqlite-migration-inventory \
+            -directory migrations/sqlite \
+            > "${RUNNER_TEMP}/sqlite-migrations.expected"
 
       - uses: actions/download-artifact@v8
         with:
@@ -96,7 +101,6 @@ jobs:
       - name: Build
         run: |
           export EDITION=lite
-          eval "$(./scripts/get_version.sh env)"
           LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
           if [ "${{ matrix.goos }}" = "darwin" ]; then
@@ -116,14 +120,22 @@ jobs:
           if [ -d config ]; then
             cp -r config "${ARCHIVE}/config"
           fi
-          if [ -d migrations/sqlite ]; then
-            mkdir -p "${ARCHIVE}/migrations/sqlite"
-            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
-          fi
+          mkdir -p "${ARCHIVE}/migrations/sqlite"
+          cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           if [ -f deploy/weknora-lite.service ]; then
             cp deploy/weknora-lite.service "${ARCHIVE}/"
           fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          VERIFY_ROOT="${RUNNER_TEMP}/verify-${ARCHIVE}"
+          rm -rf "${VERIFY_ROOT}"
+          mkdir -p "${VERIFY_ROOT}"
+          tar xzf "${ARCHIVE}.tar.gz" -C "${VERIFY_ROOT}"
+          go run ./cmd/sqlite-migration-inventory \
+            -directory "${VERIFY_ROOT}/${ARCHIVE}/migrations/sqlite" \
+            > "${RUNNER_TEMP}/sqlite-migrations.actual"
+          diff -u \
+            "${RUNNER_TEMP}/sqlite-migrations.expected" \
+            "${RUNNER_TEMP}/sqlite-migrations.actual"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
       - uses: actions/upload-artifact@v7
@@ -168,8 +180,15 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
+
+      - name: Validate SQLite migrations
+        shell: bash
+        run: |
+          go run ./cmd/sqlite-migration-inventory \
+            -directory migrations/sqlite \
+            > "${RUNNER_TEMP}/sqlite-migrations.expected"
 
       - uses: actions/setup-node@v6
         with:
@@ -216,7 +235,6 @@ jobs:
         run: |
           export EDITION=lite
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
-          eval "$(./scripts/get_version.sh env)"
           LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
 
@@ -255,12 +273,16 @@ jobs:
           if [ -f .env.lite.example ]; then
             cp .env.lite.example "${RESOURCES}/.env"
           fi
-          if [ -d migrations/sqlite ]; then
-            cp -r migrations/sqlite/* "${RESOURCES}/migrations/sqlite/"
-          fi
+          cp -r migrations/sqlite/* "${RESOURCES}/migrations/sqlite/"
           if [ -d config ]; then
             cp -r config/* "${RESOURCES}/config/"
           fi
+          go run ./cmd/sqlite-migration-inventory \
+            -directory "${RESOURCES}/migrations/sqlite" \
+            > "${RUNNER_TEMP}/sqlite-migrations.app"
+          diff -u \
+            "${RUNNER_TEMP}/sqlite-migrations.expected" \
+            "${RUNNER_TEMP}/sqlite-migrations.app"
 
           DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
 
@@ -273,6 +295,19 @@ jobs:
             -srcfolder "${DMG_SRC}" \
             -ov -format UDZO \
             "${DMG_NAME}.dmg"
+
+          MOUNT_POINT="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "${MOUNT_POINT}" "${DMG_NAME}.dmg"
+          trap 'hdiutil detach "${MOUNT_POINT}" >/dev/null 2>&1 || true; rmdir "${MOUNT_POINT}" >/dev/null 2>&1 || true' EXIT
+          go run ./cmd/sqlite-migration-inventory \
+            -directory "${MOUNT_POINT}/${APP_BUNDLE}/Contents/Resources/migrations/sqlite" \
+            > "${RUNNER_TEMP}/sqlite-migrations.dmg"
+          diff -u \
+            "${RUNNER_TEMP}/sqlite-migrations.expected" \
+            "${RUNNER_TEMP}/sqlite-migrations.dmg"
+          hdiutil detach "${MOUNT_POINT}"
+          rmdir "${MOUNT_POINT}"
+          trap - EXIT
 
           shasum -a 256 "${DMG_NAME}.dmg" > "${DMG_NAME}.dmg.sha256"
 
@@ -290,14 +325,22 @@ jobs:
           if [ -d config ]; then
             cp -r config "${ARCHIVE}/config"
           fi
-          if [ -d migrations/sqlite ]; then
-            mkdir -p "${ARCHIVE}/migrations/sqlite"
-            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
-          fi
+          mkdir -p "${ARCHIVE}/migrations/sqlite"
+          cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          VERIFY_ROOT="${RUNNER_TEMP}/verify-${ARCHIVE}"
+          rm -rf "${VERIFY_ROOT}"
+          mkdir -p "${VERIFY_ROOT}"
+          tar xzf "${ARCHIVE}.tar.gz" -C "${VERIFY_ROOT}"
+          go run ./cmd/sqlite-migration-inventory \
+            -directory "${VERIFY_ROOT}/${ARCHIVE}/migrations/sqlite" \
+            > "${RUNNER_TEMP}/sqlite-migrations.linux"
+          diff -u \
+            "${RUNNER_TEMP}/sqlite-migrations.expected" \
+            "${RUNNER_TEMP}/sqlite-migrations.linux"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      # ── Windows: package NSIS installer or plain exe ──
+      # ── Windows: package NSIS installer ──
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
@@ -305,13 +348,30 @@ jobs:
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
           # Wails -nsis generates an installer named {app}-amd64-installer.exe
           INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
-          if [ -f "$INSTALLER" ]; then
-            cp "$INSTALLER" "${ARCHIVE}_setup.exe"
-            sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
-          else
-            cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}.exe"
-            sha256sum "${ARCHIVE}.exe" > "${ARCHIVE}.exe.sha256"
+          if [ ! -f "$INSTALLER" ]; then
+            echo "::error::Wails did not produce the required NSIS installer"
+            exit 1
           fi
+          PAYLOAD_ROOT="${RUNNER_TEMP}/nsis-payload"
+          rm -rf "${PAYLOAD_ROOT}"
+          7z x -y "$INSTALLER" "-o${PAYLOAD_ROOT}" >/dev/null
+          mapfile -t MIGRATION_DIRS < <(
+            find "${PAYLOAD_ROOT}" -type d \
+              -path '*/migrations/sqlite' \
+              -print
+          )
+          if [ "${#MIGRATION_DIRS[@]}" -ne 1 ]; then
+            echo "::error::NSIS payload must contain exactly one migrations/sqlite directory"
+            exit 1
+          fi
+          go run ./cmd/sqlite-migration-inventory \
+            -directory "${MIGRATION_DIRS[0]}" \
+            > "${RUNNER_TEMP}/sqlite-migrations.nsis"
+          diff -u \
+            "${RUNNER_TEMP}/sqlite-migrations.expected" \
+            "${RUNNER_TEMP}/sqlite-migrations.nsis"
+          cp "$INSTALLER" "${ARCHIVE}_setup.exe"
+          sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -410,7 +470,7 @@ jobs:
             --notes-file notes.md \
             WeKnora-lite_*.tar.gz \
             WeKnora-lite_*.tar.gz.sha256 \
-            WeKnora-Lite-App_* || true
+            WeKnora-Lite-App_*
 
   # ── 4. Update Homebrew Formula ──
   update-homebrew:

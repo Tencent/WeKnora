@@ -11,7 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrKnowledgeNotFound = errors.New("knowledge not found")
+var (
+	ErrKnowledgeNotFound                   = errors.New("knowledge not found")
+	ErrKnowledgeFolderStateUpdateForbidden = errors.New("knowledge folder state cannot be updated through generic knowledge updates")
+)
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
@@ -36,7 +39,36 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+//
+// Generic updates must preserve folder placement and index versions stored
+// in the database.
+var omitFieldsOnUpdate = []string{
+	"DeletedAt",
+	"PendingSubtasksCount",
+	"FolderID",
+	"FolderVersion",
+	"FolderIndexedVersion",
+}
+
+func validateGenericKnowledgeUpdateColumn(column string) error {
+	switch strings.ToLower(strings.TrimSpace(column)) {
+	case "folder_id", "folderid",
+		"folder_version", "folderversion",
+		"folder_indexed_version", "folderindexedversion":
+		return ErrKnowledgeFolderStateUpdateForbidden
+	default:
+		return nil
+	}
+}
+
+func validateGenericKnowledgeUpdateColumns(values map[string]interface{}) error {
+	for column := range values {
+		if err := validateGenericKnowledgeUpdateColumn(column); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -311,6 +343,9 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	column string,
 	value interface{},
 ) error {
+	if err := validateGenericKnowledgeUpdateColumn(column); err != nil {
+		return err
+	}
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Update(column, value).Error
 	return err
 }
@@ -327,6 +362,9 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	if len(values) == 0 {
 		return nil
 	}
+	if err := validateGenericKnowledgeUpdateColumns(values); err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
@@ -339,6 +377,9 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 ) (bool, error) {
 	if len(values) == 0 {
 		return false, nil
+	}
+	if err := validateGenericKnowledgeUpdateColumns(values); err != nil {
+		return false, err
 	}
 	result := r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).

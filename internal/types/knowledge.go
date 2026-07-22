@@ -116,6 +116,12 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the authoritative folder placement. Empty means the knowledge base root.
+	FolderID string `json:"folder_id" gorm:"type:varchar(36);not null;default:''"`
+	// FolderVersion is the internal version of the persisted folder placement.
+	FolderVersion uint64 `json:"-" gorm:"type:bigint;not null;default:1"`
+	// FolderIndexedVersion is the internal folder indexing checkpoint.
+	FolderIndexedVersion uint64 `json:"-" gorm:"type:bigint;not null;default:0"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

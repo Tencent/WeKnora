@@ -144,6 +144,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
+	must(container.Provide(repository.NewKnowledgeFolderRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
@@ -191,6 +192,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
 	must(container.Provide(service.NewKnowledgeService))
+	must(container.Provide(service.NewKnowledgeFolderService))
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
@@ -343,6 +345,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
+	must(container.Provide(handler.NewKnowledgeFolderHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))
 	must(container.Provide(handler.NewTagHandler))
@@ -569,7 +572,7 @@ func initRedisClient() (*redis.Client, error) {
 // Returns:
 //   - Configured database connection
 //   - Error if connection fails
-func initDatabase(cfg *config.Config) (*gorm.DB, error) {
+func initDatabase(cfg *config.Config) (_ *gorm.DB, resultErr error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
 	var sqliteDBPath string
@@ -644,6 +647,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+	ownershipTransferred := false
+	defer func() {
+		if resultErr == nil || ownershipTransferred {
+			return
+		}
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("close database after initialization failure: %w", closeErr),
+			)
+		}
+	}()
 
 	// Sanity check: dialect-specific code in services (notably the
 	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
@@ -658,56 +677,45 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	if os.Getenv("DB_DRIVER") == "sqlite" {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
-		}
 		if err := sqlDB.Ping(); err != nil {
 			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
 		}
 	}
 
-	// Run database migrations automatically (optional, can be disabled via env var)
-	// To disable auto-migration, set AUTO_MIGRATE=false
-	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
-	if os.Getenv("AUTO_MIGRATE") != "false" {
-		logger.Infof(context.Background(), "Running database migrations...")
-
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
-		migrationOpts := database.MigrationOptions{
-			AutoRecoverDirty: autoRecover,
-			SQLiteDBPath:     sqliteDBPath,
-		}
-
-		// Run base migrations (all versioned migrations including embeddings)
-		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
-		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
+	// AUTO_MIGRATE=false leaves migrations to external deployment tooling.
+	// Dirty-state recovery is enabled only by a valid, explicit
+	// AUTO_RECOVER_DIRTY value accepted by strconv.ParseBool.
+	autoRecoverValue, autoRecoverPresent := os.LookupEnv("AUTO_RECOVER_DIRTY")
+	migrationsRan, err := runStartupMigrations(
+		os.Getenv("AUTO_MIGRATE"),
+		autoRecoverValue,
+		autoRecoverPresent,
+		os.Getenv("DB_DRIVER"),
+		func(autoRecover bool) error {
+			logger.Infof(context.Background(), "Running database migrations...")
+			return database.RunMigrationsWithOptions(migrateDSN, database.MigrationOptions{
+				AutoRecoverDirty: autoRecover,
+				SQLiteDBPath:     sqliteDBPath,
+			})
+		},
+		func() {
+			// These initializers depend on the migrated schema.
+			resolveStorageProviderPending(db)
+			migrateLegacyStorageBackends(db)
+			if err := types.LoadBuiltinModelsConfig(
 				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
-		}
-
-		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
-		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
-		// we replace that with the actual STORAGE_TYPE from the environment.
-		resolveStorageProviderPending(db)
-		migrateLegacyStorageBackends(db)
-
-		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
-		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
-			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
-		}
-	} else {
-		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
-	}
-
-	// Get underlying SQL DB object
-	sqlDB, err := db.DB()
+				db,
+				config.ConfigDir(),
+			); err != nil {
+				logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
+			}
+		},
+	)
 	if err != nil {
 		return nil, err
+	}
+	if !migrationsRan {
+		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
 	// Configure connection pool parameters
@@ -721,6 +729,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
+	ownershipTransferred = true
 	return db, nil
 }
 

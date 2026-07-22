@@ -3,16 +3,20 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/database/sqlitemigrations"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	migrateiofs "github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 var (
@@ -95,46 +99,211 @@ type MigrationOptions struct {
 	// parsing a URL-based DSN, which avoids breakage when the path contains
 	// spaces (e.g. macOS "Application Support").
 	SQLiteDBPath string
+
+	// SQLiteMigrationsPath overrides the directory containing SQLite migration
+	// files. When empty, the runner checks executable-relative release paths
+	// before falling back to the current working directory.
+	SQLiteMigrationsPath string
+}
+
+func sqliteMigrationDirectoryCandidates(executablePath string, workingDirectory string) []string {
+	candidates := make([]string, 0, 5)
+	seen := make(map[string]struct{}, 5)
+	appendCandidate := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	appendExecutableCandidates := func(path string) {
+		if path == "" {
+			return
+		}
+		executableDirectory := filepath.Dir(path)
+		appendCandidate(filepath.Join(executableDirectory, "migrations", "sqlite"))
+		appendCandidate(filepath.Join(
+			executableDirectory,
+			"..",
+			"Resources",
+			"migrations",
+			"sqlite",
+		))
+	}
+
+	if executablePath != "" {
+		if resolvedExecutablePath, err := filepath.EvalSymlinks(executablePath); err == nil {
+			appendExecutableCandidates(resolvedExecutablePath)
+		}
+		appendExecutableCandidates(executablePath)
+	}
+	if workingDirectory != "" {
+		appendCandidate(filepath.Join(workingDirectory, "migrations", "sqlite"))
+	}
+	return candidates
+}
+
+func validateSQLiteMigrationsDirectory(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("sqlite migrations directory is empty")
+	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve sqlite migrations directory %q: %w", path, err)
+	}
+	info, err := os.Stat(absolutePath)
+	if err != nil {
+		return "", fmt.Errorf("stat sqlite migrations directory %q: %w", absolutePath, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("sqlite migrations path %q is not a directory", absolutePath)
+	}
+	if _, err := sqlitemigrations.ValidateDirectory(
+		absolutePath,
+		sqlitemigrations.RequiredVersion,
+	); err != nil {
+		return "", fmt.Errorf(
+			"validate sqlite migrations directory %q: %w",
+			absolutePath,
+			err,
+		)
+	}
+	return filepath.Clean(absolutePath), nil
+}
+
+func resolveSQLiteMigrationsDirectory(
+	explicitPath string,
+	executablePath string,
+	workingDirectory string,
+) (string, error) {
+	if strings.TrimSpace(explicitPath) != "" {
+		return validateSQLiteMigrationsDirectory(explicitPath)
+	}
+
+	candidates := sqliteMigrationDirectoryCandidates(executablePath, workingDirectory)
+	checked := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		checked = append(checked, candidate)
+		_, statErr := os.Stat(candidate)
+		if os.IsNotExist(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return "", fmt.Errorf(
+				"stat sqlite migrations candidate %q: %w",
+				candidate,
+				statErr,
+			)
+		}
+		path, err := validateSQLiteMigrationsDirectory(candidate)
+		if err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf(
+		"sqlite migrations directory not found; checked: %s",
+		strings.Join(checked, ", "),
+	)
+}
+
+func defaultSQLiteMigrationsDirectory(explicitPath string) (string, error) {
+	executablePath, executableErr := os.Executable()
+	if executableErr != nil {
+		executablePath = ""
+	}
+	workingDirectory, workingDirectoryErr := os.Getwd()
+	if workingDirectoryErr != nil {
+		workingDirectory = ""
+	}
+	path, err := resolveSQLiteMigrationsDirectory(
+		explicitPath,
+		executablePath,
+		workingDirectory,
+	)
+	if err != nil {
+		return "", errors.Join(executableErr, workingDirectoryErr, err)
+	}
+	return path, nil
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
-func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
+func RunMigrationsWithOptions(dsn string, opts MigrationOptions) (resultErr error) {
 	ctx := context.Background()
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
-	}
-
 	var m *migrate.Migrate
-	if opts.SQLiteDBPath != "" {
-		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
+	if strings.HasPrefix(dsn, "sqlite3://") {
+		migrationsDirectory, err := defaultSQLiteMigrationsDirectory(opts.SQLiteMigrationsPath)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to open sqlite db for migration: %v", err)
-			wrapped := fmt.Errorf("failed to open sqlite db for migration: %w", err)
+			wrapped := fmt.Errorf("failed to locate sqlite migrations: %w", err)
+			logger.Errorf(ctx, "%v", wrapped)
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
-		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+		sourceDriver, err := migrateiofs.New(os.DirFS(migrationsDirectory), ".")
 		if err != nil {
-			sqlDB.Close()
-			logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
-			wrapped := fmt.Errorf("failed to create sqlite3 migrate driver: %w", err)
+			wrapped := fmt.Errorf(
+				"failed to open sqlite migrations from %s: %w",
+				migrationsDirectory,
+				err,
+			)
+			logger.Errorf(ctx, "%v", wrapped)
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
-		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
-			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
-			setMigrationState(0, false, wrapped.Error(), false)
-			return wrapped
+		logger.Infof(ctx, "Using SQLite migrations from %s", migrationsDirectory)
+
+		if opts.SQLiteDBPath == "" {
+			m, err = migrate.NewWithSourceInstance("iofs", sourceDriver, dsn)
+			if err != nil {
+				_ = sourceDriver.Close()
+				logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+				wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+				setMigrationState(0, false, wrapped.Error(), false)
+				return wrapped
+			}
+		} else {
+			sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
+			if err != nil {
+				_ = sourceDriver.Close()
+				logger.Errorf(ctx, "Failed to open sqlite db for migration: %v", err)
+				wrapped := fmt.Errorf("failed to open sqlite db for migration: %w", err)
+				setMigrationState(0, false, wrapped.Error(), false)
+				return wrapped
+			}
+			driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+			if err != nil {
+				_ = sourceDriver.Close()
+				_ = sqlDB.Close()
+				logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
+				wrapped := fmt.Errorf("failed to create sqlite3 migrate driver: %w", err)
+				setMigrationState(0, false, wrapped.Error(), false)
+				return wrapped
+			}
+			m, err = migrate.NewWithInstance("iofs", sourceDriver, "sqlite3", driver)
+			if err != nil {
+				_ = sourceDriver.Close()
+				_ = driver.Close()
+				logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+				wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
+				setMigrationState(0, false, wrapped.Error(), false)
+				return wrapped
+			}
 		}
 	} else {
 		var err error
-		m, err = migrate.New(migrationsPath, dsn)
+		m, err = newValidatedPostgresMigrator(
+			postgresMigrationsDirectory,
+			dsn,
+			migrate.New,
+		)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
@@ -142,7 +311,22 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			return wrapped
 		}
 	}
-	defer m.Close()
+	migrationClosed := false
+	defer func() {
+		if migrationClosed {
+			return
+		}
+		sourceErr, databaseErr := m.Close()
+		if closeErr := errors.Join(sourceErr, databaseErr); closeErr != nil {
+			wrapped := fmt.Errorf("close migration resources: %w", closeErr)
+			if resultErr != nil {
+				resultErr = errors.Join(resultErr, wrapped)
+				return
+			}
+			resultErr = wrapped
+			setMigrationState(0, false, resultErr.Error(), false)
+		}
+	}()
 
 	// Check current version and dirty state before migration
 	oldVersion, oldDirty, versionErr := m.Version()
@@ -152,6 +336,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	}
 
 	if versionErr == migrate.ErrNilVersion {
+		// A fresh database may have no history, but this is not a successful
+		// state: Up and the final formal-version check are still mandatory.
 		logger.Infof(ctx, "Database has no migration history, will start from version 0")
 	} else {
 		logger.Infof(ctx, "Current migration version: %d, dirty: %v", oldVersion, oldDirty)
@@ -162,31 +348,19 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
 		if opts.AutoRecoverDirty {
 			logger.Infof(ctx, "AutoRecoverDirty is enabled, attempting recovery...")
-			if err := recoverFromDirtyState(ctx, m, oldVersion); err != nil {
+			recoveredVersion, err := recoverDirtyMigrationWithRemediation(ctx, m, oldVersion)
+			if err != nil {
 				return captureMigrationFailure(m, err)
 			}
-			// Update oldVersion after recovery
-			oldVersion, _, _ = m.Version()
+			oldVersion = recoveredVersion
 		} else {
-			// Calculate the version to force to (usually the previous version)
-			forceVersion := int(oldVersion) - 1
-			if oldVersion == 0 || forceVersion < 0 {
-				forceVersion = 0
-			}
-			return captureMigrationFailure(m, fmt.Errorf(
-				"database is in dirty state at version %d. This usually means a migration failed partway through. "+
-					"To fix this:\n"+
-					"1. Check if the migration partially applied changes and manually fix if needed\n"+
-					"2. Use the force command to set the version to the last successful migration (usually %d):\n"+
-					"   ./scripts/migrate.sh force %d\n"+
-					"   Or if using make: make migrate-force version=%d\n"+
-					"3. After fixing, restart the application to retry the migration\n"+
-					"Or enable AutoRecoverDirty option to automatically retry",
-				oldVersion,
-				forceVersion,
-				forceVersion,
-				forceVersion,
-			))
+			return captureMigrationFailure(
+				m,
+				withDirtyMigrationRemediation(
+					oldVersion,
+					fmt.Errorf("database is in dirty state at version %d", oldVersion),
+				),
+			)
 		}
 	}
 
@@ -201,7 +375,11 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			if opts.AutoRecoverDirty {
 				logger.Infof(ctx, "Attempting to recover from dirty state...")
 				// Try to recover and retry
-				if recoverErr := recoverFromDirtyState(ctx, m, currentVersion); recoverErr != nil {
+				if _, recoverErr := recoverDirtyMigrationWithRemediation(
+					ctx,
+					m,
+					currentVersion,
+				); recoverErr != nil {
 					return captureMigrationFailure(m, recoverErr)
 				}
 				// Retry migration after recovery
@@ -211,35 +389,34 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 					return captureMigrationFailure(m, fmt.Errorf("migration failed after recovery attempt: %w", retryErr))
 				}
 			} else {
-				// Calculate the version to force to (usually the previous version)
-				forceVersion := currentVersion - 1
-				if currentVersion == 0 {
-					forceVersion = 0
-				}
-				return captureMigrationFailure(m, fmt.Errorf(
-					"migration failed and database is now in dirty state at version %d. "+
-						"To fix this:\n"+
-						"1. Check if the migration partially applied changes and manually fix if needed\n"+
-						"2. Use the force command to set the version to the last successful migration (usually %d):\n"+
-						"   ./scripts/migrate.sh force %d\n"+
-						"   Or if using make: make migrate-force version=%d\n"+
-						"3. After fixing, restart the application to retry the migration\n"+
-						"Or enable AutoRecoverDirty option to automatically retry",
-					currentVersion,
-					forceVersion,
-					forceVersion,
-					forceVersion,
-				))
+				return captureMigrationFailure(
+					m,
+					withDirtyMigrationRemediation(
+						currentVersion,
+						fmt.Errorf(
+							"migration failed and database is now dirty at version %d: %w",
+							currentVersion,
+							err,
+						),
+					),
+				)
 			}
 		} else {
 			return captureMigrationFailure(m, fmt.Errorf("failed to run migrations: %w", err))
 		}
 	}
 
-	// Get current version after migration
 	version, dirty, err := m.Version()
-	if err != nil && err != migrate.ErrNilVersion {
-		return captureMigrationFailure(m, fmt.Errorf("failed to get migration version: %w", err))
+	if finalErr := validateFinalMigrationState(version, dirty, err); finalErr != nil {
+		return captureMigrationFailure(m, finalErr)
+	}
+
+	sourceErr, databaseErr := m.Close()
+	migrationClosed = true
+	if closeErr := errors.Join(sourceErr, databaseErr); closeErr != nil {
+		wrapped := fmt.Errorf("close migration resources: %w", closeErr)
+		setMigrationState(version, dirty, wrapped.Error(), true)
+		return wrapped
 	}
 
 	setMigrationState(version, dirty, "", true)
@@ -250,18 +427,62 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		logger.Infof(ctx, "Database is up to date (version: %d)", version)
 	}
 
-	if dirty {
-		logger.Warnf(ctx, "Database is in dirty state! Manual intervention may be required.")
-	}
-
 	return nil
 }
 
-// recoverFromDirtyState attempts to recover from a dirty migration state
-// by forcing to the previous version and allowing the migration to be retried
-func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion uint) error {
+func validateFinalMigrationState(version uint, dirty bool, err error) error {
+	if errors.Is(err, migrate.ErrNilVersion) {
+		return fmt.Errorf("migration completed without a recorded version: %w", err)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get final migration version: %w", err)
+	}
+	if dirty {
+		return fmt.Errorf("database remains in dirty state at version %d", version)
+	}
+	return nil
+}
+
+func dirtyMigrationRemediation(dirtyVersion uint) string {
+	if dirtyVersion == 0 {
+		return "Manual remediation for dirty migration version 0:\n" +
+			"To re-run version 0, inspect and clean up or roll back all partially applied objects, " +
+			"restore the migration state to no-version with golang-migrate Force(-1) or the project equivalent, " +
+			"then restart so version 0 runs from the beginning.\n" +
+			"Only if you have manually verified that version 0 is fully applied, use Force(0) to mark version 0 complete, " +
+			"then restart for later migrations. Force(0) skips re-running version 0."
+	}
+
+	previousVersion := dirtyVersion - 1
+	return fmt.Sprintf(
+		"Manual remediation for dirty migration version %d: inspect and clean up or roll back partial results, "+
+			"restore the previous successful version %d with Force(%d) or the project equivalent, "+
+			"then restart so version %d is re-run.",
+		dirtyVersion,
+		previousVersion,
+		previousVersion,
+		dirtyVersion,
+	)
+}
+
+func withDirtyMigrationRemediation(dirtyVersion uint, err error) error {
+	return fmt.Errorf("%w\n%s", err, dirtyMigrationRemediation(dirtyVersion))
+}
+
+type dirtyMigrationRecovery interface {
+	Force(version int) error
+	Version() (version uint, dirty bool, err error)
+}
+
+// recoverFromDirtyState forces the previous migration version and verifies the
+// exact intermediate state before the caller retries pending migrations.
+func recoverFromDirtyState(
+	ctx context.Context,
+	m dirtyMigrationRecovery,
+	dirtyVersion uint,
+) (uint, error) {
 	// Special case: if dirty at version 0 (init migration), we cannot go back further
-	// The only option is to force to version 0 and retry, but this requires the migration to be idempotent
+	// The only option is to force to no version and retry from version 0.
 	if dirtyVersion == 0 {
 		logger.Warnf(ctx, "Database is in dirty state at version 0 (init migration). "+
 			"This is the initial migration, cannot rollback further. "+
@@ -271,17 +492,34 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 		// Force to version -1 (no version) to allow re-running version 0
 		// This effectively tells migrate that no migrations have been applied
 		if err := m.Force(-1); err != nil {
-			return fmt.Errorf(
-				"failed to recover from dirty state at version 0. "+
-					"Manual intervention required:\n"+
-					"1. Check what was partially created in the database\n"+
-					"2. Either drop all created objects and retry, or\n"+
-					"3. Manually complete the migration and run: ./scripts/migrate.sh force 0\n"+
-					"Error: %w", err)
+			return 0, fmt.Errorf(
+				"failed to force dirty migration version 0 to no-version: %w",
+				err,
+			)
+		}
+
+		recoveredVersion, recoveredDirty, recoveredErr := m.Version()
+		if !errors.Is(recoveredErr, migrate.ErrNilVersion) {
+			if recoveredErr != nil {
+				return 0, fmt.Errorf(
+					"read migration state after forcing dirty version 0 to no version: %w",
+					recoveredErr,
+				)
+			}
+			if recoveredDirty {
+				return 0, fmt.Errorf(
+					"database remains dirty at version %d after forcing dirty version 0 to no version",
+					recoveredVersion,
+				)
+			}
+			return 0, fmt.Errorf(
+				"unexpected migration version %d after forcing dirty version 0 to no version",
+				recoveredVersion,
+			)
 		}
 
 		logger.Infof(ctx, "Cleared migration state, will retry from version 0")
-		return nil
+		return 0, nil
 	}
 
 	forceVersion := int(dirtyVersion) - 1
@@ -291,11 +529,49 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 	// Force to previous version to clear dirty state
 	if err := m.Force(forceVersion); err != nil {
-		return fmt.Errorf("failed to force migration version during recovery: %w", err)
+		return 0, fmt.Errorf("failed to force migration version during recovery: %w", err)
+	}
+
+	recoveredVersion, recoveredDirty, recoveredErr := m.Version()
+	if recoveredErr != nil {
+		return 0, fmt.Errorf(
+			"read migration state after forcing dirty version %d to version %d: %w",
+			dirtyVersion,
+			forceVersion,
+			recoveredErr,
+		)
+	}
+	if recoveredDirty {
+		return 0, fmt.Errorf(
+			"database remains dirty at version %d after forcing dirty version %d to version %d",
+			recoveredVersion,
+			dirtyVersion,
+			forceVersion,
+		)
+	}
+	if recoveredVersion != uint(forceVersion) {
+		return 0, fmt.Errorf(
+			"unexpected migration version %d after forcing dirty version %d to version %d",
+			recoveredVersion,
+			dirtyVersion,
+			forceVersion,
+		)
 	}
 
 	logger.Infof(ctx, "Successfully forced migration to version %d, migration will be retried", forceVersion)
-	return nil
+	return recoveredVersion, nil
+}
+
+func recoverDirtyMigrationWithRemediation(
+	ctx context.Context,
+	m dirtyMigrationRecovery,
+	dirtyVersion uint,
+) (uint, error) {
+	recoveredVersion, err := recoverFromDirtyState(ctx, m, dirtyVersion)
+	if err != nil {
+		return 0, withDirtyMigrationRemediation(dirtyVersion, err)
+	}
+	return recoveredVersion, nil
 }
 
 // GetMigrationVersion returns the current migration version
@@ -309,9 +585,11 @@ func GetMigrationVersion() (uint, bool, error) {
 		os.Getenv("DB_NAME"),
 	)
 
-	migrationsPath := "file://migrations/versioned"
-
-	m, err := migrate.New(migrationsPath, dbURL)
+	m, err := newValidatedPostgresMigrator(
+		postgresMigrationsDirectory,
+		dbURL,
+		migrate.New,
+	)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}

@@ -377,6 +377,10 @@ func (a *apiKeyRouteGroup) PUT(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 	return a.handle(http.MethodPut, rel, h...)
 }
 
+func (a *apiKeyRouteGroup) PATCH(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodPatch, rel, h...)
+}
+
 func (a *apiKeyRouteGroup) DELETE(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 	return a.handle(http.MethodDelete, rel, h...)
 }

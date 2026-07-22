@@ -49,6 +49,7 @@ type RouterParams struct {
 	AgentShareService            interfaces.AgentShareService
 	KBHandler                    *handler.KnowledgeBaseHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
+	KnowledgeFolderHandler       *handler.KnowledgeFolderHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
@@ -230,6 +231,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeFolderRoutes(v1, params.KnowledgeFolderHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
 		// /files route cannot serve because it enforces same-tenant paths.
@@ -277,6 +279,46 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	return r
+}
+
+// RegisterKnowledgeFolderRoutes registers knowledge base folder routes.
+func RegisterKnowledgeFolderRoutes(
+	r *gin.RouterGroup,
+	folderHandler *handler.KnowledgeFolderHandler,
+	g *rbacGuards,
+) {
+	if folderHandler == nil {
+		return
+	}
+
+	folders := g.apiKeyGroup(
+		r.Group("/knowledge-bases/:id/folders"),
+		apiKeyIngest(apiKeyFullAccess()),
+	)
+	folderReads := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		folderReads.GET("", g.Viewer(), g.KBAccessRead("id"), folderHandler.ListFolders)
+		folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.CreateFolder)
+		folderReads.GET(
+			"/:folder_id/breadcrumb",
+			g.Viewer(),
+			g.KBAccessRead("id"),
+			folderHandler.GetBreadcrumb,
+		)
+		folderReads.GET("/:folder_id", g.Viewer(), g.KBAccessRead("id"), folderHandler.GetFolder)
+		folders.PATCH(
+			"/:folder_id",
+			g.OwnedKBOrAdmin(),
+			g.KBAccessWrite("id"),
+			folderHandler.UpdateFolder,
+		)
+		folders.DELETE(
+			"/:folder_id",
+			g.OwnedKBOrAdmin(),
+			g.KBAccessWrite("id"),
+			folderHandler.DeleteFolder,
+		)
+	}
 }
 
 // RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint
