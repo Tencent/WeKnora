@@ -355,7 +355,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	if !graphCacheHit {
 		graph, err = extractor.Extract(ctx, chunk.Content)
-		if graph != nil && s.cacheService != nil && err == nil {
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		if graph != nil && s.cacheService != nil {
 			jsonBytes, marshalErr := json.Marshal(graph)
 			if marshalErr == nil {
 				chunkHash := types.HashString(chunk.Content)

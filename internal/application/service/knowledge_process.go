@@ -290,9 +290,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+	// 删除旧的chunks - 硬删除（Purge），因为稳定 chunk ID 在重试时会生成相同主键，
+	// 软删除会留下 deleted_at 行导致 INSERT 主键冲突。与 cleanupKnowledgeResources 一致。
+	if err := s.chunkService.GetRepository().PurgeChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		logger.Warnf(ctx, "Failed to purge existing chunks (may not exist): %v", err)
 		// 不返回错误，继续处理（可能没有旧数据）
 	}
 

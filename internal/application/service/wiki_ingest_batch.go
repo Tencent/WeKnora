@@ -1598,8 +1598,11 @@ func (s *wikiIngestService) mapOneDocument(
 		if jsonBytes, marshalErr := json.Marshal(entry); marshalErr == nil {
 			contentHash := types.HashString(content)
 			chatModelID := chatModel.GetModelID()
+			// configHash MUST match the Lookup path above (line ~1203) - both
+			// include docTitle so a knowledge rename invalidates the cache.
 			configHash := types.HashAll(
 				chatModelID,
+				docTitle,
 				lang,
 				string(batchCtx.ExtractionGranularity),
 				batchCtx.ContentInstructions,
