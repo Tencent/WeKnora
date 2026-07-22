@@ -56,6 +56,8 @@ type ChunkRepository interface {
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// UpdateChunks updates chunks in batch
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch

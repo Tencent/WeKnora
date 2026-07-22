@@ -298,6 +298,21 @@ func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) e
 	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
 }
 
+// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, chunk := range chunks {
+			if err := tx.Omit("SeqID").Save(chunk).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // UpdateChunks updates chunks in batch using raw SQL for efficiency.
 // Uses raw SQL to bypass GORM's default value handling for boolean fields.
 //

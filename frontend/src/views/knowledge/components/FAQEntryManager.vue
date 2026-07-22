@@ -38,8 +38,6 @@
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.faq.title') }}</span>
             </h2>
-            <!-- 标题行右侧的动作锚点：与文档详情页保持一致的「信息 + 设置」两个圆形按钮。
-                 FAQ 类型知识库不传 supportedFileTypes，可上传格式行会自动隐藏。 -->
             <div class="kb-title-actions">
               <KBInfoPopover
                 v-if="kbInfo && !authStore.isLiteMode"
@@ -50,98 +48,51 @@
                   <t-icon name="setting" size="16px" />
                 </button>
               </t-tooltip>
+              <!-- 导入结果：默认仅图标，hover / 点击展开详情 -->
+              <div v-if="showImportResultBadge" class="faq-import-host"
+                :class="{ 'is-expanded': importResultExpanded }">
+                <button type="button" class="faq-import-trigger"
+                  :aria-label="$t('faqManager.import.recentResult')"
+                  @click.stop="importResultExpanded = !importResultExpanded">
+                  <t-icon name="check-circle-filled" size="16px" />
+                </button>
+                <div class="faq-import-panel">
+                  <div class="faq-import-strip faq-import-strip--result faq-import-strip--panel">
+                    <span class="faq-import-strip__text">{{ importResultSummary }}</span>
+                    <t-tag size="small" variant="light"
+                      :theme="importResult!.import_mode === 'append' ? 'primary' : 'warning'">
+                      {{ importResult!.import_mode === 'append' ? $t('faqManager.import.appendMode') :
+                        $t('faqManager.import.replaceMode') }}
+                    </t-tag>
+                    <t-button v-if="importResult!.failed_entries_url && importResult!.failed_count > 0"
+                      variant="text" theme="danger" size="small" class="faq-import-strip__link"
+                      @click="downloadFailedEntries">
+                      {{ $t('faqManager.import.downloadReasons') }}
+                    </t-button>
+                    <span class="faq-import-strip__time">{{ formatImportTime(importResult!.imported_at) }}</span>
+                    <button type="button" class="faq-import-strip__close" :aria-label="$t('common.close')"
+                      @click="closeImportResult">
+                      <t-icon name="close" size="14px" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <!-- 导入进行中 -->
+              <div v-else-if="isImportInProgress && importState.taskStatus"
+                class="faq-import-strip faq-import-strip--in-title"
+                :class="`faq-import-strip--${importState.taskStatus.status}`">
+                <t-icon :name="importProgressIcon" size="16px" class="faq-import-strip__icon"
+                  :class="{ 'is-spinning': importState.taskStatus.status === 'running' }" />
+                <span class="faq-import-strip__text">{{ importProgressText }}</span>
+                <div class="faq-import-strip__bar">
+                  <div class="faq-import-strip__bar-fill" :style="{ width: `${importState.taskStatus.progress}%` }" />
+                </div>
+                <span class="faq-import-strip__count">{{ importState.taskStatus.processed }}/{{
+                  importState.taskStatus.total }}</span>
+              </div>
             </div>
           </div>
           <p class="faq-subtitle">{{ $t('knowledgeEditor.faq.subtitle') }}</p>
-        </div>
-      </div>
-
-      <!-- 导入结果统计（持久化显示） -->
-      <div v-if="importResult && importResult.display_status === 'open' && !importState.taskId"
-        class="faq-import-result-card">
-        <div class="import-result-content">
-          <div class="import-result-header">
-            <div class="header-left">
-              <t-icon name="check-circle-filled" size="20px" class="result-icon" />
-              <span class="result-title">{{ $t('faqManager.import.recentResult') }}</span>
-            </div>
-            <div class="header-right">
-              <span class="result-time">{{ formatImportTime(importResult.imported_at) }}</span>
-              <t-button variant="text" theme="default" size="small" class="result-close-btn" @click="closeImportResult">
-                <t-icon name="close" size="16px" />
-              </t-button>
-            </div>
-          </div>
-          <div class="import-result-body">
-            <div class="import-result-stats">
-              <div class="stat-item">
-                <span class="stat-label">{{ $t('faqManager.import.totalData') }}</span>
-                <span class="stat-value">{{ importResult.total_entries }}{{ $t('faqManager.import.unit') }}</span>
-              </div>
-              <div class="stat-item success">
-                <span class="stat-label">{{ $t('faqManager.import.success') }}</span>
-                <span class="stat-value">{{ importResult.success_count }}{{ $t('faqManager.import.unit') }}</span>
-              </div>
-              <div v-if="importResult.failed_count > 0" class="stat-item failed">
-                <span class="stat-label">{{ $t('faqManager.import.failed') }}</span>
-                <span class="stat-value">{{ importResult.failed_count }}{{ $t('faqManager.import.unit') }}</span>
-                <t-button v-if="importResult.failed_entries_url" variant="outline" theme="danger" size="small"
-                  class="download-failed-btn" @click="downloadFailedEntries">
-                  <t-icon name="download" size="14px" />
-                  {{ $t('faqManager.import.downloadReasons') }}
-                </t-button>
-              </div>
-              <div v-if="importResult.skipped_count > 0" class="stat-item skipped">
-                <span class="stat-label">{{ $t('faqManager.import.skipped') }}</span>
-                <span class="stat-value">{{ importResult.skipped_count }}{{ $t('faqManager.import.unit') }}</span>
-              </div>
-            </div>
-            <div class="import-mode-tag">
-              <t-tag size="small" variant="light" theme="success">
-                {{ importResult.import_mode === 'append' ? $t('faqManager.import.appendMode') :
-                  $t('faqManager.import.replaceMode') }}
-              </t-tag>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 导入进度条（显示在列表页面顶部） -->
-      <div v-if="importState.taskId && importState.taskStatus" class="faq-import-progress-bar">
-        <div class="progress-bar-content">
-          <div class="progress-bar-header">
-            <div class="progress-left">
-              <t-icon :name="importState.taskStatus.status === 'running' ? 'loading' :
-                importState.taskStatus.status === 'success' ? 'check-circle' :
-                  importState.taskStatus.status === 'failed' ? 'error-circle' : 'time'" size="18px"
-                class="progress-icon" :class="{
-                  'icon-loading': importState.taskStatus.status === 'running',
-                  'icon-success': importState.taskStatus.status === 'success',
-                  'icon-error': importState.taskStatus.status === 'failed'
-                }" />
-              <span class="progress-title">
-                {{ importState.taskStatus.status === 'running' ? $t('faqManager.import.importing') :
-                  importState.taskStatus.status === 'success' ? $t('faqManager.import.importDone') :
-                    importState.taskStatus.status === 'failed' ? $t('faqManager.import.importFailed') :
-                      $t('faqManager.import.waiting') }}
-              </span>
-            </div>
-            <div class="progress-right">
-              <span class="progress-count">
-                {{ importState.taskStatus.processed }}/{{ importState.taskStatus.total }} {{
-                  $t('faqManager.import.unit') }}
-              </span>
-              <t-button v-if="importState.taskStatus.status === 'success' || importState.taskStatus.status === 'failed'"
-                variant="text" theme="default" size="small" class="progress-close-btn" @click="handleCloseProgress">
-                <t-icon name="close" size="14px" />
-              </t-button>
-            </div>
-          </div>
-          <t-progress :percentage="importState.taskStatus.progress" :status="importState.taskStatus.status === 'failed' ? 'error' :
-            importState.taskStatus.status === 'success' ? 'success' : 'active'" :label="false" class="progress-bar" />
-          <p v-if="importState.taskStatus.error" class="progress-error">
-            {{ importState.taskStatus.error }}
-          </p>
         </div>
       </div>
 
@@ -1231,21 +1182,26 @@ const importState = reactive({
     progress: number
     total: number
     processed: number
+    message?: string
     error?: string
   } | null,
   pollingInterval: null as ReturnType<typeof setInterval> | null,
 })
 
 // FAQ导入结果状态（持久化的）
-const importResult = ref<{
+type FAQImportResultView = {
   total_entries: number
   success_count: number
   failed_count: number
   skipped_count: number
+  partial_failed_count: number
+  merged_count: number
+  added_count: number
   import_mode: string
   imported_at: string
   task_id: string
   processing_time: number
+  message?: string
   failed_entries_url?: string
   success_entries?: Array<{
     index: number
@@ -1255,7 +1211,73 @@ const importResult = ref<{
     standard_question: string
   }>
   display_status: string
-} | null>(null)
+}
+
+const importResult = ref<FAQImportResultView | null>(null)
+const importResultExpanded = ref(false)
+
+const showImportResultBadge = computed(() => (
+  !!importResult.value
+  && importResult.value.display_status === 'open'
+  && !importState.taskId
+))
+
+const isImportInProgress = computed(() => {
+  const status = importState.taskStatus?.status
+  return !!importState.taskId && (status === 'running' || status === 'pending')
+})
+
+const importResultSummary = computed(() => {
+  const result = importResult.value
+  if (!result) return ''
+  if (result.message?.trim()) {
+    return result.message.trim()
+  }
+  const parts: string[] = []
+  parts.push(`${t('faqManager.import.totalData')} ${result.total_entries}`)
+  if (result.merged_count > 0) {
+    if (result.added_count > 0) {
+      parts.push(`${t('faqManager.import.added')} ${result.added_count}`)
+    }
+    parts.push(`${t('faqManager.import.merged')} ${result.merged_count}`)
+  } else if (result.success_count > 0) {
+    parts.push(`${t('faqManager.import.success')} ${result.success_count}`)
+  }
+  if (result.partial_failed_count > 0) {
+    parts.push(`${t('faqManager.import.partialFailed')} ${result.partial_failed_count}`)
+  }
+  if (result.failed_count > 0) {
+    parts.push(`${t('faqManager.import.failed')} ${result.failed_count}`)
+  }
+  if (result.skipped_count > 0) {
+    parts.push(`${t('faqManager.import.skipped')} ${result.skipped_count}`)
+  }
+  return parts.join(' · ')
+})
+
+const importProgressTitle = computed(() => {
+  const status = importState.taskStatus?.status
+  if (status === 'running') return t('faqManager.import.importing')
+  if (status === 'success') return t('faqManager.import.importDone')
+  if (status === 'failed') return t('faqManager.import.importFailed')
+  return t('faqManager.import.waiting')
+})
+
+const importProgressIcon = computed(() => {
+  const status = importState.taskStatus?.status
+  if (status === 'running') return 'loading'
+  if (status === 'success') return 'check-circle-filled'
+  if (status === 'failed') return 'error-circle-filled'
+  return 'time-filled'
+})
+
+const importProgressText = computed(() => {
+  const status = importState.taskStatus
+  if (!status) return ''
+  if (status.error) return status.error
+  if (status.message?.trim()) return status.message.trim()
+  return importProgressTitle.value
+})
 
 // Search test state
 const searchDrawerVisible = ref(false)
@@ -2166,12 +2188,14 @@ const startPolling = (taskId: string) => {
         const total = progressData.total || 0
         const processed = progressData.processed || 0
         const error = progressData.error || ''
+        const message = progressData.message || ''
 
         importState.taskStatus = {
           status: status,
           progress: progress,
           total: total,
           processed: processed,
+          message: message,
           error: error,
         }
 
@@ -2190,7 +2214,7 @@ const startPolling = (taskId: string) => {
             if (importState.taskId) {
               saveLastCompletedTaskId(importState.taskId)
             }
-            MessagePlugin.success(t('knowledgeEditor.faqImport.importSuccess'))
+            MessagePlugin.success(progressData.message || t('knowledgeEditor.faqImport.importSuccess'))
             // 清除筛选条件，确保用户能看到所有新导入的数据
             selectedTagId.value = 0
             entrySearchKeyword.value = ''
@@ -2304,6 +2328,7 @@ const restoreImportTask = async () => {
         progress: progress,
         total: total,
         processed: processed,
+        message: progressData.message || '',
         error: error,
       }
 
@@ -2372,9 +2397,13 @@ const loadImportResult = async () => {
       // Map progress fields to importResult format
       importResult.value = {
         total_entries: data.total,
-        success_count: data.success_count,
-        failed_count: data.failed_count,
+        success_count: data.success_count || 0,
+        failed_count: data.failed_count || 0,
         skipped_count: data.skipped_count || 0,
+        partial_failed_count: data.partial_failed_count || 0,
+        merged_count: data.merged_count || 0,
+        added_count: data.added_count || 0,
+        message: data.message || '',
         import_mode: data.import_mode || 'append',
         imported_at: data.imported_at,
         task_id: data.task_id,
@@ -2394,6 +2423,7 @@ const loadImportResult = async () => {
 
 // 关闭导入结果统计卡片
 const closeImportResult = async () => {
+  importResultExpanded.value = false
   if (!props.kbId) return
   try {
     await updateFAQImportResultDisplayStatus(props.kbId, 'close')
@@ -2460,6 +2490,7 @@ const handleImport = async () => {
         progress: 0,
         total: importState.preview.length,
         processed: 0,
+        message: t('faqManager.import.progressHint'),
       }
       // 开始轮询任务状态
       startPolling(taskId)
@@ -3483,6 +3514,18 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    width: 100%;
+
+    .faq-import-strip--in-title {
+      margin-bottom: 0;
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: min(420px, 40vw);
+
+      .faq-import-strip__text {
+        max-width: 220px;
+      }
+    }
   }
 
   .kb-title-actions {
@@ -3490,7 +3533,6 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
-    margin-left: 4px;
   }
 
   .faq-breadcrumb {
@@ -3573,249 +3615,204 @@ watch(() => entries.value.map(e => ({
 }
 
 
-// 导入进度条样式（显示在列表页面顶部）
-.faq-import-progress-bar {
-  margin-bottom: 16px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-success-color-focus);
-  border-radius: 10px;
-  padding: 14px 18px;
-  box-shadow: 0 2px 12px rgba(0, 168, 112, 0.08);
+// 导入结果入口：默认仅图标，hover / 点击展开浮层
+.faq-import-host {
+  position: relative;
+  flex-shrink: 0;
 
-  .progress-bar-content {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .progress-bar-header {
-    display: flex;
+  .faq-import-trigger {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    font-size: 14px;
-    color: var(--td-text-color-primary);
+    justify-content: center;
+    border: none;
+    background: transparent;
+    padding: 2px;
+    margin: 0;
+    color: var(--td-success-color);
+    cursor: pointer;
+    line-height: 1;
+    transition: opacity 0.15s ease;
 
-    .progress-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .progress-right {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .progress-icon {
-      flex-shrink: 0;
-
-      &.icon-loading {
-        animation: rotate 1s linear infinite;
-        color: var(--td-success-color);
-      }
-
-      &.icon-success {
-        color: var(--td-success-color);
-      }
-
-      &.icon-error {
-        color: var(--td-error-color);
-      }
-    }
-
-    .progress-title {
-      font-weight: 600;
-      font-size: 14px;
-      color: var(--td-text-color-primary);
-    }
-
-    .progress-count {
-      color: var(--td-text-color-secondary);
-      font-size: 13px;
-      font-weight: 500;
-      background: rgba(0, 168, 112, 0.1);
-      padding: 2px 10px;
-      border-radius: 12px;
-    }
-
-    .progress-close-btn {
-      flex-shrink: 0;
-      padding: 4px;
-      margin-left: 4px;
-      border-radius: 4px;
-
-      &:hover {
-        background: rgba(0, 0, 0, 0.06);
-      }
+    &:hover {
+      opacity: 0.75;
     }
   }
 
-  .progress-bar {
-    margin: 0;
-    width: 100%;
-
-    :deep(.t-progress) {
-      width: 100%;
-    }
-
-    :deep(.t-progress__bar) {
-      width: 100%;
-      height: 8px;
-      border-radius: 4px;
-      background: rgba(0, 168, 112, 0.15);
-    }
-
-    :deep(.t-progress__inner) {
-      border-radius: 4px;
-    }
+  .faq-import-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 200;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
   }
 
-  .progress-error {
-    margin: 0;
-    font-size: 13px;
-    color: var(--td-error-color);
-    line-height: 1.5;
-    background: rgba(250, 81, 81, 0.08);
-    padding: 8px 12px;
-    border-radius: 6px;
+  &:hover .faq-import-panel,
+  &.is-expanded .faq-import-panel,
+  &:focus-within .faq-import-panel {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .faq-import-strip--panel {
+    margin-bottom: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+
+    .faq-import-strip__text {
+      max-width: 360px;
+    }
   }
 }
 
-@keyframes rotate {
+
+// FAQ 导入提示条（紧凑单行）
+.faq-import-strip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  gap: 8px;
+  max-width: 100%;
+  margin-bottom: 10px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+
+    &.is-spinning {
+      animation: faq-import-spin 1s linear infinite;
+    }
+  }
+
+  &__text {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 520px;
+  }
+
+  &__bar {
+    flex-shrink: 0;
+    width: 72px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+  }
+
+  &__bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--td-brand-color);
+    transition: width 0.3s ease;
+  }
+
+  &__count {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__time {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    white-space: nowrap;
+  }
+
+  &__link {
+    flex-shrink: 0;
+    padding: 0 4px;
+    height: auto;
+    font-size: 12px;
+  }
+
+  &__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  &--result {
+    .faq-import-strip__icon {
+      color: var(--td-success-color);
+    }
+  }
+
+  &--running {
+    .faq-import-strip__icon {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &--success {
+    .faq-import-strip__icon {
+      color: var(--td-success-color);
+    }
+
+    .faq-import-strip__bar-fill {
+      background: var(--td-success-color);
+    }
+  }
+
+  &--failed {
+    border-color: rgba(227, 77, 89, 0.3);
+    background: rgba(227, 77, 89, 0.06);
+
+    .faq-import-strip__icon {
+      color: var(--td-error-color);
+    }
+
+    .faq-import-strip__text {
+      color: var(--td-error-color);
+    }
+
+    .faq-import-strip__bar-fill {
+      background: var(--td-error-color);
+    }
+  }
+}
+
+@keyframes faq-import-spin {
   from {
     transform: rotate(0deg);
   }
 
   to {
     transform: rotate(360deg);
-  }
-}
-
-// 导入结果统计卡片样式
-.faq-import-result-card {
-  margin-bottom: 16px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  padding: 16px 20px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-
-  .import-result-content {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .import-result-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-
-      .result-icon {
-        color: var(--td-brand-color);
-        flex-shrink: 0;
-      }
-
-      .result-title {
-        font-family: var(--app-font-family);
-        font-weight: 600;
-        font-size: 14px;
-        color: var(--td-text-color-primary);
-      }
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-
-      .result-time {
-        font-family: var(--app-font-family);
-        font-size: 13px;
-        color: var(--td-text-color-secondary);
-      }
-
-      .result-close-btn {
-        padding: 4px;
-        border-radius: 4px;
-        color: var(--td-text-color-secondary);
-        transition: all 0.2s ease;
-
-        &:hover {
-          background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-text-color-secondary);
-        }
-      }
-    }
-  }
-
-  .import-result-body {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .import-result-stats {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 24px;
-
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-family: var(--app-font-family);
-      font-size: 13px;
-
-      .stat-label {
-        color: var(--td-text-color-secondary);
-      }
-
-      .stat-value {
-        font-weight: 600;
-        color: var(--td-text-color-primary);
-      }
-
-      &.success .stat-value {
-        color: var(--td-brand-color);
-      }
-
-      &.failed .stat-value {
-        color: var(--td-error-color);
-      }
-
-      &.skipped .stat-value {
-        color: var(--td-warning-color);
-      }
-
-      .download-failed-btn {
-        margin-left: 4px;
-        padding: 0 8px;
-        height: 24px;
-        font-size: 12px;
-        border-radius: 4px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-
-        .t-icon {
-          font-size: 12px;
-        }
-      }
-    }
-  }
-
-  .import-mode-tag {
-    flex-shrink: 0;
   }
 }
 

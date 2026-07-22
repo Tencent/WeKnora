@@ -284,6 +284,7 @@ type FAQBatchUpsertPayload struct {
 type FAQFailedEntry struct {
 	Index             int      `json:"index"`                        // 条目在批次中的索引（从0开始）
 	Reason            string   `json:"reason"`                       // 失败原因
+	FailureType       string   `json:"failure_type,omitempty"`       // 失败类型：pre_validation / post_validation
 	IsPartialFailure  bool     `json:"is_partial_failure,omitempty"` // 是否为部分失败（相似问/反例被移除，但整条仍可导入）
 	TagName           string   `json:"tag_name,omitempty"`           // 分类
 	StandardQuestion  string   `json:"standard_question"`            // 标准问题
@@ -295,6 +296,15 @@ type FAQFailedEntry struct {
 	// 部分失败详情（当 IsPartialFailure 为 true 时）
 	RemovedSimilarQuestions  []string `json:"removed_similar_questions,omitempty"`  // 被移除的相似问及原因
 	RemovedNegativeQuestions []string `json:"removed_negative_questions,omitempty"` // 被移除的反例及原因
+}
+
+// FAQMergeDetail 表示一条 FAQ 在 append 模式下与已有 chunk 合并的结果摘要。
+type FAQMergeDetail struct {
+	Index            int    `json:"index"`              // 行号（在批次中的索引）
+	StandardQuestion string `json:"standard_question"`  // 标准问
+	AnswerChanged    bool   `json:"answer_changed"`     // 答案是否变更
+	NewSimilarCount  int    `json:"new_similar_count"`  // 新增相似问数量
+	NewNegativeCount int    `json:"new_negative_count"` // 新增反例数量
 }
 
 // FAQSuccessEntry 表示导入成功的条目简单信息
@@ -381,6 +391,10 @@ type FAQImportProgress struct {
 	FailedEntriesURL   string              `json:"failed_entries_url,omitempty"`   // 失败条目CSV下载URL（大量时返回URL）
 	SuccessEntries     []FAQSuccessEntry   `json:"success_entries,omitempty"`      // 成功条目简单信息（少量时直接返回）
 	ValidEntryIndices  []int               `json:"valid_entry_indices,omitempty"`  // 验证通过的条目索引（用于重试时跳过验证）
+	MergeEntryIndices  []int               `json:"merge_entry_indices,omitempty"`  // 需要合并的条目索引（内部使用，用于重试时跳过识别）
+	MergedCount        int                 `json:"merged_count,omitempty"`         // 合并更新的条目数
+	AddedCount         int                 `json:"added_count,omitempty"`          // 新增的条目数
+	MergeDetails       []FAQMergeDetail    `json:"merge_details,omitempty"`        // 合并详情
 	Message            string              `json:"message"`                        // Status message
 	Error              string              `json:"error"`                          // Error message if failed
 	CreatedAt          int64               `json:"created_at"`                     // Task creation timestamp
@@ -411,6 +425,8 @@ type FAQImportResult struct {
 	FailedCount        int `json:"failed_count"`         // 完全失败的条目数
 	PartialFailedCount int `json:"partial_failed_count"` // 部分失败的条目数（相似问/反例被移除但已导入）
 	SkippedCount       int `json:"skipped_count"`        // 跳过的条目数（如重复等）
+	MergedCount        int `json:"merged_count"`         // 合并更新的条目数
+	AddedCount         int `json:"added_count"`          // 新增的条目数
 
 	// 导入模式和时间信息
 	ImportMode string    `json:"import_mode"` // 导入模式：append 或 replace
