@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -455,6 +456,10 @@ var ErrWikiFolderNotFound = errors.New("wiki folder not found")
 // already exists under the same parent.
 var ErrWikiFolderConflict = errors.New("wiki folder name conflict")
 
+// ErrWikiFolderNotEmpty is returned when a folder still has a live page or
+// child folder at the instant an atomic delete is attempted.
+var ErrWikiFolderNotEmpty = errors.New("wiki folder is not empty")
+
 func (r *wikiPageRepository) CreateFolder(ctx context.Context, folder *types.WikiFolder) error {
 	return r.db.WithContext(ctx).Create(folder).Error
 }
@@ -535,14 +540,34 @@ func (r *wikiPageRepository) UpdateFolder(ctx context.Context, folder *types.Wik
 }
 
 func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id string) error {
-	result := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND id = ?", kbID, id).
-		Delete(&types.WikiFolder{})
+	// Keep the emptiness test in the same SQL statement as the soft delete.
+	// A page move or child-folder create can race the service's earlier checks;
+	// a check-then-delete sequence would otherwise leave a dangling folder_id.
+	result := r.db.WithContext(ctx).Exec(`
+UPDATE wiki_folders
+SET deleted_at = ?
+WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM wiki_pages
+    WHERE knowledge_base_id = ? AND folder_id = ? AND deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM wiki_folders AS child
+    WHERE child.knowledge_base_id = ? AND child.parent_id = ? AND child.deleted_at IS NULL
+  )`, time.Now(), kbID, id, kbID, id, kbID, id)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrWikiFolderNotFound
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&types.WikiFolder{}).
+			Where("knowledge_base_id = ? AND id = ?", kbID, id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrWikiFolderNotFound
+		}
+		return ErrWikiFolderNotEmpty
 	}
 	return nil
 }

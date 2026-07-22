@@ -183,6 +183,13 @@ const (
 	// wikiFinalizeOpChange rows carry a doc-level add/remove change entry for
 	// the index-intro change description.
 	wikiFinalizeOpChange = "change"
+	// wikiFinalizeOpFolderPrune rows carry folders that may have become empty
+	// after a document retract. Keeping this in the durable finalize lane lets
+	// us wait until every ingest op for the KB has settled before deleting the
+	// directories; taxonomy planning creates folders before reduce writes the
+	// corresponding pages, so pruning any earlier can invalidate in-flight
+	// folder assignments.
+	wikiFinalizeOpFolderPrune = "folder_prune"
 
 	wikiFinalizeAdded   = "added"
 	wikiFinalizeRemoved = "removed"
@@ -201,6 +208,11 @@ const (
 	wikiFinalizeLockTTL   = 60 * time.Second
 	wikiFinalizeLockRenew = 20 * time.Second
 
+	// Folder cleanup is maintenance, not user-blocking work. When an ingest is
+	// still active, retry slowly so pruning never competes with the primary wiki
+	// pipeline for worker capacity.
+	wikiFolderPruneRetryDelay = 1 * time.Minute
+
 	// wikiIngestCleanupTimeout bounds detached tail cleanup after the asynq
 	// task context has been cancelled or hit its timeout.
 	wikiIngestCleanupTimeout = 10 * time.Second
@@ -215,12 +227,13 @@ type wikiFinalizeChange struct {
 }
 
 // wikiFinalizeRow is the JSON payload of a task_pending_ops row in the
-// finalize lane. Exactly one of {Slug, Change} is set, distinguished by the
-// row's Op column (wikiFinalizeOpSlug / wikiFinalizeOpChange).
+// finalize lane. Exactly one of {Slug, Change, FolderIDs} is set,
+// distinguished by the row's Op column.
 type wikiFinalizeRow struct {
-	Slug   string              `json:"slug,omitempty"`
-	Title  string              `json:"title,omitempty"`
-	Change *wikiFinalizeChange `json:"change,omitempty"`
+	Slug      string              `json:"slug,omitempty"`
+	Title     string              `json:"title,omitempty"`
+	Change    *wikiFinalizeChange `json:"change,omitempty"`
+	FolderIDs []string            `json:"folder_ids,omitempty"`
 }
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
@@ -253,6 +266,7 @@ type WikiRetractPayload struct {
 	DocSummary      string   `json:"doc_summary,omitempty"` // one-line summary of the deleted document
 	Language        string   `json:"language,omitempty"`
 	PageSlugs       []string `json:"page_slugs"`
+	FolderIDs       []string `json:"folder_ids,omitempty"`
 }
 
 const (
@@ -281,6 +295,7 @@ type WikiPendingOp struct {
 	DocTitle   string   `json:"doc_title,omitempty"`
 	DocSummary string   `json:"doc_summary,omitempty"`
 	PageSlugs  []string `json:"page_slugs,omitempty"`
+	FolderIDs  []string `json:"folder_ids,omitempty"`
 
 	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
 	// constructions made outside the queue (e.g. legacy tests).
@@ -489,6 +504,7 @@ func EnqueueWikiRetract(
 		DocTitle:    payload.DocTitle,
 		DocSummary:  payload.DocSummary,
 		PageSlugs:   payload.PageSlugs,
+		FolderIDs:   payload.FolderIDs,
 		Language:    payload.Language,
 	}
 	payloadBytes, err := json.Marshal(op)
@@ -559,6 +575,7 @@ func (s *wikiIngestService) enqueueFinalize(
 	affectedSlugs []string,
 	freshTitleBySlug map[string]string,
 	changes []wikiFinalizeChange,
+	folderIDs []string,
 ) {
 	if s.pendingRepo == nil {
 		return
@@ -599,7 +616,40 @@ func (s *wikiIngestService) enqueueFinalize(
 			logger.Warnf(ctx, "wiki finalize: enqueue change row failed: %v", err)
 		}
 	}
+	if len(folderIDs) > 0 {
+		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
+		if b, err := json.Marshal(row); err == nil {
+			if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+				TenantID: payload.TenantID,
+				TaskType: wikiFinalizeTaskType,
+				Scope:    wikiTaskScope,
+				ScopeID:  payload.KnowledgeBaseID,
+				Op:       wikiFinalizeOpFolderPrune,
+				DedupKey: "",
+				Payload:  b,
+			}); err != nil {
+				logger.Warnf(ctx, "wiki finalize: enqueue folder prune row failed: %v", err)
+			}
+		}
+	}
 	s.scheduleFinalize(ctx, payload)
+}
+
+func uniqueWikiFolderIDs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
@@ -623,6 +673,25 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 			return // a finalize is already scheduled/running for this KB — coalesced
 		}
 		logger.Warnf(ctx, "wiki finalize: schedule trigger failed: %v", err)
+	}
+}
+
+// scheduleFinalizeRetry is used when folder pruning is waiting for ingest
+// rows to drain. It deliberately has no stable TaskID: the currently-running
+// finalize task still owns that ID until it returns, so reusing it here would
+// coalesce the only retry away. Duplicate retries are harmless because the
+// durable prune row is deleted exactly once and an empty lane is a no-op.
+func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload WikiIngestPayload) {
+	langfuse.InjectTracing(ctx, &payload)
+	b, _ := json.Marshal(payload)
+	t := asynq.NewTask(types.TypeWikiFinalize, b,
+		asynq.Queue(types.QueueWiki),
+		asynq.MaxRetry(wikiIngestMaxRetry),
+		asynq.Timeout(30*time.Minute),
+		asynq.ProcessIn(wikiFolderPruneRetryDelay),
+	)
+	if _, err := s.task.Enqueue(t); err != nil {
+		logger.Warnf(ctx, "wiki finalize: schedule deferred folder prune failed: %v", err)
 	}
 }
 

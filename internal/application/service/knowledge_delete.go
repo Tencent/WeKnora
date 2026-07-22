@@ -272,9 +272,13 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 
 	var deletedSlugs []string
 	var retractSlugs []string
+	var affectedFolderIDs []string
 	for _, page := range pages {
 		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
 			continue
+		}
+		if page.FolderID != "" {
+			affectedFolderIDs = append(affectedFolderIDs, page.FolderID)
 		}
 
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
@@ -318,6 +322,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		DocSummary:      docSummary,
 		Language:        lang,
 		PageSlugs:       allAffectedSlugs,
+		FolderIDs:       uniqueWikiFolderIDs(affectedFolderIDs),
 	})
 	logger.Infof(ctx, "wiki cleanup: enqueued retract task for knowledge %s (%d known slugs: %v)",
 		knowledgeID, len(allAffectedSlugs), allAffectedSlugs)

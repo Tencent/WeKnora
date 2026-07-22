@@ -413,6 +413,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var failedOps []WikiPendingOp
 	slugUpdates := make(map[string][]SlugUpdate)
 	var docResults []*docIngestResult
+	var retractFolderIDs []string
 	// rateLimited flips true when any map/reduce LLM failure looks like an
 	// upstream 429/quota trip. It steers the follow-up scheduler onto the
 	// longer wikiRateLimitBackoff so retries don't keep hammering an already
@@ -442,11 +443,17 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// PageSlugs as "figure it out yourself" — see
 				// cleanupWikiOnKnowledgeDelete's comment (3).
 				slugSet := make(map[string]struct{}, len(op.PageSlugs))
+				folderSet := make(map[string]struct{}, len(op.FolderIDs))
 				for _, slug := range op.PageSlugs {
 					if slug == "" {
 						continue
 					}
 					slugSet[slug] = struct{}{}
+				}
+				for _, folderID := range op.FolderIDs {
+					if folderID != "" {
+						folderSet[folderID] = struct{}{}
+					}
 				}
 				if op.KnowledgeID != "" {
 					livePages, err := s.wikiService.ListPagesBySourceRef(mapCtx, payload.KnowledgeBaseID, op.KnowledgeID)
@@ -464,6 +471,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 								continue
 							}
 							slugSet[p.Slug] = struct{}{}
+							if p.FolderID != "" {
+								folderSet[p.FolderID] = struct{}{}
+							}
 						}
 					}
 				}
@@ -482,6 +492,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						KnowledgeID:       op.KnowledgeID,
 						Language:          types.LanguageLocaleName(op.Language),
 					})
+				}
+				for folderID := range folderSet {
+					retractFolderIDs = append(retractFolderIDs, folderID)
 				}
 				mapMu.Unlock()
 				return nil
@@ -763,7 +776,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			freshTitleBySlug[p.Slug] = p.Title
 		}
 	}
-	if len(allPagesAffected) > 0 || len(docResults) > 0 {
+	if len(allPagesAffected) > 0 || len(docResults) > 0 || retractHandled > 0 || len(retractFolderIDs) > 0 {
 		changes := make([]wikiFinalizeChange, 0, len(docResults)+len(pendingOps))
 		for _, r := range docResults {
 			changes = append(changes, wikiFinalizeChange{
@@ -777,7 +790,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes)
+		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
@@ -1001,18 +1014,27 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	// refs, and the index-intro change description. We collect ids up front so
 	// we can drain the lane even on the KB-disabled short-circuit below.
 	ids := make([]int64, 0, len(rows))
+	pruneRowIDs := make([]int64, 0)
 	affectedSet := make(map[string]struct{}, len(rows))
 	var affectedSlugs []string
 	var freshRefs []linkRef
+	var folderPruneIDs []string
 	var changeDesc strings.Builder
 	for _, r := range rows {
 		ids = append(ids, r.ID)
+		if r.Op == wikiFinalizeOpFolderPrune {
+			pruneRowIDs = append(pruneRowIDs, r.ID)
+		}
 		if len(r.Payload) == 0 {
 			continue
 		}
 		var row wikiFinalizeRow
 		if err := json.Unmarshal(r.Payload, &row); err != nil {
 			logger.Warnf(ctx, "wiki finalize: unmarshal row id=%d failed: %v", r.ID, err)
+			continue
+		}
+		if r.Op == wikiFinalizeOpFolderPrune {
+			folderPruneIDs = append(folderPruneIDs, row.FolderIDs...)
 			continue
 		}
 		if row.Change != nil {
@@ -1080,11 +1102,50 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, freshRefs, batchCtx)
 	}
 
+	// A retract may leave one or more generated folders empty. Do not prune
+	// while any ingest row for this KB is queued or claimed: taxonomy planning
+	// creates folders before reduce writes pages, so an apparently-empty folder
+	// can still be owned by an in-flight batch. The durable prune rows stay in
+	// the finalize lane and are retried after the ingest lane drains.
+	pruneDeferred := false
+	deletedFolders := 0
+	if len(folderPruneIDs) > 0 {
+		pending, pErr := s.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID)
+		if pErr != nil {
+			logger.Warnf(ctx, "wiki finalize: cannot verify ingest drain before folder prune: %v", pErr)
+			pruneDeferred = true
+		} else if pending > 0 {
+			pruneDeferred = true
+		} else {
+			deleted, pruneErr := s.wikiService.PruneEmptyFolderChains(
+				ctx, payload.KnowledgeBaseID, uniqueWikiFolderIDs(folderPruneIDs))
+			if pruneErr != nil {
+				logger.Warnf(ctx, "wiki finalize: prune empty folders failed: %v", pruneErr)
+				pruneDeferred = true
+			} else {
+				deletedFolders = len(deleted)
+			}
+		}
+	}
+
 	// Drain the processed rows. Best-effort convergence mirrors the legacy
 	// in-batch behaviour: a failed index rebuild is logged (not retried),
 	// so we delete regardless to avoid re-doing the whole pass forever.
+	idsToTrim := ids
+	if pruneDeferred && len(pruneRowIDs) > 0 {
+		deferred := make(map[int64]struct{}, len(pruneRowIDs))
+		for _, id := range pruneRowIDs {
+			deferred[id] = struct{}{}
+		}
+		idsToTrim = idsToTrim[:0:0]
+		for _, id := range ids {
+			if _, keep := deferred[id]; !keep {
+				idsToTrim = append(idsToTrim, id)
+			}
+		}
+	}
 	drainCtx, drainCancel := wikiIngestCleanupContext(ctx)
-	err = s.trimPendingList(drainCtx, ids)
+	err = s.trimPendingList(drainCtx, idsToTrim)
 	drainCancel()
 	if err != nil {
 		return fmt.Errorf("wiki finalize: trim pending rows: %w", err)
@@ -1093,14 +1154,20 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	// If more finalize rows landed while we were working, reschedule so they
 	// get their own convergence pass.
 	rescheduled := false
+	if pruneDeferred {
+		s.scheduleFinalizeRetry(ctx, payload)
+		rescheduled = true
+	}
 	if n, cErr := s.pendingRepo.PendingCount(ctx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID); cErr == nil && n > 0 {
-		s.scheduleFinalize(ctx, payload)
+		if !pruneDeferred {
+			s.scheduleFinalize(ctx, payload)
+		}
 		rescheduled = true
 	}
 
 	logger.Infof(ctx,
-		"wiki finalize: kb=%s rows=%d affected_slugs=%d index_rebuilt=%v rescheduled=%v elapsed=%s",
-		payload.KnowledgeBaseID, len(rows), len(affectedSlugs), indexRebuilt, rescheduled,
+		"wiki finalize: kb=%s rows=%d affected_slugs=%d deleted_folders=%d folder_prune_deferred=%v index_rebuilt=%v rescheduled=%v elapsed=%s",
+		payload.KnowledgeBaseID, len(rows), len(affectedSlugs), deletedFolders, pruneDeferred, indexRebuilt, rescheduled,
 		time.Since(startedAt).Round(time.Millisecond),
 	)
 	return nil

@@ -1,10 +1,57 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+	createFolder := func(id, parentID, name, path string, depth int) {
+		require.NoError(t, repo.CreateFolder(ctx, &types.WikiFolder{
+			ID: id, TenantID: 1, KnowledgeBaseID: "kb-prune", ParentID: parentID,
+			Name: name, Path: path, Depth: depth, CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+	createFolder("topic", "", "Topic", "Topic", 1)
+	createFolder("empty-leaf", "topic", "Empty", "Topic/Empty", 2)
+	createFolder("occupied-leaf", "topic", "Occupied", "Topic/Occupied", 2)
+	createFolder("empty-chain", "", "Empty chain", "Empty chain", 1)
+	createFolder("empty-chain-leaf", "empty-chain", "Leaf", "Empty chain/Leaf", 2)
+	createFolder("unrelated-empty", "", "Keep me", "Keep me", 1)
+
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-1", TenantID: 1, KnowledgeBaseID: "kb-prune", Slug: "entity/occupied",
+		Title: "Occupied", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		FolderID: "occupied-leaf", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	deleted, err := svc.PruneEmptyFolderChains(ctx, "kb-prune", []string{"empty-leaf", "empty-chain-leaf"})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"empty-leaf", "empty-chain-leaf", "empty-chain"}, deleted)
+
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "topic")
+	require.NoError(t, err, "ancestor with another occupied child must remain")
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "occupied-leaf")
+	require.NoError(t, err)
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "unrelated-empty")
+	require.NoError(t, err, "empty folders outside the affected chains must remain")
+}
 
 func TestStripWikiInlineChunkCitations(t *testing.T) {
 	input := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械[c003]。手柄便于操作 [c003]。多个来源[c003, c1000]。"

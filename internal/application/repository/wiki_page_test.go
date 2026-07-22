@@ -205,6 +205,14 @@ func TestFolderTree_CRUDAndChildListing(t *testing.T) {
 	pages, err := repo.ListPagesByFolderIDs(ctx, "kb-f", []string{"f-ai", "f-llm"})
 	require.NoError(t, err)
 	assert.Len(t, pages, 3)
+
+	// Repository deletion re-checks emptiness atomically, so a concurrent page
+	// move / child create cannot slip between the service check and soft delete.
+	err = repo.DeleteFolder(ctx, "kb-f", "f-ai")
+	assert.ErrorIs(t, err, ErrWikiFolderNotEmpty)
+	require.NoError(t, repo.DeleteFolder(ctx, "kb-f", "f-people"))
+	_, err = repo.GetFolderByID(ctx, "kb-f", "f-people")
+	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies
