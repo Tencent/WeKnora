@@ -10,11 +10,19 @@ import (
 
 type wikiSearchRepositoryStub struct {
 	interfaces.WikiPageRepository
-	query string
+	query     string
+	published bool
 }
 
 func (s *wikiSearchRepositoryStub) Search(_ context.Context, _ string, query string, _ int) ([]*types.WikiPage, error) {
 	s.query = query
+	s.published = false
+	return nil, nil
+}
+
+func (s *wikiSearchRepositoryStub) SearchPublished(_ context.Context, _ string, query string, _ int) ([]*types.WikiPage, error) {
+	s.query = query
+	s.published = true
 	return nil, nil
 }
 
@@ -56,6 +64,9 @@ func TestSearchPagesLiteralEscapesPostgresRegexCharacters(t *testing.T) {
 			if repo.query != test.want {
 				t.Fatalf("SearchPagesLiteral() query = %q, want %q", repo.query, test.want)
 			}
+			if !repo.published {
+				t.Fatal("SearchPagesLiteral() must use the published-only repository path")
+			}
 		})
 	}
 }
@@ -70,6 +81,9 @@ func TestSearchPagesPreservesExistingRegexSemantics(t *testing.T) {
 	}
 	if repo.query != "price.*" {
 		t.Fatalf("SearchPages() query = %q, want %q", repo.query, "price.*")
+	}
+	if repo.published {
+		t.Fatal("SearchPages() must preserve the existing non-archived repository path")
 	}
 }
 

@@ -439,8 +439,8 @@ curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-
 | query       | string     | 是   | 查询文本；Wiki 来源按字面量匹配，正则字符没有特殊含义 |
 | sources     | string[]   | 否   | `rag`、`wiki`；默认两者都检索 |
 | top_k       | integer    | 否   | 最终返回数量，默认 10，最大 50 |
-| rag_weight  | number     | 否   | RRF 中 RAG 来源权重，非负，默认 0.7 |
-| wiki_weight | number     | 否   | RRF 中 Wiki 来源权重，非负，默认 0.3 |
+| rag_weight  | number     | 否   | RRF 中 RAG 来源权重，非负，默认 0.5 |
+| wiki_weight | number     | 否   | RRF 中 Wiki 来源权重，非负，默认 0.5 |
 | rrf_k       | integer    | 否   | RRF 平滑常数，默认 60，范围 1–1000 |
 
 权重省略或传 0 时使用对应默认值；如需关闭某个来源，请通过 `sources` 仅选择需要检索的来源。

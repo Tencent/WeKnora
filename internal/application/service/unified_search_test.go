@@ -139,7 +139,13 @@ func TestNormalizeUnifiedSearchSourcesDefaultsWithoutExplicitWikiRequirement(t *
 }
 
 func TestUnifiedSearchWeightsNormalizeAndValidate(t *testing.T) {
-	ragWeight, wikiWeight, rrfK, err := unifiedSearchWeights(types.UnifiedSearchRequest{
+	ragWeight, wikiWeight, rrfK, err := unifiedSearchWeights(types.UnifiedSearchRequest{})
+	require.NoError(t, err)
+	require.Equal(t, 0.5, ragWeight)
+	require.Equal(t, 0.5, wikiWeight)
+	require.Equal(t, defaultUnifiedSearchRRFK, rrfK)
+
+	ragWeight, wikiWeight, rrfK, err = unifiedSearchWeights(types.UnifiedSearchRequest{
 		RAGWeight:  2,
 		WikiWeight: 1,
 		RRFK:       10,
@@ -152,16 +158,46 @@ func TestUnifiedSearchWeightsNormalizeAndValidate(t *testing.T) {
 
 	ragWeight, wikiWeight, _, err = unifiedSearchWeights(types.UnifiedSearchRequest{RAGWeight: 2})
 	require.NoError(t, err)
-	require.InDelta(t, 2.0/2.3, ragWeight, 1e-12)
-	require.InDelta(t, 0.3/2.3, wikiWeight, 1e-12)
+	require.InDelta(t, 2.0/2.5, ragWeight, 1e-12)
+	require.InDelta(t, 0.5/2.5, wikiWeight, 1e-12)
 
 	ragWeight, wikiWeight, _, err = unifiedSearchWeights(types.UnifiedSearchRequest{WikiWeight: 1})
 	require.NoError(t, err)
-	require.InDelta(t, 0.7/1.7, ragWeight, 1e-12)
-	require.InDelta(t, 1.0/1.7, wikiWeight, 1e-12)
+	require.InDelta(t, 0.5/1.5, ragWeight, 1e-12)
+	require.InDelta(t, 1.0/1.5, wikiWeight, 1e-12)
 
 	_, _, _, err = unifiedSearchWeights(types.UnifiedSearchRequest{RAGWeight: -1})
 	require.Error(t, err)
+}
+
+func TestDefaultUnifiedSearchWeightsKeepBothSourcesInTopResults(t *testing.T) {
+	rag := make([]*types.SearchResult, 20)
+	for index := range rag {
+		rag[index] = &types.SearchResult{
+			ID:      fmt.Sprintf("rag-%02d", index+1),
+			Content: fmt.Sprintf("RAG content %02d", index+1),
+		}
+	}
+	wiki := make([]*types.WikiPage, 10)
+	for index := range wiki {
+		wiki[index] = &types.WikiPage{
+			ID:      fmt.Sprintf("wiki-%02d", index+1),
+			Content: fmt.Sprintf("Wiki content %02d", index+1),
+		}
+	}
+
+	ragWeight, wikiWeight, rrfK, err := unifiedSearchWeights(types.UnifiedSearchRequest{})
+	require.NoError(t, err)
+	results := fuseUnifiedSearchResults(rag, wiki, ragWeight, wikiWeight, rrfK)[:defaultUnifiedSearchTopK]
+
+	sources := make(map[types.UnifiedSearchSource]bool, 2)
+	for _, result := range results {
+		for _, source := range result.Sources {
+			sources[source.Type] = true
+		}
+	}
+	require.True(t, sources[types.UnifiedSearchSourceRAG])
+	require.True(t, sources[types.UnifiedSearchSourceWiki])
 }
 
 func TestActiveUnifiedSearchWeightsRenormalizeSelectedSources(t *testing.T) {

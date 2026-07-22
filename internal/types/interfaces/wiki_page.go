@@ -358,6 +358,8 @@ type WikiPageRepository interface {
 
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+	// SearchPublished performs full-text search on published wiki pages only.
+	SearchPublished(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)

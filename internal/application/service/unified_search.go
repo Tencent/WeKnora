@@ -22,8 +22,8 @@ const (
 	defaultUnifiedSearchTopK = 10
 	maxUnifiedSearchTopK     = 50
 	defaultUnifiedSearchRRFK = 60
-	defaultRAGWeight         = 0.7
-	defaultWikiWeight        = 0.3
+	defaultRAGWeight         = 0.5
+	defaultWikiWeight        = 0.5
 )
 
 // unifiedSearchService orchestrates the existing RAG and Wiki search paths.
