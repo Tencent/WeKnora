@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -210,6 +211,29 @@ func (c *Chunk) EmbeddingContent() string {
 		return body
 	}
 	return c.ContextHeader + "\n\n" + body
+}
+
+
+// ChunkID roles for StableDocumentChunkID — keep types from colliding when
+// content hashes happen to match across roles.
+const (
+	ChunkIDRoleText         = "text"
+	ChunkIDRoleParentText   = "parent_text"
+	ChunkIDRoleSummary      = "summary"
+	ChunkIDRoleImageOCR     = "image_ocr"
+	ChunkIDRoleImageCaption = "image_caption"
+)
+
+// StableDocumentChunkID returns a UUID-shaped ID derived from knowledgeID,
+// contentHash and role. Same inputs always produce the same ID so reparses can
+// recreate chunks with stable references even when no prior row is reused.
+func StableDocumentChunkID(knowledgeID, contentHash, role string) string {
+	sum := sha256.Sum256([]byte("chunk-id-v1\x00" + knowledgeID + "\x00" + contentHash + "\x00" + role))
+	var u [16]byte
+	copy(u[:], sum[:16])
+	u[6] = (u[6] & 0x0f) | 0x40 // UUID version 4
+	u[8] = (u[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return uuid.UUID(u).String()
 }
 
 // CalculateDocumentChunkContentHash returns a stable hash for non-FAQ document

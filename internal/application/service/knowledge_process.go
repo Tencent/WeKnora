@@ -409,13 +409,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 	existingByHash := reusableChunksByHash(existingReusableChunks)
 
-	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
-	}
-
+	// Graph data is no longer wiped here. Full wipes only happen when no text
+	// chunks are reused (true full rebuild) or when graph rematerialize decides
+	// a rebuild is required — see ensureGraphMaterialized. This keeps GraphRAG
+	// extract cache hits possible across reparses of unchanged content.
 	logger.Infof(ctx, "Incremental cleanup prepared, starting to process new chunks")
 
 	// ========== DocReader 解析结果日志 ==========
@@ -488,8 +485,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			parentHash := types.CalculateDocumentChunkContentHash(pc.Content, "", types.ChunkTypeParentText, kb.EmbeddingModelID, chunkingFingerprint)
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              types.StableDocumentChunkID(knowledge.ID, parentHash, types.ChunkIDRoleParentText),
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -501,7 +499,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				StartAt:         pc.Start,
 				EndAt:           pc.End,
 				ChunkType:       types.ChunkTypeParentText,
-				ContentHash:     types.CalculateDocumentChunkContentHash(pc.Content, "", types.ChunkTypeParentText, kb.EmbeddingModelID, chunkingFingerprint),
+				ContentHash:     parentHash,
 			}
 		}
 		// Set prev/next links for parent chunks
@@ -528,8 +526,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// 创建主文本Chunk
+		textHash := types.CalculateDocumentChunkContentHash(chunkData.Content, chunkData.ContextHeader, types.ChunkTypeText, kb.EmbeddingModelID, chunkingFingerprint)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableDocumentChunkID(knowledge.ID, textHash, types.ChunkIDRoleText),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -542,7 +541,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
-			ContentHash:     types.CalculateDocumentChunkContentHash(chunkData.Content, chunkData.ContextHeader, types.ChunkTypeText, kb.EmbeddingModelID, chunkingFingerprint),
+			ContentHash:     textHash,
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -623,6 +622,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	for _, chunk := range textChunks {
 		if !reusedChunkIDs[chunk.ID] {
 			newTextChunks = append(newTextChunks, chunk)
+		}
+	}
+
+	// Clear graph when the text-chunk set changed (full rebuild or stale deletes).
+	// Unchanged reparses keep the graph so extract cache hits can skip LLM.
+	// When wiped, subsequent graph tasks re-AddGraph from cached payloads or re-extract.
+	if s.graphEngine != nil && shouldWipeGraphForRematerialize(len(reusedChunkIDs), len(chunksToDelete)) {
+		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+		if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+			logger.Warnf(ctx, "Failed to delete graph data before rematerialize (may not exist): %v", err)
 		}
 	}
 
@@ -949,18 +958,15 @@ func sortChunksForSummary(chunks []*types.Chunk) []*types.Chunk {
 	return sorted
 }
 
-// getSummary generates a summary for knowledge content using an AI model
-func (s *knowledgeService) getSummary(ctx context.Context,
-	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
-	// Get knowledge info from the first chunk
+// buildSummaryUserContent reconstructs the exact user-message text that will be
+// sent to the summary LLM. Fingerprint generation MUST call this (not a
+// simplified join) so cache hits match real Chat inputs.
+func (s *knowledgeService) buildSummaryUserContent(ctx context.Context, knowledge *types.Knowledge, chunks []*types.Chunk) (string, int, error) {
 	if len(chunks) == 0 {
-		return "", fmt.Errorf("no chunks provided for summary generation")
+		return "", 0, fmt.Errorf("no chunks provided for summary generation")
 	}
-
-	// Determine max input chars from config
 	maxInputChars := defaultMaxInputChars
-	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxInputChars > 0 {
+	if s.config != nil && s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxInputChars > 0 {
 		maxInputChars = s.config.Conversation.Summary.MaxInputChars
 	}
 
@@ -1001,35 +1007,33 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 			}
 		}
 	}
-
-	// Collect image_info from image_ocr/image_caption children and enrich
-	chunkIDs := make([]string, len(sortedChunks))
-	for i, c := range sortedChunks {
-		chunkIDs[i] = c.ID
-	}
-	imageInfoMap := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, knowledge.TenantID, chunkIDs)
-	mergedImageInfo := searchutil.MergeImageInfoJSON(imageInfoMap)
-	if mergedImageInfo != "" {
-		// For image-dominated documents (e.g. a docx whose only payload is a
-		// single embedded picture, or a screenshot-only file), captions alone
-		// often carry too little signal — the real content lives in OCR text.
-		// Detect that case by measuring the document's real (non-image-markup)
-		// text BEFORE enrichment, and switch to full enrichment (caption + OCR)
-		// when the body is essentially empty. Text-heavy documents stay on the
-		// caption-only path to avoid OCR noise (page headers/footers/watermarks
-		// from many figures diluting the main topic).
-		if realTextRuneCount(chunkContents) < imageDominatedTextThreshold {
-			// Caption + OCR (no URL/original wrappers — those are pure noise
-			// for the summary LLM and have been observed to trigger the
-			// "image reference with no extracted text" refusal heuristic).
-			chunkContents = searchutil.EnrichContentCaptionAndOCR(chunkContents, mergedImageInfo)
-		} else {
-			chunkContents = searchutil.EnrichContentCaptionOnly(chunkContents, mergedImageInfo)
+	if s.chunkRepo != nil && knowledge != nil {
+		chunkIDs := make([]string, len(sortedChunks))
+		for i, c := range sortedChunks {
+			chunkIDs[i] = c.ID
+		}
+		imageInfoMap := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, knowledge.TenantID, chunkIDs)
+		mergedImageInfo := searchutil.MergeImageInfoJSON(imageInfoMap)
+		if mergedImageInfo != "" {
+			if realTextRuneCount(chunkContents) < imageDominatedTextThreshold {
+				chunkContents = searchutil.EnrichContentCaptionAndOCR(chunkContents, mergedImageInfo)
+			} else {
+				chunkContents = searchutil.EnrichContentCaptionOnly(chunkContents, mergedImageInfo)
+			}
 		}
 	}
-
-	// Apply length limit: sample long content to fit within maxInputChars
 	chunkContents = sampleLongContent(chunkContents, maxInputChars)
+	return chunkContents, maxInputChars, nil
+}
+
+// getSummary generates a summary for knowledge content using an AI model
+func (s *knowledgeService) getSummary(ctx context.Context,
+	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
+) (string, error) {
+	chunkContents, maxInputChars, err := s.buildSummaryUserContent(ctx, knowledge, chunks)
+	if err != nil {
+		return "", err
+	}
 
 	logger.GetLogger(ctx).Infof("getSummary: content length=%d chars (max=%d) for knowledge %s",
 		len([]rune(chunkContents)), maxInputChars, knowledge.ID)
@@ -1291,18 +1295,44 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return textChunks[i].ChunkIndex < textChunks[j].ChunkIndex
 	})
 
-	// Initialize chat model for summary
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get chat model: %v", err)
-		markSummaryFailed()
-		summaryErr = err
-		return fmt.Errorf("failed to get chat model: %w", err)
+	// Summary fingerprint: skip Chat when the exact LLM inputs are unchanged.
+	maxTokensForFP := 2048
+	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxCompletionTokens > 0 {
+		maxTokensForFP = s.config.Conversation.Summary.MaxCompletionTokens
+	}
+	summaryPromptForFP := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
+		"language": types.LanguageNameFromContext(ctx),
+	})
+	userContentForFP, _, buildErr := s.buildSummaryUserContent(ctx, knowledge, textChunks)
+	if buildErr != nil {
+		logger.Warnf(ctx, "Failed to build summary fingerprint content: %v", buildErr)
+		userContentForFP = ""
+	}
+	summaryFP := calculateSummaryCacheFingerprint(
+		userContentForFP,
+		kb.SummaryModelID,
+		summaryPromptForFP,
+		maxTokensForFP,
+		types.LanguageNameFromContext(ctx),
+	)
+	var summary string
+	if cachedSummary, ok := summaryCacheFromKnowledgeMetadata(knowledge.Metadata, summaryFP); ok {
+		summaryOut["summary_cache_hit"] = true
+		summary = cachedSummary
+		logger.Infof(ctx, "summary cache hit for knowledge %s", payload.KnowledgeID)
+		err = nil
+	} else {
+		chatModel, modelErr := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+		if modelErr != nil {
+			logger.Errorf(ctx, "Failed to get chat model: %v", modelErr)
+			markSummaryFailed()
+			summaryErr = modelErr
+			return fmt.Errorf("failed to get chat model: %w", modelErr)
+		}
+		summary, err = s.getSummary(ctx, chatModel, knowledge, textChunks)
 	}
 
-	// Generate summary
 	summaryMetadataVersion := string(knowledge.CustomMetadata)
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1362,6 +1392,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	knowledge.Description = summary
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
+	if strings.TrimSpace(summary) != "" && summaryFP != "" {
+		knowledge.Metadata = knowledgeMetadataWithSummaryCache(knowledge.Metadata, summaryFP, summary)
+	}
 	summaryOut["summary_chars"] = len([]rune(summary))
 	// Preview the generated summary on the span output so the trace
 	// viewer can show "this is what the LLM produced" at a glance,
@@ -1377,6 +1410,15 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Create summary chunk and index it — only when RAG indexing is enabled.
 	// Wiki-only KBs don't need summary chunks in the vector index.
 	if strings.TrimSpace(summary) != "" && kb.NeedsEmbeddingModel() {
+		// Cache hit with existing summary chunk: skip re-create / re-embed.
+		if summaryOut["summary_cache_hit"] == true {
+			for _, c := range chunks {
+				if c != nil && c.ChunkType == types.ChunkTypeSummary && c.ContentHash == summaryFP {
+					summaryOut["summary_chunk_reused"] = true
+					return nil
+				}
+			}
+		}
 		// Get max chunk index
 		maxChunkIndex := 0
 		for _, chunk := range chunks {
@@ -1390,12 +1432,13 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// unreliable signal (e.g. "MX5280.pdf" for a scanned legal letter)
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
+		summaryContent := fmt.Sprintf("# Summary\n%s", summary)
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableDocumentChunkID(knowledge.ID, summaryFP, types.ChunkIDRoleSummary),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
+			Content:         summaryContent,
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -1404,6 +1447,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			EndAt:           0,
 			ChunkType:       types.ChunkTypeSummary,
 			ParentChunkID:   textChunks[0].ID,
+			ContentHash:     summaryFP,
 		}
 
 		// Save summary chunk
@@ -1768,6 +1812,21 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		generationRevision := chunk.ContentRevision
+		promptForFP := strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt)
+		qgFP := calculateQuestionCacheFingerprint(
+			enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount,
+			kb.SummaryModelID, promptForFP, customInstructions, types.LanguageNameFromContext(ctx),
+		)
+		if existingMeta, _ := chunk.DocumentMetadata(); existingMeta != nil &&
+			existingMeta.QuestionCacheFingerprint == qgFP && len(existingMeta.GeneratedQuestions) > 0 {
+			llmCallSuccess++
+			generatedQuestionsTotal += len(existingMeta.GeneratedQuestions)
+			if sampleQuestion == "" {
+				sampleQuestion = previewText(existingMeta.GeneratedQuestions[0].Question, 200)
+			}
+			continue
+		}
+
 		llmCallAttempts++
 		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
@@ -1805,7 +1864,9 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			}
 		}
 		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions, GeneratedQuestionsRevision: chunk.ContentRevision,
+			GeneratedQuestions:         generatedQuestions,
+			GeneratedQuestionsRevision: chunk.ContentRevision,
+			QuestionCacheFingerprint:   qgFP,
 		}
 		if err := chunk.SetDocumentMetadata(meta); err != nil {
 			chunkMetadataSetFailed++
@@ -2108,6 +2169,22 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 
 		generationRevision := chunk.ContentRevision
+		promptForFP := strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt)
+		qgFP := calculateQuestionCacheFingerprint(
+			enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			kb.SummaryModelID, promptForFP, customInstructions, types.LanguageNameFromContext(ctx),
+		)
+		if existingMeta, _ := chunk.DocumentMetadata(); existingMeta != nil &&
+			existingMeta.QuestionCacheFingerprint == qgFP && len(existingMeta.GeneratedQuestions) > 0 {
+			// Cache hit: questions already persisted and indexed from a prior run.
+			chunksProcessed++
+			generatedQuestionsTotal += len(existingMeta.GeneratedQuestions)
+			if sampleQuestion == "" {
+				sampleQuestion = previewText(existingMeta.GeneratedQuestions[0].Question, 200)
+			}
+			continue
+		}
+
 		questions, gerr := s.generateQuestionsWithContext(
 			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)
@@ -2141,7 +2218,9 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			}
 		}
 		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions, GeneratedQuestionsRevision: chunk.ContentRevision,
+			GeneratedQuestions:         generatedQuestions,
+			GeneratedQuestionsRevision: chunk.ContentRevision,
+			QuestionCacheFingerprint:   qgFP,
 		}
 		if err := chunk.SetDocumentMetadata(meta); err != nil {
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
@@ -3711,6 +3790,24 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
+	parseFP := calculateParseCacheFingerprint(
+		knowledge.FileHash, parserEngine, fileType, payload.URL, mergedOverrides,
+	)
+	if cachedResult, ok := parseCacheFromKnowledgeMetadata(knowledge.Metadata, parseFP); ok {
+		docOutput := types.JSONMap{
+			"text_length":     len(cachedResult.MarkdownContent),
+			"images_found":    len(cachedResult.ImageRefs),
+			"is_audio":        cachedResult.IsAudio,
+			"parse_cache_hit": true,
+		}
+		if pages := cachedResult.Metadata["pages"]; pages != "" {
+			docOutput["pages"] = pages
+		}
+		s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
+		logger.Infof(ctx, "[convert] parse cache hit kb=%s knowledge=%s engine=%q", kb.ID, knowledge.ID, parserEngine)
+		return cachedResult, nil
+	}
+
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
@@ -3742,6 +3839,12 @@ func (s *knowledgeService) convert(
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages
+	}
+	if parseFP != "" {
+		knowledge.Metadata = knowledgeMetadataWithParseCache(knowledge.Metadata, parseFP, result)
+		if uerr := s.repo.UpdateKnowledge(ctx, knowledge); uerr != nil {
+			logger.Warnf(ctx, "[convert] failed to persist parse cache for %s: %v", knowledge.ID, uerr)
+		}
 	}
 	s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
 	return result, nil

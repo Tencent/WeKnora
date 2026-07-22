@@ -57,6 +57,15 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+	// QuestionCacheFingerprint is the fingerprint of inputs used to generate
+	// GeneratedQuestions. Matching fingerprint on reparse skips Chat.
+	QuestionCacheFingerprint string `json:"question_cache_fingerprint,omitempty"`
+	// GraphExtractFingerprint is the fingerprint of inputs used for GraphRAG
+	// extract on this chunk.
+	GraphExtractFingerprint string `json:"graph_extract_fingerprint,omitempty"`
+	// GraphPayload caches the last successful GraphData so rematerialize can
+	// re-AddGraph without calling the LLM.
+	GraphPayload *GraphData `json:"graph_payload,omitempty"`
 }
 
 // IsQuestionCurrent reports whether a generated question was authored for the

@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -345,7 +344,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" && !ocrCacheHit {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableDocumentChunkID(payload.KnowledgeID, ocrContentHash, types.ChunkIDRoleImageOCR),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -363,7 +362,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" && !captionCacheHit {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableDocumentChunkID(payload.KnowledgeID, captionContentHash, types.ChunkIDRoleImageCaption),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,

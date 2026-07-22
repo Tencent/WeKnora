@@ -331,6 +331,34 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
+	promptDescription := types.AppendCustomPromptInstructions(
+		s.template.Description, extractCfg.CustomInstructions, "graph_extraction")
+	graphFP := calculateGraphExtractFingerprint(
+		chunk.Content, p.ModelID, promptDescription, extractCfg.CustomInstructions, extractCfg.Tags,
+	)
+	if meta, _ := chunk.DocumentMetadata(); meta != nil &&
+		meta.GraphExtractFingerprint == graphFP && meta.GraphPayload != nil {
+		// Cache hit: rematerialize without LLM / model resolve.
+		graph := meta.GraphPayload
+		for _, node := range graph.Node {
+			if node != nil {
+				node.Chunks = []string{chunk.ID}
+			}
+		}
+		if err = s.graphEngine.AddGraph(ctx,
+			types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
+			[]*types.GraphData{graph},
+		); err != nil {
+			logger.Errorf(ctx, "failed to add cached graph: %v", err)
+			handleErr = err
+			return err
+		}
+		graphOut["graph_cache_hit"] = true
+		graphOut["nodes_added"] = len(graph.Node)
+		graphOut["relations_added"] = len(graph.Relation)
+		return nil
+	}
+
 	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
@@ -339,9 +367,8 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description: types.AppendCustomPromptInstructions(
-			s.template.Description, extractCfg.CustomInstructions, "graph_extraction"),
-		Tags: extractCfg.Tags,
+		Description: promptDescription,
+		Tags:        extractCfg.Tags,
 		Examples: []types.GraphData{
 			{
 				Text:     extractCfg.Text,
@@ -374,6 +401,18 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err
 		return err
+	}
+	// Persist extract cache on the chunk so reparse / rematerialize can skip LLM.
+	meta, _ := chunk.DocumentMetadata()
+	if meta == nil {
+		meta = &types.DocumentChunkMetadata{}
+	}
+	meta.GraphExtractFingerprint = graphFP
+	meta.GraphPayload = graph
+	if uerr := chunk.SetDocumentMetadata(meta); uerr != nil {
+		logger.Warnf(ctx, "failed to set graph cache metadata for chunk %s: %v", chunk.ID, uerr)
+	} else if uerr := s.chunkRepo.UpdateChunk(ctx, chunk); uerr != nil {
+		logger.Warnf(ctx, "failed to update chunk graph cache for %s: %v", chunk.ID, uerr)
 	}
 	graphOut["nodes_added"] = len(graph.Node)
 	graphOut["relations_added"] = len(graph.Relation)
