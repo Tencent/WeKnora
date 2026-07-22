@@ -35,6 +35,23 @@ type citationBatchResult struct {
 	NewSlugs  []newSlugFromCitation `json:"new_slugs"`
 }
 
+func unmarshalRequiredJSONObject(raw string, target any, requiredFields ...string) error {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &object); err != nil {
+		return err
+	}
+	if object == nil {
+		return fmt.Errorf("expected JSON object")
+	}
+	for _, field := range requiredFields {
+		value, ok := object[field]
+		if !ok || strings.TrimSpace(string(value)) == "null" {
+			return fmt.Errorf("missing required JSON field %q", field)
+		}
+	}
+	return json.Unmarshal([]byte(raw), target)
+}
+
 // newSlugFromCitation is the shape of an entry in the "new_slugs" array of
 // WikiChunkCitationPrompt. Mirrors extractedItem but also carries a "type"
 // tag because this prompt emits entities and concepts in a single array.
@@ -46,6 +63,48 @@ type newSlugFromCitation struct {
 	Description  string   `json:"description"`
 	Details      string   `json:"details"`
 	SourceChunks []string `json:"source_chunks"`
+}
+
+func isCompleteNewSlugFromCitation(value newSlugFromCitation) bool {
+	kind := strings.ToLower(strings.TrimSpace(value.Type))
+	if kind != types.WikiPageTypeEntity && kind != types.WikiPageTypeConcept {
+		return false
+	}
+	if strings.TrimSpace(value.Name) == "" || strings.TrimSpace(value.Slug) == "" ||
+		strings.TrimSpace(value.Description) == "" || strings.TrimSpace(value.Details) == "" ||
+		len(value.SourceChunks) == 0 {
+		return false
+	}
+	prefix := kind + "/"
+	return strings.HasPrefix(value.Slug, prefix) && strings.TrimSpace(strings.TrimPrefix(value.Slug, prefix)) != ""
+}
+
+func isCompleteExtractedCandidate(value extractedItem, kind string) bool {
+	if strings.TrimSpace(value.Name) == "" || strings.TrimSpace(value.Slug) == "" ||
+		strings.TrimSpace(value.Description) == "" || strings.TrimSpace(value.Details) == "" {
+		return false
+	}
+	prefix := kind + "/"
+	return strings.HasPrefix(value.Slug, prefix) && strings.TrimSpace(strings.TrimPrefix(value.Slug, prefix)) != ""
+}
+
+func sameNewSlugMetadata(left, right newSlugFromCitation) bool {
+	if strings.ToLower(strings.TrimSpace(left.Type)) != strings.ToLower(strings.TrimSpace(right.Type)) ||
+		left.Name != right.Name || left.Slug != right.Slug ||
+		left.Description != right.Description || left.Details != right.Details ||
+		len(left.Aliases) != len(right.Aliases) {
+		return false
+	}
+	leftAliases := append([]string(nil), left.Aliases...)
+	rightAliases := append([]string(nil), right.Aliases...)
+	sort.Strings(leftAliases)
+	sort.Strings(rightAliases)
+	for i := range leftAliases {
+		if leftAliases[i] != rightAliases[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // citationPipelineOutcome carries the raw numbers produced by the Pass
@@ -66,8 +125,8 @@ type citationPipelineOutcome struct {
 // this pass explicitly does NOT ask the LLM to paraphrase full facts per item;
 // those will come from the chunk-citation pass instead.
 //
-// Returns (entities, concepts, slugItems, error). On LLM or parse failure it
-// returns an error — the caller can then fall back to the legacy extractor.
+// On LLM or parse failure it returns an error so the caller can fall back to
+// the legacy extractor. The final bool reports whether the result is cacheable.
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -75,7 +134,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
-) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
+) ([]extractedItem, []extractedItem, map[string]extractedItem, wikiMapDedupContext, bool, error) {
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
@@ -102,18 +161,32 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"InstructionScope":    "wiki_extraction",
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
+		return nil, nil, nil, wikiMapDedupContext{}, false, fmt.Errorf("candidate slug extraction failed: %w", err)
 	}
 
 	raw = cleanLLMJSON(raw)
 
 	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := unmarshalRequiredJSONObject(raw, &result, "entities", "concepts"); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
+		return nil, nil, nil, wikiMapDedupContext{}, false, fmt.Errorf("parse candidate slug JSON: %w", err)
+	}
+	for _, item := range result.Entities {
+		if !isCompleteExtractedCandidate(item, types.WikiPageTypeEntity) {
+			return nil, nil, nil, wikiMapDedupContext{}, false,
+				fmt.Errorf("parse candidate slug JSON: invalid entity candidate %q", item.Slug)
+		}
+	}
+	for _, item := range result.Concepts {
+		if !isCompleteExtractedCandidate(item, types.WikiPageTypeConcept) {
+			return nil, nil, nil, wikiMapDedupContext{}, false,
+				fmt.Errorf("parse candidate slug JSON: invalid concept candidate %q", item.Slug)
+		}
 	}
 
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
+	var dedupComplete bool
+	var dedupContext wikiMapDedupContext
+	result.Entities, result.Concepts, dedupContext, dedupComplete = s.deduplicateExtractedBatch(
 		ctx, chatModel, kbID, result.Entities, result.Concepts,
 	)
 
@@ -129,7 +202,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		}
 	}
 
-	return result.Entities, result.Concepts, slugItems, nil
+	return result.Entities, result.Concepts, slugItems, dedupContext, dedupComplete, nil
 }
 
 // chunkBatch groups chunks that will be sent in a single WikiChunkCitationPrompt call.
@@ -164,13 +237,7 @@ func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
 		return nil
 	}
 
-	// Preserve document order for human-readable citation
-	sort.Slice(filtered, func(i, j int) bool {
-		if filtered[i].ChunkIndex == filtered[j].ChunkIndex {
-			return filtered[i].StartAt < filtered[j].StartAt
-		}
-		return filtered[i].ChunkIndex < filtered[j].ChunkIndex
-	})
+	filtered = canonicalWikiMapChunkOrder(filtered)
 
 	var batches []chunkBatch
 	current := chunkBatch{aliasToID: make(map[string]string)}
@@ -244,6 +311,17 @@ func renderCandidateSlugsXML(entities, concepts []extractedItem) string {
 	return sb.String()
 }
 
+func wikiCandidateSlugSet(entities, concepts []extractedItem) map[string]struct{} {
+	slugs := make(map[string]struct{}, len(entities)+len(concepts))
+	for _, item := range entities {
+		slugs[item.Slug] = struct{}{}
+	}
+	for _, item := range concepts {
+		slugs[item.Slug] = struct{}{}
+	}
+	return slugs
+}
+
 // renderChunksXML formats one batch's chunks into the <chunks> block, using
 // per-batch aliases (c000, c001, ...) instead of raw UUIDs.
 func renderChunksXML(batch chunkBatch) string {
@@ -272,27 +350,29 @@ func renderChunksXML(batch chunkBatch) string {
 // batches are merged into a single slug → union(chunk_id) map, and any
 // "new_slugs" that Pass 0 missed are collected separately.
 //
-// Returns (citations, newSlugs, batchCount). citations is keyed by slug and
-// contains real chunk UUIDs (already translated from batch aliases). newSlugs
-// likewise carry real chunk UUIDs in SourceChunks.
+// citations is keyed by slug and contains real chunk UUIDs (already translated
+// from batch aliases). newSlugs likewise carry real chunk UUIDs in SourceChunks.
+// The final bool reports whether every batch produced a complete response.
 func (s *wikiIngestService) classifyChunkCitations(
 	ctx context.Context,
 	chatModel chat.Chat,
 	candidatesXML string,
+	candidateSlugs map[string]struct{},
 	chunks []*types.Chunk,
 	lang string,
 	batchCtx *WikiBatchContext,
-) (map[string][]string, []newSlugFromCitation, int) {
+) (map[string][]string, []newSlugFromCitation, int, bool) {
 	batches := splitChunksIntoCitationBatches(chunks)
 	if len(batches) == 0 || strings.TrimSpace(candidatesXML) == "" {
-		return map[string][]string{}, nil, 0
+		return map[string][]string{}, nil, 0, true
 	}
 
 	// Merge state. Using sets keyed by (slug, chunkID) to dedup across
 	// batches; order is re-imposed from chunk ChunkIndex at the end.
 	var mu sync.Mutex
 	citationSet := make(map[string]map[string]bool) // slug → set of real chunk IDs
-	var newSlugsAll []newSlugFromCitation
+	newSlugsByBatch := make([][]newSlugFromCitation, len(batches))
+	complete := true
 
 	eg, ectx := errgroup.WithContext(ctx)
 	eg.SetLimit(maxCitationBatchConcurrency)
@@ -308,13 +388,19 @@ func (s *wikiIngestService) classifyChunkCitations(
 				"Language":       lang,
 			})
 			if err != nil {
+				mu.Lock()
+				complete = false
+				mu.Unlock()
 				logger.Warnf(ectx, "wiki ingest: citation batch %d failed: %v", batchIdx, err)
 				return nil // don't abort peer batches
 			}
 			raw = cleanLLMJSON(raw)
 
 			var parsed citationBatchResult
-			if jerr := json.Unmarshal([]byte(raw), &parsed); jerr != nil {
+			if jerr := unmarshalRequiredJSONObject(raw, &parsed, "citations", "new_slugs"); jerr != nil {
+				mu.Lock()
+				complete = false
+				mu.Unlock()
 				logger.Warnf(ectx, "wiki ingest: citation batch %d parse failed: %v\nRaw: %s", batchIdx, jerr, raw)
 				return nil
 			}
@@ -325,6 +411,11 @@ func (s *wikiIngestService) classifyChunkCitations(
 
 			for slug, aliasList := range parsed.Citations {
 				if slug == "" {
+					complete = false
+					continue
+				}
+				if _, ok := candidateSlugs[slug]; !ok {
+					complete = false
 					continue
 				}
 				set, ok := citationSet[slug]
@@ -335,6 +426,7 @@ func (s *wikiIngestService) classifyChunkCitations(
 				for _, alias := range aliasList {
 					realID, known := batch.aliasToID[alias]
 					if !known {
+						complete = false
 						logger.Warnf(ectx, "wiki ingest: citation batch %d referenced unknown chunk alias %q for slug %s", batchIdx, alias, slug)
 						continue
 					}
@@ -343,27 +435,84 @@ func (s *wikiIngestService) classifyChunkCitations(
 			}
 
 			for _, ns := range parsed.NewSlugs {
-				if ns.Slug == "" || ns.Name == "" {
+				_, rediscoveredCandidate := candidateSlugs[ns.Slug]
+				if rediscoveredCandidate {
+					complete = false
+				} else if !isCompleteNewSlugFromCitation(ns) {
+					complete = false
+					continue
+				}
+				if len(ns.SourceChunks) == 0 {
+					complete = false
 					continue
 				}
 				real := make([]string, 0, len(ns.SourceChunks))
+				seenReal := make(map[string]struct{}, len(ns.SourceChunks))
 				for _, alias := range ns.SourceChunks {
-					if id, ok := batch.aliasToID[alias]; ok {
-						real = append(real, id)
+					id, ok := batch.aliasToID[alias]
+					if !ok {
+						complete = false
+						logger.Warnf(ectx, "wiki ingest: citation batch %d referenced unknown chunk alias %q for new slug %s", batchIdx, alias, ns.Slug)
+						continue
 					}
+					if _, seen := seenReal[id]; seen {
+						continue
+					}
+					seenReal[id] = struct{}{}
+					real = append(real, id)
+				}
+				if len(real) == 0 {
+					complete = false
+					continue
+				}
+				if rediscoveredCandidate {
+					set := citationSet[ns.Slug]
+					if set == nil {
+						set = make(map[string]bool)
+						citationSet[ns.Slug] = set
+					}
+					for _, id := range real {
+						set[id] = true
+					}
+					continue
 				}
 				ns.SourceChunks = real
-				newSlugsAll = append(newSlugsAll, ns)
+				newSlugsByBatch[batchIdx] = append(newSlugsByBatch[batchIdx], ns)
 			}
 			return nil
 		})
 	}
 	_ = eg.Wait()
 
-	// Build a stable chunk-order so the final citations come out in document order.
-	chunkOrder := make(map[string]int, len(chunks))
+	// Build the same stable document order used by the map artifact layout.
+	type chunkPosition struct {
+		index, startAt int
+		content        string
+		chunkType      types.ChunkType
+		id             string
+	}
+	chunkOrder := make(map[string]chunkPosition, len(chunks))
 	for _, c := range chunks {
-		chunkOrder[c.ID] = c.ChunkIndex
+		if c == nil {
+			continue
+		}
+		chunkOrder[c.ID] = chunkPosition{c.ChunkIndex, c.StartAt, c.Content, c.ChunkType, c.ID}
+	}
+	lessChunkID := func(leftID, rightID string) bool {
+		left, right := chunkOrder[leftID], chunkOrder[rightID]
+		if left.index != right.index {
+			return left.index < right.index
+		}
+		if left.startAt != right.startAt {
+			return left.startAt < right.startAt
+		}
+		if left.content != right.content {
+			return left.content < right.content
+		}
+		if left.chunkType != right.chunkType {
+			return left.chunkType < right.chunkType
+		}
+		return left.id < right.id
 	}
 
 	out := make(map[string][]string, len(citationSet))
@@ -373,12 +522,30 @@ func (s *wikiIngestService) classifyChunkCitations(
 			ids = append(ids, id)
 		}
 		sort.SliceStable(ids, func(i, j int) bool {
-			return chunkOrder[ids[i]] < chunkOrder[ids[j]]
+			return lessChunkID(ids[i], ids[j])
 		})
 		out[slug] = ids
 	}
 
-	return out, newSlugsAll, len(batches)
+	newSlugsAll := make([]newSlugFromCitation, 0)
+	newSlugMetadata := make(map[string]newSlugFromCitation)
+	for _, batchSlugs := range newSlugsByBatch {
+		for _, ns := range batchSlugs {
+			sort.SliceStable(ns.SourceChunks, func(i, j int) bool {
+				return lessChunkID(ns.SourceChunks[i], ns.SourceChunks[j])
+			})
+			if previous, ok := newSlugMetadata[ns.Slug]; ok {
+				if !sameNewSlugMetadata(previous, ns) {
+					complete = false
+				}
+			} else {
+				newSlugMetadata[ns.Slug] = ns
+			}
+			newSlugsAll = append(newSlugsAll, ns)
+		}
+	}
+
+	return out, newSlugsAll, len(batches), complete
 }
 
 // resolveCitedChunks loads the content of every chunk referenced by the

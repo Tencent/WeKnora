@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -306,6 +307,7 @@ type wikiIngestService struct {
 	knowledgeRepo  interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
+	artifactStore  interfaces.ProcessingArtifactStore
 	task           interfaces.TaskEnqueuer
 	logEntrySvc    interfaces.WikiLogEntryService
 	pendingRepo    interfaces.TaskPendingOpsRepository
@@ -335,6 +337,7 @@ func NewWikiIngestService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
+	artifactStore interfaces.ProcessingArtifactStore,
 	task interfaces.TaskEnqueuer,
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
@@ -349,6 +352,7 @@ func NewWikiIngestService(
 		knowledgeRepo:  knowledgeRepo,
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
+		artifactStore:  artifactStore,
 		task:           task,
 		logEntrySvc:    logEntrySvc,
 		pendingRepo:    pendingRepo,
@@ -1751,14 +1755,16 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 // a defense-in-depth measure: an old buggy ingest that mistakenly
 // stamped a system page with a knowledge ref would otherwise show up
 // in the reparse "old set" and confuse the reduce stage.
-func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context, kbID, knowledgeID string) map[string]bool {
+func (s *wikiIngestService) getExistingPageSlugsForKnowledge(
+	ctx context.Context,
+	kbID, knowledgeID string,
+) (map[string]bool, error) {
 	slugs, err := s.wikiService.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: ListSlugsBySourceRef(%s) failed: %v", knowledgeID, err)
-		return nil
+		return nil, err
 	}
 	if len(slugs) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]bool, len(slugs))
 	for _, slug := range slugs {
@@ -1769,7 +1775,7 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 		}
 		out[slug] = true
 	}
-	return out
+	return out, nil
 }
 
 // retractStalePages handles pages that were previously linked to this document
@@ -2070,57 +2076,29 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	chatModel chat.Chat,
 	kbID string,
 	entities, concepts []extractedItem,
-) ([]extractedItem, []extractedItem) {
+) ([]extractedItem, []extractedItem, wikiMapDedupContext, bool) {
+	dedupContext := wikiMapDedupContext{
+		Entities:                    cloneWikiMapItems(entities),
+		Concepts:                    cloneWikiMapItems(concepts),
+		CandidateFingerprint:        wikiDedupCandidateFingerprint(nil),
+		ReducedCandidateFingerprint: wikiDedupCandidateFingerprint(nil),
+	}
 	if len(entities) == 0 && len(concepts) == 0 {
-		return entities, concepts
+		return entities, concepts, dedupContext, true
 	}
 	if s.wikiService == nil {
-		return entities, concepts
+		return entities, concepts, finalizeWikiMapDedupContext(dedupContext, nil, entities, concepts), true
 	}
 
 	// Build the candidate set: for each new item, ask the repo for
 	// the top-K trigram-similar pages and union the results. Dedup by
 	// slug as we go so the prompt only carries each candidate once.
-	candidatePages := make(map[string]*types.WikiPageLite)
-	probe := func(item extractedItem) {
-		queries := make([]string, 0, 1+len(item.Aliases))
-		if item.Name != "" {
-			queries = append(queries, item.Name)
-		}
-		for _, alias := range item.Aliases {
-			if alias != "" {
-				queries = append(queries, alias)
-			}
-		}
-		for _, q := range queries {
-			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
-				[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
-				dedupCandidateTopK)
-			if err != nil {
-				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
-				continue
-			}
-			for _, p := range pages {
-				if p == nil || p.Slug == "" {
-					continue
-				}
-				if _, ok := candidatePages[p.Slug]; !ok {
-					candidatePages[p.Slug] = p
-				}
-			}
-		}
-	}
-	for _, e := range entities {
-		probe(e)
-	}
-	for _, c := range concepts {
-		probe(c)
-	}
+	candidatePages, complete := s.findWikiDedupCandidates(ctx, kbID, entities, concepts)
+	dedupContext.CandidateSlugs = wikiDedupCandidateSlugs(candidatePages)
+	dedupContext.CandidateFingerprint = wikiDedupCandidateFingerprint(candidatePages)
 	if len(candidatePages) == 0 {
-		// No similar existing pages — nothing to merge against. The
-		// items pass through unchanged.
 		logger.Infof(ctx, "wiki ingest: no similar existing pages found for %d new items", len(entities)+len(concepts))
-		return entities, concepts
+		return entities, concepts, finalizeWikiMapDedupContext(dedupContext, candidatePages, entities, concepts), complete
 	}
 	logger.Infof(ctx, "wiki ingest: %d similar existing pages selected for %d new items",
 		len(candidatePages), len(entities)+len(concepts))
@@ -2130,7 +2108,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupItemXML(&existingBuf, p.Slug, p.Title, p.PageType, []string(p.Aliases))
 	}
 	if existingBuf.Len() == 0 {
-		return entities, concepts
+		return entities, concepts, finalizeWikiMapDedupContext(dedupContext, candidatePages, entities, concepts), complete
 	}
 
 	var newBuf strings.Builder
@@ -2147,7 +2125,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	})
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
-		return entities, concepts
+		return entities, concepts, dedupContext, false
 	}
 
 	dedupeJSON = cleanLLMJSON(dedupeJSON)
@@ -2155,13 +2133,13 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	var dedupeResult struct {
 		Merges map[string]string `json:"merges"`
 	}
-	if err := json.Unmarshal([]byte(dedupeJSON), &dedupeResult); err != nil {
+	if err := unmarshalRequiredJSONObject(dedupeJSON, &dedupeResult, "merges"); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to parse dedup JSON: %v\nRaw: %s", err, dedupeJSON)
-		return entities, concepts
+		return entities, concepts, dedupContext, false
 	}
 
 	if len(dedupeResult.Merges) == 0 {
-		return entities, concepts
+		return entities, concepts, finalizeWikiMapDedupContext(dedupContext, candidatePages, entities, concepts), complete
 	}
 
 	// Build the existing-slug set from the candidate map: anything not
@@ -2182,11 +2160,6 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		srcSlash := strings.Index(srcSlug, "/")
 		dstSlash := strings.Index(dstSlug, "/")
 		if srcSlash <= 0 || dstSlash <= 0 {
-			// A type-prefixed slug must look like "entity/foo" or
-			// "concept/bar". An LLM that emits an un-prefixed slug
-			// here is hallucinating; reject rather than fall through
-			// the prefix-equality check (which would treat both empty
-			// prefixes as a match).
 			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (missing type prefix)", srcSlug, dstSlug)
 			return false
 		}
@@ -2198,21 +2171,292 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		}
 		return true
 	}
+	inputSlugs := make(map[string]struct{}, len(entities)+len(concepts))
+	for _, item := range entities {
+		inputSlugs[item.Slug] = struct{}{}
+	}
+	for _, item := range concepts {
+		inputSlugs[item.Slug] = struct{}{}
+	}
+	validMerges := make(map[string]string, len(dedupeResult.Merges))
+	for srcSlug, dstSlug := range dedupeResult.Merges {
+		if _, ok := inputSlugs[srcSlug]; !ok {
+			complete = false
+			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (source slug was not extracted)", srcSlug, dstSlug)
+			continue
+		}
+		if !validMerge(srcSlug, dstSlug) {
+			complete = false
+			continue
+		}
+		validMerges[srcSlug] = dstSlug
+	}
 
 	for i, item := range entities {
-		if existingSlug, ok := dedupeResult.Merges[item.Slug]; ok && validMerge(item.Slug, existingSlug) {
+		if existingSlug, ok := validMerges[item.Slug]; ok {
 			logger.Infof(ctx, "wiki ingest: dedup merge %s → %s", item.Slug, existingSlug)
 			entities[i].Slug = existingSlug
 		}
 	}
 	for i, item := range concepts {
-		if existingSlug, ok := dedupeResult.Merges[item.Slug]; ok && validMerge(item.Slug, existingSlug) {
+		if existingSlug, ok := validMerges[item.Slug]; ok {
 			logger.Infof(ctx, "wiki ingest: dedup merge %s → %s", item.Slug, existingSlug)
 			concepts[i].Slug = existingSlug
 		}
 	}
 
-	return entities, concepts
+	entities = coalesceExtractedItemsBySlug(entities)
+	concepts = coalesceExtractedItemsBySlug(concepts)
+	return entities, concepts, finalizeWikiMapDedupContext(dedupContext, candidatePages, entities, concepts), complete
+}
+
+func finalizeWikiMapDedupContext(
+	context wikiMapDedupContext,
+	candidates map[string]*types.WikiPageLite,
+	entities, concepts []extractedItem,
+) wikiMapDedupContext {
+	reducedCandidates := make(map[string]*types.WikiPageLite, len(candidates))
+	for slug, page := range candidates {
+		clone := *page
+		clone.Aliases = append(types.StringArray(nil), page.Aliases...)
+		reducedCandidates[slug] = &clone
+	}
+	context.OutputPageFingerprints = make(map[string]string)
+	apply := func(items []extractedItem, pageType string) {
+		for _, item := range items {
+			if page, exists := reducedCandidates[item.Slug]; exists {
+				for _, alias := range item.Aliases {
+					page.Aliases = appendUnique(page.Aliases, alias)
+				}
+				continue
+			}
+			page := &types.WikiPageLite{
+				Slug: item.Slug, Title: item.Name, PageType: pageType,
+				Aliases: append(types.StringArray(nil), item.Aliases...),
+			}
+			context.OutputPageFingerprints[item.Slug] = wikiDedupPageFingerprint(page)
+		}
+	}
+	apply(entities, types.WikiPageTypeEntity)
+	apply(concepts, types.WikiPageTypeConcept)
+	context.ReducedCandidateFingerprint = wikiDedupCandidateFingerprint(reducedCandidates)
+	if len(context.OutputPageFingerprints) == 0 {
+		context.OutputPageFingerprints = nil
+	}
+	return context
+}
+
+func coalesceExtractedItemsBySlug(items []extractedItem) []extractedItem {
+	coalesced := make([]extractedItem, 0, len(items))
+	positions := make(map[string]int, len(items))
+	for _, item := range items {
+		position, exists := positions[item.Slug]
+		if !exists {
+			item.Aliases = append([]string(nil), item.Aliases...)
+			item.SourceChunks = append([]string(nil), item.SourceChunks...)
+			positions[item.Slug] = len(coalesced)
+			coalesced = append(coalesced, item)
+			continue
+		}
+
+		current := &coalesced[position]
+		if item.Name != current.Name {
+			current.Aliases = appendUniqueWikiMapString(current.Aliases, item.Name)
+		}
+		for _, alias := range item.Aliases {
+			current.Aliases = appendUniqueWikiMapString(current.Aliases, alias)
+		}
+		current.Description = joinDistinctWikiMapText(current.Description, item.Description)
+		current.Details = joinDistinctWikiMapText(current.Details, item.Details)
+		for _, chunkID := range item.SourceChunks {
+			current.SourceChunks = appendUniqueWikiMapString(current.SourceChunks, chunkID)
+		}
+	}
+	return coalesced
+}
+
+func appendUniqueWikiMapString(values []string, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func joinDistinctWikiMapText(existing, addition string) string {
+	if strings.TrimSpace(addition) == "" || existing == addition {
+		return existing
+	}
+	if strings.TrimSpace(existing) == "" {
+		return addition
+	}
+	return existing + "\n" + addition
+}
+
+func (s *wikiIngestService) findWikiDedupCandidates(
+	ctx context.Context,
+	kbID string,
+	entities, concepts []extractedItem,
+) (map[string]*types.WikiPageLite, bool) {
+	candidatePages := make(map[string]*types.WikiPageLite)
+	complete := true
+	probe := func(item extractedItem) {
+		queries := make([]string, 0, 1+len(item.Aliases))
+		if item.Name != "" {
+			queries = append(queries, item.Name)
+		}
+		for _, alias := range item.Aliases {
+			if alias != "" {
+				queries = append(queries, alias)
+			}
+		}
+		for _, q := range queries {
+			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
+				[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
+				dedupCandidateTopK)
+			if err != nil {
+				complete = false
+				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
+				continue
+			}
+			for _, p := range pages {
+				if p == nil || p.Slug == "" {
+					continue
+				}
+				if p.Slug == item.Slug {
+					continue
+				}
+				if _, ok := candidatePages[p.Slug]; !ok {
+					candidatePages[p.Slug] = p
+				}
+			}
+		}
+	}
+	for _, e := range entities {
+		probe(e)
+	}
+	for _, c := range concepts {
+		probe(c)
+	}
+	return candidatePages, complete
+}
+
+func wikiDedupCandidateFingerprint(pages map[string]*types.WikiPageLite) string {
+	type candidate struct {
+		Slug, Title, PageType string
+		Aliases               []string
+	}
+	items := make([]candidate, 0, len(pages))
+	for _, page := range pages {
+		aliases := append([]string(nil), page.Aliases...)
+		sort.Strings(aliases)
+		items = append(items, candidate{page.Slug, page.Title, page.PageType, aliases})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Slug < items[j].Slug })
+	encoded, _ := json.Marshal(items)
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func wikiDedupPageFingerprint(page *types.WikiPageLite) string {
+	return wikiDedupCandidateFingerprint(map[string]*types.WikiPageLite{page.Slug: page})
+}
+
+func wikiDedupCandidateSlugs(pages map[string]*types.WikiPageLite) []string {
+	slugs := make([]string, 0, len(pages))
+	for slug := range pages {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	return slugs
+}
+
+func wikiPageSlugFingerprint(slugs map[string]bool) string {
+	ordered := make([]string, 0, len(slugs))
+	for slug := range slugs {
+		ordered = append(ordered, slug)
+	}
+	sort.Strings(ordered)
+	encoded, _ := json.Marshal(ordered)
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func wikiMapArtifactOutputSlugs(summarySlug string, value wikiMapArtifactValue) map[string]struct{} {
+	slugs := make(map[string]struct{}, len(value.Entities)+len(value.Concepts)+1)
+	slugs[summarySlug] = struct{}{}
+	for _, item := range value.Entities {
+		slugs[item.Slug] = struct{}{}
+	}
+	for _, item := range value.Concepts {
+		slugs[item.Slug] = struct{}{}
+	}
+	return slugs
+}
+
+func (s *wikiIngestService) wikiMapArtifactStateCurrent(
+	ctx context.Context,
+	kbID, summarySlug string,
+	oldPageSlugs map[string]bool,
+	value wikiMapArtifactValue,
+) bool {
+	expectedSlugs := wikiMapArtifactOutputSlugs(summarySlug, value)
+	if len(expectedSlugs) != len(oldPageSlugs) {
+		return false
+	}
+	for slug := range expectedSlugs {
+		if !oldPageSlugs[slug] {
+			return false
+		}
+	}
+	return s.wikiMapArtifactDedupStateCurrent(ctx, kbID, summarySlug, value)
+}
+
+func (s *wikiIngestService) wikiMapArtifactDedupStateCurrent(
+	ctx context.Context,
+	kbID, summarySlug string,
+	value wikiMapArtifactValue,
+) bool {
+	expectedSlugs := wikiMapArtifactOutputSlugs(summarySlug, value)
+	candidates, complete := s.findWikiDedupCandidates(
+		ctx, kbID, value.DedupContext.Entities, value.DedupContext.Concepts,
+	)
+	storedCandidates := make(map[string]struct{}, len(value.DedupContext.CandidateSlugs))
+	for _, slug := range value.DedupContext.CandidateSlugs {
+		storedCandidates[slug] = struct{}{}
+	}
+	for slug := range candidates {
+		_, outputSlug := expectedSlugs[slug]
+		_, originalCandidate := storedCandidates[slug]
+		if outputSlug && !originalCandidate {
+			expectedFingerprint, ok := value.DedupContext.OutputPageFingerprints[slug]
+			if !ok || wikiDedupPageFingerprint(candidates[slug]) != expectedFingerprint {
+				return false
+			}
+			delete(candidates, slug)
+		}
+	}
+	if !complete {
+		return false
+	}
+	fingerprint := wikiDedupCandidateFingerprint(candidates)
+	return fingerprint == value.DedupContext.CandidateFingerprint ||
+		(value.DedupContext.ReducedCandidateFingerprint != "" &&
+			fingerprint == value.DedupContext.ReducedCandidateFingerprint)
+}
+
+func (s *wikiIngestService) wikiMapConcurrentWinnerCurrent(
+	ctx context.Context,
+	kbID, summarySlug string,
+	winner, computed wikiMapArtifactValue,
+) bool {
+	return winner.PreviousSlugsFingerprint != "" &&
+		winner.PreviousSlugsFingerprint == computed.PreviousSlugsFingerprint &&
+		s.wikiMapArtifactDedupStateCurrent(ctx, kbID, summarySlug, winner)
 }
 
 // generateWithTemplate executes a prompt template and calls the LLM with
