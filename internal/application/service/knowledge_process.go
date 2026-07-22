@@ -3419,7 +3419,7 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	}
 	ctx = payload.Initiator.Apply(ctx)
 	taskID, _ := asynq.GetTaskID(ctx)
-	ctx = withKBActivityTask(ctx, taskID, "user")
+	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 
 	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
 

@@ -460,7 +460,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 		return fmt.Errorf("failed to unmarshal KB clone payload: %w", err)
 	}
 	ctx = payload.Initiator.Apply(ctx)
-	ctx = withKBActivityTask(ctx, payload.TaskID, "user")
+	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -995,7 +995,7 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 		return fmt.Errorf("failed to unmarshal knowledge move payload: %w", err)
 	}
 	ctx = payload.Initiator.Apply(ctx)
-	ctx = withKBActivityTask(ctx, payload.TaskID, "user")
+	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)

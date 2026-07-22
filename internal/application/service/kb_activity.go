@@ -3,12 +3,16 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-const auditScopeKnowledgeBase = "knowledge_base"
+const (
+	auditScopeKnowledgeBase    = "knowledge_base"
+	kbActivitySampleTitleLimit = 5
+)
 
 type kbActivityTaskMetadata struct {
 	TaskID  string
@@ -37,6 +41,44 @@ func kbActivityTrigger(ctx context.Context) string {
 		return "user"
 	}
 	return "system"
+}
+
+// kbActivityAppendSampleTitles adds a bounded, human-readable preview of batch
+// mutations into activity details. The first sample is also mirrored as title so
+// list views can show what was affected without opening the drawer.
+func kbActivityAppendSampleTitles(details map[string]any, titles ...string) {
+	if details == nil {
+		return
+	}
+	samples := make([]string, 0, kbActivitySampleTitleLimit)
+	seen := make(map[string]struct{}, kbActivitySampleTitleLimit)
+	appendSample := func(title string) {
+		title = strings.TrimSpace(title)
+		if title == "" {
+			return
+		}
+		if _, ok := seen[title]; ok {
+			return
+		}
+		if len(samples) >= kbActivitySampleTitleLimit {
+			return
+		}
+		seen[title] = struct{}{}
+		samples = append(samples, title)
+	}
+	if existing, ok := details["title"].(string); ok {
+		appendSample(existing)
+	}
+	for _, title := range titles {
+		appendSample(title)
+	}
+	if len(samples) == 0 {
+		return
+	}
+	details["title"] = samples[0]
+	if len(samples) > 1 {
+		details["titles"] = samples
+	}
 }
 
 // withKBActivitySuppressed is used for high-volume child mutations inside a

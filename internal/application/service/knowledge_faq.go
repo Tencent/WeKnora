@@ -1398,9 +1398,14 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 			return err
 		}
 	}
+	details := map[string]any{"count": len(chunksToRemove), "source_type": "faq"}
+	titles := make([]string, 0, len(chunksToRemove))
+	for _, chunk := range chunksToRemove {
+		titles = append(titles, faqChunkQuestion(chunk))
+	}
+	kbActivityAppendSampleTitles(details, titles...)
 	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeBatchDeleted,
-		"faq_entry", "", types.AuditOutcomeSuccess,
-		map[string]any{"count": len(chunksToRemove), "source_type": "faq"})
+		"faq_entry", "", types.AuditOutcomeSuccess, details)
 	return nil
 }
 
@@ -1605,6 +1610,18 @@ func buildFAQKnowledgeTitle(kbName string) string {
 		return "FAQ"
 	}
 	return name
+}
+
+func faqChunkQuestion(chunk *types.Chunk) string {
+	if chunk == nil {
+		return ""
+	}
+	if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+		if question := strings.TrimSpace(meta.StandardQuestion); question != "" {
+			return question
+		}
+	}
+	return strings.TrimSpace(chunk.Content)
 }
 
 func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase, tagSeqIDMap map[string]int64) (*types.FAQEntry, error) {

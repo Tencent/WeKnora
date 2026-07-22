@@ -120,6 +120,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		Mode:        payload.Mode,
 		DryRun:      payload.DryRun,
 		EnqueuedAt:  enqueuedAt,
+		Initiator:   types.TaskInitiatorFromContext(ctx),
 	}
 
 	// 阈值：超过 200 条或序列化后超过 50KB 时使用对象存储
@@ -206,6 +207,15 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		return "", fmt.Errorf("failed to enqueue task: %w", err)
 	}
 	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
+
+	if !payload.DryRun {
+		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionFAQImportStarted,
+			"faq_entry", knowledgeID, types.AuditOutcomeAccepted,
+			map[string]any{
+				"task_id": taskID, "mode": payload.Mode, "total": len(payload.Entries),
+				"trigger": kbActivityTrigger(ctx), "processing_status": "pending",
+			})
+	}
 
 	return taskID, nil
 }
@@ -1515,6 +1525,66 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	return s.repo.UpdateKnowledge(ctx, knowledge)
 }
 
+func faqImportCompletedOutcome(successCount, failedCount, skippedCount int) types.AuditOutcome {
+	if successCount > 0 && (failedCount > 0 || skippedCount > 0) {
+		return types.AuditOutcomePartial
+	}
+	if successCount > 0 {
+		return types.AuditOutcomeSuccess
+	}
+	if failedCount > 0 && skippedCount > 0 {
+		return types.AuditOutcomePartial
+	}
+	if failedCount > 0 || skippedCount > 0 {
+		return types.AuditOutcomeFailed
+	}
+	return types.AuditOutcomeSuccess
+}
+
+func faqImportActivityDetails(payload *types.FAQImportPayload, progress *types.FAQImportProgress, totalEntries int) map[string]any {
+	details := map[string]any{"mode": payload.Mode}
+	if progress == nil {
+		return details
+	}
+	total := totalEntries
+	if total <= 0 {
+		total = progress.Total
+	}
+	if total > 0 {
+		details["total"] = total
+	}
+	details["count"] = progress.SuccessCount
+	if progress.FailedCount > 0 {
+		details["failed"] = progress.FailedCount
+	}
+	skipped := progress.SkippedCount
+	if skipped <= 0 && total > 0 {
+		skipped = total - progress.SuccessCount - progress.FailedCount
+		if skipped < 0 {
+			skipped = 0
+		}
+	}
+	if skipped > 0 {
+		details["skipped"] = skipped
+	}
+	return details
+}
+
+func (s *knowledgeService) recordFAQImportKBActivity(
+	ctx context.Context,
+	payload *types.FAQImportPayload,
+	progress *types.FAQImportProgress,
+	totalEntries int,
+	action types.AuditAction,
+	outcome types.AuditOutcome,
+) {
+	if s == nil || payload == nil || payload.DryRun || payload.KBID == "" {
+		return
+	}
+	recordKBActivity(ctx, s.audit, payload.TenantID, payload.KBID, action,
+		"faq_entry", payload.KnowledgeID, outcome, faqImportActivityDetails(payload, progress, totalEntries))
+}
+
 // ProcessFAQImport handles Asynq FAQ import tasks (including dry run mode)
 func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) error {
 	var payload types.FAQImportPayload
@@ -1522,6 +1592,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "failed to unmarshal FAQ import task payload: %v", err)
 		return fmt.Errorf("failed to unmarshal task payload: %w", err)
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	ctx = logger.WithRequestID(ctx, uuid.New().String())
 	ctx = logger.WithField(ctx, "faq_import", payload.TaskID)
@@ -1660,6 +1732,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
+			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 		}
 		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("failed to get knowledge base: %w", err)
@@ -1689,6 +1762,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
+			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 		}
 		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("failed to delete unindexed chunks: %w", err)
@@ -1745,6 +1819,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
+			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 		}
 		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("FAQ import failed: %w", err)
@@ -1816,6 +1891,17 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 
 	logger.Infof(ctx, "FAQ task completed: %s, dry_run=%v, success: %d, failed: %d",
 		payload.TaskID, payload.DryRun, progress.SuccessCount, progress.FailedCount)
+
+	if !payload.DryRun {
+		skippedCount := originalTotalEntries - progress.SuccessCount - progress.FailedCount
+		if skippedCount < 0 {
+			skippedCount = 0
+		}
+		progress.SkippedCount = skippedCount
+		outcome := faqImportCompletedOutcome(progress.SuccessCount, progress.FailedCount, skippedCount)
+		s.recordFAQImportKBActivity(ctx, payload, progress, originalTotalEntries,
+			types.AuditActionFAQImportCompleted, outcome)
+	}
 
 	return nil
 }

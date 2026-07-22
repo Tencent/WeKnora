@@ -1,39 +1,32 @@
 <template>
   <div class="section-content kb-activity-settings">
     <div class="section-header">
-      <h3 class="section-title">{{ t('knowledgeEditor.activity.title') }}</h3>
+      <div class="kb-activity-title-row">
+        <h3 class="section-title">{{ t('knowledgeEditor.activity.title') }}</h3>
+        <button
+          type="button"
+          class="suggested-questions-refresh"
+          :disabled="loading"
+          :title="t('knowledgeEditor.activity.refresh')"
+          :aria-label="t('knowledgeEditor.activity.refresh')"
+          @click="reload"
+        >
+          <t-icon
+            :name="loading ? 'loading' : 'refresh'"
+            :class="{ 'sq-refresh-spin': loading }"
+          />
+        </button>
+      </div>
       <p class="section-desc">{{ t('knowledgeEditor.activity.description') }}</p>
+      <p v-if="hasActiveFilters" class="kb-activity-filter-bar">
+        <span>{{ filterSummaryText }}</span>
+        <button type="button" class="kb-activity-clear-filters" @click="clearFilters">
+          {{ t('knowledgeEditor.activity.clearFilters') }}
+        </button>
+      </p>
     </div>
 
     <div class="section-body kb-activity-body">
-      <div class="kb-activity-toolbar">
-        <t-select
-          v-model="outcome"
-          clearable
-          size="small"
-          class="kb-activity-outcome-select"
-          :placeholder="t('knowledgeEditor.activity.allOutcomes')"
-        >
-          <t-option
-            v-for="item in outcomeOptions"
-            :key="item.value"
-            :value="item.value"
-            :label="item.label"
-          />
-        </t-select>
-        <t-button
-          variant="text"
-          size="small"
-          class="kb-activity-refresh"
-          :loading="loading"
-          :disabled="loading"
-          @click="reload"
-        >
-          <template #icon><t-icon name="refresh" /></template>
-          {{ t('knowledgeEditor.activity.refresh') }}
-        </t-button>
-      </div>
-
       <div v-if="error" class="kb-activity-branch kb-activity-branch--error">
         <t-alert theme="error" :message="error">
           <template #operation>
@@ -42,24 +35,113 @@
         </t-alert>
       </div>
 
-      <div
-        v-else-if="!loading && entries.length === 0"
-        class="kb-activity-branch kb-activity-branch--empty"
-      >
-        <t-empty :description="t('knowledgeEditor.activity.empty')" />
-      </div>
-
-      <div v-else ref="scrollRoot" class="audit-scroll-area narrow-scrollbar kb-activity-branch">
+      <div ref="scrollRoot" class="audit-scroll-area narrow-scrollbar kb-activity-branch">
           <div class="data-table-shell audit-table-shell">
             <t-table
               row-key="id"
               :data="entries"
               :columns="columns"
+              :filter-row="null"
               size="medium"
               hover
-              :loading="loading && !entries.length"
+              :loading="loading && !entries.length && !loadedOnce"
               @row-click="openDetail"
             >
+              <template #action-title>
+                <div class="kb-activity-col-header">
+                  <span>{{ t('knowledgeEditor.activity.columns.action') }}</span>
+                  <t-popup
+                    v-model:visible="actionFilterOpen"
+                    trigger="click"
+                    placement="bottom-left"
+                    destroy-on-close
+                    :overlay-style="{ padding: 0 }"
+                    :overlay-inner-style="{ padding: 0 }"
+                  >
+                    <template #content>
+                      <div class="kb-activity-filter-menu">
+                        <div class="kb-activity-filter-options">
+                          <button
+                            v-for="item in actionFilterList"
+                            :key="item.value || '__all__'"
+                            type="button"
+                            class="kb-activity-filter-option"
+                            :class="{ active: (action ?? '') === item.value }"
+                            @click="selectActionFilter(item.value)"
+                          >
+                            <span class="kb-activity-filter-option-label">{{ item.label }}</span>
+                            <t-icon
+                              v-if="(action ?? '') === item.value"
+                              name="check"
+                              class="kb-activity-filter-option-check"
+                              size="14px"
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </template>
+                    <button
+                      type="button"
+                      class="kb-activity-filter-trigger"
+                      :class="{ active: Boolean(action) }"
+                      :aria-label="t('knowledgeEditor.activity.columns.action')"
+                      @click.stop
+                    >
+                      <t-icon name="filter" size="14px" />
+                    </button>
+                  </t-popup>
+                </div>
+              </template>
+              <template #outcome-title>
+                <div class="kb-activity-col-header kb-activity-col-header--center">
+                  <span>{{ t('knowledgeEditor.activity.columns.outcome') }}</span>
+                  <t-popup
+                    v-model:visible="outcomeFilterOpen"
+                    trigger="click"
+                    placement="bottom-right"
+                    destroy-on-close
+                    :overlay-style="{ padding: 0 }"
+                    :overlay-inner-style="{ padding: 0 }"
+                  >
+                    <template #content>
+                      <div class="kb-activity-filter-menu">
+                        <div class="kb-activity-filter-options">
+                          <button
+                            v-for="item in outcomeFilterList"
+                            :key="item.value || '__all__'"
+                            type="button"
+                            class="kb-activity-filter-option"
+                            :class="{ active: (outcome ?? '') === item.value }"
+                            @click="selectOutcomeFilter(item.value)"
+                          >
+                            <span class="kb-activity-filter-option-label">{{ item.label }}</span>
+                            <t-icon
+                              v-if="(outcome ?? '') === item.value"
+                              name="check"
+                              class="kb-activity-filter-option-check"
+                              size="14px"
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </template>
+                    <button
+                      type="button"
+                      class="kb-activity-filter-trigger"
+                      :class="{ active: Boolean(outcome) }"
+                      :aria-label="t('knowledgeEditor.activity.columns.outcome')"
+                      @click.stop
+                    >
+                      <t-icon name="filter" size="14px" />
+                    </button>
+                  </t-popup>
+                </div>
+              </template>
+              <template #empty>
+                <div class="kb-activity-empty">
+                  <t-empty :description="emptyDescription" />
+                </div>
+              </template>
               <template #created_at="{ row }">
                 <div class="audit-time">
                   <span class="audit-time-date">{{ formatDatePart(row.created_at) }}</span>
@@ -203,12 +285,15 @@ const hasMore = ref(true)
 const loading = ref(false)
 const error = ref('')
 const outcome = ref<AuditOutcome | undefined>()
+const action = ref<string | undefined>()
 const loadedOnce = ref(false)
 const pageSize = 30
 const scrollRoot = ref<HTMLElement | null>(null)
 const loadSentinel = ref<HTMLElement | null>(null)
 const detailVisible = ref(false)
 const selectedEntry = ref<KnowledgeBaseActivity | null>(null)
+const actionFilterOpen = ref(false)
+const outcomeFilterOpen = ref(false)
 let scrollObserver: IntersectionObserver | null = null
 
 const outcomeOptions = computed(() =>
@@ -218,13 +303,84 @@ const outcomeOptions = computed(() =>
   })),
 )
 
+// Column-header filter lists. Both host a leading "全部" entry (value '')
+// so picking it clears the server-side filter for that dimension.
+const outcomeFilterList = computed(() => [
+  { label: t('knowledgeEditor.activity.allOutcomes'), value: '' },
+  ...outcomeOptions.value.map(item => ({ label: item.label, value: item.value })),
+])
+
+const actionFilterList = computed(() => {
+  const bag = tm('knowledgeEditor.activity.actions') as unknown
+  const list =
+    bag !== null && typeof bag === 'object'
+      ? Object.keys(bag as Record<string, string>).map(key => ({
+          label: (bag as Record<string, string>)[key],
+          value: key,
+        }))
+      : []
+  return [{ label: t('knowledgeEditor.activity.allActions'), value: '' }, ...list]
+})
+
 const columns = computed(() => [
   { colKey: 'created_at', title: t('knowledgeEditor.activity.columns.time'), width: 116 },
-  { colKey: 'action', title: t('knowledgeEditor.activity.columns.action'), width: 132 },
+  {
+    colKey: 'action',
+    title: 'action-title',
+    width: 132,
+  },
   { colKey: 'target', title: t('knowledgeEditor.activity.columns.target'), minWidth: 180 },
   { colKey: 'actor', title: t('knowledgeEditor.activity.columns.actor'), width: 120 },
-  { colKey: 'outcome', title: t('knowledgeEditor.activity.columns.outcome'), width: 88, align: 'center' as const },
+  {
+    colKey: 'outcome',
+    title: 'outcome-title',
+    width: 108,
+    align: 'center' as const,
+  },
 ])
+
+const hasActiveFilters = computed(() => Boolean(action.value || outcome.value))
+
+const filterSummaryText = computed(() => {
+  const parts: string[] = []
+  if (action.value) {
+    parts.push(`${t('knowledgeEditor.activity.columns.action')}：${actionLabel(action.value)}`)
+  }
+  if (outcome.value) {
+    parts.push(`${t('knowledgeEditor.activity.columns.outcome')}：${outcomeLabel(outcome.value)}`)
+  }
+  return parts.join('；')
+})
+
+function selectActionFilter(value: string) {
+  actionFilterOpen.value = false
+  const next = value || undefined
+  if (action.value === next) return
+  action.value = next
+  if (props.active) reload()
+}
+
+function selectOutcomeFilter(value: string) {
+  outcomeFilterOpen.value = false
+  const next = (value || undefined) as AuditOutcome | undefined
+  if (outcome.value === next) return
+  outcome.value = next
+  if (props.active) reload()
+}
+
+const emptyDescription = computed(() =>
+  hasActiveFilters.value
+    ? t('knowledgeEditor.activity.emptyFiltered')
+    : t('knowledgeEditor.activity.empty'),
+)
+
+function clearFilters() {
+  actionFilterOpen.value = false
+  outcomeFilterOpen.value = false
+  action.value = undefined
+  outcome.value = undefined
+  if (props.active) reload()
+}
 
 const detailTitle = computed(() =>
   selectedEntry.value ? actionLabel(selectedEntry.value.action) : '',
@@ -267,7 +423,7 @@ function outcomeTheme(value: AuditOutcome): 'success' | 'danger' | 'warning' | '
 
 const taskDetailKeys = [
   'task_id', 'trigger', 'processing_status', 'source_kb_id', 'target_kb_id',
-  'sync_log_id', 'mode', 'attempt', 'count', 'total', 'processed', 'failed', 'failure_stage',
+  'sync_log_id', 'mode', 'attempt', 'count', 'total', 'processed', 'failed', 'skipped', 'failure_stage',
 ] as const
 
 function taskFields(entry: KnowledgeBaseActivity): DetailField[] {
@@ -305,22 +461,47 @@ function targetLabel(value: string): string {
 function targetSubject(entry: KnowledgeBaseActivity): string {
   const value = details(entry)
   const label = String(value.title || value.name || '').trim()
+  const count = Number(value.count ?? 0)
+  if (label && count > 1) {
+    return t('knowledgeEditor.activity.titleWithCount', { title: label, count })
+  }
   if (label) return label
-  const count = Number(value.count || 0)
-  if (count > 0) return targetLabel(entry.target_type)
-  return ''
+  // Aggregate / clone / share events carry no human-readable name — fall back
+  // to the localized object-type label so the column always has a meaningful
+  // primary subject instead of being blank or showing a raw identifier.
+  return targetLabel(entry.target_type)
 }
 
 function targetDiff(entry: KnowledgeBaseActivity): string {
   const value = details(entry)
-  const count = Number(value.count || 0)
-  if (count > 0) {
-    return t('knowledgeEditor.activity.countSummary', {
-      label: targetLabel(entry.target_type),
-      count,
-    })
+  // Data source: the connector type is more identifying than a row count.
+  if (entry.target_type === 'data_source' && value.type) {
+    return String(value.type)
   }
-  if (entry.target_id) return entry.target_id
+  // Share: surface the granted permission rather than the opaque share id.
+  if (entry.target_type === 'knowledge_base_share' && value.permission) {
+    const key = `knowledgeEditor.activity.detailValues.${String(value.permission)}`
+    return te(key) ? t(key) : String(value.permission)
+  }
+  if (entry.action.startsWith('faq.import_')) {
+    if (entry.action === 'faq.import_started' && value.total !== undefined && value.total !== null) {
+      return t('knowledgeEditor.activity.countItems', { count: Number(value.total) })
+    }
+    if (entry.action !== 'faq.import_started' && value.total !== undefined && value.total !== null) {
+      const success = Number(value.count ?? 0)
+      const failed = Number(value.failed ?? 0)
+      const skipped = Number(value.skipped ?? 0)
+      return t('knowledgeEditor.activity.importSummary', { success, failed, skipped })
+    }
+  }
+  // Aggregate events: show volume only when the primary subject has no title.
+  const count = value.count !== undefined && value.count !== null
+    ? Number(value.count)
+    : Number(value.total ?? 0)
+  if (count > 0 && !String(value.title || value.name || '').trim()) {
+    return t('knowledgeEditor.activity.countItems', { count })
+  }
+  // Deliberately no raw target_id here — identifiers live in the detail drawer.
   return ''
 }
 
@@ -456,11 +637,15 @@ async function fetchPage(reset = false) {
   if (!props.kbId || loading.value || (!reset && !hasMore.value)) return
   loading.value = true
   error.value = ''
+  if (reset) {
+    entries.value = []
+  }
   try {
     const response = await listKnowledgeBaseActivity(props.kbId, {
       limit: pageSize,
       after_id: reset ? undefined : cursor.value || undefined,
       outcome: outcome.value,
+      action: action.value,
     })
     const page = response.data || []
     entries.value = reset ? page : [...entries.value, ...page]
@@ -517,10 +702,6 @@ watch(() => props.kbId, () => {
   if (props.active) reload()
 })
 
-watch(outcome, () => {
-  if (props.active) reload()
-})
-
 watch(
   [() => props.active, () => entries.value.length, () => error.value, hasMore],
   async ([active]) => {
@@ -538,6 +719,8 @@ onUnmounted(() => detachInfiniteScroll())
 </script>
 
 <style scoped lang="less">
+@import '@/components/css/suggested-questions.less';
+
 .section-content {
   width: 100%;
 
@@ -545,8 +728,16 @@ onUnmounted(() => detachInfiniteScroll())
     margin-bottom: 16px;
   }
 
+  .kb-activity-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    max-width: 100%;
+  }
+
   .section-title {
-    margin: 0 0 6px 0;
+    margin: 0;
     font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;
@@ -560,27 +751,139 @@ onUnmounted(() => detachInfiniteScroll())
     color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
-}
 
-.kb-activity-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.kb-activity-outcome-select {
-  width: 160px;
-  max-width: 100%;
-}
-
-.kb-activity-refresh {
-  flex-shrink: 0;
+  .kb-activity-filter-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+    line-height: 20px;
+  }
 }
 
 .kb-activity-body {
   min-height: 280px;
+}
+
+.kb-activity-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 0;
+}
+
+.kb-activity-clear-filters {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--td-brand-color);
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.kb-activity-col-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+
+  &--center {
+    justify-content: center;
+    width: 100%;
+  }
+}
+
+.kb-activity-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+  }
+}
+
+.kb-activity-filter-menu {
+  min-width: 160px;
+  max-width: 280px;
+  max-height: min(360px, 60vh);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.kb-activity-filter-options {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  scrollbar-width: thin;
+}
+
+.kb-activity-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.active {
+    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+}
+
+.kb-activity-filter-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-activity-filter-option-check {
+  flex: 0 0 auto;
+  color: var(--td-brand-color);
 }
 
 .kb-activity-branch {
@@ -589,8 +892,7 @@ onUnmounted(() => detachInfiniteScroll())
   min-height: 0;
 }
 
-.kb-activity-branch--error,
-.kb-activity-branch--empty {
+.kb-activity-branch--error {
   justify-content: center;
   align-items: center;
   min-height: 240px;

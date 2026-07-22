@@ -170,6 +170,10 @@ const (
 	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
 	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"
 	AuditActionWikiContentChanged       AuditAction = "wiki.content_changed"
+
+	AuditActionFAQImportStarted   AuditAction = "faq.import_started"
+	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
+	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
 )
 
 // AuditOutcome separates asynchronous acceptance from terminal business

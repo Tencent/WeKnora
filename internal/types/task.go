@@ -305,6 +305,7 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
 	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
+	Initiator   TaskInitiator     `json:"initiator,omitempty"`
 }
 
 // QuestionGenerationPayload represents the question generation task payload
