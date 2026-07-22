@@ -57,6 +57,7 @@ type knowledgeService struct {
 	tagService      interfaces.KnowledgeTagService
 	fileSvc         interfaces.FileService
 	storageResolver interfaces.StorageBackendResolver
+	resourceCatalog interfaces.ResourceCatalog
 	modelService    interfaces.ModelService
 	task            interfaces.TaskEnqueuer
 	taskInspector   interfaces.TaskInspector
@@ -99,6 +100,7 @@ func NewKnowledgeService(
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	taskInspector interfaces.TaskInspector,
@@ -126,6 +128,7 @@ func NewKnowledgeService(
 		tagService:      tagService,
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
+		resourceCatalog: resourceCatalog,
 		modelService:    modelService,
 		task:            task,
 		taskInspector:   taskInspector,
