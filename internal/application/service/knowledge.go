@@ -76,6 +76,10 @@ type knowledgeService struct {
 	// handled because the public surface is the SpanTracker interface,
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
+
+	// deleteKnowledgeHook overrides DeleteKnowledge for unit tests of the
+	// hash_id upsert path. Production code leaves this nil.
+	deleteKnowledgeHook func(ctx context.Context, id string) error
 }
 
 const (

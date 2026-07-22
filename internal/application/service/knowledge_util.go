@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -9,8 +10,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,6 +21,15 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+// documentHashIDLine matches the first-line identity declaration:
+//
+//	hash_id = alarm-policy
+//	hash_id=alarm-policy
+//	# hash_id = alarm-policy
+var documentHashIDLine = regexp.MustCompile(`(?i)^\s*(?:#\s*)?hash_id\s*=\s*(\S+)\s*$`)
+
+const maxDocumentHashIDLen = 128
 
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
@@ -67,6 +79,56 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// supportsDocumentHashID reports whether the file type can declare a stable
+// identity via a first-line "hash_id = ..." marker. Binary formats are skipped
+// because their "first line" is not author-controlled text.
+func supportsDocumentHashID(filename string) bool {
+	switch strings.ToLower(getFileType(filename)) {
+	case "md", "markdown", "txt", "csv", "json", "html", "mhtml":
+		return true
+	default:
+		return false
+	}
+}
+
+// extractDocumentHashID reads the first line of a text upload and, when it
+// declares "hash_id = <id>", returns that id. Empty string means no identity
+// declaration (caller keeps legacy create / content-hash dedupe behavior).
+func extractDocumentHashID(file *multipart.FileHeader, filename string) (string, error) {
+	if file == nil || !supportsDocumentHashID(filename) {
+		return "", nil
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	line = strings.TrimRight(line, "\r\n")
+	// UTF-8 BOM is common in editor-saved markdown; strip before matching.
+	line = strings.TrimPrefix(line, "\ufeff")
+
+	matches := documentHashIDLine.FindStringSubmatch(line)
+	if len(matches) != 2 {
+		return "", nil
+	}
+	hashID := strings.TrimSpace(matches[1])
+	if hashID == "" || utf8.RuneCountInString(hashID) > maxDocumentHashIDLen {
+		return "", nil
+	}
+	// Reject values that would be unsafe in metadata / logs.
+	if safe, ok := secutils.ValidateInput(hashID); !ok || safe != hashID {
+		return "", nil
+	}
+	return hashID, nil
 }
 
 func calculateStr(strList ...string) string {
