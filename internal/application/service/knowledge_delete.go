@@ -156,22 +156,6 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		return nil
 	})
 
-	// Delete the physical file and extracted images if they exist
-	wg.Go(func() error {
-		if knowledge.FilePath != "" {
-			if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
-			}
-		}
-		deleteExtractedImages(ctx, kbFileSvc, imageURLs)
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		tenantInfo.StorageUsed -= knowledge.StorageSize
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
-		}
-		return nil
-	})
-
 	// Delete the knowledge graph
 	wg.Go(func() error {
 		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
@@ -188,8 +172,32 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
 	}
-	// Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
+	// Delete the knowledge row FIRST, then drop its physical file. Physical
+	// cleanup is deliberately deferred until the row is gone: if any of the
+	// index/chunk/graph cleanups above failed we already returned early with the
+	// row (and its file) intact, so the queued retry — or a user-triggered
+	// reparse — can still read the original file. Deleting the file before the
+	// row could leave a "file missing but row present" zombie that can neither be
+	// reparsed nor cleanly re-deleted (issue #2192). Orphaning a file after the
+	// row is gone is the tolerable failure mode instead.
+	if err := s.repo.DeleteKnowledge(ctx, tenantID, id); err != nil {
+		return err
+	}
+
+	// Best-effort physical cleanup. Errors here only leak storage; they must not
+	// fail the delete now that the row is already gone.
+	if knowledge.FilePath != "" {
+		if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
+		}
+	}
+	deleteExtractedImages(ctx, kbFileSvc, imageURLs)
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantInfo.StorageUsed -= knowledge.StorageSize
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+	}
+	return nil
 }
 
 // cleanupWikiOnKnowledgeDelete handles wiki pages when a source document is deleted.
@@ -557,34 +565,6 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// 5. Delete the physical file and extracted images if they exist
-	wg.Go(func() error {
-		storageAdjust := int64(0)
-		for _, knowledge := range knowledgeList {
-			if knowledge.FilePath != "" {
-				fSvc := kbFileServices[knowledge.KnowledgeBaseID]
-				if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-					logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
-				}
-			}
-			storageAdjust -= knowledge.StorageSize
-		}
-		// Delete extracted images per KB
-		for kbID, urls := range kbImageURLs {
-			fSvc := kbFileServices[kbID]
-			if fSvc == nil {
-				logger.Warnf(ctx, "No file service for KB %s, skipping %d image deletions", kbID, len(urls))
-				continue
-			}
-			deleteExtractedImages(ctx, fSvc, urls)
-		}
-		tenantInfo.StorageUsed += storageAdjust
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
-		}
-		return nil
-	})
-
 	// Delete the knowledge graph
 	wg.Go(func() error {
 		namespaces := []types.NameSpace{}
@@ -609,8 +589,39 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
 		}
 	}
-	// 6. Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids)
+	// 6. Delete the knowledge rows FIRST, then drop their physical files. See
+	// DeleteKnowledge for the rationale: deferring file removal until the rows are
+	// gone avoids "file missing but row present" zombies that break reparse /
+	// re-delete when an earlier cleanup step failed (issue #2192). A failure below
+	// only orphans storage.
+	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
+		return err
+	}
+
+	storageAdjust := int64(0)
+	for _, knowledge := range knowledgeList {
+		if knowledge.FilePath != "" {
+			fSvc := kbFileServices[knowledge.KnowledgeBaseID]
+			if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
+			}
+		}
+		storageAdjust -= knowledge.StorageSize
+	}
+	// Delete extracted images per KB
+	for kbID, urls := range kbImageURLs {
+		fSvc := kbFileServices[kbID]
+		if fSvc == nil {
+			logger.Warnf(ctx, "No file service for KB %s, skipping %d image deletions", kbID, len(urls))
+			continue
+		}
+		deleteExtractedImages(ctx, fSvc, urls)
+	}
+	tenantInfo.StorageUsed += storageAdjust
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+	}
+	return nil
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {

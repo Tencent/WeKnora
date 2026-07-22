@@ -136,6 +136,13 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	}
 	if filter.ParseStatus != "" {
 		query = query.Where("parse_status = ?", filter.ParseStatus)
+	} else {
+		// Hide rows that are mid-deletion so an async delete never lingers in the
+		// document list as if it were a normal entry (issue #2192). The delete
+		// pipeline marks the row `deleting` before tearing down its resources; a
+		// row whose delete task exhausts its retries is flipped to `failed` by the
+		// dead-letter callback and stays visible so the failure remains actionable.
+		query = query.Where("parse_status <> ?", types.ParseStatusDeleting)
 	}
 	if !filter.UpdatedFrom.IsZero() {
 		query = query.Where("updated_at >= ?", filter.UpdatedFrom)
