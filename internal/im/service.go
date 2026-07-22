@@ -1489,7 +1489,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	}
 
 	// 4. Get the WeKnora session
-	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+	session, err := s.sessionService.GetSessionByID(sessionCtx, tenantID, channelSession.SessionID)
 	if err != nil {
 		// The underlying session may have been deleted from the UI while the
 		// ChannelSession mapping still exists (GORM soft-delete does not trigger
@@ -1506,7 +1506,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			if err != nil {
 				return fmt.Errorf("resolve session (retry): %w", err)
 			}
-			session, err = s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+			session, err = s.sessionService.GetSessionByID(sessionCtx, tenantID, channelSession.SessionID)
 			if err != nil {
 				return fmt.Errorf("get session (retry): %w", err)
 			}
