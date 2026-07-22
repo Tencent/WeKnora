@@ -2949,6 +2949,9 @@ definitions:
           type: number
         type: array
       query_text:
+        description: |-
+          QueryText is required unless query_embedding is provided, keyword matching is disabled,
+          and vector matching remains enabled.
         type: string
       scope_tag_ids:
         items:
