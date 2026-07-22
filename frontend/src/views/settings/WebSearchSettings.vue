@@ -277,6 +277,18 @@
               {{ configFieldText(field.description_key, field.description) }}
             </p>
           </div>
+          <div v-if="providerForm.provider === 'serpapi'" class="form-item">
+            <label class="form-label required">{{ t('webSearchSettings.serpApiEngineLabel') }}</label>
+            <t-select v-model="providerForm.parameters.extra_config!.engine">
+              <t-option
+                v-for="option in serpApiEngineOptions"
+                :key="option.value"
+                :value="option.value"
+                :label="option.label"
+              />
+            </t-select>
+            <p class="form-desc">{{ t('webSearchSettings.serpApiEngineHelp') }}</p>
+          </div>
         </section>
 
         <!-- Section 3 — 选项（代理 / 默认） -->
@@ -395,6 +407,18 @@ const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
 
+const serpApiEngineOptions = computed(() => [
+  { value: 'google', label: t('webSearchSettings.serpApiEngines.google') },
+  { value: 'google_news', label: t('webSearchSettings.serpApiEngines.googleNews') },
+  { value: 'google_scholar', label: t('webSearchSettings.serpApiEngines.googleScholar') },
+  { value: 'google_patents', label: t('webSearchSettings.serpApiEngines.googlePatents') },
+  { value: 'bing', label: t('webSearchSettings.serpApiEngines.bing') },
+  { value: 'duckduckgo', label: t('webSearchSettings.serpApiEngines.duckduckgo') },
+  { value: 'google_images', label: t('webSearchSettings.serpApiEngines.googleImages') },
+  { value: 'google_videos', label: t('webSearchSettings.serpApiEngines.googleVideos') },
+  { value: 'youtube', label: t('webSearchSettings.serpApiEngines.youtube') },
+])
+
 // Create-mode placeholder (edit mode replaces the input with
 // <CredentialResource>, which has its own placeholder).
 const apiKeyPlaceholder = computed(() => t('webSearchSettings.apiKeyPlaceholder'))
@@ -502,9 +526,9 @@ const providerConfigDefaults = (providerId: string) => {
 
 // ===== Methods =====
 const onProviderTypeChange = () => {
-  providerForm.value.parameters = {
-    extra_config: providerConfigDefaults(providerForm.value.provider),
-  }
+  const extraConfig = providerConfigDefaults(providerForm.value.provider)
+  if (providerForm.value.provider === 'serpapi') extraConfig.engine = 'google'
+  providerForm.value.parameters = { extra_config: extraConfig }
   lastTestOk.value = null
 }
 
@@ -583,6 +607,9 @@ const saveProvider = async () => {
       engine_id: providerForm.value.parameters.engine_id,
       base_url: providerForm.value.parameters.base_url,
       proxy_url: providerForm.value.parameters.proxy_url,
+      extra_config: providerForm.value.provider === 'serpapi'
+        ? { engine: providerForm.value.parameters.extra_config?.engine || 'google' }
+        : undefined,
     }
     const extraConfig = Object.fromEntries(
       Object.entries(providerForm.value.parameters.extra_config || {})
@@ -919,6 +946,10 @@ onMounted(async () => {
   background: rgba(37, 99, 235, 0.12);
   color: #2563EB;
 }
+.provider-card--serpapi .provider-card__badge {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
 
 .provider-card__body {
   flex: 1;
@@ -1200,5 +1231,9 @@ onMounted(async () => {
 .websearch-drawer--zhipu .setting-drawer__header-icon {
   background: rgba(37, 99, 235, 0.12);
   color: #2563EB;
+}
+.websearch-drawer--serpapi .setting-drawer__header-icon {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
 }
 </style>

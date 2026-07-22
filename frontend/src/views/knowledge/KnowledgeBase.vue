@@ -35,6 +35,7 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  updateKnowledgeContentTypeBatch,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -45,6 +46,7 @@ import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import type { KnowledgeRebuildStage } from '@/api/knowledge-base';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
@@ -57,6 +59,7 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import { contentTypeOptions, setContentClassification, type KnowledgeContentType } from '@/types/contentType';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -407,6 +410,10 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchContentTypeLoading = ref(false);
+const batchContentTypeDialogVisible = ref(false);
+const batchContentType = ref<KnowledgeContentType | ''>('');
+const availableContentTypes = computed(() => contentTypeOptions(t));
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -460,24 +467,11 @@ const confirmBatchReparse = async () => {
   if (skipped > 0) {
     MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
   }
-  batchReparsing.value = true;
-  try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
-      clearSelection();
-      batchMode.value = false;
-      scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
-    }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
-  } finally {
-    batchReparsing.value = false;
-  }
+  rebuildTarget.value = null;
+  rebuildTargetIds.value = ids;
+  rebuildMode.value = 'partial';
+  rebuildStages.value = [];
+  rebuildDialogVisible.value = true;
 };
 
 const tagFilterPanelVisible = ref(false);
@@ -1172,6 +1166,13 @@ const openCardDetails = (item: KnowledgeCard) => {
   getCardDetails(item);
 };
 
+const handleDocumentUpdated = async (knowledgeId: string) => {
+  resetPage();
+  await loadKnowledgeFiles(kbId.value);
+  const item = cardList.value.find((card: KnowledgeCard) => card.id === knowledgeId);
+  if (isCardDetails.value) getCardDetails(item || { id: knowledgeId });
+};
+
 // Open source document preview from WikiBrowser
 const openSourceDoc = (knowledgeId: string) => {
   isCardDetails.value = true;
@@ -1629,7 +1630,14 @@ const handleViewTrace = (index: number, item: KnowledgeCard) => {
   });
 };
 
-const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
+const rebuildDialogVisible = ref(false);
+const rebuildMode = ref<'full' | 'partial'>('partial');
+const rebuildStages = ref<KnowledgeRebuildStage[]>([]);
+const rebuildLoading = ref(false);
+const rebuildTarget = ref<KnowledgeCard | null>(null);
+const rebuildTargetIds = ref<string[]>([]);
+
+const confirmRebuildKnowledge = (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
   if (!item?.id) {
@@ -1642,6 +1650,46 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   }
   closeCardMoreMenu(index);
 
+  rebuildTarget.value = item;
+  rebuildTargetIds.value = [];
+  rebuildMode.value = 'partial';
+  rebuildStages.value = [];
+  rebuildDialogVisible.value = true;
+};
+
+const openBatchContentTypeDialog = () => {
+  if (selectedIds.value.size === 0) return;
+  batchContentType.value = '';
+  batchContentTypeDialogVisible.value = true;
+};
+
+const submitBatchContentType = async () => {
+  if (!batchContentType.value || selectedIds.value.size === 0) {
+    MessagePlugin.warning(t('knowledgeBase.contentTypeRequired'));
+    return;
+  }
+  const ids = Array.from(selectedIds.value);
+  batchContentTypeLoading.value = true;
+  try {
+    await updateKnowledgeContentTypeBatch(kbId.value, ids, batchContentType.value);
+    const idSet = new Set(ids);
+    for (const item of cardList.value) {
+      if (idSet.has(item.id)) {
+        item.metadata = setContentClassification(item.metadata, batchContentType.value);
+      }
+    }
+    batchContentTypeDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    MessagePlugin.success(t('knowledgeBase.batchContentTypeSuccess', { count: ids.length }));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.contentTypeUpdateFailed'));
+  } finally {
+    batchContentTypeLoading.value = false;
+  }
+};
+
+const submitFullRebuild = async (item: KnowledgeCard) => {
   // No KB context to seed the dialog defaults — fall back to a direct reparse
   // that reuses the overrides stored at upload time.
   if (!kbInfo.value) {
@@ -1678,17 +1726,75 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   }
 };
 
-const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrides) => {
+const submitRebuildChoice = async () => {
+  const item = rebuildTarget.value;
+  const batchIds = rebuildTargetIds.value;
+  if (!item?.id && batchIds.length === 0) return;
+  if (rebuildMode.value === 'partial' && rebuildStages.value.length === 0) {
+    MessagePlugin.warning(t('knowledgeStages.rebuildSelectOne'));
+    return;
+  }
+
+  rebuildLoading.value = true;
   try {
-    await reparseKnowledge(id, processConfig ? { process_config: processConfig } : undefined);
+    if (batchIds.length > 0) {
+      if (rebuildMode.value === 'partial') {
+        await Promise.all(batchIds.map((id) => reparseKnowledge(id, { stages: rebuildStages.value })));
+      } else {
+        const result: any = await batchReparseKnowledge(kbId.value, batchIds);
+        if (!result?.success) throw new Error(result?.message || t('knowledgeBase.batchReparseFailed'));
+      }
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: batchIds.length }));
+      applyOptimisticBatchReparse(batchIds);
+      clearSelection();
+      batchMode.value = false;
+      rebuildDialogVisible.value = false;
+      rebuildTargetIds.value = [];
+      scheduleWikiStatusProbes();
+      void awaitBatchReparseReflection(batchIds);
+      return;
+    }
+    if (!item) return;
+    if (rebuildMode.value === 'partial') {
+      const submitted = await submitReparse(item.id, undefined, rebuildStages.value);
+      if (submitted) {
+        rebuildDialogVisible.value = false;
+        rebuildTarget.value = null;
+        rebuildTargetIds.value = [];
+      }
+      return;
+    }
+
+    rebuildDialogVisible.value = false;
+    rebuildTarget.value = null;
+    rebuildTargetIds.value = [];
+    await submitFullRebuild(item);
+  } finally {
+    rebuildLoading.value = false;
+  }
+};
+
+const submitReparse = async (
+  id: string,
+  processConfig?: KnowledgeProcessOverrides,
+  stages?: KnowledgeRebuildStage[],
+) => {
+  try {
+    const options = {
+      ...(processConfig ? { process_config: processConfig } : {}),
+      ...(stages?.length ? { stages } : {}),
+    };
+    await reparseKnowledge(id, Object.keys(options).length > 0 ? options : undefined);
     delete traceAvailableById[id];
     traceAvailableById[id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
     resetPage();
     loadKnowledgeFiles(kbId.value);
     scheduleWikiStatusProbes();
+    return true;
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
+    return false;
   }
 };
 
@@ -2292,8 +2398,10 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :content-type-loading="batchContentTypeLoading"
+                  :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
+                  @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @content-type="openBatchContentTypeDialog" />
               </div>
             </div>
           </div>
@@ -2302,7 +2410,7 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+        @closeDoc="closeDoc" @getDoc="getDoc" @documentUpdated="handleDocumentUpdated">
       </DocContent>
     </div>
   </template>
@@ -2332,6 +2440,33 @@ async function createNewSession(value: string): Promise<void> {
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
   />
+
+  <t-dialog v-model:visible="rebuildDialogVisible" :header="t('knowledgeStages.rebuildDialogTitle')"
+    :confirm-btn="{ content: t('knowledgeStages.rebuildSubmit'), loading: rebuildLoading }"
+    :cancel-btn="{ content: t('common.cancel') }" width="460px" @confirm="submitRebuildChoice">
+    <div class="kb-rebuild-dialog">
+      <t-radio-group v-model="rebuildMode" variant="default-filled">
+        <t-radio value="full">{{ t('knowledgeStages.rebuildFull') }}</t-radio>
+        <t-radio value="partial">{{ t('knowledgeStages.rebuildPartial') }}</t-radio>
+      </t-radio-group>
+      <t-checkbox-group v-if="rebuildMode === 'partial'" v-model="rebuildStages" class="kb-rebuild-options">
+        <t-checkbox value="embedding">{{ t('knowledgeStages.stageEmbedding') }}</t-checkbox>
+        <t-checkbox value="summary">{{ t('knowledgeStages.stageSummary') }}</t-checkbox>
+        <t-checkbox value="questions">{{ t('knowledgeStages.stageQuestions') }}</t-checkbox>
+        <t-checkbox value="graph">{{ t('knowledgeStages.stageGraph') }}</t-checkbox>
+        <t-checkbox value="wiki">{{ t('knowledgeStages.stageWiki') }}</t-checkbox>
+        <t-checkbox value="journal_rank">{{ t('knowledgeStages.stageJournalRank') }}</t-checkbox>
+        <t-checkbox value="content_type">{{ t('knowledgeStages.stageContentType') }}</t-checkbox>
+      </t-checkbox-group>
+    </div>
+  </t-dialog>
+
+  <t-dialog v-model:visible="batchContentTypeDialogVisible" :header="t('knowledgeBase.batchSetContentType')"
+    :confirm-btn="{ content: t('common.confirm'), loading: batchContentTypeLoading }"
+    :cancel-btn="{ content: t('common.cancel') }" width="420px" @confirm="submitBatchContentType">
+    <t-select v-model="batchContentType" :options="availableContentTypes"
+      :placeholder="t('knowledgeBase.contentTypePlaceholder')" />
+  </t-dialog>
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -2378,6 +2513,19 @@ async function createNewSession(value: string): Promise<void> {
 }
 </style>
 <style scoped lang="less">
+.kb-rebuild-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kb-rebuild-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  width: 100%;
+}
+
 .knowledge-layout {
   display: flex;
   flex-direction: column;
@@ -2725,7 +2873,7 @@ async function createNewSession(value: string): Promise<void> {
     flex-shrink: 0;
   }
 
-  @media (min-width: 1280px) {
+  @media (min-width: 1600px) {
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
@@ -2821,7 +2969,7 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  @media (min-width: 1280px) {
+  @media (min-width: 1600px) {
     .doc-search-input {
       flex: 1 1 220px;
       min-width: 220px;

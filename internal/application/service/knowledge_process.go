@@ -677,6 +677,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			Language:        lang,
 			Attempt:         attemptFromCtx(ctx),
 		}
+		if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+			postProcessPayload.EasyScholarSecretKey = strings.TrimSpace(overrides["easyscholar_secret_key"])
+		}
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
@@ -1970,8 +1973,18 @@ func (s *knowledgeService) ReparseKnowledge(
 	ctx context.Context,
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	requestedStages ...[]string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
+
+	var requested []string
+	if len(requestedStages) > 0 {
+		requested = requestedStages[0]
+	}
+	rebuildPlan, err := types.PlanKnowledgeRebuild(requested)
+	if err != nil {
+		return nil, werrors.NewBadRequestError(err.Error())
+	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
@@ -1989,6 +2002,13 @@ func (s *knowledgeService) ReparseKnowledge(
 	reparseAttempt := 0
 	if root, n, err := s.tracker().OpenAttempt(ctx, existing.ID, ""); err == nil && root != nil {
 		reparseAttempt = n
+		if !rebuildPlan.Full {
+			for _, stage := range []string{types.StageDocReader, types.StageChunking, types.StageEmbedding, types.StageMultimodal, types.StagePostProcess} {
+				if !rebuildPlan.Includes(stage) {
+					s.tracker().SkipSpan(ctx, s.tracker().BeginStage(ctx, existing.ID, n, stage, nil), "not_selected")
+				}
+			}
+		}
 	} else if err != nil {
 		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
 	}
@@ -2019,7 +2039,85 @@ func (s *knowledgeService) ReparseKnowledge(
 	}
 
 	processOverrides, _ = existing.ProcessOverrides()
+	// Tenant parser settings may have changed after this knowledge was uploaded.
+	// Sync the current EasyScholar key before a rebuild so post-processing of
+	// existing documents can use the newly configured journal-rank provider.
+	if tenantOverrides := s.getParserEngineOverridesFromContext(ctx); tenantOverrides != nil {
+		if secretKey := strings.TrimSpace(tenantOverrides["easyscholar_secret_key"]); secretKey != "" {
+			if processOverrides == nil {
+				processOverrides = &types.KnowledgeProcessOverrides{}
+			}
+			if processOverrides.ParserEngineOverrides == nil {
+				processOverrides.ParserEngineOverrides = make(map[string]string)
+			}
+			processOverrides.ParserEngineOverrides["easyscholar_secret_key"] = secretKey
+			if err := existing.SetProcessOverrides(processOverrides); err != nil {
+				return nil, err
+			}
+			if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", existing.Metadata); err != nil {
+				return nil, err
+			}
+		}
+	}
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
+
+	// Embedding and post-process rebuilds reuse persisted chunks. They must not
+	// call cleanupKnowledgeResources, otherwise the very input being reused
+	// would be deleted before the worker starts.
+	if !rebuildPlan.Full {
+		if rebuildPlan.Includes(types.StageEmbedding) && !kb.NeedsEmbeddingModel() {
+			return nil, werrors.NewBadRequestError("knowledge base does not have embedding indexing enabled")
+		}
+		if rebuildPlan.IncludesPostProcess(types.RebuildStageWiki) && kb.IsWikiEnabled() {
+			s.prepareWikiForReparse(ctx, existing)
+		}
+		// Keep the persisted state so a serialization or queue failure does
+		// not strand an otherwise usable document in pending/disabled.
+		previousStatus := existing.ParseStatus
+		previousEnableStatus := existing.EnableStatus
+		previousPendingSubtasks := existing.PendingSubtasksCount
+		previousErrorMessage := existing.ErrorMessage
+		previousUpdatedAt := existing.UpdatedAt
+		now := time.Now()
+		if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{
+			"parse_status":           types.ParseStatusPending,
+			"enable_status":          "disabled",
+			"pending_subtasks_count": 0,
+			"error_message":          "",
+			"updated_at":             now,
+		}); err != nil {
+			return nil, err
+		}
+		existing.ParseStatus = types.ParseStatusPending
+		existing.EnableStatus = "disabled"
+		existing.PendingSubtasksCount = 0
+		existing.ErrorMessage = ""
+		existing.UpdatedAt = now
+
+		lang, _ := types.LanguageFromContext(ctx)
+		taskPayload := types.DocumentProcessPayload{
+			TenantID:          tenantID,
+			KnowledgeID:       existing.ID,
+			KnowledgeBaseID:   existing.KnowledgeBaseID,
+			Language:          lang,
+			Attempt:           reparseAttempt,
+			RebuildStages:     rebuildPlan.Stages,
+			PostProcessStages: rebuildPlan.PostProcessStages,
+		}
+		langfuse.InjectTracing(ctx, &taskPayload)
+		payloadBytes, marshalErr := json.Marshal(taskPayload)
+		if marshalErr != nil {
+			s.rollbackPartialRebuildState(ctx, existing.ID, reparseAttempt, previousStatus, previousEnableStatus, previousPendingSubtasks, previousErrorMessage, previousUpdatedAt)
+			return nil, marshalErr
+		}
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
+		if _, enqueueErr := s.task.Enqueue(task); enqueueErr != nil {
+			s.rollbackPartialRebuildState(ctx, existing.ID, reparseAttempt, previousStatus, previousEnableStatus, previousPendingSubtasks, previousErrorMessage, previousUpdatedAt)
+			return nil, enqueueErr
+		}
+		return existing, nil
+	}
 
 	// Keep wiki's pending queue consistent across both manual and non-manual
 	// paths. The destructive work (swapping old wiki contributions for new)
@@ -2253,6 +2351,52 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
 	return existing, nil
+}
+
+func (s *knowledgeService) rollbackPartialRebuildState(
+	ctx context.Context,
+	knowledgeID string,
+	attempt int,
+	parseStatus string,
+	enableStatus string,
+	pendingSubtasks int,
+	errorMessage string,
+	updatedAt time.Time,
+) {
+	if err := s.repo.UpdateKnowledgeColumns(ctx, knowledgeID, map[string]interface{}{
+		"parse_status":           parseStatus,
+		"enable_status":          enableStatus,
+		"pending_subtasks_count": pendingSubtasks,
+		"error_message":          errorMessage,
+		"updated_at":             updatedAt,
+	}); err != nil {
+		logger.Warnf(ctx, "[Reparse] Failed to roll back partial rebuild state for %s: %v", knowledgeID, err)
+	}
+	if attempt > 0 {
+		s.tracker().FinalizeAttempt(ctx, knowledgeID, attempt, types.SpanStatusFailed, nil,
+			"REBUILD_ENQUEUE_FAILED", "partial rebuild task could not be queued")
+	}
+}
+
+func (s *knowledgeService) failPartialRebuild(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	attempt int,
+	rebuildErr error,
+) {
+	knowledge.ParseStatus = types.ParseStatusFailed
+	// Partial rebuilds retain the previously persisted chunks and indexes.
+	// Keep them retrievable even when the requested refresh exhausts retries.
+	knowledge.EnableStatus = "enabled"
+	knowledge.ErrorMessage = rebuildErr.Error()
+	knowledge.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		logger.Warnf(ctx, "[Reparse] Failed to persist partial rebuild failure for %s: %v", knowledge.ID, err)
+	}
+	if attempt > 0 {
+		s.tracker().FinalizeAttempt(ctx, knowledge.ID, attempt, types.SpanStatusFailed, nil,
+			"PARTIAL_REBUILD_FAILED", "partial rebuild failed; existing document content remains enabled")
+	}
 }
 
 // CancelKnowledgeParse marks an in-progress parse as cancelled by the user.
@@ -2679,6 +2823,68 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	return nil
 }
 
+// processPartialRebuild reuses persisted chunks for the stages that do not
+// require transient DocReader output. The normal document pipeline remains
+// untouched when RebuildStages is empty.
+func (s *knowledgeService) processPartialRebuild(ctx context.Context, payload types.DocumentProcessPayload, knowledge *types.Knowledge, kb *types.KnowledgeBase, attempt int) error {
+	plan, err := types.PlanKnowledgeRebuild(payload.RebuildStages)
+	if err != nil || plan.Full {
+		return fmt.Errorf("invalid partial rebuild plan")
+	}
+	if payload.PostProcessStages != nil {
+		plan.PostProcessStages = append([]string(nil), payload.PostProcessStages...)
+	}
+	if plan.Includes(types.StageEmbedding) {
+		span := s.tracker().BeginStage(ctx, knowledge.ID, attempt, types.StageEmbedding, nil)
+		chunks, listErr := s.chunkService.ListChunksByKnowledgeID(ctx, knowledge.ID)
+		if listErr != nil {
+			s.tracker().FailSpan(ctx, span, "EMBEDDING_REBUILD_FAILED", "failed to list chunks", listErr)
+			return listErr
+		}
+		if updateErr := s.updateChunkVector(ctx, kb.ID, chunks); updateErr != nil {
+			s.tracker().FailSpan(ctx, span, "EMBEDDING_REBUILD_FAILED", "failed to rebuild embeddings", updateErr)
+			return updateErr
+		}
+		s.tracker().EndSpan(ctx, span, types.JSONMap{"chunks_total": len(chunks)})
+	}
+
+	if plan.Includes(types.StagePostProcess) {
+		lang, _ := types.LanguageFromContext(ctx)
+		postPayload := types.KnowledgePostProcessPayload{
+			TenantID:          payload.TenantID,
+			KnowledgeID:       payload.KnowledgeID,
+			KnowledgeBaseID:   payload.KnowledgeBaseID,
+			Language:          lang,
+			Attempt:           attempt,
+			PostProcessStages: plan.PostProcessStages,
+		}
+		if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+			postPayload.EasyScholarSecretKey = strings.TrimSpace(overrides["easyscholar_secret_key"])
+		}
+		langfuse.InjectTracing(ctx, &postPayload)
+		payloadBytes, marshalErr := json.Marshal(postPayload)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, knowledgePostProcessTaskOptions()...)
+		if _, enqueueErr := s.task.Enqueue(task); enqueueErr != nil {
+			return enqueueErr
+		}
+		return nil
+	}
+
+	if err := s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+		"parse_status":  types.ParseStatusCompleted,
+		"enable_status": "enabled",
+		"updated_at":    time.Now(),
+	}); err != nil {
+		return err
+	}
+	s.tracker().FinalizeAttempt(ctx, knowledge.ID, attempt, types.SpanStatusDone,
+		types.JSONMap{"partial_rebuild": true}, "", "")
+	return nil
+}
+
 // ProcessDocument handles Asynq document processing tasks
 func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) error {
 	var payload types.DocumentProcessPayload
@@ -2797,6 +3003,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 	ctx = withAttempt(ctx, attempt)
+	if len(payload.RebuildStages) > 0 {
+		if err := s.processPartialRebuild(ctx, payload, knowledge, kb, attempt); err != nil {
+			s.failPartialRebuild(ctx, knowledge, attempt, err)
+			return err
+		}
+		return nil
+	}
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
@@ -3376,6 +3589,12 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			EnableOCR:       true,
 			EnableCaption:   true,
 			Language:        lang,
+			EasyScholarSecretKey: func() string {
+				if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+					return strings.TrimSpace(overrides["easyscholar_secret_key"])
+				}
+				return ""
+			}(),
 			ImageSourceType: metadata["image_source_type"],
 			Attempt:         attempt,
 			ImageIndex:      idx,

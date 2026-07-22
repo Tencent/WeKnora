@@ -307,6 +307,7 @@ type ParserEngineConfig struct {
 	ChatParserEngineRules []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
 	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
 	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
+	EasyScholarSecretKey  string             `json:"easyscholar_secret_key,omitempty"` // EasyScholar journal-rank API key
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
@@ -369,6 +370,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUAPIKey != "" {
 		m["mineru_api_key"] = c.MinerUAPIKey
+	}
+	if c.EasyScholarSecretKey != "" {
+		m["easyscholar_secret_key"] = c.EasyScholarSecretKey
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel

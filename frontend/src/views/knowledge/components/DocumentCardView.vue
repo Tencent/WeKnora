@@ -5,6 +5,8 @@ import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import JournalRankBadges from './JournalRankBadges.vue';
+import type { KnowledgeJournalMetadata } from '@/types/journalRank';
 
 interface Tag {
   id: string;
@@ -26,7 +28,7 @@ interface KnowledgeCard {
   updated_at?: string;
   file_type?: string;
   isMore?: boolean;
-  metadata?: any;
+  metadata?: KnowledgeJournalMetadata;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
   source?: string;
@@ -391,6 +393,14 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
           </t-popup>
         </div>
 
+        <JournalRankBadges
+          v-if="item.metadata?.journal_rank?.found"
+          class="card-journal-ranks"
+          :rank="item.metadata.journal_rank"
+          :max-visible="4"
+          compact
+        />
+
         <!-- Parse status display -->
         <div v-if="isParseInFlight(item.parse_status)" class="card-analyze card-analyze-trace">
           <t-icon name="loading" class="card-analyze-loading"></t-icon>
@@ -738,6 +748,11 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     font-weight: 600;
     letter-spacing: 0.01em;
     margin-right: 8px;
+  }
+
+  .card-journal-ranks {
+    flex-shrink: 0;
+    margin-bottom: 7px;
   }
 
   .more-wrap {

@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/journalrank"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -25,6 +29,20 @@ type KnowledgePostProcessService struct {
 	pendingRepo   interfaces.TaskPendingOpsRepository
 	redisClient   *redis.Client
 	spanTracker   SpanTracker
+	journalClient *journalrank.Client
+	modelService  interfaces.ModelService
+}
+
+func postProcessUpdatesSummaryStatus(requestedStages []string) bool {
+	if len(requestedStages) == 0 {
+		return true
+	}
+	for _, stage := range requestedStages {
+		if stage == types.RebuildStageSummary {
+			return true
+		}
+	}
+	return false
 }
 
 func NewKnowledgePostProcessService(
@@ -35,6 +53,8 @@ func NewKnowledgePostProcessService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	journalClient *journalrank.Client,
+	modelService interfaces.ModelService,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
 		knowledgeRepo: knowledgeRepo,
@@ -44,6 +64,8 @@ func NewKnowledgePostProcessService(
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
 		spanTracker:   spanTracker,
+		journalClient: journalClient,
+		modelService:  modelService,
 	}
 }
 
@@ -142,6 +164,25 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
+	journalSecretKey := strings.TrimSpace(payload.EasyScholarSecretKey)
+	if processOverrides != nil {
+		if journalSecretKey == "" {
+			journalSecretKey = strings.TrimSpace(processOverrides.ParserEngineOverrides["easyscholar_secret_key"])
+		}
+	}
+	postStages := payload.PostProcessStages
+	updateSummaryStatus := postProcessUpdatesSummaryStatus(postStages)
+	if len(postStages) == 0 {
+		postStages = []string{types.RebuildStageSummary, types.RebuildStageQuestions, types.RebuildStageGraph, types.RebuildStageWiki, types.RebuildStageJournalRank, types.RebuildStageContentType}
+	}
+	hasPostStage := func(stage string) bool {
+		for _, selected := range postStages {
+			if selected == stage {
+				return true
+			}
+		}
+		return false
+	}
 
 	// 2. Fetch all chunks
 	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
@@ -155,6 +196,15 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if c.ChunkType == types.ChunkTypeText || c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
 			textChunks = append(textChunks, c)
 		}
+	}
+
+	journalMatched, journalReason := false, "not_selected"
+	if hasPostStage(types.RebuildStageJournalRank) {
+		journalMatched, journalReason = s.enrichJournalRank(ctx, knowledge, textChunks, postSpan, journalSecretKey)
+	}
+	contentTypeMatched, contentTypeReason := false, "not_selected"
+	if hasPostStage(types.RebuildStageContentType) {
+		contentTypeMatched, contentTypeReason = s.enrichContentType(ctx, knowledge, kb, textChunks, postSpan)
 	}
 
 	// 3. Compute the enrichment subtask count up front so we can flip to
@@ -172,10 +222,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    until wiki generation actually finishes instead of flipping to
 	//    completed while wiki runs minutes later. A wiki op that never
 	//    drains is bounded by the housekeeping finalizing sweep.
-	willSpawnSummary := len(textChunks) > 0
-	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
+	hasTextChunks := len(textChunks) > 0
+	willSpawnSummary := hasPostStage(types.RebuildStageSummary) && hasTextChunks
+	willSpawnQuestion := hasPostStage(types.RebuildStageQuestions) && hasTextChunks && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
-	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	willSpawnWiki := hasPostStage(types.RebuildStageWiki) && kb.IndexingStrategy.WikiEnabled && hasTextChunks
 
 	// Question generation now fans out one subtask per plain text chunk
 	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
@@ -203,7 +254,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	questionBatchCount := (len(questionChunks) + questionGenChunkBatchSize - 1) / questionGenChunkBatchSize
 
 	graphChunkCount := 0
-	if eff.GraphEnabled {
+	if hasPostStage(types.RebuildStageGraph) && eff.GraphEnabled {
 		graphChunkCount = len(textChunks)
 	}
 	expectedSubtasks := 0
@@ -244,10 +295,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		// Nothing to enrich — fast path keeps the previous behavior so
 		// users without summary/question/graph see 'completed' immediately.
 		updates := map[string]interface{}{
-			"parse_status": types.ParseStatusCompleted,
-			"updated_at":   time.Now(),
+			"parse_status":  types.ParseStatusCompleted,
+			"enable_status": "enabled",
+			"updated_at":    time.Now(),
 		}
-		if len(textChunks) > 0 {
+		if len(textChunks) > 0 && updateSummaryStatus {
 			updates["summary_status"] = types.SummaryStatusNone
 		}
 		if err := s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates); err != nil {
@@ -273,10 +325,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			if willSpawnSummary {
 				summaryStatus = types.SummaryStatusPending
 			}
-			if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
-				payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
-				logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
-					payload.KnowledgeID, err)
+			if updateSummaryStatus {
+				if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
+					payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
+					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
+						payload.KnowledgeID, err)
+				}
 			}
 			logger.Infof(ctx,
 				"[KnowledgePostProcess] Knowledge %s entered finalizing (pending_subtasks=%d).",
@@ -304,25 +358,25 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	enqueuedQuestionCount := 0
 	if willSpawnSummary {
 		enqueuedSummary = s.enqueueSummaryGenerationTask(ctx, payload, attempt)
-		if willSpawnQuestion {
-			// Create the postprocess.question grouping span up front so the
-			// per-batch subspans (enqueued just below, run later in their own
-			// workers) have a parent to nest under. It's begun and ended right
-			// here as a structural container — the batches extend past it,
-			// which the timeline renders with the wrapping outline bar.
-			if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
-				types.SpanKindSubSpan, types.JSONMap{
-					"batch_count": questionBatchCount,
-					"chunk_count": len(questionChunks),
-					"batch_size":  questionGenChunkBatchSize,
-				}); grp != nil {
-				s.tracker().EndSpan(ctx, grp, types.JSONMap{
-					"batch_count": questionBatchCount,
-					"chunk_count": len(questionChunks),
-				})
-			}
-			enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks)
+	}
+	if willSpawnQuestion {
+		// Create the postprocess.question grouping span up front so the
+		// per-batch subspans (enqueued just below, run later in their own
+		// workers) have a parent to nest under. It's begun and ended right
+		// here as a structural container — the batches extend past it,
+		// which the timeline renders with the wrapping outline bar.
+		if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
+			types.SpanKindSubSpan, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+				"batch_size":  questionGenChunkBatchSize,
+			}); grp != nil {
+			s.tracker().EndSpan(ctx, grp, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+			})
 		}
+		enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks)
 	}
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
@@ -415,6 +469,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		"enqueued_wiki":           enqueuedWiki,
 		"enqueued_graph":          enqueuedGraphCount > 0,
 		"enqueued_graph_count":    enqueuedGraphCount,
+		"journal_rank_matched":    journalMatched,
+		"journal_rank_reason":     journalReason,
+		"content_type_matched":    contentTypeMatched,
+		"content_type_reason":     contentTypeReason,
 	}
 	s.tracker().EndSpan(ctx, postSpan, postOutput)
 	// Close the root span — the parse pipeline is done. Async
@@ -425,6 +483,208 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
 		types.SpanStatusDone, postOutput, "", "")
 	return nil
+}
+
+const contentTypeTextLimit = 12000
+
+const contentTypeClassificationPrompt = `Classify the document into exactly one content type.
+
+Allowed types:
+- article: academic papers, journal articles, essays, or news articles
+- book: books, ebooks, monographs, or book chapters
+- webpage: general website pages or online reference pages
+- meeting_notes: meeting minutes, discussion records, decisions, and action items
+- report: research, business, analytical, audit, policy, or project reports
+- presentation: slide decks or presentation notes
+- spreadsheet: tabular datasets, workbooks, or data sheets
+- manual: manuals, guides, specifications, or operating instructions
+- other: none of the above
+
+Return only JSON in this form: {"type":"article","confidence":0.95}.
+Use only the supplied document content. Do not infer from a filename.`
+
+type contentTypeLLMResult struct {
+	Type       types.KnowledgeContentType `json:"type"`
+	Confidence float64                    `json:"confidence"`
+}
+
+func ruleBasedContentType(knowledge *types.Knowledge) (types.KnowledgeContentType, bool) {
+	if knowledge == nil {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(knowledge.Type)) {
+	case "url":
+		return types.KnowledgeContentTypeWebpage, true
+	case "manual":
+		return types.KnowledgeContentTypeManual, true
+	}
+	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(knowledge.FileType), ".")) {
+	case "epub", "mobi", "azw", "azw3":
+		return types.KnowledgeContentTypeBook, true
+	case "ppt", "pptx":
+		return types.KnowledgeContentTypePresentation, true
+	case "xls", "xlsx", "csv":
+		return types.KnowledgeContentTypeSpreadsheet, true
+	}
+	return "", false
+}
+
+func contentTypeText(chunks []*types.Chunk) string {
+	ordered := append([]*types.Chunk(nil), chunks...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].StartAt < ordered[j].StartAt })
+	var b strings.Builder
+	for _, chunk := range ordered {
+		if chunk == nil || strings.TrimSpace(chunk.Content) == "" {
+			continue
+		}
+		remaining := contentTypeTextLimit - len([]rune(b.String()))
+		if remaining <= 0 {
+			break
+		}
+		contentRunes := []rune(chunk.Content)
+		if len(contentRunes) > remaining {
+			contentRunes = contentRunes[:remaining]
+		}
+		b.WriteString(string(contentRunes))
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (s *KnowledgePostProcessService) enrichContentType(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	kb *types.KnowledgeBase,
+	chunks []*types.Chunk,
+	parent *Span,
+) (bool, string) {
+	span := s.tracker().BeginSubSpan(ctx, parent, "postprocess.content_type", types.SpanKindSubSpan, nil)
+	if current, _ := knowledge.ContentClassification(); current != nil && current.Source == "manual" {
+		s.tracker().SkipSpan(ctx, span, "manual_override")
+		return true, "manual_override"
+	}
+
+	contentType, matchedByRule := ruleBasedContentType(knowledge)
+	confidence := 1.0
+	source := "rule"
+	if !matchedByRule {
+		if s.modelService == nil || kb == nil || kb.SummaryModelID == "" {
+			s.tracker().SkipSpan(ctx, span, "summary_model_unavailable")
+			return false, "summary_model_unavailable"
+		}
+		content := contentTypeText(chunks)
+		if content == "" {
+			s.tracker().SkipSpan(ctx, span, "empty_content")
+			return false, "empty_content"
+		}
+		model, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+		if err != nil {
+			s.tracker().FailSpan(ctx, span, "CONTENT_TYPE_MODEL_FAILED", "failed to load classification model", err)
+			return false, "model_unavailable"
+		}
+		thinking := false
+		response, err := model.Chat(ctx, []chat.Message{
+			{Role: "system", Content: contentTypeClassificationPrompt},
+			{Role: "user", Content: content},
+		}, &chat.ChatOptions{Temperature: 0, MaxTokens: 80, Thinking: &thinking})
+		if err != nil {
+			s.tracker().FailSpan(ctx, span, "CONTENT_TYPE_CLASSIFY_FAILED", "classification request failed", err)
+			return false, "classification_failed"
+		}
+		var result contentTypeLLMResult
+		if err := json.Unmarshal([]byte(cleanLLMJSON(response.Content)), &result); err != nil || !result.Type.IsValid() {
+			s.tracker().FailSpan(ctx, span, "CONTENT_TYPE_RESPONSE_INVALID", "classification response was invalid", err)
+			return false, "invalid_response"
+		}
+		contentType = result.Type
+		confidence = result.Confidence
+		if confidence < 0 || confidence > 1 {
+			confidence = 0
+		}
+		source = "ai"
+	}
+
+	classification := types.ContentClassificationMetadata{
+		SchemaVersion: 1,
+		Type:          contentType,
+		Source:        source,
+		Confidence:    confidence,
+		MatchedAt:     time.Now().UTC(),
+	}
+	if err := knowledge.SetContentClassification(classification); err != nil {
+		s.tracker().FailSpan(ctx, span, "CONTENT_TYPE_METADATA_FAILED", "failed to encode classification", err)
+		return false, "metadata_encode_failed"
+	}
+	if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx, knowledge.ID, "metadata", knowledge.Metadata); err != nil {
+		s.tracker().FailSpan(ctx, span, "CONTENT_TYPE_METADATA_FAILED", "failed to save classification", err)
+		return false, "metadata_save_failed"
+	}
+	s.tracker().EndSpan(ctx, span, types.JSONMap{"content_type": contentType, "source": source, "confidence": confidence})
+	return true, source
+}
+
+const journalRankTextLimit = 24000
+
+// enrichJournalRank is deliberately best-effort. Ranking lookup is external
+// metadata enrichment and must never turn a successful document parse into a
+// failed parse when the provider is unavailable or the publication is unknown.
+func (s *KnowledgePostProcessService) enrichJournalRank(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	chunks []*types.Chunk,
+	parent *Span,
+	secretKey string,
+) (bool, string) {
+	span := s.tracker().BeginSubSpan(ctx, parent, "postprocess.journal_rank", types.SpanKindSubSpan, nil)
+	if s.journalClient == nil {
+		s.tracker().SkipSpan(ctx, span, "journal_rank_client_unavailable")
+		return false, "client_unavailable"
+	}
+
+	ordered := append([]*types.Chunk(nil), chunks...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].StartAt < ordered[j].StartAt })
+	var b strings.Builder
+	for _, chunk := range ordered {
+		if chunk == nil || chunk.Content == "" || b.Len() >= journalRankTextLimit {
+			continue
+		}
+		remaining := journalRankTextLimit - b.Len()
+		content := chunk.Content
+		if len(content) > remaining {
+			content = content[:remaining]
+		}
+		b.WriteString(content)
+		b.WriteString("\n")
+	}
+
+	metadata := knowledge.GetMetadata()
+	result, reason, err := s.journalClient.EnrichWithSecretKey(ctx, secretKey, metadata, b.String())
+	if err != nil {
+		if errors.Is(err, journalrank.ErrNotConfigured) || errors.Is(err, journalrank.ErrPublicationMissing) {
+			s.tracker().SkipSpan(ctx, span, reason)
+			return false, reason
+		}
+		s.tracker().FailSpan(ctx, span, "JOURNAL_RANK_LOOKUP_FAILED", reason, err)
+		return false, reason
+	}
+
+	raw, err := knowledge.Metadata.Map()
+	if err != nil {
+		raw = map[string]interface{}{}
+	}
+	raw["journal_rank"] = result
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		s.tracker().FailSpan(ctx, span, "JOURNAL_RANK_METADATA_FAILED", "failed to encode journal rank metadata", err)
+		return false, "metadata_encode_failed"
+	}
+	if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx, knowledge.ID, "metadata", types.JSON(encoded)); err != nil {
+		s.tracker().FailSpan(ctx, span, "JOURNAL_RANK_METADATA_FAILED", "failed to save journal rank metadata", err)
+		return false, "metadata_save_failed"
+	}
+	knowledge.Metadata = types.JSON(encoded)
+	s.tracker().EndSpan(ctx, span, types.JSONMap{"publication": result.Publication, "found": result.Found, "source": result.Source})
+	return result.Found, reason
 }
 
 // enqueueSummaryGenerationTask enqueues the summary task. Returns true only

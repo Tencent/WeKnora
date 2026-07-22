@@ -1,5 +1,6 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import type { KnowledgeContentType } from '@/types/contentType';
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
@@ -259,6 +260,26 @@ export function getKnowledgeDetails(id: string, options?: { agent_id?: string })
   return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
 
+export function updateKnowledge(id: string, data: { title?: string; file_name?: string }) {
+  return put(`/api/v1/knowledge/${id}`, data);
+}
+
+export function updateKnowledgeContentType(id: string, contentType: KnowledgeContentType) {
+  return put(`/api/v1/knowledge/${id}/content-type`, { content_type: contentType });
+}
+
+export function updateKnowledgeContentTypeBatch(
+  kbId: string,
+  ids: string[],
+  contentType: KnowledgeContentType,
+) {
+  return put('/api/v1/knowledge/content-types', {
+    kb_id: kbId,
+    ids,
+    content_type: contentType,
+  });
+}
+
 export function updateManualKnowledge(
   id: string,
   data: { title: string; content: string; status: string; process_config?: KnowledgeProcessOverrides },
@@ -266,7 +287,23 @@ export function updateManualKnowledge(
   return put(`/api/v1/knowledge/manual/${id}`, data);
 }
 
-export function reparseKnowledge(id: string, data?: { process_config?: KnowledgeProcessOverrides }) {
+export type KnowledgeRebuildStage =
+  | 'docreader'
+  | 'chunking'
+  | 'embedding'
+  | 'multimodal'
+  | 'postprocess'
+  | 'summary'
+  | 'questions'
+  | 'graph'
+  | 'wiki'
+  | 'journal_rank'
+  | 'content_type';
+
+export function reparseKnowledge(
+  id: string,
+  data?: { process_config?: KnowledgeProcessOverrides; stages?: KnowledgeRebuildStage[] },
+) {
   return post(`/api/v1/knowledge/${id}/reparse`, data);
 }
 

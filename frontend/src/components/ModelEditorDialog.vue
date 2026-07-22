@@ -352,6 +352,15 @@
           </div>
         </div>
 
+        <div v-if="activeModelType === 'vllm' && formData.source === 'remote'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.vlmTokenParameterLabel') }}</label>
+          <t-select v-model="formData.vlmTokenParameter">
+            <t-option value="max_tokens" :label="$t('model.editor.vlmTokenParameter.maxTokens')" />
+            <t-option value="max_completion_tokens" :label="$t('model.editor.vlmTokenParameter.maxCompletionTokens')" />
+          </t-select>
+          <p class="form-desc">{{ $t('model.editor.vlmTokenParameterDesc') }}</p>
+        </div>
+
         <!-- Chat + 远程 API：思考模式参数格式 -->
         <div v-if="showThinkingControlField" class="form-item">
           <label class="form-label">{{ $t('model.editor.thinkingControlLabel') }}</label>
@@ -441,6 +450,8 @@ interface ModelFormData {
   maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
+  /** extra_config.vlm_token_parameter — completion limit field used by remote VLM APIs. */
+  vlmTokenParameter?: 'max_tokens' | 'max_completion_tokens'
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
   /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
@@ -876,6 +887,7 @@ const formData = ref<ModelFormData>({
   supportsVision: false,
   maxConcurrency: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
+  vlmTokenParameter: 'max_tokens',
   customHeaders: [],
   appSecret: '',
   lkeapRegion: 'ap-guangzhou',
@@ -1066,6 +1078,7 @@ watch(() => props.visible, (val) => {
           customHeaders: Array.isArray(props.modelData.customHeaders)
             ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
             : [],
+          vlmTokenParameter: props.modelData.vlmTokenParameter || 'max_tokens',
         }
         applyThinkingControlFromModelData()
       } else if (lastOpenedModelId.value !== null || !formData.value.id) {
@@ -1117,6 +1130,7 @@ const resetForm = () => {
     supportsVision: false,
     maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
+    vlmTokenParameter: 'max_tokens',
     customHeaders: [],
     appSecret: '',
     lkeapRegion: 'ap-guangzhou',

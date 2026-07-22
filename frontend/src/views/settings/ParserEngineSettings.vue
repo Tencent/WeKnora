@@ -89,6 +89,29 @@
             <p class="engine-card__desc">{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
           </div>
         </button>
+
+        <!-- EasyScholar 放在解析引擎列表末尾，作为独立的后处理服务配置。 -->
+        <button
+          type="button"
+          class="engine-card engine-card--easyscholar"
+          :class="{ 'engine-card--active': drawerVisible && currentEngine?.Name === 'easyscholar' }"
+          @click="openDrawer({ Name: 'easyscholar', Description: '' } as any)"
+        >
+          <div class="engine-card__badge">E</div>
+          <div class="engine-card__body">
+            <div class="engine-card__header">
+              <h3 class="engine-card__title">{{ $t('settings.parser.easyScholarCardTitle') }}</h3>
+              <span
+                class="engine-card__status"
+                :class="easyScholarAvailable ? 'engine-card__status--on' : 'engine-card__status--err'"
+              >
+                <span class="engine-card__status-dot" />
+                {{ easyScholarAvailable ? $t('settings.parser.available') : $t('settings.parser.unavailable') }}
+              </span>
+            </div>
+            <p class="engine-card__desc">{{ $t('settings.parser.easyScholarCardDesc') }}</p>
+          </div>
+        </button>
       </div>
 
     </template>
@@ -221,6 +244,23 @@
               </a>
             </div>
           </template>
+        </section>
+
+        <!-- EasyScholar 是后处理的期刊等级服务，属于解析引擎设置的通用配置。 -->
+        <section v-if="currentEngine.Name === 'easyscholar'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.easyScholarSection') }}</h4>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.easyScholarSecretKey') }}</label>
+            <t-input
+              v-model="config.easyscholar_secret_key"
+              type="password"
+              :placeholder="$t('settings.parser.easyScholarSecretPlaceholder')"
+              clearable
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p class="form-desc">{{ $t('settings.parser.easyScholarHint') }}</p>
+          </div>
         </section>
 
         <!-- Section 3 — mineru 自建配置 -->
@@ -410,6 +450,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   docreader_transport: 'grpc',
   mineru_endpoint: '',
   mineru_api_key: '',
+  easyscholar_secret_key: '',
   mineru_model: 'pipeline',
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
@@ -443,13 +484,19 @@ const saveMessage = ref('')
 const saveSuccess = ref(false)
 const checking = ref(false)
 const checkMessage = ref('')
+// EasyScholar follows the other parser cards: it is either available or
+// unavailable. An empty/unconfigured key is therefore unavailable too.
+const easyScholarAvailable = ref(false)
 
 const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'builtin'))
 
 const drawerVisible = ref(false)
 const currentEngine = ref<ParserEngineInfo | null>(null)
 const drawerTitle = computed(() => {
-  return currentEngine.value ? getEngineDisplayName(currentEngine.value.Name) : ''
+  if (!currentEngine.value) return ''
+  return currentEngine.value.Name === 'easyscholar'
+    ? t('settings.parser.easyScholarCardTitle')
+    : getEngineDisplayName(currentEngine.value.Name)
 })
 
 // SettingDrawer 头部图标走 #headerIcon 槽（首字母 monogram + per-engine
@@ -461,7 +508,7 @@ const drawerTitle = computed(() => {
 // e.g. simple/markitdown there's nothing to validate beyond presence.
 const needsTestButton = computed(() => {
   if (!currentEngine.value) return false
-  return hasConfigFields(currentEngine.value.Name) || currentEngine.value.Name === 'builtin'
+  return hasConfigFields(currentEngine.value.Name) || currentEngine.value.Name === 'builtin' || currentEngine.value.Name === 'easyscholar'
 })
 
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
@@ -531,6 +578,11 @@ async function loadEngines() {
     const transport = (res?.docreader_transport ?? 'grpc').toLowerCase()
     docreaderTransport.value = transport === 'http' ? 'http' : 'grpc'
     connected.value = res?.connected ?? (engines.value.length > 0)
+    if (res?.easyscholar_available !== undefined) {
+      // Match the other parser cards: the provider check itself determines
+      // the status, including the unconfigured case (shown as unavailable).
+      easyScholarAvailable.value = res.easyscholar_available === true
+    }
   } catch (e: any) {
     error.value = e?.message || t('settings.parser.loadFailed')
     engines.value = []
@@ -547,6 +599,7 @@ async function loadConfig() {
       docreader_transport: data?.docreader_transport ?? DEFAULT_PARSER_CONFIG.docreader_transport ?? 'grpc',
       mineru_endpoint: data?.mineru_endpoint ?? DEFAULT_PARSER_CONFIG.mineru_endpoint ?? '',
       mineru_api_key: data?.mineru_api_key ?? DEFAULT_PARSER_CONFIG.mineru_api_key ?? '',
+      easyscholar_secret_key: data?.easyscholar_secret_key ?? DEFAULT_PARSER_CONFIG.easyscholar_secret_key ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
@@ -566,8 +619,18 @@ async function loadConfig() {
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
     }
+    // The engine-list endpoint does not include EasyScholar status. Reuse the
+    // real test endpoint after loading the persisted (masked) configuration;
+    // the backend preserves the stored secret when it receives the mask.
+    try {
+      const status = await checkParserEngines(buildConfigPayload())
+      easyScholarAvailable.value = status?.easyscholar_available === true
+    } catch {
+      easyScholarAvailable.value = false
+    }
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
+    easyScholarAvailable.value = false
   }
 }
 
@@ -584,6 +647,7 @@ function buildConfigPayload(): ParserEngineConfig {
     docreader_transport: (config.value.docreader_transport ?? 'grpc').trim() || 'grpc',
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
     mineru_api_key: config.value.mineru_api_key?.trim() ?? '',
+    easyscholar_secret_key: config.value.easyscholar_secret_key?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
@@ -606,7 +670,7 @@ function buildConfigPayload(): ParserEngineConfig {
 }
 
 async function onCheck() {
-  if (!connected) {
+  if (currentEngine.value?.Name !== 'easyscholar' && !connected) {
     checkMessage.value = t('settings.parser.ensureDocreaderConnected')
     return
   }
@@ -618,6 +682,16 @@ async function onCheck() {
     engines.value = res?.data ?? []
     if (res?.connected !== undefined) {
       connected.value = res.connected
+    }
+
+    if (currentEngine.value?.Name === 'easyscholar') {
+      easyScholarAvailable.value = res?.easyscholar_available === true
+      checkMessage.value = easyScholarAvailable.value
+        ? t('settings.parser.checkSuccess', '测试连接成功')
+        : (res?.easyscholar_reason || t('settings.parser.checkFailed', '测试连接失败'))
+      saveSuccess.value = easyScholarAvailable.value
+      setTimeout(() => { checkMessage.value = '' }, 3000)
+      return
     }
 
     if (currentEngine.value) {

@@ -187,6 +187,7 @@ export default function (knowledgeBaseId?: string) {
       file_type: "",
       description: "",
       summary_status: "",
+      metadata: {},
       parse_status: "",
       error_message: "",
       chunkLoadError: "",
@@ -198,7 +199,7 @@ export default function (knowledgeBaseId?: string) {
           const { data } = result;
           Object.assign(details, {
             title: data.file_name || data.title || data.source || t('knowledgeBase.untitledDocument'),
-            time: formatStringDate(new Date(data.updated_at)),
+            time: formatStringDate(new Date(data.created_at || data.updated_at)),
             id: data.id,
             type: data.type || 'file',
             source: data.source || '',
@@ -206,6 +207,7 @@ export default function (knowledgeBaseId?: string) {
             file_type: data.file_type || '',
             description: data.description || '',
             summary_status: data.summary_status || '',
+            metadata: data.metadata || {},
             parse_status: data.parse_status || '',
             error_message: data.error_message || '',
             tags: data.tags?.length ? data.tags : (item?.tags || []),

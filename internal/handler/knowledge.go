@@ -1568,6 +1568,73 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	})
 }
 
+type updateKnowledgeContentTypeRequest struct {
+	ContentType string `json:"content_type" binding:"required"`
+}
+
+func (h *KnowledgeHandler) UpdateKnowledgeContentType(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	_, ctx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req updateKnowledgeContentTypeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	contentType := types.KnowledgeContentType(strings.TrimSpace(req.ContentType))
+	if !contentType.IsValid() {
+		c.Error(errors.NewBadRequestError("unsupported content type"))
+		return
+	}
+	if err := h.kgService.UpdateKnowledgeContentType(ctx, id, contentType); err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type updateKnowledgeContentTypeBatchRequest struct {
+	KnowledgeBaseID string   `json:"kb_id" binding:"required"`
+	KnowledgeIDs    []string `json:"ids" binding:"required"`
+	ContentType     string   `json:"content_type" binding:"required"`
+}
+
+func (h *KnowledgeHandler) UpdateKnowledgeContentTypeBatch(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req updateKnowledgeContentTypeBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if len(req.KnowledgeIDs) == 0 || len(req.KnowledgeIDs) > 200 {
+		c.Error(errors.NewBadRequestError("knowledge IDs must contain between 1 and 200 items"))
+		return
+	}
+	contentType := types.KnowledgeContentType(strings.TrimSpace(req.ContentType))
+	if !contentType.IsValid() {
+		c.Error(errors.NewBadRequestError("unsupported content type"))
+		return
+	}
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KnowledgeBaseID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to update knowledge content types"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	if err := h.kgService.UpdateKnowledgeContentTypeBatch(ctx, req.KnowledgeBaseID, req.KnowledgeIDs, contentType); err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "updated": len(req.KnowledgeIDs)})
+}
+
 // UpdateManualKnowledge godoc
 // @Summary      更新手工知识
 // @Description  更新手工录入的Markdown知识内容
@@ -1660,9 +1727,11 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	// Optional per-reparse parse config override. Empty body keeps the
 	// overrides stored at upload time.
 	var processOverrides *types.KnowledgeProcessOverrides
+	var requestedStages []string
 	if c.Request.ContentLength != 0 {
 		var req struct {
 			ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config"`
+			Stages        []string                         `json:"stages"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			logger.Error(ctx, "Failed to parse reparse request body", err)
@@ -1670,10 +1739,11 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 			return
 		}
 		processOverrides = req.ProcessConfig
+		requestedStages = req.Stages
 	}
 
 	// Call service to reparse knowledge
-	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id, processOverrides)
+	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id, processOverrides, requestedStages)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)

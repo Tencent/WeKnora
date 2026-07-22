@@ -101,6 +101,7 @@ export interface ParserEngineConfig {
   docreader_transport?: string
   mineru_endpoint?: string
   mineru_api_key?: string
+  easyscholar_secret_key?: string
   // MinerU 自建参数
   mineru_model?: string
   mineru_vlm_server_url?: string
@@ -131,6 +132,8 @@ export interface ParserEnginesResponse {
   /** 连接方式：grpc | http，由服务端环境/配置决定 */
   docreader_transport?: string
   connected?: boolean
+  easyscholar_available?: boolean
+  easyscholar_reason?: string
 }
 
 export function getParserEngines(): Promise<ParserEnginesResponse> {

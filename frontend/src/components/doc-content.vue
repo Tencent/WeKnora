@@ -8,7 +8,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile, updateKnowledge, updateKnowledgeContentType } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
@@ -17,6 +17,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import { contentTypeOptions, getContentClassification, setContentClassification, type KnowledgeContentType } from '@/types/contentType';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -85,7 +86,80 @@ mermaid.initialize({
   }
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status", "kbId"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "documentUpdated"]);
+
+const renameDialogVisible = ref(false);
+const renameValue = ref('');
+const renameLoading = ref(false);
+const contentTypeValue = ref<KnowledgeContentType | ''>('');
+const contentTypeLoading = ref(false);
+const availableContentTypes = computed(() => contentTypeOptions(t));
+const currentContentClassification = computed(() => getContentClassification(props.details?.metadata));
+
+const currentContentTypeLabel = computed(() => {
+  const value = currentContentClassification.value?.type;
+  return value ? t(`knowledgeBase.contentTypes.${value}`) : t('knowledgeBase.contentTypeUnclassified');
+});
+
+function openRenameDialog() {
+  renameValue.value = getDisplayTitle();
+  renameDialogVisible.value = true;
+}
+
+async function submitRename() {
+  const name = renameValue.value.trim();
+  if (!name) {
+    MessagePlugin.warning(t('knowledgeBase.renameRequired'));
+    return;
+  }
+  if (name.length > 200 || /[\\/:*?"<>|]/.test(name)) {
+    MessagePlugin.warning(t('knowledgeBase.renameInvalid'));
+    return;
+  }
+  renameLoading.value = true;
+  try {
+    const data = props.details.type === 'file' ? { file_name: name } : { title: name };
+    await updateKnowledge(props.details.id, data);
+    if (props.details.type === 'file') {
+      const oldTitle = String(props.details.title || '');
+      const dot = oldTitle.lastIndexOf('.');
+      props.details.title = `${name}${dot > 0 ? oldTitle.substring(dot) : ''}`;
+    } else {
+      props.details.title = name;
+    }
+    renameDialogVisible.value = false;
+    emit('documentUpdated', props.details.id);
+    MessagePlugin.success(t('knowledgeBase.renameSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.renameFailed'));
+  } finally {
+    renameLoading.value = false;
+  }
+}
+
+watch(currentContentClassification, (classification) => {
+  contentTypeValue.value = classification?.type || '';
+}, { immediate: true });
+
+async function submitContentType() {
+  if (!contentTypeValue.value) {
+    return;
+  }
+  const previousValue = currentContentClassification.value?.type || '';
+  if (contentTypeValue.value === previousValue) return;
+  contentTypeLoading.value = true;
+  try {
+    await updateKnowledgeContentType(props.details.id, contentTypeValue.value);
+    props.details.metadata = setContentClassification(props.details.metadata, contentTypeValue.value);
+    emit('documentUpdated', props.details.id);
+    MessagePlugin.success(t('knowledgeBase.contentTypeUpdateSuccess'));
+  } catch (error: any) {
+    contentTypeValue.value = previousValue;
+    MessagePlugin.error(error?.message || t('knowledgeBase.contentTypeUpdateFailed'));
+  } finally {
+    contentTypeLoading.value = false;
+  }
+}
 
 const hasTimelineSpans = ref(false);
 const timelineDrawerVisible = ref(false);
@@ -1095,6 +1169,10 @@ const handleDetailsScroll = () => {
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
           <div class="header-actions">
+            <t-button v-if="canEditKB" class="header-action-btn" size="small" variant="text" shape="square"
+              theme="default" :title="$t('knowledgeBase.renameDocument')" @click="openRenameDialog">
+              <template #icon><t-icon name="edit" size="16px" /></template>
+            </t-button>
             <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
               @click="downloadFile()">
@@ -1148,10 +1226,26 @@ const handleDetailsScroll = () => {
               <span class="doc-detail-label">{{ getTimeLabel() }}</span>
               <span class="doc-detail-value">{{ details.time }}</span>
             </div>
-            <div v-if="details.type" class="doc-detail-row">
-              <span class="doc-detail-label">{{ $t('knowledgeBase.infoCard.type') }}</span>
+            <div v-if="details.type === 'file'" class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.fileTypeLabel') }}</span>
               <span class="doc-detail-value">
                 <t-tag size="small" :theme="getTypeTheme()" variant="light">{{ getTypeLabel() }}</t-tag>
+              </span>
+            </div>
+            <div v-else-if="details.type" class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.importTypeLabel') }}</span>
+              <span class="doc-detail-value">
+                <t-tag size="small" :theme="getTypeTheme()" variant="light">{{ getTypeLabel() }}</t-tag>
+              </span>
+            </div>
+            <div class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.contentTypeLabel') }}</span>
+              <span class="doc-detail-value doc-content-type-value">
+                <t-select v-if="canEditKB" v-model="contentTypeValue" class="doc-content-type-select" size="small"
+                  :options="availableContentTypes" :loading="contentTypeLoading" :disabled="contentTypeLoading"
+                  :clearable="false" :placeholder="$t('knowledgeBase.contentTypePlaceholder')"
+                  @change="submitContentType" />
+                <t-tag v-else size="small" theme="primary" variant="light">{{ currentContentTypeLabel }}</t-tag>
               </span>
             </div>
             <div v-if="details.channel && details.channel !== 'web'" class="doc-detail-row">
@@ -1317,6 +1411,14 @@ const handleDetailsScroll = () => {
       </div>
 
     </t-drawer>
+
+    <t-dialog v-model:visible="renameDialogVisible" :header="$t('knowledgeBase.renameDocument')"
+      :confirm-btn="{ content: $t('common.confirm'), loading: renameLoading }"
+      :cancel-btn="{ content: $t('common.cancel') }" width="420px" @confirm="submitRename">
+      <t-input v-model="renameValue" :placeholder="$t('knowledgeBase.renamePlaceholder')" maxlength="200"
+        show-limit-number @enter="submitRename" />
+    </t-dialog>
+
   </div>
 </template>
 <style scoped lang="less">
@@ -1489,6 +1591,17 @@ const handleDetailsScroll = () => {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.doc-content-type-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.doc-content-type-select {
+  width: 180px;
+  max-width: 100%;
 }
 
 .doc-content-section-head-left {

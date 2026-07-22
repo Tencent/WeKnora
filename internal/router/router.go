@@ -370,6 +370,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kRead.GET("/:id/spans", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DeleteKnowledge)
 		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledge)
+		k.PUT("/:id/content-type", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledgeContentType)
 		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
 		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
 		k.POST("/:id/cancel-parse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
@@ -378,15 +379,14 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
-		// Batch / cross-KB content writes: JWT Contributor+, or an API key
-		// with the ingest capability (or full access). Each handler binds the
-		// operation to a single (move: source+target) KB and rejects any KB
-		// or knowledge id outside the key's allow-list, so a scoped ingest key
-		// can only touch KBs it is already permitted to write.
-		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
-		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// Batch / cross-KB write ops stay Contributor-gated for JWT and are
+		// NOT declared for API keys (default-deny): they fan out to arbitrary
+		// KBs with no single owning KB to bound a key's scope against.
+		kgrp.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		kgrp.PUT("/content-types", g.Contributor(), handler.UpdateKnowledgeContentTypeBatch)
+		kgrp.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		kgrp.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		kgrp.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
 }
 

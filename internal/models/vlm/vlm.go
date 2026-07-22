@@ -33,6 +33,9 @@ type Config struct {
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int
 	Extra          map[string]any
+	// TokenParameterFormat selects the OpenAI-compatible completion limit field.
+	// Empty and "max_tokens" preserve the legacy request shape.
+	TokenParameterFormat string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 	AppID         string
@@ -55,19 +58,24 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 			ifType = "openai"
 		}
 	}
+	tokenParameterFormat := ""
+	if m.Parameters.ExtraConfig != nil {
+		tokenParameterFormat = m.Parameters.ExtraConfig["vlm_token_parameter"]
+	}
 	return &Config{
-		ModelID:        m.ID,
-		APIKey:         m.Parameters.APIKey,
-		BaseURL:        m.Parameters.BaseURL,
-		ModelName:      m.Name,
-		Source:         m.Source,
-		InterfaceType:  ifType,
-		Provider:       m.Parameters.Provider,
-		MaxConcurrency: m.Parameters.MaxConcurrency,
-		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
-		CustomHeaders:  m.Parameters.CustomHeaders,
-		AppID:          appID,
-		AppSecret:      appSecret,
+		ModelID:              m.ID,
+		APIKey:               m.Parameters.APIKey,
+		BaseURL:              m.Parameters.BaseURL,
+		ModelName:            m.Name,
+		Source:               m.Source,
+		InterfaceType:        ifType,
+		Provider:             m.Parameters.Provider,
+		MaxConcurrency:       m.Parameters.MaxConcurrency,
+		Extra:                stringMapToAnyMap(m.Parameters.ExtraConfig),
+		TokenParameterFormat: tokenParameterFormat,
+		CustomHeaders:        m.Parameters.CustomHeaders,
+		AppID:                appID,
+		AppSecret:            appSecret,
 	}
 }
 
