@@ -197,6 +197,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 	}
+	recordKBActivity(ctx, s.audit, tenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeDeleted,
+		"knowledge", knowledge.ID, types.AuditOutcomeSuccess,
+		map[string]any{"title": knowledge.Title, "type": knowledge.Type})
 	return nil
 }
 
@@ -621,6 +624,18 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 	}
+	byKB := make(map[string][]string)
+	for _, knowledge := range knowledgeList {
+		byKB[knowledge.KnowledgeBaseID] = append(byKB[knowledge.KnowledgeBaseID], knowledge.ID)
+	}
+	for kbID, knowledgeIDs := range byKB {
+		details := map[string]any{"count": len(knowledgeIDs)}
+		if len(knowledgeIDs) <= 20 {
+			details["knowledge_ids"] = knowledgeIDs
+		}
+		recordKBActivity(ctx, s.audit, tenantInfo.ID, kbID, types.AuditActionKnowledgeBatchDeleted,
+			"knowledge", "", types.AuditOutcomeSuccess, details)
+	}
 	return nil
 }
 
@@ -718,6 +733,9 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 		logger.Errorf(ctx, "Failed to unmarshal knowledge list delete payload: %v", err)
 		return err
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	taskID, _ := asynq.GetTaskID(ctx)
+	ctx = withKBActivityTask(ctx, taskID, "user")
 
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 

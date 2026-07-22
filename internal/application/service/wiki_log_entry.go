@@ -7,24 +7,52 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// wikiLogEntryService is a thin wrapper over WikiLogEntryRepository. The
-// event layer carries no business rules today, so the service just
-// forwards to the repo — the indirection exists so handlers / ingest
-// batch code depend on an interface rather than a concrete repo type.
+// wikiLogEntryService persists the detailed Wiki feed and projects a bounded
+// summary into the generic per-KB activity timeline.
 type wikiLogEntryService struct {
-	repo interfaces.WikiLogEntryRepository
+	repo  interfaces.WikiLogEntryRepository
+	audit interfaces.AuditLogService
 }
 
 // NewWikiLogEntryService constructs a WikiLogEntryService backed by the
 // given repository.
-func NewWikiLogEntryService(repo interfaces.WikiLogEntryRepository) interfaces.WikiLogEntryService {
-	return &wikiLogEntryService{repo: repo}
+func NewWikiLogEntryService(
+	repo interfaces.WikiLogEntryRepository,
+	audit interfaces.AuditLogService,
+) interfaces.WikiLogEntryService {
+	return &wikiLogEntryService{repo: repo, audit: audit}
 }
 
 // AppendBatch records the given events in one database round trip. Empty
 // batches are a no-op (the repo handles that).
 func (s *wikiLogEntryService) AppendBatch(ctx context.Context, entries []*types.WikiLogEntry) error {
-	return s.repo.AppendBatch(ctx, entries)
+	if err := s.repo.AppendBatch(ctx, entries); err != nil {
+		return err
+	}
+	type summary struct {
+		tenantID uint64
+		count    int
+		actions  map[string]int
+	}
+	byKB := make(map[string]*summary)
+	for _, entry := range entries {
+		if entry == nil || entry.KnowledgeBaseID == "" {
+			continue
+		}
+		item := byKB[entry.KnowledgeBaseID]
+		if item == nil {
+			item = &summary{tenantID: entry.TenantID, actions: make(map[string]int)}
+			byKB[entry.KnowledgeBaseID] = item
+		}
+		item.count++
+		item.actions[entry.Action]++
+	}
+	for kbID, item := range byKB {
+		recordKBActivity(ctx, s.audit, item.tenantID, kbID, types.AuditActionWikiContentChanged,
+			"wiki", kbID, types.AuditOutcomeSuccess,
+			map[string]any{"count": item.count, "actions": item.actions})
+	}
+	return nil
 }
 
 // List paginates the per-KB event feed. See repo.List for cursor semantics.

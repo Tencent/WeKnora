@@ -43,6 +43,7 @@ type knowledgeBaseService struct {
 	dsRepo          interfaces.DataSourceRepository
 	syncLogRepo     interfaces.SyncLogRepository
 	dsScheduler     *datasource.Scheduler
+	audit           interfaces.AuditLogService
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -62,6 +63,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsRepo interfaces.DataSourceRepository,
 	syncLogRepo interfaces.SyncLogRepository,
 	dsScheduler *datasource.Scheduler,
+	audit interfaces.AuditLogService,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -80,6 +82,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsRepo:          dsRepo,
 		syncLogRepo:     syncLogRepo,
 		dsScheduler:     dsScheduler,
+		audit:           audit,
 	}
 }
 
@@ -151,6 +154,10 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		})
 		return nil, err
 	}
+	recordKBActivity(ctx, s.audit, kb.TenantID, kb.ID, types.AuditActionKBCreated,
+		"knowledge_base", kb.ID, types.AuditOutcomeSuccess, map[string]any{
+			"name": kb.Name, "type": kb.Type,
+		})
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
@@ -485,6 +492,17 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		return nil, err
 	}
 
+	changedFields := make([]string, 0, 3)
+	if kb.Name != name {
+		changedFields = append(changedFields, "name")
+	}
+	if kb.Description != description {
+		changedFields = append(changedFields, "description")
+	}
+	if config != nil {
+		changedFields = append(changedFields, "config")
+	}
+
 	// Update the knowledge base properties
 	kb.Name = name
 	kb.Description = description
@@ -526,6 +544,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		})
 		return nil, err
 	}
+	recordKBActivity(ctx, s.audit, kb.TenantID, kb.ID, types.AuditActionKBUpdated,
+		"knowledge_base", kb.ID, types.AuditOutcomeSuccess, map[string]any{
+			"name": kb.Name, "changed_fields": changedFields,
+		})
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
@@ -691,6 +713,12 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		})
 		return err
 	}
+	deletedName := ""
+	if kb != nil {
+		deletedName = kb.Name
+	}
+	recordKBActivity(ctx, s.audit, tenantID, id, types.AuditActionKBDeleted,
+		"knowledge_base", id, types.AuditOutcomeSuccess, map[string]any{"name": deletedName})
 
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
 	if s.shareRepo != nil {
@@ -1127,6 +1155,10 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 		return nil, err
 	}
+	recordKBActivity(ctx, s.audit, tenantID, targetKB.ID, types.AuditActionKBDuplicated,
+		"knowledge_base", targetKB.ID, types.AuditOutcomeSuccess, map[string]any{
+			"source_kb_id": sourceKB.ID, "name": targetKB.Name,
+		})
 	return targetKB, nil
 }
 

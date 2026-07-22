@@ -148,6 +148,10 @@ audit:
 
 `access_denied` 采用 1 分钟滑动窗口去重，防止恶意探测刷表；同样的拒绝在应用日志（`[rbac] role insufficient ...`）里仍然条条可见。
 
+知识库活动记录也复用这张不可变审计表，通过 `scope_type=knowledge_base`、`scope_id=<kb_id>` 建立范围索引，而不是为每个知识库创建独立日志表。`GET /api/v1/knowledge-bases/:id/activity` 提供游标分页，覆盖知识库配置、知识/FAQ、标签、数据源、共享、克隆/移动任务和 Wiki 内容变更；原有空间审计接口只返回无资源范围的 RBAC 事件，避免知识库活动淹没成员与拒绝记录。解析阶段明细继续由 knowledge spans 展示，数据源同步明细继续由 sync logs 展示，活动记录只保存摘要与关联 ID。
+
+该接口仅知识库创建者或所属空间 Admin+ 可读，并明确拒绝从组织共享空间读取，避免向接收方泄露源空间操作者与配置历史。活动详情不得写入知识正文、外部 URL、数据源凭据或原始错误堆栈。
+
 后台 goroutine `AuditLogRetentionRunner` 启动 ~10 分钟后开始首轮清理，之后每 24 小时清扫一次超过 `audit.retention_days` 的旧行；保留期为 `0` 时整条 goroutine 短路，不产生任何 DB 流量。
 
 ## 七、灰度上线建议

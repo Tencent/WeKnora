@@ -29,19 +29,19 @@ const (
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
+	QueueDefault = "default"
 	// QueueChatAttachment carries session-scoped chat attachment parsing. It
 	// lives in the core pool but with a higher weight than QueueDefault so
 	// interactive chat uploads are not starved by knowledge-base batch imports.
 	QueueChatAttachment = "chat_attachment"
 	QueuePostProcess    = "postprocess"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -367,10 +367,11 @@ type SummaryGenerationPayload struct {
 // KBClonePayload represents the knowledge base clone task payload
 type KBClonePayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
+	TenantID  uint64        `json:"tenant_id"`
+	TaskID    string        `json:"task_id"`
+	SourceID  string        `json:"source_id"`
+	TargetID  string        `json:"target_id"`
+	Initiator TaskInitiator `json:"initiator,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -403,8 +404,9 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID     uint64        `json:"tenant_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
@@ -413,17 +415,19 @@ type KnowledgeListReparsePayload struct {
 	TenantID      uint64                     `json:"tenant_id"`
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator     TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	TaskID       string   `json:"task_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
-	SourceKBID   string   `json:"source_kb_id"`
-	TargetKBID   string   `json:"target_kb_id"`
-	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+	TenantID     uint64        `json:"tenant_id"`
+	TaskID       string        `json:"task_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	SourceKBID   string        `json:"source_kb_id"`
+	TargetKBID   string        `json:"target_kb_id"`
+	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task

@@ -459,6 +459,8 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("failed to unmarshal KB clone payload: %w", err)
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = withKBActivityTask(ctx, payload.TaskID, "user")
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -487,6 +489,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 			progress.Message = message
 			progress.UpdatedAt = time.Now().Unix()
 			_ = s.saveKBCloneProgress(ctx, progress)
+			recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneFailed,
+				"knowledge_base", payload.TargetID, types.AuditOutcomeFailed,
+				map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID})
 		}
 	}
 
@@ -511,10 +516,21 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 		handleError(progress, err, "Failed to copy knowledge base configuration")
 		return err
 	}
+	if retryCount == 0 {
+		recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneStarted,
+			"knowledge_base", payload.TargetID, types.AuditOutcomeAccepted,
+			map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID})
+	}
 
 	// Use different sync strategies based on knowledge base type
 	if srcKB.Type == types.KnowledgeBaseTypeFAQ {
-		return s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError)
+		if err := s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError); err != nil {
+			return err
+		}
+		recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
+			"knowledge_base", payload.TargetID, types.AuditOutcomeSuccess,
+			map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID, "total": progress.Total})
+		return nil
 	}
 
 	// Document type: use Knowledge-level diff based on file_hash
@@ -616,6 +632,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	}
 
 	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
+	recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
+		"knowledge_base", payload.TargetID, types.AuditOutcomeSuccess,
+		map[string]any{"source_kb_id": payload.SourceID, "task_id": payload.TaskID, "total": totalOperations})
 	return nil
 }
 
@@ -975,6 +994,8 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("failed to unmarshal knowledge move payload: %w", err)
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = withKBActivityTask(ctx, payload.TaskID, "user")
 
 	// Add tenant ID to context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -1003,6 +1024,20 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 			progress.Message = message
 			progress.UpdatedAt = time.Now().Unix()
 			_ = s.saveKnowledgeMoveProgress(ctx, progress)
+			for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+				recordKBActivity(ctx, s.audit, payload.TenantID, kbID, types.AuditActionKnowledgeMoveFailed,
+					"knowledge_move", payload.TaskID, types.AuditOutcomeFailed,
+					map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+						"task_id": payload.TaskID, "count": len(payload.KnowledgeIDs), "mode": payload.Mode})
+			}
+		}
+	}
+	if retryCount == 0 {
+		for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+			recordKBActivity(ctx, s.audit, payload.TenantID, kbID, types.AuditActionKnowledgeMoveStarted,
+				"knowledge_move", payload.TaskID, types.AuditOutcomeAccepted,
+				map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+					"task_id": payload.TaskID, "count": len(payload.KnowledgeIDs), "mode": payload.Mode})
 		}
 	}
 
@@ -1072,6 +1107,20 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	_ = s.saveKnowledgeMoveProgress(ctx, progress)
 
 	logger.Infof(ctx, "ProcessKnowledgeMove: task=%s completed, processed=%d, failed=%d", payload.TaskID, progress.Processed, progress.Failed)
+	outcome := types.AuditOutcomeSuccess
+	action := types.AuditActionKnowledgeMoveCompleted
+	if progress.Failed == progress.Total && progress.Total > 0 {
+		outcome = types.AuditOutcomeFailed
+		action = types.AuditActionKnowledgeMoveFailed
+	} else if progress.Failed > 0 {
+		outcome = types.AuditOutcomePartial
+	}
+	for _, kbID := range []string{payload.SourceKBID, payload.TargetKBID} {
+		recordKBActivity(ctx, s.audit, payload.TenantID, kbID, action,
+			"knowledge_move", payload.TaskID, outcome,
+			map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
+				"task_id": payload.TaskID, "count": progress.Total, "failed": progress.Failed, "mode": payload.Mode})
+	}
 	return nil
 }
 

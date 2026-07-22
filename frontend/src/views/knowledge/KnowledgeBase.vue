@@ -282,6 +282,9 @@ const canManage = computed(() => {
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// The activity feed exposes owner-side actor and configuration summaries.
+// It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
+
 // Can mutate knowledge (move / batch-delete): the backend gate for these
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
 // in their tenant on top of having KB edit permission. Without the extra

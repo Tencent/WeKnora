@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -76,11 +77,12 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 	}
 
 	q := &interfaces.AuditLogQuery{
-		AfterID:     afterID,
-		Limit:       limit,
-		Action:      types.AuditAction(c.Query("action")),
-		Outcome:     types.AuditOutcome(c.Query("outcome")),
-		ActorUserID: c.Query("actor"),
+		AfterID:      afterID,
+		Limit:        limit,
+		Action:       types.AuditAction(c.Query("action")),
+		Outcome:      types.AuditOutcome(c.Query("outcome")),
+		ActorUserID:  c.Query("actor"),
+		UnscopedOnly: true,
 	}
 
 	entries, err := h.auditService.List(ctx, tenantID, q)
@@ -103,6 +105,85 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 		Data:       entries,
 		NextCursor: nextCursor,
 	})
+}
+
+// ListKnowledgeBaseActivity returns the durable activity projection for one
+// knowledge base. The route has already resolved KB access; this handler adds
+// an owner-tenant check so organization-shared consumers cannot inspect source
+// workspace actors or configuration history.
+// @Summary      获取知识库活动记录
+// @Description  返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。
+// @Tags         知识库
+// @Produce      json
+// @Param        id        path   string  true   "知识库ID"
+// @Param        after_id  query  int     false  "游标：返回 id 小于此值的记录"
+// @Param        limit     query  int     false  "页大小，1-100，默认 50"
+// @Param        action    query  string  false  "按 action 精确过滤"
+// @Param        outcome   query  string  false  "按 outcome 精确过滤"
+// @Param        actor     query  string  false  "按 actor_user_id 精确过滤"
+// @Success      200  {object}  auditLogListResponse
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/activity [get]
+func (h *AuditLogHandler) ListKnowledgeBaseActivity(c *gin.Context) {
+	ctx := c.Request.Context()
+	kbID := c.Param("id")
+	access, ok := middleware.KBAccessFromContext(c)
+	if !ok || access == nil || access.KnowledgeBase == nil || access.KnowledgeBase.ID != kbID {
+		c.Error(errors.NewNotFoundError("knowledge base not found"))
+		return
+	}
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if callerTenantID == 0 || access.KnowledgeBase.TenantID != callerTenantID {
+		c.Error(errors.NewForbiddenError("knowledge base activity is only available in the owner workspace"))
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	role := types.TenantRoleFromContext(ctx)
+	if access.KnowledgeBase.CreatorID != actorID && !role.HasPermission(types.TenantRoleAdmin) {
+		c.Error(errors.NewForbiddenError("knowledge base activity requires creator or admin access"))
+		return
+	}
+
+	afterID, limit := parseAuditCursor(c)
+	q := &interfaces.AuditLogQuery{
+		AfterID:     afterID,
+		Limit:       limit,
+		Action:      types.AuditAction(c.Query("action")),
+		Outcome:     types.AuditOutcome(c.Query("outcome")),
+		ActorUserID: c.Query("actor"),
+		ScopeType:   "knowledge_base",
+		ScopeID:     kbID,
+	}
+	entries, err := h.auditService.List(ctx, access.KnowledgeBase.TenantID, q)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": kbID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	var nextCursor uint64
+	if n := len(entries); n > 0 {
+		nextCursor = entries[n-1].ID
+	}
+	c.JSON(http.StatusOK, auditLogListResponse{
+		Success: true, Data: entries, NextCursor: nextCursor,
+	})
+}
+
+func parseAuditCursor(c *gin.Context) (uint64, int) {
+	var afterID uint64
+	if raw := c.Query("after_id"); raw != "" {
+		if v, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			afterID = v
+		}
+	}
+	limit := 0
+	if raw := c.Query("limit"); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	return afterID, limit
 }
 
 // ListSystemAuditLog godoc

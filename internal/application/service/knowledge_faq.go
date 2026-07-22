@@ -245,6 +245,9 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeCreated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "source_type": "faq"})
 
 	return entry, nil
 }
@@ -303,7 +306,6 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
-
 	return entry, nil
 }
 
@@ -466,6 +468,9 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "source_type": "faq"})
 
 	return entry, nil
 }
@@ -655,6 +660,9 @@ func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 	if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, chunkStatusMap); err != nil {
 		return err
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "changed_fields": []string{"enabled"}})
 
 	return nil
 }
@@ -857,6 +865,9 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			}
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", "", types.AuditOutcomeSuccess,
+		map[string]any{"count": len(req.ByID), "tag_groups": len(req.ByTag), "batch": true})
 
 	return nil
 }
@@ -1387,6 +1398,9 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 			return err
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeBatchDeleted,
+		"faq_entry", "", types.AuditOutcomeSuccess,
+		map[string]any{"count": len(chunksToRemove), "source_type": "faq"})
 	return nil
 }
 

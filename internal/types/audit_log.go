@@ -131,32 +131,81 @@ const (
 	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
 	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
 	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
+
+	// Knowledge-base activity actions. These rows use scope_type=knowledge_base
+	// and scope_id=<kb id>; TargetType/TargetID identify the concrete child
+	// resource when the operation is about a document, tag, data source, or share.
+	AuditActionKBCreated        AuditAction = "kb.created"
+	AuditActionKBUpdated        AuditAction = "kb.updated"
+	AuditActionKBDeleted        AuditAction = "kb.deleted"
+	AuditActionKBDuplicated     AuditAction = "kb.duplicated"
+	AuditActionKBCloneStarted   AuditAction = "kb.clone_started"
+	AuditActionKBCloneCompleted AuditAction = "kb.clone_completed"
+	AuditActionKBCloneFailed    AuditAction = "kb.clone_failed"
+
+	AuditActionKnowledgeCreated        AuditAction = "knowledge.created"
+	AuditActionKnowledgeUpdated        AuditAction = "knowledge.updated"
+	AuditActionKnowledgeDeleted        AuditAction = "knowledge.deleted"
+	AuditActionKnowledgeBatchDeleted   AuditAction = "knowledge.batch_deleted"
+	AuditActionKnowledgeReparseStarted AuditAction = "knowledge.reparse_started"
+	AuditActionKnowledgeParseCanceled  AuditAction = "knowledge.parse_canceled"
+	AuditActionKnowledgeMoveStarted    AuditAction = "knowledge.move_started"
+	AuditActionKnowledgeMoveCompleted  AuditAction = "knowledge.move_completed"
+	AuditActionKnowledgeMoveFailed     AuditAction = "knowledge.move_failed"
+
+	AuditActionTagCreated AuditAction = "tag.created"
+	AuditActionTagUpdated AuditAction = "tag.updated"
+	AuditActionTagDeleted AuditAction = "tag.deleted"
+
+	AuditActionDataSourceCreated       AuditAction = "datasource.created"
+	AuditActionDataSourceUpdated       AuditAction = "datasource.updated"
+	AuditActionDataSourceDeleted       AuditAction = "datasource.deleted"
+	AuditActionDataSourceSyncStarted   AuditAction = "datasource.sync_started"
+	AuditActionDataSourceSyncCompleted AuditAction = "datasource.sync_completed"
+	AuditActionDataSourceSyncFailed    AuditAction = "datasource.sync_failed"
+	AuditActionDataSourcePaused        AuditAction = "datasource.paused"
+	AuditActionDataSourceResumed       AuditAction = "datasource.resumed"
+
+	AuditActionKBShareAdded             AuditAction = "kb.share_added"
+	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
+	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"
+	AuditActionWikiContentChanged       AuditAction = "wiki.content_changed"
 )
 
-// AuditOutcome distinguishes successful mutations from middleware-level
-// rejections. The split lets the audit-log UI highlight denials in red
-// without needing to enumerate every action class.
+// AuditOutcome separates asynchronous acceptance from terminal business
+// results and middleware-level rejections. The UI can therefore avoid
+// presenting a queued operation as already completed.
 type AuditOutcome string
 
 const (
 	AuditOutcomeSuccess AuditOutcome = "success"
-	AuditOutcomeDenied  AuditOutcome = "denied"
+	// Accepted means the durable request was created and asynchronous work was
+	// submitted, but the background operation has not reached a terminal state.
+	AuditOutcomeAccepted AuditOutcome = "accepted"
+	AuditOutcomeDenied   AuditOutcome = "denied"
+	AuditOutcomeFailed   AuditOutcome = "failed"
+	AuditOutcomePartial  AuditOutcome = "partial"
+	AuditOutcomeCanceled AuditOutcome = "canceled"
 )
 
 // AuditLog is a single immutable audit event. The schema is intentionally
 // generic: PR 6 wires only RBAC events, but TargetType / TargetID /
 // Details are set up to absorb KB / agent / datasource events in
-// follow-up PRs without another migration.
+// follow-up PRs without another migration. Knowledge-base task events use a
+// bounded convention inside Details: task_id, trigger, processing_status,
+// source/target ids, aggregate counts, and operation-specific mode/attempt.
 //
 // Rows are append-only — no UpdatedAt, no soft-delete column. The
 // monotonic ID acts as both primary key and pagination cursor (newest-
 // first is `WHERE id < AfterID ORDER BY id DESC`).
 type AuditLog struct {
-	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement"`
-	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1"`
+	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc"`
+	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1;index:idx_audit_logs_tenant_scope_desc,priority:1"`
 	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
 	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''"`
 	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2"`
+	ScopeType     string       `json:"scope_type"     gorm:"type:varchar(32);default:'';index:idx_audit_logs_tenant_scope_desc,priority:2"`
+	ScopeID       string       `json:"scope_id"       gorm:"type:varchar(64);default:'';index:idx_audit_logs_tenant_scope_desc,priority:3"`
 	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''"`
 	TargetID      string       `json:"target_id"      gorm:"type:varchar(64);default:''"`
 	TargetUserID  string       `json:"target_user_id" gorm:"type:varchar(36);default:''"`

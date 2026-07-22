@@ -249,6 +249,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	payload := types.KnowledgeListDeletePayload{
 		TenantID:     tenantID,
 		KnowledgeIDs: ids,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -273,6 +274,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		TenantID:      tenantID,
 		KnowledgeIDs:  ids,
 		ProcessConfig: processConfig,
+		Initiator:     types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -2219,6 +2221,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		SourceKBID:   req.SourceKBID,
 		TargetKBID:   req.TargetKBID,
 		Mode:         req.Mode,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 
