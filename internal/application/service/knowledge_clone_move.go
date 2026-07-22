@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -44,39 +45,53 @@ func copyOwnedObject(
 // rollback on failure). urlCache dedups identical source objects across chunks
 // so the same source image is copied at most once per clone.
 //
-// An empty srcImageInfo yields ("", nil, nil). A JSON parse failure returns an
-// error (the clone fails) rather than silently inheriting the shared-reference
-// bug. When an image's OriginalURL points at the same object as its URL (the
-// common case for extracted images), OriginalURL is rewritten to the new path
-// too; an OriginalURL from a different/external source is preserved.
+// srcContent is the chunk's Markdown content, which embeds the same image URLs
+// as ![](url) references. Because the source objects are deleted after some
+// clone/move flows, those in-content references must also be rewritten to the
+// newly-copied objects; otherwise the content would point at soon-to-be-deleted
+// storage while image_info points at the new copies. The rewritten content is
+// returned alongside the rewritten image_info so both stay consistent.
+//
+// An empty srcImageInfo yields (srcContent, "", nil, nil). A JSON parse failure
+// returns an error (the clone fails) rather than silently inheriting the
+// shared-reference bug. When an image's OriginalURL points at the same object as
+// its URL (the common case for extracted images), OriginalURL is rewritten to
+// the new path too; an OriginalURL from a different/external source is preserved.
 func cloneChunkImageInfo(
 	ctx context.Context,
 	dstSvc interfaces.FileService,
+	srcContent string,
 	srcImageInfo string,
 	tenantID uint64,
 	knowledgeID string,
 	urlCache map[string]string,
-) (newImageInfo string, copiedURLs []string, err error) {
+) (newContent string, newImageInfo string, copiedURLs []string, err error) {
 	if srcImageInfo == "" {
-		return "", nil, nil
+		return srcContent, "", nil, nil
 	}
 
 	var images []*types.ImageInfo
 	if err := json.Unmarshal([]byte(srcImageInfo), &images); err != nil {
-		return "", nil, fmt.Errorf("failed to parse chunk image_info JSON: %w", err)
+		return srcContent, "", nil, fmt.Errorf("failed to parse chunk image_info JSON: %w", err)
 	}
+
+	// urlReplacements maps every old (source) URL to its new (copied) URL so
+	// the in-content Markdown image references can be rewritten to match.
+	urlReplacements := make(map[string]string)
 
 	for _, img := range images {
 		if img == nil || img.URL == "" {
 			continue
 		}
+		oldURL := img.URL
+		oldOriginalURL := img.OriginalURL
 		originalMatchedURL := img.OriginalURL == img.URL
 
 		newURL, cached := urlCache[img.URL]
 		if !cached {
 			newURL, err = copyOwnedObject(ctx, dstSvc, dstSvc, img.URL, tenantID, knowledgeID)
 			if err != nil {
-				return "", copiedURLs, fmt.Errorf("failed to copy chunk image %q: %w", img.URL, err)
+				return srcContent, "", copiedURLs, fmt.Errorf("failed to copy chunk image %q: %w", img.URL, err)
 			}
 			urlCache[img.URL] = newURL
 			copiedURLs = append(copiedURLs, newURL)
@@ -86,13 +101,40 @@ func cloneChunkImageInfo(
 			img.OriginalURL = newURL
 		}
 		img.URL = newURL
+
+		urlReplacements[oldURL] = newURL
+		if oldOriginalURL != "" {
+			urlReplacements[oldOriginalURL] = img.OriginalURL
+		}
 	}
 
 	out, err := json.Marshal(images)
 	if err != nil {
-		return "", copiedURLs, fmt.Errorf("failed to re-serialize chunk image_info: %w", err)
+		return srcContent, "", copiedURLs, fmt.Errorf("failed to re-serialize chunk image_info: %w", err)
 	}
-	return string(out), copiedURLs, nil
+	return rewriteContentImageURLs(srcContent, urlReplacements), string(out), copiedURLs, nil
+}
+
+// rewriteContentImageURLs replaces every occurrence of an old image URL with its
+// new URL in content. Replacements whose old and new URL are identical (e.g. an
+// external OriginalURL that was preserved) are skipped. Longer URLs are applied
+// first so a URL that is a prefix of another does not partially rewrite it.
+func rewriteContentImageURLs(content string, replacements map[string]string) string {
+	if content == "" || len(replacements) == 0 {
+		return content
+	}
+	oldURLs := make([]string, 0, len(replacements))
+	for oldURL, newURL := range replacements {
+		if oldURL == "" || oldURL == newURL {
+			continue
+		}
+		oldURLs = append(oldURLs, oldURL)
+	}
+	slices.SortFunc(oldURLs, func(a, b string) int { return len(b) - len(a) })
+	for _, oldURL := range oldURLs {
+		content = strings.ReplaceAll(content, oldURL, replacements[oldURL])
+	}
+	return content
 }
 
 // cleanupCopiedObjects deletes objects that were newly created during a clone
@@ -257,8 +299,8 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 
 			// Deep-copy extracted images into objects owned by the destination
 			// knowledge so deleting the source never breaks this clone.
-			newImageInfo, copied, copyErr := cloneChunkImageInfo(
-				ctx, dstSvc, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache)
+			newContent, newImageInfo, copied, copyErr := cloneChunkImageInfo(
+				ctx, dstSvc, sourceChunk.Content, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache)
 			if copyErr != nil {
 				err = fmt.Errorf("clone chunk image copy failed: %w", copyErr)
 				return err
@@ -271,7 +313,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 				KnowledgeID:     dst.ID,
 				KnowledgeBaseID: dst.KnowledgeBaseID,
 				TagID:           targetTagID,
-				Content:         sourceChunk.Content,
+				Content:         newContent,
 				ChunkIndex:      sourceChunk.ChunkIndex,
 				IsEnabled:       sourceChunk.IsEnabled,
 				Flags:           sourceChunk.Flags,
@@ -676,8 +718,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 			// Deep-copy extracted images into objects owned by the destination
 			// FAQ knowledge so deleting the source never breaks this clone.
-			newImageInfo, copied, copyErr := cloneChunkImageInfo(
-				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache)
+			newContent, newImageInfo, copied, copyErr := cloneChunkImageInfo(
+				ctx, dstSvc, srcChunk.Content, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache)
 			if copyErr != nil {
 				logger.Errorf(ctx, "Failed to copy FAQ chunk images: %v", copyErr)
 				handleError(progress, copyErr, "Failed to copy FAQ entry images")
@@ -692,7 +734,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 				KnowledgeID:     dstKnowledge.ID,
 				KnowledgeBaseID: dstKB.ID,
 				TagID:           targetTagID,
-				Content:         srcChunk.Content,
+				Content:         newContent,
 				ChunkIndex:      srcChunk.ChunkIndex,
 				IsEnabled:       srcChunk.IsEnabled,
 				Flags:           srcChunk.Flags,
