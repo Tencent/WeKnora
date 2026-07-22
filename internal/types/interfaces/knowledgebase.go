@@ -138,6 +138,12 @@ type KnowledgeBaseService interface {
 	ProcessKBDelete(ctx context.Context, t *asynq.Task) error
 }
 
+// UnifiedSearchService combines the existing RAG and Wiki retrieval paths
+// into one ranked, deduplicated result set.
+type UnifiedSearchService interface {
+	Search(ctx context.Context, kbID string, req types.UnifiedSearchRequest) ([]*types.UnifiedSearchResult, error)
+}
+
 // KnowledgeBaseRepository defines the knowledge base repository interface
 // Responsible for knowledge base data persistence and retrieval,
 // serving as a bridge between the service layer and data storage

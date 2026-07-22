@@ -5772,6 +5772,62 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/unified-search": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "并行检索文档片段和 Wiki 页面，使用 RRF 融合并按正文指纹去重",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "统一 RAG + Wiki 检索",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "统一检索参数",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一检索结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/batch": {
             "get": {
                 "security": [
@@ -19060,6 +19116,43 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string"
+                },
+                "rag_weight": {
+                    "type": "number"
+                },
+                "rrf_k": {
+                    "type": "integer"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource"
+                    }
+                },
+                "top_k": {
+                    "type": "integer"
+                },
+                "wiki_weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource": {
+            "type": "string",
+            "enum": [
+                "rag",
+                "wiki"
+            ],
+            "x-enum-varnames": [
+                "UnifiedSearchSourceRAG",
+                "UnifiedSearchSourceWiki"
+            ]
         },
         "github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest": {
             "type": "object",

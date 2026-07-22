@@ -20,6 +20,7 @@
 | PUT    | `/knowledge-bases/:id/pin`                | 置顶/取消置顶知识库      |
 | POST   | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（向量+关键词，推荐）  |
 | GET    | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（兼容旧客户端，需 JSON 请求体）  |
+| POST   | `/knowledge-bases/:id/unified-search`    | 统一 RAG + Wiki 检索           |
 | POST   | `/knowledge-bases/copy`                   | 拷贝知识库（异步任务）   |
 | GET    | `/knowledge-bases/copy/progress/:task_id` | 获取拷贝进度             |
 | POST   | `/knowledge-bases/:id/duplicate`          | 创建知识库副本（仅设置） |
@@ -426,6 +427,61 @@ curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-
     "success": true
 }
 ```
+
+## POST `/knowledge-bases/:id/unified-search` - 统一 RAG + Wiki 检索
+
+在指定知识库内并行执行 RAG（向量 + 关键词）和 Wiki 页面检索，使用加权 RRF 融合结果，并按规范化正文指纹去重。默认检索两种来源；普通文档知识库会自动跳过未启用的 Wiki 来源。
+
+**请求体**:
+
+| 字段        | 类型       | 必填 | 说明 |
+| ----------- | ---------- | ---- | ---- |
+| query       | string     | 是   | 查询文本 |
+| sources     | string[]   | 否   | `rag`、`wiki`；默认两者都检索 |
+| top_k       | integer    | 否   | 最终返回数量，默认 10，最大 50 |
+| rag_weight  | number     | 否   | RRF 中 RAG 来源权重，默认 0.7 |
+| wiki_weight | number     | 否   | RRF 中 Wiki 来源权重，默认 0.3 |
+| rrf_k       | integer    | 否   | RRF 平滑常数，默认 60 |
+
+权重省略或传 0 时使用对应默认值；如需关闭某个来源，请通过 `sources` 仅选择需要检索的来源。
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/unified-search' \\
+--header 'X-API-Key: sk-xxxxx' \\
+--header 'Content-Type: application/json' \\
+--data '{
+    "query": "退款异常怎么处理",
+    "sources": ["rag", "wiki"],
+    "top_k": 10
+}'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "id": "chunk-00000001",
+            "content": "退款申请需要在订单完成后 7 天内提交。",
+            "title": "售后处理指南",
+            "score": 0.016393,
+            "knowledge_base_id": "kb-00000001",
+            "knowledge_id": "knowledge-00000001",
+            "wiki_page_id": "wiki-page-00000001",
+            "sources": [
+                {"type": "rag", "id": "chunk-00000001", "title": "售后处理指南", "knowledge_id": "knowledge-00000001"},
+                {"type": "wiki", "id": "wiki-page-00000001", "title": "退款异常处理", "wiki_slug": "refund-errors"}
+            ]
+        }
+    ]
+}
+```
+
+同一正文同时出现在 RAG 和 Wiki 结果中时只返回一条，并通过 `sources` 保留两边的来源引用。该接口只负责检索，不执行 LLM 总结；需要生成答案时可将 `data` 交给 `knowledge-chat` 或 `agent-chat`。
 
 ## POST `/knowledge-bases/copy` - 拷贝知识库
 
