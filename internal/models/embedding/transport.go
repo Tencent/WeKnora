@@ -8,6 +8,14 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// sharedEmbeddingHTTPTransport keeps a single SSRF-safe connection pool for
+// all embedding clients. Embedders are recreated as model configuration changes,
+// but their outbound connections can be safely reused across client instances.
+var sharedEmbeddingHTTPTransport = func() http.RoundTripper {
+	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	return secutils.NewSSRFSafeHTTPClient(cfg).Transport
+}()
+
 // validateEmbeddingBaseURL checks that a resolved embedding API base URL is safe
 // for outbound requests. Empty URLs are allowed (callers apply provider defaults).
 func validateEmbeddingBaseURL(baseURL string) error {
@@ -25,5 +33,7 @@ func validateEmbeddingBaseURL(baseURL string) error {
 func newEmbeddingHTTPClient(timeout time.Duration) *http.Client {
 	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
 	cfg.Timeout = timeout
-	return secutils.NewSSRFSafeHTTPClient(cfg)
+	client := secutils.NewSSRFSafeHTTPClient(cfg)
+	client.Transport = sharedEmbeddingHTTPTransport
+	return client
 }
