@@ -49,6 +49,7 @@ type RouterParams struct {
 	AgentShareService            interfaces.AgentShareService
 	KBHandler                    *handler.KnowledgeBaseHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
+	KnowledgeFolderHandler       *handler.KnowledgeFolderHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
@@ -243,6 +244,25 @@ func NewRouter(params RouterParams) *gin.Engine {
 		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
+		if params.KnowledgeFolderHandler == nil {
+			panic("knowledge folder handler is nil")
+		}
+		folders := rbacGuards.apiKeyGroup(
+			v1.Group("/knowledge-bases/:id/folders"),
+			apiKeyIngest(apiKeyFullAccess()),
+		)
+		folderRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+		folders.POST("", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.CreateFolder)
+		folderRead.GET("", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.ListFolders)
+		// Keep static routes before /:folder_id so /tree cannot be captured as an ID.
+		folderRead.GET("/tree", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetTree)
+		folderRead.GET("/:folder_id/breadcrumb", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetBreadcrumb)
+		folders.POST("/:folder_id/move", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.MoveFolder)
+		folderRead.GET("/:folder_id", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetFolder)
+		folders.PUT("/:folder_id", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.UpdateFolder)
+		folders.DELETE("/:folder_id", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.DeleteFolder)
+		folderKnowledge := rbacGuards.apiKeyGroup(v1.Group("/knowledges"), apiKeyIngest(apiKeyFullAccess()))
+		folderKnowledge.PUT("/:id/folder", rbacGuards.OwnedKnowledgeKBOrAdmin(), rbacGuards.KBAccessWriteFromKnowledgeIDParam("id"), params.KnowledgeFolderHandler.MoveKnowledgeToFolder)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
@@ -388,6 +408,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
+	// Mixed document/folder moves use the plural resource contract and the
+	// same Contributor + ingest/full policy as existing batch writes.
+	knowledges := g.apiKeyGroup(r.Group("/knowledges"), apiKeyIngest(apiKeyFullAccess()))
+	knowledges.POST("/batch-move-folder", g.Contributor(), handler.BatchMoveToFolder)
 }
 
 // RegisterFAQRoutes 注册 FAQ 相关路由

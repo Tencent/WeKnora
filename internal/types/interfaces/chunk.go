@@ -102,6 +102,10 @@ type ChunkRepository interface {
 	// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs.
 	// Returns up to `limit` chunks sorted by updated_at descending.
 	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, tagIDs []string, limit int) ([]*types.Chunk, error)
+	// ListRecommendedFAQChunksInKnowledgeScope lists recommended FAQ chunks in a
+	// knowledge/folder scope, intersecting it with FAQ tags when both are present.
+	// Supplying only one filter applies that filter alone.
+	ListRecommendedFAQChunksInKnowledgeScope(ctx context.Context, tenantID uint64, knowledgeIDs []string, tagIDs []string, limit int) ([]*types.Chunk, error)
 
 	// ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
 	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.

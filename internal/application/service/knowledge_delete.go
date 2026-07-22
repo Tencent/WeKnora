@@ -710,6 +710,24 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 
+	// Folder selections are resolved again in the worker under current tenant/KB
+	// scope. This makes retries safe and ensures folders are removed only after
+	// every currently contained document has been deleted successfully.
+	knowledgeIDs := payload.KnowledgeIDs
+	if len(payload.FolderIDs) > 0 {
+		if payload.KnowledgeBaseID == "" {
+			return types.ErrInvalidArgument
+		}
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+		resolved, err := s.ResolveBatchKnowledgeScope(
+			ctx, payload.KnowledgeBaseID, knowledgeIDs, payload.FolderIDs, true,
+		)
+		if err != nil {
+			return err
+		}
+		knowledgeIDs = resolved
+	}
+
 	// Get tenant info
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -721,12 +739,41 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	// Delete knowledge list
-	if err := s.DeleteKnowledgeList(ctx, payload.KnowledgeIDs); err != nil {
-		logger.Errorf(ctx, "Failed to delete knowledge list: %v", err)
-		return err
+	// Only existing rows enter the destructive pipeline. A retry after the rows
+	// were removed therefore skips external cleanup and proceeds to finalization.
+	if len(knowledgeIDs) > 0 {
+		existing, err := s.repo.GetKnowledgeBatch(ctx, payload.TenantID, knowledgeIDs)
+		if err != nil {
+			return err
+		}
+		knowledgeIDs = knowledgeIDs[:0]
+		for _, knowledge := range existing {
+			if payload.KnowledgeBaseID == "" || knowledge.KnowledgeBaseID == payload.KnowledgeBaseID {
+				knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+			}
+		}
+	}
+	if len(knowledgeIDs) > 0 {
+		deleteList := s.DeleteKnowledgeList
+		if s.deleteKnowledgeListHook != nil {
+			deleteList = s.deleteKnowledgeListHook
+		}
+		if err := deleteList(ctx, knowledgeIDs); err != nil {
+			logger.Errorf(ctx, "Failed to delete knowledge list: %v", err)
+			return err
+		}
+	}
+	if len(payload.FolderIDs) > 0 {
+		finalize := s.folderService.DeleteEmptySubtrees
+		if s.finalizeFoldersHook != nil {
+			finalize = s.finalizeFoldersHook
+		}
+		if err := finalize(ctx, payload.KnowledgeBaseID, payload.FolderIDs); err != nil {
+			logger.Errorf(ctx, "Failed to delete emptied folder subtrees: %v", err)
+			return err
+		}
 	}
 
-	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))
+	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(knowledgeIDs))
 	return nil
 }

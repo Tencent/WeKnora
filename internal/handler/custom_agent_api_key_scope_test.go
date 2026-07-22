@@ -19,6 +19,7 @@ type suggestedQuestionsAgentService struct {
 	interfaces.CustomAgentService
 	err       error
 	tagScopes []types.TagScope
+	folderIDs []string
 }
 
 func (s *suggestedQuestionsAgentService) GetSuggestedQuestions(
@@ -27,9 +28,11 @@ func (s *suggestedQuestionsAgentService) GetSuggestedQuestions(
 	_ []string,
 	_ []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
 	_ int,
 ) ([]types.SuggestedQuestion, error) {
 	s.tagScopes = tagScopes
+	s.folderIDs = folderIDs
 	return nil, s.err
 }
 
@@ -91,4 +94,20 @@ func TestGetSuggestedQuestionsRejectsInvalidScopedTags(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
+func TestGetSuggestedQuestionsParsesFolderScopeAndDefaultsDescendants(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	service := &suggestedQuestionsAgentService{}
+	h := &CustomAgentHandler{service: service}
+	r.GET("/agents/:id/suggested-questions", h.GetSuggestedQuestions)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/agents/agent-1/suggested-questions?folder_ids=folder-1,folder-2&folder_ids=folder-3", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"folder-1", "folder-2", "folder-3"}, service.folderIDs)
 }

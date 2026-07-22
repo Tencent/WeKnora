@@ -300,3 +300,42 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
 }
+
+func TestListRecommendedFAQChunksInKnowledgeScope_FolderAndTagIntersection(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+	selectedTag := uuid.NewString()
+
+	folderNoTag := makeSuggestedFAQChunk(t, "kb-1", "folder-no-tag", uuid.NewString(), "folder no tag")
+	outsideWithTag := makeSuggestedFAQChunk(t, "kb-1", "outside-with-tag", selectedTag, "outside with tag")
+	folderWithTag := makeSuggestedFAQChunk(t, "kb-1", "folder-with-tag", selectedTag, "folder with tag")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{folderNoTag, outsideWithTag, folderWithTag}))
+
+	got, err := repo.ListRecommendedFAQChunksInKnowledgeScope(
+		ctx, 1, []string{"folder-no-tag", "folder-with-tag"}, []string{selectedTag}, 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, folderWithTag.ID, got[0].ID)
+}
+
+func TestListRecommendedFAQChunksInKnowledgeScope_SingleFilters(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+	selectedTag := uuid.NewString()
+	folderNoTag := makeSuggestedFAQChunk(t, "kb-1", "folder-no-tag", uuid.NewString(), "folder no tag")
+	outsideWithTag := makeSuggestedFAQChunk(t, "kb-1", "outside-with-tag", selectedTag, "outside with tag")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{folderNoTag, outsideWithTag}))
+
+	folderOnly, err := repo.ListRecommendedFAQChunksInKnowledgeScope(ctx, 1, []string{"folder-no-tag"}, nil, 10)
+	require.NoError(t, err)
+	require.Len(t, folderOnly, 1)
+	assert.Equal(t, folderNoTag.ID, folderOnly[0].ID)
+
+	tagOnly, err := repo.ListRecommendedFAQChunksInKnowledgeScope(ctx, 1, nil, []string{selectedTag}, 10)
+	require.NoError(t, err)
+	require.Len(t, tagOnly, 1)
+	assert.Equal(t, outsideWithTag.ID, tagOnly[0].ID)
+}

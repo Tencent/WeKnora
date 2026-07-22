@@ -63,7 +63,8 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	// Check if we have search targets or web search enabled
-	hasKBTargets := types.HasKnowledgeRetrievalScope(
+	hasKBTargets := types.HasEffectiveKnowledgeRetrievalScope(
+		chatManage.KnowledgeScopeSpecified,
 		chatManage.SearchTargets,
 		chatManage.KnowledgeBaseIDs,
 		chatManage.KnowledgeIDs,

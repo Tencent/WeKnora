@@ -233,7 +233,8 @@ func hasKBRetrievalTargets(chatManage *types.ChatManage) bool {
 	if chatManage == nil {
 		return false
 	}
-	return types.HasKnowledgeRetrievalScope(
+	return types.HasEffectiveKnowledgeRetrievalScope(
+		chatManage.KnowledgeScopeSpecified,
 		chatManage.SearchTargets,
 		chatManage.KnowledgeBaseIDs,
 		chatManage.KnowledgeIDs,

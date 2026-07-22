@@ -159,7 +159,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 		100,
 		[]string{"doc-kb"},
 		nil,
-		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, nil,
 	)
 
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *te
 		100,
 		nil,
 		[]string{"doc-1"},
-		nil,
+		nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -198,7 +198,7 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 		100,
 		[]string{"doc-kb"},
 		[]string{"doc-2", "doc-3"},
-		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, nil,
 	)
 
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 		100,
 		[]string{"faq-kb"},
 		nil,
-		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}},
+		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}}, nil,
 	)
 
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 		100,
 		[]string{"doc-kb"},
 		nil,
-		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, nil,
 	)
 
 	require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 		100,
 		[]string{"doc-kb"},
 		nil,
-		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, nil,
 	)
 
 	require.NoError(t, err)
@@ -322,7 +322,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 		100,
 		[]string{"doc-kb"},
 		nil,
-		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}}, nil,
 	)
 
 	require.Error(t, err)

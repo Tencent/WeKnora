@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -25,13 +26,14 @@ var (
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo           interfaces.CustomAgentRepository
-	chunkRepo      interfaces.ChunkRepository
-	kbService      interfaces.KnowledgeBaseService
-	kbShareService interfaces.KBShareService
-	wikiPageRepo   interfaces.WikiPageRepository
-	tagRepo        interfaces.KnowledgeTagRepository
-	knowledgeRepo  interfaces.KnowledgeRepository
+	repo                   interfaces.CustomAgentRepository
+	chunkRepo              interfaces.ChunkRepository
+	kbService              interfaces.KnowledgeBaseService
+	kbShareService         interfaces.KBShareService
+	wikiPageRepo           interfaces.WikiPageRepository
+	tagRepo                interfaces.KnowledgeTagRepository
+	knowledgeRepo          interfaces.KnowledgeRepository
+	knowledgeFolderService interfaces.KnowledgeFolderService
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -43,15 +45,17 @@ func NewCustomAgentService(
 	wikiPageRepo interfaces.WikiPageRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	knowledgeFolderService interfaces.KnowledgeFolderService,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo:           repo,
-		chunkRepo:      chunkRepo,
-		kbService:      kbService,
-		kbShareService: kbShareService,
-		wikiPageRepo:   wikiPageRepo,
-		tagRepo:        tagRepo,
-		knowledgeRepo:  knowledgeRepo,
+		repo:                   repo,
+		chunkRepo:              chunkRepo,
+		kbService:              kbService,
+		kbShareService:         kbShareService,
+		wikiPageRepo:           wikiPageRepo,
+		tagRepo:                tagRepo,
+		knowledgeRepo:          knowledgeRepo,
+		knowledgeFolderService: knowledgeFolderService,
 	}
 }
 
@@ -472,9 +476,10 @@ func (s *customAgentService) GetSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, true)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, folderIDs, limit, true)
 }
 
 func (s *customAgentService) GetKnowledgeSuggestedQuestions(
@@ -483,9 +488,40 @@ func (s *customAgentService) GetKnowledgeSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, false)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, folderIDs, limit, false)
+}
+
+func (s *customAgentService) resolveSuggestionAgentKBIDs(
+	ctx context.Context, agent *types.CustomAgent,
+) ([]string, error) {
+	if agent == nil {
+		return nil, types.ErrInvalidArgument
+	}
+	switch agent.Config.KBSelectionMode {
+	case "all":
+		kbs, err := s.kbService.ListKnowledgeBases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		capFilter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
+		ids := make([]string, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb == nil || (!capFilter.IsEmpty() && !tools.KBSatisfiesAgentRequirements(
+				kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools,
+			)) {
+				continue
+			}
+			ids = append(ids, kb.ID)
+		}
+		return ids, nil
+	case "none":
+		return nil, nil
+	default:
+		return mergeUniqueStrings(nil, agent.Config.KnowledgeBases), nil
+	}
 }
 
 func (s *customAgentService) getSuggestedQuestions(
@@ -494,6 +530,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
 	limit int,
 	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
@@ -515,10 +552,47 @@ func (s *customAgentService) getSuggestedQuestions(
 		return nil, ErrInvalidTenantID
 	}
 
-	// Get agent configuration
+	// Load agent before folder resolution so a folder-only request can bind its
+	// bare folder IDs against the agent's configured KB scope.
 	agent, err := s.GetAgentByID(ctx, agentID)
 	if err != nil {
 		return nil, err
+	}
+
+	var folderScopedKBIDs []string
+	if len(folderIDs) > 0 {
+		folderBindingKBIDs := kbIDs
+		if len(folderBindingKBIDs) == 0 {
+			folderBindingKBIDs, err = s.resolveSuggestionAgentKBIDs(ctx, agent)
+			if err != nil {
+				return nil, err
+			}
+			folderBindingKBIDs, err = types.FilterKnowledgeBasesForTenantAPIKeyScope(
+				ctx, nil, folderBindingKBIDs,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+		resolvedFolders, resolveErr := s.resolveSuggestionFolderScopes(
+			ctx, tenantID, folderBindingKBIDs, folderIDs,
+		)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if resolvedFolders.Empty {
+			return []types.SuggestedQuestion{}, nil
+		}
+		if len(resolvedFolders.KnowledgeIDs) > 0 {
+			hadExplicitKnowledgeScope := len(knowledgeIDs) > 0
+			knowledgeIDs = intersectOptionalSuggestionScopes(knowledgeIDs, resolvedFolders.KnowledgeIDs)
+			if hadExplicitKnowledgeScope && len(knowledgeIDs) == 0 {
+				return []types.SuggestedQuestion{}, nil
+			}
+		}
+		folderScopedKBIDs = resolvedFolders.ScopedKnowledgeBaseIDs
+		kbIDs = mergeUniqueStrings(excludeSuggestionStrings(kbIDs, resolvedFolders.ScopedKnowledgeBaseIDs),
+			resolvedFolders.FullKnowledgeBaseIDs)
 	}
 
 	var curated []types.SuggestedQuestion
@@ -562,7 +636,13 @@ func (s *customAgentService) getSuggestedQuestions(
 			})
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
-		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolvedTags.KnowledgeIDs)
+		if len(resolvedTags.KnowledgeIDs) > 0 {
+			hadKnowledgeScope := len(knowledgeIDs) > 0
+			knowledgeIDs = intersectOptionalSuggestionScopes(knowledgeIDs, resolvedTags.KnowledgeIDs)
+			if hadKnowledgeScope && len(knowledgeIDs) == 0 {
+				return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
+			}
+		}
 		if len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
@@ -570,7 +650,7 @@ func (s *customAgentService) getSuggestedQuestions(
 
 	// 2. Determine knowledge base scope
 	effectiveKBIDs := kbIDs
-	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
+	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 && len(folderIDs) == 0 {
 		// Use agent's KB configuration
 		switch agent.Config.KBSelectionMode {
 		case "all":
@@ -648,6 +728,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	// querying a KB shared from tenant B would hit `tenant_id = A` and get zero
 	// rows back — the symptom is "suggested questions never appear for shared KBs".
 	scopeKBIDs := mergeUniqueStrings(queryKBIDs, resolvedTags.KnowledgeBaseIDs)
+	scopeKBIDs = mergeUniqueStrings(scopeKBIDs, folderScopedKBIDs)
 	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, scopeKBIDs)
 	// Always keep the caller's tenant in the iteration so knowledge_ids-only
 	// requests (no kbIDs) still execute one query under the caller's tenant.
@@ -659,9 +740,19 @@ func (s *customAgentService) getSuggestedQuestions(
 	for groupTenantID, groupKBIDs := range kbGroups {
 		explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
 		groupTagIDs := resolvedTags.TagIDsByTenant[groupTenantID]
-		faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(
-			ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, groupTagIDs, fetchLimit,
-		)
+		var faqChunks []*types.Chunk
+		var err error
+		if len(folderIDs) > 0 && len(groupTagIDs) > 0 {
+			// A folder is an authoritative knowledge scope. FAQ tags narrow that
+			// scope rather than forming the legacy method's additive OR union.
+			faqChunks, err = s.chunkRepo.ListRecommendedFAQChunksInKnowledgeScope(
+				ctx, groupTenantID, queryKnowledgeIDs, groupTagIDs, fetchLimit,
+			)
+		} else {
+			faqChunks, err = s.chunkRepo.ListRecommendedFAQChunks(
+				ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, groupTagIDs, fetchLimit,
+			)
+		}
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"agent_id":  agentID,
@@ -865,6 +956,114 @@ func (s *customAgentService) resolveSuggestionTagScopes(
 		}
 	}
 	return result, nil
+}
+
+type resolvedSuggestionFolderScopes struct {
+	KnowledgeIDs           []string
+	ScopedKnowledgeBaseIDs []string
+	FullKnowledgeBaseIDs   []string
+	Empty                  bool
+}
+
+func (s *customAgentService) resolveSuggestionFolderScopes(
+	ctx context.Context,
+	callerTenantID uint64,
+	kbIDs []string,
+	folderIDs []string,
+) (resolvedSuggestionFolderScopes, error) {
+	var result resolvedSuggestionFolderScopes
+	if len(folderIDs) == 0 {
+		return result, nil
+	}
+	if len(kbIDs) == 0 || s.knowledgeFolderService == nil || s.kbService == nil {
+		return result, types.ErrInvalidArgument
+	}
+	kbIDs = mergeUniqueStrings(nil, kbIDs)
+	kbs, err := s.kbService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
+	if err != nil {
+		return result, err
+	}
+	kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil {
+			kbByID[kb.ID] = kb
+		}
+	}
+	ownerByKB := make(map[string]uint64, len(kbIDs))
+	callerRole := types.TenantRoleFromContext(ctx)
+	for _, kbID := range kbIDs {
+		kb := kbByID[kbID]
+		if kb == nil {
+			return result, types.ErrInvalidArgument
+		}
+		if kb.TenantID != callerTenantID {
+			if s.kbShareService == nil {
+				return result, apperrors.NewForbiddenError("knowledge base is not readable")
+			}
+			allowed, permissionErr := s.kbShareService.HasTenantKBPermission(
+				ctx, kbID, callerTenantID, callerRole, types.OrgRoleViewer,
+			)
+			if permissionErr != nil {
+				return result, permissionErr
+			}
+			if !allowed {
+				return result, apperrors.NewForbiddenError("knowledge base is not readable")
+			}
+		}
+		ownerByKB[kbID] = kb.TenantID
+	}
+	byKB := make(map[string][]string, len(kbIDs))
+	for _, folderID := range folderIDs {
+		if folderID == types.FolderRootID || folderID == types.FolderRootFilter {
+			for _, kbID := range kbIDs {
+				byKB[kbID] = append(byKB[kbID], types.FolderRootID)
+			}
+			continue
+		}
+		matched := ""
+		for _, kbID := range kbIDs {
+			ownerCtx := context.WithValue(ctx, types.TenantIDContextKey, ownerByKB[kbID])
+			folder, getErr := s.knowledgeFolderService.GetFolder(ownerCtx, kbID, folderID)
+			if getErr == nil && folder != nil {
+				if folder.KnowledgeBaseID != kbID || folder.TenantID != ownerByKB[kbID] || matched != "" {
+					return result, types.ErrInvalidArgument
+				}
+				matched = kbID
+			}
+		}
+		if matched == "" {
+			return result, types.ErrInvalidArgument
+		}
+		byKB[matched] = append(byKB[matched], folderID)
+	}
+	for _, kbID := range kbIDs {
+		ids := byKB[kbID]
+		if len(ids) == 0 {
+			continue
+		}
+		ownerCtx := context.WithValue(ctx, types.TenantIDContextKey, ownerByKB[kbID])
+		scope, resolveErr := s.knowledgeFolderService.ResolveKnowledgeScope(
+			ownerCtx, kbID, ids,
+		)
+		if resolveErr != nil {
+			return result, resolveErr
+		}
+		result.ScopedKnowledgeBaseIDs = mergeUniqueStrings(result.ScopedKnowledgeBaseIDs, []string{kbID})
+		if scope.FullKnowledgeBase {
+			result.FullKnowledgeBaseIDs = mergeUniqueStrings(result.FullKnowledgeBaseIDs, []string{kbID})
+			continue
+		}
+		result.KnowledgeIDs = mergeUniqueStrings(result.KnowledgeIDs, scope.KnowledgeIDs)
+	}
+	result.Empty = len(result.KnowledgeIDs) == 0 && len(result.FullKnowledgeBaseIDs) == 0
+	return result, nil
+}
+
+func intersectOptionalSuggestionScopes(current, narrowed []string) []string {
+	if len(current) == 0 {
+		return mergeUniqueStrings(nil, narrowed)
+	}
+	return intersectSuggestionStrings(current, narrowed)
 }
 
 func flattenTagScopeIDs(scopes []types.TagScope) []string {

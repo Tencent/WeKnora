@@ -932,6 +932,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			item.FileName, // customFileName — must include extension for file-type validation
 			tagIDs,        // auto-tag from data source
 			channel,
+			"", // DataSource-synchronized knowledge always stays at the root.
 			nil,
 		)
 		return isUpdate, err
@@ -949,6 +950,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			item.Title,
 			tagIDs, // auto-tag from data source
 			channel,
+			"", // DataSource-synchronized knowledge always stays at the root.
 			nil,
 		)
 		return isUpdate, err

@@ -48,6 +48,20 @@ func (r *createKnowledgeFileRepoStub) GetKnowledgeTags(
 	return map[string][]*types.KnowledgeTag{}, nil
 }
 
+type createKnowledgeFolderServiceStub struct {
+	interfaces.KnowledgeFolderService
+	repo     interfaces.KnowledgeRepository
+	folderID string
+}
+
+func (s *createKnowledgeFolderServiceStub) CreateKnowledgeInFolder(
+	ctx context.Context, knowledge *types.Knowledge, folderID string,
+) error {
+	s.folderID = folderID
+	knowledge.FolderID = folderID
+	return s.repo.CreateKnowledge(ctx, knowledge)
+}
+
 type createKnowledgeFileKBServiceStub struct {
 	interfaces.KnowledgeBaseService
 
@@ -133,9 +147,10 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 	repo := &createKnowledgeFileRepoStub{}
 	fileSvc := &createKnowledgeFileServiceStub{saveErr: errors.New("storage unavailable")}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
+		repo:          repo,
+		folderService: &createKnowledgeFolderServiceStub{repo: repo},
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       fileSvc,
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -147,6 +162,7 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 		"",
 		nil,
 		"",
+		types.FolderRootID,
 		nil,
 	)
 
@@ -163,10 +179,11 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 	fileSvc := &createKnowledgeFileServiceStub{}
 	task := &createKnowledgeTaskEnqueuerStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
-		task:      task,
+		repo:          repo,
+		folderService: &createKnowledgeFolderServiceStub{repo: repo},
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       fileSvc,
+		task:          task,
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -178,6 +195,7 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 		"",
 		nil,
 		"",
+		types.FolderRootID,
 		nil,
 	)
 
@@ -198,9 +216,10 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 	repo := &createKnowledgeFileRepoStub{createErr: errors.New("database unavailable")}
 	fileSvc := &createKnowledgeFileServiceStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
+		repo:          repo,
+		folderService: &createKnowledgeFolderServiceStub{repo: repo},
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       fileSvc,
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -212,6 +231,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 		"",
 		nil,
 		"",
+		types.FolderRootID,
 		nil,
 	)
 
@@ -230,10 +250,11 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	fileSvc := &createKnowledgeFileServiceStub{}
 	task := &createKnowledgeTaskEnqueuerStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
-		task:      task,
+		repo:          repo,
+		folderService: &createKnowledgeFolderServiceStub{repo: repo},
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       fileSvc,
+		task:          task,
 	}
 
 	chunkSize := 512
@@ -250,6 +271,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 		"",
 		nil,
 		"",
+		types.FolderRootID,
 		overrides,
 	)
 
@@ -290,4 +312,50 @@ func newMultipartFileHeader(t *testing.T, filename string, content string) *mult
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	require.NoError(t, req.ParseMultipartForm(1024))
 	return req.MultipartForm.File["file"][0]
+}
+
+func TestCreateKnowledgeFromFileAssignsCurrentFolder(t *testing.T) {
+	repo := &createKnowledgeFileRepoStub{}
+	folderService := &createKnowledgeFolderServiceStub{repo: repo}
+	svc := &knowledgeService{
+		repo:          repo,
+		folderService: folderService,
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       &createKnowledgeFileServiceStub{},
+		task:          &createKnowledgeTaskEnqueuerStub{},
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(), "kb-1", newMultipartFileHeader(t, "doc.txt", "folder-aware"),
+		nil, nil, "", nil, "web", "folder-current", nil,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "folder-current", folderService.folderID)
+	require.Equal(t, "folder-current", knowledge.FolderID)
+	require.Equal(t, "folder-current", repo.createdKnowledge.FolderID)
+}
+
+func TestCreateKnowledgeFromURLDirectFileAssignsCurrentFolder(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST_EXTRA", "example.com")
+	repo := &createKnowledgeFileRepoStub{}
+	folderService := &createKnowledgeFolderServiceStub{repo: repo}
+	svc := &knowledgeService{
+		repo:          repo,
+		folderService: folderService,
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       &createKnowledgeFileServiceStub{},
+		task:          &createKnowledgeTaskEnqueuerStub{},
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromURL(
+		newCreateKnowledgeFileContext(), "kb-1", "https://example.com/report.pdf", "", "", nil,
+		"Report", nil, "web", "folder-current", nil,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "file_url", knowledge.Type)
+	require.Equal(t, "folder-current", folderService.folderID)
+	require.Equal(t, "folder-current", knowledge.FolderID)
+	require.Equal(t, "folder-current", repo.createdKnowledge.FolderID)
 }

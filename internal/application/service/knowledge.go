@@ -46,6 +46,7 @@ type knowledgeService struct {
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
 	repo            interfaces.KnowledgeRepository
+	folderService   interfaces.KnowledgeFolderService
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
 	tenantService   interfaces.TenantService
@@ -64,6 +65,11 @@ type knowledgeService struct {
 	kbShareService  interfaces.KBShareService
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
+
+	// Narrow test seams for the asynchronous delete orchestration. Production
+	// uses the normal methods when these hooks are nil.
+	deleteKnowledgeListHook func(context.Context, []string) error
+	finalizeFoldersHook     func(context.Context, string, []string) error
 
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
@@ -88,6 +94,7 @@ const (
 func NewKnowledgeService(
 	config *config.Config,
 	repo interfaces.KnowledgeRepository,
+	folderService interfaces.KnowledgeFolderService,
 	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
@@ -115,6 +122,7 @@ func NewKnowledgeService(
 	return &knowledgeService{
 		config:          config,
 		repo:            repo,
+		folderService:   folderService,
 		kbService:       kbService,
 		tenantRepo:      tenantRepo,
 		tenantService:   tenantService,
@@ -139,6 +147,60 @@ func NewKnowledgeService(
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 	}, nil
+}
+
+// ResolveBatchKnowledgeScope is the single live folder-scope expansion path used by batch operations.
+func (s *knowledgeService) ResolveBatchKnowledgeScope(
+	ctx context.Context, kbID string, explicitIDs, folderIDs []string, enumerateFull bool,
+) ([]string, error) {
+	merged := mergeStableKnowledgeIDs(explicitIDs, nil)
+	if len(folderIDs) == 0 {
+		return merged, nil
+	}
+	scope, err := s.folderService.ResolveKnowledgeScope(ctx, kbID, folderIDs)
+	if err != nil {
+		return nil, err
+	}
+	resolved := scope.KnowledgeIDs
+	if scope.FullKnowledgeBase {
+		if !enumerateFull {
+			return nil, types.ErrInvalidArgument
+		}
+		knowledges, err := s.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+		if err != nil {
+			return nil, err
+		}
+		resolved = make([]string, 0, len(knowledges))
+		for _, knowledge := range knowledges {
+			resolved = append(resolved, knowledge.ID)
+		}
+	}
+	return mergeStableKnowledgeIDs(merged, resolved), nil
+}
+
+func mergeStableKnowledgeIDs(first, second []string) []string {
+	seen := make(map[string]struct{}, len(first)+len(second))
+	out := make([]string, 0, len(first)+len(second))
+	for _, values := range [][]string{first, second} {
+		for _, raw := range values {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (s *knowledgeService) MoveBatchToFolder(
+	ctx context.Context, kbID string, knowledgeIDs, folderIDs []string, targetFolderID string,
+) error {
+	return s.folderService.MoveBatchToFolder(ctx, kbID, knowledgeIDs, folderIDs, targetFolderID)
 }
 
 // tracker returns a usable SpanTracker — falls back to a no-op when the
@@ -528,6 +590,11 @@ func (s *knowledgeService) ListKnowledgeByKnowledgeBaseID(ctx context.Context,
 func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
 	kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 ) (*types.PageResult, error) {
+	if filter.FolderIDSet && filter.FolderID != types.FolderRootID {
+		if _, err := s.folderService.GetFolder(ctx, kbID, filter.FolderID); err != nil {
+			return nil, err
+		}
+	}
 	knowledges, total, err := s.repo.ListPagedKnowledgeByKnowledgeBaseID(ctx,
 		ctx.Value(types.TenantIDContextKey).(uint64), kbID, page, filter)
 	if err != nil {

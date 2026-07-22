@@ -29,6 +29,7 @@ type AgentConfig struct {
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
 	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
+	KnowledgeScopeSpecified bool          `json:"-"`                                    // Runtime scope is authoritative, even when empty
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")

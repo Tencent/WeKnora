@@ -201,3 +201,46 @@ func TestBatchCountReferences_ScopedToKnowledgeBase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), counts[tag1].KnowledgeCount)
 }
+
+func TestApplyKnowledgeListFilter_FolderRootNamedAndOmitted(t *testing.T) {
+	db := setupKnowledgeTagTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	kbID := uuid.New().String()
+	for _, row := range []struct{ id, folder string }{
+		{"root", ""}, {"parent", "folder-a"}, {"descendant", "folder-child"},
+	} {
+		require.NoError(t, db.Exec(`
+			INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, parse_status, folder_id)
+			VALUES (?, 1, ?, 'file', ?, 'completed', ?)
+		`, row.id, kbID, row.id, row.folder).Error)
+	}
+
+	list := func(filter types.KnowledgeListFilter) []string {
+		var ids []string
+		query := db.Model(&types.Knowledge{}).Where("tenant_id = ? AND knowledge_base_id = ?", 1, kbID)
+		require.NoError(t, applyKnowledgeListFilter(query, filter).Order("id").Pluck("id", &ids).Error)
+		return ids
+	}
+	assert.Equal(t, []string{"descendant", "parent", "root"}, list(types.KnowledgeListFilter{}))
+	assert.Equal(t, []string{"root"}, list(types.KnowledgeListFilter{FolderIDSet: true, FolderID: types.FolderRootID}))
+	assert.Equal(t, []string{"parent"}, list(types.KnowledgeListFilter{FolderIDSet: true, FolderID: "folder-a"}))
+	_ = repo
+}
+
+func TestCheckKnowledgeExists_DuplicateRemainsGlobalAcrossFolders(t *testing.T) {
+	db := setupKnowledgeTagTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	kbID := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges
+		(id, tenant_id, knowledge_base_id, type, title, parse_status, folder_id, file_hash, file_name, file_size)
+		VALUES ('doc-a', 1, ?, 'file', 'doc', 'completed', 'folder-a', 'same-hash', 'doc.txt', 3)
+	`, kbID).Error)
+
+	exists, knowledge, err := repo.CheckKnowledgeExists(context.Background(), 1, kbID, &types.KnowledgeCheckParams{
+		Type: "file", FileHash: "same-hash",
+	})
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, "doc-a", knowledge.ID)
+}

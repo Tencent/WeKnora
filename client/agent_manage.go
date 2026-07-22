@@ -310,6 +310,7 @@ type SuggestedQuestionsRequest struct {
 	KnowledgeBaseIDs []string                    // Optional: override agent's KB scope
 	KnowledgeIDs     []string                    // Optional: limit to specific knowledge items
 	TagScopes        []SuggestedQuestionTagScope // Optional: limit to tags within their parent KBs
+	FolderIDs        []string                    // Optional: limit to folders in selected knowledge bases
 	Limit            int                         // Optional: max questions to return (default 6)
 }
 
@@ -349,6 +350,9 @@ func (c *Client) GetSuggestedQuestions(ctx context.Context, agentID string, requ
 				return nil, fmt.Errorf("marshal tag scopes: %w", err)
 			}
 			query.Set("tag_scopes", string(encoded))
+		}
+		if len(request.FolderIDs) > 0 {
+			query.Set("folder_ids", strings.Join(request.FolderIDs, ","))
 		}
 		if request.Limit > 0 {
 			query.Set("limit", strconv.Itoa(request.Limit))

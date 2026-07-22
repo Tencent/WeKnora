@@ -600,6 +600,15 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
+	var folderIDs []string
+	for _, value := range c.QueryArray("folder_ids") {
+		for _, id := range strings.Split(value, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				folderIDs = append(folderIDs, trimmed)
+			}
+		}
+	}
+
 	var tagScopes []types.TagScope
 	if raw := strings.TrimSpace(c.Query("tag_scopes")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &tagScopes); err != nil {
@@ -618,7 +627,7 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
 		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, folderIDs, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

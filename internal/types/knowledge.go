@@ -90,6 +90,10 @@ const (
 type KnowledgeListFilter struct {
 	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
 	TagIDs []string
+	// FolderID is the stored folder ID used when FolderIDSet is true.
+	FolderID string
+	// FolderIDSet distinguishes an explicit root filter (FolderID == "") from an omitted filter.
+	FolderIDSet bool
 	// Keyword performs a LIKE match on file_name / title when non-empty.
 	Keyword string
 	// FileType filters by file_type, or by type for the special values "manual" / "url".
@@ -116,6 +120,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// ID of the containing folder (empty means the knowledge base root).
+	FolderID string `json:"folder_id" gorm:"type:varchar(36);not null;default:'';index"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

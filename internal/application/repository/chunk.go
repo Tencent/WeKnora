@@ -1008,6 +1008,44 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	return chunks, nil
 }
 
+// ListRecommendedFAQChunksInKnowledgeScope lists recommended FAQ chunks in a
+// concrete knowledge scope. Knowledge and FAQ-tag filters are intersected when
+// both are supplied; a single supplied filter remains independently useful.
+func (r *chunkRepository) ListRecommendedFAQChunksInKnowledgeScope(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeIDs []string,
+	tagIDs []string,
+	limit int,
+) ([]*types.Chunk, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(knowledgeIDs) == 0 && len(tagIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	query := r.db.WithContext(ctx).
+		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
+		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
+			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)},
+			true, int(types.ChunkFlagRecommended))
+	if len(knowledgeIDs) > 0 {
+		query = query.Where("knowledge_id IN ?", knowledgeIDs)
+	}
+	if len(tagIDs) > 0 {
+		query = query.Where("tag_id IN ?", tagIDs)
+	}
+	orderClause := "RANDOM()"
+	if r.db.Dialector.Name() == "mysql" {
+		orderClause = "RAND()"
+	}
+	if err := query.Order(orderClause).Limit(limit).Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
 // Filter by kbIDs and/or knowledgeIDs (OR relationship). At least one must be non-empty.
 // Returns up to `limit` chunks sorted by updated_at descending.

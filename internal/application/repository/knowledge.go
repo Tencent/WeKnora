@@ -98,6 +98,9 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
 func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+	if filter.FolderIDSet {
+		query = query.Where("knowledges.folder_id = ?", filter.FolderID)
+	}
 	if len(filter.TagIDs) > 0 {
 		query = query.Where(
 			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
@@ -760,4 +763,56 @@ func (r *knowledgeRepository) ListIDsByTagIDs(
 		Distinct("knowledges.id").
 		Pluck("knowledges.id", &ids).Error
 	return ids, err
+}
+
+// ListIDsByFolderIDs resolves a live folder scope to knowledge IDs.
+func (r *knowledgeRepository) ListIDsByFolderIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+) ([]string, bool, error) {
+	if len(folderIDs) == 0 {
+		return nil, false, nil
+	}
+
+	hasRoot := false
+	namedIDs := make([]string, 0, len(folderIDs))
+	seen := make(map[string]struct{}, len(folderIDs))
+	for _, folderID := range folderIDs {
+		if folderID == types.FolderRootID {
+			hasRoot = true
+			continue
+		}
+		if _, ok := seen[folderID]; ok {
+			continue
+		}
+		seen[folderID] = struct{}{}
+		namedIDs = append(namedIDs, folderID)
+	}
+	if hasRoot {
+		return nil, true, nil
+	}
+
+	resolvedFolderIDs := append([]string(nil), namedIDs...)
+	if len(namedIDs) > 0 {
+		folderRepo := &knowledgeFolderRepository{db: r.db}
+		var err error
+		resolvedFolderIDs, err = folderRepo.GetDescendantIDs(ctx, tenantID, kbID, namedIDs)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if hasRoot {
+		resolvedFolderIDs = append(resolvedFolderIDs, types.FolderRootID)
+	}
+	if len(resolvedFolderIDs) == 0 {
+		return []string{}, false, nil
+	}
+
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND folder_id IN ?", tenantID, kbID, resolvedFolderIDs).
+		Distinct("id").Pluck("id", &ids).Error
+	return ids, false, err
 }

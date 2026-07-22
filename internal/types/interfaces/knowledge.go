@@ -22,6 +22,7 @@ type KnowledgeService interface {
 		customFileName string,
 		tagIDs []string,
 		channel string,
+		folderID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
@@ -38,6 +39,7 @@ type KnowledgeService interface {
 		title string,
 		tagIDs []string,
 		channel string,
+		folderID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
@@ -84,6 +86,10 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// ResolveBatchKnowledgeScope expands a live folder selection and merges it with explicit knowledge IDs.
+	// destructive requests set enumerateFull so root+descendants yields explicit current IDs.
+	ResolveBatchKnowledgeScope(ctx context.Context, kbID string, explicitIDs, folderIDs []string, enumerateFull bool) ([]string, error)
+	MoveBatchToFolder(ctx context.Context, kbID string, knowledgeIDs, folderIDs []string, targetFolderID string) error
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -268,6 +274,9 @@ type KnowledgeRepository interface {
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
+	// ListIDsByFolderIDs resolves a live folder scope to knowledge IDs. A root
+	// virtual-root scope returns fullKB=true without expanding IDs; named folders always include descendants.
+	ListIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, bool, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.

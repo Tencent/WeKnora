@@ -40,6 +40,8 @@ type SearchTarget struct {
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// ScopeFolderIDs records the authorized logical folders resolved at request entry.
+	ScopeFolderIDs []string `json:"scope_folder_ids,omitempty"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
@@ -78,6 +80,20 @@ func HasKnowledgeRetrievalScope(
 	knowledgeIDs []string,
 ) bool {
 	return len(searchTargets) > 0 || len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+}
+
+// HasEffectiveKnowledgeRetrievalScope treats a resolved request scope as authoritative.
+// In particular, a named folder that resolves empty must not fall back to raw/default KB IDs.
+func HasEffectiveKnowledgeRetrievalScope(
+	scopeSpecified bool,
+	searchTargets SearchTargets,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+) bool {
+	if scopeSpecified {
+		return len(searchTargets) > 0
+	}
+	return HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 }
 
 // GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets

@@ -93,7 +93,7 @@ func (s *sessionService) AgentQA(
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
-	if agentRequiresRerankModel(req.CustomAgent) {
+	if agentHasKnowledgeScope(agentConfig) && agentRequiresRerankModel(req.CustomAgent) {
 		// Rerank model is resolved purely from the agent config now.
 		// We used to fall back to ConversationConfig.RerankModelID at
 		// the tenant level, but that path encouraged "leave rerank
@@ -193,18 +193,10 @@ func (s *sessionService) AgentQA(
 	logger.Info(ctx, "Executing agent with streaming")
 	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
 		logger.Errorf(ctx, "Agent execution failed: %v", err)
-		// Emit error event to the EventBus used by this agent
-		eventBus.Emit(ctx, event.Event{
-			Type:      event.EventError,
-			SessionID: sessionID,
-			Data: event.ErrorData{
-				Error:     err.Error(),
-				Stage:     "agent_execution",
-				SessionID: sessionID,
-			},
-		})
+		// The handler owns terminal service-error events. Returning the execution
+		// error keeps persistence success-gated and prevents duplicate SSE errors.
+		return fmt.Errorf("agent execution failed: %w", err)
 	}
-	// Return empty - events will be handled by Handler via EventBus subscription
 	return nil
 }
 
@@ -303,18 +295,26 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(
+		ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes, req.FolderIDs,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	agentConfig.KnowledgeScopeSpecified = len(req.FolderIDs) > 0
+	if agentConfig.KnowledgeScopeSpecified {
+		// Folder scope is authoritative. Do not retain agent defaults as a fallback.
+		agentConfig.KnowledgeBases = nil
+		agentConfig.KnowledgeIDs = nil
+	}
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
 	// Agent tools are correctly constrained behind the scenes, but the model only
 	// sees a bound KB and does not know which documents the user explicitly chose.
-	if len(req.TagScopes) > 0 {
-		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+	if len(req.TagScopes) > 0 || len(req.FolderIDs) > 0 {
+		agentConfig.KnowledgeIDs = mergeResolvedScopeKnowledgeIDs(
 			agentConfig.KnowledgeIDs,
 			searchTargets,
 			req.TagScopes,
@@ -329,7 +329,7 @@ func (s *sessionService) buildAgentConfig(
 	return agentConfig, nil
 }
 
-func mergeResolvedTagKnowledgeIDs(
+func mergeResolvedScopeKnowledgeIDs(
 	existing []string,
 	searchTargets types.SearchTargets,
 	tagScopes []types.TagScope,
@@ -340,18 +340,20 @@ func mergeResolvedTagKnowledgeIDs(
 			tagKBs[scope.KnowledgeBaseID] = true
 		}
 	}
-	if len(tagKBs) == 0 {
-		return uniqueNonEmptyStrings(existing)
-	}
+	includeAllPartialTargets := len(tagKBs) == 0
 
 	merged := append([]string(nil), existing...)
 	for _, target := range searchTargets {
-		if target == nil || !tagKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
+		if target == nil || (!includeAllPartialTargets && !tagKBs[target.KnowledgeBaseID]) || target.Type != types.SearchTargetTypeKnowledge {
 			continue
 		}
 		merged = append(merged, target.KnowledgeIDs...)
 	}
 	return uniqueNonEmptyStrings(merged)
+}
+
+func mergeResolvedTagKnowledgeIDs(existing []string, searchTargets types.SearchTargets, tagScopes []types.TagScope) []string {
+	return mergeResolvedScopeKnowledgeIDs(existing, searchTargets, tagScopes)
 }
 
 // applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill

@@ -244,11 +244,13 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
-	ctx context.Context, tenantID uint64, ids []string,
+	ctx context.Context, tenantID uint64, kbID string, ids, folderIDs []string,
 ) (string, error) {
 	payload := types.KnowledgeListDeletePayload{
-		TenantID:     tenantID,
-		KnowledgeIDs: ids,
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeIDs:    ids,
+		FolderIDs:       folderIDs,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -403,12 +405,22 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
 
 	channel := c.PostForm("channel")
+	folderID := strings.TrimSpace(c.PostForm("folder_id"))
+	if folderID == types.FolderRootFilter {
+		folderID = types.FolderRootID
+	}
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(
+		ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, folderID, processOverrides,
+	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
+			return
+		}
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) {
+			c.Error(errors.NewNotFoundError("knowledge folder not found"))
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -473,6 +485,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		Title            string                           `json:"title"`
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
+		FolderID         string                           `json:"folder_id"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -500,13 +513,23 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		secutils.SanitizeForLog(req.URL),
 	)
 
+	folderID := strings.TrimSpace(req.FolderID)
+	if folderID == types.FolderRootFilter {
+		folderID = types.FolderRootID
+	}
+
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel,
+		folderID, req.ProcessConfig,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
+			return
+		}
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) {
+			c.Error(errors.NewNotFoundError("knowledge folder not found"))
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -954,6 +977,13 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
 	}
+	if rawFolderID, exists := c.GetQuery("folder_id"); exists {
+		filter.FolderIDSet = true
+		filter.FolderID = strings.TrimSpace(rawFolderID)
+		if filter.FolderID == types.FolderRootFilter {
+			filter.FolderID = types.FolderRootID
+		}
+	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
@@ -990,6 +1020,10 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	// Retrieve paginated knowledge entries
 	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, filter)
 	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) {
+			c.Error(errors.NewNotFoundError("knowledge folder not found"))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -1035,7 +1069,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1052,7 +1086,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
-	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id})
+	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, knowledge.KnowledgeBaseID, []string{id}, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
@@ -1071,13 +1105,90 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 
 // BatchDeleteKnowledgeRequest is the body schema for POST /knowledge/batch-delete.
 type BatchDeleteKnowledgeRequest struct {
-	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"ids"  binding:"required"`
+	KBID string `json:"kb_id" binding:"required"`
+	// IDs is retained for backward compatibility. New clients use knowledge_ids.
+	IDs []string `json:"ids"`
+	types.BatchFolderScopeRequest
+}
+
+func mergeKnowledgeScope(explicit, resolved []string) []string {
+	seen := make(map[string]struct{}, len(explicit)+len(resolved))
+	out := make([]string, 0, len(explicit)+len(resolved))
+	for _, values := range [][]string{explicit, resolved} {
+		for _, raw := range values {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func normalizeBatchFolderIDs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, raw := range values {
+		id := strings.TrimSpace(raw)
+		if id == types.FolderRootFilter {
+			id = types.FolderRootID
+		} else if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (h *KnowledgeHandler) resolveWritableBatchScope(
+	c *gin.Context, kbID string, explicitIDs, folderIDs []string,
+) (context.Context, string, uint64, []string, error) {
+	_, authorizedKBID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		return nil, "", 0, nil, errors.NewForbiddenError("No permission to modify knowledge")
+	}
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, effectiveTenantID)
+	ids, err := h.kgService.ResolveBatchKnowledgeScope(
+		ctx, authorizedKBID, explicitIDs, folderIDs, true,
+	)
+	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) {
+			return nil, "", 0, nil, errors.NewBadRequestError("folder does not belong to the requested knowledge base")
+		}
+		return nil, "", 0, nil, err
+	}
+	if len(ids) > 0 {
+		knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+		if err != nil {
+			return nil, "", 0, nil, err
+		}
+		if len(knowledgeList) != len(ids) {
+			return nil, "", 0, nil, errors.NewBadRequestError("One or more knowledge entries not found")
+		}
+		for _, knowledge := range knowledgeList {
+			if knowledge.KnowledgeBaseID != authorizedKBID {
+				return nil, "", 0, nil, errors.NewBadRequestError("knowledge does not belong to the requested knowledge base")
+			}
+		}
+	}
+	return ctx, authorizedKBID, effectiveTenantID, ids, nil
 }
 
 // BatchDeleteKnowledge godoc
 // @Summary      批量删除知识
-// @Description  按 ID 列表批量删除单个知识库下的多个知识条目
+// @Description  批量删除显式知识条目及所选文件夹子树；文件与文件夹在同一异步任务中处理
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1089,93 +1200,45 @@ type BatchDeleteKnowledgeRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /knowledge/batch-delete [post]
 func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	var req BatchDeleteKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
 		return
 	}
-
-	// Deduplicate and drop empty IDs.
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("ids cannot be empty"))
+	explicit := mergeKnowledgeScope(req.IDs, req.KnowledgeIDs)
+	folderIDs := normalizeBatchFolderIDs(req.FolderIDs)
+	if len(explicit) == 0 && len(folderIDs) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids or folder_ids cannot be empty"))
 		return
 	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
-		return
-	}
-
-	// Validate KB access (editor or admin) using the kb_id from body.
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	ctx, kbID, effectiveTenantID, ids, err := h.resolveWritableBatchScope(c, req.KBID, explicit, folderIDs)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
-		return
-	}
+	// Preserve the existing batch-delete ownership policy. Reparse/tag/move
+	// retain their pre-existing editor-level authorization semantics.
 	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
 		c.Error(err)
 		return
 	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
-
-	// Single batch fetch to validate that every id exists and belongs to the
-	// requested KB. The service-layer DeleteKnowledgeList only enforces tenant
-	// scope, not KB scope, so the handler must guard against cross-KB deletion.
-	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+	const maxBatch = 200
+	// Keep the legacy cap for caller-enumerated IDs, but do not reject a folder
+	// merely because its live recursive subtree contains more than 200 documents.
+	// The worker re-resolves that subtree and must delete it completely.
+	if len(explicit) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many explicit knowledge entries (max %d per batch)", maxBatch)))
 		return
 	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
-		return
-	}
-	for _, k := range knowledgeList {
-		if k.KnowledgeBaseID != kbID {
-			c.Error(errors.NewBadRequestError(
-				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
-					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
-			return
-		}
-	}
-
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, explicit, folderIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
 	}
-
-	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
-
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Batch delete task submitted",
-		"data": gin.H{
-			"task_id":       taskID,
-			"deleted_count": len(ids),
-		},
+		"success": true, "message": "Batch delete task submitted",
+		"data": gin.H{"task_id": taskID, "deleted_count": len(ids)},
 	})
 }
 
@@ -1233,7 +1296,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, knowledgeIDs, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))
@@ -1748,8 +1811,11 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 }
 
 type knowledgeTagBatchRequest struct {
-	Updates map[string][]string `json:"updates" binding:"required,min=1"`
-	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
+	Updates      map[string][]string `json:"updates"`
+	KBID         string              `json:"kb_id"`
+	KnowledgeIDs []string            `json:"knowledge_ids"`
+	FolderIDs    []string            `json:"folder_ids"`
+	TagIDs       []string            `json:"tag_ids"`
 }
 
 // UpdateKnowledgeTagBatch godoc
@@ -1765,61 +1831,75 @@ type knowledgeTagBatchRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	// Ensure tenant ID is in context (service reads it; may be missing if request context was not set by auth)
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		c.Error(errors.NewUnauthorizedError("Unauthorized"))
-		return
-	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-
 	var req knowledgeTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse knowledge tag batch request", err)
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	// Resolve effective tenant and the authorized KB scope.
-	var authorizedKBID string
-	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
-		_, _, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+	// Legacy updates-only payload remains supported. Folder scopes require a KB and common tag_ids.
+	if len(req.FolderIDs) == 0 && len(req.KnowledgeIDs) == 0 {
+		if len(req.Updates) == 0 {
+			c.Error(errors.NewBadRequestError("updates cannot be empty"))
+			return
+		}
+		var firstID string
+		for id := range req.Updates {
+			firstID = id
+			break
+		}
+		knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstID, types.OrgRoleEditor)
 		if err != nil {
 			c.Error(err)
 			return
 		}
-		if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-			c.Error(errors.NewForbiddenError("No permission to update knowledge tags"))
+		kbID := req.KBID
+		if kbID == "" {
+			kbID = knowledge.KnowledgeBaseID
+		}
+		if _, _, _, _, err := h.resolveWritableBatchScope(c, kbID, mapKeys(req.Updates), nil); err != nil {
+			c.Error(err)
 			return
 		}
-		authorizedKBID = kbID
-		ctx = context.WithValue(ctx, types.TenantIDContextKey, effID)
-	} else if len(req.Updates) > 0 {
-		// No kb_id: infer from first knowledge ID so shared-KB updates work without client sending kb_id
-		var firstKnowledgeID string
-		for id := range req.Updates {
-			firstKnowledgeID = id
-			break
+		if err := h.kgService.UpdateKnowledgeTagBatch(effCtx, kbID, req.Updates); err != nil {
+			c.Error(err)
+			return
 		}
-		if firstKnowledgeID != "" {
-			knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
-			if err != nil {
-				c.Error(err)
-				return
-			}
-			authorizedKBID = knowledge.KnowledgeBaseID
-			ctx = effCtx
-		}
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
 	}
-	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, authorizedKBID, req.Updates); err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
+	if strings.TrimSpace(req.KBID) == "" {
+		c.Error(errors.NewBadRequestError("kb_id is required for folder scope"))
+		return
+	}
+	ctx, kbID, _, ids, err := h.resolveWritableBatchScope(c, req.KBID, req.KnowledgeIDs, req.FolderIDs)
+	if err != nil {
 		c.Error(err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-	})
+	updates := make(map[string][]string, len(ids)+len(req.Updates))
+	for id, tags := range req.Updates {
+		updates[id] = tags
+	}
+	for _, id := range ids {
+		updates[id] = req.TagIDs
+	}
+	if len(updates) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "updated_count": 0})
+		return
+	}
+	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, kbID, updates); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "updated_count": len(updates)})
+}
+
+func mapKeys[V any](values map[string]V) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	return out
 }
 
 // UpdateImageInfo godoc
@@ -2378,8 +2458,9 @@ func sliceContains(ss []string, target string) bool {
 }
 
 type batchReparseKnowledgeRequest struct {
-	KBID          string                           `json:"kb_id" binding:"required"`
-	IDs           []string                         `json:"ids" binding:"required"`
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids"`
+	types.BatchFolderScopeRequest
 	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
@@ -2397,87 +2478,81 @@ type batchReparseKnowledgeRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /knowledge/batch-reparse [post]
 func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
-	ctx := c.Request.Context()
 	var req batchReparseKnowledgeRequest
-
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
 		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
 		return
 	}
-
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
+	explicit := mergeKnowledgeScope(req.IDs, req.KnowledgeIDs)
+	folderIDs := normalizeBatchFolderIDs(req.FolderIDs)
+	if len(explicit) == 0 && len(folderIDs) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids or folder_ids cannot be empty"))
 		return
 	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
-		return
-	}
-
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	ctx, _, effectiveTenantID, ids, err := h.resolveWritableBatchScope(c, req.KBID, explicit, folderIDs)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"reparse_count": 0}})
 		return
 	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
-
-	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
-		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many knowledge entries (max %d per batch)", maxBatch)))
 		return
 	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
-		return
-	}
-	for _, k := range knowledgeList {
-		if k.KnowledgeBaseID != kbID {
-			c.Error(errors.NewBadRequestError(
-				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
-					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
-			return
-		}
-	}
-
 	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Batch reparse task submitted",
+		"data": gin.H{"task_id": taskID, "reparse_count": len(ids)}})
+}
 
-	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Batch reparse task submitted",
-		"data": gin.H{
-			"task_id":       taskID,
-			"reparse_count": len(ids),
-		},
-	})
+// BatchMoveToFolder atomically moves selected documents and folders to one target parent.
+func (h *KnowledgeHandler) BatchMoveToFolder(c *gin.Context) {
+	var req types.BatchMoveFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid batch move request").WithDetails(err.Error()))
+		return
+	}
+	knowledgeIDs := mergeKnowledgeScope(req.KnowledgeIDs, nil)
+	folderIDs := normalizeBatchFolderIDs(req.FolderIDs)
+	if len(knowledgeIDs) == 0 && len(folderIDs) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids or folder_ids cannot be empty"))
+		return
+	}
+	ctx, kbID, _, validatedIDs, err := h.resolveWritableBatchScope(
+		c, req.KBID, knowledgeIDs, nil,
+	)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	targetID := strings.TrimSpace(req.TargetFolderID)
+	if targetID == types.FolderRootFilter {
+		targetID = types.FolderRootID
+	}
+	if err := h.kgService.MoveBatchToFolder(ctx, kbID, validatedIDs, folderIDs, targetID); err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) || goerrors.Is(err, repository.ErrKnowledgeNotFound) {
+			c.Error(errors.NewBadRequestError("batch move selection does not belong to the requested knowledge base"))
+			return
+		}
+		if goerrors.Is(err, types.ErrInvalidArgument) {
+			c.Error(errors.NewBadRequestError("invalid batch move"))
+			return
+		}
+		if goerrors.Is(err, types.ErrFolderAlreadyExists) {
+			c.Error(errors.NewConflictError("folder already exists in target"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "moved_count": len(validatedIDs) + len(folderIDs)})
 }
 
 func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {

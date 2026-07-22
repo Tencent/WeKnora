@@ -50,6 +50,9 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 	if config == nil {
 		return false
 	}
+	if config.KnowledgeScopeSpecified {
+		return len(config.SearchTargets) > 0
+	}
 	return types.HasKnowledgeRetrievalScope(
 		config.SearchTargets,
 		config.KnowledgeBases,
@@ -63,7 +66,7 @@ func knowledgeBaseIDsForPrompt(config *types.AgentConfig) []string {
 	if config == nil {
 		return nil
 	}
-	if len(config.KnowledgeBases) > 0 {
+	if !config.KnowledgeScopeSpecified && len(config.KnowledgeBases) > 0 {
 		return config.KnowledgeBases
 	}
 	if len(config.SearchTargets) == 0 {
