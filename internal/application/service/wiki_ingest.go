@@ -426,6 +426,23 @@ func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID st
 // Lite mode (no Redis) still works as long as Postgres is reachable —
 // the queue lives in PG, only the active-batch lock is Redis-only and
 // has a process-local fallback (liteLocks) inside the worker.
+func enqueueWikiPendingOp(
+	ctx context.Context,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	op *types.TaskPendingOp,
+) (bool, error) {
+	if pendingRepo == nil {
+		return true, nil
+	}
+	if guard, ok := pendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseGuard); ok {
+		return guard.EnqueueIfKnowledgeBaseActive(ctx, op)
+	}
+	if err := pendingRepo.Enqueue(ctx, op); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func EnqueueWikiIngest(
 	ctx context.Context,
 	task interfaces.TaskEnqueuer,
@@ -450,20 +467,22 @@ func EnqueueWikiIngest(
 		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
 		return
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: tenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  kbID,
-			Op:       WikiOpIngest,
-			DedupKey: knowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-			// Fall through and still schedule the trigger task — the
-			// next upload (or the next retry pass) will catch the gap.
-		}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+		TenantID: tenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  kbID,
+		Op:       WikiOpIngest,
+		DedupKey: knowledgeID,
+		Payload:  payloadBytes,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
+		return
 	}
 
 	trigger := WikiIngestPayload{
@@ -512,18 +531,22 @@ func EnqueueWikiRetract(
 		logger.Warnf(ctx, "wiki retract: failed to marshal pending op: %v", err)
 		return
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       WikiOpRetract,
-			DedupKey: payload.KnowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
-		}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+		TenantID: payload.TenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  payload.KnowledgeBaseID,
+		Op:       WikiOpRetract,
+		DedupKey: payload.KnowledgeID,
+		Payload:  payloadBytes,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
+		return
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki retract: skip enqueue for deleted KB %s", payload.KnowledgeBaseID)
+		return
 	}
 
 	trigger := WikiIngestPayload{
@@ -564,6 +587,25 @@ func wikiIngestCleanupContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), wikiIngestCleanupTimeout)
 }
 
+func (s *wikiIngestService) clearDeletedKnowledgeBasePendingOps(ctx context.Context, kbID string) error {
+	cleaner, ok := s.pendingRepo.(interfaces.TaskPendingOpsScopeCleaner)
+	if !ok || kbID == "" {
+		return nil
+	}
+	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
+	defer cancel()
+	return cleaner.DeleteByScope(cleanupCtx, types.TaskScopeKnowledgeBase, kbID)
+}
+
+func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {
+	accepted, err := enqueueWikiPendingOp(ctx, s.pendingRepo, op)
+	if err != nil {
+		logger.Warnf(ctx, "wiki finalize: enqueue %s row failed: %v", op.Op, err)
+		return false
+	}
+	return accepted
+}
+
 // enqueueFinalize persists this batch's KB-global convergence work into the
 // finalize lane of task_pending_ops and schedules a debounced trigger. One
 // "slug" row per affected page (carrying its fresh title when this batch wrote
@@ -580,13 +622,14 @@ func (s *wikiIngestService) enqueueFinalize(
 	if s.pendingRepo == nil {
 		return
 	}
+	acceptedAny := false
 	for _, slug := range affectedSlugs {
 		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
 		b, err := json.Marshal(row)
 		if err != nil {
 			continue
 		}
-		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -594,8 +637,8 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpSlug,
 			DedupKey: slug,
 			Payload:  b,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki finalize: enqueue slug row for %s failed: %v", slug, err)
+		}) {
+			acceptedAny = true
 		}
 	}
 	for i := range changes {
@@ -604,7 +647,7 @@ func (s *wikiIngestService) enqueueFinalize(
 		if err != nil {
 			continue
 		}
-		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -612,14 +655,14 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpChange,
 			DedupKey: "",
 			Payload:  b,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki finalize: enqueue change row failed: %v", err)
+		}) {
+			acceptedAny = true
 		}
 	}
 	if len(folderIDs) > 0 {
 		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
 		if b, err := json.Marshal(row); err == nil {
-			if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 				TenantID: payload.TenantID,
 				TaskType: wikiFinalizeTaskType,
 				Scope:    wikiTaskScope,
@@ -627,10 +670,13 @@ func (s *wikiIngestService) enqueueFinalize(
 				Op:       wikiFinalizeOpFolderPrune,
 				DedupKey: "",
 				Payload:  b,
-			}); err != nil {
-				logger.Warnf(ctx, "wiki finalize: enqueue folder prune row failed: %v", err)
+			}) {
+				acceptedAny = true
 			}
 		}
+	}
+	if !acceptedAny {
+		return
 	}
 	s.scheduleFinalize(ctx, payload)
 }

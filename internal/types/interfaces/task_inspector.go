@@ -64,6 +64,24 @@ type TaskInspector interface {
 	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
 }
 
+// KnowledgeBaseTaskCanceller is the optional queue-cleanup capability used
+// when a knowledge base is deleted. It is separate from TaskInspector so
+// lightweight test doubles and queue backends that cannot inspect tasks do
+// not need to implement knowledge-base-wide scanning.
+type KnowledgeBaseTaskCanceller interface {
+	// CancelTasksForKnowledgeBase removes pending/scheduled/retry tasks
+	// associated with kbID and signals matching active workers to stop.
+	// knowledgeIDs covers batch tasks whose payload references documents but
+	// does not carry the parent knowledge-base ID. dataSourceIDs covers sync
+	// tasks whose payload only identifies a data source.
+	CancelTasksForKnowledgeBase(
+		ctx context.Context,
+		kbID string,
+		knowledgeIDs []string,
+		dataSourceIDs []string,
+	) (deleted int, cancelled int, err error)
+}
+
 // RuntimeTaskInspector is the optional operator surface implemented by queue
 // backends that retain inspectable task state. It is separate from
 // TaskInspector so Lite mode and light-weight tests do not need to implement

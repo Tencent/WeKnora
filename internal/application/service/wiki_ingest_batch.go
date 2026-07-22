@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -280,6 +281,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
+		exitStatus = "kb_deleted"
+		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+			return fmt.Errorf("wiki ingest: clear deleted KB queue: %w", cleanupErr)
+		}
+		return nil
+	}
 	if err != nil {
 		exitStatus = "get_kb_failed"
 		return fmt.Errorf("wiki ingest: get KB: %w", err)
@@ -1006,6 +1014,12 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
+		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+			return fmt.Errorf("wiki finalize: clear deleted KB queue: %w", cleanupErr)
+		}
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("wiki finalize: get KB: %w", err)
 	}

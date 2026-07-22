@@ -96,7 +96,12 @@ var taskTypesForKnowledgeCancel = map[string]struct{}{
 
 // listPageSize caps each Redis LIST call. Asynq pages tasks, so we
 // loop until a short page comes back. 100 matches asynq's default.
-const listPageSize = 100
+const (
+	listPageSize                    = 100
+	maxQueueMutationPasses          = 1000
+	activeCancellationSettleTimeout = time.Second
+	activeCancellationPollInterval  = 25 * time.Millisecond
+)
 
 // CancelTasksForKnowledge removes queued tasks whose payload references
 // the given knowledge_id and signals active workers running such tasks
@@ -107,22 +112,49 @@ func (a *asynqTaskInspector) CancelTasksForKnowledge(
 	if a == nil || a.inspector == nil || knowledgeID == "" {
 		return 0, 0, nil
 	}
-	deleted := 0
-	cancelled := 0
-
-	for _, queue := range queuesScanned {
-		// Pending / Scheduled / Retry can all be deleted by task ID.
-		// Archived tasks are NOT touched: dead-letter rows are
-		// already final and should remain visible to operators.
-		deleted += a.deletePendingMatches(ctx, queue, knowledgeID)
-		deleted += a.deleteScheduledMatches(ctx, queue, knowledgeID)
-		deleted += a.deleteRetryMatches(ctx, queue, knowledgeID)
-		cancelled += a.cancelActiveMatches(ctx, queue, knowledgeID)
-	}
+	deleted, cancelled := a.cancelMatchingTasks(ctx, func(taskType string, payload []byte) bool {
+		return matchesKnowledge(taskType, payload, knowledgeID)
+	})
 
 	logger.Infof(ctx,
 		"[TaskInspector] knowledge=%s cancel summary: deleted_from_queue=%d active_cancel_signaled=%d",
 		knowledgeID, deleted, cancelled,
+	)
+	return deleted, cancelled, nil
+}
+
+// CancelTasksForKnowledgeBase removes tasks that still reference a knowledge
+// base (or one of its knowledges) after the knowledge base has been deleted.
+// The kb:delete task is deliberately excluded because it performs the durable
+// storage cleanup and must remain queued.
+func (a *asynqTaskInspector) CancelTasksForKnowledgeBase(
+	ctx context.Context, knowledgeBaseID string, knowledgeIDs []string, dataSourceIDs []string,
+) (int, int, error) {
+	if a == nil || a.inspector == nil {
+		return 0, 0, nil
+	}
+	knowledgeIDSet := make(map[string]struct{}, len(knowledgeIDs))
+	for _, knowledgeID := range knowledgeIDs {
+		if knowledgeID != "" {
+			knowledgeIDSet[knowledgeID] = struct{}{}
+		}
+	}
+	dataSourceIDSet := make(map[string]struct{}, len(dataSourceIDs))
+	for _, dataSourceID := range dataSourceIDs {
+		if dataSourceID != "" {
+			dataSourceIDSet[dataSourceID] = struct{}{}
+		}
+	}
+	if knowledgeBaseID == "" && len(knowledgeIDSet) == 0 && len(dataSourceIDSet) == 0 {
+		return 0, 0, nil
+	}
+
+	deleted, cancelled := a.cancelMatchingTasks(ctx, func(taskType string, payload []byte) bool {
+		return matchesKnowledgeBase(taskType, payload, knowledgeBaseID, knowledgeIDSet, dataSourceIDSet)
+	})
+	logger.Infof(ctx,
+		"[TaskInspector] knowledge_base=%s cancel summary: deleted_from_queue=%d active_cancel_signaled=%d",
+		knowledgeBaseID, deleted, cancelled,
 	)
 	return deleted, cancelled, nil
 }
@@ -138,18 +170,12 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	if a == nil || a.inspector == nil || knowledgeID == "" {
 		return false, nil
 	}
-	listers := []struct {
-		state string
-		list  func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
-	}{
-		{"pending", a.inspector.ListPendingTasks},
-		{"scheduled", a.inspector.ListScheduledTasks},
-		{"retry", a.inspector.ListRetryTasks},
-		{"active", a.inspector.ListActiveTasks},
+	matcher := func(taskType string, payload []byte) bool {
+		return matchesKnowledge(taskType, payload, knowledgeID)
 	}
 	for _, queue := range queuesScanned {
-		for _, l := range listers {
-			if a.queueStateHasMatch(ctx, queue, knowledgeID, l.state, l.list) {
+		for _, state := range a.cancellableTaskStates() {
+			if a.queueStateHasMatch(ctx, queue, state.name, state.list, matcher) {
 				return true, nil
 			}
 		}
@@ -685,14 +711,249 @@ func (a *asynqTaskInspector) WorkerServerStats(
 	return stats, true, nil
 }
 
+type taskMatcher func(taskType string, payload []byte) bool
+
+type cancellableTaskState struct {
+	name   string
+	list   func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	active bool
+}
+
+func (a *asynqTaskInspector) cancellableTaskStates() []cancellableTaskState {
+	return []cancellableTaskState{
+		{name: "pending", list: a.inspector.ListPendingTasks},
+		{name: "scheduled", list: a.inspector.ListScheduledTasks},
+		{name: "retry", list: a.inspector.ListRetryTasks},
+		{name: "active", list: a.inspector.ListActiveTasks, active: true},
+	}
+}
+
+// cancelMatchingTasks applies the same matcher to every live queue state.
+// Archived tasks are deliberately retained as operator-visible history.
+func (a *asynqTaskInspector) cancelMatchingTasks(ctx context.Context, matcher taskMatcher) (int, int) {
+	deleted := 0
+	cancelled := 0
+
+	// Drain queued states first. Active cancellation is asynchronous: when a
+	// handler returns context.Canceled, asynq normally moves it to retry, so a
+	// later settle phase must remove that transitioned record as well.
+	for _, queue := range queuesScanned {
+		for _, state := range a.cancellableTaskStates() {
+			if state.active {
+				continue
+			}
+			deleted += a.processQueueStateMatches(
+				ctx, queue, state, true, matcher, "delete",
+				func(task *asynq.TaskInfo) error { return a.inspector.DeleteTask(queue, task.ID) },
+			)
+		}
+	}
+
+	// Snapshot all matching active IDs before publishing cancellation. If we
+	// mutate the active set while paging, exited workers shift later pages and
+	// can make us skip an entire page.
+	activeTasks := make([]queueTask, 0)
+	for _, queue := range queuesScanned {
+		for _, state := range a.cancellableTaskStates() {
+			if !state.active {
+				continue
+			}
+			for _, task := range a.snapshotQueueStateMatches(ctx, queue, state, matcher) {
+				if err := a.inspector.CancelProcessing(task.ID); err != nil {
+					logger.Warnf(ctx, "[TaskInspector] cancel active type=%s id=%s: %v", task.Type, task.ID, err)
+					continue
+				}
+				cancelled++
+				activeTasks = append(activeTasks, queueTask{queue: queue, id: task.ID})
+			}
+		}
+	}
+	deleted += a.deleteCancelledTransitions(ctx, activeTasks)
+
+	// Catch tasks that entered pending/scheduled/retry while cancellation was
+	// settling, plus downstream work emitted immediately before a handler saw
+	// its cancellation.
+	for _, queue := range queuesScanned {
+		for _, state := range a.cancellableTaskStates() {
+			if state.active {
+				continue
+			}
+			deleted += a.processQueueStateMatches(
+				ctx, queue, state, true, matcher, "delete",
+				func(task *asynq.TaskInfo) error { return a.inspector.DeleteTask(queue, task.ID) },
+			)
+		}
+	}
+	return deleted, cancelled
+}
+
+type queueTask struct {
+	queue string
+	id    string
+}
+
+// snapshotQueueStateMatches returns a read-only snapshot before its caller
+// mutates the state. TaskInfo values are only used for immutable task metadata.
+func (a *asynqTaskInspector) snapshotQueueStateMatches(
+	ctx context.Context,
+	queue string,
+	state cancellableTaskState,
+	matcher taskMatcher,
+) []*asynq.TaskInfo {
+	var matches []*asynq.TaskInfo
+	for page := 1; ; page++ {
+		if ctx.Err() != nil {
+			return matches
+		}
+		tasks, err := state.list(queue, asynq.PageSize(listPageSize), asynq.Page(page))
+		if err != nil {
+			if !errors.Is(err, asynq.ErrQueueNotFound) {
+				logger.Warnf(ctx, "[TaskInspector] snapshot %s queue=%s page=%d: %v", state.name, queue, page, err)
+			}
+			return matches
+		}
+		for _, task := range tasks {
+			if matcher(task.Type, task.Payload) {
+				matches = append(matches, task)
+			}
+		}
+		if len(tasks) < listPageSize {
+			return matches
+		}
+	}
+}
+
+// deleteCancelledTransitions waits briefly for signalled active tasks to
+// leave active state. A normal context.Canceled result is retried by asynq;
+// delete that transitioned record before it can become an orphan. Archived
+// and completed tasks remain operator-visible history.
+func (a *asynqTaskInspector) deleteCancelledTransitions(ctx context.Context, tasks []queueTask) int {
+	if len(tasks) == 0 {
+		return 0
+	}
+	deadline := time.Now().Add(activeCancellationSettleTimeout)
+	pending := append([]queueTask(nil), tasks...)
+	deleted := 0
+	for len(pending) > 0 {
+		if ctx.Err() != nil {
+			return deleted
+		}
+		next := pending[:0]
+		for _, ref := range pending {
+			info, err := a.inspector.GetTaskInfo(ref.queue, ref.id)
+			if errors.Is(err, asynq.ErrTaskNotFound) || errors.Is(err, asynq.ErrQueueNotFound) {
+				continue
+			}
+			if err != nil {
+				logger.Warnf(ctx, "[TaskInspector] inspect cancelled task queue=%s id=%s: %v", ref.queue, ref.id, err)
+				next = append(next, ref)
+				continue
+			}
+			switch info.State {
+			case asynq.TaskStatePending, asynq.TaskStateScheduled, asynq.TaskStateRetry:
+				if err := a.inspector.DeleteTask(ref.queue, ref.id); err != nil {
+					if !errors.Is(err, asynq.ErrTaskNotFound) {
+						logger.Warnf(ctx, "[TaskInspector] delete cancelled transition queue=%s id=%s: %v", ref.queue, ref.id, err)
+						next = append(next, ref)
+					}
+					continue
+				}
+				deleted++
+			case asynq.TaskStateActive:
+				next = append(next, ref)
+			}
+		}
+		pending = next
+		if len(pending) == 0 || !time.Now().Before(deadline) {
+			return deleted
+		}
+		wait := activeCancellationPollInterval
+		if remaining := time.Until(deadline); remaining < wait {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return deleted
+		case <-timer.C:
+		}
+	}
+	return deleted
+}
+
+// processQueueStateMatches pages through one queue state and applies action to
+// matching tasks. Deleting a task shifts later entries toward the current
+// page, so delete states rescan that page after any successful mutation.
+func (a *asynqTaskInspector) processQueueStateMatches(
+	ctx context.Context,
+	queue string,
+	state cancellableTaskState,
+	rescanAfterSuccess bool,
+	matcher taskMatcher,
+	actionName string,
+	action func(*asynq.TaskInfo) error,
+) int {
+	processed := 0
+	page := 1
+	passes := 0
+	for passes < maxQueueMutationPasses {
+		passes++
+		if ctx.Err() != nil {
+			return processed
+		}
+		tasks, err := state.list(queue, asynq.PageSize(listPageSize), asynq.Page(page))
+		if err != nil {
+			if !errors.Is(err, asynq.ErrQueueNotFound) {
+				logger.Warnf(ctx, "[TaskInspector] list %s queue=%s page=%d: %v", state.name, queue, page, err)
+			}
+			return processed
+		}
+		if len(tasks) == 0 {
+			return processed
+		}
+
+		processedOnPage := 0
+		for _, task := range tasks {
+			if !matcher(task.Type, task.Payload) {
+				continue
+			}
+			if err := action(task); err != nil {
+				logger.Warnf(ctx, "[TaskInspector] %s %s type=%s id=%s: %v", actionName, state.name, task.Type, task.ID, err)
+				continue
+			}
+			processed++
+			processedOnPage++
+		}
+		if rescanAfterSuccess && processedOnPage > 0 {
+			continue
+		}
+		if len(tasks) < listPageSize {
+			return processed
+		}
+		page++
+	}
+	logger.Warnf(ctx,
+		"[TaskInspector] stopped %s queue=%s after %d mutation passes",
+		state.name, queue, maxQueueMutationPasses,
+	)
+	return processed
+}
+
 // queueStateHasMatch pages through one (queue, state) list looking for a
-// task that references knowledgeID. Mirrors the delete* scanners but is
-// strictly read-only and returns early on the first hit. A backend error
-// is logged and treated as "no match" (false); the caller's fail-safe
-// then errs toward recovering the row rather than preserving it forever.
+// matching task. It is strictly read-only and returns on the first hit. A
+// backend error is logged and treated as "no match" (false).
 func (a *asynqTaskInspector) queueStateHasMatch(
-	ctx context.Context, queue, knowledgeID, state string,
+	ctx context.Context,
+	queue string,
+	state string,
 	list func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error),
+	matcher taskMatcher,
 ) bool {
 	page := 1
 	for {
@@ -706,8 +967,8 @@ func (a *asynqTaskInspector) queueStateHasMatch(
 		if len(tasks) == 0 {
 			return false
 		}
-		for _, t := range tasks {
-			if matchesKnowledge(t.Type, t.Payload, knowledgeID) {
+		for _, task := range tasks {
+			if matcher(task.Type, task.Payload) {
 				return true
 			}
 		}
@@ -731,133 +992,55 @@ func matchesKnowledge(taskType string, payload []byte, knowledgeID string) bool 
 	return probe.KnowledgeID == knowledgeID
 }
 
-func (a *asynqTaskInspector) deletePendingMatches(ctx context.Context, queue, knowledgeID string) int {
-	deleted := 0
-	page := 1
-	for {
-		tasks, err := a.inspector.ListPendingTasks(queue, asynq.PageSize(listPageSize), asynq.Page(page))
-		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
-				logger.Warnf(ctx, "[TaskInspector] list pending queue=%s page=%d: %v", queue, page, err)
-			}
-			return deleted
-		}
-		if len(tasks) == 0 {
-			return deleted
-		}
-		for _, t := range tasks {
-			if !matchesKnowledge(t.Type, t.Payload, knowledgeID) {
-				continue
-			}
-			if err := a.inspector.DeleteTask(queue, t.ID); err != nil {
-				logger.Warnf(ctx, "[TaskInspector] delete pending type=%s id=%s: %v", t.Type, t.ID, err)
-				continue
-			}
-			deleted++
-		}
-		if len(tasks) < listPageSize {
-			return deleted
-		}
-		page++
+// matchesKnowledgeBase identifies work made obsolete by deleting a knowledge
+// base. In addition to direct KB fields, clone/move payloads carry semantic KB
+// references under task-specific field names. knowledgeIDs catches tasks whose
+// payload does not carry a KB ID at all.
+func matchesKnowledgeBase(
+	taskType string,
+	payload []byte,
+	knowledgeBaseID string,
+	knowledgeIDs map[string]struct{},
+	dataSourceIDs map[string]struct{},
+) bool {
+	// These cleanup tasks carry snapshots specifically so they can still run
+	// after the KB row has been soft-deleted. Removing them leaks resources.
+	if taskType == types.TypeKBDelete || taskType == types.TypeIndexDelete {
+		return false
 	}
-}
+	var probe runtimeTaskPayloadProbe
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
 
-func (a *asynqTaskInspector) deleteScheduledMatches(ctx context.Context, queue, knowledgeID string) int {
-	deleted := 0
-	page := 1
-	for {
-		tasks, err := a.inspector.ListScheduledTasks(queue, asynq.PageSize(listPageSize), asynq.Page(page))
-		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
-				logger.Warnf(ctx, "[TaskInspector] list scheduled queue=%s page=%d: %v", queue, page, err)
+	if knowledgeBaseID != "" {
+		if probe.KnowledgeBaseID == knowledgeBaseID || probe.KBID == knowledgeBaseID {
+			return true
+		}
+		switch taskType {
+		case types.TypeKBClone:
+			if probe.SourceID == knowledgeBaseID || probe.TargetID == knowledgeBaseID {
+				return true
 			}
-			return deleted
-		}
-		if len(tasks) == 0 {
-			return deleted
-		}
-		for _, t := range tasks {
-			if !matchesKnowledge(t.Type, t.Payload, knowledgeID) {
-				continue
+		case types.TypeKnowledgeMove:
+			if probe.SourceKBID == knowledgeBaseID || probe.TargetKBID == knowledgeBaseID {
+				return true
 			}
-			if err := a.inspector.DeleteTask(queue, t.ID); err != nil {
-				logger.Warnf(ctx, "[TaskInspector] delete scheduled type=%s id=%s: %v", t.Type, t.ID, err)
-				continue
-			}
-			deleted++
 		}
-		if len(tasks) < listPageSize {
-			return deleted
-		}
-		page++
 	}
-}
 
-func (a *asynqTaskInspector) deleteRetryMatches(ctx context.Context, queue, knowledgeID string) int {
-	deleted := 0
-	page := 1
-	for {
-		tasks, err := a.inspector.ListRetryTasks(queue, asynq.PageSize(listPageSize), asynq.Page(page))
-		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
-				logger.Warnf(ctx, "[TaskInspector] list retry queue=%s page=%d: %v", queue, page, err)
-			}
-			return deleted
-		}
-		if len(tasks) == 0 {
-			return deleted
-		}
-		for _, t := range tasks {
-			if !matchesKnowledge(t.Type, t.Payload, knowledgeID) {
-				continue
-			}
-			if err := a.inspector.DeleteTask(queue, t.ID); err != nil {
-				logger.Warnf(ctx, "[TaskInspector] delete retry type=%s id=%s: %v", t.Type, t.ID, err)
-				continue
-			}
-			deleted++
-		}
-		if len(tasks) < listPageSize {
-			return deleted
-		}
-		page++
+	if _, ok := knowledgeIDs[probe.KnowledgeID]; ok && probe.KnowledgeID != "" {
+		return true
 	}
-}
-
-// cancelActiveMatches signals active workers to abort via
-// Inspector.CancelProcessing. The worker's ctx becomes Done() so the
-// next blocking call (or our checkpoint reads) bails. The DB-level
-// abort flag (parse_status=cancelled) remains the durable signal —
-// this is a latency optimization, not the correctness mechanism.
-func (a *asynqTaskInspector) cancelActiveMatches(ctx context.Context, queue, knowledgeID string) int {
-	cancelled := 0
-	page := 1
-	for {
-		tasks, err := a.inspector.ListActiveTasks(queue, asynq.PageSize(listPageSize), asynq.Page(page))
-		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
-				logger.Warnf(ctx, "[TaskInspector] list active queue=%s page=%d: %v", queue, page, err)
-			}
-			return cancelled
+	for _, knowledgeID := range probe.KnowledgeIDs {
+		if _, ok := knowledgeIDs[knowledgeID]; ok && knowledgeID != "" {
+			return true
 		}
-		if len(tasks) == 0 {
-			return cancelled
-		}
-		for _, t := range tasks {
-			if !matchesKnowledge(t.Type, t.Payload, knowledgeID) {
-				continue
-			}
-			if err := a.inspector.CancelProcessing(t.ID); err != nil {
-				logger.Warnf(ctx, "[TaskInspector] cancel active type=%s id=%s: %v", t.Type, t.ID, err)
-				continue
-			}
-			cancelled++
-		}
-		if len(tasks) < listPageSize {
-			return cancelled
-		}
-		page++
 	}
+	if _, ok := dataSourceIDs[probe.DataSourceID]; ok && probe.DataSourceID != "" {
+		return true
+	}
+	return false
 }
 
 // noopTaskInspector is the Lite-mode (no Redis) inspector. Inline
