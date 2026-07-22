@@ -1,10 +1,22 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type wikiSearchRepositoryStub struct {
+	interfaces.WikiPageRepository
+	query string
+}
+
+func (s *wikiSearchRepositoryStub) Search(_ context.Context, _ string, query string, _ int) ([]*types.WikiPage, error) {
+	s.query = query
+	return nil, nil
+}
 
 func TestStripWikiInlineChunkCitations(t *testing.T) {
 	input := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械[c003]。手柄便于操作 [c003]。多个来源[c003, c1000]。"
@@ -19,6 +31,45 @@ func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
 	input := "保留 [citation]、[C003]、[c12] 和 [[concept/c003|页面链接]]。"
 	if got := stripWikiInlineChunkCitations(input); got != input {
 		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
+	}
+}
+
+func TestSearchPagesLiteralEscapesPostgresRegexCharacters(t *testing.T) {
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{query: "refund (", want: `refund \(`},
+		{query: "[draft", want: `\[draft`},
+		{query: `path\`, want: `path\\`},
+		{query: "price.*", want: `price\.\*`},
+	}
+	for _, test := range tests {
+		t.Run(test.query, func(t *testing.T) {
+			repo := &wikiSearchRepositoryStub{}
+			service := &wikiPageService{repo: repo}
+
+			_, err := service.SearchPagesLiteral(context.Background(), "kb-1", test.query, 10)
+			if err != nil {
+				t.Fatalf("SearchPagesLiteral() error = %v", err)
+			}
+			if repo.query != test.want {
+				t.Fatalf("SearchPagesLiteral() query = %q, want %q", repo.query, test.want)
+			}
+		})
+	}
+}
+
+func TestSearchPagesPreservesExistingRegexSemantics(t *testing.T) {
+	repo := &wikiSearchRepositoryStub{}
+	service := &wikiPageService{repo: repo}
+
+	_, err := service.SearchPages(context.Background(), "kb-1", "price.*", 10)
+	if err != nil {
+		t.Fatalf("SearchPages() error = %v", err)
+	}
+	if repo.query != "price.*" {
+		t.Fatalf("SearchPages() query = %q, want %q", repo.query, "price.*")
 	}
 }
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,7 +69,11 @@ func TestUnifiedSearchHandlerReturnsUnifiedResults(t *testing.T) {
 	newUnifiedSearchHandlerRouter(kbService, unifiedSearch).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), `"id":"chunk-1"`)
+	var body types.UnifiedSearchResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.True(t, body.Success)
+	require.Len(t, body.Data, 1)
+	require.Equal(t, "chunk-1", body.Data[0].ID)
 }
 
 func TestUnifiedSearchHandlerRejectsInvalidJSON(t *testing.T) {
@@ -94,4 +99,39 @@ func TestUnifiedSearchHandlerRejectsInvalidJSON(t *testing.T) {
 	newUnifiedSearchHandlerRouter(kbService, unifiedSearch).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+}
+
+func TestUnifiedSearchHandlerRejectsInvalidContractValues(t *testing.T) {
+	tests := map[string]string{
+		"missing query":   `{"top_k":10}`,
+		"top k too large": `{"query":"refund","top_k":51}`,
+		"negative weight": `{"query":"refund","rag_weight":-1}`,
+		"rrf k too large": `{"query":"refund","rrf_k":1001}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			kbService := &stubKBOnlyService{
+				getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
+					return &types.KnowledgeBase{ID: "kb-1", TenantID: 1}, nil
+				},
+			}
+			unifiedSearch := &unifiedSearchHandlerStub{
+				search: func(context.Context, string, types.UnifiedSearchRequest) ([]*types.UnifiedSearchResult, error) {
+					t.Fatal("unified search service must not be called for invalid contract values")
+					return nil, nil
+				},
+			}
+
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/knowledge-bases/kb-1/unified-search",
+				strings.NewReader(body),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			newUnifiedSearchHandlerRouter(kbService, unifiedSearch).ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+		})
+	}
 }

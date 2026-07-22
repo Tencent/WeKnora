@@ -343,7 +343,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                     true  "知识库ID"
 // @Param        request  body      types.UnifiedSearchRequest true  "统一检索参数"
-// @Success      200      {object}  map[string]interface{}      "统一检索结果"
+// @Success      200      {object}  types.UnifiedSearchResponse  "统一检索结果"
 // @Failure      400      {object}  errors.AppError             "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -372,9 +372,9 @@ func (h *KnowledgeBaseHandler) UnifiedSearch(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    results,
+	c.JSON(http.StatusOK, types.UnifiedSearchResponse{
+		Success: true,
+		Data:    results,
 	})
 }
 

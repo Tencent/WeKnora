@@ -13,12 +13,12 @@ const (
 
 // UnifiedSearchRequest describes a unified RAG + Wiki search.
 type UnifiedSearchRequest struct {
-	Query      string                `json:"query"`
+	Query      string                `json:"query" binding:"required,min=1"`
 	Sources    []UnifiedSearchSource `json:"sources,omitempty"`
-	TopK       int                   `json:"top_k,omitempty"`
-	RAGWeight  float64               `json:"rag_weight,omitempty"`
-	WikiWeight float64               `json:"wiki_weight,omitempty"`
-	RRFK       int                   `json:"rrf_k,omitempty"`
+	TopK       int                   `json:"top_k,omitempty" binding:"omitempty,min=1,max=50"`
+	RAGWeight  float64               `json:"rag_weight,omitempty" binding:"omitempty,min=0"`
+	WikiWeight float64               `json:"wiki_weight,omitempty" binding:"omitempty,min=0"`
+	RRFK       int                   `json:"rrf_k,omitempty" binding:"omitempty,min=1,max=1000"`
 }
 
 // UnifiedSearchResultSource keeps the source reference when results from
@@ -45,4 +45,10 @@ type UnifiedSearchResult struct {
 	WikiPageID      string                      `json:"wiki_page_id,omitempty"`
 	WikiSlug        string                      `json:"wiki_slug,omitempty"`
 	Sources         []UnifiedSearchResultSource `json:"sources"`
+}
+
+// UnifiedSearchResponse is the HTTP response returned by unified search.
+type UnifiedSearchResponse struct {
+	Success bool                   `json:"success"`
+	Data    []*UnifiedSearchResult `json:"data"`
 }

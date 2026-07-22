@@ -886,6 +886,12 @@ func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query st
 	return s.repo.Search(ctx, kbID, query, limit)
 }
 
+// SearchPagesLiteral preserves text-query semantics for callers that do not
+// expose the repository's PostgreSQL regular-expression search behavior.
+func (s *wikiPageService) SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
+	return s.repo.Search(ctx, kbID, regexp.QuoteMeta(query), limit)
+}
+
 // --- Internal helpers ---
 
 // parseOutLinks extracts [[wiki-link]] slugs from markdown content

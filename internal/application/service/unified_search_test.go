@@ -33,12 +33,19 @@ func (s *unifiedSearchKBStub) HybridSearch(_ context.Context, _ string, params t
 
 type unifiedSearchWikiStub struct {
 	interfaces.WikiPageService
-	pages     []*types.WikiPage
-	callCount int
+	pages            []*types.WikiPage
+	callCount        int
+	literalCallCount int
 }
 
 func (s *unifiedSearchWikiStub) SearchPages(context.Context, string, string, int) ([]*types.WikiPage, error) {
 	s.callCount++
+	return s.pages, nil
+}
+
+func (s *unifiedSearchWikiStub) SearchPagesLiteral(context.Context, string, string, int) ([]*types.WikiPage, error) {
+	s.callCount++
+	s.literalCallCount++
 	return s.pages, nil
 }
 
@@ -249,4 +256,41 @@ func TestUnifiedSearchCallsBothSourcesForWikiEnabledKB(t *testing.T) {
 	require.Len(t, results, 2)
 	require.Equal(t, 1, kbStub.ragCallCnt)
 	require.Equal(t, 1, wikiStub.callCount)
+	require.Equal(t, 1, wikiStub.literalCallCount)
+}
+
+func TestUnifiedSearchRenormalizesAfterFilteringEmptyWikiCandidates(t *testing.T) {
+	kbStub := &unifiedSearchKBStub{
+		kb:         &types.KnowledgeBase{ID: "kb-1", IndexingStrategy: types.IndexingStrategy{WikiEnabled: true}},
+		ragResults: []*types.SearchResult{{ID: "chunk-1", Content: "RAG result"}},
+	}
+	wikiStub := &unifiedSearchWikiStub{
+		pages: []*types.WikiPage{{ID: "page-1", Title: "Title-only result"}},
+	}
+
+	results, err := (&unifiedSearchService{kbService: kbStub, wikiService: wikiStub}).Search(
+		context.Background(), "kb-1", types.UnifiedSearchRequest{Query: "result"},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, 1.0/61.0, results[0].Score)
+}
+
+func TestUnifiedSearchRenormalizesAfterFilteringEmptyRAGCandidates(t *testing.T) {
+	kbStub := &unifiedSearchKBStub{
+		kb:         &types.KnowledgeBase{ID: "kb-1", IndexingStrategy: types.IndexingStrategy{WikiEnabled: true}},
+		ragResults: []*types.SearchResult{{ID: "chunk-1", Content: "  "}},
+	}
+	wikiStub := &unifiedSearchWikiStub{
+		pages: []*types.WikiPage{{ID: "page-1", Content: "Wiki result"}},
+	}
+
+	results, err := (&unifiedSearchService{kbService: kbStub, wikiService: wikiStub}).Search(
+		context.Background(), "kb-1", types.UnifiedSearchRequest{Query: "result"},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, 1.0/61.0, results[0].Score)
 }

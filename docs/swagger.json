@@ -5808,8 +5808,7 @@
                     "200": {
                         "description": "统一检索结果",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse"
                         }
                     },
                     "400": {
@@ -19112,15 +19111,22 @@
         },
         "github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest": {
             "type": "object",
+            "required": [
+                "query"
+            ],
             "properties": {
                 "query": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                 },
                 "rag_weight": {
-                    "type": "number"
+                    "type": "number",
+                    "minimum": 0
                 },
                 "rrf_k": {
-                    "type": "integer"
+                    "type": "integer",
+                    "maximum": 1000,
+                    "minimum": 1
                 },
                 "sources": {
                     "type": "array",
@@ -19129,10 +19135,85 @@
                     }
                 },
                 "top_k": {
-                    "type": "integer"
+                    "type": "integer",
+                    "maximum": 50,
+                    "minimum": 1
                 },
                 "wiki_weight": {
+                    "type": "number",
+                    "minimum": 0
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult"
+                    }
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "score": {
                     "type": "number"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource"
+                    }
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "wiki_page_id": {
+                    "type": "string"
+                },
+                "wiki_slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource"
+                },
+                "wiki_slug": {
+                    "type": "string"
                 }
             }
         },

@@ -3551,19 +3551,75 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest:
     properties:
       query:
+        minLength: 1
         type: string
       rag_weight:
+        minimum: 0
         type: number
       rrf_k:
+        maximum: 1000
+        minimum: 1
         type: integer
       sources:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource'
         type: array
       top_k:
+        maximum: 50
+        minimum: 1
         type: integer
       wiki_weight:
+        minimum: 0
         type: number
+    required:
+    - query
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult'
+        type: array
+      success:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult:
+    properties:
+      content:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      score:
+        type: number
+      sources:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource'
+        type: array
+      summary:
+        type: string
+      title:
+        type: string
+      wiki_page_id:
+        type: string
+      wiki_slug:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource:
+    properties:
+      id:
+        type: string
+      knowledge_id:
+        type: string
+      title:
+        type: string
+      type:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource'
+      wiki_slug:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource:
     enum:
@@ -9319,8 +9375,7 @@ paths:
         "200":
           description: 统一检索结果
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse'
         "400":
           description: 请求参数错误
           schema:

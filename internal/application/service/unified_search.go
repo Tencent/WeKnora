@@ -114,7 +114,7 @@ func (s *unifiedSearchService) Search(
 	}
 	if sources[types.UnifiedSearchSourceWiki] && kb.IsWikiEnabled() {
 		group.Go(func() error {
-			pages, searchErr := s.wikiService.SearchPages(groupCtx, kbID, query, candidateLimit)
+			pages, searchErr := s.wikiService.SearchPagesLiteral(groupCtx, kbID, query, candidateLimit)
 			if searchErr != nil {
 				return searchErr
 			}
@@ -126,8 +126,8 @@ func (s *unifiedSearchService) Search(
 		return nil, err
 	}
 	availableSources := map[types.UnifiedSearchSource]bool{
-		types.UnifiedSearchSourceRAG:  len(ragResults) > 0,
-		types.UnifiedSearchSourceWiki: len(wikiPages) > 0,
+		types.UnifiedSearchSourceRAG:  hasUnifiedRAGCandidates(ragResults),
+		types.UnifiedSearchSourceWiki: hasUnifiedWikiCandidates(wikiPages),
 	}
 	if availableSources[types.UnifiedSearchSourceRAG] || availableSources[types.UnifiedSearchSourceWiki] {
 		ragWeight, wikiWeight, err = activeUnifiedSearchWeights(availableSources, ragWeight, wikiWeight)
@@ -322,17 +322,20 @@ func addRAGCandidates(candidates map[string]*unifiedSearchCandidate, results []*
 	}
 }
 
+func hasUnifiedRAGCandidates(results []*types.SearchResult) bool {
+	for _, item := range results {
+		if item != nil && unifiedContentFingerprint(item.Content) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func addWikiCandidates(candidates map[string]*unifiedSearchCandidate, pages []*types.WikiPage) {
 	seen := make(map[string]struct{}, len(pages))
 	uniqueRank := 0
 	for _, page := range pages {
-		if page == nil {
-			continue
-		}
-		content := strings.TrimSpace(page.Content)
-		if content == "" {
-			content = strings.TrimSpace(page.Summary)
-		}
+		content := unifiedWikiCandidateContent(page)
 		if content == "" {
 			continue
 		}
@@ -387,6 +390,25 @@ func addWikiCandidates(candidates map[string]*unifiedSearchCandidate, pages []*t
 			candidate.ranks[types.UnifiedSearchSourceWiki] = uniqueRank
 		}
 	}
+}
+
+func hasUnifiedWikiCandidates(pages []*types.WikiPage) bool {
+	for _, page := range pages {
+		if unifiedContentFingerprint(unifiedWikiCandidateContent(page)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func unifiedWikiCandidateContent(page *types.WikiPage) string {
+	if page == nil {
+		return ""
+	}
+	if content := strings.TrimSpace(page.Content); content != "" {
+		return content
+	}
+	return strings.TrimSpace(page.Summary)
 }
 
 func appendUnifiedSource(result *types.UnifiedSearchResult, source types.UnifiedSearchResultSource) {

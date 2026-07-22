@@ -203,6 +203,8 @@ type WikiPageService interface {
 
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+	// SearchPagesLiteral performs full-text search while treating query as literal text.
+	SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// CreateIssue logs a new issue for a wiki page.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error)
