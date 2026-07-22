@@ -97,8 +97,9 @@ type ChunkRepository interface {
 	// newTagID: if not nil, updates tag_id to this value (empty string means uncategorized)
 	UpdateChunkFieldsByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, isEnabled *bool, setFlags types.ChunkFlags, clearFlags types.ChunkFlags, newTagID *string, excludeIDs []string) ([]string, error)
 	// FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
-	// Returns: chunksToAdd (content_hash in src but not in dst), chunksToDelete (content_hash in dst but not in src)
-	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (chunksToAdd []string, chunksToDelete []string, err error)
+	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (*types.FAQChunkDiffResult, error)
+	// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+	ListFAQChunkStatusByIDs(ctx context.Context, tenantID uint64, ids []string) (map[string]*types.FAQChunkStatus, error)
 
 	// ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
 	// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs.

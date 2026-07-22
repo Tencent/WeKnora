@@ -238,12 +238,15 @@
                 </t-tooltip>
               </template>
               <!-- 导出 -->
-              <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
-                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
-                  @click="handleFaqAction({ value: 'export' })">
-                  <template #icon><t-icon name="download" size="16px" /></template>
-                </t-button>
-              </t-tooltip>
+              <t-dropdown :options="faqExportOptions" trigger="click" placement="bottom-right"
+                @click="handleFaqAction">
+                <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
+                  <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
+                    :loading="exportLoading">
+                    <template #icon><t-icon name="download" size="16px" /></template>
+                  </t-button>
+                </t-tooltip>
+              </t-dropdown>
               <!-- 检索 -->
               <t-tooltip :content="$t('knowledgeEditor.faq.searchTest')" placement="top">
                 <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
@@ -998,6 +1001,11 @@ const canManage = computed(() => {
   return orgStore.canManageKB(props.kbId, false)
 })
 
+const faqExportOptions = computed(() => [
+  { content: t('knowledgeEditor.faqExport.exportCSV'), value: 'export_csv' },
+  { content: t('knowledgeEditor.faqExport.exportJSON'), value: 'export_json' },
+])
+
 // FAQ 操作：新建组（新建条目 + 导入）
 const faqCreateOptions = computed(() => {
   if (!canEdit.value) return []
@@ -1018,6 +1026,12 @@ const handleFaqAction = (data: { value: string }) => {
       break
     case 'search':
       searchDrawerVisible.value = true
+      break
+    case 'export_csv':
+      handleExportCSV()
+      break
+    case 'export_json':
+      handleExportJSON()
       break
     case 'export':
       handleExportCSV()
@@ -2647,9 +2661,19 @@ const downloadExcelExample = () => {
   XLSX.writeFile(workbook, 'faq_example.xlsx')
 }
 
-// 导出 FAQ 数据为 CSV
+// 导出 FAQ 数据
 const exportLoading = ref(false)
-const handleExportCSV = async () => {
+const downloadExportBlob = (blob: Blob, ext: 'csv' | 'json') => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `faq_export_${new Date().toISOString().slice(0, 10)}.${ext}`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+const handleExportFAQ = async (format: 'csv' | 'json') => {
   if (!props.kbId) {
     MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase'))
     return
@@ -2657,15 +2681,8 @@ const handleExportCSV = async () => {
 
   exportLoading.value = true
   try {
-    const blob = await exportFAQEntries(props.kbId)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `faq_export_${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    const blob = await exportFAQEntries(props.kbId, format)
+    downloadExportBlob(blob, format)
     MessagePlugin.success(t('knowledgeEditor.faqExport.exportSuccess'))
   } catch (error: any) {
     console.error('Export failed:', error)
@@ -2674,6 +2691,8 @@ const handleExportCSV = async () => {
     exportLoading.value = false
   }
 }
+const handleExportCSV = () => handleExportFAQ('csv')
+const handleExportJSON = () => handleExportFAQ('json')
 
 watch(
   () => props.kbId,

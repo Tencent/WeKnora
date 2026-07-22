@@ -2992,7 +2992,9 @@ export default {
       downloadExampleExcel: 'Download Excel Example',
     },
     faqExport: {
-      exportButton: 'Export CSV',
+      exportButton: 'Export',
+      exportCSV: 'Export CSV',
+      exportJSON: 'Export JSON',
       exportSuccess: 'Export successful',
       exportFailed: 'Export failed',
     },

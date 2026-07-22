@@ -4281,7 +4281,9 @@ export default {
       downloadExampleExcel: "下载 Excel 示例",
     },
     faqExport: {
-      exportButton: "导出 CSV",
+      exportButton: "导出",
+      exportCSV: "导出 CSV",
+      exportJSON: "导出 JSON",
       exportSuccess: "导出成功",
       exportFailed: "导出失败",
     },

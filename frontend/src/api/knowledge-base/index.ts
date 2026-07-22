@@ -445,10 +445,11 @@ export function searchFAQEntries(
   return post(`/api/v1/knowledge-bases/${kbId}/faq/search`, data);
 }
 
-// Export FAQ entries as CSV file
-export async function exportFAQEntries(kbId: string): Promise<Blob> {
-  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export`);
-  return response as unknown as Blob;
+// Export FAQ entries as CSV or JSON file
+export async function exportFAQEntries(kbId: string, format: 'csv' | 'json' = 'csv'): Promise<Blob> {
+  const suffix = format === 'json' ? '?format=json' : ''
+  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export${suffix}`)
+  return response as unknown as Blob
 }
 
 // FAQ Import Progress API

@@ -931,44 +931,170 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	return affectedIDs, nil
 }
 
+type chunkIDHash struct {
+	ID          string `gorm:"column:id"`
+	ContentHash string `gorm:"column:content_hash"`
+}
+
+const faqChunkDiffBatchSize = 5000
+
+// listFAQChunkIDHashesByKB loads id/content_hash pairs for all FAQ chunks in a KB.
+func (r *chunkRepository) listFAQChunkIDHashesByKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) ([]chunkIDHash, error) {
+	var all []chunkIDHash
+	var lastID string
+
+	for {
+		var batch []chunkIDHash
+		query := r.db.WithContext(ctx).Model(&types.Chunk{}).
+			Select("id, content_hash").
+			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
+				tenantID, kbID, types.ChunkTypeFAQ).
+			Order("id ASC").
+			Limit(faqChunkDiffBatchSize)
+		if lastID != "" {
+			query = query.Where("id > ?", lastID)
+		}
+		if err := query.Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		lastID = batch[len(batch)-1].ID
+		if len(batch) < faqChunkDiffBatchSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+func diffFAQChunkIDsByContentHash(src, dst []chunkIDHash) (
+	chunksToAdd, chunksToDelete []string,
+	matched []types.FAQChunkSyncPair,
+) {
+	dstHashes := make(map[string]struct{}, len(dst))
+	dstIDByHash := make(map[string]string, len(dst))
+	dstIDsByHash := make(map[string][]string, len(dst))
+	for _, pair := range dst {
+		dstHashes[pair.ContentHash] = struct{}{}
+		if _, ok := dstIDByHash[pair.ContentHash]; !ok {
+			dstIDByHash[pair.ContentHash] = pair.ID
+		}
+		dstIDsByHash[pair.ContentHash] = append(dstIDsByHash[pair.ContentHash], pair.ID)
+	}
+	srcHashes := make(map[string]struct{}, len(src))
+	for _, pair := range src {
+		srcHashes[pair.ContentHash] = struct{}{}
+	}
+
+	for _, pair := range src {
+		if _, exists := dstHashes[pair.ContentHash]; !exists {
+			chunksToAdd = append(chunksToAdd, pair.ID)
+			continue
+		}
+		if dstID, ok := dstIDByHash[pair.ContentHash]; ok {
+			matched = append(matched, types.FAQChunkSyncPair{
+				SrcChunkID: pair.ID,
+				DstChunkID: dstID,
+			})
+		}
+	}
+	for _, pair := range dst {
+		if _, exists := srcHashes[pair.ContentHash]; !exists {
+			chunksToDelete = append(chunksToDelete, pair.ID)
+		}
+	}
+	for hash, ids := range dstIDsByHash {
+		if hash == "" || len(ids) <= 1 {
+			continue
+		}
+		if _, inSrc := srcHashes[hash]; !inSrc {
+			continue
+		}
+		canonical := dstIDByHash[hash]
+		for _, id := range ids {
+			if id != canonical {
+				chunksToDelete = append(chunksToDelete, id)
+			}
+		}
+	}
+	return chunksToAdd, chunksToDelete, matched
+}
+
 // FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
 // Returns: chunksToAdd (IDs of chunks in src whose content_hash is not in dst),
 //
-//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src)
+//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src, plus
+//	duplicate dst chunks that share a content_hash with another dst chunk when
+//	that hash still exists in src)
 func (r *chunkRepository) FAQChunkDiff(
 	ctx context.Context,
 	srcTenantID uint64, srcKBID string,
 	dstTenantID uint64, dstKBID string,
-) (chunksToAdd []string, chunksToDelete []string, err error) {
-	// Get content_hash set from destination KB
-	dstHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
-
-	// Find chunks in source that don't exist in destination (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", dstHashSubQuery).
-		Pluck("id", &chunksToAdd).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to add: %w", err)
+) (*types.FAQChunkDiffResult, error) {
+	srcPairs, err := r.listFAQChunkIDHashesByKB(ctx, srcTenantID, srcKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list source FAQ chunks: %w", err)
+	}
+	dstPairs, err := r.listFAQChunkIDHashesByKB(ctx, dstTenantID, dstKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list destination FAQ chunks: %w", err)
 	}
 
-	// Get content_hash set from source KB
-	srcHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
+	add, del, matched := diffFAQChunkIDsByContentHash(srcPairs, dstPairs)
+	return &types.FAQChunkDiffResult{
+		ChunksToAdd:    add,
+		ChunksToDelete: del,
+		MatchedPairs:   matched,
+	}, nil
+}
 
-	// Find chunks in destination that don't exist in source (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", srcHashSubQuery).
-		Pluck("id", &chunksToDelete).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to delete: %w", err)
+// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+func (r *chunkRepository) ListFAQChunkStatusByIDs(
+	ctx context.Context,
+	tenantID uint64,
+	ids []string,
+) (map[string]*types.FAQChunkStatus, error) {
+	if len(ids) == 0 {
+		return map[string]*types.FAQChunkStatus{}, nil
 	}
-
-	return chunksToAdd, chunksToDelete, nil
+	const batchSize = 5000
+	var chunks []*types.Chunk
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var batch []*types.Chunk
+		if err := r.db.WithContext(ctx).
+			Select("id, tag_id, is_enabled, flags, metadata").
+			Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).
+			Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, batch...)
+	}
+	out := make(map[string]*types.FAQChunkStatus, len(chunks))
+	for _, chunk := range chunks {
+		strategy := types.AnswerStrategyAll
+		if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+			strategy = meta.AnswerStrategy
+		}
+		out[chunk.ID] = &types.FAQChunkStatus{
+			ID:             chunk.ID,
+			TagID:          chunk.TagID,
+			IsEnabled:      chunk.IsEnabled,
+			Flags:          chunk.Flags,
+			AnswerStrategy: strategy,
+			Metadata:       chunk.Metadata,
+		}
+	}
+	return out, nil
 }
 
 // ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.

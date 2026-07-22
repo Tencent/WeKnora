@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -381,19 +382,35 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 
 // ExportEntries godoc
 // @Summary      导出FAQ条目
-// @Description  将所有FAQ条目导出为CSV文件
+// @Description  将所有FAQ条目导出为 CSV（默认）或 JSON。?format=json 返回与 FAQEntryPayload 结构兼容的数组。
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      text/csv
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {file}    file    "CSV文件"
-// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Produce      application/json
+// @Param        id      path      string  true   "知识库ID"
+// @Param        format  query     string  false  "导出格式：csv（默认）或 json"
+// @Success      200     {file}    file    "导出文件"
+// @Failure      400     {object}  errors.AppError  "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/export [get]
 func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
+	format := strings.ToLower(strings.TrimSpace(c.Query("format")))
+
+	if format == "json" {
+		jsonData, err := h.knowledgeService.ExportFAQEntriesJSON(ctx, kbID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(err)
+			return
+		}
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		c.Header("Content-Disposition", "attachment; filename=faq_export.json")
+		c.Data(http.StatusOK, "application/json; charset=utf-8", jsonData)
+		return
+	}
 
 	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
 	if err != nil {

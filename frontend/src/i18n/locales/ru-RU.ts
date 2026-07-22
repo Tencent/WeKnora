@@ -3689,7 +3689,9 @@ export default {
       downloadExampleExcel: 'Скачать пример Excel'
     },
     faqExport: {
-      exportButton: 'Экспорт CSV',
+      exportButton: 'Экспорт',
+      exportCSV: 'Экспорт CSV',
+      exportJSON: 'Экспорт JSON',
       exportSuccess: 'Экспорт успешен',
       exportFailed: 'Ошибка экспорта'
     },

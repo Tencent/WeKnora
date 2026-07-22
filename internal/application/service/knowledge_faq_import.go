@@ -73,15 +73,29 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 
 	// 记录任务入队时间
 	enqueuedAt := time.Now().Unix()
+	instanceID := uuid.NewString()
+	runningInfoSet := false
+	enqueueSucceeded := false
 
 	// 设置 KB 的运行中任务信息
 	if err := s.setRunningFAQImportInfo(ctx, kbID, &runningFAQImportInfo{
 		TaskID:     taskID,
 		EnqueuedAt: enqueuedAt,
+		InstanceID: instanceID,
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to set running FAQ import task info: %v", err)
 		// 不影响任务执行，继续
+	} else {
+		runningInfoSet = true
 	}
+	defer func() {
+		if !runningInfoSet || enqueueSucceeded {
+			return
+		}
+		if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, kbID, taskID, instanceID, enqueuedAt); clearErr != nil {
+			logger.Warnf(ctx, "Failed to clear FAQ import running info after setup failure: %v", clearErr)
+		}
+	}()
 
 	// 初始化导入任务状态到Redis
 	progress := &types.FAQImportProgress{
@@ -120,6 +134,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		Mode:        payload.Mode,
 		DryRun:      payload.DryRun,
 		EnqueuedAt:  enqueuedAt,
+		InstanceID:  instanceID,
 		Initiator:   types.TaskInitiatorFromContext(ctx),
 	}
 
@@ -189,9 +204,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		maxRetry = 3 // dry run 重试次数少一些
 	}
 
-	// 使用 taskID:enqueuedAt 作为 asynq 的唯一任务标识
-	// 这样同一个用户 TaskID 的不同次提交不会冲突
-	asynqTaskID := fmt.Sprintf("%s:%d", taskID, enqueuedAt)
+	// 使用 taskID:instanceID 作为 asynq 的唯一任务标识
+	asynqTaskID := fmt.Sprintf("%s:%s", taskID, instanceID)
 
 	task := asynq.NewTask(
 		types.TypeFAQImport,
@@ -207,6 +221,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		return "", fmt.Errorf("failed to enqueue task: %w", err)
 	}
 	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
+	enqueueSucceeded = true
 
 	if !payload.DryRun {
 		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionFAQImportStarted,
@@ -1215,34 +1230,118 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		}
 	}
 
+	// 批量预加载 tag 信息，避免循环内逐条查询数据库
+	// 收集所有需要查询的 tag_id 和 tag_name
+	tagSeqIDSet := make(map[int64]bool)
+	tagNameSet := make(map[string]bool)
+	for _, ewh := range entriesWithHash {
+		if ewh.entry.TagID != 0 {
+			tagSeqIDSet[ewh.entry.TagID] = true
+		} else if ewh.entry.TagName != "" {
+			tagNameSet[ewh.entry.TagName] = true
+		} else {
+			tagNameSet[types.UntaggedTagName] = true
+		}
+	}
+
+	// 批量查询 tag by seq_id
+	tagSeqIDToUUID := make(map[int64]string)
+	if len(tagSeqIDSet) > 0 {
+		seqIDs := make([]int64, 0, len(tagSeqIDSet))
+		for seqID := range tagSeqIDSet {
+			seqIDs = append(seqIDs, seqID)
+		}
+		tags, err := s.tagRepo.GetBySeqIDs(ctx, tenantID, seqIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to batch load tags by seq_ids: %v", err)
+		} else {
+			for _, tag := range tags {
+				tagSeqIDToUUID[tag.SeqID] = tag.ID
+			}
+		}
+	}
+
+	// 批量查询 tag by name
+	tagNameToUUID := make(map[string]string)
+	if len(tagNameSet) > 0 && kbID != "" {
+		for name := range tagNameSet {
+			if tag, err := s.tagRepo.GetByName(ctx, tenantID, kbID, name); err == nil && tag != nil {
+				tagNameToUUID[name] = tag.ID
+			}
+		}
+	}
+
+	logger.Infof(ctx, "Preloaded %d tags by seq_id, %d tags by name for %d entries",
+		len(tagSeqIDToUUID), len(tagNameToUUID), len(entriesWithHash))
+
+	// resolveTagIDFromCache 从缓存中解析 tag ID，缓存未命中时回退到数据库查询
+	resolveTagIDFromCache := func(entry *types.FAQEntryPayload) (string, error) {
+		if entry.TagID != 0 {
+			if uuid, ok := tagSeqIDToUUID[entry.TagID]; ok {
+				return uuid, nil
+			}
+			// 缓存未命中，回退到数据库查询（可能需要创建）
+			return s.resolveTagID(ctx, kbID, entry)
+		}
+		tagName := entry.TagName
+		if tagName == "" {
+			tagName = types.UntaggedTagName
+		}
+		if uuid, ok := tagNameToUUID[tagName]; ok {
+			return uuid, nil
+		}
+		// 缓存未命中，回退到数据库查询（可能需要创建）
+		return s.resolveTagID(ctx, kbID, entry)
+	}
+
 	// 计算需要创建的条目（利用已经计算好的hash，避免重复计算）
 	entriesToProcess := make([]types.FAQEntryPayload, 0, len(entriesWithHash))
 	skippedCount := batchSkippedCount
 
-	for _, ewh := range entriesWithHash {
+	for idx, ewh := range entriesWithHash {
+		// 每处理 1000 条打印一次进度日志
+		if idx > 0 && idx%1000 == 0 {
+			logger.Infof(ctx, "calculateReplaceOperations progress: %d/%d entries processed", idx, len(entriesWithHash))
+		}
+
 		existingChunk := existingHashMap[ewh.hash]
 		if existingChunk != nil {
 			// hash 匹配，检查 tag 是否变化
-			newTagID, err := s.resolveTagID(ctx, kbID, &ewh.entry)
+			newTagID, err := resolveTagIDFromCache(&ewh.entry)
 			if err != nil {
 				logger.Warnf(ctx, "Failed to resolve tag for entry, treating as new: %v", err)
 				entriesToProcess = append(entriesToProcess, ewh.entry)
 				continue
 			}
 
-			if existingChunk.TagID != newTagID {
-				// tag 变化了，需要删除旧的并创建新的
-				logger.Infof(ctx, "FAQ entry tag changed from %s to %s, will update", existingChunk.TagID, newTagID)
+			enabledChanged := ewh.entry.IsEnabled != nil && *ewh.entry.IsEnabled != existingChunk.IsEnabled
+			recommendedChanged := ewh.entry.IsRecommended != nil &&
+				*ewh.entry.IsRecommended != existingChunk.Flags.HasFlag(types.ChunkFlagRecommended)
+			answerStrategyChanged := false
+			if existingMeta, metaErr := existingChunk.FAQMetadata(); metaErr == nil && existingMeta != nil {
+				answerStrategyChanged = ewh.meta.AnswerStrategy != existingMeta.AnswerStrategy
+			}
+
+			if existingChunk.TagID != newTagID || enabledChanged || recommendedChanged || answerStrategyChanged {
+				if existingChunk.TagID != newTagID {
+					logger.Infof(ctx, "FAQ entry tag changed from %s to %s, will update", existingChunk.TagID, newTagID)
+				}
+				if enabledChanged || recommendedChanged || answerStrategyChanged {
+					logger.Infof(ctx, "FAQ entry operational fields changed (enabled: %v->%v, recommended: %v->%v, answerStrategy changed: %v), will update",
+						existingChunk.IsEnabled, ewh.entry.IsEnabled,
+						existingChunk.Flags.HasFlag(types.ChunkFlagRecommended), ewh.entry.IsRecommended,
+						answerStrategyChanged)
+				}
 				chunksToDelete = append(chunksToDelete, existingChunk)
 				entriesToProcess = append(entriesToProcess, ewh.entry)
 			} else {
-				// hash 和 tag 都相同，跳过
+				// hash、tag、运营状态都相同，跳过
 				skippedCount++
 			}
 			continue
 		}
 
-		// hash不匹配或不存在，需要创建
+		// hash 不匹配或不存在，需要创建
 		entriesToProcess = append(entriesToProcess, ewh.entry)
 	}
 
@@ -1512,7 +1611,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		actualProcessed += len(batch)
 		// 更新任务进度
 		progress := int(float64(actualProcessed) / float64(totalEntries) * 100)
-		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
+		if err := s.updateFAQImportProgressStatus(ctx, taskID, "", 0, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
 			logger.Errorf(ctx, "Failed to update task progress: %v", err)
 		}
 
@@ -1555,6 +1654,8 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 func (s *knowledgeService) updateFAQImportProgressStatus(
 	ctx context.Context,
 	taskID string,
+	instanceID string,
+	enqueuedAt int64,
 	status types.FAQImportTaskStatus,
 	progress, total, processed int,
 	message, errorMsg string,
@@ -1585,7 +1686,7 @@ func (s *knowledgeService) updateFAQImportProgressStatus(
 	// 任务完成或失败时，清除 running key
 	if status == types.FAQImportStatusCompleted || status == types.FAQImportStatusFailed {
 		if existingProgress.KBID != "" {
-			if clearErr := s.clearRunningFAQImportTaskID(ctx, existingProgress.KBID); clearErr != nil {
+			if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, existingProgress.KBID, taskID, instanceID, enqueuedAt); clearErr != nil {
 				logger.Errorf(ctx, "Failed to clear running FAQ import task ID: %v", clearErr)
 			}
 		}
@@ -1611,6 +1712,7 @@ func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(ctx context.Conte
 type runningFAQImportInfo struct {
 	TaskID     string `json:"task_id"`
 	EnqueuedAt int64  `json:"enqueued_at"`
+	InstanceID string `json:"instance_id,omitempty"`
 }
 
 // getRunningFAQImportInfo checks if there's a running FAQ import task for the given KB
@@ -1677,6 +1779,39 @@ func (s *knowledgeService) clearRunningFAQImportTaskID(ctx context.Context, kbID
 	return s.redisClient.Del(ctx, key).Err()
 }
 
+func (s *knowledgeService) clearRunningFAQImportInfoIfMatches(ctx context.Context, kbID, taskID, instanceID string, enqueuedAt int64) error {
+	if s.redisClient == nil {
+		if v, ok := s.memFAQRunningImport.Load(kbID); ok {
+			info, _ := v.(*runningFAQImportInfo)
+			if runningFAQImportInfoMatches(info, taskID, instanceID, enqueuedAt) {
+				s.memFAQRunningImport.Delete(kbID)
+			}
+		}
+		return nil
+	}
+
+	info, err := s.getRunningFAQImportInfo(ctx, kbID)
+	if err != nil {
+		return err
+	}
+	if !runningFAQImportInfoMatches(info, taskID, instanceID, enqueuedAt) {
+		return nil
+	}
+
+	key := getFAQImportRunningKey(kbID)
+	return s.redisClient.Del(ctx, key).Err()
+}
+
+func runningFAQImportInfoMatches(info *runningFAQImportInfo, taskID, instanceID string, enqueuedAt int64) bool {
+	if info == nil || info.TaskID != taskID {
+		return false
+	}
+	if info.InstanceID != "" && instanceID != "" {
+		return info.InstanceID == instanceID
+	}
+	return enqueuedAt == 0 || info.EnqueuedAt == 0 || info.EnqueuedAt == enqueuedAt
+}
+
 // incrementalIndexFAQEntry 增量更新FAQ条目的索引
 // 只对内容变化的部分进行embedding计算和索引更新，跳过未变化的部分
 func (s *knowledgeService) incrementalIndexFAQEntry(
@@ -1691,6 +1826,8 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	newMeta *types.FAQChunkMetadata,
 ) error {
 	indexStartTime := time.Now()
+	logger.Debugf(ctx, "incrementalIndexFAQEntry: starting for chunk=%s, oldSimilarQuestions=%d, newSimilarQuestions=%d",
+		chunk.ID, len(oldSimilarQuestions), len(newMeta.SimilarQuestions))
 
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
@@ -1703,12 +1840,26 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		indexMode = kb.FAQConfig.IndexMode
 	}
 
-	// 构建旧的内容（用于比较）
-	buildOldContent := func(question string) string {
-		if indexMode == types.FAQIndexModeQuestionAnswer && len(oldAnswers) > 0 {
+	// 对新旧数据进行归一化处理，确保与 buildFAQIndexInfoList 的行为一致
+	// 旧数据归一化
+	oldStandardQuestion = types.NormalizeQuestion(oldStandardQuestion)
+	normalizedOldSimilarQuestions := make([]string, 0, len(oldSimilarQuestions))
+	for _, q := range oldSimilarQuestions {
+		if nq := types.NormalizeQuestion(q); nq != "" {
+			normalizedOldSimilarQuestions = append(normalizedOldSimilarQuestions, nq)
+		}
+	}
+	oldSimilarQuestions = normalizedOldSimilarQuestions
+	oldAnswers = types.SanitizeStrings(oldAnswers)
+	// 新数据归一化
+	normalizedNewMeta := newMeta.Normalize()
+
+	// 构建索引内容
+	buildContent := func(question string, answers []string) string {
+		if indexMode == types.FAQIndexModeQuestionAnswer && len(answers) > 0 {
 			var builder strings.Builder
 			builder.WriteString(question)
-			for _, ans := range oldAnswers {
+			for _, ans := range answers {
 				builder.WriteString("\n")
 				builder.WriteString(ans)
 			}
@@ -1717,30 +1868,20 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		return question
 	}
 
-	// 构建新的内容
-	buildNewContent := func(question string) string {
-		if indexMode == types.FAQIndexModeQuestionAnswer && len(newMeta.Answers) > 0 {
-			var builder strings.Builder
-			builder.WriteString(question)
-			for _, ans := range newMeta.Answers {
-				builder.WriteString("\n")
-				builder.WriteString(ans)
-			}
-			return builder.String()
-		}
-		return question
-	}
-
-	// 检查答案是否变化
-	answersChanged := !slices.Equal(oldAnswers, newMeta.Answers)
+	// 检查答案是否变化（仅在 QuestionAnswer 模式下才影响索引）
+	answersChanged := indexMode == types.FAQIndexModeQuestionAnswer && !slices.Equal(oldAnswers, normalizedNewMeta.Answers)
+	logger.Debugf(ctx, "incrementalIndexFAQEntry: answersChanged=%v (indexMode=%s), oldAnswers=%d, newAnswers=%d",
+		answersChanged, indexMode, len(oldAnswers), len(normalizedNewMeta.Answers))
 
 	// 收集需要更新的索引项
 	var indexInfoToUpdate []*types.IndexInfo
 
 	// 1. 检查标准问是否需要更新
-	oldStdContent := buildOldContent(oldStandardQuestion)
-	newStdContent := buildNewContent(newMeta.StandardQuestion)
-	if oldStdContent != newStdContent {
+	oldStdContent := buildContent(oldStandardQuestion, oldAnswers)
+	newStdContent := buildContent(normalizedNewMeta.StandardQuestion, normalizedNewMeta.Answers)
+	stdQuestionChanged := oldStdContent != newStdContent
+	if stdQuestionChanged {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: standard question changed, sourceID=%s", chunk.ID)
 		indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
 			Content:         newStdContent,
 			SourceID:        chunk.ID,
@@ -1755,27 +1896,41 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		})
 	}
 
-	// 2. 检查每个相似问是否需要更新
-	oldCount := len(oldSimilarQuestions)
-	newCount := len(newMeta.SimilarQuestions)
+	// 2. 基于内容哈希处理相似问的增删改
+	// 构建旧问题集合 (问题 -> 是否存在)
+	oldQuestionsSet := make(map[string]struct{}, len(oldSimilarQuestions))
+	for _, q := range oldSimilarQuestions {
+		oldQuestionsSet[q] = struct{}{}
+	}
 
-	for i, newQ := range newMeta.SimilarQuestions {
-		needUpdate := false
-		if i >= oldCount {
-			// 新增的相似问
-			needUpdate = true
-		} else {
-			// 已存在的相似问，检查内容是否变化
-			oldQ := oldSimilarQuestions[i]
-			if oldQ != newQ || answersChanged {
-				needUpdate = true
-			}
+	// 构建新问题集合
+	newQuestionsSet := make(map[string]struct{}, len(normalizedNewMeta.SimilarQuestions))
+	for _, q := range normalizedNewMeta.SimilarQuestions {
+		newQuestionsSet[q] = struct{}{}
+	}
+
+	// 找出需要删除的问题（在旧集合中但不在新集合中）
+	var sourceIDsToDelete []string
+	var deletedQuestions []string
+	for oldQ := range oldQuestionsSet {
+		if _, exists := newQuestionsSet[oldQ]; !exists {
+			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(oldQ))
+			sourceIDsToDelete = append(sourceIDsToDelete, sourceID)
+			deletedQuestions = append(deletedQuestions, oldQ)
 		}
+	}
 
-		if needUpdate {
-			sourceID := fmt.Sprintf("%s-%d", chunk.ID, i)
+	// 找出需要新增或更新的问题
+	var addedQuestions, updatedQuestions []string
+	for newQ := range newQuestionsSet {
+		_, existedBefore := oldQuestionsSet[newQ]
+		// 需要更新的条件：
+		// 1. 新问题（之前不存在）
+		// 2. 答案变化（需要重新embedding）
+		if !existedBefore || answersChanged {
+			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
 			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
-				Content:         buildNewContent(newQ),
+				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -1786,22 +1941,35 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 				IsEnabled:       chunk.IsEnabled,
 				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 			})
+			if !existedBefore {
+				addedQuestions = append(addedQuestions, newQ)
+			} else {
+				updatedQuestions = append(updatedQuestions, newQ)
+			}
 		}
 	}
 
-	// 3. 删除多余的旧相似问索引
-	if oldCount > newCount {
-		sourceIDsToDelete := make([]string, 0, oldCount-newCount)
-		for i := newCount; i < oldCount; i++ {
-			sourceIDsToDelete = append(sourceIDsToDelete, fmt.Sprintf("%s-%d", chunk.ID, i))
-		}
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete source IDs", len(sourceIDsToDelete))
+	// 输出详细的变化日志
+	if len(deletedQuestions) > 0 {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleted similar questions: %v", deletedQuestions)
+	}
+	if len(addedQuestions) > 0 {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: added similar questions: %v", addedQuestions)
+	}
+	if len(updatedQuestions) > 0 {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %v", updatedQuestions)
+	}
+
+	// 3. 删除不再存在的相似问索引
+	if len(sourceIDsToDelete) > 0 {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete sourceIDs: %v", len(sourceIDsToDelete), sourceIDsToDelete)
 		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
 			logger.Warnf(ctx, "incrementalIndexFAQEntry: failed to delete obsolete source IDs: %v", delErr)
 		}
 	}
 
 	// 4. 批量索引需要更新的内容
+	newCount := len(normalizedNewMeta.SimilarQuestions)
 	if len(indexInfoToUpdate) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: updating %d index entries (skipped %d unchanged)",
 			len(indexInfoToUpdate), 1+newCount-len(indexInfoToUpdate))
@@ -2193,7 +2361,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
@@ -2207,6 +2375,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	if existingProgress != nil {
 		if existingProgress.Status == types.FAQImportStatusCompleted {
 			logger.Infof(ctx, "FAQ import already completed, skipping: %s", payload.TaskID)
+			if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, payload.KBID, payload.TaskID, payload.InstanceID, payload.EnqueuedAt); clearErr != nil {
+				logger.Warnf(ctx, "Failed to clear running FAQ import info for completed task: %v", clearErr)
+			}
 			return nil // 幂等：已完成的任务直接返回
 		}
 		// 获取已处理的数量（注意：这是相对于 validEntries 的索引）
@@ -2223,7 +2394,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
@@ -2280,7 +2451,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
@@ -2385,7 +2556,7 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	}
 
 	// 然后调用状态更新来清理 running key
-	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusCompleted,
+	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusCompleted,
 		100, originalTotalEntries, originalTotalEntries, progress.Message, ""); err != nil {
 		logger.Warnf(ctx, "Failed to update final FAQ import status: %v", err)
 	}

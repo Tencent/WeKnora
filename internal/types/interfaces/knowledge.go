@@ -152,6 +152,8 @@ type KnowledgeService interface {
 	SearchFAQEntries(ctx context.Context, kbID string, req *types.FAQSearchRequest) ([]*types.FAQEntry, error)
 	// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
 	ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error)
+	// ExportFAQEntriesJSON exports all FAQ entries as a JSON array compatible with FAQEntryPayload.
+	ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
 	// pass empty string to skip (caller must ensure authorization by other means).

@@ -251,6 +251,21 @@ type FAQEntry struct {
 	MatchedQuestion string `json:"matched_question,omitempty"`
 }
 
+// FAQExportEntry 表示 JSON 导出的 FAQ 条目，与 FAQEntryPayload 的导入格式兼容，
+// 便于"导出 → 编辑 → 重新导入"循环。新增字段时务必保留 omitempty，避免破坏
+// 历史导出文件的兼容性。
+type FAQExportEntry struct {
+	ID                int64          `json:"id"`
+	TagName           string         `json:"tag_name,omitempty"`
+	StandardQuestion  string         `json:"standard_question"`
+	SimilarQuestions  []string       `json:"similar_questions,omitempty"`
+	NegativeQuestions []string       `json:"negative_questions,omitempty"`
+	Answers           []string       `json:"answers,omitempty"`
+	AnswerStrategy    AnswerStrategy `json:"answer_strategy,omitempty"`
+	IsEnabled         bool           `json:"is_enabled"`
+	IsRecommended     bool           `json:"is_recommended"`
+}
+
 // FAQEntryPayload 用于创建/更新 FAQ 条目的 payload
 type FAQEntryPayload struct {
 	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
