@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,13 +24,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// copyOwnedObject performs a real copy of srcPath into a NEW object owned by
-// (tenantID, knowledgeID) using the destination FileService, returning the new
-// provider:// path. The same-backend check lives inside dstSvc.CopyFile, which
-// returns file.ErrCrossBackendCopy when srcPath belongs to a different provider;
-// that error is propagated unchanged so callers can fail the clone explicitly.
-// srcSvc is accepted for symmetry with the read side but is not used directly:
-// server-side copies are issued by the destination service.
+// copyOwnedObject copies srcPath into a NEW object owned by the destination
+// tenant, returning the new provider:// (resource) path.
+//
+// Extracted/embedded chunk images MUST land in the tenant's exports/ namespace,
+// because GET /knowledge-bases/:id/files only serves objects that pass
+// ValidateKBScopedStoragePath (i.e. {tenant}/exports/...). CopyFile writes to
+// the knowledge-scoped upload layout ({tenant}/{knowledgeID}/...) used for raw
+// source files, which the KB proxy rejects — so a clone that used CopyFile
+// produced images that could no longer be rendered. Instead, read the source
+// bytes and re-save them via SaveBytes, exactly mirroring how the original
+// images were persisted during ingestion (see image_resolver.saveReferencedImage),
+// so the copy is a genuine independent object in the servable namespace.
 func copyOwnedObject(
 	ctx context.Context,
 	srcSvc, dstSvc interfaces.FileService,
@@ -35,8 +43,55 @@ func copyOwnedObject(
 	tenantID uint64,
 	knowledgeID string,
 ) (string, error) {
-	_ = srcSvc // reserved for future cross-backend streaming fallback
-	return dstSvc.CopyFile(ctx, srcPath, tenantID, knowledgeID)
+	_ = knowledgeID // exports objects are tenant-scoped, not knowledge-scoped
+	rc, err := srcSvc.GetFile(ctx, srcPath)
+	if err != nil {
+		return "", fmt.Errorf("read source image %q: %w", srcPath, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return "", fmt.Errorf("buffer source image %q: %w", srcPath, err)
+	}
+
+	fileName := uuid.New().String() + imageExtForCopy(srcPath, data)
+	newPath, err := dstSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+	if err != nil {
+		return "", fmt.Errorf("save copied image for %q: %w", srcPath, err)
+	}
+	return newPath, nil
+}
+
+// imageExtForCopy resolves the file extension to use for a copied image. It
+// prefers an image extension already present on the source path, then falls
+// back to sniffing the content bytes, and finally defaults to ".png" (matching
+// image_resolver's default) so the object is always served with a sane type.
+func imageExtForCopy(srcPath string, data []byte) string {
+	if ext := strings.ToLower(filepath.Ext(srcPath)); isImageExt(ext) {
+		return ext
+	}
+	switch http.DetectContentType(data) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	}
+	return ".png"
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
 }
 
 // cloneChunkImageInfo parses a chunk's image_info JSON, copies every referenced

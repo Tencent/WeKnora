@@ -3,22 +3,24 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // countingFileService is a minimal FileService stub for cloneChunkImageInfo tests.
-// CopyFile records each invocation and returns a deterministic destination path
-// derived from (knowledgeID, srcPath) so dedup and rewrite behaviour are verifiable.
+// copyOwnedObject copies by GetFile-then-SaveBytes (so extracted images land in
+// the servable exports/ namespace), so this stub streams the source path back as
+// the file bytes from GetFile and reconstructs a deterministic exports-style
+// destination path in SaveBytes, making dedup and rewrite behaviour verifiable.
 type countingFileService struct {
 	copyCalls   int
 	copiedFrom  []string
-	failOnURL   string // when non-empty, CopyFile returns an error for this srcPath
+	failOnURL   string // when non-empty, GetFile returns an error for this srcPath
 	deleteCalls int
 }
 
@@ -28,12 +30,22 @@ func (c *countingFileService) SaveFile(ctx context.Context, file *multipart.File
 	return "", nil
 }
 
+// SaveBytes records each copy and returns a deterministic exports-namespace path
+// derived from the streamed source bytes (which GetFile set to the source path).
 func (c *countingFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	return "", nil
+	src := string(data)
+	c.copyCalls++
+	c.copiedFrom = append(c.copiedFrom, src)
+	return fmt.Sprintf("local://%d/exports/copy-of-%s", tenantID, src), nil
 }
 
+// GetFile streams the requested path back as the file content so SaveBytes can
+// build a deterministic destination. failOnURL simulates an unreadable source.
 func (c *countingFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	return nil, errors.New("not implemented")
+	if c.failOnURL != "" && filePath == c.failOnURL {
+		return nil, fmt.Errorf("simulated read failure for %s", filePath)
+	}
+	return io.NopCloser(strings.NewReader(filePath)), nil
 }
 
 func (c *countingFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
@@ -46,12 +58,7 @@ func (c *countingFileService) DeleteFile(ctx context.Context, filePath string) e
 }
 
 func (c *countingFileService) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
-	if c.failOnURL != "" && srcPath == c.failOnURL {
-		return "", fmt.Errorf("simulated copy failure for %s", srcPath)
-	}
-	c.copyCalls++
-	c.copiedFrom = append(c.copiedFrom, srcPath)
-	return fmt.Sprintf("local://%d/%s/copy-of-%s", tenantID, knowledgeID, srcPath), nil
+	return "", fmt.Errorf("CopyFile must not be used for embedded image copies")
 }
 
 func mustImageInfoJSON(t *testing.T, imgs []types.ImageInfo) string {
@@ -93,7 +100,7 @@ func TestCloneChunkImageInfo_RewritesURLAndMatchedOriginal(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal out: %v", err)
 	}
-	want := "local://7/k-dst/copy-of-local://1/k0/a.png"
+	want := "local://7/exports/copy-of-local://1/k0/a.png"
 	if got[0].URL != want {
 		t.Errorf("URL not rewritten: got %q want %q", got[0].URL, want)
 	}
@@ -125,7 +132,7 @@ func TestRewriteContentImageURLs_ParentTextChunk(t *testing.T) {
 	// Parent text chunk has NO image_info but embeds the markdown reference.
 	parentContent := "See ![diagram](local://1/k0/a.png) here."
 	got := rewriteContentImageURLs(parentContent, urlCache)
-	want := "See ![diagram](local://7/k-dst/copy-of-local://1/k0/a.png) here."
+	want := "See ![diagram](local://7/exports/copy-of-local://1/k0/a.png) here."
 	if got != want {
 		t.Errorf("parent content image URL not rewritten:\n got %q\nwant %q", got, want)
 	}
