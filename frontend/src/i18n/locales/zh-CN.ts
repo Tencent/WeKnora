@@ -3284,6 +3284,12 @@ export default {
       dimensionOverrideDesc: "仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
+      vlmTokenParameterLabel: "Token 参数格式",
+      vlmTokenParameterDesc: "选择视觉模型接口用于限制输出长度的字段。GPT-5、o 系列及其兼容接口请选择 max_completion_tokens。",
+      vlmTokenParameter: {
+        maxTokens: "max_tokens（通用兼容）",
+        maxCompletionTokens: "max_completion_tokens（GPT-5 / o 系列）",
+      },
       maxConcurrencyLabel: "后台并发上限",
       maxConcurrencyPlaceholder: "0 表示使用全局默认",
       maxConcurrencyDesc: "限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。",

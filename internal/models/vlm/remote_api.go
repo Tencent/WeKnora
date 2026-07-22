@@ -40,11 +40,12 @@ func vlmHTTPTimeout() time.Duration {
 
 // RemoteAPIVLM implements VLM via an OpenAI-compatible chat completions API.
 type RemoteAPIVLM struct {
-	modelName   string
-	modelID     string
-	client      *openai.Client
-	baseURL     string
-	temperature float32
+	modelName            string
+	modelID              string
+	client               *openai.Client
+	baseURL              string
+	temperature          float32
+	tokenParameterFormat string
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -98,11 +99,12 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 	}
 
 	return &RemoteAPIVLM{
-		modelName:   config.ModelName,
-		modelID:     config.ModelID,
-		client:      openai.NewClientWithConfig(apiCfg),
-		baseURL:     config.BaseURL,
-		temperature: temp,
+		modelName:            config.ModelName,
+		modelID:              config.ModelID,
+		client:               openai.NewClientWithConfig(apiCfg),
+		baseURL:              config.BaseURL,
+		temperature:          temp,
+		tokenParameterFormat: config.TokenParameterFormat,
 	}, nil
 }
 
@@ -143,6 +145,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		MaxTokens:   defaultMaxToks,
 		Temperature: v.temperature,
 	}
+	shapeVLMTokenParameter(&req, v.tokenParameterFormat)
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
@@ -162,6 +165,17 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	content := resp.Choices[0].Message.Content
 	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
 	return content, nil
+}
+
+func shapeVLMTokenParameter(req *openai.ChatCompletionRequest, format string) {
+	if format != "max_completion_tokens" {
+		return
+	}
+	req.MaxCompletionTokens = req.MaxTokens
+	req.MaxTokens = 0
+	// GPT-5/o-series endpoints that require max_completion_tokens also reject
+	// sampling parameters such as temperature.
+	req.Temperature = 0
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }
