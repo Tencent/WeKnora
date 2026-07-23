@@ -10,6 +10,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
+	mysqlConfig "github.com/go-sql-driver/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -106,6 +108,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	migrationsPath := "file://migrations/versioned"
 	if strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
+	} else if strings.HasPrefix(dsn, "mysql://") {
+		migrationsPath = "file://migrations/mysql"
 	}
 
 	var m *migrate.Migrate
@@ -300,16 +304,33 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
+	dbDriver := os.Getenv("DB_DRIVER")
+	var dbURL string
+	switch dbDriver {
+	case "mysql":
+		cfg := mysqlConfig.NewConfig()
+		cfg.Net = "tcp"
+		cfg.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
+		cfg.User = os.Getenv("DB_USER")
+		cfg.Passwd = os.Getenv("DB_PASSWORD")
+		cfg.DBName = os.Getenv("DB_NAME")
+		cfg.Params = map[string]string{"charset": "utf8mb4"}
+		dbURL = "mysql://" + cfg.FormatDSN()
+	default:
+		dbURL = fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+	}
 
 	migrationsPath := "file://migrations/versioned"
+	if dbDriver == "mysql" {
+		migrationsPath = "file://migrations/mysql"
+	}
 
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {

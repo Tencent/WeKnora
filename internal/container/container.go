@@ -21,7 +21,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	mysqlConfig "github.com/go-sql-driver/mysql" // MySQL 驱动注册 & DSN 构造
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -634,8 +635,82 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "3306"
+		}
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "root"
+		}
+		dbName := os.Getenv("DB_NAME")
+		if dbName == "" {
+			dbName = "WeKnora"
+		}
+		myCfg := mysqlConfig.NewConfig()
+		myCfg.Net = "tcp"
+		myCfg.Addr = host + ":" + port
+		myCfg.User = user
+		myCfg.Passwd = os.Getenv("DB_PASSWORD")
+		myCfg.DBName = dbName
+		myCfg.Params = map[string]string{
+			"charset":   "utf8mb4",
+			"parseTime": "true",
+			"loc":       "UTC",
+		}
+		gormDSN := myCfg.FormatDSN()
+
+		// MySQL 8.0.13+ required: JSON column expression defaults (e.g.
+		// CAST('[]' AS JSON)) and JSON_CONTAINS / JSON_LENGTH functions
+		// used by application queries need at least 8.0.
+		{
+			tmpDB, pingErr := sql.Open("mysql", gormDSN)
+			if pingErr != nil {
+				return nil, fmt.Errorf("failed to open temp MySQL connection for version check: %w", pingErr)
+			}
+			var versionStr string
+			if pingErr = tmpDB.QueryRow("SELECT VERSION()").Scan(&versionStr); pingErr != nil {
+				tmpDB.Close()
+				return nil, fmt.Errorf("failed to query MySQL version: %w", pingErr)
+			}
+			tmpDB.Close()
+
+			// Parse "8.0.13" -> major=8, minor=0, patch=13
+			var major, minor, patch int
+			if n, _ := fmt.Sscanf(versionStr, "%d.%d.%d", &major, &minor, &patch); n < 2 {
+				return nil, fmt.Errorf("unable to parse MySQL version %q; need 8.0.13+", versionStr)
+			}
+			requiredMsg := "WeKnora requires MySQL 8.0.13+ for JSON column support"
+			if major < 8 {
+				return nil, fmt.Errorf("%s (detected %s)", requiredMsg, versionStr)
+			}
+			if major == 8 && minor == 0 && patch < 13 {
+				return nil, fmt.Errorf("%s (detected %s)", requiredMsg, versionStr)
+			}
+			logger.Infof(context.Background(), "MySQL version check passed: %s", versionStr)
+		}
+
+		dialector = mysql.Open(gormDSN)
+		migCfg := mysqlConfig.NewConfig()
+		migCfg.Net = "tcp"
+		migCfg.Addr = host + ":" + port
+		migCfg.User = user
+		migCfg.Passwd = os.Getenv("DB_PASSWORD")
+		migCfg.DBName = dbName
+		migCfg.Params = map[string]string{
+			"charset":         "utf8mb4",
+			"multiStatements": "true",
+		}
+		migrateDSN = "mysql://" + migCfg.FormatDSN()
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			user, host, port, dbName)
 	default:
-		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
+		return nil, fmt.Errorf("unsupported database driver (valid: postgres, sqlite, mysql): %s", os.Getenv("DB_DRIVER"))
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
 		NowFunc: func() time.Time {
@@ -652,19 +727,20 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
-				"(see vectorStoreService.isPostgres for impact)", name)
+			"unsupported gorm dialector %q; expected postgres, sqlite or mysql "+
+				"(see vectorStoreService.canRowLock for impact)", name)
 	}
 
-	if os.Getenv("DB_DRIVER") == "sqlite" {
+	if os.Getenv("DB_DRIVER") == "sqlite" || os.Getenv("DB_DRIVER") == "mysql" {
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 		}
+		driverLabel := os.Getenv("DB_DRIVER")
 		if err := sqlDB.Ping(); err != nil {
-			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+			return nil, fmt.Errorf("failed to ping %s database: %w", driverLabel, err)
 		}
 	}
 
@@ -719,6 +795,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqlDB.SetMaxOpenConns(1)
 	} else {
 		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(20)
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
@@ -735,8 +812,14 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
-	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+	var updateSQL string
+	switch db.Dialector.Name() {
+	case "mysql":
+		updateSQL = "UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(storage_provider_config, '$.provider')) = '__pending_env__'"
+	default:
+		updateSQL = "UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'"
+	}
+	result := db.Exec(updateSQL,
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
 	)
 	if result.Error != nil {
@@ -848,25 +931,63 @@ func migrateLegacyStorageBackends(db *gorm.DB) {
 // are at least as high as the current MAX value in each table. This is needed
 // because older code assigned seq_id via application-level MAX()+1, which could
 // advance values past the DB sequence counter and cause duplicate key errors.
+// syncSequences ensures auto-increment counters are at least as high as the
+// current MAX value in each table. This is needed because older code assigned
+// seq_id via application-level MAX()+1, which could advance values past the
+// DB sequence counter and cause duplicate key errors.
 func syncSequences(db *gorm.DB) {
-	if db.Dialector.Name() != "postgres" {
-		return
-	}
+	dialect := db.Dialector.Name()
 	pairs := [][2]string{
 		{"chunks", "chunks_seq_id_seq"},
 		{"knowledge_tags", "knowledge_tags_seq_id_seq"},
 	}
 	for _, p := range pairs {
 		table, seq := p[0], p[1]
-		sql := fmt.Sprintf(
-			`SELECT setval('%s', GREATEST(nextval('%s'), (SELECT COALESCE(MAX(seq_id), 0) FROM %s)))`,
-			seq, seq, table,
-		)
-		if err := db.Exec(sql).Error; err != nil {
-			logger.Warnf(context.Background(), "Failed to sync sequence %s: %v", seq, err)
-		} else {
-			logger.Infof(context.Background(), "Synced sequence %s with table %s", seq, table)
+		switch dialect {
+		case "postgres":
+			syncPostgresSequence(db, table, seq)
+		case "mysql":
+			syncMySQLAutoIncrement(db, table)
+		default:
+			return
 		}
+	}
+}
+
+// syncPostgresSequence bumps a PostgreSQL sequence to at least MAX(seq_id)+1.
+func syncPostgresSequence(db *gorm.DB, table, seq string) {
+	sql := fmt.Sprintf(
+		`SELECT setval('%s', GREATEST(nextval('%s'), (SELECT COALESCE(MAX(seq_id), 0) FROM %s)))`,
+		seq, seq, table,
+	)
+	if err := db.Exec(sql).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to sync sequence for table %s: %v", table, err)
+	} else {
+		logger.Infof(context.Background(), "Synced sequence for table %s", table)
+	}
+}
+
+// syncMySQLAutoIncrement bumps a MySQL AUTO_INCREMENT counter to at least
+// MAX(seq_id)+1. MySQL allows ALTER TABLE to only increase the counter, so
+// an empty table (MAX = 0) leaves the default 1 in place.
+func syncMySQLAutoIncrement(db *gorm.DB, table string) {
+	var maxVal int64
+	if err := db.Raw(
+		fmt.Sprintf("SELECT COALESCE(MAX(seq_id), 0) FROM %s", table),
+	).Scan(&maxVal).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to query MAX(seq_id) for table %s: %v", table, err)
+		return
+	}
+	if maxVal == 0 {
+		return // empty table, nothing to sync
+	}
+	target := maxVal + 1
+	if err := db.Exec(
+		fmt.Sprintf("ALTER TABLE %s AUTO_INCREMENT = ?", table), target,
+	).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to set AUTO_INCREMENT for table %s to %d: %v", table, target, err)
+	} else {
+		logger.Infof(context.Background(), "Synced sequence for table %s → AUTO_INCREMENT = %d", table, target)
 	}
 }
 
@@ -1032,8 +1153,32 @@ func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	registry := retriever.NewRetrieveEngineRegistry()
-	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
+	retrieveDriverRaw := os.Getenv("RETRIEVE_DRIVER")
+	retrieveDriver := strings.Split(retrieveDriverRaw, ",")
 	log := logger.GetLogger(context.Background())
+
+	// Guard: MySQL primary database cannot use PostgreSQL retriever (pgvector).
+	// Automatically normalize the retriever list to avoid silent misconfiguration.
+	if os.Getenv("DB_DRIVER") == "mysql" {
+		if retrieveDriverRaw == "" || retrieveDriverRaw == "postgres" {
+			log.Warnf("DB_DRIVER=mysql requires an external vector store; " +
+				"RETRIEVE_DRIVER is %q. Set RETRIEVE_DRIVER to qdrant, milvus, "+
+				"weaviate, elasticsearch, or another supported engine.",
+				retrieveDriverRaw)
+			// Clear the implicit postgres default to avoid a startup error.
+			retrieveDriver = []string{}
+		} else if slices.Contains(retrieveDriver, "postgres") {
+			log.Warnf("DB_DRIVER=mysql but RETRIEVE_DRIVER contains postgres; "+
+				"removing postgres from the retriever list")
+			var filtered []string
+			for _, d := range retrieveDriver {
+				if d != "postgres" {
+					filtered = append(filtered, d)
+				}
+			}
+			retrieveDriver = filtered
+		}
+	}
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
 	// events fire under a tenant-scoped ctx at indexing time; the env-path
 	// registration ctx below has no tenant, so those emits self-skip.

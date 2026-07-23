@@ -9,6 +9,12 @@ import (
 )
 
 // This file provides comprehensive SQL validation and security features
+//
+// IMPORTANT: The SQL parser used here (pg_query_go) is PostgreSQL-specific.
+// When the application is configured with DB_DRIVER=mysql, this validation
+// layer may not correctly parse MySQL-specific syntax (JSON_CONTAINS, REGEXP,
+// etc.). If you use the "natural language to SQL" knowledge search feature,
+// keep the database backend as PostgreSQL.
 
 /*
 Example Usage:
@@ -498,10 +504,12 @@ func WithDefaultSafeFunctions() SQLValidationOption {
 			"string_agg":       true,
 			"bool_and":         true,
 			"bool_or":          true,
-			"json_agg":         true,
-			"jsonb_agg":        true,
-			"json_object_agg":  true,
-			"jsonb_object_agg": true,
+			"json_agg":          true,
+			"jsonb_agg":         true,  // PostgreSQL; MySQL equivalent: JSON_ARRAYAGG
+			"json_object_agg":   true,
+			"jsonb_object_agg":  true,  // PostgreSQL; MySQL equivalent: JSON_OBJECTAGG
+			"json_arrayagg":     true,  // MySQL 5.7.22+
+			"json_objectagg":    true,  // MySQL 5.7.22+
 			// Safe scalar functions
 			"coalesce":          true,
 			"nullif":            true,
