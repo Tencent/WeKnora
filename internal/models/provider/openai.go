@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 const (
@@ -83,4 +84,24 @@ func IsOpenAIReasoningOrGPT5Model(modelName string) bool {
 		}
 	}
 	return false
+}
+
+// ShapeOpenAIReasoning strips sampling params unsupported by OpenAI's
+// o-series / GPT-5 reasoning models and migrates max_tokens to
+// max_completion_tokens. Intended for OpenAI and Azure OpenAI providers; pair
+// with IsOpenAIReasoningOrGPT5Model. See issue #1283.
+//
+// The go-openai fields carry the `omitempty` JSON tag, so zeroing
+// Temperature / TopP / MaxTokens omits them from the request body instead of
+// sending explicit zeros - which is what makes these models accept the request
+// (they fall back to their defaults, e.g. temperature=1).
+func ShapeOpenAIReasoning(req *openai.ChatCompletionRequest) {
+	req.Temperature = 0
+	req.TopP = 0
+	req.FrequencyPenalty = 0
+	req.PresencePenalty = 0
+	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
+		req.MaxCompletionTokens = req.MaxTokens
+	}
+	req.MaxTokens = 0
 }

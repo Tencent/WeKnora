@@ -144,6 +144,10 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		Temperature: v.temperature,
 	}
 
+	if shouldShapeReasoning(v.modelName) {
+		provider.ShapeOpenAIReasoning(&req)
+	}
+
 	totalImageSize := 0
 	for _, img := range imgBytesList {
 		totalImageSize += len(img)
@@ -162,6 +166,21 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	content := resp.Choices[0].Message.Content
 	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
 	return content, nil
+}
+
+// shouldShapeReasoning reports whether an OpenAI-compatible VLM request must be
+// reshaped for GPT-5 / o-series reasoning models.
+//
+// The go-openai SDK enforces this client-side via ReasoningValidator (see
+// reasoning_validator.go): for any model whose name starts with o1/o3/o4/gpt-5
+// it rejects requests carrying MaxTokens (>0) or non-default sampling params
+// BEFORE the request is sent, regardless of provider or endpoint. So the
+// max_tokens -> max_completion_tokens migration (and zeroing the sampling
+// params) is required purely by model name - including the generic / legacy
+// inline-config path (NewVLMFromLegacyConfig) where no provider is set and
+// DetectProvider falls back to "generic".
+func shouldShapeReasoning(modelName string) bool {
+	return provider.IsOpenAIReasoningOrGPT5Model(modelName)
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }
