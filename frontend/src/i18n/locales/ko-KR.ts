@@ -2751,6 +2751,10 @@ export default {
           deleteConfirm: "현재 큐에서만 기록을 제거합니다. 원래 작업은 실행되거나 완료되지 않으며 기록 로그는 유지됩니다. 지울까요?",
           deleteSuccess: "실패 기록을 지웠습니다",
           deleteError: "실패 기록을 지우지 못했습니다",
+          purgeArchived: "실패 작업 모두 지우기",
+          purgeArchivedConfirm: "현재 큐의 실패 기록 {count}건을 한 번에 제거합니다. 큐의 실패 작업만 정리하며 실행 중이거나 대기 중인 작업에는 영향이 없고, 이미 실패한 문서의 비즈니스 상태도 되돌리지 않습니다. 지울까요?",
+          purgeArchivedSuccess: "실패 작업 {count}건을 지웠습니다",
+          purgeArchivedError: "실패 작업을 지우지 못했습니다",
           taskTypes: {
             documentProcess: "문서 파싱",
             manualProcess: "수동 재처리",
@@ -2801,6 +2805,7 @@ export default {
         },
         queueNames: {
           default: "문서 파싱",
+          chat_attachment: "대화 첨부파일 파싱",
           postprocess: "후처리 오케스트레이션",
           summary: "요약 생성",
           sync: "데이터 소스 동기화",
@@ -2812,6 +2817,7 @@ export default {
         },
         queueDescriptions: {
           default: "문서 파싱, 수동 재파싱",
+          chat_attachment: "세션 내 업로드 첨부파일 파싱",
           postprocess: "파싱 마무리, 보강 분배",
           summary: "문서 요약, 테이블 요약",
           sync: "수동 및 예약 동기화",
@@ -3022,6 +3028,7 @@ export default {
           "system.queue_task_deleted": "실패 작업 기록 삭제",
           "system.queue_task_run_now": "큐 작업 즉시 실행",
           "system.queue_task_cancelled": "큐 작업 취소",
+          "system.queue_archived_purged": "실패 작업 모두 지우기",
         },
         outcome: {
           success: "성공",

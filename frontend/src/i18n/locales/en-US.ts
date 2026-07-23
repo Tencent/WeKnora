@@ -3770,6 +3770,10 @@ export default {
           runNowConfirm: "This task will move to pending immediately without resetting its retry count. Continue?",
           deleteRecord: "Clear record",
           deleteConfirm: "This only removes the record from this queue. It will not run or complete the original task, and historical logs remain. Clear it?",
+          purgeArchived: "Clear all failed tasks",
+          purgeArchivedConfirm: "Remove all {count} failed records from this queue at once. This only clears failed tasks in the queue — it does not affect running or pending tasks, nor does it roll back the business status of documents that already failed. Clear them?",
+          purgeArchivedSuccess: "Cleared {count} failed tasks",
+          purgeArchivedError: "Failed to clear failed tasks",
           stateFilter: "Filter by task state",
           states: {
             active: "Active",
@@ -3839,6 +3843,7 @@ export default {
         },
         queueNames: {
           default: "Document parsing",
+          chat_attachment: "Chat attachments",
           postprocess: "Post-process",
           summary: "Summaries",
           sync: "Source sync",
@@ -3850,6 +3855,7 @@ export default {
         },
         queueDescriptions: {
           default: "Document parse, manual reparse",
+          chat_attachment: "Session-scoped chat upload parsing",
           postprocess: "Parse finalization, enrichment fan-out",
           summary: "Document & table summaries",
           sync: "Manual & scheduled sync",
@@ -4060,6 +4066,7 @@ export default {
           'system.queue_task_deleted': 'Failed task record cleared',
           'system.queue_task_run_now': 'Queue task run now',
           'system.queue_task_cancelled': 'Queue task cancelled',
+          'system.queue_archived_purged': 'All failed tasks cleared',
         },
         outcome: {
           success: 'Success',

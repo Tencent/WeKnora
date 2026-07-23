@@ -2725,6 +2725,10 @@ export default {
           runNowConfirm: "该任务将立即进入待执行队列，重试次数不会重置。确认继续？",
           deleteRecord: "清除记录",
           deleteConfirm: "仅从当前队列移除这条失败记录，不会执行或完成原任务，历史日志仍会保留。确认清除？",
+          purgeArchived: "清除全部失败任务",
+          purgeArchivedConfirm: "将从当前队列一次性移除全部 {count} 条失败记录，仅清理队列里的失败任务，不影响运行中或排队中的任务，也不会回滚已失败文档的业务状态。确认清除？",
+          purgeArchivedSuccess: "已清除 {count} 条失败任务",
+          purgeArchivedError: "清除失败任务失败",
           stateFilter: "按任务状态筛选",
           states: {
             active: "运行中",
@@ -2802,6 +2806,7 @@ export default {
         },
         queueNames: {
           default: "文档解析",
+          chat_attachment: "对话附件解析",
           postprocess: "后处理编排",
           summary: "摘要生成",
           sync: "数据源同步",
@@ -2813,6 +2818,7 @@ export default {
         },
         queueDescriptions: {
           default: "文档解析、手工重解析",
+          chat_attachment: "会话内上传附件解析",
           postprocess: "解析收尾、富化扇出",
           summary: "文档摘要、表格摘要",
           sync: "手动与定时同步",
@@ -3034,6 +3040,7 @@ export default {
           "system.queue_task_deleted": "清除失败任务记录",
           "system.queue_task_run_now": "立即执行队列任务",
           "system.queue_task_cancelled": "终止队列任务",
+          "system.queue_archived_purged": "清除全部失败任务",
         },
         outcome: {
           success: "成功",

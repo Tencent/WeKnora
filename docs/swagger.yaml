@@ -300,6 +300,7 @@ definitions:
     - system.queue_task_deleted
     - system.queue_task_run_now
     - system.queue_task_cancelled
+    - system.queue_archived_purged
     - kb.created
     - kb.updated
     - kb.deleted
@@ -362,6 +363,7 @@ definitions:
     - AuditActionSystemQueueTaskDeleted
     - AuditActionSystemQueueTaskRunNow
     - AuditActionSystemQueueTaskCancelled
+    - AuditActionSystemQueueArchivedPurged
     - AuditActionKBCreated
     - AuditActionKBUpdated
     - AuditActionKBDeleted
@@ -13370,6 +13372,25 @@ paths:
       summary: 获取解析任务队列运行时状态
       tags:
       - 系统管理
+  /system/admin/runtime/queues/{queue}/archived:
+    delete:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Purge all archived tasks in a queue
+      tags:
+      - System Admin
   /system/admin/runtime/queues/{queue}/tasks:
     get:
       parameters:
