@@ -104,6 +104,11 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if langfuse.GetManager().Enabled() {
 		e = &langfuseEmbedder{inner: e}
 	}
+	// Outermost: content-addressed result cache (issue #1679). Cache hits
+	// short-circuit before tracing and the concurrency gate, so rebuilding
+	// unchanged content costs zero provider round-trips. No-op unless a
+	// CacheStore was installed at startup (Redis mode).
+	e = wrapEmbeddingCache(e)
 	return e, nil
 }
 

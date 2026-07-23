@@ -288,6 +288,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// available with Redis (the shared semaphore backend); Lite mode is
 		// single-process and low-volume, so it runs ungated.
 		must(container.Invoke(registerModelConcurrencyLimiter))
+		// Content-addressed embedding cache (issue #1679): embeddings are a
+		// pure function of (text, model, dimensions), so reparse/rebuild and
+		// crash-resume reuse cached vectors instead of re-billing the
+		// provider for unchanged content.
+		must(container.Invoke(registerEmbeddingCache))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
@@ -532,6 +537,20 @@ func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
 	}
 	logger.Infof(context.Background(),
 		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
+}
+
+// registerEmbeddingCache installs the Redis-backed content-addressed embedding
+// result cache (issue #1679). Only wired in Redis mode; Lite mode runs without
+// caching (the wrapper is a no-op when no store is installed).
+func registerEmbeddingCache(rdb *redis.Client) {
+	if rdb == nil {
+		return
+	}
+	if store := embedding.NewRedisCacheStore(rdb); store != nil {
+		embedding.SetCacheStore(store)
+		logger.Infof(context.Background(),
+			"[Container] Embedding result cache enabled (content-addressed, redis)")
+	}
 }
 
 func initRedisClient() (*redis.Client, error) {

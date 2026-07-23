@@ -257,6 +257,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		OriginalURL: payload.ImageURL,
 	}
 
+	// Content-addressed VLM result cache (issue #1679): OCR/caption depend
+	// only on (image bytes, VLM model, prompt). On a cache hit the stored
+	// text is frozen as the canonical result — the VLM is never re-consulted
+	// for unchanged inputs, which both saves the most expensive per-image
+	// call and isolates VLM output nondeterminism from downstream
+	// content-hash layers. nil-safe when Redis is unavailable (Lite mode).
+	vlmCache := newVLMResultCache(s.redisClient)
+	imageHash := hashImageBytes(imgBytes)
+	modelKey := vlmModelCacheKey(vlmCfg)
+
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
 		if payload.ImageSourceType == "scanned_pdf" {
@@ -268,12 +278,26 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
+		ocrKey := vlmCacheKey(imageHash, modelKey, prompt)
+		if cached, hit := vlmCache.Get(ctx, ocrKey); hit {
+			logger.Infof(ctx, "[ImageMultimodal] OCR cache hit for %s", payload.ImageURL)
+			imgOut["ocr_cache"] = "hit"
+			if cached != "" {
+				imageInfo.OCRText = cached
+				imgOut["ocr_chars"] = len([]rune(cached))
+				imgOut["ocr_preview"] = previewText(cached, 200)
+			} else {
+				imgOut["ocr_chars"] = 0
+				imgOut["ocr_skipped"] = "empty_or_invalid"
+			}
+		} else if ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt); ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
 			ocrText = sanitizeOCRText(ocrText)
+			// Freeze the sanitized result (including a legitimate empty
+			// result) as canonical; errors are never cached.
+			vlmCache.Set(ctx, ocrKey, ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -286,14 +310,26 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	captionKey := vlmCacheKey(imageHash, modelKey, captionPrompt)
+	if cached, hit := vlmCache.Get(ctx, captionKey); hit {
+		logger.Infof(ctx, "[ImageMultimodal] Caption cache hit for %s", payload.ImageURL)
+		imgOut["caption_cache"] = "hit"
+		if cached != "" {
+			imageInfo.Caption = cached
+			imgOut["caption_chars"] = len([]rune(cached))
+			imgOut["caption_preview"] = previewText(cached, 200)
+		}
+	} else if caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt); capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	} else {
+		vlmCache.Set(ctx, captionKey, caption)
+		if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
