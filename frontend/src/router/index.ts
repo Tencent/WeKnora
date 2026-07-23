@@ -64,6 +64,12 @@ const router = createRouter({
       meta: { requiresAuth: false, requiresInit: false }
     },
     {
+      path: "/onboarding/workspace",
+      name: "workspaceOnboarding",
+      component: () => import("../views/auth/WorkspaceOnboarding.vue"),
+      meta: { requiresAuth: true, requiresInit: false, requiresTenant: false }
+    },
+    {
       path: "/join",
       name: "joinOrganization",
       // 重定向到组织列表页，并将 code 参数转换为 invite_code
@@ -256,6 +262,8 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
         created_at: tenant.created_at || new Date().toISOString(),
         updated_at: tenant.updated_at || new Date().toISOString(),
       })
+    } else {
+      authStore.setTenant(null)
     }
 
     // Refresh memberships on every page load — same reason as
@@ -266,6 +274,11 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     const memberships = response.data?.memberships
     if (Array.isArray(memberships)) {
       authStore.setMemberships(memberships)
+    }
+
+    const canCreateTenant = response.data?.capabilities?.can_create_tenant
+    if (typeof canCreateTenant === 'boolean') {
+      authStore.setCanCreateTenant(canCreateTenant)
     }
 
     return true
@@ -302,11 +315,29 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
+  // Tenantless onboarding still requires a valid user token even though it
+  // deliberately skips the normal tenant/system-initialization gates.
+  if (to.path === '/onboarding/workspace') {
+    if (!authStore.isLoggedIn) {
+      const restored = await hydrateSessionFromToken(authStore)
+      if (!restored) {
+        next('/login')
+        return
+      }
+    }
+    if (authStore.hasValidTenant) {
+      next('/platform/knowledge-bases')
+    } else {
+      next()
+    }
+    return
+  }
+
   // 如果访问的是登录页面或初始化页面，直接放行
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next('/platform/knowledge-bases')
+      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
       return
     }
     next()
@@ -318,7 +349,11 @@ router.beforeEach(async (to, from, next) => {
     if (!authStore.isLoggedIn) {
       const restored = await hydrateSessionFromToken(authStore)
       if (restored) {
-        next(to.fullPath)
+        next(
+          !authStore.hasValidTenant && to.meta.requiresTenant !== false
+            ? '/onboarding/workspace'
+            : to.fullPath,
+        )
         return
       }
 
@@ -341,6 +376,11 @@ router.beforeEach(async (to, from, next) => {
       next('/login')
       return
     }
+  }
+
+  if (to.meta.requiresTenant !== false && !authStore.hasValidTenant) {
+    next('/onboarding/workspace')
+    return
   }
 
   // SystemAdmin gate — checked AFTER auth so a non-admin who's logged

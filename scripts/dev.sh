@@ -86,11 +86,17 @@ show_help() {
 }
 
 # 加载 .env 与可选的 .env.local（后者覆盖前者）
+# 读取 .env 时去掉行尾的 \r，兼容 Windows 风格(CRLF)换行符，
+# 否则 bash source 会把残留的 \r 当成命令导致 "...: $'\r': command not found"。
+_clean_env_file() {
+    sed -e 's/\r$//' "$1"
+}
+
 load_env_files() {
     if [ -f ".env" ]; then
         set -a
         # shellcheck source=/dev/null
-        source .env
+        source <(_clean_env_file .env)
         set +a
     else
         return 1
@@ -100,7 +106,7 @@ load_env_files() {
         log_info "加载 .env.local 覆盖配置..."
         set -a
         # shellcheck source=/dev/null
-        source .env.local
+        source <(_clean_env_file .env.local)
         set +a
     fi
     return 0
@@ -372,7 +378,7 @@ check_remote_dev_connectivity() {
         local h="${rest%%:*}"
         local p="${rest##*:}"
         if command -v nc &> /dev/null; then
-            if nc -z -G 3 "$h" "$p" 2>/dev/null; then
+            if nc -z -w 3 "$h" "$p" 2>/dev/null; then
                 log_success "${name} ${h}:${p} 可达"
             else
                 log_error "${name} ${h}:${p} 不可达 (no route / connection refused)"

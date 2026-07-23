@@ -79,9 +79,6 @@
       </div>
       <div class="test-case">
         <div ref="streamContainer" class="test-rendered markdown-content" v-html="streamHtml"></div>
-        <div v-if="isStreaming" class="loading-typing">
-          <span></span><span></span><span></span>
-        </div>
       </div>
     </section>
 
@@ -579,48 +576,6 @@ watch(customInput, () => {
   resize: vertical;
   box-sizing: border-box;
   margin-bottom: 12px;
-}
-
-.loading-typing {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0;
-
-  span {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--td-brand-color, #0052d9);
-    animation: typingBounce 1.4s ease-in-out infinite;
-    will-change: transform;
-    backface-visibility: hidden;
-
-    &:nth-child(1) {
-      animation-delay: 0s;
-    }
-
-    &:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    &:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-  }
-}
-
-@keyframes typingBounce {
-
-  0%,
-  60%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  30% {
-    transform: translate3d(0, -6px, 0);
-  }
 }
 
 .shimmer-demo {

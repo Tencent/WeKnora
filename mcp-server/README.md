@@ -96,9 +96,9 @@ python test_module.py
 
 该 MCP 服务器提供以下工具：
 
-### 租户管理
-- `create_tenant` - 创建新租户
-- `list_tenants` - 列出所有租户
+### 空间管理
+- `create_tenant` - 创建新空间
+- `list_tenants` - 列出所有空间
 
 ### 知识库管理
 - `create_knowledge_base` - 创建知识库

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,58 +118,161 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
-// doRequest executes an authenticated API request and decodes the JSON response.
+// Retry policy shared by doRequest (JSON API calls) and downloadRawBytes (file
+// downloads): 429 honours Retry-After, 5xx retries once, transport errors back off.
+const (
+	feishuMaxRetries    = 3
+	feishuMax5xxRetries = 1
+	feishuRetry5xxDelay = 2 * time.Second
+)
+
+var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// doRequest executes an authenticated API request and decodes the JSON response,
+// retrying transient failures (transport errors, HTTP 429, 5xx). Feishu's drive
+// export/wiki APIs are aggressively rate limited, and a thousand-document sync
+// issues tens of thousands of calls; without backoff a single 429 burst used to
+// fail whole swathes of documents silently. 429 responses honour Retry-After;
+// 5xx is retried once; other non-2xx statuses fail fast (no point retrying 4xx).
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+	const (
+		maxRetries    = feishuMaxRetries
+		max5xxRetries = feishuMax5xxRetries
+		retry5xxDelay = feishuRetry5xxDelay
+	)
+	backoff := feishuRetryBackoff
+
 	token, err := c.getTenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
 
-	var bodyReader io.Reader
+	var bodyBytes []byte
 	if body != nil {
-		bodyBytes, err := json.Marshal(body)
+		bodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal request body: %w", err)
 		}
-		bodyReader = bytes.NewReader(bodyBytes)
 	}
 
 	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Authorization", "Bearer "+token)
+	var lastErr error
 
-	logger.Infof(ctx, "[Feishu] %s %s", method, path)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read body once for logging + decoding
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
-		method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
-	}
-
-	if result != nil {
-		if err := json.Unmarshal(respBody, result); err != nil {
-			return fmt.Errorf("decode response: %w", err)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
 		}
+		req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if attempt == 0 {
+			logger.Infof(ctx, "[Feishu] %s %s", method, path)
+		} else {
+			logger.Infof(ctx, "[Feishu] %s %s (retry %d/%d)", method, path, attempt, maxRetries)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("execute request: %w", err)
+			if attempt < maxRetries {
+				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read response body: %w", readErr)
+			if attempt < maxRetries {
+				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
+			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])
+			lastErr = fmt.Errorf("feishu rate limited: status=429 body=%s", truncate(string(respBody), 500))
+			if attempt < maxRetries {
+				if sErr := sleepCtx(ctx, wait); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			lastErr = fmt.Errorf("feishu server error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 500))
+			if attempt < max5xxRetries {
+				if sErr := sleepCtx(ctx, retry5xxDelay); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+		}
+
+		if result != nil {
+			if err := json.Unmarshal(respBody, result); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+		}
+		return nil
 	}
 
-	return nil
+	return lastErr
+}
+
+// parseRetryAfter interprets a Retry-After header value (seconds) into a wait
+// duration, coercing 0/negative to a short delay and falling back when absent
+// or unparseable.
+func parseRetryAfter(header string, fallback time.Duration) time.Duration {
+	if header == "" {
+		return fallback
+	}
+	secs, err := strconv.ParseFloat(strings.TrimSpace(header), 64)
+	if err != nil {
+		return fallback
+	}
+	if secs <= 0 {
+		return 100 * time.Millisecond
+	}
+	return time.Duration(secs * float64(time.Second))
+}
+
+// sleepCtx waits for d or until ctx is cancelled, returning ctx.Err() if the
+// context ends first so retries abort promptly on task cancellation/timeout.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // truncate truncates a string to maxLen and appends "..." if truncated.
@@ -554,31 +658,83 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	}
 
 	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create download request: %w", err)
+	var lastErr error
+
+	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create download request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if attempt == 0 {
+			logger.Infof(ctx, "[Feishu] download GET %s", path)
+		} else {
+			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, feishuMaxRetries)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download request: %w", err)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
+			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, wait); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+			if attempt < feishuMax5xxRetries {
+				if sErr := sleepCtx(ctx, feishuRetry5xxDelay); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+		}
+
+		data, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read download body: %w", readErr)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))
+		return data, nil
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
 
-	logger.Infof(ctx, "[Feishu] download GET %s", path)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-		return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read download body: %w", err)
-	}
-
-	logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))
-	return data, nil
+	return nil, lastErr
 }

@@ -204,6 +204,10 @@ func (g *rbacGuards) Admin() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleAdmin, g.cfg)
 }
 
+func (g *rbacGuards) AdminOrSystemAdmin() gin.HandlerFunc {
+	return middleware.RequireRoleOrSystemAdmin(types.TenantRoleAdmin, g.cfg)
+}
+
 func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }
@@ -225,6 +229,14 @@ func apiKeyAny() middleware.APIKeyRoutePolicy {
 
 func apiKeyFullAccess() middleware.APIKeyRoutePolicy {
 	return middleware.APIKeyRoutePolicy{RequireFullAccess: true}
+}
+
+func apiKeyPlatform(capabilities ...types.APIKeyCapability) middleware.APIKeyRoutePolicy {
+	policy := middleware.APIKeyRoutePolicy{PlatformOnly: true}
+	for _, capability := range capabilities {
+		policy = policy.WithCapability(capability)
+	}
+	return policy
 }
 
 // apiKeyRetrieve grants read/search access to knowledge-base data.
@@ -254,8 +266,9 @@ func apiKeyIngest(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolic
 }
 
 // apiKeyManageKnowledgeBases layers the "manage_kbs" capability on top of a
-// base policy so a scoped key can manage existing KB metadata/config within
-// its KB allow-list.
+// base policy so a scoped key can manage the KB lifecycle (create/copy/
+// duplicate/update/delete + config). Existing-KB operations stay bounded by
+// the key's allow-list downstream; create has no source to bound.
 func apiKeyManageKnowledgeBases(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageKnowledgeBases)
 }
@@ -290,6 +303,13 @@ func apiKeyManageChannels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRo
 
 func apiKeyManageVectorStores(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageVectorStores)
+}
+
+// apiKeyManageStorageBackends layers the "manage_storage_backends" capability
+// on top of a base policy so a scoped key can manage object/file storage
+// backend instances without carrying vector-store or full tenant access.
+func apiKeyManageStorageBackends(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageStorageBackends)
 }
 
 func apiKeyManageWebSearch(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {

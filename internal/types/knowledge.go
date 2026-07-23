@@ -112,7 +112,7 @@ type KnowledgeListFilter struct {
 type Knowledge struct {
 	// Unique identifier of the knowledge
 	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`

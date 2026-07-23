@@ -205,6 +205,14 @@ func TestFolderTree_CRUDAndChildListing(t *testing.T) {
 	pages, err := repo.ListPagesByFolderIDs(ctx, "kb-f", []string{"f-ai", "f-llm"})
 	require.NoError(t, err)
 	assert.Len(t, pages, 3)
+
+	// Repository deletion re-checks emptiness atomically, so a concurrent page
+	// move / child create cannot slip between the service check and soft delete.
+	err = repo.DeleteFolder(ctx, "kb-f", "f-ai")
+	assert.ErrorIs(t, err, ErrWikiFolderNotEmpty)
+	require.NoError(t, repo.DeleteFolder(ctx, "kb-f", "f-people"))
+	_, err = repo.GetFolderByID(ctx, "kb-f", "f-people")
+	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies
@@ -323,4 +331,29 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 	clampedEntries, _, err := repo.ListByTypeLight(ctx, "kb-cap", types.WikiPageTypeEntity, 5000, 0)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(clampedEntries), 200)
+}
+
+func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	orphan := makeWikiPage("kb-orphans", "entity/orphan", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	orphan.InLinks = types.StringArray{}
+	linked := makeWikiPage("kb-orphans", "entity/linked", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	linked.InLinks = types.StringArray{"entity/source"}
+	indexPage := makeWikiPage("kb-orphans", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
+	indexPage.InLinks = types.StringArray{}
+	logPage := makeWikiPage("kb-orphans", "log", types.WikiPageTypeLog, types.WikiPageStatusPublished)
+	logPage.InLinks = types.StringArray{}
+	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.InLinks = types.StringArray{}
+
+	for _, p := range []*types.WikiPage{orphan, linked, indexPage, logPage, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, err := repo.CountOrphans(ctx, "kb-orphans")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), got)
 }

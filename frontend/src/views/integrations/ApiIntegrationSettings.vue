@@ -579,6 +579,13 @@ import {
 } from '@/api/tenant'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { getApiBaseUrl } from '@/utils/api-base'
+import {
+  DEFAULT_TENANT_API_KEY_CAPABILITIES,
+  KB_SCOPED_API_KEY_CAPABILITIES,
+  TENANT_API_KEY_CAPABILITIES,
+  TENANT_API_KEY_CAPABILITY_GROUPS,
+  type ApiKeyCapabilityGroup,
+} from '@/config/apiKeyCapabilities'
 
 const { t } = useI18n()
 
@@ -622,90 +629,10 @@ const form = reactive({
   require_direct_header: false,
 })
 
-type ApiKeyCapabilityOption = {
-  value: TenantAPIKeyCapability
-  labelKey: string
-  hintKey: string
-}
-type ApiKeyCapabilityGroup = {
-  key: string
-  labelKey: string
-  capabilities: ApiKeyCapabilityOption[]
-}
-
-const API_KEY_CAPABILITIES: TenantAPIKeyCapability[] = [
-  'retrieve',
-  'chat',
-  'read_agents',
-  'ingest',
-  'manage_kbs',
-  'message_history',
-  'manage_agents',
-  'manage_mcp_services',
-  'manage_datasources',
-  'manage_models',
-  'manage_vector_stores',
-  'manage_web_search',
-  'manage_channels',
-  'run_evaluations',
-  'manage_members',
-  'manage_spaces',
-  'manage_tenant_settings',
-]
-
-const DEFAULT_API_KEY_CAPABILITIES = new Set<TenantAPIKeyCapability>(['retrieve', 'chat', 'read_agents'])
-const KB_SCOPED_CAPABILITIES = new Set<TenantAPIKeyCapability>([
-  'retrieve',
-  'chat',
-  'ingest',
-  'manage_kbs',
-  'manage_agents',
-  'manage_datasources',
-])
-
-const apiKeyCapabilityGroups: ApiKeyCapabilityGroup[] = [
-  {
-    key: 'knowledge',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupKnowledge',
-    capabilities: [
-      { value: 'retrieve', labelKey: 'integrations.api.capabilityRetrieve', hintKey: 'integrations.api.capabilityRetrieveHint' },
-      { value: 'chat', labelKey: 'integrations.api.capabilityChat', hintKey: 'integrations.api.capabilityChatHint' },
-      { value: 'ingest', labelKey: 'integrations.api.capabilityIngest', hintKey: 'integrations.api.capabilityIngestHint' },
-      { value: 'manage_kbs', labelKey: 'integrations.api.capabilityManageKbs', hintKey: 'integrations.api.capabilityManageKbsHint' },
-      { value: 'message_history', labelKey: 'integrations.api.capabilityMessageHistory', hintKey: 'integrations.api.capabilityMessageHistoryHint' },
-    ],
-  },
-  {
-    key: 'automation',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupAutomation',
-    capabilities: [
-      { value: 'read_agents', labelKey: 'integrations.api.capabilityReadAgents', hintKey: 'integrations.api.capabilityReadAgentsHint' },
-      { value: 'manage_agents', labelKey: 'integrations.api.capabilityManageAgents', hintKey: 'integrations.api.capabilityManageAgentsHint' },
-      { value: 'manage_mcp_services', labelKey: 'integrations.api.capabilityManageMcpServices', hintKey: 'integrations.api.capabilityManageMcpServicesHint' },
-      { value: 'manage_datasources', labelKey: 'integrations.api.capabilityManageDatasources', hintKey: 'integrations.api.capabilityManageDatasourcesHint' },
-    ],
-  },
-  {
-    key: 'collaboration',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupCollaboration',
-    capabilities: [
-      { value: 'manage_members', labelKey: 'integrations.api.capabilityManageMembers', hintKey: 'integrations.api.capabilityManageMembersHint' },
-      { value: 'manage_spaces', labelKey: 'integrations.api.capabilityManageSpaces', hintKey: 'integrations.api.capabilityManageSpacesHint' },
-    ],
-  },
-  {
-    key: 'tenant',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupTenant',
-    capabilities: [
-      { value: 'manage_models', labelKey: 'integrations.api.capabilityManageModels', hintKey: 'integrations.api.capabilityManageModelsHint' },
-      { value: 'manage_vector_stores', labelKey: 'integrations.api.capabilityManageVectorStores', hintKey: 'integrations.api.capabilityManageVectorStoresHint' },
-      { value: 'manage_web_search', labelKey: 'integrations.api.capabilityManageWebSearch', hintKey: 'integrations.api.capabilityManageWebSearchHint' },
-      { value: 'manage_channels', labelKey: 'integrations.api.capabilityManageChannels', hintKey: 'integrations.api.capabilityManageChannelsHint' },
-      { value: 'run_evaluations', labelKey: 'integrations.api.capabilityRunEvaluations', hintKey: 'integrations.api.capabilityRunEvaluationsHint' },
-      { value: 'manage_tenant_settings', labelKey: 'integrations.api.capabilityManageTenantSettings', hintKey: 'integrations.api.capabilityManageTenantSettingsHint' },
-    ],
-  },
-]
+const API_KEY_CAPABILITIES = TENANT_API_KEY_CAPABILITIES
+const DEFAULT_API_KEY_CAPABILITIES = DEFAULT_TENANT_API_KEY_CAPABILITIES
+const KB_SCOPED_CAPABILITIES = KB_SCOPED_API_KEY_CAPABILITIES
+const apiKeyCapabilityGroups = TENANT_API_KEY_CAPABILITY_GROUPS
 
 const capabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
   API_KEY_CAPABILITIES.reduce((acc, capability) => {
@@ -773,7 +700,7 @@ function toggleCapabilityGroup(group: ApiKeyCapabilityGroup, selected: boolean) 
 // Full-access keys already cover every capability, so no capability badges for them.
 function keyCapabilityLabels(key: TenantAPIKey): string[] {
   if (key.full_access) return []
-  const labels: Record<TenantAPIKeyCapability, string> = {
+  const labels: Partial<Record<TenantAPIKeyCapability, string>> = {
     retrieve: t('integrations.api.capabilityRetrieve'),
     chat: t('integrations.api.capabilityChat'),
     read_agents: t('integrations.api.capabilityReadAgents'),
@@ -786,6 +713,7 @@ function keyCapabilityLabels(key: TenantAPIKey): string[] {
     manage_datasources: t('integrations.api.capabilityManageDatasources'),
     manage_channels: t('integrations.api.capabilityManageChannels'),
     manage_vector_stores: t('integrations.api.capabilityManageVectorStores'),
+    manage_storage_backends: t('integrations.api.capabilityManageStorageBackends'),
     manage_web_search: t('integrations.api.capabilityManageWebSearch'),
     run_evaluations: t('integrations.api.capabilityRunEvaluations'),
     manage_members: t('integrations.api.capabilityManageMembers'),

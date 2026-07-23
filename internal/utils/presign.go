@@ -95,18 +95,87 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 	return hmac.Equal([]byte(expected), []byte(sig))
 }
 
+// kbScopedExportsSegment is the only storage prefix served by the KB-scoped
+// file proxy. Embedded wiki/chunk images land under exports/; raw knowledge
+// uploads use {tenant}/{knowledgeID}/... and are served via
+// /knowledge/{id}/download instead.
+const kbScopedExportsSegment = "exports"
+
 // ValidateStoragePathTenant ensures the tenant segment embedded in a provider://
 // storage path matches the authenticated caller's tenant. Cross-tenant access
-// must use /api/v1/files/presigned with an HMAC bound to the resource owner.
+// for arbitrary tenant paths uses /api/v1/files/presigned with an HMAC bound to
+// the resource owner; KB-scoped shared rendering uses ValidateKBScopedStoragePath.
 func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
 	pathTenant := ParseTenantIDFromStoragePath(filePath)
 	if pathTenant == 0 {
 		return fmt.Errorf("storage path has no tenant segment")
 	}
 	if pathTenant != tenantID {
-		return fmt.Errorf("storage path tenant mismatch")
+		return fmt.Errorf("storage path workspace mismatch")
 	}
 	return nil
+}
+
+// ValidateKBScopedStoragePath is used by GET /knowledge-bases/:id/files. It
+// requires the path to belong to the KB owner tenant and to live under the
+// exports/ namespace used for embedded images (SaveBytes / multimodal output).
+// This prevents borrowers with shared-KB read access from using the proxy to
+// fetch arbitrary owner-tenant objects such as raw knowledge uploads.
+func ValidateKBScopedStoragePath(filePath string, tenantID uint64) error {
+	if err := ValidateStoragePathTenant(filePath, tenantID); err != nil {
+		return err
+	}
+	if !storagePathHasExportsScope(filePath, tenantID) {
+		return fmt.Errorf("storage path is outside KB-scoped exports namespace")
+	}
+	return nil
+}
+
+// storageBackendScheme wraps a provider:// path with the concrete instance id:
+// storage://<backendID>/<provider>://...  It is duplicated here (rather than
+// reusing types.ParseStorageBackendPath) because internal/types already imports
+// internal/utils, so a reverse import would create a cycle.
+const storageBackendScheme = "storage://"
+
+// unwrapStorageBackendPath strips a leading storage://<backendID>/ wrapper and
+// returns the inner provider:// path. Non-wrapped paths are returned unchanged.
+// This keeps tenant/exports parsing anchored on the provider path instead of
+// relying on the backend id happening not to look like a tenant segment.
+func unwrapStorageBackendPath(filePath string) string {
+	if !strings.HasPrefix(filePath, storageBackendScheme) {
+		return filePath
+	}
+	rest := strings.TrimPrefix(filePath, storageBackendScheme)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return filePath
+	}
+	return parts[1]
+}
+
+// storagePathHasExportsScope reports whether tenantID appears next to an
+// exports segment in either canonical layout:
+//   - {tenant}/exports/...  (local, minio, s3, most cloud backends)
+//   - exports/{tenant}/...  (OSS temp-bucket layout)
+func storagePathHasExportsScope(filePath string, tenantID uint64) bool {
+	_, rest, ok := strings.Cut(unwrapStorageBackendPath(filePath), "://")
+	if !ok {
+		return false
+	}
+	tenantSeg := strconv.FormatUint(tenantID, 10)
+	parts := strings.Split(rest, "/")
+	for i, part := range parts {
+		if part != tenantSeg {
+			continue
+		}
+		if i+1 < len(parts) && parts[i+1] == kbScopedExportsSegment {
+			return true
+		}
+		if i > 0 && parts[i-1] == kbScopedExportsSegment {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.
@@ -118,6 +187,9 @@ func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
 // Callers that have an authoritative resource-owner tenant ID available
 // should pass it directly to SignFileURL instead of relying on this parser.
 func ParseTenantIDFromStoragePath(filePath string) uint64 {
+	// Unwrap storage://<backendID>/ so the tenant scan is anchored on the inner
+	// provider path, not the (opaque) backend id.
+	filePath = unwrapStorageBackendPath(filePath)
 	// Strip scheme: "local://1/abc/img.png" → "1/abc/img.png"
 	_, rest, ok := strings.Cut(filePath, "://")
 	if !ok {

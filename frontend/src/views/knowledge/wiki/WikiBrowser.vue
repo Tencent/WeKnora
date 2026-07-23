@@ -1385,7 +1385,7 @@ function closeImagePreview() {
 watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
-    await hydrateProtectedFileImages(drawerBodyRef.value)
+    await hydrateProtectedFileImages(drawerBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -1896,7 +1896,7 @@ const indexHasMore = computed(() => {
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
-    await hydrateProtectedFileImages(readerBodyRef.value)
+    await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -1906,7 +1906,7 @@ watch(renderedContent, async () => {
 watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
-    await hydrateProtectedFileImages(indexBodyRef.value)
+    await hydrateProtectedFileImages(indexBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -4449,7 +4449,7 @@ watch(() => props.view, (v) => {
   } else if (v === 'browser') {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
-        await hydrateProtectedFileImages(readerBodyRef.value)
+        await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
       }
     })
   }

@@ -9,9 +9,12 @@ func TestValidateWorkerConcurrencyMinimums(t *testing.T) {
 		value   any
 		wantErr bool
 	}{
-		{name: "upstream below one worker per pool", key: "asynq.concurrency", value: 2, wantErr: true},
-		{name: "upstream minimum", key: "asynq.concurrency", value: 3},
-		{name: "upstream normal", key: "asynq.concurrency", value: 32},
+		{name: "core zero", key: "asynq.core_concurrency", value: 0, wantErr: true},
+		{name: "core minimum", key: "asynq.core_concurrency", value: 1},
+		{name: "postprocess minimum", key: "asynq.postprocess_concurrency", value: 1},
+		{name: "enrichment minimum", key: "asynq.enrichment_concurrency", value: 1},
+		{name: "maintenance minimum", key: "asynq.maintenance_concurrency", value: 1},
+		{name: "shared minimum", key: "asynq.shared_concurrency", value: 1},
 		{name: "wiki zero", key: "asynq.wiki_concurrency", value: 0, wantErr: true},
 		{name: "wiki minimum", key: "asynq.wiki_concurrency", value: 1},
 	}

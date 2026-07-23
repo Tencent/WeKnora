@@ -65,6 +65,17 @@ func LastConsolidatedRetrievalStage(eventList []types.EventType, chatManage *typ
 	return last
 }
 
+// ShouldCloseRetrievalProgress reports whether the consolidated retrieval
+// progress window must be closed after a pipeline stage. It returns true when
+// either the planned last retrieval stage completed, or a retrieval stage
+// short-circuited the pipeline with an error — including ErrSearchNothing,
+// which routes into the fallback response. Closing on the error paths prevents
+// the frontend "knowledge_search" spinner from hanging forever when the
+// pipeline early-returns before reaching the last retrieval stage.
+func ShouldCloseRetrievalProgress(stage, lastRetrievalStage types.EventType, stageErr *PluginError) bool {
+	return stage == lastRetrievalStage || stageErr != nil
+}
+
 // BeginRetrievalProgress emits a single pending knowledge_search tool_call.
 func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *StageProgress {
 	if chatManage == nil || chatManage.EventBus == nil {
@@ -222,9 +233,11 @@ func hasKBRetrievalTargets(chatManage *types.ChatManage) bool {
 	if chatManage == nil {
 		return false
 	}
-	return len(chatManage.SearchTargets) > 0 ||
-		len(chatManage.KnowledgeBaseIDs) > 0 ||
-		len(chatManage.KnowledgeIDs) > 0
+	return types.HasKnowledgeRetrievalScope(
+		chatManage.SearchTargets,
+		chatManage.KnowledgeBaseIDs,
+		chatManage.KnowledgeIDs,
+	)
 }
 
 func retrievalSearchSource(chatManage *types.ChatManage) string {

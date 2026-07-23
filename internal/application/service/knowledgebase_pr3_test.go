@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -165,6 +166,20 @@ func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
+}
+
+func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.T) {
+	t.Setenv(storageallowlist.AllowListEnv, "minio")
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+
+	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{Name: "kb"})
+	require.NoError(t, err)
+	assert.Equal(t, "minio", kb.GetStorageProvider())
+
+	kbDisallowedDefault, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "local"), &types.KnowledgeBase{Name: "kb2"})
+	require.NoError(t, err)
+	assert.Equal(t, "minio", kbDisallowedDefault.GetStorageProvider())
 }
 
 // ---------------------------------------------------------------------------

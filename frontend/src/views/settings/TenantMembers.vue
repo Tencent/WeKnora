@@ -1500,7 +1500,7 @@ watch(
     color: var(--td-text-color-secondary);
     font-size: 13px;
     line-height: 1.55;
-    margin: 6px 0 0 0;
+    margin: 8px 0 0;
     max-width: 52rem;
   }
 }
@@ -1516,8 +1516,13 @@ watch(
 .section-header-titlewrap {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
+
+  h2 {
+    margin: 0;
+    line-height: 1.25;
+  }
 }
 
 /* 顶部右侧的「审计日志」入口。t-button variant="text" 自带颜色
@@ -1571,8 +1576,9 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
   margin: 0;
   padding: 0;
   border: none;
@@ -1580,7 +1586,12 @@ watch(
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
+  line-height: 0;
   transition: background-color 0.2s ease, color 0.2s ease;
+
+  :deep(.t-icon) {
+    display: block;
+  }
 
   &:hover {
     background-color: var(--td-bg-color-secondarycontainer);
@@ -2309,6 +2320,137 @@ watch(
 </style>
 
 <style lang="less">
+/* 权限说明弹出层（t-popup 挂到 body，须全局样式） */
+.permissions-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    overflow: hidden;
+  }
+
+  .permissions-compact.permissions-compact--popover {
+    padding: 12px 14px;
+    margin: 0;
+    max-height: min(392px, calc(65vh - 8px));
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    .permissions-compact-header {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 10px;
+
+      .permissions-compact-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+      }
+
+      .permissions-compact-desc {
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--td-text-color-secondary);
+      }
+    }
+
+    .permissions-compact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .perm-role-block {
+      border: 1px solid var(--td-component-stroke);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: var(--td-bg-color-container);
+
+      &.is-me {
+        border-color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+      }
+
+      .perm-role-tag {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+        margin-bottom: 6px;
+
+        .me-badge {
+          margin-left: auto;
+          font-size: 10px;
+          font-weight: 500;
+          color: var(--td-brand-color);
+          padding: 1px 5px;
+          background: var(--td-brand-color-light);
+          border-radius: 4px;
+        }
+      }
+
+      .perm-items {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        .perm-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 4px;
+          font-size: 11px;
+          line-height: 1.35;
+          color: var(--td-text-color-secondary);
+
+          .t-icon {
+            margin-top: 1px;
+            flex-shrink: 0;
+          }
+
+          &.has .t-icon {
+            color: var(--td-brand-color);
+          }
+
+          &.no {
+            color: var(--td-text-color-disabled);
+
+            .t-icon {
+              color: var(--td-text-color-disabled);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+:root[theme-mode='dark'] .permissions-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+@media (max-width: 480px) {
+  .permissions-popup-overlay .permissions-compact.permissions-compact--popover .permissions-compact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* t-popup 挂到 body，需全局样式；z-index 需高于设置全屏遮罩（2000）。 */
 .member-invite-popup-overlay {
   z-index: 3050 !important;

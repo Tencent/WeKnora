@@ -188,8 +188,23 @@ func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, use
 	return ErrAgentSharePermission
 }
 
-// ListSharesByAgent lists all shares for an agent
-func (s *agentShareService) ListSharesByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error) {
+// ListSharesByAgent lists all shares for an agent owned by tenantID.
+//
+// Ownership is enforced here (not only at the route layer): the caller must
+// own the agent, mirroring ListSharesByKnowledgeBase. This is the sole guard
+// for API-key principals, whose route-level OwnedAgentOrAdmin check
+// short-circuits — without this, a full-access key could enumerate any
+// tenant's agent shares by ID (cross-tenant IDOR).
+func (s *agentShareService) ListSharesByAgent(
+	ctx context.Context, agentID string, tenantID uint64,
+) ([]*types.AgentShare, error) {
+	agent, err := s.agentRepo.GetAgentByID(ctx, agentID, tenantID)
+	if err != nil || agent == nil {
+		return nil, ErrAgentNotFoundForShare
+	}
+	if agent.TenantID != tenantID {
+		return nil, ErrNotAgentOwner
+	}
 	return s.shareRepo.ListByAgent(ctx, agentID)
 }
 

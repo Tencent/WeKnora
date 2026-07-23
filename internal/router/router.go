@@ -60,6 +60,7 @@ type RouterParams struct {
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -73,6 +74,9 @@ type RouterParams struct {
 	WebSearchProviderHandler     *handler.WebSearchProviderHandler
 	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
 	VectorStoreHandler           *handler.VectorStoreHandler
+	StorageBackendHandler        *handler.StorageBackendHandler
+	StorageBackendResolver       interfaces.StorageBackendResolver
+	ResourceCatalog              interfaces.ResourceCatalog
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
@@ -155,19 +159,32 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient, params.FileService)
+	RegisterEmbedPublicRoutes(
+		r,
+		params.EmbedChannelHandler,
+		params.EmbedChannelService,
+		params.TenantService,
+		params.RedisClient,
+		params.FileService,
+		params.StorageBackendResolver,
+		params.ResourceCatalog,
+	)
+
+	// Short-lived capability URLs for IM and other clients that cannot attach
+	// WeKnora authentication headers.
+	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFiles(r, params.FileService)
+	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
 
 	// Presigned file access: no auth required, signature-verified.
-	servePresignedFiles(r, params.TenantService)
+	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
 
 	// Diagnostic preview of presigned URLs (Admin only, behind auth middleware).
-	servePresignedPreview(r, params.Config)
+	servePresignedPreview(r, params.Config, params.StorageBackendResolver)
 
 	// Langfuse observability — only active when LANGFUSE_* env vars are set.
 	// The middleware is registered unconditionally; when disabled it's a no-op.
@@ -213,11 +230,23 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
+		// KB-scoped image proxy: lets tenants render images embedded in
+		// org-shared / agent-visible KB content, which the tenant-scoped
+		// /files route cannot serve because it enforces same-tenant paths.
+		serveKBScopedFiles(
+			v1,
+			rbacGuards,
+			params.TenantService,
+			params.FileService,
+			params.StorageBackendResolver,
+			params.ResourceCatalog,
+		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
-		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
@@ -229,6 +258,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
+		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
@@ -323,10 +353,18 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kRead := k.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		// Cross-knowledge endpoints (no :id) can't be gated on a single
-		// KB — they accept arbitrary knowledge IDs and the handler must
-		// fan out the access check itself. /batch and /search are read
-		// routes; /move and /batch-delete stay JWT Contributor-gated and are
-		// not declared for API keys.
+		// KB via the URL — they accept a kb_id (or source/target KB) in the
+		// body and the handler fans out the access check itself. /batch and
+		// /search are read routes (retrieve). /move, /batch-delete,
+		// /batch-reparse and /tags are content writes that each bound
+		// themselves to a single (or source+target) KB and enforce the API
+		// key's KB allow-list downstream — MoveKnowledge via
+		// requireTenantAPIKeyKnowledgeBases(source,target); the batch ops via
+		// validateKnowledgeBaseAccessWithKBID (requireTenantAPIKeyKnowledgeBase)
+		// plus a per-item "belongs to the authorized KB" check in the handler
+		// and service. They are therefore declared for API keys under the
+		// ingest capability, matching their single-document siblings
+		// (k.DELETE("/:id"), k.POST("/:id/reparse"), k.PUT("/:id")).
 		kRead.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
 		kRead.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
@@ -341,13 +379,15 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
-		// Batch / cross-KB write ops stay Contributor-gated for JWT and are
-		// NOT declared for API keys (default-deny): they fan out to arbitrary
-		// KBs with no single owning KB to bound a key's scope against.
-		kgrp.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		kgrp.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
-		kgrp.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		kgrp.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// Batch / cross-KB content writes: JWT Contributor+, or an API key
+		// with the ingest capability (or full access). Each handler binds the
+		// operation to a single (move: source+target) KB and rejects any KB
+		// or knowledge id outside the key's allow-list, so a scoped ingest key
+		// can only touch KBs it is already permitted to write.
+		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
 }
 
@@ -387,32 +427,50 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		// FAQ import result display status
 		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
-	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
-	faqImport := r.Group("/faq/import")
-	{
-		faqImport.GET("/progress/:task_id", g.Viewer(), handler.GetImportProgress)
-	}
+	// FAQ import progress route (outside of knowledge-base scope) — Viewer+.
+	// Scoped API keys that can ingest (they start the import) or retrieve may
+	// poll their own import/dry-run progress. The task is tenant-scoped by
+	// requireTaskProgressTenant, so a key only ever sees its own tenant's
+	// tasks. Declared through apiKeyRoute so the APIKeyGate doesn't fail-closed
+	// and 403 the poller with "scope does not allow this operation".
+	g.apiKeyRoute(r, http.MethodGet, "/faq/import/progress/:task_id",
+		apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.GetImportProgress)
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
 func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
-	// 知识库路由组。Scoped API key 需要 retrieve 能力读取（限 KB 范围）；KB 内容写入
-	// 由 RegisterKnowledgeRoutes/FAQ/Tag/Wiki 等子路由的 ingest 能力控制；
-	// KB 自身的元数据/生命周期管理需要 full access 或 manage_kbs。创建/拷贝
-	// KB 没有单个目标 KB 可约束，继续不对 scoped API key 开放。
+	// 知识库路由组。API-key 可达性按能力分两档，全部通过 apiKeyGroup 声明，
+	// 不要再用裸 kbgrp.Handle 注册（那会绕过网关、对所有 key 静默默认拒绝）：
+	//
+	//   1. 读取（list/detail/search/progress/move-targets）—— retrieve OR full-access（kb）
+	//   2. KB 生命周期管理（create/copy/duplicate/update/delete）
+	//      —— manage_kbs OR full-access（kbManagement）
+	//
+	// 第 2 档整条 KB 生命周期共用同一策略：manage_kbs 是「管理知识库」capability，
+	// 建/拷/改/删都是它的分内事。KB 的 allow-list 仍在下游生效——copy/duplicate/
+	// update/delete 的目标 KB 会被 allow-list 兜住；create 无源可约束，限定 allow-list
+	// 的 key 建出的新 KB 落在其 allow-list 之外（同租户、无越权，只是建完自己管不到），
+	// 空 allow-list 的 key 则是全租户 KB 管理、新建天然在范围内。KB 内容写入（文档/
+	// 分块/FAQ/Tag/Wiki）由对应子路由的 ingest 能力控制，不在本组。
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{
-		// 创建知识库 — Contributor+ for JWT callers; API keys may not create KBs.
-		kbgrp.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 创建知识库 — JWT Contributor+；API key 需 manage_kbs 或 full-access。
+		kbManagement.POST("", g.Contributor(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ for JWT callers; retrieve-capable API keys pass via the gate.
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
-		// 更新知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		// 更新/删除知识库 — 两层正交鉴权，缺一不可：
+		//   OwnedKBOrAdmin  管「租户内」归属：非创建者的 Contributor 改不了
+		//                   同事的 KB（跨租户 KB 在此走 lookup=NotFound → 交给
+		//                   下游处理，不在此拦）。
+		//   KBAccessWrite   管「跨租户」访问级：自有 KB 或被组织共享(editor)。
+		// handler 内再按 permission/所有者租户做最终判定 —— 尤其 DeleteKnowledgeBase
+		// 以调用者「自身」租户(c.Keys，未被 KBAccess 改写)校验 kb.TenantID，
+		// 把删除锁死为「所有者租户 + Admin」，共享 editor 无法删除源 KB。
 		kbManagement.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
-		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		kbManagement.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		// Pin state is now per-(user, kb) (migration 000050). Anyone with
@@ -426,15 +484,34 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// POST is preferred; GET with JSON body is kept for backward compatibility (#1727).
 		kb.POST("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
-		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
-		kbgrp.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
-		// 创建知识库副本 — Contributor+ 且对源 KB 有 read 权限；只创建新的 KB 设置记录，不复制内容/索引/分享。
-		kbgrp.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
-		// 获取知识库复制进度 — Viewer+
-		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
+		// 拷贝知识库 — 产出新 KB，与 create 同档：JWT Contributor+，API key 需 manage_kbs 或 full-access。
+		// 源 KB 通过 body 里的 source_id 传入（非 :id 路径参数），无法套用基于路径参数
+		// 的 KBAccessRead，故源/目标 KB 的租户归属与 allow-list 校验在 handler 内完成
+		// （requireTenantAPIKeyKnowledgeBases 会把 source_id/target_id 兜进 allow-list）。
+		// 副本归调用者所有，不需要原 KB 的所有权。
+		kbManagement.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 创建知识库副本 — 产出新 KB，与 create 同档：JWT Contributor+，API key 需 manage_kbs 或 full-access；
+		// 且对源 KB 有 read 权限（KBAccessRead 会对限定 key 兜住源 KB）。只创建新的 KB 设置记录，不复制内容/索引/分享。
+		kbManagement.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
+		// 获取知识库复制进度 — Viewer+；只读。manage_kbs（发起 copy 的 key）或
+		// retrieve 均可轮询；任务按租户隔离（requireTaskProgressTenant），key 只能
+		// 查本租户任务。
+		kb.With(apiKeyRetrieve(apiKeyManageKnowledgeBases(apiKeyFullAccess()))).
+			GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
 	}
+}
+
+// RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity
+// feed. It intentionally stays JWT-only: audit history is a sensitive owner
+// surface and no existing workspace API-key capability grants audit access.
+func RegisterKnowledgeBaseActivityRoutes(r *gin.RouterGroup, auditHandler *handler.AuditLogHandler, g *rbacGuards) {
+	if auditHandler == nil {
+		return
+	}
+	r.GET("/knowledge-bases/:id/activity",
+		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), auditHandler.ListKnowledgeBaseActivity)
 }
 
 // RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
@@ -495,7 +572,12 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 // the message routes above. A future refactor can introduce
 // per-session ownership in the middleware layer the same way KB/agent
 // routes do today.
-func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+func RegisterSessionRoutes(
+	r *gin.RouterGroup,
+	handler *session.Handler,
+	suggestionHandler *handler.MessageSuggestionHandler,
+	g *rbacGuards,
+) {
 	// Sessions are per-user chat state, not knowledge-base content. The
 	// chat capability lets a scoped key run the full conversation flow
 	// (create/manage its own sessions) without full tenant access.
@@ -509,6 +591,11 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbac
 		sessions.DELETE("/:id", handler.DeleteSession)
 		sessions.DELETE("/:id/messages", handler.ClearSessionMessages)
 		sessions.POST("/:session_id/generate_title", handler.GenerateTitle)
+		sessions.POST("/:session_id/attachments", handler.UploadTemporaryDocument)
+		sessions.GET("/:id/attachments", handler.ListTemporaryDocuments)
+		sessions.GET("/:id/attachments/:attachment_id", handler.GetTemporaryDocument)
+		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
+		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		// POST and DELETE share this path but gin maintains a separate radix tree
 		// per HTTP verb, and the existing trees use different wildcard names
@@ -518,6 +605,13 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbac
 		sessions.DELETE("/:id/pin", handler.UnpinSession)
 		// 继续接收活跃流
 		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		if suggestionHandler != nil {
+			// Gin requires wildcard names to be identical within the same HTTP-method
+			// radix tree. Existing GET session routes use :id, so keep that name here.
+			sessions.GET("/:id/messages/:message_id/suggestions", suggestionHandler.Get)
+			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
+			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
+		}
 	}
 }
 
@@ -545,7 +639,7 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 	}
 }
 
-// RegisterTenantRoutes 注册租户相关的路由
+// RegisterTenantRoutes 注册空间相关的路由
 //
 // Tenant-internal RBAC for /tenants/:id:
 //   - GET   /:id          Viewer+ (read tenant settings)
@@ -572,10 +666,9 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 // EnableCrossTenantAccess flag, replacing the 12-line if-block that
 // previously opened ListAllTenants and SearchTenants.
 //
-// POST /tenants and GET /tenants stay open to authenticated users —
-// the previous handler comments claimed CanAccessAllTenants gating
-// "is in the handler" but the bodies never enforced it; this PR is a
-// pure refactor and does not introduce new gates.
+// JWT behavior for POST /tenants and GET /tenants remains unchanged. Platform
+// API keys may create tenants through system_tenants_manage; workspace keys
+// remain default-denied on tenant-catalog operations.
 func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
@@ -586,21 +679,26 @@ func RegisterTenantRoutes(
 ) {
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.
-	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
-	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/all",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.ListAllTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/search",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.SearchTenants)
 
-	// 租户路由组
+	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		// 创建租户对所有已登录用户开放：用户可以为自己再开一个工作区，
-		// handler 内部会调 EnsureOwner 把调用者写成新租户的 Owner。
-		// 跨租户超管走同一个端点，但能携带 storage_quota / status 等
+		// 创建空间对所有已登录用户开放：用户可以为自己再开一个工作区，
+		// handler 内部会调 EnsureOwner 把调用者写成新空间的 Owner。
+		// 跨空间超管走同一个端点，但能携带 storage_quota / status 等
 		// 全字段（见 handler.CreateTenant 内部分支）。
 		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
-		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
-		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
-		// 创建租户不对 API key 开放（注册在原始 group，默认拒绝）。
-		tenantRoutes.POST("", handler.CreateTenant)
+		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
+		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
+		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
+		g.apiKeyRoute(tenantRoutes, http.MethodPost, "",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
@@ -618,9 +716,13 @@ func RegisterTenantRoutes(
 		// opts in below through the manage_members capability.
 		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
 		{
-			tenantByID.GET("", g.Viewer(), handler.GetTenant)
-			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
-			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
+			g.apiKeyRoute(tenantByID, http.MethodGet, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+				g.Viewer(), handler.GetTenant)
+			g.apiKeyRoute(tenantByID, http.MethodPut, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.UpdateTenant)
+			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
 			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
 			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
@@ -683,7 +785,7 @@ func RegisterModelRoutes(
 	credHandler *handler.ModelCredentialsHandler,
 	g *rbacGuards,
 ) {
-	// 模型路由组。租户级基础设施：仅完全访问（Owner）API key 可访问。
+	// 模型路由组。空间级基础设施：仅完全访问（Owner）API key 可访问。
 	models := g.apiKeyGroup(r.Group("/models"), apiKeyManageModels(apiKeyFullAccess()))
 	{
 		// 获取模型厂商列表 — Viewer+
@@ -696,13 +798,13 @@ func RegisterModelRoutes(
 		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
-		// 更新模型 — Admin+
-		models.PUT("/:id", g.Admin(), handler.UpdateModel)
+		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
+		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
 		// 删除模型 — Admin+
 		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
-		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		models.PUT("/:id/credentials", g.AdminOrSystemAdmin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.AdminOrSystemAdmin(), credHandler.DeleteField)
 	}
 }
 
@@ -787,8 +889,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 		apiKeyManageKnowledgeBases(apiKeyFullAccess()), g.OwnedKBOrAdminFromKbIDParam(), g.KBAccessWrite("kbId"), handler.UpdateKBConfig)
 
 	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
-	// 会改租户级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
-	// 对 API key 均为租户级：full-access key 可用，scoped key 需要 manage_models。
+	// 会改空间级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
+	// 对 API key 均为空间级：full-access key 可用，scoped key 需要 manage_models。
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.CheckOllamaStatus)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/models", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.ListOllamaModels)
 	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckOllamaModels)
@@ -865,29 +967,46 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
+		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
+		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
+		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
+		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)
 
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
 		// wrapping), matching the project's axios interceptor convention
 		// — see frontend/src/utils/request.ts:97.
-		adminRoutes.GET("/settings", handler.ListSystemSettings)
-		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
-		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
-		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.ListSystemSettings)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.GetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodPut, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.UpdateSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodDelete, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.ResetSystemSetting)
 
-		// Runtime observability: live asynq queue depths + worker pool
-		// concurrency for the parse/wiki pools. Read-only snapshot for the
-		// SystemAdmin runtime dashboard. Returns available=false in Lite
-		// mode (no Redis) so the UI degrades gracefully.
-		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
+		// Runtime operations: live asynq queue depths, safe task projections,
+		// and state-checked task actions for the SystemAdmin dashboard. Lite
+		// mode returns available=false.
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.GetRuntimeQueues)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues/:queue/tasks",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.ListRuntimeTasks)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/runtime/queues/:queue/tasks/:task_id/actions/:action",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.MutateRuntimeTask)
+		g.apiKeyRoute(adminRoutes, http.MethodDelete, "/runtime/queues/:queue/archived",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.PurgeArchivedRuntimeTasks)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of
 		// /settings because it changes tenants, not the setting row.
-		adminRoutes.POST(
-			"/tenants/apply-default-storage-quota",
-			handler.ApplyDefaultStorageQuotaToAllTenants,
-		)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/tenants/apply-default-storage-quota",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
+			handler.ApplyDefaultStorageQuotaToAllTenants)
 
 		// Platform-wide audit feed (tenant_id=0 rows). Covers
 		// system.setting_changed / system.admin_promoted /
@@ -897,7 +1016,8 @@ func RegisterSystemAdminRoutes(
 		// out by tenant_id). Optional: skip when audit deps are
 		// absent, matching RegisterTenantRoutes' /audit-log handling.
 		if auditLogHandler != nil {
-			adminRoutes.GET("/audit-log", auditLogHandler.ListSystemAuditLog)
+			g.apiKeyRoute(adminRoutes, http.MethodGet, "/audit-log",
+				apiKeyPlatform(types.APIKeyCapabilitySystemAuditRead), auditLogHandler.ListSystemAuditLog)
 		}
 	}
 }
@@ -1027,6 +1147,22 @@ func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler
 		stores.DELETE("/:id", g.Admin(), h.DeleteStore)
 		// Test existing saved or env store — Admin+
 		stores.POST("/:id/test", g.Admin(), h.TestStoreByID)
+	}
+}
+
+// RegisterStorageBackendRoutes manages concrete object/file storage instances.
+func RegisterStorageBackendRoutes(r *gin.RouterGroup, h *handler.StorageBackendHandler, g *rbacGuards) {
+	backends := g.apiKeyGroup(r.Group("/storage-backends"), apiKeyManageStorageBackends(apiKeyFullAccess()))
+	{
+		backends.GET("/types", g.Viewer(), h.Types)
+		backends.POST("/test", g.Admin(), h.TestRaw)
+		backends.POST("", g.Admin(), h.Create)
+		backends.GET("", g.Viewer(), h.List)
+		backends.GET("/:id", g.Viewer(), h.Get)
+		backends.PUT("/:id", g.Admin(), h.Update)
+		backends.DELETE("/:id", g.Admin(), h.Delete)
+		backends.POST("/:id/test", g.Admin(), h.TestByID)
+		backends.PUT("/:id/default", g.Admin(), h.SetDefault)
 	}
 }
 
@@ -1180,10 +1316,11 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 
 	// Knowledge base sharing routes (add to existing kb routes).
 	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
-	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
+	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己空间里
 	// 也不能私自把 KB 暴露出去。
-	// KB share management is JWT-only; not declared for API keys.
-	kbShares := r.Group("/knowledge-bases/:id/shares")
+	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
+	// key（空间级全权）可管理分享，scoped key 保持 default-deny。
+	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
 		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
@@ -1198,12 +1335,13 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
 	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
 	//
-	// GET 同样走 OwnedAgentOrAdmin：service.ListSharesByAgent 没有 owner
-	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
-	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
-	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
-	// Agent share management is JWT-only; not declared for API keys.
-	agentShares := r.Group("/agents/:id/shares")
+	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
+	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
+	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨空间
+	// 枚举他人 agent 的分享。
+	// 同 KB 分享：分享管理不通过 capability 授予；仅 full-access key
+	// （空间级全权）可管理 agent 分享，scoped key 保持 default-deny。
+	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
 		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
@@ -1214,9 +1352,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
 	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
-	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
-	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
-	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
+	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），
+	// 影响整个空间在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
+	// 等于替整个空间做决定 — 必须 Admin+ 才允许调整。
 	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyManageSpaces(apiKeyFullAccess()), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
@@ -1228,6 +1366,8 @@ func RegisterEmbedPublicRoutes(
 	tenantService interfaces.TenantService,
 	redisClient *redis.Client,
 	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	if embedHandler == nil || embedService == nil {
 		return
@@ -1243,6 +1383,9 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
 		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
+		embed.GET("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedGetMessageSuggestions)
+		embed.POST("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedEnsureMessageSuggestions)
+		embed.POST("/sessions/:session_id/suggestion-events", embedHandler.EmbedRecordSuggestionEvent)
 		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id", embedHandler.EmbedResolveMCPOAuth)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id/cancel", embedHandler.EmbedCancelMCPOAuth)
@@ -1252,7 +1395,7 @@ func RegisterEmbedPublicRoutes(
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.
-		embed.GET("/files", newFileServeHandler(fileService))
+		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalogs...))
 	}
 }
 
@@ -1430,7 +1573,8 @@ func serveFrontendStatic(r *gin.Engine) {
 			return
 		}
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") {
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") ||
+			strings.HasPrefix(path, "/r/") || path == "/files" {
 			c.Next()
 			return
 		}
@@ -1472,7 +1616,15 @@ type getRouteRegistrar interface {
 // same handler backs both the authenticated /files route and the embed route
 // (where EmbedAuth injects the channel's tenant). Tenant ownership of the
 // requested path is enforced via ValidateStoragePathTenant either way.
-func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFunc {
+func newFileServeHandler(
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
+) gin.HandlerFunc {
+	var resourceCatalog interfaces.ResourceCatalog
+	if len(resourceCatalogs) > 0 {
+		resourceCatalog = resourceCatalogs[0]
+	}
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1495,18 +1647,49 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 			return
 		}
 
-		provider := types.ParseProviderScheme(filePath)
-
 		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
 		if tenant == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
+		resourceResolved := false
+		if resourceCatalog != nil {
+			resolvedPath, resource, err := resourceCatalog.ResolvePath(c.Request.Context(), filePath)
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			if resource != nil {
+				if resource.TenantID != tenant.ID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+					return
+				}
+				filePath = resolvedPath
+				resourceResolved = true
+			}
+		}
+		backendID, innerPath, scoped := types.ParseStorageBackendPath(filePath)
+		providerPath := filePath
+		if scoped {
+			providerPath = innerPath
+		}
+		provider := types.ParseProviderScheme(providerPath)
 
-		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-			return
+		// A registered resource's tenant is authoritative. Physical provider
+		// paths remain an internal locator and are not required to encode access
+		// control metadata (some cloud layouts contain other numeric segments).
+		if !resourceResolved {
+			if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
+				logger.Warnf(
+					context.Background(),
+					"[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v",
+					tenant.ID,
+					filePath,
+					err,
+				)
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+				return
+			}
 		}
 
 		var (
@@ -1515,7 +1698,9 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 			err              error
 		)
 
-		if tenant.StorageEngineConfig != nil {
+		if storageResolver != nil {
+			fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(c.Request.Context(), tenant, backendID, provider, absDir)
+		} else if tenant.StorageEngineConfig != nil {
 			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
 		} else {
 			err = http.ErrMissingFile
@@ -1558,12 +1743,310 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 	}
 }
 
-func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
+func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService, resolvers ...interfaces.StorageBackendResolver) {
+	var storageResolver interfaces.StorageBackendResolver
+	if len(resolvers) > 0 {
+		storageResolver = resolvers[0]
+	}
+	serveFilesWithResources(r, globalFileService, storageResolver, nil)
+}
+
+func serveFilesWithResources(
+	r getRouteRegistrar,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
-	// /files sits outside the /api/v1 APIKeyGate; storage paths cannot be
-	// attributed to a key's KB allow-list, so API keys are denied outright
-	// (embed routes use their own /embed/.../files handler).
-	r.GET("/files", middleware.DenyAPIKeyPrincipal(), newFileServeHandler(globalFileService))
+	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
+	// API-key guard. A KB-restricted key is denied (a raw storage path cannot
+	// be bounded to its allow-list); full-access keys and tenant-wide retrieve
+	// keys pass, since the handler still enforces same-tenant paths
+	// (ValidateStoragePathTenant). Embed routes use their own
+	// /embed/.../files handler.
+	r.GET(
+		"/files",
+		middleware.AllowFileServeAPIKey(),
+		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
+	)
+}
+
+// serveResourceGrants exposes short, revocable capability URLs for clients
+// such as IM platforms that cannot attach a WeKnora bearer/embed token.
+func serveResourceGrants(
+	r *gin.Engine,
+	resourceCatalog interfaces.ResourceCatalog,
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+) {
+	if resourceCatalog == nil || tenantService == nil {
+		return
+	}
+	handler := func(c *gin.Context) {
+		ctx := c.Request.Context()
+		resource, err := resourceCatalog.ResolveAccessGrant(ctx, c.Param("token"))
+		if err != nil || resource == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		tenant, err := tenantService.GetTenantByID(ctx, resource.TenantID)
+		if err != nil || tenant == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		providerPath := resource.PhysicalPath
+		if _, inner, ok := types.ParseStorageBackendPath(providerPath); ok {
+			providerPath = inner
+		}
+		provider := types.ParseProviderScheme(providerPath)
+		var fileSvc interfaces.FileService
+		if storageResolver != nil {
+			fileSvc, _, err = storageResolver.ResolveFileService(
+				ctx,
+				tenant,
+				resource.StorageBackendID,
+				provider,
+				localStorageBaseDir(),
+			)
+		} else {
+			fileSvc = globalFileService
+		}
+		if err != nil || fileSvc == nil {
+			logger.Warnf(ctx, "[Router] resource grant storage resolution failed: resource_id=%s err=%v", resource.ID, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		reader, err := fileSvc.GetFile(ctx, resource.PhysicalPath)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer func() { _ = reader.Close() }()
+
+		fileName := resource.OriginalName
+		if fileName == "" {
+			fileName = resource.PhysicalPath
+		}
+		contentType, inline := secutils.SafeContentTypeByFilename(fileName)
+		if resource.MimeType != "" && inline {
+			contentType = resource.MimeType
+		}
+		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Cache-Control", "private, max-age=300")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
+		c.Status(http.StatusOK)
+		if c.Request.Method != http.MethodHead {
+			if _, err := io.Copy(c.Writer, reader); err != nil {
+				logger.Warnf(ctx, "[Router] resource grant write failed: resource_id=%s err=%v", resource.ID, err)
+			}
+		}
+	}
+	r.GET("/r/:token", handler)
+	r.HEAD("/r/:token", handler)
+}
+
+func localStorageBaseDir() string {
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	return baseDir
+}
+
+// serveKBScopedFiles registers the KB-scoped file proxy used to render images
+// embedded in a knowledge base's content (chunks / wiki pages). Unlike the
+// tenant-scoped /files route — which enforces file_path.tenant == caller.tenant
+// and therefore cannot serve objects owned by another tenant — this route is
+// gated by RequireKBAccess. That guard resolves org-shared / agent-visible KBs
+// and rewrites the request context's tenant ID to the KB's *owner* (source)
+// tenant, so images stored under the owner tenant (local://<owner>/exports/...)
+// become reachable by tenants that legitimately share the KB, while still
+// enforcing that the requested path belongs to that owner tenant.
+//
+// Route:
+//   - GET /api/v1/knowledge-bases/:id/files?file_path=<provider://...>
+func serveKBScopedFiles(
+	r *gin.RouterGroup,
+	g *rbacGuards,
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
+) {
+	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
+	// API-key access mirrors /files: KB-restricted keys are denied (an
+	// arbitrary file_path under the KB owner tenant cannot be bounded to a
+	// key's allow-list), while full-access and tenant-wide retrieve keys pass
+	// — KBAccessRead still confines them to KBs they may read (own /
+	// org-shared / agent-visible), exactly as it does for a JWT Viewer. The
+	// route is declared to the gate with the retrieve policy so it is reachable
+	// at all; AllowFileServeAPIKey then applies the stricter not-KB-restricted
+	// constraint.
+	g.apiKeyRoute(r, http.MethodGet, "/knowledge-bases/:id/files",
+		apiKeyRetrieve(apiKeyFullAccess()),
+		middleware.AllowFileServeAPIKey(),
+		g.Viewer(),
+		g.KBAccessRead("id"),
+		newKBScopedFileServeHandlerWithResources(
+			tenantService,
+			globalFileService,
+			storageResolver,
+			firstResourceCatalog(resourceCatalogs),
+		),
+	)
+}
+
+// newKBScopedFileServeHandler builds the handler backing serveKBScopedFiles.
+// The effective (owner) tenant is taken from the request context, which
+// RequireKBAccess has already rewritten to the KB's source tenant. The owner
+// tenant's storage config is loaded via TenantService so the file is fetched
+// from the backend that actually holds it — the caller's own storage config is
+// irrelevant here.
+func newKBScopedFileServeHandler(
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	resolvers ...interfaces.StorageBackendResolver,
+) gin.HandlerFunc {
+	var storageResolver interfaces.StorageBackendResolver
+	if len(resolvers) > 0 {
+		storageResolver = resolvers[0]
+	}
+	return newKBScopedFileServeHandlerWithResources(tenantService, globalFileService, storageResolver, nil)
+}
+
+func firstResourceCatalog(catalogs []interfaces.ResourceCatalog) interfaces.ResourceCatalog {
+	if len(catalogs) == 0 {
+		return nil
+	}
+	return catalogs[0]
+}
+
+func newKBScopedFileServeHandlerWithResources(
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) gin.HandlerFunc {
+	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	absDir, _ := filepath.Abs(baseDir)
+
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		filePath := strings.TrimSpace(c.Query("file_path"))
+		if filePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
+			return
+		}
+		if strings.Contains(filePath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
+
+		// RequireKBAccess rewrote the request context tenant ID to the KB's
+		// owner (source) tenant for shared KBs; for own KBs it equals the
+		// caller's tenant. Either way it is the tenant that owns this KB's
+		// storage objects, so the requested path must belong to it.
+		ownerTenantID, ok := types.TenantIDFromContext(ctx)
+		if !ok || ownerTenantID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+			return
+		}
+		if resourceCatalog != nil {
+			resolvedPath, resource, err := resourceCatalog.ResolvePath(ctx, filePath)
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			if resource != nil {
+				if resource.TenantID != ownerTenantID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+					return
+				}
+				filePath = resolvedPath
+			}
+		}
+
+		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not allowed for KB proxy: owner_tenant_id=%d file_path=%q err=%v",
+				ownerTenantID, filePath, err)
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+			return
+		}
+
+		tenant, err := tenantService.GetTenantByID(ctx, ownerTenantID)
+		if err != nil || tenant == nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files owner tenant lookup failed: owner_tenant_id=%d err=%v",
+				ownerTenantID, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		backendID, innerPath, scoped := types.ParseStorageBackendPath(filePath)
+		providerPath := filePath
+		if scoped {
+			providerPath = innerPath
+		}
+		provider := types.ParseProviderScheme(providerPath)
+
+		var (
+			fileSvc          interfaces.FileService
+			resolvedProvider string
+		)
+		if storageResolver != nil {
+			fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
+		} else if tenant.StorageEngineConfig != nil {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		} else {
+			err = http.ErrMissingFile
+		}
+		if err != nil {
+			globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+			if globalStorageType == "" {
+				globalStorageType = "local"
+			}
+			if provider == globalStorageType && globalFileService != nil {
+				fileSvc = globalFileService
+				resolvedProvider = globalStorageType
+			} else {
+				logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files resolve file service failed: owner_tenant_id=%d provider=%s global_storage_type=%s err=%v",
+					ownerTenantID, provider, globalStorageType, err)
+				c.Status(http.StatusBadRequest)
+				return
+			}
+		}
+
+		reader, err := fileSvc.GetFile(ctx, filePath)
+		if err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files get file failed: owner_tenant_id=%d provider=%s path=%q err=%v",
+				ownerTenantID, resolvedProvider, filePath, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer reader.Close()
+
+		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
+		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
+		// Cross-tenant shared content — keep it private so shared proxies /
+		// CDNs do not cache one tenant's view for another.
+		c.Header("Cache-Control", "private, max-age=86400")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, reader); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files write response failed: %v", err)
+		}
+	}
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.
@@ -1580,14 +2063,14 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 // Without this it is otherwise impossible to tell whether a "broken image" is
 // caused by an expired signature, a stale URL cached by the platform, the
 // platform's IP being blocked, or the URL simply never reaching us.
-func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) {
+func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService, storageResolver interfaces.StorageBackendResolver) {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
 	}
 	absDir, _ := filepath.Abs(baseDir)
 
-	handler := presignedFileHandler(tenantService, absDir)
+	handler := presignedFileHandler(tenantService, absDir, storageResolver)
 	r.GET("/api/v1/files/presigned", handler)
 	r.HEAD("/api/v1/files/presigned", handler)
 }
@@ -1596,7 +2079,11 @@ func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) 
 // For HEAD requests it returns the same status + headers but does not stream
 // the body — this is enough for IM platforms to validate the URL while saving
 // us a full read of the backing object.
-func presignedFileHandler(tenantService interfaces.TenantService, absDir string) gin.HandlerFunc {
+func presignedFileHandler(tenantService interfaces.TenantService, absDir string, resolvers ...interfaces.StorageBackendResolver) gin.HandlerFunc {
+	var storageResolver interfaces.StorageBackendResolver
+	if len(resolvers) > 0 {
+		storageResolver = resolvers[0]
+	}
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		clientIP := c.ClientIP()
@@ -1637,7 +2124,12 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string)
 			return
 		}
 
-		provider := types.ParseProviderScheme(filePath)
+		backendID, innerPath, scoped := types.ParseStorageBackendPath(filePath)
+		providerPath := filePath
+		if scoped {
+			providerPath = innerPath
+		}
+		provider := types.ParseProviderScheme(providerPath)
 		tenant, err := tenantService.GetTenantByID(ctx, tenantID)
 		if err != nil {
 			logger.Warnf(ctx, "[Router] /files/presigned tenant lookup failed: client_ip=%s tenant_id=%d err=%v", clientIP, tenantID, err)
@@ -1645,7 +2137,13 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string)
 			return
 		}
 
-		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		var fileSvc interfaces.FileService
+		var resolvedProvider string
+		if storageResolver != nil {
+			fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
+		} else {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		}
 		if err != nil {
 			logger.Warnf(ctx, "[Router] /files/presigned resolve file service failed: client_ip=%s tenant_id=%d provider=%s err=%v",
 				clientIP, tenantID, provider, err)
@@ -1695,7 +2193,7 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string)
 //
 // Route:
 //   - GET /api/v1/files/presigned-preview?file_path=<provider://...>
-func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
+func servePresignedPreview(r *gin.Engine, cfg *config.Config, storageResolver interfaces.StorageBackendResolver) {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1723,17 +2221,29 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 
 			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 			if tenant == nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 				return
 			}
 
-			provider := types.ParseProviderScheme(filePath)
-			fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+			backendID, innerPath, scoped := types.ParseStorageBackendPath(filePath)
+			providerPath := filePath
+			if scoped {
+				providerPath = innerPath
+			}
+			provider := types.ParseProviderScheme(providerPath)
+			var fileSvc interfaces.FileService
+			var resolvedProvider string
+			var err error
+			if storageResolver != nil {
+				fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
+			} else {
+				fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+			}
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":    err.Error(),
 					"provider": provider,
-					"hint":     "tenant storage config is missing or incomplete for this provider",
+					"hint":     "workspace storage config is missing or incomplete for this provider",
 				})
 				return
 			}

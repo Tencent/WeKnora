@@ -176,7 +176,7 @@ docker pull docker.m.daocloud.io/wechatopenai/weknora-ui:v0.5.0
 检查代理网络与 \`OPENAI_BASE_URL\` 配置；本地无外网时切换到 Ollama 或国内大模型。
 
 ### Q14: token 用量在哪里看？
-开启 Langfuse 后，每个会话、每次推理、每个工具调用的 token 消耗都有完整 trace，可按时间、租户、模型聚合。
+开启 Langfuse 后，每个会话、每次推理、每个工具调用的 token 消耗都有完整 trace，可按时间、空间、模型聚合。
 
 ### Q15: 如何接入私有 LLM？
 实现 \`internal/models/chat/provider/Provider\` 接口，注册到 provider 工厂，配置文件中加一条记录即可，约 100-200 行代码。

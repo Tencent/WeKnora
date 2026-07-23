@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 )
 
 // rbacTestHarness builds a tiny gin engine with the RBAC middleware in
@@ -77,6 +78,33 @@ func TestRequireRole_RejectsBelowMin(t *testing.T) {
 		RequireRole(types.TenantRoleAdmin, cfgRBAC(true)))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("Contributor must NOT clear Admin gate, got %d", w.Code)
+	}
+}
+
+func TestRequireRoleOrSystemAdmin_AllowsSystemAdminBelowTenantRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleViewer)
+		ctx = context.WithValue(ctx, types.SystemAdminContextKey, true)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	router.GET("/protected",
+		RequireRoleOrSystemAdmin(types.TenantRoleAdmin, cfgRBAC(true)),
+		func(c *gin.Context) { c.Status(http.StatusOK) },
+	)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/protected", nil))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireRoleOrSystemAdmin_RejectsOrdinaryViewer(t *testing.T) {
+	w := rbacTestHarness(types.TenantRoleViewer, "u1",
+		RequireRoleOrSystemAdmin(types.TenantRoleAdmin, cfgRBAC(true)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("ordinary Viewer must not clear Admin-or-SystemAdmin gate, got %d", w.Code)
 	}
 }
 

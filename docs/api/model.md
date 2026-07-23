@@ -2,7 +2,7 @@
 
 [返回目录](./README.md)
 
-模型管理接口用于维护当前租户下可用的 LLM / Embedding / Rerank / VLLM / ASR 模型配置。
+模型管理接口用于维护当前空间下可用的 LLM / Embedding / Rerank / VLLM / ASR 模型配置。
 
 | 方法   | 路径                | 描述                  |
 | ------ | ------------------- | --------------------- |
@@ -25,7 +25,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `openai`       | OpenAI                       | Chat, Embedding, Rerank, VLLM   |
 | `aliyun`       | 阿里云 DashScope             | Chat, Embedding, Rerank, VLLM   |
 | `zhipu`        | 智谱 BigModel                | Chat, Embedding, Rerank, VLLM   |
-| `volcengine`   | 火山引擎 Volcengine          | Chat, Embedding, VLLM           |
+| `volcengine`   | 火山引擎 Volcengine          | Chat, Embedding, Rerank, VLLM   |
 | `hunyuan`      | 腾讯混元 Hunyuan             | Chat, Embedding                 |
 | `deepseek`     | DeepSeek                     | Chat                            |
 | `minimax`      | MiniMax                      | Chat                            |
@@ -33,6 +33,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `siliconflow`  | 硅基流动 SiliconFlow         | Chat, Embedding, Rerank, VLLM   |
 | `jina`         | Jina                         | Embedding, Rerank               |
 | `openrouter`   | OpenRouter                   | Chat, VLLM                      |
+| `requesty`     | Requesty                     | Chat, Embedding, VLLM           |
 | `gemini`       | Google Gemini                | Chat                            |
 | `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |
 | `moonshot`     | 月之暗面 Moonshot            | Chat, VLLM                      |
@@ -45,7 +46,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 
 ## GET `/models/providers` - 获取模型服务商列表
 
-根据模型类型获取支持的服务商列表及配置信息（系统级元数据，与租户无关）。
+根据模型类型获取支持的服务商列表及配置信息（系统级元数据，与空间无关）。
 
 **查询参数**:
 
@@ -99,7 +100,7 @@ curl --location 'http://localhost:8080/api/v1/models/providers?model_type=embedd
 
 ## POST `/models` - 创建模型
 
-为当前租户创建一个新的模型配置。
+为当前空间创建一个新的模型配置。
 
 **参数说明（请求体）**:
 
@@ -262,6 +263,29 @@ curl --location 'http://localhost:8080/api/v1/models' \
 }'
 ```
 
+**远程 API 模型（火山引擎 VikingDB）**:
+
+火山 Rerank 使用 AK/SK 签名，不使用方舟 API Key。`api_key` 保存 Access Key ID，
+`app_secret` 保存 Secret Access Key；两项均按模型凭证加密存储。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: your_api_key' \
+--data '{
+    "name": "doubao-seed-rerank",
+    "type": "Rerank",
+    "source": "remote",
+    "description": "火山引擎托管 Rerank 模型",
+    "parameters": {
+        "base_url": "https://api-knowledgebase.mlp.cn-beijing.volces.com",
+        "api_key": "your-volcengine-access-key-id",
+        "app_secret": "your-volcengine-secret-access-key",
+        "provider": "volcengine"
+    }
+}'
+```
+
 ### 创建视觉模型（VLLM）
 
 ```curl
@@ -313,7 +337,7 @@ curl --location 'http://localhost:8080/api/v1/models' \
 
 ## GET `/models` - 获取模型列表
 
-返回当前租户下的所有模型。内置模型（`is_builtin = true`）的 `base_url` 与 `api_key` 会被清空以隐藏敏感信息。
+返回当前空间下的所有模型。内置模型（`is_builtin = true`）的 `base_url` 与 `api_key` 会被清空以隐藏敏感信息。
 
 **请求**:
 

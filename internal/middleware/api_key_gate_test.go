@@ -171,6 +171,35 @@ func TestGateKBScopeDoesNotBlockDataPlane(t *testing.T) {
 	}
 }
 
+func TestGatePlatformOnlyPolicyRejectsTenantKeyBeforeFullAccess(t *testing.T) {
+	a := NewAPIKeyRouteAuthorizer()
+	a.Register(http.MethodGet, "/api/v1/system/admin/settings",
+		APIKeyRoutePolicy{PlatformOnly: true}.
+			WithCapability(types.APIKeyCapabilitySystemSettingsRead))
+	tenantFull := &types.TenantAPIKeyScope{FullAccess: true}
+	platform := &types.TenantAPIKeyScope{
+		ScopeType:    types.APIKeyScopePlatform,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilitySystemSettingsRead)},
+	}
+	if runGate(t, a, tenantFull, http.MethodGet, "/api/v1/system/admin/settings") {
+		t.Fatal("tenant full-access key must not enter a platform-only route")
+	}
+	if !runGate(t, a, platform, http.MethodGet, "/api/v1/system/admin/settings") {
+		t.Fatal("platform key with the required capability should pass")
+	}
+
+	withoutCapability := NewAPIKeyRouteAuthorizer()
+	withoutCapability.Register(http.MethodGet, "/api/v1/system/admin/unsafe",
+		APIKeyRoutePolicy{PlatformOnly: true})
+	corruptPlatformFull := &types.TenantAPIKeyScope{
+		ScopeType:  types.APIKeyScopePlatform,
+		FullAccess: true,
+	}
+	if runGate(t, withoutCapability, corruptPlatformFull, http.MethodGet, "/api/v1/system/admin/unsafe") {
+		t.Fatal("platform-only policy without an explicit capability must fail closed")
+	}
+}
+
 // runDenyAPIKey mounts DenyAPIKeyPrincipal ahead of a handler and reports
 // whether the request reached the handler.
 func runDenyAPIKey(t *testing.T, scope *types.TenantAPIKeyScope) (reached bool, status int) {
@@ -212,6 +241,74 @@ func TestDenyAPIKeyPrincipalAllowsJWT(t *testing.T) {
 	reached, status := runDenyAPIKey(t, nil)
 	if !reached || status != http.StatusOK {
 		t.Fatalf("JWT session should pass DenyAPIKeyPrincipal: reached=%v status=%d", reached, status)
+	}
+}
+
+// runAllowFileServe mounts AllowFileServeAPIKey ahead of a handler and reports
+// whether the request reached the handler.
+func runAllowFileServe(t *testing.T, scope *types.TenantAPIKeyScope) (reached bool, status int) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		if scope != nil {
+			c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), *scope))
+		}
+		c.Next()
+	})
+	engine.GET("/files", AllowFileServeAPIKey(), func(c *gin.Context) {
+		reached = true
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/files", nil))
+	return reached, w.Code
+}
+
+func TestAllowFileServeAPIKey(t *testing.T) {
+	cases := []struct {
+		name        string
+		scope       *types.TenantAPIKeyScope
+		wantReached bool
+	}{
+		{name: "jwt passes", scope: nil, wantReached: true},
+		{name: "full access passes", scope: &types.TenantAPIKeyScope{FullAccess: true}, wantReached: true},
+		{
+			name: "tenant-wide retrieve passes",
+			scope: &types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantReached: true,
+		},
+		{
+			name: "kb-restricted retrieve denied",
+			scope: &types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-1"},
+				Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantReached: false,
+		},
+		{
+			name: "non-retrieve capability denied",
+			scope: &types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityChat)},
+			},
+			wantReached: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reached, status := runAllowFileServe(t, tc.scope)
+			if reached != tc.wantReached {
+				t.Fatalf("reached=%v want %v (status=%d)", reached, tc.wantReached, status)
+			}
+			if tc.wantReached && status != http.StatusOK {
+				t.Fatalf("expected 200, got %d", status)
+			}
+			if !tc.wantReached && status != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d", status)
+			}
+		})
 	}
 }
 

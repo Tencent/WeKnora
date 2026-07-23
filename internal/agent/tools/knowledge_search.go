@@ -75,7 +75,7 @@ Avoid:
 
 ## Output
 Returns chunks ranked by semantic similarity, reranked when applicable.  
-Results represent conceptual relevance, not literal keyword overlap.`,
+Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -90,7 +90,7 @@ Results represent conceptual relevance, not literal keyword overlap.`,
     },
     "knowledge_base_ids": {
       "type": "array",
-      "description": "Optional: KB IDs to search",
+      "description": "Optional: bound knowledge-base IDs (the short bN values shown in runtime context)",
       "items": {
         "type": "string"
       },
@@ -559,14 +559,19 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					innerWg.Add(1)
 					go func() {
 						defer innerWg.Done()
+						stVectorThreshold, stKeywordThreshold := st.RecallThresholds(
+							vectorThreshold,
+							keywordThreshold,
+						)
 						searchParams := types.SearchParams{
 							QueryText:        q,
 							QueryEmbedding:   queryEmbedding,
 							MatchCount:       topK,
-							VectorThreshold:  vectorThreshold,
-							KeywordThreshold: keywordThreshold,
+							VectorThreshold:  stVectorThreshold,
+							KeywordThreshold: stKeywordThreshold,
 							KnowledgeIDs:     st.KnowledgeIDs,
 							TagIDs:           st.TagIDs,
+							ScopeTagIDs:      st.ScopeTagIDs,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {
@@ -780,7 +785,8 @@ Output only the scores, no explanations or additional text.`,
 		// Each score line is ~15 tokens, add buffer for safety
 		maxTokens := len(batch)*20 + 100
 
-		response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
+		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
 		})
@@ -837,7 +843,12 @@ Output only the scores, no explanations or additional text.`,
 		return rankResults[i].RelevanceScore > rankResults[j].RelevanceScore
 	})
 
-	ranked := t.applyModelRerankScores(results, rankResults, t.rerankThreshold())
+	ranked := t.applyModelRerankScores(
+		results,
+		rankResults,
+		t.rerankThreshold(),
+		t.searchTargets.HasRecallThresholdOverride(),
+	)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM reranked %d/%d results above threshold %.2f",
 		len(ranked), len(results), t.rerankThreshold())
 	return ranked, nil
@@ -929,7 +940,12 @@ func (t *KnowledgeSearchTool) rerankWithModel(
 		return nil, fmt.Errorf("rerank call failed: %w", err)
 	}
 
-	ranked := t.applyModelRerankScores(results, rerankResp, t.rerankThreshold())
+	ranked := t.applyModelRerankScores(
+		results,
+		rerankResp,
+		t.rerankThreshold(),
+		t.searchTargets.HasRecallThresholdOverride(),
+	)
 	logger.Infof(
 		ctx,
 		"[Tool][KnowledgeSearch] Reranked %d/%d results above threshold %.2f",
@@ -949,7 +965,11 @@ func (t *KnowledgeSearchTool) rerankThreshold() float64 {
 
 const agentRerankFallbackMinScore = 0.15
 
-func filterRerankRankResults(rankResults []rerank.RankResult, threshold float64) []rerank.RankResult {
+func filterRerankRankResults(
+	rankResults []rerank.RankResult,
+	threshold float64,
+	preserveTop bool,
+) []rerank.RankResult {
 	if len(rankResults) == 0 {
 		return nil
 	}
@@ -966,7 +986,7 @@ func filterRerankRankResults(rankResults []rerank.RankResult, threshold float64)
 				top = r
 			}
 		}
-		if top.RelevanceScore >= agentRerankFallbackMinScore {
+		if preserveTop || top.RelevanceScore >= agentRerankFallbackMinScore {
 			return []rerank.RankResult{top}
 		}
 	}
@@ -977,8 +997,9 @@ func (t *KnowledgeSearchTool) applyModelRerankScores(
 	originals []*searchResultWithMeta,
 	rankResults []rerank.RankResult,
 	threshold float64,
+	preserveTop bool,
 ) []*searchResultWithMeta {
-	filtered := filterRerankRankResults(rankResults, threshold)
+	filtered := filterRerankRankResults(rankResults, threshold, preserveTop)
 	out := make([]*searchResultWithMeta, 0, len(filtered))
 	for _, rr := range filtered {
 		if rr.Index < 0 || rr.Index >= len(originals) {
@@ -1155,7 +1176,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
 					effectiveTenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "",
+					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
 				)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
@@ -1247,14 +1268,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 				var imageInfos []types.ImageInfo
 				if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
 					for _, img := range imageInfos {
-						ob.WriteString(fmt.Sprintf("<image url=\"%s\">\n", xmlEscape(img.URL)))
-						if img.Caption != "" {
-							ob.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", xmlEscape(img.Caption)))
+						if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+							ob.WriteString(imageMarkdown)
+							ob.WriteString("\n")
 						}
-						if img.OCRText != "" {
-							ob.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", xmlEscape(img.OCRText)))
-						}
-						ob.WriteString("</image>\n")
 					}
 				}
 			}

@@ -68,9 +68,9 @@ func interpolateBuiltinModelEnv(s string) string {
 // with the file contents.
 //
 // Lifecycle contract:
-//   - YAML loader only ever reads/writes rows tagged managed_by="yaml". Rows
-//     created via UI/API/SQL (managed_by="") are invisible to the loader and
-//     are never modified.
+//   - YAML loader only ever writes rows tagged managed_by="yaml". Rows created
+//     or explicitly overridden via UI/API/SQL (managed_by="") are detected by
+//     id and preserved, and are never modified.
 //   - Each YAML entry is UPSERTed by id, with deleted_at force-reset to NULL
 //     (so a row that was soft-deleted previously is resurrected when it
 //     reappears in the file).
@@ -134,6 +134,24 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		m := e.toModel()
+
+		// A system-admin edit clears managed_by to claim the row as a runtime
+		// override. Preserve that explicit override on subsequent starts rather
+		// than reclaiming and overwriting it from YAML. Unscoped is required so
+		// a manually managed soft-deleted collision is not resurrected either.
+		var existing Model
+		lookupErr := db.WithContext(ctx).Unscoped().
+			Select("id", "managed_by").
+			Where("id = ?", m.ID).
+			First(&existing).Error
+		if lookupErr == nil && existing.ManagedBy != BuiltinModelManagedBy {
+			log.Printf("[builtin-models] preserving runtime override: id=%s", m.ID)
+			continue
+		}
+		if lookupErr != nil && lookupErr != gorm.ErrRecordNotFound {
+			log.Printf("[builtin-models] WARN: inspect existing model %s failed: %v; skipping", m.ID, lookupErr)
+			continue
+		}
 
 		// Mirror the API path's "single default per (tenant_id, type)"
 		// invariant: clear other defaults before promoting this one.

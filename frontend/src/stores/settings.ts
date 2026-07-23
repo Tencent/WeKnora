@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
-import { updateMyPreferences, type UserPreferences } from "@/api/auth";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
 
@@ -23,10 +22,9 @@ interface Settings {
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
-  enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
-  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源租户 ID（用于后端 model/KB/MCP 解析）
+  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
   autoCheckUpdate?: boolean; // 是否自动检查并下载更新
 }
 
@@ -100,14 +98,13 @@ const defaultSettings: Settings = {
     enabled: true
   },
   webSearchEnabled: false,  // 默认关闭网络搜索
-  enableMemory: false,       // 默认关闭记忆功能
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
     selectedChatModelId: "",  // 用户当前选择的对话模型ID
   },
   selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
-  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源租户 ID
+  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源空间 ID
   autoCheckUpdate: true,
 };
 
@@ -170,15 +167,12 @@ export const useSettingsStore = defineStore("settings", {
     // 网络搜索是否启用
     isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
-    // 记忆功能是否启用
-    isMemoryEnabled: (state) => state.settings.enableMemory || false,
-
     // 是否自动检查并下载更新
     isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
 
     // 当前选中的智能体ID
     selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
-    // 共享智能体来源租户 ID（可选）
+    // 共享智能体来源空间 ID（可选）
     selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
   },
 
@@ -334,47 +328,6 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
-    // 启用/禁用记忆功能。
-    // 现在是"真用户级"开关：
-    //   - 本地缓存 (localStorage) 用作 UI 首屏 / 离线兜底；
-    //   - PUT /auth/me/preferences 是真正的持久化，跨设备/浏览器同步。
-    //
-    // 乐观更新：先翻本地状态让 UI 立刻响应，再异步写后端；失败则回滚 + throw
-    // 让调用方（GeneralSettings.vue 的 t-switch）可以提示并把开关复位。
-    async toggleMemory(enabled: boolean): Promise<void> {
-      const previous = !!this.settings.enableMemory;
-      this.settings.enableMemory = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-
-      try {
-        const resp = await updateMyPreferences({ enable_memory: enabled });
-        if (!resp.success) {
-          throw new Error(resp.message || "update failed");
-        }
-      } catch (err) {
-        // 回滚本地状态，让 UI 复位到旧值。
-        this.settings.enableMemory = previous;
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-        throw err;
-      }
-    },
-
-    // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
-    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切租户后都会触发）。
-    // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
-    hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
-      if (!prefs) return;
-      let changed = false;
-      if (typeof prefs.enable_memory === "boolean" &&
-          this.settings.enableMemory !== prefs.enable_memory) {
-        this.settings.enableMemory = prefs.enable_memory;
-        changed = true;
-      }
-      if (changed) {
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-      }
-    },
-
     // 启用/禁用自动检查更新
     toggleAutoCheckUpdate(enabled: boolean) {
       this.settings.autoCheckUpdate = enabled;
@@ -470,13 +423,21 @@ export const useSettingsStore = defineStore("settings", {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
-      const tagIds = [...new Set(tags.map((t) => t.id).filter(Boolean))];
-      const tagKbIds = [...new Set(tags.map((t) => t.kbId).filter(Boolean))];
-      const kbIds = [...new Set([...selectedKBs, ...tagKbIds])];
+      const tagScopes = Object.entries(tags.reduce<Record<string, string[]>>((scopes, tag) => {
+        if (!tag.id || !tag.kbId) return scopes;
+        (scopes[tag.kbId] ||= []).push(tag.id);
+        return scopes;
+      }, {})).map(([knowledge_base_id, ids]) => ({
+        knowledge_base_id,
+        tag_ids: [...new Set(ids)],
+      }));
       return {
-        knowledge_base_ids: kbIds.length > 0 ? kbIds : undefined,
+        // A tag's parent KB is only an ownership hint, not an explicit whole-KB
+        // selection. Keep it in tag_scopes so the backend cannot widen a tag to
+        // every document in that KB.
+        knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
-        tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
         limit,
       };
     },
@@ -485,6 +446,9 @@ export const useSettingsStore = defineStore("settings", {
     selectAgent(agentId: string, sourceTenantId?: string | null) {
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
+      // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
+      // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
+      this.settings.webSearchEnabled = false;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;

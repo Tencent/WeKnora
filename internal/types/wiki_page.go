@@ -146,7 +146,7 @@ const (
 type WikiPage struct {
 	// Unique identifier (UUID)
 	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID for multi-tenant isolation
+	// Workspace ID for multi-workspace isolation
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 	// Knowledge base this page belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
@@ -347,6 +347,12 @@ type WikiConfig struct {
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
+	// ContentInstructions controls tone, structure and emphasis for generated
+	// summary/entity/index prose. Citation and merge rules remain system-owned.
+	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty"`
+	// ExtractionInstructions tells candidate extraction which domain concepts
+	// to emphasize without replacing the stable JSON/citation protocol.
+	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty"`
 
 	// Wiki ingest concurrency is two-level:
 	//   1. batch-level: multiple batches per KB run concurrently in the wiki
@@ -464,7 +470,6 @@ type WikiPageListResponse struct {
 	PageSize   int         `json:"page_size"`
 	TotalPages int         `json:"total_pages"`
 }
-
 
 // WikiGraphMode enumerates the graph query modes exposed to the API.
 const (

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -13,9 +14,21 @@ import (
 
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
-	"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true, "mattermost": true,
-	"wechat": true, "qqbot": true,
+	"wecom": true, "feishu": true, "lark": true, "slack": true, "telegram": true, "dingtalk": true,
+	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true,
 }
+
+// invalidIMPlatformError is the 400 message listing the accepted platforms. It
+// is derived from validIMPlatforms so the two cannot drift apart as platforms
+// are added.
+var invalidIMPlatformError = func() string {
+	names := make([]string, 0, len(validIMPlatforms))
+	for p := range validIMPlatforms {
+		names = append(names, "'"+p+"'")
+	}
+	sort.Strings(names)
+	return "platform must be one of: " + strings.Join(names, ", ")
+}()
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
@@ -60,7 +73,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk', 'mattermost', 'wechat' or 'qqbot'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
 	}
 
@@ -84,7 +97,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		channel.OutputMode = "full"
 	} else {
 		if channel.Mode == "" {
-			if channel.Platform == "mattermost" {
+			if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
 				channel.Mode = "webhook"
 			} else {
 				channel.Mode = "websocket"
@@ -315,6 +328,21 @@ func (h *IMHandler) ToggleIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channel})
 }
 
+func writeIMCallbackACK(c *gin.Context, platform string) {
+	if platform == "yunzhijia" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"type":    2,
+				"content": "",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // ── Callback handlers ──
 
 // IMCallback handles IM platform callback requests for a specific channel.
@@ -391,12 +419,12 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		} else {
 			logger.Infof(ctx, "[IM] Callback parsed no message to process platform=%s path_channel_id=%s", channel.Platform, channelID)
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		writeIMCallbackACK(c, channel.Platform)
 		return
 	}
 
 	// Respond immediately to avoid platform timeout
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	writeIMCallbackACK(c, channel.Platform)
 
 	// Detach from gin request context
 	asyncCtx := context.WithoutCancel(ctx)

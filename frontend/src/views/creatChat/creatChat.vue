@@ -256,7 +256,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex-flow: column;
     align-items: center;
     width: 100%;
-    max-width: 800px;
+    max-width: 960px;
     gap: 24px;
 
     :deep(.answers-input) {
@@ -305,7 +305,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .suggested-questions-container {
-    max-width: 800px;
+    max-width: 960px;
     margin: 0;
     padding: 0 16px;
     transition: height 0.35s @suggested-ease;

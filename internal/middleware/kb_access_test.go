@@ -123,7 +123,7 @@ func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, str
 func (s *stubAgentShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
-func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string) ([]*types.AgentShare, error) {
+func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string, uint64) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
 func (s *stubAgentShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.AgentShare, error) {

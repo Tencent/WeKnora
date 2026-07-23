@@ -1,5 +1,12 @@
 export const RAG_PIPELINE_TOOL_NAMES = new Set(['query_understand', 'knowledge_search'])
 
+/** Tools rendered on the quick-answer timeline (includes pre-RAG attachment prep). */
+export const RAG_TIMELINE_TOOL_NAMES = new Set([
+  ...RAG_PIPELINE_TOOL_NAMES,
+  'attachment_parsing',
+  'image_analysis',
+])
+
 type RagHistoryReference = {
   chunk_type?: string
   knowledge_id?: string
@@ -41,6 +48,13 @@ export function synthesizeRagPipelineToolEvents(
   item: RagHistoryMessage,
 ): Array<Record<string, unknown>> {
   const refs = item.knowledge_references ?? []
+  // Only rebuild retrieval steps when citations prove a search actually ran.
+  // Content-only turns (e.g. attachment Q&A with no KB hits) must not get a
+  // fake "knowledge_search" row on history reload.
+  if (refs.length === 0) {
+    return []
+  }
+
   const kbCounts: Record<string, number> = {}
   let docCount = 0
   let webCount = 0

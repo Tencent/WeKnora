@@ -2,31 +2,41 @@ package langfuse
 
 import (
 	"context"
-	"math/rand"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
+
+// propagator is the W3C TraceContext propagator used to extract/inject
+// traceparent across process boundaries (HTTP requests from sop3, asynq
+// payloads). It is a package-level value rather than the global OTel
+// propagator so tests remain isolated and Init never mutates global state.
+var propagator = propagation.TraceContext{}
 
 // Manager is the public façade of the langfuse package. A singleton is
 // installed via Init(); callers should treat a nil *Manager as "disabled"
 // and still invoke methods — every public method tolerates a nil receiver.
+//
+// Internally the manager owns an OpenTelemetry TracerProvider backed by an
+// OTLP/HTTP exporter pointing at the Langfuse v3+ / LiteFuse OTel endpoint.
+// The handles (*Trace / *Span / *Generation) wrap OTel spans; spans are
+// buffered by the BatchSpanProcessor and exported complete on End, so there
+// is no per-flush-batch duplication of root spans (the bug the legacy
+// hand-rolled translator had on long traces spanning multiple flushes).
 type Manager struct {
-	cfg    Config
-	client *client
+	cfg Config
 
-	queue    chan ingestionEvent
-	done     chan struct{}
-	workerWG sync.WaitGroup
-	closed   atomic.Bool
+	tp     *sdktrace.TracerProvider
+	tracer trace.Tracer
 
-	// rng is used for sampling decisions. Guarded by rngMu because
-	// math/rand.Source isn't goroutine-safe.
-	rngMu sync.Mutex
-	rng   *rand.Rand
+	closed atomic.Bool
 }
 
 var (
@@ -43,12 +53,48 @@ func Init(cfg Config) (*Manager, error) {
 	}
 	m := &Manager{cfg: cfg}
 	if cfg.Enabled {
-		m.client = newClient(cfg)
-		m.queue = make(chan ingestionEvent, cfg.QueueSize)
-		m.done = make(chan struct{})
-		m.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-		m.workerWG.Add(1)
-		go m.runWorker()
+		resAttrs := []attribute.KeyValue{
+			attribute.String("service.name", "weknora"),
+			attribute.String(attrLangfusePubKey, cfg.PublicKey),
+		}
+		if cfg.Environment != "" {
+			resAttrs = append(resAttrs, attribute.String(attrEnvironment, cfg.Environment))
+		}
+		if cfg.Release != "" {
+			resAttrs = append(resAttrs, attribute.String(attrRelease, cfg.Release))
+		}
+		res, err := resource.New(context.Background(), resource.WithAttributes(resAttrs...))
+		if err != nil {
+			return nil, err
+		}
+		var sp sdktrace.SpanProcessor
+		if cfg.testExporter != nil {
+			// Test mode: synchronous export on span End (deterministic).
+			sp = sdktrace.NewSimpleSpanProcessor(cfg.testExporter)
+		} else {
+			exp, err := newExporter(context.Background(), cfg)
+			if err != nil {
+				return nil, err
+			}
+			sp = sdktrace.NewBatchSpanProcessor(exp,
+				sdktrace.WithBatchTimeout(cfg.FlushInterval),
+				sdktrace.WithMaxExportBatchSize(cfg.FlushAt),
+				sdktrace.WithMaxQueueSize(cfg.QueueSize),
+			)
+		}
+		m.tp = sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+			sdktrace.WithSpanProcessor(sp),
+			sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate))),
+		)
+		m.tracer = m.tp.Tracer(langfuseScopeName,
+			trace.WithInstrumentationVersion(langfuseScopeVersion),
+			trace.WithInstrumentationAttributes(attribute.String("public_key", cfg.PublicKey)),
+		)
+		// Extraction/injection in this package use the package-level
+		// `propagator` directly, so we deliberately do NOT call
+		// otel.SetTextMapPropagator here — mutating global OTel state could
+		// interfere with any other OTel instrumentation in the process.
 	}
 
 	globalMu.Lock()
@@ -57,7 +103,7 @@ func Init(cfg Config) (*Manager, error) {
 
 	if cfg.Enabled {
 		logger.Infof(context.Background(),
-			"[Langfuse] enabled host=%s flush_at=%d flush_interval=%s sample_rate=%.2f",
+			"[Langfuse] enabled host=%s flush_at=%d flush_interval=%s sample_rate=%.2f (OTLP/OTel SDK)",
 			cfg.Host, cfg.FlushAt, cfg.FlushInterval, cfg.SampleRate,
 		)
 	}
@@ -72,114 +118,29 @@ func GetManager() *Manager {
 	return global
 }
 
-// Enabled reports whether the manager would actually emit events.
+// Enabled reports whether the manager would actually emit spans.
 func (m *Manager) Enabled() bool {
-	return m != nil && m.cfg.Enabled && !m.closed.Load()
+	return m != nil && m.cfg.Enabled && !m.closed.Load() && m.tp != nil
 }
 
-// Shutdown drains pending events, signals the worker to stop and waits for it.
-// Safe to call multiple times.
+// Tracer exposes the OTel tracer so middleware can create spans directly
+// when needed (e.g. extracting a remote traceparent). Returns a no-op tracer
+// when disabled.
+func (m *Manager) Tracer() trace.Tracer {
+	if !m.Enabled() {
+		return noop.NewTracerProvider().Tracer(langfuseScopeName)
+	}
+	return m.tracer
+}
+
+// Shutdown flushes pending spans and releases the exporter. Safe to call
+// multiple times.
 func (m *Manager) Shutdown(ctx context.Context) error {
-	if m == nil || !m.cfg.Enabled {
+	if m == nil || !m.cfg.Enabled || m.tp == nil {
 		return nil
 	}
 	if !m.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	close(m.done)
-
-	doneCh := make(chan struct{})
-	go func() {
-		m.workerWG.Wait()
-		close(doneCh)
-	}()
-	select {
-	case <-doneCh:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// enqueue drops silently when either disabled, full or closed. Langfuse is
-// observability, not business logic — back-pressure or failures must never
-// block the request path.
-func (m *Manager) enqueue(ev ingestionEvent) {
-	if !m.Enabled() {
-		return
-	}
-	select {
-	case m.queue <- ev:
-	default:
-		if m.cfg.Debug {
-			logger.Warnf(context.Background(), "[Langfuse] queue full, dropping event type=%s", ev.Type)
-		}
-	}
-}
-
-// sample decides whether to emit based on SampleRate. Sampling is applied once
-// per trace; observations attached to an already-sampled trace are always kept
-// (Langfuse itself would drop orphaned observations anyway).
-func (m *Manager) sample() bool {
-	if !m.Enabled() {
-		return false
-	}
-	if m.cfg.SampleRate >= 1.0 {
-		return true
-	}
-	m.rngMu.Lock()
-	defer m.rngMu.Unlock()
-	return m.rng.Float64() < m.cfg.SampleRate
-}
-
-// runWorker batches queued events and flushes them either when the batch
-// reaches FlushAt, when FlushInterval elapses, or when the manager shuts down.
-func (m *Manager) runWorker() {
-	defer m.workerWG.Done()
-	ticker := time.NewTicker(m.cfg.FlushInterval)
-	defer ticker.Stop()
-
-	buf := make([]ingestionEvent, 0, m.cfg.FlushAt)
-	flush := func(reason string) {
-		if len(buf) == 0 {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.RequestTimeout)
-		defer cancel()
-		if err := m.client.ingest(ctx, buf); err != nil && m.cfg.Debug {
-			logger.Warnf(ctx, "[Langfuse] flush (%s) failed: %v", reason, err)
-		}
-		buf = buf[:0]
-	}
-
-	for {
-		select {
-		case ev := <-m.queue:
-			buf = append(buf, ev)
-			if len(buf) >= m.cfg.FlushAt {
-				flush("batch-full")
-			}
-		case <-ticker.C:
-			flush("interval")
-		case <-m.done:
-			// Drain whatever remains in the queue before exiting.
-			for {
-				select {
-				case ev := <-m.queue:
-					buf = append(buf, ev)
-					if len(buf) >= m.cfg.FlushAt {
-						flush("batch-full-on-shutdown")
-					}
-				default:
-					flush("shutdown")
-					return
-				}
-			}
-		}
-	}
-}
-
-// newID returns a Langfuse-compatible UUIDv4.
-func newID() string {
-	return uuid.New().String()
+	return m.tp.Shutdown(ctx)
 }

@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable'
+  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -36,6 +36,19 @@ export interface WebSearchProviderTypeInfo {
   supports_proxy?: boolean
   description?: string
   docs_url?: string
+  config_fields?: WebSearchProviderConfigField[]
+}
+
+export interface WebSearchProviderConfigField {
+  key: string
+  label: string
+  label_key?: string
+  type: 'select'
+  required?: boolean
+  default?: string
+  description?: string
+  description_key?: string
+  options?: Array<{ label: string; label_key?: string; value: string }>
 }
 
 // Create a new web search provider

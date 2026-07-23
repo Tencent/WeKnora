@@ -620,6 +620,17 @@
                       </div>
                     </div>
 
+                    <!-- 来源引用 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.citationEnabled') }}</label>
+                        <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.citation_enabled" />
+                      </div>
+                    </div>
+
                     <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
                     <div
                       v-if="showRerankModelField"
@@ -693,7 +704,7 @@
                   </div>
                 </div>
 
-                <!-- 多模态配置 -->
+                <!-- 附件上传 -->
                 <div v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
@@ -701,7 +712,7 @@
                   </div>
 
                   <div class="settings-group">
-                    <!-- 图片上传（多模态） -->
+                    <!-- 图片上传 -->
                     <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
@@ -724,6 +735,31 @@
                           @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
                           @add-model="handleAddModel('vllm')"
                           :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
+                      </div>
+                    </div>
+
+                    <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
+                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.attachment_image_understanding" />
+                      </div>
+                    </div>
+
+                    <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
+                    <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
+                      class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.ocrMaxPagesDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_ocr_max_pages" :min="0" :max="64"
+                          :step="1" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
                       </div>
                     </div>
 
@@ -779,6 +815,33 @@
                       </div>
                     </div>
 
+                    <!-- 单轮等待附件解析超时（秒） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_parse_wait_timeout_sec" :min="0" :max="600"
+                          :step="10" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
+                      </div>
+                    </div>
+
+                    <!-- 聊天附件解析策略 -->
+                    <div class="parser-policy-block">
+                      <div class="parser-policy-block__header">
+                        <label>{{ $t('agentEditor.chatParser.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
+                      </div>
+                      <KBParserSettings
+                        embedded
+                        :parser-engine-rules="formData.config.chat_parser_engine_rules"
+                        :relevant-extensions="CHAT_PARSER_EXTENSIONS"
+                        @update:parser-engine-rules="(val: any) => formData.config.chat_parser_engine_rules = val"
+                      />
+                    </div>
+
                   </div>
                 </div>
 
@@ -822,6 +885,188 @@
                         <t-switch v-model="formData.config.enable_rewrite" />
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <!-- 对话问题推荐 -->
+                <div v-show="currentSection === 'suggestions'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('agentEditor.questionSuggestions.title') }}</h2>
+                    <p class="section-description">{{ $t('agentEditor.questionSuggestions.description') }}</p>
+                  </div>
+
+                  <t-tabs v-model="suggestionTab" class="suggestion-tabs">
+                    <t-tab-panel value="starters"
+                      :label="$t('agentEditor.questionSuggestions.startersTitle')" />
+                    <t-tab-panel value="followUps"
+                      :label="$t('agentEditor.questionSuggestions.followUpsTitle')" />
+                  </t-tabs>
+
+                  <div v-show="suggestionTab === 'starters'" class="settings-group">
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.questionSuggestions.enableStarters') }}</label>
+                        <p class="desc">{{ $t('agentEditor.questionSuggestions.enableStartersDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.question_suggestions.starters.enabled"
+                          :aria-label="$t('agentEditor.questionSuggestions.enableStarters')" />
+                      </div>
+                    </div>
+
+                    <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
+                      </div>
+                      <div class="setting-control">
+                        <t-select v-model="formData.config.question_suggestions.starters.mode"
+                          :options="starterSuggestionModeOptions" />
+                      </div>
+                    </div>
+
+                    <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.question_suggestions.starters.count"
+                          :min="1" :max="8" theme="column" />
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="formData.config.question_suggestions.starters.enabled && ['curated', 'hybrid'].includes(formData.config.question_suggestions.starters.mode)"
+                      class="setting-row setting-row-vertical">
+                      <div class="setting-info">
+                        <div class="setting-info-header setting-info-header--inline">
+                          <label>{{ $t('agentEditor.questionSuggestions.curatedItems') }}</label>
+                          <span class="curated-items-count">
+                            {{ formData.config.question_suggestions.starters.items.length }}/8
+                          </span>
+                        </div>
+                        <p class="desc">{{ $t('agentEditor.questionSuggestions.curatedItemsDesc') }}</p>
+                      </div>
+                      <div class="setting-control setting-control-full">
+                        <div class="suggested-prompts-list">
+                          <div v-for="(_prompt, index) in formData.config.question_suggestions.starters.items"
+                            :key="index" class="prompt-item">
+                            <t-input v-model="formData.config.question_suggestions.starters.items[index]"
+                              :maxlength="200" />
+                            <t-button variant="text" theme="danger" shape="square"
+                              :aria-label="$t('common.delete')" @click="removeStarterSuggestion(Number(index))">
+                              <t-icon name="delete" />
+                            </t-button>
+                          </div>
+                          <t-button variant="dashed"
+                            :disabled="formData.config.question_suggestions.starters.items.length >= 8"
+                            @click="addStarterSuggestion">
+                            <template #icon><t-icon name="add" /></template>
+                            {{ $t('agentEditor.questionSuggestions.addItem') }}
+                          </t-button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-show="suggestionTab === 'followUps'" class="settings-group">
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.questionSuggestions.enableFollowUps') }}</label>
+                        <p class="desc">{{ $t('agentEditor.questionSuggestions.enableFollowUpsDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.question_suggestions.follow_ups.enabled"
+                          :aria-label="$t('agentEditor.questionSuggestions.enableFollowUps')" />
+                      </div>
+                    </div>
+
+                    <template v-if="formData.config.question_suggestions.follow_ups.enabled">
+                      <div class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
+                        </div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.config.question_suggestions.follow_ups.mode"
+                            :options="followUpSuggestionModeOptions" />
+                        </div>
+                      </div>
+
+                      <div class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
+                        </div>
+                        <div class="setting-control">
+                          <t-input-number v-model="formData.config.question_suggestions.follow_ups.count"
+                            :min="1" :max="5" theme="column" />
+                        </div>
+                      </div>
+
+                      <div v-if="formData.config.question_suggestions.follow_ups.mode !== 'knowledge'"
+                        class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.model') }}</label>
+                          <p class="desc">{{ $t('agentEditor.questionSuggestions.modelDesc') }}</p>
+                        </div>
+                        <div class="setting-control">
+                          <ModelSelector model-type="KnowledgeQA"
+                            :selected-model-id="formData.config.question_suggestions.follow_ups.model_id"
+                            :all-models="allModels"
+                            @update:selected-model-id="(val: string) => formData.config.question_suggestions.follow_ups.model_id = val"
+                            @add-model="handleAddModel('summary')" />
+                        </div>
+                      </div>
+
+                      <div class="suggestion-advanced-divider">
+                        <span>{{ $t('agentEditor.questionSuggestions.advancedSettings') }}</span>
+                      </div>
+
+                      <div class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.contextTurns') }}</label>
+                        </div>
+                        <div class="setting-control">
+                          <t-input-number
+                            v-model="formData.config.question_suggestions.follow_ups.max_context_turns"
+                            :min="1" :max="5" theme="column" />
+                        </div>
+                      </div>
+
+                      <div class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.categories') }}</label>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <t-checkbox-group v-model="formData.config.question_suggestions.follow_ups.categories"
+                            :options="followUpCategoryOptions" />
+                        </div>
+                      </div>
+
+                      <div class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.instruction') }}</label>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <t-textarea
+                            v-model="formData.config.question_suggestions.follow_ups.additional_instruction"
+                            :placeholder="$t('agentEditor.questionSuggestions.instructionPlaceholder')"
+                            :maxlength="2000" :autosize="{ minRows: 3, maxRows: 8 }" />
+                        </div>
+                      </div>
+
+                      <div class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('agentEditor.questionSuggestions.displayRules') }}</label>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <div class="suggestion-checkboxes">
+                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_on_fallback">{{ $t('agentEditor.questionSuggestions.suppressFallback') }}</t-checkbox>
+                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_when_answer_asks_question">{{ $t('agentEditor.questionSuggestions.suppressQuestion') }}</t-checkbox>
+                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.knowledge_fallback">{{ $t('agentEditor.questionSuggestions.knowledgeFallback') }}</t-checkbox>
+                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.allow_regenerate">{{ $t('agentEditor.questionSuggestions.allowRegenerate') }}</t-checkbox>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -955,7 +1200,7 @@
                     </div>
 
                     <!-- 选择指定 MCP 服务 -->
-                    <div v-if="mcpSelectionMode === 'selected' && mcpOptions.length > 0" class="setting-row">
+                    <div v-if="mcpSelectionMode === 'selected' && showMcpServiceSelect" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.mcp.selectLabel') }}</label>
                         <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
@@ -963,7 +1208,8 @@
                       <div class="setting-control">
                         <t-select v-model="formData.config.mcp_services" multiple
                           :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
-                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label" />
+                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label"
+                            :disabled="mcp.disabled" />
                         </t-select>
                       </div>
                     </div>
@@ -1407,7 +1653,6 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
-import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
@@ -1419,6 +1664,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
@@ -1428,6 +1674,13 @@ import {
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+
+// File extensions offered in the agent-level chat attachment parsing policy.
+const CHAT_PARSER_EXTENSIONS = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'mhtml',
+  'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'yaml', 'yml', 'log',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+];
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
@@ -1487,6 +1740,7 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+const suggestionTab = ref<'starters' | 'followUps'>('starters');
 const contentWrapperRef = ref<HTMLElement | null>(null);
 const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
 let highlightClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1574,7 +1828,43 @@ const agentTypePresets = ref<AgentTypePreset[]>([]);
 // Agent 系统提示词模板缓存（用于切换智能体类型时根据 system_prompt_id 解析出实际文本填入）
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
 const intentPromptTemplates = ref<PromptTemplate[]>([]);
-const mcpOptions = ref<{ label: string; value: string }[]>([]);
+type McpSelectOption = { label: string; value: string; disabled?: boolean };
+
+const mcpOptions = computed<McpSelectOption[]>(() => {
+  const services = editorResources.mcpServices || [];
+  const selectedIds = new Set(formData.value.config.mcp_services || []);
+  const serviceById = new Map(services.map((mcp) => [mcp.id, mcp]));
+  const options: McpSelectOption[] = [];
+
+  for (const mcp of services) {
+    if (mcp.enabled) {
+      options.push({ label: mcp.name, value: mcp.id });
+    }
+  }
+
+  for (const id of selectedIds) {
+    const mcp = serviceById.get(id);
+    if (mcp && !mcp.enabled) {
+      options.push({
+        label: `${mcp.name} (${t('mcpSettings.disabled')})`,
+        value: mcp.id,
+        disabled: true,
+      });
+    } else if (!mcp) {
+      options.push({
+        label: t('agentEditor.mcp.unavailableService'),
+        value: id,
+        disabled: true,
+      });
+    }
+  }
+
+  return options;
+});
+
+const showMcpServiceSelect = computed(() =>
+  mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
+);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
@@ -1922,6 +2212,7 @@ const navItems = computed(() => {
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
     { key: 'prompts', icon: 'file-paste', label: t('agent.editor.promptsConfig') },
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
+    { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
   // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
   if (!isAgentMode.value) {
@@ -1933,7 +2224,7 @@ const navItems = computed(() => {
     items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
   }
   items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
-  items.push({ key: 'multimodal', icon: 'image', label: t('agentEditor.imageUpload.navLabel') });
+  items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
   // Agent 模式能力
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
@@ -1958,7 +2249,7 @@ const navGroups = computed(() => {
     {
       key: 'basic',
       label: t('agentEditor.navGroups.basic'),
-      items: pickItems(['basic', 'prompts', 'model', 'conversation']),
+      items: pickItems(['basic', 'prompts', 'model', 'conversation', 'suggestions']),
     },
     {
       key: 'knowledge',
@@ -1994,6 +2285,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 2048,
     thinking: false, // 默认禁用思考模式
+    citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
@@ -2016,10 +2308,18 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置
+    // 附件上传设置
     image_upload_enabled: false,
     vlm_model_id: '',
     image_storage_provider: '',
+    // 附件图片理解 / 扫描件 OCR 开关（默认关闭，避免解析耗时增加）
+    attachment_image_understanding: false,
+    // 扫描件 OCR 最大页数（0 = 使用全局默认）
+    attachment_ocr_max_pages: 0,
+    // 单轮问答等待附件解析完成的最长时间（秒，0 = 使用全局默认）
+    attachment_parse_wait_timeout_sec: 0,
+    // 聊天附件解析引擎策略（按文件类型选引擎）
+    chat_parser_engine_rules: [] as ParserEngineRule[],
     // 文件类型限制
     supported_file_types: [] as string[],
     // 数据分析阶段开关（默认关闭，避免在普通问答上多一次 LLM 调用生成 SQL）
@@ -2049,13 +2349,58 @@ const defaultFormData = {
     fallback_strategy: 'model' as 'fixed' | 'model',
     fallback_response: '',
     fallback_prompt: '',
+    question_suggestions: {
+      starters: {
+        enabled: true,
+        mode: 'hybrid' as 'curated' | 'knowledge' | 'hybrid',
+        items: [] as string[],
+        count: 6,
+      },
+      follow_ups: {
+        enabled: false,
+        mode: 'hybrid' as 'generated' | 'knowledge' | 'hybrid',
+        count: 3,
+        model_id: '',
+        additional_instruction: '',
+        categories: ['clarify', 'deepen', 'action'] as Array<'clarify' | 'deepen' | 'action'>,
+        max_context_turns: 2,
+        suppress_on_fallback: true,
+        suppress_when_answer_asks_question: true,
+        knowledge_fallback: true,
+        allow_regenerate: false,
+      },
+    },
     // 已废弃字段（保留兼容）
     welcome_message: '',
-    suggested_prompts: [] as string[],
   }
 };
 
 const formData = ref(JSON.parse(JSON.stringify(defaultFormData)));
+
+const starterSuggestionModeOptions = computed(() => [
+  { value: 'curated', label: t('agentEditor.questionSuggestions.modeCurated') },
+  { value: 'knowledge', label: t('agentEditor.questionSuggestions.modeKnowledge') },
+  { value: 'hybrid', label: t('agentEditor.questionSuggestions.modeHybrid') },
+]);
+const followUpSuggestionModeOptions = computed(() => [
+  { value: 'generated', label: t('agentEditor.questionSuggestions.modeGenerated') },
+  { value: 'knowledge', label: t('agentEditor.questionSuggestions.modeKnowledge') },
+  { value: 'hybrid', label: t('agentEditor.questionSuggestions.modeHybrid') },
+]);
+const followUpCategoryOptions = computed(() => [
+  { value: 'clarify', label: t('agentEditor.questionSuggestions.categoryClarify') },
+  { value: 'deepen', label: t('agentEditor.questionSuggestions.categoryDeepen') },
+  { value: 'action', label: t('agentEditor.questionSuggestions.categoryAction') },
+]);
+
+const addStarterSuggestion = () => {
+  const items = formData.value.config.question_suggestions.starters.items;
+  if (items.length < 8) items.push('');
+};
+
+const removeStarterSuggestion = (index: number) => {
+  formData.value.config.question_suggestions.starters.items.splice(index, 1);
+};
 
 const applyDefaultChatModelIfEmpty = () => {
   if (props.mode !== 'create' || !formData.value) return
@@ -2570,8 +2915,20 @@ watch(() => props.visible, async (val) => {
         agentData.config.thinking = false;
       }
 
+      agentData.config.question_suggestions = {
+        starters: {
+          ...defaultFormData.config.question_suggestions.starters,
+          ...(agentData.config.question_suggestions?.starters || {}),
+          items: agentData.config.question_suggestions?.starters?.items || [],
+        },
+        follow_ups: {
+          ...defaultFormData.config.question_suggestions.follow_ups,
+          ...(agentData.config.question_suggestions?.follow_ups || {}),
+          categories: agentData.config.question_suggestions?.follow_ups?.categories
+            || [...defaultFormData.config.question_suggestions.follow_ups.categories],
+        },
+      };
       // 确保数组字段存在
-      if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
@@ -2581,6 +2938,10 @@ watch(() => props.visible, async (val) => {
       }
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
+      if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
+      // 附件解析调优字段：旧数据缺省时置 0（表示使用全局默认）
+      if (agentData.config.attachment_ocr_max_pages == null) agentData.config.attachment_ocr_max_pages = 0;
+      if (agentData.config.attachment_parse_wait_timeout_sec == null) agentData.config.attachment_parse_wait_timeout_sec = 0;
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
       if (!agentData.config.agent_mode) {
@@ -2959,7 +3320,7 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
   }
 };
 
-// 加载依赖数据（复用租户级缓存，避免重复请求）
+// 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
     await Promise.all([
@@ -2979,10 +3340,6 @@ const loadDependencies = async () => {
       .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
       .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
-
-    mcpOptions.value = editorResources.mcpServices
-      .filter((mcp: MCPService) => mcp.enabled)
-      .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
 
     skillsAvailable.value = editorResources.skillsAvailable;
     skillOptions.value = editorResources.skills;
@@ -3890,10 +4247,10 @@ const handleSave = async () => {
   // ReRank 模型按运行范围按需使用：知识库范围为 none，或未启用
   // knowledge_search 时不需要；其余情况由对话入口在使用前给出明确提示。
 
-  // 过滤空推荐问题
-  if (formData.value.config.suggested_prompts) {
-    formData.value.config.suggested_prompts = formData.value.config.suggested_prompts.filter((p: string) => p.trim() !== '');
-  }
+  formData.value.config.question_suggestions.starters.items =
+    formData.value.config.question_suggestions.starters.items
+      .map((p: string) => p.trim())
+      .filter(Boolean);
 
   if (!formData.value.config.intent_prompts || Object.keys(formData.value.config.intent_prompts).length === 0) {
     delete formData.value.config.intent_prompts;
@@ -4265,12 +4622,38 @@ const handleSave = async () => {
   gap: 0;
 }
 
+.parser-policy-block {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &__header {
+    margin-bottom: 12px;
+
+    label {
+      display: block;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+      margin-bottom: 4px;
+    }
+
+    .desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+      line-height: 1.5;
+    }
+  }
+}
+
 .setting-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 24px;
   padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
+  min-width: 0;
 
   &:last-child {
     border-bottom: none;
@@ -4328,9 +4711,10 @@ const handleSave = async () => {
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 55%;
-  padding-right: 24px;
+  flex: 0 0 42%;
+  max-width: 42%;
+  min-width: 0;
+  padding-right: 0;
 
   &.full-width {
     max-width: 100%;
@@ -4374,15 +4758,18 @@ const handleSave = async () => {
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 360px;
+  flex: 1 1 58%;
+  min-width: 0;
+  max-width: 58%;
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+  overflow: hidden;
 
   &.setting-control-full {
     width: 100%;
     min-width: 100%;
+    max-width: 100%;
     justify-content: flex-start;
   }
 
@@ -4391,6 +4778,22 @@ const handleSave = async () => {
   :deep(.t-input),
   :deep(.t-textarea) {
     width: 100%;
+    min-width: 0;
+  }
+
+  :deep(.t-select-input) {
+    min-width: 0;
+  }
+
+  :deep(.t-select .t-tag) {
+    max-width: 160px;
+  }
+
+  :deep(.t-select .t-tag__text) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   :deep(.t-input-number) {
@@ -4627,6 +5030,75 @@ const handleSave = async () => {
   :deep(.t-input) {
     flex: 1;
   }
+}
+
+// 开场 / 回答后推荐用顶部 tab 区分（参照模型管理），避免整块包围框
+.suggestion-tabs {
+  margin-bottom: 4px;
+
+  :deep(.t-tabs__nav-item) {
+    font-size: 14px;
+  }
+
+  :deep(.t-tabs__operations) {
+    display: none;
+  }
+
+  // 只用 tab 作导航，内容自行渲染在下方
+  :deep(.t-tabs__content) {
+    display: none;
+  }
+}
+
+.suggestion-advanced-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 18px;
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--td-component-stroke);
+  }
+
+  span {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+    font-weight: 500;
+  }
+}
+
+// 计数徽标紧贴标签，避免在整宽行里被 space-between 甩开
+// 需与基础 `.setting-info .setting-info-header`（space-between）同等特异性才能覆盖
+.setting-info-header.setting-info-header--inline {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.curated-items-count {
+  flex-shrink: 0;
+  padding: 0 8px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--td-text-color-secondary);
+}
+
+.suggestion-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
 }
 
 // ===== 工具配置：overview 面板 =====

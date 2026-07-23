@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,6 +94,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	logger.Infof(ctx, "Creating custom agent, name: %s, agent_mode: %s",
 		secutils.SanitizeForLog(req.Name), req.Config.AgentMode)
@@ -166,7 +172,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 
 // ListAgents godoc
 // @Summary      获取智能体列表
-// @Description  获取当前租户的所有智能体（包括内置智能体）
+// @Description  获取当前空间的所有智能体（包括内置智能体）
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -217,14 +223,14 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
 	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
-		logger.Error(ctx, "Tenant ID not found in context")
-		c.Error(errors.NewUnauthorizedError("Missing tenant context"))
+		logger.Error(ctx, "Workspace ID not found in context")
+		c.Error(errors.NewUnauthorizedError("Missing workspace context"))
 		return
 	}
 	tenantID, ok := tenantIDVal.(uint64)
 	if !ok {
 		logger.Errorf(ctx, "Tenant ID has unexpected type %T in context", tenantIDVal)
-		c.Error(errors.NewInternalServerError("Invalid tenant context type"))
+		c.Error(errors.NewInternalServerError("Invalid workspace context type"))
 		return
 	}
 	disabledOwnIDs, err := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID)
@@ -236,7 +242,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
-	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同租户其他成员」。
+	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同空间其他成员」。
 	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
@@ -331,6 +337,11 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		Description: req.Description,
 		Avatar:      req.Avatar,
 		Config:      req.Config,
+	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s",
@@ -551,6 +562,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        id                  path      string  true   "智能体ID"
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
+// @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
 // @Param        limit               query     int     false  "返回数量上限（默认6）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
@@ -588,12 +600,11 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	var tagIDs []string
-	if tagIDsStr := strings.TrimSpace(c.Query("tag_ids")); tagIDsStr != "" {
-		for _, id := range strings.Split(tagIDsStr, ",") {
-			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				tagIDs = append(tagIDs, trimmed)
-			}
+	var tagScopes []types.TagScope
+	if raw := strings.TrimSpace(c.Query("tag_scopes")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &tagScopes); err != nil {
+			c.Error(errors.NewBadRequestError("tag_scopes must be valid JSON"))
+			return
 		}
 	}
 
@@ -604,10 +615,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagIDs: %v, limit: %d",
-		secutils.SanitizeForLog(id), kbIDs, tagIDs, limit)
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,
