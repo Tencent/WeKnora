@@ -8,7 +8,9 @@ import (
 )
 
 const (
-	ContentCacheKindEmbedding = "embedding"
+	ContentCacheKindEmbedding    = "embedding"
+	ContentCacheKindImageOCR     = "image_ocr"
+	ContentCacheKindImageCaption = "image_caption"
 )
 
 // ContentCacheEntry stores reusable deterministic processing artifacts.

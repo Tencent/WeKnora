@@ -85,3 +85,27 @@ func TestChunkIDAllocator_IsolatedByKnowledgeAndType(t *testing.T) {
 		StableChunkID(1, "knowledge-a", ChunkTypeParentText, hash, 0),
 	)
 }
+
+func TestStableImageChildChunkID(t *testing.T) {
+	id1 := StableImageChildChunkID(1, "knowledge-a", "parent-a", ChunkTypeImageOCR, "text")
+	id2 := StableImageChildChunkID(1, "knowledge-a", "parent-a", ChunkTypeImageOCR, " text ")
+
+	assert.Equal(t, id1, id2)
+	assert.Len(t, id1, 36)
+	_, err := uuid.Parse(id1)
+	require.NoError(t, err)
+}
+
+func TestStableImageChildChunkID_IsolatedByModeAndContent(t *testing.T) {
+	id := StableImageChildChunkID(1, "knowledge-a", "parent-a", ChunkTypeImageOCR, "same")
+
+	assert.NotEqual(t, id,
+		StableImageChildChunkID(1, "knowledge-a", "parent-a", ChunkTypeImageCaption, "same"),
+	)
+	assert.NotEqual(t, id,
+		StableImageChildChunkID(1, "knowledge-a", "parent-a", ChunkTypeImageOCR, "changed"),
+	)
+	assert.NotEqual(t, id,
+		StableImageChildChunkID(1, "knowledge-a", "parent-b", ChunkTypeImageOCR, "same"),
+	)
+}
