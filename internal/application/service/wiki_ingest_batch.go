@@ -1272,6 +1272,28 @@ func (s *wikiIngestService) mapOneDocument(
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	cacheKey := wikiMapCacheKey(knowledgeID, content, chatModel, lang, batchCtx)
+	if cached, hit := s.getCachedWikiDocumentMap(ctx, payload.TenantID, cacheKey); hit {
+		result, updates := cached.buildResultAndUpdates(
+			ctx,
+			batchCtx,
+			knowledgeID,
+			docTitle,
+			sourceRef,
+			content,
+			oldPageSlugs,
+			wikiSpan,
+			true,
+			len(chunks),
+			lang,
+		)
+		logger.Infof(ctx,
+			"wiki ingest: wiki map cache hit knowledge %s title=%q candidates=%d chunks=%d updates=%d elapsed=%s",
+			knowledgeID, previewText(docTitle, 80), result.MapStats["candidate_slugs"], len(chunks), len(updates),
+			time.Since(docStartedAt).Round(time.Millisecond),
+		)
+		return result, updates, nil
+	}
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
 	// On failure we fall back to the legacy single-shot extractor so the doc
@@ -1312,12 +1334,6 @@ func (s *wikiIngestService) mapOneDocument(
 	for slug := range slugItems {
 		summaryExtractedPages = append(summaryExtractedPages, slug)
 	}
-	// Wiki summary slug is derived from the knowledge ID rather than the
-	// docTitle (which is typically the upload filename). Filename-based slugs
-	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
-	// that downstream LLM prompts read; a UUID-based slug is uglier but
-	// hallucination-safe.
-	summarySlug := fmt.Sprintf("summary/%s", slugify(knowledgeID))
 	var slugListing string
 	for _, slug := range summaryExtractedPages {
 		if item, ok := slugItems[slug]; ok {
@@ -1420,36 +1436,6 @@ func (s *wikiIngestService) mapOneDocument(
 		}
 	}
 
-	// extractedPages records every wiki page this document materialized
-	// (entities, concepts, plus the summary page appended below). The
-	// slug is used for link/retract bookkeeping; the title is captured
-	// for the log feed so the user sees "提供本学位在线验证报告查询…"
-	// rather than "entity/xue-xin-wang".
-	extractedPages := make([]types.WikiLogPageRef, 0, len(slugItems)+1)
-	for slug, item := range slugItems {
-		title := item.Name
-		if title == "" {
-			title = slug
-		}
-		extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: slug, Title: title})
-	}
-
-	// Count total distinct chunks cited across all slugs for logging.
-	citedChunkSet := make(map[string]bool)
-	for _, ids := range citations {
-		for _, id := range ids {
-			citedChunkSet[id] = true
-		}
-	}
-
-	var updates []SlugUpdate
-	// docSummaryLine is the one-sentence headline used for terse log/audit
-	// previews and for <document_added> blocks in retract prompts.
-	// docSummary is the full summary body attached to each entity/concept
-	// update so the editor model gets rich framing in <source_context>.
-	var docSummaryLine string
-	var docSummary string
-
 	if summaryErr != nil {
 		// Summary is the headline artifact of an ingested document — a
 		// document with no summary page is half-ingested and leaves the
@@ -1467,170 +1453,46 @@ func (s *wikiIngestService) mapOneDocument(
 		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
 	}
-	sumLine, sumBody := splitSummaryLine(summaryContent)
-	if sumBody == "" {
-		sumBody = summaryContent
-	}
-	if sumLine == "" {
-		sumLine = docTitle
-	}
-	docSummaryLine = sumLine
-	docSummary = sumBody
-	if strings.TrimSpace(docSummary) == "" {
-		docSummary = sumLine
-	}
-	updates = append(updates, SlugUpdate{
-		Slug:        summarySlug,
-		Type:        types.WikiPageTypeSummary,
-		DocTitle:    docTitle,
-		KnowledgeID: knowledgeID,
-		SourceRef:   sourceRef,
-		Language:    lang,
-		SummaryLine: sumLine,
-		SummaryBody: sumBody,
-	})
-	extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: summarySlug, Title: docTitle})
 
-	// Entities
-	for _, item := range extractedEntities {
-		if item.Slug != "" {
-			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeEntity,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
-			})
+	citedChunkSet := make(map[string]bool)
+	for _, ids := range citations {
+		for _, id := range ids {
+			citedChunkSet[id] = true
 		}
 	}
-
-	// Concepts
-	for _, item := range extractedConcepts {
-		if item.Slug != "" {
-			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeConcept,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
-			})
-		}
+	mapPayload := &wikiDocumentMapCachePayload{
+		KnowledgeID:        knowledgeID,
+		SummaryContent:     summaryContent,
+		Entities:           extractedEntities,
+		Concepts:           extractedConcepts,
+		Uncited:            uncited,
+		NewSlugCount:       len(newSlugs),
+		Pass0Failed:        pass0Failed,
+		ClassifyBatchCount: batchCount,
 	}
-
-	// Reconcile old page set against new extraction.
-	//
-	// Three cases:
-	//
-	//  (a) oldSlug ∉ new  → "retractStale": the doc no longer mentions this
-	//      page's subject, so strip its ref (and possibly delete the page
-	//      if this was the only source). Passes the NEW content as the
-	//      retract context — if the LLM finds matching facts it trims
-	//      them, otherwise the retract is a near no-op, which is fine.
-	//
-	//  (b) oldSlug ∈ new AND slug is an entity/concept page  → reparse
-	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
-	//      body as the old-version signal) AND the normal addition. The
-	//      reduce stage sees HasAdditions=1 + HasRetractions=1 and the
-	//      WikiPageModifyUserPrompt correctly tells the editor model to
-	//      remove the old K section and add the new K section in one
-	//      pass — giving us replace-not-append semantics that "append
-	//      new K on top of old K" would otherwise violate.
-	//
-	//  (c) oldSlug ∈ new AND slug is a summary page (summary/...) →
-	//      nothing to do here. reduceSlugUpdates' summary branch
-	//      unconditionally overwrites the whole page from the new
-	//      SummaryBody, so emitting an extra retract would just be
-	//      dead weight that the summary branch discards anyway.
-	//
-	// priorContribution is the doc's LAST summary body, fetched lazily
-	// at this point (rather than pre-loaded into the batch context).
-	// Empty on first-ever ingest — in that case oldPageSlugs is also
-	// empty, so we never consult it.
-	priorContribution := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
-
-	newSlugSet := make(map[string]bool, len(extractedPages))
-	for _, ns := range extractedPages {
-		newSlugSet[ns.Slug] = true
-	}
-
-	var reparseOverlap, staleCount int
-	for oldSlug := range oldPageSlugs {
-		if newSlugSet[oldSlug] {
-			// Skip summary slugs — they're overwritten wholesale by the
-			// summary update, retract would be ignored downstream.
-			if strings.HasPrefix(oldSlug, "summary/") {
-				continue
-			}
-			reparseOverlap++
-			updates = append(updates, SlugUpdate{
-				Slug:              oldSlug,
-				Type:              "retract",
-				RetractDocContent: priorContribution,
-				DocTitle:          docTitle,
-				KnowledgeID:       knowledgeID,
-				Language:          lang,
-			})
-			continue
-		}
-		staleCount++
-		updates = append(updates, SlugUpdate{
-			Slug:              oldSlug,
-			Type:              "retractStale",
-			RetractDocContent: content,
-			DocTitle:          docTitle,
-			KnowledgeID:       knowledgeID,
-			Language:          lang,
-		})
-	}
+	result, updates := mapPayload.buildResultAndUpdates(
+		ctx,
+		batchCtx,
+		knowledgeID,
+		docTitle,
+		sourceRef,
+		content,
+		oldPageSlugs,
+		wikiSpan,
+		false,
+		len(chunks),
+		lang,
+	)
+	s.setCachedWikiDocumentMap(ctx, payload.TenantID, cacheKey, mapPayload)
 
 	logger.Infof(ctx,
 		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
 		knowledgeID, previewText(docTitle, 80),
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
-		len(updates), reparseOverlap, staleCount, pass0Failed,
+		len(updates), result.MapStats["reparse_slugs"], result.MapStats["stale_slugs"], pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
-
-	// Map-phase metrics get attached to the postprocess.wiki span's
-	// output, but we do NOT EndSpan here — the batch driver keeps the
-	// span open through reduce + index rebuild + cross-link injection
-	// + page publish, then closes it once this doc's pages have all
-	// been written. That way the span's duration reflects the full
-	// "wiki processing for this knowledge" time the user sees in the
-	// trace viewer, not just the LLM extraction slice.
-	mapStats := types.JSONMap{
-		"doc_title":        previewText(docTitle, 120),
-		"chunks":           len(chunks),
-		"candidate_slugs":  len(slugItems),
-		"cited_chunks":     len(citedChunkSet),
-		"uncited_slugs":    uncited,
-		"new_slugs":        len(newSlugs),
-		"updates":          len(updates),
-		"reparse_slugs":    reparseOverlap,
-		"stale_slugs":      staleCount,
-		"extracted_pages":  len(extractedPages),
-		"summary_chars":    utf8.RuneCountInString(docSummary),
-		"pass0_fallback":   pass0Failed,
-		"classify_batches": batchCount,
-		"summary_preview":  previewText(docSummaryLine, 160),
-	}
-
-	return &docIngestResult{
-		KnowledgeID: knowledgeID,
-		DocTitle:    docTitle,
-		Summary:     docSummaryLine,
-		Pages:       extractedPages,
-		MapStats:    mapStats,
-		WikiSpan:    wikiSpan,
-	}, updates, nil
+	return result, updates, nil
 }
 
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
