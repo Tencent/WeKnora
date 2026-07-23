@@ -145,6 +145,8 @@ type SearchResult struct {
 	Seq int `gorm:"column:seq"             json:"seq"`
 	// Score
 	Score float64 `                              json:"score"`
+	// RecallWeight is the feedback-derived multiplier applied to this result.
+	RecallWeight float64 `json:"recall_weight,omitempty"`
 	// Match type
 	MatchType MatchType `                              json:"match_type"`
 	// SubChunkIndex

@@ -61,6 +61,7 @@ type RouterParams struct {
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
+	MessageFeedbackHandler       *handler.MessageFeedbackHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -231,6 +232,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
+		RegisterKnowledgeBaseFeedbackRoutes(v1, params.MessageFeedbackHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
 		// /files route cannot serve because it enforces same-tenant paths.
@@ -248,7 +250,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
-		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		RegisterMessageRoutes(v1, params.MessageHandler, params.MessageFeedbackHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
@@ -520,6 +522,22 @@ func RegisterKnowledgeBaseActivityRoutes(r *gin.RouterGroup, auditHandler *handl
 		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), auditHandler.ListKnowledgeBaseActivity)
 }
 
+// RegisterKnowledgeBaseFeedbackRoutes exposes owner/admin chunk-quality
+// statistics and management. Like the activity feed, this is JWT-only.
+func RegisterKnowledgeBaseFeedbackRoutes(
+	r *gin.RouterGroup,
+	feedbackHandler *handler.MessageFeedbackHandler,
+	g *rbacGuards,
+) {
+	if feedbackHandler == nil {
+		return
+	}
+	group := r.Group("/knowledge-bases/:id/chunk-feedback")
+	group.GET("", g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListChunkStats)
+	group.GET("/:chunk_id/logs", g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListWeightLogs)
+	group.POST("/:chunk_id/reset", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), feedbackHandler.ResetChunk)
+}
+
 // RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
 //
 // Tags are KB metadata: Viewer reads, Contributor writes. Per-KB
@@ -552,7 +570,12 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 // user must own the session). We add Viewer+ here so non-members
 // (e.g. revoked accounts retained in the tenant for audit) cannot
 // reach the endpoints at all once RBAC is on.
-func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
+func RegisterMessageRoutes(
+	r *gin.RouterGroup,
+	handler *handler.MessageHandler,
+	feedbackHandler *handler.MessageFeedbackHandler,
+	g *rbacGuards,
+) {
 	// Message history is tenant-wide and not attributable to a KB, so it is
 	// a full-access surface for API keys by default. The narrow
 	// exceptions are explicit capabilities:
@@ -568,6 +591,10 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 		historyMessages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		chatMessages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
 		chatMessages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
+		if feedbackHandler != nil {
+			chatMessages.PUT("/:session_id/:id/feedback", g.Viewer(), feedbackHandler.Submit)
+			chatMessages.DELETE("/:session_id/:id/feedback", g.Viewer(), feedbackHandler.Cancel)
+		}
 	}
 }
 

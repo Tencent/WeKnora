@@ -1433,6 +1433,15 @@ func (t *KnowledgeSearchTool) compositeScore(
 	result *searchResultWithMeta,
 	modelScore, baseScore float64,
 ) float64 {
+	recallWeight := result.RecallWeight
+	if recallWeight <= 0 {
+		recallWeight = 1
+	}
+	// HybridSearch already applies the multiplier to Score. Recover the raw
+	// retrieval score before composing so feedback weight is applied exactly
+	// once to the final reranked score.
+	rawBaseScore := baseScore / recallWeight
+
 	// Source weight: web_search results get slightly lower weight
 	sourceWeight := 1.0
 	if strings.ToLower(result.KnowledgeSource) == "web_search" {
@@ -1448,8 +1457,8 @@ func (t *KnowledgeSearchTool) compositeScore(
 	}
 
 	// Composite formula: weighted combination of model score, base score, and source weight
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
+	composite := 0.6*modelScore + 0.3*rawBaseScore + 0.1*sourceWeight
+	composite *= positionPrior * recallWeight
 
 	// Clamp to [0, 1]
 	if composite < 0 {

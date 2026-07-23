@@ -1697,6 +1697,30 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
 	}
+	if cfg.FeedbackPositiveThreshold < 0 || cfg.FeedbackPositiveThreshold > 1 ||
+		cfg.FeedbackNegativeThreshold < 0 || cfg.FeedbackNegativeThreshold > 1 ||
+		cfg.FeedbackOptimizationThreshold < 0 || cfg.FeedbackOptimizationThreshold > 1 {
+		c.Error(errors.NewBadRequestError("feedback thresholds must be between 0 and 1"))
+		return
+	}
+	feedbackPositive, feedbackNegative, feedbackOptimize := cfg.GetEffectiveFeedbackThresholds()
+	if feedbackPositive < feedbackNegative {
+		c.Error(errors.NewBadRequestError("feedback_positive_threshold must be greater than or equal to feedback_negative_threshold"))
+		return
+	}
+	if feedbackOptimize > feedbackNegative {
+		c.Error(errors.NewBadRequestError("feedback_optimization_threshold must be less than or equal to feedback_negative_threshold"))
+		return
+	}
+	if cfg.FeedbackBoostWeight < 0 || cfg.FeedbackBoostWeight > 5 ||
+		cfg.FeedbackReduceWeight < 0 || cfg.FeedbackReduceWeight > 5 {
+		c.Error(errors.NewBadRequestError("feedback weights must be between 0 and 5"))
+		return
+	}
+	if cfg.FeedbackMinCount < 0 || cfg.FeedbackMinCount > 1000 {
+		c.Error(errors.NewBadRequestError("feedback_min_count must be between 0 and 1000"))
+		return
+	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {

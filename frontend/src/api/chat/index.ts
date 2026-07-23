@@ -80,3 +80,23 @@ export async function stopSession(session_id: string, message_id: string) {
 export async function clearSessionMessages(session_id: string) {
   return del(`/api/v1/sessions/${session_id}/messages`);
 }
+
+export type MessageFeedbackRating = 1 | -1;
+
+export interface MessageFeedbackPayload {
+  rating: MessageFeedbackRating;
+  reason_code?: 'inaccurate' | 'outdated' | 'incomplete' | 'irrelevant' | 'other';
+  reason_detail?: string;
+}
+
+export async function submitMessageFeedback(
+  sessionId: string,
+  messageId: string,
+  data: MessageFeedbackPayload,
+) {
+  return put(`/api/v1/messages/${sessionId}/${messageId}/feedback`, data);
+}
+
+export async function cancelMessageFeedback(sessionId: string, messageId: string) {
+  return del(`/api/v1/messages/${sessionId}/${messageId}/feedback`);
+}

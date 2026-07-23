@@ -248,11 +248,22 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	if len(deduplicatedChunks) > params.MatchCount {
-		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
+	// Keep a wider candidate set until feedback weights have been loaded from
+	// the chunks table. Truncating here would prevent a boosted lower-ranked
+	// chunk from moving into the final result set.
+	if params.MatchCount > 0 {
+		candidateLimit := params.MatchCount * 3
+		if len(deduplicatedChunks) > candidateLimit {
+			deduplicatedChunks = deduplicatedChunks[:candidateLimit]
+		}
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.processSearchResults(
+		ctx,
+		deduplicatedChunks,
+		params.SkipContextEnrichment,
+		params.MatchCount,
+	)
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in

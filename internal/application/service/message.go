@@ -29,6 +29,7 @@ type messageService struct {
 	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
+	feedbackRepo   interfaces.MessageFeedbackRepository
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,6 +40,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	feedbackRepo interfaces.MessageFeedbackRepository,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:    messageRepo,
@@ -48,6 +50,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		knowService:    knowService,
 		modelService:   modelService,
 		suggestionRepo: suggestionRepo,
+		feedbackRepo:   feedbackRepo,
 	}
 }
 
@@ -123,6 +126,9 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 		})
 		return nil, err
 	}
+	if err := s.hydrateMessageFeedback(ctx, []*types.Message{message}); err != nil {
+		return nil, err
+	}
 
 	logger.Info(ctx, "Message retrieved successfully")
 	return message, nil
@@ -151,6 +157,9 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 			"page":       page,
 			"page_size":  pageSize,
 		})
+		return nil, err
+	}
+	if err := s.hydrateMessageFeedback(ctx, messages); err != nil {
 		return nil, err
 	}
 
@@ -184,6 +193,9 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 			"session_id": sessionID,
 			"limit":      limit,
 		})
+		return nil, err
+	}
+	if err := s.hydrateMessageFeedback(ctx, messages); err != nil {
 		return nil, err
 	}
 
@@ -220,6 +232,9 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 		})
 		return nil, err
 	}
+	if err := s.hydrateMessageFeedback(ctx, messages); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
 	return messages, nil
@@ -247,8 +262,47 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 		})
 		return err
 	}
+	if message.Role == "assistant" && message.IsCompleted && len(message.KnowledgeReferences) > 0 && s.feedbackRepo != nil {
+		if err := s.feedbackRepo.SyncMessageChunkReferences(ctx, tenantID, message); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"session_id": message.SessionID,
+				"message_id": message.ID,
+			})
+			return err
+		}
+	}
 
 	logger.Info(ctx, "Message updated successfully")
+	return nil
+}
+
+func (s *messageService) hydrateMessageFeedback(ctx context.Context, messages []*types.Message) error {
+	if s.feedbackRepo == nil || len(messages) == 0 {
+		return nil
+	}
+	actorID := types.SessionOwnerIDFromContext(ctx)
+	if actorID == "" {
+		return nil
+	}
+	tenantID, ok := sessionTenantIDForLookup(ctx)
+	if !ok {
+		return nil
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.Role == "assistant" {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	feedback, err := s.feedbackRepo.GetByMessageIDs(ctx, tenantID, actorID, messageIDs)
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.Feedback = feedback[message.ID]
+		}
+	}
 	return nil
 }
 

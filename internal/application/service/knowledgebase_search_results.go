@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -14,6 +15,7 @@ import (
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
 	skipEnrichment bool,
+	maxPrimaryResults int,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
@@ -22,22 +24,22 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Collect all knowledge and chunk IDs, track scores and match info
-	index := s.buildChunkIndex(chunks)
+	candidateIndex := s.buildChunkIndex(chunks)
 
 	// Batch fetch knowledge data (include shared KB so cross-tenant retrieval works)
-	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(index.knowledgeIDs))
-	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, index.knowledgeIDs)
+	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(candidateIndex.knowledgeIDs))
+	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, candidateIndex.knowledgeIDs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Batch fetch chunks (include shared KB chunks)
-	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
-	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, index.chunkIDs)
+	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(candidateIndex.chunkIDs))
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, candidateIndex.chunkIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
-			"chunk_ids": index.chunkIDs,
+			"chunk_ids": candidateIndex.chunkIDs,
 		})
 		return nil, err
 	}
@@ -48,6 +50,23 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	for _, chunk := range allChunks {
 		chunkMap[chunk.ID] = chunk
 	}
+
+	// Feedback weights live on the source-of-truth chunk rows rather than in
+	// every vector store. Rank the over-retrieved primary candidates now, then
+	// perform context enrichment only for the selected TopK. This preserves the
+	// original parent/nearby expansion behavior.
+	chunks = rankPrimaryChunksByFeedback(chunks, chunkMap, maxPrimaryResults)
+	index := s.buildChunkIndex(chunks)
+	selectedChunks := make([]*types.Chunk, 0, len(chunks))
+	selectedChunkMap := make(map[string]*types.Chunk, len(chunks))
+	for _, candidate := range chunks {
+		if chunk := chunkMap[candidate.ChunkID]; chunk != nil {
+			selectedChunks = append(selectedChunks, chunk)
+			selectedChunkMap[chunk.ID] = chunk
+		}
+	}
+	allChunks = selectedChunks
+	chunkMap = selectedChunkMap
 
 	if !skipEnrichment {
 		additionalChunkIDs := s.collectEnrichmentChunkIDs(ctx, allChunks, index)
@@ -83,11 +102,44 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	sort.SliceStable(searchResults, func(i, j int) bool {
+		if searchResults[i].Score != searchResults[j].Score {
+			return searchResults[i].Score > searchResults[j].Score
+		}
+		return searchResults[i].ID < searchResults[j].ID
+	})
 
 	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
+}
+
+func rankPrimaryChunksByFeedback(
+	candidates []*types.IndexWithScore,
+	chunkMap map[string]*types.Chunk,
+	limit int,
+) []*types.IndexWithScore {
+	ranked := append([]*types.IndexWithScore(nil), candidates...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		leftWeight, rightWeight := 1.0, 1.0
+		if chunk := chunkMap[ranked[i].ChunkID]; chunk != nil {
+			leftWeight = chunk.EffectiveRecallWeight()
+		}
+		if chunk := chunkMap[ranked[j].ChunkID]; chunk != nil {
+			rightWeight = chunk.EffectiveRecallWeight()
+		}
+		leftScore := ranked[i].Score * leftWeight
+		rightScore := ranked[j].Score * rightWeight
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		return ranked[i].ChunkID < ranked[j].ChunkID
+	})
+	if limit > 0 && len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	return ranked
 }
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
@@ -306,28 +358,30 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
+	recallWeight := chunk.EffectiveRecallWeight()
 	return &types.SearchResult{
-		ID:                chunk.ID,
-		Content:           chunk.Content,
-		KnowledgeID:       chunk.KnowledgeID,
-		ChunkIndex:        chunk.ChunkIndex,
-		KnowledgeTitle:    knowledge.Title,
-		StartAt:           chunk.StartAt,
-		EndAt:             chunk.EndAt,
-		Seq:               chunk.ChunkIndex,
-		Score:             score,
-		MatchType:         matchType,
-		Metadata:          knowledge.GetMetadata(),
-		ChunkType:         string(chunk.ChunkType),
-		ParentChunkID:     chunk.ParentChunkID,
-		ImageInfo:         chunk.ImageInfo,
+		ID:                   chunk.ID,
+		Content:              chunk.Content,
+		KnowledgeID:          chunk.KnowledgeID,
+		ChunkIndex:           chunk.ChunkIndex,
+		KnowledgeTitle:       knowledge.Title,
+		StartAt:              chunk.StartAt,
+		EndAt:                chunk.EndAt,
+		Seq:                  chunk.ChunkIndex,
+		Score:                score * recallWeight,
+		RecallWeight:         recallWeight,
+		MatchType:            matchType,
+		Metadata:             knowledge.GetMetadata(),
+		ChunkType:            string(chunk.ChunkType),
+		ParentChunkID:        chunk.ParentChunkID,
+		ImageInfo:            chunk.ImageInfo,
 		KnowledgeFilename:    knowledge.FileName,
 		KnowledgeSource:      knowledge.Source,
 		KnowledgeChannel:     knowledge.Channel,
 		KnowledgeDescription: knowledge.Description,
-		ChunkMetadata:     chunk.Metadata,
-		MatchedContent:    matchedContent,
-		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
+		ChunkMetadata:        chunk.Metadata,
+		MatchedContent:       matchedContent,
+		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
 	}
 }
 
