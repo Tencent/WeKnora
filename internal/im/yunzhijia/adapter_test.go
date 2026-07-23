@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +38,7 @@ func TestVerifyCallbackSignature(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
-	adapter := NewAdapter("https://www.yunzhijia.com/send", "secret", 10, "yunzhijia.com")
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "secret", "", "", 10, "yunzhijia.com")
 	if err := adapter.VerifyCallback(c); err != nil {
 		t.Fatalf("VerifyCallback() error = %v", err)
 	}
@@ -68,8 +70,94 @@ func TestCleanAtMentionRequiresNameBoundary(t *testing.T) {
 	}
 }
 
+func TestToIncomingMessageParsesMsgParamImage(t *testing.T) {
+	msg := &callbackMessage{
+		Type:           2,
+		MsgType:        23,
+		RobotID:        "BOT-1",
+		RobotName:      "Websocket",
+		GroupID:        "group-1",
+		OperatorOpenid: "user",
+		OperatorName:   "User",
+		Time:           123,
+		MsgID:          "message",
+		Content:        "@Websocket 图片测试一下看看[图片]",
+		GroupType:      2,
+		MsgParam: `{"desc":[{"data":"BOT-1","length":10,"start":0,"type":"at"},` +
+			`{"data":"file-1","h":1032,"length":4,"start":19,"type":"image","w":1920}],` +
+			`"notifyTo":["BOT-1"],"notifyType":1}`,
+	}
+
+	got := toIncomingMessage(t.Context(), msg)
+	if got == nil {
+		t.Fatal("toIncomingMessage() returned nil")
+	}
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want image", got.MessageType)
+	}
+	if got.FileKey != "file-1" {
+		t.Fatalf("FileKey = %q, want file-1", got.FileKey)
+	}
+	if got.FileName != "message.png" {
+		t.Fatalf("FileName = %q, want message.png", got.FileName)
+	}
+	if got.ChatID != "group-1" {
+		t.Fatalf("ChatID = %q, want group-1", got.ChatID)
+	}
+	if got.Content != "图片测试一下看看[图片]" {
+		t.Fatalf("Content = %q", got.Content)
+	}
+	if got.Extra["yunzhijia_image_width"] != "1920" || got.Extra["yunzhijia_image_height"] != "1032" {
+		t.Fatalf("image dimensions extra = %#v", got.Extra)
+	}
+}
+
+func TestToIncomingMessageAcceptsMsgParamMention(t *testing.T) {
+	msg := &callbackMessage{
+		Type:           2,
+		RobotID:        "BOT-1",
+		RobotName:      "Websocket",
+		OperatorOpenid: "user",
+		OperatorName:   "User",
+		Time:           123,
+		MsgID:          "message",
+		Content:        "图片测试一下看看[图片]",
+		MsgParam:       `{"desc":[{"data":"BOT-1","type":"at"},{"data":"file-1","type":"image"}]}`,
+	}
+
+	got := toIncomingMessage(t.Context(), msg)
+	if got == nil {
+		t.Fatal("toIncomingMessage() returned nil")
+	}
+	if got.FileKey != "file-1" {
+		t.Fatalf("FileKey = %q, want file-1", got.FileKey)
+	}
+}
+
+func TestToIncomingMessageAcceptsImageWithoutText(t *testing.T) {
+	msg := &callbackMessage{
+		Type:           2,
+		RobotID:        "BOT-1",
+		RobotName:      "Websocket",
+		OperatorOpenid: "user",
+		OperatorName:   "User",
+		Time:           123,
+		MsgID:          "message",
+		Content:        "",
+		MsgParam:       `{"desc":[{"data":"BOT-1","type":"at"},{"data":"file-1","type":"image"}]}`,
+	}
+
+	got := toIncomingMessage(t.Context(), msg)
+	if got == nil {
+		t.Fatal("toIncomingMessage() returned nil")
+	}
+	if got.MessageType != im.MessageTypeImage || got.FileKey != "file-1" || got.Content != "" {
+		t.Fatalf("incoming = %#v", got)
+	}
+}
+
 func TestSendReplyAcceptsAny2xxAndBuildsPayload(t *testing.T) {
-	adapter := NewAdapter("https://www.yunzhijia.com/send", "", 10, "yunzhijia.com")
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "", "", 10, "yunzhijia.com")
 	var payload sendMessagePayload
 	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
@@ -91,5 +179,249 @@ func TestSendReplyAcceptsAny2xxAndBuildsPayload(t *testing.T) {
 	}
 	if len(payload.NotifyParams) != 1 || len(payload.NotifyParams[0].Values) != 1 || payload.NotifyParams[0].Values[0] != "user" {
 		t.Fatalf("notify params = %#v", payload.NotifyParams)
+	}
+	if payload.Param == nil || payload.Param.FormatType != markdownFormatType {
+		t.Fatalf("expected markdown format param by default, got %#v", payload.Param)
+	}
+}
+
+func TestSendReplyFormatTypeOverride(t *testing.T) {
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "", "", 10, "yunzhijia.com")
+	var payload sendMessagePayload
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusNoContent,
+			Body:       io.NopCloser(bytes.NewReader(nil)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	incoming := &im.IncomingMessage{UserID: "user"}
+
+	// Empty string explicitly disables the param.
+	if err := adapter.SendReply(context.Background(), incoming, &im.ReplyMessage{
+		Content: "answer",
+		Extra:   map[string]string{"yunzhijia_format_type": ""},
+	}); err != nil {
+		t.Fatalf("SendReply() error = %v", err)
+	}
+	if payload.Param != nil {
+		t.Fatalf("expected no param when format type overridden to empty, got %#v", payload.Param)
+	}
+
+	// Non-empty override replaces the default markdown formatType.
+	if err := adapter.SendReply(context.Background(), incoming, &im.ReplyMessage{
+		Content: "answer",
+		Extra:   map[string]string{"yunzhijia_format_type": "text"},
+	}); err != nil {
+		t.Fatalf("SendReply() error = %v", err)
+	}
+	if payload.Param == nil || payload.Param.FormatType != "text" {
+		t.Fatalf("expected overridden format type 'text', got %#v", payload.Param)
+	}
+}
+
+func TestBuildDownloadFileURL(t *testing.T) {
+	got := buildDownloadFileURL("file-1")
+	if got != "https://yunzhijia.com/gateway/docrest/doc/file/downloadfileOpen?fileId=file-1" {
+		t.Fatalf("download URL = %q", got)
+	}
+}
+
+func TestDownloadFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			if r.Method != http.MethodPost {
+				t.Fatalf("token method = %s", r.Method)
+			}
+			var tokenReq map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&tokenReq); err != nil {
+				t.Fatalf("decode token request: %v", err)
+			}
+			if tokenReq["appId"] != "app-id" || tokenReq["secret"] != "app-secret" {
+				t.Fatalf("token request = %#v", tokenReq)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			if r.Header.Get("Authorization") != "Bearer token-1" {
+				t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+			}
+			if r.URL.Query().Get("fileId") != "file-1" {
+				t.Fatalf("query = %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("image-bytes"))
+		default:
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	validateDownloadFileURL = func(string) error { return nil }
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.httpClient = server.Client()
+	reader, fileName, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey:  "file-1",
+		FileName: "message.png",
+	})
+	if err != nil {
+		t.Fatalf("DownloadFile() error = %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "image-bytes" || fileName != "message.png" {
+		t.Fatalf("body=%q fileName=%q", string(body), fileName)
+	}
+}
+
+func TestDownloadFileFollowsSingleRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			http.Redirect(w, r, "/cdn/file-1", http.StatusFound)
+		case "/cdn/file-1":
+			// Bearer token must NOT be forwarded across the redirect.
+			if r.Header.Get("Authorization") != "" {
+				t.Fatalf("Authorization forwarded to redirect target: %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("image-bytes"))
+		default:
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	validateDownloadFileURL = func(string) error { return nil }
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.httpClient = noRedirectClient(server)
+	reader, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1", FileName: "message.png"})
+	if err != nil {
+		t.Fatalf("DownloadFile() error = %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "image-bytes" {
+		t.Fatalf("body = %q", string(body))
+	}
+}
+
+// noRedirectClient returns a client bound to the test server transport that does
+// not auto-follow redirects, mirroring the production adapter's CheckRedirect.
+func noRedirectClient(server *httptest.Server) *http.Client {
+	client := server.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client
+}
+
+func TestDownloadFileRejectsRedirectOffAllowedHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			http.Redirect(w, r, "https://evil.example.com/steal", http.StatusFound)
+		default:
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	// Allow the test server host but reject anything off-host, mimicking the
+	// real yunzhijia.com suffix check for redirect targets.
+	validateDownloadFileURL = func(rawURL string) error {
+		if strings.Contains(rawURL, "evil.example.com") {
+			return fmt.Errorf("host not allowed")
+		}
+		return nil
+	}
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.httpClient = noRedirectClient(server)
+	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
+		t.Fatalf("DownloadFile() error = %v, want redirect rejected", err)
+	}
+}
+
+func TestLimitedReadCloserEnforcesMaxSize(t *testing.T) {
+	reader := newLimitedReadCloser(io.NopCloser(strings.NewReader("0123456789")), 4)
+	defer reader.Close()
+	if _, err := io.ReadAll(reader); err == nil || !strings.Contains(err.Error(), "max download size") {
+		t.Fatalf("read error = %v, want max download size error", err)
+	}
+
+	ok := newLimitedReadCloser(io.NopCloser(strings.NewReader("1234")), 4)
+	defer ok.Close()
+	if got, err := io.ReadAll(ok); err != nil || string(got) != "1234" {
+		t.Fatalf("read got=%q err=%v, want full read within limit", string(got), err)
+	}
+}
+
+func TestDownloadFileRequiresAppCredentials(t *testing.T) {
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "", "", 10, "yunzhijia.com")
+	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil || !strings.Contains(err.Error(), "app_id and app_secret") {
+		t.Fatalf("DownloadFile() error = %v, want app credential error", err)
+	}
+}
+
+func TestValidateFileIDRejectsURLishValues(t *testing.T) {
+	for _, fileID := range []string{"", "a/b", "a?b", "a&b", "a b"} {
+		if err := validateFileID(fileID); err == nil {
+			t.Fatalf("validateFileID(%q) = nil, want error", fileID)
+		}
+	}
+	if err := validateFileID("6a605afe5dda8e000121fcea"); err != nil {
+		t.Fatalf("validateFileID(valid) error = %v", err)
 	}
 }

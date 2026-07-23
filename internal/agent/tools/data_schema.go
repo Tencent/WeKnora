@@ -72,7 +72,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		input.KnowledgeID,
 		page,
 		chunkTypes,
-		"", // tagID
+		nil, // tagIDs
 		"", // keyword
 		"", // searchField
 		"", // sortOrder

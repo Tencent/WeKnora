@@ -295,6 +295,8 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidTenantRole):
 			c.Error(apperrors.NewValidationError(err.Error()))
+		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		case errors.Is(err, service.ErrPendingInvitationExists):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrAlreadyMember):

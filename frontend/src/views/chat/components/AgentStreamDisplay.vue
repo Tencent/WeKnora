@@ -36,19 +36,24 @@
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
               <div v-if="event.type === 'thinking'" class="tool-event">
-                <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+                <div class="action-card thinking-event-card"
+                  :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                   <div class="action-header" @click="toggleEvent(event.event_id)">
-                    <div class="action-title">
+                    <div class="action-title" :class="{
+                      'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                    }">
                       <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                      }}</span>
+                      <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                        class="thinking-inline-content markdown-content">
+                        <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                      </div>
                       <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                         }}</span>
                     </div>
                   </div>
-                  <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                  <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
                       <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
@@ -230,17 +235,23 @@
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
             <div v-if="event.type === 'thinking'" class="tool-event">
-              <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+              <div class="action-card thinking-event-card"
+                :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                 <div class="action-header" @click="toggleEvent(event.event_id)">
-                  <div class="action-title">
+                  <div class="action-title" :class="{
+                    'thinking-inline-title': !event.title && isEventExpanded(event.event_id),
+                  }">
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                    <span v-else class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)"
+                    <div v-else-if="event.content && isEventExpanded(event.event_id)"
+                      class="thinking-inline-content markdown-content">
+                      <div class="thinking-inline-markdown" v-html="renderMarkdownContent(event.content)"></div>
+                    </div>
+                    <span v-else-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
                 </div>
-                <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                <div v-if="event.title && event.content && isEventExpanded(event.event_id)" class="action-details">
                   <div class="thinking-detail-content markdown-content">
                     <div v-html="renderMarkdownContent(event.content)"></div>
                   </div>
@@ -499,6 +510,7 @@ import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMar
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -547,6 +559,13 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_search: 'agentEditor.tools.wikiSearch',
   wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
+  wiki_flag_issue: 'agentEditor.tools.wikiFlagIssue',
+  wiki_write_page: 'agentEditor.tools.wikiWritePage',
+  wiki_replace_text: 'agentEditor.tools.wikiReplaceText',
+  wiki_rename_page: 'agentEditor.tools.wikiRenamePage',
+  wiki_delete_page: 'agentEditor.tools.wikiDeletePage',
+  wiki_read_issue: 'agentEditor.tools.wikiReadIssue',
+  wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
@@ -905,6 +924,84 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
+const WIKI_EDIT_TOOL_NAMES = new Set([
+  'wiki_write_page',
+  'wiki_replace_text',
+  'wiki_rename_page',
+  'wiki_delete_page',
+]);
+
+const WIKI_ISSUE_TOOL_NAMES = new Set([
+  'wiki_flag_issue',
+  'wiki_read_issue',
+  'wiki_update_issue',
+]);
+
+const formatWikiEditResultContent = (toolData: any): string => {
+  const rows: Array<[string, unknown]> = [];
+  switch (toolData?.display_type) {
+    case 'wiki_write_page':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldPageType'), toolData.page_type],
+        [t('chat.wikiFieldSummary'), toolData.summary],
+      );
+      break;
+    case 'wiki_replace_text':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldOldText'), toolData.old_text],
+        [t('chat.wikiFieldNewText'), toolData.new_text],
+      );
+      break;
+    case 'wiki_rename_page':
+      rows.push(
+        [t('chat.wikiFieldOldSlug'), toolData.old_slug],
+        [t('chat.wikiFieldNewSlug'), toolData.new_slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldAffectedPages'), Array.isArray(toolData.affected_pages)
+          ? toolData.affected_pages.join(', ')
+          : toolData.affected_pages],
+      );
+      break;
+    case 'wiki_delete_page':
+      rows.push(
+        [t('chat.wikiFieldSlug'), toolData.slug],
+        [t('chat.wikiFieldTitle'), toolData.title],
+        [t('chat.wikiFieldAffectedPages'), Array.isArray(toolData.affected_pages)
+          ? toolData.affected_pages.join(', ')
+          : toolData.affected_pages],
+      );
+      break;
+  }
+  return rows
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+    .map(([label, value]) => `${label}: ${String(value).trim()}`)
+    .join('\n');
+};
+
+const buildToolResultReference = (
+  event: any,
+  content: string,
+): KnowledgeReferenceLike[] => {
+  if (!content) return [];
+  const toolName = String(event.tool_name || '');
+  const title = getToolTitle(event);
+  return [{
+    id: event.tool_call_id || toolName,
+    chunk_type: 'tool_result',
+    knowledge_title: title,
+    content,
+    metadata: {
+      title,
+      source: getLocalizedToolName(toolName),
+      tool: toolName,
+    },
+  }];
+};
+
 function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (!event || event.pending) return [];
   const toolName = event.tool_name;
@@ -912,21 +1009,38 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
 
   if (isMcpTool(toolName)) {
     const output = formatToolResultContent(event.output) || formatToolResultContent(toolData);
-    if (!output) return [];
-    return [{
-      id: event.tool_call_id || toolName,
-      chunk_type: 'tool_result',
-      knowledge_title: getToolTitle(event),
-      content: output,
-      metadata: {
-        title: getToolTitle(event),
-        source: getLocalizedToolName(toolName),
-        tool: String(toolName || ''),
-      },
-    }];
+    return buildToolResultReference(event, output);
+  }
+
+  if (WIKI_ISSUE_TOOL_NAMES.has(toolName)) {
+    return buildToolResultReference(event, formatToolResultContent(event.output));
   }
 
   if (!toolData) return [];
+
+  if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+    return parseWikiToolReferences(toolName, event.output, event.tool_call_id || toolName)
+      .map((item) => ({
+        id: item.id,
+        chunk_type: 'tool_result',
+        knowledge_title: item.title,
+        content: item.content,
+        metadata: {
+          title: item.title,
+          source: getLocalizedToolName(toolName),
+          tool: toolName,
+          ...(item.slug ? { slug: item.slug } : {}),
+          ...(item.knowledgeBaseId ? { knowledge_base_id: item.knowledgeBaseId } : {}),
+        },
+      }));
+  }
+
+  if (WIKI_EDIT_TOOL_NAMES.has(toolName)) {
+    return buildToolResultReference(
+      event,
+      formatWikiEditResultContent(toolData) || formatToolResultContent(event.output),
+    );
+  }
 
   if (toolName === 'web_search') {
     const results = Array.isArray(toolData.results) ? toolData.results : [];
@@ -1010,7 +1124,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
       })));
   }
 
-  if (toolName === 'list_knowledge_chunks') {
+  if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
     const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
     if (chunks.length) {
       return mergeDocumentReferences(chunks
@@ -1299,6 +1413,12 @@ const hasPendingStreamingActivity = computed(() => {
   return displayEvents.value.some((event: any) => {
     if (!event) return false;
     if (event.pending === true) return true;
+    if (
+      event.type === 'thinking' &&
+      (event.thinking === true || isThinkingActive(event.event_id))
+    ) {
+      return true;
+    }
     return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
   });
 });
@@ -1665,14 +1785,10 @@ const intermediateEvents = computed(() => {
   });
 });
 
-const visibleIntermediateEvents = computed(() => {
-  return intermediateEvents.value.filter((e: any) => {
-    if (!e) return false;
-    if (e.type === 'thinking') return false;
-    if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-    return true;
-  });
-});
+// Keep reasoning in the same compact timeline as tool calls. The template
+// auto-expands the active reasoning event and folds it again once a tool or
+// answer follows, so tool activity remains the primary structure.
+const visibleIntermediateEvents = computed(() => intermediateEvents.value);
 
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
@@ -1689,15 +1805,10 @@ const displayEvents = computed(() => {
     return result.filter((e: any) => e.type === 'answer');
   }
 
-  // While the conversation is still running, keep the same lightweight tool-log
-  // surface as the completed tree. Raw thinking narration is noisy during
-  // streaming; real tool rows carry their own pending state.
+  // Keep the active reasoning event inline with tool activity. It uses the same
+  // compact timeline card and is auto-collapsed when a tool or answer follows.
   if (!isConversationDone.value) {
-    return result.filter((e: any) => {
-      if (e.type === 'thinking') return false;
-      if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
-      return true;
-    });
+    return result;
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
@@ -1795,12 +1906,17 @@ const isEventExpanded = (eventId: string): boolean => {
 
 const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   isMcpTool(toolName) ||
+  WIKI_EDIT_TOOL_NAMES.has(String(toolName || '')) ||
+  WIKI_ISSUE_TOOL_NAMES.has(String(toolName || '')) ||
   toolName === 'search_knowledge' ||
   toolName === 'knowledge_search' ||
   toolName === 'web_search' ||
   toolName === 'web_fetch' ||
   toolName === 'grep_chunks' ||
-  toolName === 'list_knowledge_chunks';
+  toolName === 'list_knowledge_chunks' ||
+  toolName === 'wiki_search' ||
+  toolName === 'wiki_read_page' ||
+  toolName === 'wiki_read_source_doc';
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
@@ -3363,6 +3479,34 @@ const handleAddToKnowledge = (answerEvent: any) => {
     color: var(--td-text-color-secondary);
     max-height: none;
     overflow-y: visible;
+  }
+
+  .thinking-inline-title {
+    align-items: flex-start;
+  }
+
+  // Anchor the bulb to the fixed header instead of the variable-height title.
+  // Otherwise expanding inline reasoning shifts the icon along the timeline.
+  .tree-child .thinking-event-card .action-title {
+    position: static;
+  }
+
+  .thinking-inline-content {
+    flex: 1;
+    min-width: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--agent-step-summary-size);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    user-select: text;
+
+    :deep(.thinking-inline-markdown > :first-child) {
+      margin-top: 0;
+    }
+
+    :deep(.thinking-inline-markdown > :last-child) {
+      margin-bottom: 0;
+    }
   }
 
   .search-results-summary-fixed,

@@ -365,13 +365,17 @@ export async function getEmbedMCPOAuthAuthorizeURL(
   visitorId: string,
   serviceId: string,
   body: { redirect_uri: string; frontend_redirect?: string },
-): Promise<string> {
+): Promise<{ authorizationUrl: string; authorizationAttempt: string }> {
   const response: any = await post(
     `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/authorize-url`,
     body,
     { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
-  return (response.data ?? response)?.authorization_url ?? ''
+  const data = response.data ?? response
+  return {
+    authorizationUrl: data?.authorization_url ?? '',
+    authorizationAttempt: data?.authorization_attempt ?? '',
+  }
 }
 
 export async function getEmbedMCPOAuthStatus(
@@ -381,9 +385,13 @@ export async function getEmbedMCPOAuthStatus(
   sessionSig: string,
   visitorId: string,
   serviceId: string,
+  authorizationAttempt?: string,
 ): Promise<boolean> {
+  const query = authorizationAttempt
+    ? `?authorization_attempt=${encodeURIComponent(authorizationAttempt)}`
+    : ''
   const response: any = await get(
-    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/status`,
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/status${query}`,
     { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
   return Boolean((response.data ?? response)?.authorized)

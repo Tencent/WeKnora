@@ -685,8 +685,8 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		t := time.Unix(*req.ExpiresAt, 0)
-		if !t.After(time.Now()) {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !t.After(time.Now().UTC()) {
 			c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
 			return
 		}

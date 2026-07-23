@@ -305,6 +305,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
+	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
+		return
+	}
 
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
@@ -1127,10 +1132,11 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	// Create KB clone payload
 	payload := types.KBClonePayload{
-		TenantID: tenantID.(uint64),
-		TaskID:   taskID,
-		SourceID: req.SourceID,
-		TargetID: req.TargetID,
+		TenantID:  tenantID.(uint64),
+		TaskID:    taskID,
+		SourceID:  req.SourceID,
+		TargetID:  req.TargetID,
+		Initiator: types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 

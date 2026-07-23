@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -269,6 +270,10 @@ func isAuthorizationRequired(err error) bool {
 		return false
 	}
 	if mcpclient.IsOAuthAuthorizationRequiredError(err) || mcpclient.IsAuthorizationRequiredError(err) {
+		return true
+	}
+	var reauth *mcp.OAuthReauthorizationRequiredError
+	if errors.As(err, &reauth) {
 		return true
 	}
 	msg := err.Error()

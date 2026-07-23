@@ -339,15 +339,34 @@
           <h4 class="setting-drawer__section-title">
             {{ t('system.globalSettings.runtime.tasks.listTitle', { state: taskStateLabel(taskState) }) }}
           </h4>
-          <t-button
-            variant="text"
-            size="small"
-            :loading="tasksLoading && !tasksLoadingMore"
-            @click="reloadRuntimeTasks"
-          >
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('system.globalSettings.runtime.refresh') }}
-          </t-button>
+          <div class="rq-failed-section-actions">
+            <t-popconfirm
+              v-if="taskState === 'archived' && tasks.length > 0"
+              theme="danger"
+              :content="t('system.globalSettings.runtime.tasks.purgeArchivedConfirm', { count: taskStateCount(taskQueue, 'archived') })"
+              @confirm="purgeArchivedTasks"
+            >
+              <t-button
+                variant="text"
+                size="small"
+                theme="danger"
+                :loading="purging"
+                :disabled="Boolean(taskActionID)"
+              >
+                <template #icon><t-icon name="clear" /></template>
+                {{ t('system.globalSettings.runtime.tasks.purgeArchived') }}
+              </t-button>
+            </t-popconfirm>
+            <t-button
+              variant="text"
+              size="small"
+              :loading="tasksLoading && !tasksLoadingMore"
+              @click="reloadRuntimeTasks"
+            >
+              <template #icon><t-icon name="refresh" /></template>
+              {{ t('system.globalSettings.runtime.refresh') }}
+            </t-button>
+          </div>
         </div>
 
         <div v-if="tasksLoading && tasks.length === 0" class="rq-failed-loading">
@@ -497,6 +516,7 @@ import {
   getRuntimeTasks,
   getRuntimeQueues,
   mutateRuntimeTask,
+  purgeArchivedRuntimeTasks,
   type ModelRuntimeStat,
   type QueueStat,
   type RuntimeTask,
@@ -531,6 +551,7 @@ const tasksHasMore = ref(false)
 const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
 const taskAction = ref<RuntimeTaskAction | ''>('')
+const purging = ref(false)
 
 const TASK_PAGE_SIZE = 20
 const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
@@ -857,6 +878,22 @@ async function runTaskAction(task: RuntimeTask, action: RuntimeTaskAction) {
   } finally {
     taskActionID.value = ''
     taskAction.value = ''
+  }
+}
+
+async function purgeArchivedTasks() {
+  const queue = taskQueue.value?.name
+  if (!queue || purging.value) return
+  purging.value = true
+  try {
+    const { deleted } = await purgeArchivedRuntimeTasks(queue)
+    MessagePlugin.success(t('system.globalSettings.runtime.tasks.purgeArchivedSuccess', { count: deleted }))
+    await Promise.all([reloadRuntimeTasks(), load(false)])
+    taskQueue.value = queues.value.find((item) => item.name === queue) ?? taskQueue.value
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.tasks.purgeArchivedError'))
+  } finally {
+    purging.value = false
   }
 }
 
@@ -1475,6 +1512,13 @@ onUnmounted(() => {
   .setting-drawer__section-title {
     margin-bottom: 0;
   }
+}
+
+.rq-failed-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .rq-failed-loading {

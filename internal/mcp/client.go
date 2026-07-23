@@ -66,6 +66,7 @@ type ClientConfig struct {
 type mcpGoClient struct {
 	service     *types.MCPService
 	client      *client.Client
+	oauth       *oauthRuntime
 	connected   bool
 	initialized bool
 }
@@ -223,6 +224,16 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		service: config.Service,
 		client:  mcpClient,
 	}
+	if useOAuth {
+		instance.oauth = newOAuthRuntime(
+			config.OAuthRepo,
+			config.TenantID,
+			config.Principal,
+			config.Service.ID,
+			*config.Service.URL,
+			oauthConfig,
+		)
+	}
 	mcpClient.OnConnectionLost(instance.onConnectionLost)
 	return instance, nil
 }
@@ -246,10 +257,11 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 	if !principal.Valid() {
 		return transport.OAuthConfig{}, false, fmt.Errorf("principal context is required to connect to an OAuth MCP service")
 	}
+	config.Principal = principal
 
 	oauthCfg := transport.OAuthConfig{
 		Scopes:                svc.AuthConfig.Scopes,
-		TokenStore:            newDBTokenStore(config.OAuthRepo, config.TenantID, principal, svc.ID),
+		TokenStore:            newManagedTokenStore(config.OAuthRepo, config.TenantID, principal, svc.ID),
 		PKCEEnabled:           true,
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,
@@ -288,14 +300,37 @@ func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
 	}
 }
 
+// oauthCall runs one MCP operation with WeKnora-owned token lifecycle checks.
+// A resource-server 401 forces exactly one refresh and one retry. Other errors
+// are never retried, which avoids duplicating tool side effects after ambiguous
+// network failures.
+func oauthCall[T any](ctx context.Context, c *mcpGoClient, operation func() (T, error)) (T, error) {
+	var zero T
+	if c.oauth != nil {
+		if err := c.oauth.ensureFresh(ctx, false, nil); err != nil {
+			return zero, err
+		}
+	}
+	result, err := operation()
+	if err == nil || c.oauth == nil || !isOAuthAuthorizationFailure(err) {
+		return result, err
+	}
+	if refreshErr := c.oauth.ensureFresh(ctx, true, client.GetOAuthHandler(err)); refreshErr != nil {
+		return zero, refreshErr
+	}
+	return operation()
+}
+
 // Connect establishes connection to the MCP service
 func (c *mcpGoClient) Connect(ctx context.Context) error {
 	if c.connected {
 		return ErrAlreadyConnected
 	}
 
-	// Start the client
-	if err := c.client.Start(ctx); err != nil {
+	_, err := oauthCall(ctx, c, func() (struct{}, error) {
+		return struct{}{}, c.client.Start(ctx)
+	})
+	if err != nil {
 		if oerr := asOAuthRequired(err); oerr != nil {
 			return oerr
 		}
@@ -344,7 +379,9 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 		},
 	}
 
-	result, err := c.client.Initialize(ctx, req)
+	result, err := oauthCall(ctx, c, func() (*mcp.InitializeResult, error) {
+		return c.client.Initialize(ctx, req)
+	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		if oerr := asOAuthRequired(err); oerr != nil {
@@ -373,7 +410,9 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 	}
 
 	req := mcp.ListToolsRequest{}
-	result, err := c.client.ListTools(ctx, req)
+	result, err := oauthCall(ctx, c, func() (*mcp.ListToolsResult, error) {
+		return c.client.ListTools(ctx, req)
+	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
@@ -400,7 +439,9 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 	}
 
 	req := mcp.ListResourcesRequest{}
-	result, err := c.client.ListResources(ctx, req)
+	result, err := oauthCall(ctx, c, func() (*mcp.ListResourcesResult, error) {
+		return c.client.ListResources(ctx, req)
+	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list resources: %w", err)
@@ -433,7 +474,9 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		},
 	}
 
-	result, err := c.client.CallTool(ctx, req)
+	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
+		return c.client.CallTool(ctx, req)
+	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to call tool: %w", err)
@@ -474,7 +517,9 @@ func (c *mcpGoClient) ReadResource(ctx context.Context, uri string) (*ReadResour
 		},
 	}
 
-	result, err := c.client.ReadResource(ctx, req)
+	result, err := oauthCall(ctx, c, func() (*mcp.ReadResourceResult, error) {
+		return c.client.ReadResource(ctx, req)
+	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to read resource: %w", err)

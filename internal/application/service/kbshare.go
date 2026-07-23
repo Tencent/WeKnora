@@ -27,7 +27,7 @@ var (
 // in this org, with what role" rather than "is this user". The 3-D cap
 // inside CheckTenantKBPermission encodes:
 //
-//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//	effective = min(share.Permission, tenant_org_role, tenant_role_cap)
 //
 // where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
 // of what the org-level grant said. That keeps the tenant RBAC promise
@@ -39,6 +39,7 @@ type kbShareService struct {
 	kbRepo    interfaces.KnowledgeBaseRepository
 	kgRepo    interfaces.KnowledgeRepository
 	chunkRepo interfaces.ChunkRepository
+	audit     interfaces.AuditLogService
 }
 
 // NewKBShareService creates a new knowledge base share service
@@ -48,6 +49,7 @@ func NewKBShareService(
 	kbRepo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
+	audit interfaces.AuditLogService,
 ) interfaces.KBShareService {
 	return &kbShareService{
 		shareRepo: shareRepo,
@@ -55,6 +57,7 @@ func NewKBShareService(
 		kbRepo:    kbRepo,
 		kgRepo:    kgRepo,
 		chunkRepo: chunkRepo,
+		audit:     audit,
 	}
 }
 
@@ -129,12 +132,18 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 			if err := s.shareRepo.Update(ctx, existingShare); err != nil {
 				return nil, err
 			}
+			recordKBActivity(ctx, s.audit, kb.TenantID, kb.ID, types.AuditActionKBSharePermissionChanged,
+				"knowledge_base_share", existingShare.ID, types.AuditOutcomeSuccess,
+				map[string]any{"organization_id": orgID, "permission": permission})
 			return existingShare, nil
 		}
 		return nil, err
 	}
 
 	logger.Infof(ctx, "Knowledge base %s shared successfully to organization %s", kbID, orgID)
+	recordKBActivity(ctx, s.audit, kb.TenantID, kb.ID, types.AuditActionKBShareAdded,
+		"knowledge_base_share", share.ID, types.AuditOutcomeSuccess,
+		map[string]any{"organization_id": orgID, "permission": permission})
 	return share, nil
 }
 
@@ -169,7 +178,13 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 	share.Permission = permission
 	share.UpdatedAt = time.Now()
 
-	return s.shareRepo.Update(ctx, share)
+	if err := s.shareRepo.Update(ctx, share); err != nil {
+		return err
+	}
+	recordKBActivity(ctx, s.audit, share.SourceTenantID, share.KnowledgeBaseID, types.AuditActionKBSharePermissionChanged,
+		"knowledge_base_share", share.ID, types.AuditOutcomeSuccess,
+		map[string]any{"organization_id": share.OrganizationID, "permission": permission})
+	return nil
 }
 
 // RemoveShare removes a share.
@@ -184,7 +199,13 @@ func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID
 	}
 
 	if s.callerCanManageShare(ctx, share.SharedByUserID, share.SourceTenantID, share.OrganizationID, userID, tenantID) {
-		return s.shareRepo.Delete(ctx, shareID)
+		if err := s.shareRepo.Delete(ctx, shareID); err != nil {
+			return err
+		}
+		recordKBActivity(ctx, s.audit, share.SourceTenantID, share.KnowledgeBaseID, types.AuditActionKBShareRemoved,
+			"knowledge_base_share", share.ID, types.AuditOutcomeSuccess,
+			map[string]any{"organization_id": share.OrganizationID, "permission": share.Permission})
+		return nil
 	}
 
 	return ErrSharePermissionDenied
