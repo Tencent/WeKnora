@@ -220,7 +220,7 @@ type AuditLog struct {
 	RequestPath   string       `json:"request_path"   gorm:"type:varchar(512);default:''"`
 	RequestMethod string       `json:"request_method" gorm:"type:varchar(16);default:''"`
 	Outcome       AuditOutcome `json:"outcome"        gorm:"type:varchar(16);default:success"`
-	Details       JSON         `json:"details"        gorm:"type:jsonb;default:'{}'"`
+	Details       JSON         `json:"details"        gorm:"type:json;default:'{}'"`
 	CreatedAt     time.Time    `json:"created_at"     gorm:"index:idx_audit_logs_tenant_id_desc,priority:2,sort:desc"`
 }
 

@@ -89,9 +89,9 @@ type KnowledgeProcessingSpan struct {
 	Name         string     `gorm:"column:name;size:255"             json:"name"`
 	Kind         string     `gorm:"column:kind;size:16"              json:"kind"`
 	Status       string     `gorm:"column:status;size:16"            json:"status"`
-	Input        JSONMap    `gorm:"column:input;type:jsonb"          json:"input,omitempty"`
-	Output       JSONMap    `gorm:"column:output;type:jsonb"         json:"output,omitempty"`
-	Metadata     JSONMap    `gorm:"column:metadata;type:jsonb"       json:"metadata,omitempty"`
+	Input        JSONMap    `gorm:"column:input;type:json"          json:"input,omitempty"`
+	Output       JSONMap    `gorm:"column:output;type:json"         json:"output,omitempty"`
+	Metadata     JSONMap    `gorm:"column:metadata;type:json"       json:"metadata,omitempty"`
 	ErrorCode    string     `gorm:"column:error_code;size:64"        json:"error_code,omitempty"`
 	ErrorMessage string     `gorm:"column:error_message;type:text"   json:"error_message,omitempty"`
 	ErrorDetail  string     `gorm:"column:error_detail;type:text"    json:"-"`

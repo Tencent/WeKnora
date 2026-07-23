@@ -42,7 +42,7 @@ type TaskPendingOp struct {
 	DedupKey string `json:"dedup_key" gorm:"type:varchar(128);default:''"`
 	// JSON-serialized op payload. Schema is consumer-defined; the queue
 	// stores it verbatim. Use json.RawMessage to avoid double-decode.
-	Payload json.RawMessage `json:"payload" gorm:"type:jsonb;default:'{}'"`
+	Payload json.RawMessage `json:"payload" gorm:"type:json;default:'{}'"`
 	// In-batch retry counter. Reset to 0 on successful consume.
 	FailCount int `json:"fail_count" gorm:"default:0"`
 	// Server-side enqueue time. NOT used for ordering (id is the cursor)

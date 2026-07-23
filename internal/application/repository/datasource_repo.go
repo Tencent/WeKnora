@@ -299,10 +299,15 @@ func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays in
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
-	// Delete logs older than the retention period
-	if err := r.db.WithContext(ctx).
-		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
-		Delete(&types.SyncLog{}).Error; err != nil {
+		// Delete logs older than the retention period
+		q := r.db.WithContext(ctx)
+		switch r.db.Dialector.Name() {
+		case "mysql":
+			q = q.Where("started_at < DATE_SUB(NOW(), INTERVAL ? DAY)", retentionDays)
+		default:
+			q = q.Where("started_at < NOW() - INTERVAL ? DAY", retentionDays)
+		}
+		if err := q.Delete(&types.SyncLog{}).Error; err != nil {
 		return err
 	}
 	return nil

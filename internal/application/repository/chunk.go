@@ -392,10 +392,11 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	dialect := r.db.Dialector.Name()
 
 	var sql string
-	if isPostgres {
+	switch dialect {
+	case "postgres":
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -413,7 +414,25 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(statusCases, " "),
 			strings.Join(inPlaceholders, ","),
 		)
-	} else {
+	case "mysql":
+		sql = fmt.Sprintf(`
+			UPDATE chunks SET
+				content = CASE %s END,
+				is_enabled = CASE %s END,
+				tag_id = CASE %s END,
+				flags = CASE %s END,
+				status = CASE %s END,
+				updated_at = NOW()
+			WHERE id IN (%s)
+		`,
+			strings.Join(contentCases, " "),
+			strings.Join(isEnabledCases, " "),
+			strings.Join(tagIDCases, " "),
+			strings.Join(flagsCases, " "),
+			strings.Join(statusCases, " "),
+			strings.Join(inPlaceholders, ","),
+		)
+	default: // sqlite
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -681,6 +700,10 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 	switch r.db.Name() {
 	case "mysql":
 		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
+		// For MySQL 8.0.17+, this loop can be replaced with a single
+		//   JSON_OVERLAPS(metadata->'$.similar_questions', CAST(? AS JSON))
+		// but since this is only hit during FAQ import (not a hot path), the
+		// per-question loop is acceptable for now.
 		parts := []string{
 			"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) IN ?",
 		}

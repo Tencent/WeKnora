@@ -27,7 +27,7 @@ type IMChannel struct {
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
-	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
+	Credentials     types.JSON     `json:"credentials"       gorm:"type:json;not null;default:'{}'"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	DeletedAt       gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
@@ -229,7 +229,7 @@ type ChannelSession struct {
 	AgentID     string         `json:"agent_id"      gorm:"type:varchar(36);default:''"`
 	IMChannelID string         `json:"im_channel_id" gorm:"type:varchar(36);default:''"`
 	Status      string         `json:"status"        gorm:"type:varchar(20);not null;default:'active'"`
-	Metadata    types.JSON     `json:"metadata"      gorm:"type:jsonb;default:'{}'"`
+	Metadata    types.JSON     `json:"metadata"      gorm:"type:json;default:'{}'"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"deleted_at"    gorm:"index"`

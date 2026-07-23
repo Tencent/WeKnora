@@ -96,7 +96,7 @@ type Session struct {
 	// that reopening the session can restore the original request context to
 	// the chat UI. Stored in the legacy sessions.agent_config JSONB column to
 	// avoid a new migration; the shape used today is `SessionLastRequestState`.
-	LastRequestState *SessionLastRequestState `json:"last_request_state,omitempty" gorm:"column:agent_config;type:jsonb"`
+	LastRequestState *SessionLastRequestState `json:"last_request_state,omitempty" gorm:"column:agent_config;type:json"`
 
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
@@ -112,8 +112,8 @@ type Session struct {
 	// RerankThreshold   float64             `json:"rerank_threshold"`                     // 排序阈值
 	// SummaryModelID    string              `json:"summary_model_id"`                     // 总结模型ID
 	// SummaryParameters *SummaryConfig      `json:"summary_parameters" gorm:"type:json"`  // 总结模型参数
-	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:jsonb"` // Agent 配置（会话级别，仅存储enabled和knowledge_bases）
-	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:jsonb"` // 上下文管理配置（可选）
+	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:json"` // Agent 配置（会话级别，仅存储enabled和knowledge_bases）
+	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:json"` // 上下文管理配置（可选）
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
