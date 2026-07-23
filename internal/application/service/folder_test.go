@@ -30,7 +30,7 @@ func setupFolderServiceTest(t *testing.T) folderServiceTestFixture {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", ".."))
 	initSQL, err := os.ReadFile(filepath.Join(repoRoot, "migrations", "sqlite", "000000_init.up.sql"))
 	require.NoError(t, err)
-	folderSQL, err := os.ReadFile(filepath.Join(repoRoot, "migrations", "sqlite", "000071_add_folders.up.sql"))
+	folderSQL, err := os.ReadFile(filepath.Join(repoRoot, "migrations", "sqlite", "000075_add_folders.up.sql"))
 	require.NoError(t, err)
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared&_foreign_keys=on"), &gorm.Config{})
 	require.NoError(t, err)

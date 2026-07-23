@@ -1,4 +1,4 @@
--- Migration: 000071_add_folders
+-- Migration: 000075_add_folders
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_bases_tenant_id_id
     ON knowledge_bases (tenant_id, id);

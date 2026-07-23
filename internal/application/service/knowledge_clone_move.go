@@ -1287,7 +1287,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
-	knowledge.KnowledgeBaseID = targetKB.ID
+	moveKnowledgeToTargetRoot(knowledge, targetKB.ID)
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -1315,7 +1315,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
-	knowledge.KnowledgeBaseID = targetKB.ID
+	moveKnowledgeToTargetRoot(knowledge, targetKB.ID)
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"
@@ -1377,6 +1377,14 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	}
 
 	return nil
+}
+
+// moveKnowledgeToTargetRoot maintains the folder foreign-key invariant when a
+// knowledge row changes knowledge bases. Folder IDs are scoped to one KB, so a
+// source folder can never be carried into the target KB.
+func moveKnowledgeToTargetRoot(knowledge *types.Knowledge, targetKnowledgeBaseID string) {
+	knowledge.KnowledgeBaseID = targetKnowledgeBaseID
+	knowledge.FolderID = nil
 }
 
 // getOrCreateTagInTarget finds or creates a tag in the target knowledge base based on the source tag.

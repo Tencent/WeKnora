@@ -60,3 +60,17 @@ func TestSharesStoreWith_GuardSemantics(t *testing.T) {
 	assert.False(t, same(&storeA, &storeB), "different UUID → cross-store")
 	assert.False(t, same(&storeA, nil), "bound vs env-store → cross-store")
 }
+
+func TestMoveKnowledgeToTargetRootClearsSourceFolder(t *testing.T) {
+	sourceFolderID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	knowledge := &types.Knowledge{
+		ID:              "knowledge-1",
+		KnowledgeBaseID: "source-kb",
+		FolderID:        &sourceFolderID,
+	}
+
+	moveKnowledgeToTargetRoot(knowledge, "target-kb")
+
+	assert.Equal(t, "target-kb", knowledge.KnowledgeBaseID)
+	assert.Nil(t, knowledge.FolderID)
+}

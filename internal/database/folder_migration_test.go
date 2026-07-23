@@ -45,7 +45,7 @@ func TestSQLiteFolderMigrationUpDownAndScopedConstraints(t *testing.T) {
 	require.NoError(t, m.Up())
 	version, dirty, err := m.Version()
 	require.NoError(t, err)
-	require.Equal(t, uint(71), version)
+	require.Equal(t, uint(75), version)
 	require.False(t, dirty)
 
 	_, err = db.Exec(`

@@ -1,4 +1,4 @@
--- Migration: 000071_add_folders (down)
+-- Migration: 000075_add_folders (down)
 
 DROP TRIGGER IF EXISTS trg_folders_referenced_by_knowledge_update;
 DROP TRIGGER IF EXISTS trg_folders_referenced_by_knowledge_delete;

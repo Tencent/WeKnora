@@ -1,4 +1,4 @@
--- Migration: 000071_add_folders (down)
+-- Migration: 000075_add_folders (down)
 
 ALTER TABLE knowledges
     DROP CONSTRAINT IF EXISTS fk_knowledges_folder;
