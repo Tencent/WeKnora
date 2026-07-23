@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -10,6 +13,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+const storageAllowSharedBucketEnv = "WEKNORA_STORAGE_ALLOW_SHARED_BUCKET"
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
 type ListTenantsParams struct {
@@ -41,18 +46,17 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Creating tenant, name: %s", tenant.Name)
 
+	if !storageBucketSharingAllowed() {
+		if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
+			return nil, err
+		}
+	}
+
 	// New tenants do not receive an API key by default. Integrations create
 	// keys explicitly through tenant_api_keys.
 	tenant.Status = "active"
 	tenant.CreatedAt = time.Now()
 	tenant.UpdatedAt = time.Now()
-
-	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_name": tenant.Name,
-		})
-		return nil, err
-	}
 
 	logger.Info(ctx, "Saving tenant information to database")
 	if err := s.repo.CreateTenant(ctx, tenant); err != nil {
@@ -143,11 +147,10 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Updating tenant, ID: %d, name: %s", tenant.ID, tenant.Name)
 
-	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenant.ID,
-		})
-		return nil, err
+	if !storageBucketSharingAllowed() {
+		if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
+			return nil, err
+		}
 	}
 
 	tenant.UpdatedAt = time.Now()
@@ -162,6 +165,100 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Tenant updated successfully, ID: %d", tenant.ID)
 	return tenant, nil
+}
+
+// storageBucketSharingAllowed defaults to true for backward compatibility with
+// deployments that intentionally isolate tenants by path prefix in one bucket.
+// Only a valid, explicit false value enables the legacy uniqueness check.
+func storageBucketSharingAllowed() bool {
+	value := strings.TrimSpace(os.Getenv(storageAllowSharedBucketEnv))
+	if value == "" {
+		return true
+	}
+	allowed, err := strconv.ParseBool(value)
+	if err != nil {
+		return true
+	}
+	return allowed
+}
+
+func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, tenant *types.Tenant) error {
+	if tenant.StorageEngineConfig == nil {
+		return nil
+	}
+
+	var oldTenant *types.Tenant
+	if tenant.ID != 0 {
+		existing, err := s.repo.GetTenantByID(ctx, tenant.ID)
+		if err != nil && err.Error() != "tenant not found" && err.Error() != "record not found" {
+			return err
+		}
+		oldTenant = existing
+	}
+
+	allTenants, err := s.repo.ListTenants(ctx)
+	if err != nil {
+		return err
+	}
+
+	getBuckets := func(config *types.StorageEngineConfig) map[string]string {
+		buckets := make(map[string]string)
+		if config == nil {
+			return buckets
+		}
+		if config.MinIO != nil && config.MinIO.BucketName != "" {
+			buckets["minio"] = config.MinIO.BucketName
+		}
+		if config.COS != nil && config.COS.BucketName != "" {
+			buckets["cos"] = config.COS.BucketName
+		}
+		if config.TOS != nil && config.TOS.BucketName != "" {
+			buckets["tos"] = config.TOS.BucketName
+		}
+		if config.S3 != nil && config.S3.BucketName != "" {
+			buckets["s3"] = config.S3.BucketName
+		}
+		if config.OSS != nil && config.OSS.BucketName != "" {
+			buckets["oss"] = config.OSS.BucketName
+		}
+		if config.KS3 != nil && config.KS3.BucketName != "" {
+			buckets["ks3"] = config.KS3.BucketName
+		}
+		if config.OBS != nil && config.OBS.BucketName != "" {
+			buckets["obs"] = config.OBS.BucketName
+		}
+		return buckets
+	}
+
+	oldBuckets := map[string]string{}
+	if oldTenant != nil {
+		oldBuckets = getBuckets(oldTenant.StorageEngineConfig)
+	}
+	newBuckets := getBuckets(tenant.StorageEngineConfig)
+	usedByOthers := make(map[string]map[string]bool)
+	for _, otherTenant := range allTenants {
+		if otherTenant == nil || otherTenant.ID == tenant.ID {
+			continue
+		}
+		for provider, bucket := range getBuckets(otherTenant.StorageEngineConfig) {
+			if usedByOthers[provider] == nil {
+				usedByOthers[provider] = make(map[string]bool)
+			}
+			usedByOthers[provider][bucket] = true
+		}
+	}
+
+	for provider, bucket := range newBuckets {
+		if bucket == oldBuckets[provider] {
+			continue
+		}
+		if usedByOthers[provider] != nil && usedByOthers[provider][bucket] {
+			return werrors.NewBadRequestError(
+				"存储桶名称「" + bucket + "」已被其他空间使用，为保证数据隔离，请使用其他名称",
+			)
+		}
+	}
+	return nil
 }
 
 // DeleteTenant removes a tenant by their ID
@@ -285,83 +382,4 @@ func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.W
 		return nil
 	}
 	return tenant.Credentials.GetWeKnoraCloud()
-}
-
-func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, tenant *types.Tenant) error {
-	if tenant.StorageEngineConfig == nil {
-		return nil
-	}
-
-	// Fetch existing tenant from DB to compare
-	var oldTenant *types.Tenant
-	if tenant.ID != 0 {
-		var err error
-		oldTenant, err = s.repo.GetTenantByID(ctx, tenant.ID)
-		if err != nil && err.Error() != "tenant not found" && err.Error() != "record not found" {
-			return err
-		}
-	}
-
-	// Fetch ALL tenants to check for collision.
-	allTenants, err := s.repo.ListTenants(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Helper to get bucket names from a StorageEngineConfig
-	getBuckets := func(cfg *types.StorageEngineConfig) map[string]string {
-		if cfg == nil {
-			return nil
-		}
-		res := make(map[string]string)
-		if cfg.MinIO != nil && cfg.MinIO.BucketName != "" {
-			res["minio"] = cfg.MinIO.BucketName
-		}
-		if cfg.COS != nil && cfg.COS.BucketName != "" {
-			res["cos"] = cfg.COS.BucketName
-		}
-		if cfg.TOS != nil && cfg.TOS.BucketName != "" {
-			res["tos"] = cfg.TOS.BucketName
-		}
-		if cfg.S3 != nil && cfg.S3.BucketName != "" {
-			res["s3"] = cfg.S3.BucketName
-		}
-		if cfg.OSS != nil && cfg.OSS.BucketName != "" {
-			res["oss"] = cfg.OSS.BucketName
-		}
-		return res
-	}
-
-	var oldBuckets map[string]string
-	if oldTenant != nil {
-		oldBuckets = getBuckets(oldTenant.StorageEngineConfig)
-	}
-	newBuckets := getBuckets(tenant.StorageEngineConfig)
-
-	// Collect buckets used by other tenants
-	usedByOthers := make(map[string]map[string]bool) // provider -> set of bucket names
-	for _, t := range allTenants {
-		if t.ID == tenant.ID {
-			continue
-		}
-		tb := getBuckets(t.StorageEngineConfig)
-		for p, b := range tb {
-			if usedByOthers[p] == nil {
-				usedByOthers[p] = make(map[string]bool)
-			}
-			usedByOthers[p][b] = true
-		}
-	}
-
-	// Check if any NEW bucket is already used by someone else, AND it's different from the OLD bucket
-	for p, b := range newBuckets {
-		oldB := oldBuckets[p]
-		if b != oldB { // User is trying to change their bucket name or set a new one
-			if usedByOthers[p] != nil && usedByOthers[p][b] {
-				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他空间使用，为保证数据隔离，请使用其他名称")
-			}
-		}
-	}
-
-	return nil
 }
