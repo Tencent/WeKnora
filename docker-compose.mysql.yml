@@ -1,0 +1,52 @@
+services:
+  mysql:
+    # WeKnora requires MySQL 8.0.13+ (for JSON column expression defaults).
+    # `mysql:8.0` auto-pulls the latest 8.0.x release.
+    # Pin to a specific patch if needed, e.g. mysql:8.0.36.
+    image: mysql:8.0
+    container_name: WeKnora-mysql
+    profiles:
+      - mysql
+      - mysql-test
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=256M
+      - --innodb-log-file-size=1G
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-weknora}
+      MYSQL_DATABASE: ${DB_NAME:-WeKnora}
+    ports:
+      - "${DB_PORT_MYSQL:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-weknora}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
+  # Redis — 开发/测试时 WeKnora 必需
+  redis:
+    image: redis:7.0-alpine
+    container_name: WeKnora-redis-mysql
+    profiles:
+      - mysql
+      - mysql-test
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+
+networks:
+  WeKnora-network:
+    driver: bridge

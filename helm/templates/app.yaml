@@ -53,11 +53,11 @@ spec:
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ if .Values.mysql.enabled }}"mysql"{{ else }}"postgres"{{ end }}
             - name: DB_HOST
-              value: "postgres"
+              value: {{ if .Values.mysql.enabled }}"mysql"{{ else }}"postgres"{{ end }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ if .Values.mysql.enabled }}"3306"{{ else }}"5432"{{ end }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -106,7 +106,7 @@ spec:
                   key: SYSTEM_AES_KEY
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
-              value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+              value: {{ if eq .Values.app.env.RETRIEVE_DRIVER "postgres" }}{{ if .Values.mysql.enabled }}"qdrant"{{ else }}"postgres"{{ end }}{{ else }}{{ .Values.app.env.RETRIEVE_DRIVER | quote }}{{ end }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
             - name: LOCAL_STORAGE_BASE_DIR

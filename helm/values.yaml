@@ -238,7 +238,7 @@ docreader:
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
 # -----------------------------------------------------------------------------
 postgresql:
-  # -- Enable PostgreSQL
+  # -- Enable PostgreSQL (disabled automatically when mysql is enabled)
   enabled: true
 
   image:
@@ -281,8 +281,52 @@ postgresql:
   affinity: {}
 
 # -----------------------------------------------------------------------------
-# Redis (Stream & Task Queue)
+# MySQL 8.0 (Alternative Business Database)
 # -----------------------------------------------------------------------------
+# When mysql is enabled, PostgreSQL is not needed for the business database.
+# MySQL does not support pgvector — an external vector store (qdrant, milvus,
+# elasticsearch, etc.) is required for retrieval.
+# -----------------------------------------------------------------------------
+mysql:
+  # -- Enable MySQL as the business database (disables internal PostgreSQL)
+  enabled: false
+
+  image:
+    # -- Image repository
+    repository: mysql
+    # -- Image tag (8.0.13+ required for JSON column expression defaults)
+    tag: "8.0"
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- Persistence configuration
+  persistence:
+    # -- Enable persistence
+    enabled: true
+    # -- Size of the PVC
+    size: 10Gi
+    # -- Use existing PVC (leave empty to create new)
+    existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
 redis:
   # -- Enable Redis
   enabled: true
