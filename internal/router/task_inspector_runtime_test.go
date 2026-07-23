@@ -1,16 +1,50 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
+
+func TestQueueStatsDoesNotWarnForQueuesThatDoNotExist(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	inspector := &asynqTaskInspector{
+		inspector: asynq.NewInspectorFromRedisClient(client),
+		redis:     client,
+	}
+
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+
+	stats, supported, err := inspector.QueueStats(context.Background())
+	if err != nil || !supported {
+		t.Fatalf("QueueStats: supported=%v err=%v", supported, err)
+	}
+	if got, want := len(stats), len(types.QueueDefinitions()); got != want {
+		t.Fatalf("QueueStats returned %d rows, want %d", got, want)
+	}
+	for _, stat := range stats {
+		if stat.Size != 0 || stat.Pending != 0 || stat.Active != 0 {
+			t.Fatalf("missing queue %q should have zero depth: %+v", stat.Name, stat)
+		}
+	}
+	if strings.Contains(logs.String(), "[TaskInspector] queue info") {
+		t.Fatalf("missing queues should not emit warnings:\n%s", logs.String())
+	}
+}
 
 func TestProjectRuntimeTaskRedactsPayloadAndBuildsSafeActions(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{

@@ -187,9 +187,9 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 // into. Read-only: it calls Inspector.GetQueueInfo per queue and maps
 // the result onto types.QueueStat, attaching static pool/weight metadata
 // from the central queue registry. A queue that has never received a task yields
-// ErrQueueNotFound from asynq; we still surface it as a zeroed row so the
-// dashboard shows the complete lane set even before a queue receives its
-// first task.
+// either ErrQueueNotFound or an internal NOT_FOUND error from asynq; we still
+// surface it as a zeroed row so the dashboard shows the complete lane set even
+// before a queue receives its first task.
 func (a *asynqTaskInspector) QueueStats(
 	ctx context.Context,
 ) ([]types.QueueStat, bool, error) {
@@ -207,7 +207,7 @@ func (a *asynqTaskInspector) QueueStats(
 		}
 		info, err := a.inspector.GetQueueInfo(queue)
 		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
+			if !isAsynqQueueNotFound(err) {
 				logger.Warnf(ctx, "[TaskInspector] queue info queue=%s: %v", queue, err)
 			}
 			// Zeroed row: queue not created yet (or transient error).
