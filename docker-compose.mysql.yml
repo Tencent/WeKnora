@@ -1,0 +1,89 @@
+# MySQL override for docker-compose.yml
+#
+# Swap the metadata database from PostgreSQL to MySQL 8.0+. Usage:
+#
+#   docker compose --profile qdrant -f docker-compose.yml -f docker-compose.mysql.yml up -d
+#
+# Required environment (in .env or shell):
+#   DB_DRIVER=mysql
+#   DB_HOST=postgres            # the service name is unchanged so app's depends_on resolves
+#   DB_PORT=3306
+#   DB_USER=weknora
+#   DB_PASSWORD=<your-password>
+#   DB_NAME=weknora
+#   MYSQL_ROOT_PASSWORD=<root-password>   # optional; defaults to weknora-root
+#   RETRIEVE_DRIVER=qdrant      # MUST NOT be postgres or sqlite — MySQL mode
+#                               # never creates the embeddings table. Use an
+#                               # external engine: qdrant, milvus, elasticsearch_v8,
+#                               # opensearch, doris, weaviate, tencent_vectordb.
+#
+# The app validates this combination at startup and fails fast with an
+# actionable message if RETRIEVE_DRIVER is misconfigured.
+#
+# Limitations under MySQL:
+#   - Wiki keyword search uses multi-column LIKE instead of PostgreSQL's
+#     to_tsvector / pg_trgm. Results are a superset (higher recall, lower
+#     precision) but search remains functional.
+#   - The full / langfuse profile assumes the `postgres` service is really
+#     PostgreSQL; this override replaces it with MySQL, so Langfuse init
+#     will fail. Deploy a separate PostgreSQL instance for Langfuse.
+#
+# NOTE: this override only changes the metadata database. To actually run
+# retrieval you also need the chosen external engine (qdrant/milvus/...)
+# declared as a service and reachable. See docs/使用其他向量数据库.md.
+
+services:
+  postgres:  # keep the name so the app's depends_on: postgres resolves
+    image: mysql:8.0.37   # pinned patch version (latest 8.0 release)
+    container_name: WeKnora-mysql
+    environment:
+      # Clear the inherited PostgreSQL env vars — without this the MySQL
+      # image would still receive POSTGRES_USER / POSTGRES_PASSWORD /
+      # POSTGRES_DB (harmless but confusing) from the base compose file.
+      - POSTGRES_USER=
+      - POSTGRES_PASSWORD=
+      - POSTGRES_DB=
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_NAME}
+      # Root password is deliberately separate from DB_PASSWORD so the app
+      # credential and the admin credential can be rotated independently.
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weknora-root}
+    # The base docker-compose.yml defines this service's `volumes` as a LIST
+    # (`- postgres-data:/var/lib/postgresql/data`). Docker Compose normally
+    # *appends* list entries across files, so a plain `- mysql-data:...`
+    # override would leave both volumes mounted (postgres-data dangling and
+    # unused). Using the `!override` tag tells Compose to REPLACE the list
+    # entirely, so only mysql-data is mounted.
+    #
+    # Requires Docker Compose v2.24+ (Jan 2024) for the `!override` tag.
+    # On older Compose, drop `!override` and accept the harmless extra
+    # empty postgres-data mount at /var/lib/postgresql/data.
+    volumes: !override
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      # mysqladmin ping returns success once the server answers, even before
+      # accounts are fully provisioned. No password is needed for a basic
+      # connectivity check, so we intentionally omit -u/-p (which would also
+      # leak credentials into the container's inspect output).
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 1m
+    # utf8mb4 is the default in MySQL 8.0, but set it explicitly so the
+    # character set is deterministic regardless of the server's config file.
+    # --default-authentication-plugin=caching_sha2_password is intentionally
+    # NOT set: it was deprecated in 8.0.34 and removed in 8.4. caching_sha2
+    # is already the default in 8.0.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+
+volumes:
+  mysql-data:

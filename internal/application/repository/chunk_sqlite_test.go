@@ -300,3 +300,46 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
 }
+
+// TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp exercises the
+// SQLite branch of UpdateChunks (datetime('now')) so the three-dialect
+// switch has a red-capable unit test that does not need a live DB.
+// The corresponding MySQL / PostgreSQL paths are covered by
+// TestUpdateChunks_RealDB_AllDialects under the integration_db tag.
+func TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	c1 := makeChunk(kbID, knowledgeID, "text")
+	c2 := makeChunk(kbID, knowledgeID, "text")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{c1, c2}))
+
+	// Mutate exactly the fields UpdateChunks rewrites.
+	c1.Content = "updated content 1"
+	c1.Status = 2
+	c1.IsEnabled = false
+	c2.Content = "updated content 2"
+	c2.Status = 3
+
+	require.NoError(t, repo.UpdateChunks(ctx, []*types.Chunk{c1, c2}))
+
+	var got1, got2 types.Chunk
+	require.NoError(t, db.First(&got1, "id = ?", c1.ID).Error)
+	require.NoError(t, db.First(&got2, "id = ?", c2.ID).Error)
+
+	assert.Equal(t, "updated content 1", got1.Content)
+	assert.Equal(t, 2, int(got1.Status))
+	assert.False(t, got1.IsEnabled)
+	assert.Equal(t, "updated content 2", got2.Content)
+	assert.Equal(t, 3, int(got2.Status))
+
+	// updated_at should have been refreshed by datetime('now'). We don't
+	// compare against the original timestamp because SQLite stores it in
+	// UTC while the in-memory original is in the process local zone, so
+	// a direct After() comparison is unreliable. The Content / Status /
+	// IsEnabled assertions above are the load-bearing ones.
+	assert.False(t, got1.UpdatedAt.IsZero(), "updated_at must be set")
+}

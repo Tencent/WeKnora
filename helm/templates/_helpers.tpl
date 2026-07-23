@@ -185,6 +185,42 @@ securityContext:
 {{- end }}
 
 {{/*
+Return the MySQL image string (values.mysql.image is a full repo:tag).
+*/}}
+{{- define "weknora.mysql.image" -}}
+{{- .Values.mysql.image -}}
+{{- end }}
+
+{{/*
+Validate database backend selection. Only one of:
+  - postgresql.enabled (internal PostgreSQL)
+  - mysql.enabled       (internal MySQL)
+  - database.external   (external DB)
+may be active at a time. Renders empty string on success, calls fail() otherwise.
+Usage: {{ include "weknora.validateDb" . }}
+*/}}
+{{- define "weknora.validateDb" -}}
+{{- $internal := 0 }}
+{{- if .Values.postgresql.enabled }}{{- $internal = add1 $internal }}{{- end }}
+{{- if .Values.mysql.enabled }}{{- $internal = add1 $internal }}{{- end }}
+{{- if and (eq $internal 0) (not .Values.database.external) }}
+{{- fail "No database configured: enable one of postgresql.enabled, mysql.enabled, or database.external" }}
+{{- end }}
+{{- if and .Values.database.external (gt $internal 0) }}
+{{- fail "database.external is mutually exclusive with postgresql.enabled and mysql.enabled" }}
+{{- end }}
+{{- if gt $internal 1 }}
+{{- fail "postgresql.enabled and mysql.enabled are mutually exclusive; pick exactly one internal database" }}
+{{- end }}
+{{- if and .Values.mysql.enabled }}
+{{- $rd := .Values.app.env.RETRIEVE_DRIVER | default "" }}
+{{- if or (eq $rd "postgres") (eq $rd "sqlite") (eq $rd "") }}
+{{- fail "MySQL metadata DB requires an external retriever (qdrant, milvus, elasticsearch_v8, weaviate, etc.); set app.env.RETRIEVE_DRIVER to a non-local engine. postgres and sqlite retrievers depend on the embeddings table that MySQL mode does not create." }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Container security context.
 */}}
 {{- define "weknora.containerSecurityContext" -}}

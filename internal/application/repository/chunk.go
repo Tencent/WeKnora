@@ -350,6 +350,9 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	var flagsArgs []interface{}
 	var statusArgs []interface{}
 
+	dialectName := r.db.Dialector.Name()
+	isPostgres := dialectName == "postgres"
+
 	for _, chunk := range chunks {
 		ids = append(ids, chunk.ID)
 		content := common.CleanInvalidUTF8(chunk.Content)
@@ -357,22 +360,47 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
+		// PostgreSQL accepts 'true'/'false' string literals in a
+		// boolean context (and the SQL below casts with ::boolean). MySQL
+		// under STRICT_TRANS_TABLES rejects string->BOOLEAN coercion with
+		// Error 1292, so pass an integer 0/1 there. SQLite accepts both.
+		var isEnabledVal interface{}
+		if isPostgres {
+			if chunk.IsEnabled {
+				isEnabledVal = "true"
+			} else {
+				isEnabledVal = "false"
+			}
+		} else {
+			if chunk.IsEnabled {
+				isEnabledVal = 1
+			} else {
+				isEnabledVal = 0
+			}
 		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledVal)
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
 
+		// flags / status are INTEGER columns. PostgreSQL tolerates a
+		// text literal because the SQL casts with ::integer, but MySQL
+		// strict mode rejects it (Error 1292). Pass native int32 for
+		// non-PostgreSQL dialects.
+		var flagsVal interface{}
+		var statusVal interface{}
+		if isPostgres {
+			flagsVal = fmt.Sprintf("%d", chunk.Flags)
+			statusVal = fmt.Sprintf("%d", chunk.Status)
+		} else {
+			flagsVal = chunk.Flags
+			statusVal = chunk.Status
+		}
 		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
-
+		flagsArgs = append(flagsArgs, chunk.ID, flagsVal)
 		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
+		statusArgs = append(statusArgs, chunk.ID, statusVal)
 	}
 
 	// Build IN clause placeholders
@@ -392,46 +420,43 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
-	var sql string
+	// One SQL template, dialect-aware bits hoisted into small variables:
+	//   - Postgres needs ::boolean / ::integer casts on CASE results
+	//     (the bind values are string literals).
+	//   - Postgres and MySQL both use NOW() for the timestamp; SQLite has
+	//     neither NOW() nor casts, so it uses datetime('now').
+	//   - The bind values are already shaped per-dialect above (string
+	//     for Postgres, native int for MySQL/SQLite), so the only thing
+	//     that differs in the SQL is the cast suffix and timestamp expr.
+	boolCast, intCast := "", ""
 	if isPostgres {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = (CASE %s END)::boolean,
-				tag_id = CASE %s END,
-				flags = (CASE %s END)::integer,
-				status = (CASE %s END)::integer,
-				updated_at = NOW()
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
-	} else {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = CASE %s END,
-				tag_id = CASE %s END,
-				flags = CASE %s END,
-				status = CASE %s END,
-				updated_at = datetime('now')
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
+		boolCast, intCast = "::boolean", "::integer"
 	}
+	tsExpr := "NOW()"
+	if dialectName == "mysql" {
+		tsExpr = "NOW(6)" // microsecond precision to match DATETIME(6) columns
+	}
+	if dialectName == "sqlite" {
+		tsExpr = "datetime('now')"
+	}
+	sql := fmt.Sprintf(`
+		UPDATE chunks SET
+			content = CASE %s END,
+			is_enabled = (CASE %s END)%s,
+			tag_id = CASE %s END,
+			flags = (CASE %s END)%s,
+			status = (CASE %s END)%s,
+			updated_at = %s
+		WHERE id IN (%s)
+	`,
+		strings.Join(contentCases, " "),
+		strings.Join(isEnabledCases, " "), boolCast,
+		strings.Join(tagIDCases, " "),
+		strings.Join(flagsCases, " "), intCast,
+		strings.Join(statusCases, " "), intCast,
+		tsExpr,
+		strings.Join(inPlaceholders, ","),
+	)
 
 	return r.db.WithContext(ctx).Exec(sql, args...).Error
 }
@@ -826,6 +851,9 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 	}
 
 	nowFunc := "NOW()"
+	if r.db.Dialector.Name() == "mysql" {
+		nowFunc = "NOW(6)"
+	}
 	if r.db.Dialector.Name() == "sqlite" {
 		nowFunc = "datetime('now')"
 	}

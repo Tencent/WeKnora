@@ -313,6 +313,25 @@ func TestTaskPendingOps_IncrFailCount_ReturnsNewValueAndPersists(t *testing.T) {
 	assert.Equal(t, 2, rows[0].FailCount)
 }
 
+// TestTaskPendingOps_IncrFailCount_MissingRowReturnsZeroNil locks in the
+// contract documented on IncrFailCount: a non-existent ID returns
+// (0, nil) rather than an error. The caller's ID may have been removed
+// by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
+//
+// This test is added ahead of the RETURNING → UPDATE+SELECT rewrite
+// for MySQL compatibility: the rewrite must preserve this exact
+// behaviour across all dialects.
+func TestTaskPendingOps_IncrFailCount_MissingRowReturnsZeroNil(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	// No row with this ID was ever inserted.
+	n, err := repo.IncrFailCount(ctx, 99999)
+	require.NoError(t, err, "missing row must not surface as an error")
+	assert.Equal(t, 0, n, "missing row must return count 0")
+}
+
 // TestTaskPendingOps_PendingCount_ScopedTuple confirms the count covers
 // only the (task_type, scope, scope_id) tuple.
 func TestTaskPendingOps_PendingCount_ScopedTuple(t *testing.T) {
@@ -720,4 +739,32 @@ func TestTaskDeadLetter_DeleteByID_IsIdempotent(t *testing.T) {
 	rows, _, err := repo.ListByScope(ctx, "knowledge_base", "kb", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 0)
+}
+
+// ---------------- dialect capability gating ----------------
+
+// TestDialectSupportsSkipLocked verifies the row-locking capability gate
+// used by ClaimBatch. PostgreSQL and MySQL 8.0+ (the only MySQL versions
+// WeKnora accepts) both support FOR UPDATE SKIP LOCKED with identical
+// syntax; SQLite and others fall back to a non-locking SELECT.
+func TestDialectSupportsSkipLocked(t *testing.T) {
+	tests := []struct {
+		dialect string
+		want    bool
+	}{
+		{"postgres", true},
+		{"mysql", true},
+		{"sqlite", false},
+		{"", false},
+		{"sqlserver", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dialect, func(t *testing.T) {
+			got := dialectSupportsSkipLocked(tt.dialect)
+			if got != tt.want {
+				t.Fatalf("dialectSupportsSkipLocked(%q) = %v; want %v", tt.dialect, got, tt.want)
+			}
+		})
+	}
 }

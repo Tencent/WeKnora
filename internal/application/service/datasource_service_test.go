@@ -187,3 +187,61 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
 }
+
+// TestIngestItem_DedupErrorIsFatal verifies that when the dedup lookup
+// (FindByMetadataKey) fails, ingestItem returns the error instead of
+// silently proceeding to create a duplicate knowledge row. This was a
+// real bug on MySQL where the old metadata->>? syntax errored with
+// 1064 and the "log and proceed" path produced duplicates on every
+// re-sync.
+func TestIngestItem_DedupErrorIsFatal(t *testing.T) {
+	svc := &DataSourceService{
+		knowledgeService: &fatalDedupKnowledgeService{
+			repo: &fatalDedupKnowledgeRepo{
+				findErr: errors.New("Error 1064: Invalid JSON path expression"),
+			},
+		},
+	}
+
+	ds := &types.DataSource{
+		ID:              "ds-1",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Type:            types.ConnectorTypeRSS,
+	}
+	item := &types.FetchedItem{
+		ExternalID: "ext-1",
+		Content:    []byte("hello"),
+		FileName:   "test.txt",
+	}
+
+	_, err := svc.ingestItem(context.Background(), ds, item, nil)
+	require.Error(t, err, "ingestItem must fail when dedup lookup errors")
+	assert.Contains(t, err.Error(), "dedup lookup", "error must explain it was the dedup that failed")
+	assert.Contains(t, err.Error(), "ext-1", "error must identify the external_id")
+}
+
+// fatalDedupKnowledgeService embeds the KnowledgeService interface so
+// only GetRepository needs to be implemented for this test. Any other
+// call would panic (nil pointer) - that's intentional: it makes the
+// test fail loud if ingestItem starts touching other KnowledgeService
+// methods on the error path.
+type fatalDedupKnowledgeService struct {
+	interfaces.KnowledgeService
+	repo *fatalDedupKnowledgeRepo
+}
+
+func (s *fatalDedupKnowledgeService) GetRepository() interfaces.KnowledgeRepository {
+	return s.repo
+}
+
+// fatalDedupKnowledgeRepo embeds the KnowledgeRepository interface so
+// only FindByMetadataKey needs to be implemented.
+type fatalDedupKnowledgeRepo struct {
+	interfaces.KnowledgeRepository
+	findErr error
+}
+
+func (r *fatalDedupKnowledgeRepo) FindByMetadataKey(_ context.Context, _ uint64, _ string, _ string, _ string) (*types.Knowledge, error) {
+	return nil, r.findErr
+}

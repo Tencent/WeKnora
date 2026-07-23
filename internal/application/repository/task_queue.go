@@ -13,6 +13,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// dialectSupportsSkipLocked reports whether a GORM dialector with the
+// given name supports the FOR UPDATE SKIP LOCKED syntax. PostgreSQL
+// (all supported versions) and MySQL 8.0+ both do, with identical
+// syntax. SQLite does not — the claim path falls back to a non-locking
+// SELECT there.
+func dialectSupportsSkipLocked(dialectName string) bool {
+	return dialectName == "postgres" || dialectName == "mysql"
+}
+
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
 type taskPendingOpsRepository struct {
 	db *gorm.DB
@@ -170,15 +179,22 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Isolation: GORM Transaction() uses the DB's default isolation level.
+		// PG defaults to READ COMMITTED; MySQL defaults to REPEATABLE READ.
+		// REPEATABLE READ is STRICTER (more locking) but preserves correctness —
+		// concurrent claimers still get disjoint key sets via SKIP LOCKED. The
+		// trade-off is potentially higher lock contention on MySQL under load.
+
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if dialectSupportsSkipLocked(tx.Dialector.Name()) {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
 			// drops any key that still has a fresh (non-stale) claim.
+			// PostgreSQL and MySQL 8.0+ both support this syntax.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
@@ -290,18 +306,32 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the
-// new value. We use UPDATE ... RETURNING so the read+write happens in
-// one round trip and races between concurrent IncrFailCount callers
-// resolve to monotonic counts.
-//
-// A missing row returns (0, nil): the caller's ID may have been removed
-// by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
+// new value. Postgres uses UPDATE ... RETURNING (single round trip);
+// MySQL has no RETURNING clause, so it uses an explicit transaction
+// (UPDATE + SELECT on the same tx). A missing row returns (0, nil).
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if r.db.Dialector.Name() == "postgres" {
+		var newCount int
+		err := r.db.WithContext(ctx).Raw(
+			"UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count", id,
+		).Scan(&newCount).Error
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
 	var newCount int
-	err := r.db.WithContext(ctx).Raw(
-		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
-		id,
-	).Scan(&newCount).Error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.TaskPendingOp{}).
+			Where("id = ?", id).
+			UpdateColumn("fail_count", gorm.Expr("fail_count + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.TaskPendingOp{}).
+			Where("id = ?", id).
+			Select("fail_count").
+			Scan(&newCount).Error
+	})
 	if err != nil {
 		return 0, err
 	}

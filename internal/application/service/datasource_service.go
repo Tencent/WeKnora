@@ -1157,21 +1157,27 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		metadata[k] = v
 	}
 
-	// Check if a knowledge item with this external_id already exists → delete it first (update)
+	// Check if a knowledge item with this external_id already exists -> delete it first (update).
+	//
+	// A query error here MUST be fatal, not swallowed: the historical
+	// "log and proceed" path meant that on MySQL (where the old
+	// metadata->>? syntax errored with 1064) every re-sync silently
+	// created a duplicate knowledge row instead of updating in place.
+	// Aborting this item is strictly better than producing duplicates
+	// that pollute retrieval results.
 	isUpdate := false
 	if item.ExternalID != "" {
 		repo := s.knowledgeService.GetRepository()
 		existing, err := repo.FindByMetadataKey(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", item.ExternalID)
 		if err != nil {
-			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
-			// Non-fatal: proceed with creation (may produce duplicate)
-		} else if existing != nil {
+			return false, fmt.Errorf("dedup lookup for external_id=%s failed (sync aborted to avoid duplicate): %w", item.ExternalID, err)
+		}
+		if existing != nil {
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
-				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
-			} else {
-				isUpdate = true
+				return false, fmt.Errorf("delete existing knowledge %s for external_id=%s: %w", existing.ID, item.ExternalID, err)
 			}
+			isUpdate = true
 		}
 	}
 

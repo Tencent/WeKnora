@@ -29,8 +29,14 @@ func NewSystemSettingRepository(db *gorm.DB) interfaces.SystemSettingRepository 
 // to ENV / default", so a 404 here is a normal control-flow signal,
 // not an error. Real DB errors (connection lost, etc.) surface up.
 func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.SystemSetting, error) {
+	if key == "" {
+		return nil, nil
+	}
 	var s types.SystemSetting
-	err := r.db.WithContext(ctx).Where("key = ?", key).First(&s).Error
+	// Use a struct condition rather than a raw "key = ?" string: GORM
+	// quotes the column name per dialect, which matters because `key`
+	// is a reserved word in MySQL. On PostgreSQL the quoting is a no-op.
+	err := r.db.WithContext(ctx).Where(&types.SystemSetting{Key: key}).First(&s).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -44,7 +50,16 @@ func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.S
 // for stable management-UI rendering. No pagination — see type comment.
 func (r *systemSettingRepository) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	var rows []*types.SystemSetting
-	err := r.db.WithContext(ctx).Order("category ASC, key ASC").Find(&rows).Error
+	// Use clause.OrderBy with OrderByColumn so GORM quotes each column
+	// name per dialect. `key` is a reserved word in MySQL; a raw
+	// "key ASC" string would fail there because GORM does not re-parse
+	// raw Order strings.
+	err := r.db.WithContext(ctx).Clauses(clause.OrderBy{
+		Columns: []clause.OrderByColumn{
+			{Column: clause.Column{Name: "category"}},
+			{Column: clause.Column{Name: "key"}},
+		},
+	}).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +97,11 @@ func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSet
 // rather than translating to gorm.ErrRecordNotFound so the caller's
 // happy path is a single nil check on err.
 func (r *systemSettingRepository) Delete(ctx context.Context, key string) (bool, error) {
-	res := r.db.WithContext(ctx).Where("key = ?", key).Delete(&types.SystemSetting{})
+	if key == "" {
+		return false, nil
+	}
+	// Struct condition so GORM quotes the reserved-word column `key` per dialect.
+	res := r.db.WithContext(ctx).Where(&types.SystemSetting{Key: key}).Delete(&types.SystemSetting{})
 	if res.Error != nil {
 		return false, res.Error
 	}

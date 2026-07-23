@@ -5,6 +5,7 @@ SPDX-License-Identifier: MIT
 WeKnora Backend API Server Deployment and Service.
 */}}
 {{- if .Values.app.enabled }}
+{{- include "weknora.validateDb" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,6 +53,61 @@ spec:
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
+            {{- if .Values.mysql.enabled }}
+            - name: DB_DRIVER
+              value: "mysql"
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.fullname" . }}-mysql
+                  key: MYSQL_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.fullname" . }}-mysql
+                  key: MYSQL_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.fullname" . }}-mysql
+                  key: MYSQL_DATABASE
+            {{- else if .Values.database.external }}
+            - name: DB_DRIVER
+              value: {{ .Values.database.driver | quote }}
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            {{- if .Values.database.existingSecret }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: DB_NAME
+                  optional: true
+            {{- else }}
+            - name: DB_USER
+              value: {{ .Values.database.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.database.password | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            {{- end }}
+            {{- else }}
             - name: DB_DRIVER
               value: "postgres"
             - name: DB_HOST
@@ -73,6 +129,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
+            {{- end }}
             # Redis configuration
             - name: REDIS_ADDR
               value: "redis:6379"

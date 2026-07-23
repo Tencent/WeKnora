@@ -281,6 +281,93 @@ postgresql:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# MySQL (Alternative Relational Database)
+# -----------------------------------------------------------------------------
+# Mutually exclusive with postgresql.enabled and database.external.
+# When enabled, the app's DB_DRIVER is set to "mysql" and DB_HOST to "mysql".
+mysql:
+  # -- Enable MySQL (disables PostgreSQL for the app). Mutually exclusive with
+  # postgresql.enabled and database.external.
+  enabled: false
+
+  # -- MySQL image (full reference including repository:tag).
+  # Defaults match the upstream MySQL 8.0 image.
+  image: mysql:8.0.37
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- Authentication credentials. When password/rootPassword are empty, random
+  # values are generated on first install and reused on upgrade (Secret lookup).
+  auth:
+    # -- Root password (auto-generated if empty)
+    rootPassword: ""
+    # -- Application database name
+    database: WeKnora
+    # -- Application username
+    username: weknora
+    # -- Application password (auto-generated if empty)
+    password: ""
+
+  # -- Primary instance configuration
+  primary:
+    persistence:
+      # -- Enable persistence
+      enabled: true
+      # -- Size of the PVC
+      size: 20Gi
+      # -- Storage class name (empty uses cluster default)
+      storageClass: ""
+      # -- Use existing PVC (leave empty to create new)
+      existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# External Database
+# -----------------------------------------------------------------------------
+# Use an externally managed database instead of rendering an in-cluster DB.
+# When external is true, no internal DB (postgresql/mysql) is rendered, and the
+# app pulls DB_DRIVER/HOST/PORT from this section. Mutually exclusive with
+# postgresql.enabled and mysql.enabled.
+database:
+  # -- Use an external database (no internal DB rendered)
+  external: false
+  # -- Database driver: postgres / mysql
+  driver: postgres
+  # -- External database host
+  host: ""
+  # -- External database port
+  port: 5432
+  # -- External database name
+  name: WeKnora
+  # -- External database username
+  username: ""
+  # -- External database password
+  password: ""
+  # -- Name of a pre-existing secret containing DB credentials. When set, the
+  # app reads DB_USER/DB_PASSWORD/DB_NAME from this secret instead of the
+  # chart-managed secret.
+  existingSecret: ""
+
+# -----------------------------------------------------------------------------
 # Redis (Stream & Task Queue)
 # -----------------------------------------------------------------------------
 redis:
