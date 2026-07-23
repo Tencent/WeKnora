@@ -5815,6 +5815,29 @@ export default {
     joinFailed: 'Failed to join space',
     manageMembers: 'Manage Members',
     noMembers: 'No members',
+    members: {
+      listTitle: 'Space members',
+      searchPlaceholder: 'Search members…',
+      loading: 'Loading members…',
+      emptySearch: 'No members matching "{q}"',
+      columns: {
+        member: 'Member',
+        role: 'Role',
+        joinedAt: 'Joined',
+        operations: 'Actions',
+      },
+    },
+    sharedResources: {
+      kbListTitle: 'Shared knowledge bases',
+      agentListTitle: 'Shared agents',
+      loading: 'Loading…',
+      columns: {
+        name: 'Name',
+        sharedBy: 'Shared by',
+        sharedAt: 'Shared at',
+        permission: 'Permission',
+      },
+    },
     roleUpdated: 'Role updated',
     roleUpdateFailed: 'Failed to update role',
     memberRemoved: 'Member removed',
@@ -5848,6 +5871,7 @@ export default {
       detailTitle: 'Space Details',
       myRoleDesc: 'Your role in this space determines your permissions',
       membersDesc: 'Просмотр и управление участниками пространства и их ролями. Каждый участник представляет одно рабочее пространство: все его пользователи получают одинаковый доступ к общему пространству.',
+      permissionsIconHint: 'Просмотр прав по ролям',
       sharedDesc: 'View all knowledge bases shared to this space',
       noSharedKB: 'No shared knowledge bases yet',
       noSharedKBTip: 'Knowledge base owners can share their knowledge bases to this space in KB settings',
@@ -5858,9 +5882,9 @@ export default {
       sharedAgentsKbHintShort: 'Agent-linked knowledge is read-only in chat; share the KB to this space if members should see or edit it in the list.',
       noSharedAgentsTip: 'Admins can share agents to this space from agent settings',
       sharePermissionLabel: 'Space permission',
-      myPermissionLabel: 'My actual permission',
-      permissionCalcFormula: 'Space permission is what was set when the KB was shared to this space; my actual permission = min(space permission, my role in this space)',
-      permissionCalcTip: 'My actual permission = min(space permission, my role in this space). As a viewer in the space, I have at most read-only on this KB; as editor or admin, my permission is capped by the space permission.',
+      myPermissionLabel: 'Effective',
+      permissionCalcFormula: 'Space permission is set when sharing; effective permission is the lower of that and your space role',
+      permissionCalcTip: 'Effective permission is the lower of space permission and your role here; viewers get at most read-only on this KB.',
       inviteMembers: 'Invite Members',
       inviteMembersDesc: 'Invite others to join the space via code or link',
       inviteLink: 'Invite Link',
@@ -5897,6 +5921,11 @@ export default {
       approveSuccess: 'Request approved',
       rejectSuccess: 'Request rejected',
       reviewFailed: 'Operation failed, please try again'
+    },
+    navGroups: {
+      basic: 'Basic',
+      management: 'Members & Collaboration',
+      resources: 'Shared Resources'
     },
     editor: {
       navBasic: 'Basic Info',
@@ -5935,13 +5964,15 @@ export default {
       step3: 'Paste the invite code in the input field above'
     },
     upgrade: {
-      requestUpgrade: 'Request Permission Upgrade',
-      pending: 'Request Submitted',
-      dialogTitle: 'Request Permission Upgrade',
+      requestUpgrade: 'Request upgrade',
+      pending: 'Pending review',
+      dialogTitle: 'Request upgrade',
+      dialogDesc: 'Your role updates after a space admin approves.',
       currentRole: 'Current Role',
       selectRole: 'Request Role',
       reason: 'Reason (Optional)',
       reasonPlaceholder: 'Please briefly explain why you need higher permissions...',
+      submitBtn: 'Submit Request',
       submitSuccess: 'Upgrade request submitted, waiting for admin approval',
       submitFailed: 'Failed to submit request',
       upgradeRequest: 'Permission Upgrade'
