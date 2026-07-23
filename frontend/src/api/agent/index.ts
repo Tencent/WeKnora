@@ -296,7 +296,7 @@ export interface IMChannel {
   tenant_id?: number;
   agent_id: string;
   // 'lark' is Feishu's international edition; it shares Feishu's credentials and modes.
-  platform: 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
+  platform: 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot' | 'yunzhijia';
   name: string;
   enabled: boolean;
   mode: 'webhook' | 'websocket' | 'longpoll';

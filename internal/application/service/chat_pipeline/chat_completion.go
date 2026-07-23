@@ -55,6 +55,7 @@ func (p *PluginChatCompletion) OnEvent(
 	resourceRefs := llmresource.NewRegistry()
 	chatMessages = sourceRefs.EncodeMessages(chatMessages)
 	chatMessages = resourceRefs.EncodeMessages(chatMessages)
+	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
 
 	// Call the chat model to generate response
 	pipelineInfo(ctx, "Completion", "model_call", map[string]interface{}{

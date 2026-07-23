@@ -351,6 +351,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     request_method VARCHAR(16) NOT NULL DEFAULT '',
     outcome VARCHAR(16) NOT NULL DEFAULT 'success',
     details TEXT NOT NULL DEFAULT '{}',
+    scope_type VARCHAR(32) NOT NULL DEFAULT '',
+    scope_id VARCHAR(64) NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id_desc
@@ -361,6 +363,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
     ON audit_logs(tenant_id, action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
     ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_scope_desc
+    ON audit_logs(tenant_id, scope_type, scope_id, id DESC);
 
 -- user_resource_favorites — sqlite mirror of migration 000047. Same
 -- composite PK (user_id, tenant_id, resource_type, resource_id) so the
@@ -497,6 +501,8 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
     refresh_token TEXT,
     token_type VARCHAR(32),
     expires_at DATETIME,
+    refresh_lease_id VARCHAR(36),
+    refresh_lease_until DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
@@ -881,7 +887,9 @@ CREATE INDEX IF NOT EXISTS idx_resource_access_grants_expires
 
 CREATE TABLE IF NOT EXISTS tenant_api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    scope_type TEXT NOT NULL DEFAULT 'tenant'
+        CHECK (scope_type IN ('tenant', 'platform')),
     name TEXT NOT NULL,
     key_hash TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL DEFAULT '',
@@ -893,11 +901,16 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     revoked_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CHECK (
+        (scope_type = 'tenant' AND tenant_id IS NOT NULL)
+        OR (scope_type = 'platform' AND tenant_id IS NULL AND full_access = 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_revoked_at ON tenant_api_keys(revoked_at);
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_scope_type ON tenant_api_keys(scope_type);
 
 CREATE TABLE IF NOT EXISTS temporary_documents (
     id VARCHAR(36) PRIMARY KEY,

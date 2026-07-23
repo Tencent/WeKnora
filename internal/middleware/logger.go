@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -44,12 +45,39 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 var sensitiveFieldRegex = regexp.MustCompile(
 	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|token|access[_-]?token|` +
 		`refresh[_-]?token|id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
-		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret)")\s*:\s*"[^"]*"`,
+		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
+		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
 )
 
 // sanitizeBody 清理敏感信息
 func sanitizeBody(body string) string {
 	return sensitiveFieldRegex.ReplaceAllString(body, `$1:"***"`)
+}
+
+var sensitiveQueryFields = map[string]struct{}{
+	"access_token":          {},
+	"authorization_attempt": {},
+	"code":                  {},
+	"id_token":              {},
+	"refresh_token":         {},
+	"state":                 {},
+	"token":                 {},
+}
+
+// sanitizeQuery prevents OAuth authorization codes and CSRF/attempt state from
+// being copied into access logs. Parsing the query also covers repeated and
+// percent-encoded parameters without relying on fragile string replacement.
+func sanitizeQuery(raw string) string {
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return "[invalid query omitted]"
+	}
+	for key := range values {
+		if _, sensitive := sensitiveQueryFields[strings.ToLower(key)]; sensitive {
+			values[key] = []string{"***"}
+		}
+	}
+	return values.Encode()
 }
 
 // readRequestBody 读取请求体（限制大小用于日志，但完整读取用于重置）
@@ -172,7 +200,7 @@ func Logger() gin.HandlerFunc {
 		method := c.Request.Method
 
 		if raw != "" {
-			path = path + "?" + raw
+			path = path + "?" + sanitizeQuery(raw)
 		}
 
 		// 读取响应体

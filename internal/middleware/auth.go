@@ -337,7 +337,51 @@ func authenticateAPIKeyRequest(
 		return false
 	}
 
-	attachAPIKeyAuthContext(c, tenantService, userService, key.TenantID, key)
+	if key.IsPlatform() {
+		tenantHeader := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+		if tenantHeader == "" {
+			if !isPlatformTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error": "Workspace required: platform API keys must send X-Tenant-ID",
+					"code":  "TENANT_REQUIRED",
+				})
+				c.Abort()
+				return false
+			}
+			attachPlatformAPIKeyAuthContext(c, key)
+		} else {
+			targetTenantID, parseErr := strconv.ParseUint(tenantHeader, 10, 64)
+			if parseErr != nil || targetTenantID == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid X-Tenant-ID header"})
+				c.Abort()
+				return false
+			}
+			attachAPIKeyAuthContext(c, tenantService, userService, targetTenantID, key)
+		}
+	} else {
+		tenantID := key.TenantIDValue()
+		if tenantID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key scope"})
+			c.Abort()
+			return false
+		}
+		if tenantHeader := strings.TrimSpace(c.GetHeader("X-Tenant-ID")); tenantHeader != "" {
+			requestedTenantID, parseErr := strconv.ParseUint(tenantHeader, 10, 64)
+			if parseErr != nil || requestedTenantID == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid X-Tenant-ID header"})
+				c.Abort()
+				return false
+			}
+			if requestedTenantID != tenantID {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "Forbidden: workspace API key cannot switch workspaces",
+				})
+				c.Abort()
+				return false
+			}
+		}
+		attachAPIKeyAuthContext(c, tenantService, userService, tenantID, key)
+	}
 	if c.IsAborted() {
 		return false
 	}
@@ -345,6 +389,55 @@ func authenticateAPIKeyRequest(
 	// is enforced by middleware.APIKeyRouteAuthorizer on the /api/v1 group.
 	// Key-management and any other undeclared route is denied there.
 	return true
+}
+
+func isPlatformTenantOptionalAPI(path, method string) bool {
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if strings.HasPrefix(path, "/api/v1/system/admin") {
+		return true
+	}
+	if method == http.MethodGet && (path == "/api/v1/tenants/all" || path == "/api/v1/tenants/search") {
+		return true
+	}
+	return method == http.MethodPost && path == "/api/v1/tenants"
+}
+
+func attachPlatformAPIKeyAuthContext(c *gin.Context, key *types.TenantAPIKey) {
+	principal, user := platformAPIKeyIdentity(key)
+	userID := user.ID
+	c.Set(types.UserContextKey.String(), user)
+	c.Set(types.UserIDContextKey.String(), userID)
+	c.Set(types.PrincipalContextKey.String(), principal)
+	c.Set(types.TenantRoleContextKey.String(), types.TenantRoleViewer)
+	c.Set(types.SystemAdminContextKey.String(), false)
+	ctx := c.Request.Context()
+	ctx = context.WithValue(ctx, types.UserContextKey, user)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
+	ctx = types.WithPrincipal(ctx, principal)
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
+		KeyID:        key.ID,
+		ScopeType:    types.APIKeyScopePlatform,
+		FullAccess:   false,
+		Capabilities: key.Capabilities,
+	})
+	c.Request = c.Request.WithContext(ctx)
+}
+
+func platformAPIKeyIdentity(key *types.TenantAPIKey) (types.Principal, *types.User) {
+	keyID := uint64(0)
+	if key != nil {
+		keyID = key.ID
+	}
+	principal := types.Principal{Type: types.PrincipalAPIPlatform, ID: strconv.FormatUint(keyID, 10)}
+	userID := principal.StorageID()
+	return principal, &types.User{
+		ID:       userID,
+		Username: userID,
+		Email:    fmt.Sprintf("platform-api-key-%d@api-key.local", keyID),
+		IsActive: true,
+	}
 }
 
 func attachAPIKeyAuthContext(
@@ -369,32 +462,45 @@ func attachAPIKeyAuthContext(
 		types.TenantInfoContextKey, t,
 	)
 
-	user, err := userService.GetUserByTenantID(c.Request.Context(), tenantID)
-	if err != nil || user == nil {
-		user = &types.User{
-			ID:       fmt.Sprintf("system-%d", tenantID),
-			Username: fmt.Sprintf("system-%d", tenantID),
-			Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
-			TenantID: tenantID,
-			IsActive: true,
+	var user *types.User
+	var principal types.Principal
+	if key != nil && key.IsPlatform() {
+		// A platform key keeps one stable machine identity while selecting the
+		// target workspace through X-Tenant-ID. Tenant API-principal modes and
+		// tenant-owned synthetic users must not rewrite that identity.
+		principal, user = platformAPIKeyIdentity(key)
+		user.TenantID = tenantID
+	} else {
+		user, err = userService.GetUserByTenantID(c.Request.Context(), tenantID)
+		if err != nil || user == nil {
+			user = &types.User{
+				ID:       fmt.Sprintf("system-%d", tenantID),
+				Username: fmt.Sprintf("system-%d", tenantID),
+				Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
+				TenantID: tenantID,
+				IsActive: true,
+			}
+			log.Printf("No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
 		}
-		log.Printf("No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
+
+		var principalErr error
+		principal, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+		if principalErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
+			c.Abort()
+			return
+		}
 	}
 
 	c.Set(types.UserContextKey.String(), user)
 	c.Set(types.UserIDContextKey.String(), user.ID)
-	principal, principalErr := resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
-	if principalErr != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
-		c.Abort()
-		return
-	}
 	c.Set(types.PrincipalContextKey.String(), principal)
 	// This role context exists only for legacy guard compatibility after
 	// RequireRole short-circuits API-key principals. The API key's real
 	// authority is FullAccess + Capabilities + KnowledgeBaseIDs.
 	apiKeyTenantRoleContext := types.TenantRoleViewer
-	if key != nil && key.FullAccess {
+	fullAccess := key != nil && key.FullAccess && !key.IsPlatform()
+	if fullAccess {
 		apiKeyTenantRoleContext = types.TenantRoleOwner
 	}
 	c.Set(types.TenantRoleContextKey.String(), apiKeyTenantRoleContext)
@@ -407,7 +513,8 @@ func attachAPIKeyAuthContext(
 	if key != nil {
 		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
 			KeyID:            key.ID,
-			FullAccess:       key.FullAccess,
+			ScopeType:        key.ScopeType,
+			FullAccess:       fullAccess,
 			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 			Capabilities:     key.Capabilities,
 		})

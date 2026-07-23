@@ -147,9 +147,10 @@ func TestBuildOutbound_ShapeRequest(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-chat", nil)
 		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{ToolChoice: "auto"}, false)
 		require.NoError(t, err)
-		assert.False(t, useRaw)
-		req := body.(*openai.ChatCompletionRequest)
-		assert.Nil(t, req.ToolChoice)
+		assert.True(t, useRaw)
+		request, ok := body.(map[string]any)
+		require.True(t, ok)
+		assert.NotContains(t, request, "tool_choice")
 	})
 
 	t.Run("moonshot pins temperature to 1", func(t *testing.T) {

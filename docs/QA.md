@@ -229,7 +229,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - 只读用户 → `Viewer`
 - 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
 - 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
-- 空间所有者（拥有删除空间权限，每空间唯一）→ `Owner`
+- 空间所有者（拥有删除空间权限；每空间至少一位，可以有多位，最后一位不能被降级或移除）→ `Owner`
 
 如果你希望开启「invite-only」（不允许自助注册到本空间），可在空间设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
 
@@ -325,6 +325,10 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - Key 的 `last_used_at` 按节流更新，避免高频写库。
 - 路由级守卫会拒绝越权访问；管理类接口对 API Key Principal 默认拒绝，请为集成使用具备对应能力的 Key，而非全权 Key。
 - MCP OAuth 与嵌入会话按 Principal 隔离，不同集成之间互不串号。
+
+### 如何用一个 API Key 自动化管理多个空间？
+
+SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platform` 的 Key。平台 Key 不绑定单一空间：调用普通空间 API 时必须携带 `X-Tenant-ID`，并继续受原有 capability 和知识库范围守卫约束；调用开放的系统控制面接口则需要对应的 `system_*` capability。平台 Key 不支持 `full_access`，也不能创建、轮换或吊销其他平台 Key。
 
 ## 29. 一个空间如何绑定多个对象存储实例？
 

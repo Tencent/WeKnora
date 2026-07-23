@@ -146,6 +146,10 @@ func (lkeapProvider) Thinking() ThinkingStrategy { return thinkingTypeField{} }
 type deepseekProvider struct{ baseProvider }
 
 func (deepseekProvider) Name() provider.ProviderName { return provider.ProviderDeepSeek }
+
+// Native DeepSeek cache counters are not represented by go-openai v1.41.2;
+// use the raw path so prompt_cache_hit_tokens/miss_tokens remain observable.
+func (deepseekProvider) ForceRawHTTP() bool { return true }
 func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
 	if opts != nil && opts.ToolChoice != "" {
 		req.ToolChoice = nil

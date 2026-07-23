@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrWikiIngestConcurrent is returned by the wiki ingest handler in Lite mode
@@ -183,6 +184,13 @@ const (
 	// wikiFinalizeOpChange rows carry a doc-level add/remove change entry for
 	// the index-intro change description.
 	wikiFinalizeOpChange = "change"
+	// wikiFinalizeOpFolderPrune rows carry folders that may have become empty
+	// after a document retract. Keeping this in the durable finalize lane lets
+	// us wait until every ingest op for the KB has settled before deleting the
+	// directories; taxonomy planning creates folders before reduce writes the
+	// corresponding pages, so pruning any earlier can invalidate in-flight
+	// folder assignments.
+	wikiFinalizeOpFolderPrune = "folder_prune"
 
 	wikiFinalizeAdded   = "added"
 	wikiFinalizeRemoved = "removed"
@@ -201,6 +209,11 @@ const (
 	wikiFinalizeLockTTL   = 60 * time.Second
 	wikiFinalizeLockRenew = 20 * time.Second
 
+	// Folder cleanup is maintenance, not user-blocking work. When an ingest is
+	// still active, retry slowly so pruning never competes with the primary wiki
+	// pipeline for worker capacity.
+	wikiFolderPruneRetryDelay = 1 * time.Minute
+
 	// wikiIngestCleanupTimeout bounds detached tail cleanup after the asynq
 	// task context has been cancelled or hit its timeout.
 	wikiIngestCleanupTimeout = 10 * time.Second
@@ -215,12 +228,13 @@ type wikiFinalizeChange struct {
 }
 
 // wikiFinalizeRow is the JSON payload of a task_pending_ops row in the
-// finalize lane. Exactly one of {Slug, Change} is set, distinguished by the
-// row's Op column (wikiFinalizeOpSlug / wikiFinalizeOpChange).
+// finalize lane. Exactly one of {Slug, Change, FolderIDs} is set,
+// distinguished by the row's Op column.
 type wikiFinalizeRow struct {
-	Slug   string              `json:"slug,omitempty"`
-	Title  string              `json:"title,omitempty"`
-	Change *wikiFinalizeChange `json:"change,omitempty"`
+	Slug      string              `json:"slug,omitempty"`
+	Title     string              `json:"title,omitempty"`
+	Change    *wikiFinalizeChange `json:"change,omitempty"`
+	FolderIDs []string            `json:"folder_ids,omitempty"`
 }
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
@@ -253,6 +267,7 @@ type WikiRetractPayload struct {
 	DocSummary      string   `json:"doc_summary,omitempty"` // one-line summary of the deleted document
 	Language        string   `json:"language,omitempty"`
 	PageSlugs       []string `json:"page_slugs"`
+	FolderIDs       []string `json:"folder_ids,omitempty"`
 }
 
 const (
@@ -281,6 +296,7 @@ type WikiPendingOp struct {
 	DocTitle   string   `json:"doc_title,omitempty"`
 	DocSummary string   `json:"doc_summary,omitempty"`
 	PageSlugs  []string `json:"page_slugs,omitempty"`
+	FolderIDs  []string `json:"folder_ids,omitempty"`
 
 	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
 	// constructions made outside the queue (e.g. legacy tests).
@@ -329,6 +345,17 @@ type wikiIngestService struct {
 	// wiki:finalize:active:<kbID> lock, keeping two finalize runs for the
 	// same KB from overlapping when there is no Redis.
 	liteFinalizeLocks sync.Map
+	// llmRequests coalesces byte-identical concurrent prompts within this
+	// process. Keys include tenant and model to preserve isolation.
+	llmRequests singleflight.Group
+	// promptWarmups serializes only the first request for a reusable Wiki page
+	// prefix. Other prefixes and already-warmed cohorts stay parallel.
+	promptWarmups sync.Map
+}
+
+type wikiPromptWarmup struct {
+	done chan struct{}
+	once sync.Once
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -411,6 +438,23 @@ func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID st
 // Lite mode (no Redis) still works as long as Postgres is reachable —
 // the queue lives in PG, only the active-batch lock is Redis-only and
 // has a process-local fallback (liteLocks) inside the worker.
+func enqueueWikiPendingOp(
+	ctx context.Context,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	op *types.TaskPendingOp,
+) (bool, error) {
+	if pendingRepo == nil {
+		return true, nil
+	}
+	if guard, ok := pendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseGuard); ok {
+		return guard.EnqueueIfKnowledgeBaseActive(ctx, op)
+	}
+	if err := pendingRepo.Enqueue(ctx, op); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func EnqueueWikiIngest(
 	ctx context.Context,
 	task interfaces.TaskEnqueuer,
@@ -435,20 +479,22 @@ func EnqueueWikiIngest(
 		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
 		return
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: tenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  kbID,
-			Op:       WikiOpIngest,
-			DedupKey: knowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-			// Fall through and still schedule the trigger task — the
-			// next upload (or the next retry pass) will catch the gap.
-		}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+		TenantID: tenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  kbID,
+		Op:       WikiOpIngest,
+		DedupKey: knowledgeID,
+		Payload:  payloadBytes,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
+		return
 	}
 
 	trigger := WikiIngestPayload{
@@ -489,6 +535,7 @@ func EnqueueWikiRetract(
 		DocTitle:    payload.DocTitle,
 		DocSummary:  payload.DocSummary,
 		PageSlugs:   payload.PageSlugs,
+		FolderIDs:   payload.FolderIDs,
 		Language:    payload.Language,
 	}
 	payloadBytes, err := json.Marshal(op)
@@ -496,18 +543,22 @@ func EnqueueWikiRetract(
 		logger.Warnf(ctx, "wiki retract: failed to marshal pending op: %v", err)
 		return
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       WikiOpRetract,
-			DedupKey: payload.KnowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
-		}
+	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
+		TenantID: payload.TenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  payload.KnowledgeBaseID,
+		Op:       WikiOpRetract,
+		DedupKey: payload.KnowledgeID,
+		Payload:  payloadBytes,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
+		return
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki retract: skip enqueue for deleted KB %s", payload.KnowledgeBaseID)
+		return
 	}
 
 	trigger := WikiIngestPayload{
@@ -548,6 +599,25 @@ func wikiIngestCleanupContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), wikiIngestCleanupTimeout)
 }
 
+func (s *wikiIngestService) clearDeletedKnowledgeBasePendingOps(ctx context.Context, kbID string) error {
+	cleaner, ok := s.pendingRepo.(interfaces.TaskPendingOpsScopeCleaner)
+	if !ok || kbID == "" {
+		return nil
+	}
+	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
+	defer cancel()
+	return cleaner.DeleteByScope(cleanupCtx, types.TaskScopeKnowledgeBase, kbID)
+}
+
+func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {
+	accepted, err := enqueueWikiPendingOp(ctx, s.pendingRepo, op)
+	if err != nil {
+		logger.Warnf(ctx, "wiki finalize: enqueue %s row failed: %v", op.Op, err)
+		return false
+	}
+	return accepted
+}
+
 // enqueueFinalize persists this batch's KB-global convergence work into the
 // finalize lane of task_pending_ops and schedules a debounced trigger. One
 // "slug" row per affected page (carrying its fresh title when this batch wrote
@@ -559,17 +629,19 @@ func (s *wikiIngestService) enqueueFinalize(
 	affectedSlugs []string,
 	freshTitleBySlug map[string]string,
 	changes []wikiFinalizeChange,
+	folderIDs []string,
 ) {
 	if s.pendingRepo == nil {
 		return
 	}
+	acceptedAny := false
 	for _, slug := range affectedSlugs {
 		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
 		b, err := json.Marshal(row)
 		if err != nil {
 			continue
 		}
-		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -577,8 +649,8 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpSlug,
 			DedupKey: slug,
 			Payload:  b,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki finalize: enqueue slug row for %s failed: %v", slug, err)
+		}) {
+			acceptedAny = true
 		}
 	}
 	for i := range changes {
@@ -587,7 +659,7 @@ func (s *wikiIngestService) enqueueFinalize(
 		if err != nil {
 			continue
 		}
-		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -595,11 +667,47 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpChange,
 			DedupKey: "",
 			Payload:  b,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki finalize: enqueue change row failed: %v", err)
+		}) {
+			acceptedAny = true
 		}
 	}
+	if len(folderIDs) > 0 {
+		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
+		if b, err := json.Marshal(row); err == nil {
+			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
+				TenantID: payload.TenantID,
+				TaskType: wikiFinalizeTaskType,
+				Scope:    wikiTaskScope,
+				ScopeID:  payload.KnowledgeBaseID,
+				Op:       wikiFinalizeOpFolderPrune,
+				DedupKey: "",
+				Payload:  b,
+			}) {
+				acceptedAny = true
+			}
+		}
+	}
+	if !acceptedAny {
+		return
+	}
 	s.scheduleFinalize(ctx, payload)
+}
+
+func uniqueWikiFolderIDs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
@@ -623,6 +731,25 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 			return // a finalize is already scheduled/running for this KB — coalesced
 		}
 		logger.Warnf(ctx, "wiki finalize: schedule trigger failed: %v", err)
+	}
+}
+
+// scheduleFinalizeRetry is used when folder pruning is waiting for ingest
+// rows to drain. It deliberately has no stable TaskID: the currently-running
+// finalize task still owns that ID until it returns, so reusing it here would
+// coalesce the only retry away. Duplicate retries are harmless because the
+// durable prune row is deleted exactly once and an empty lane is a no-op.
+func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload WikiIngestPayload) {
+	langfuse.InjectTracing(ctx, &payload)
+	b, _ := json.Marshal(payload)
+	t := asynq.NewTask(types.TypeWikiFinalize, b,
+		asynq.Queue(types.QueueWiki),
+		asynq.MaxRetry(wikiIngestMaxRetry),
+		asynq.Timeout(30*time.Minute),
+		asynq.ProcessIn(wikiFolderPruneRetryDelay),
+	)
+	if _, err := s.task.Enqueue(t); err != nil {
+		logger.Warnf(ctx, "wiki finalize: schedule deferred folder prune failed: %v", err)
 	}
 }
 
@@ -1284,7 +1411,7 @@ var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\|\s]+)(?:\|([^\]]+))?\]\]`)
 // Background: WikiSummaryPrompt instructs the LLM to embed wiki links
 // for every extracted slug it knows about, but slug extraction happens
 // during map (parallel with summary generation) and the actual page
-// creation happens later in reduce. When reduce's WikiPageModifyPrompt
+// creation happens later in reduce. When reduce's WikiPageModifyUserPrompt
 // fails on an entity/concept slug the page never gets written — and
 // the already-persisted summary is left holding a `[[entity/foo|name]]`
 // link that 404s.
@@ -2264,42 +2391,163 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	}
 
 	prompt := buf.String()
-	prompt = types.AppendCustomPromptInstructions(prompt, data["CustomInstructions"], data["InstructionScope"])
-	thinking := false
-
-	var lastErr error
-	for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
-		response, err := chatModel.Chat(ctx, []chat.Message{
+	purpose := wikiPromptPurpose(promptTpl)
+	messages := []chat.Message{{Role: "user", Content: prompt}}
+	if promptTpl == agent.WikiPageModifyUserPrompt {
+		systemPrompt := types.AppendCustomPromptInstructions(
+			agent.WikiPageModifySystemPrompt,
+			maskedData["CustomInstructions"],
+			maskedData["InstructionScope"],
+		)
+		messages = []chat.Message{
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
-			Temperature: 0.3,
-			Thinking:    &thinking,
-		})
-		if err == nil {
-			return unmaskImageURLs(response.Content, urlMap), nil
 		}
-		lastErr = err
-
-		// Abort immediately on non-retryable errors (4xx except 408/429,
-		// parse/marshal failures, tool-side bugs, etc.). Retrying a
-		// hard "invalid arguments" error just wastes the model's budget.
-		if !isTransientLLMError(ctx, err) {
-			return "", fmt.Errorf("LLM call failed: %w", err)
-		}
-		if attempt == wikiLLMMaxAttempts {
-			break
-		}
-
-		backoff := wikiLLMBackoffBase << (attempt - 1)
-		logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
-			attempt, wikiLLMMaxAttempts, backoff, err)
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
-		case <-time.After(backoff):
+	} else {
+		messages[0].Content = types.AppendCustomPromptInstructions(
+			prompt, maskedData["CustomInstructions"], maskedData["InstructionScope"],
+		)
+	}
+	thinking := false
+	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking}
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	warmupKey := ""
+	if promptTpl == agent.WikiPageModifyUserPrompt {
+		prefixFingerprint = chat.FingerprintPromptPrefix(
+			messages[0].Content, maskedData["SharedSourceContexts"],
+		)
+		if tenantID, ok := types.TenantIDFromContext(ctx); ok {
+			warmupKey = chat.BuildPromptCacheKey(
+				tenantID, chatModel.GetModelID(), purpose, prefixFingerprint,
+			)
 		}
 	}
-	return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+	ctx = types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
+
+	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
+	requestJSON, _ := json.Marshal(struct {
+		Messages []chat.Message    `json:"messages"`
+		Options  *chat.ChatOptions `json:"options"`
+	}{Messages: messages, Options: opts})
+	requestKey := chat.BuildPromptCacheKey(
+		tenantID, chatModel.GetModelID(), "wiki_exact_request",
+		chat.FingerprintPromptPrefix(string(requestJSON)),
+	)
+
+	execute := func() (interface{}, error) {
+		releaseWarmup := func() {}
+		if tenantScoped && promptTpl == agent.WikiPageModifyUserPrompt && strings.TrimSpace(maskedData["SharedSourceContexts"]) != "" {
+			var warmupErr error
+			releaseWarmup, warmupErr = s.awaitWikiPromptWarmup(ctx, warmupKey)
+			if warmupErr != nil {
+				return "", warmupErr
+			}
+		}
+		defer releaseWarmup()
+
+		var lastErr error
+		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+			response, callErr := chatModel.Chat(ctx, messages, opts)
+			if callErr == nil && response != nil {
+				return response.Content, nil
+			}
+			if callErr == nil {
+				callErr = errors.New("LLM returned nil response")
+			}
+			lastErr = callErr
+
+			if !isTransientLLMError(ctx, callErr) {
+				return "", fmt.Errorf("LLM call failed: %w", callErr)
+			}
+			if attempt == wikiLLMMaxAttempts {
+				break
+			}
+
+			backoff := wikiLLMBackoffBase << (attempt - 1)
+			logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
+				attempt, wikiLLMMaxAttempts, backoff, callErr)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
+			case <-timer.C:
+			}
+		}
+		return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+	}
+
+	// Missing tenant context is unexpected for production Wiki work. Fail safe
+	// by skipping cross-call coalescing instead of putting unrelated requests
+	// into a synthetic tenant-0 bucket.
+	if !tenantScoped {
+		value, executeErr := execute()
+		if executeErr != nil {
+			return "", executeErr
+		}
+		content, _ := value.(string)
+		return unmaskImageURLs(content, urlMap), nil
+	}
+	resultCh := s.llmRequests.DoChan(requestKey, execute)
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		content, _ := result.Val.(string)
+		return unmaskImageURLs(content, urlMap), nil
+	}
+}
+
+func wikiPromptPurpose(promptTpl string) string {
+	switch promptTpl {
+	case agent.WikiPageModifyUserPrompt:
+		return "wiki_page_modify"
+	case agent.WikiChunkCitationPrompt:
+		return "wiki_chunk_citation"
+	case agent.WikiCandidateSlugPrompt:
+		return "wiki_candidate_slug"
+	case agent.WikiSummaryPrompt:
+		return "wiki_summary"
+	case agent.WikiKnowledgeExtractPrompt:
+		return "wiki_knowledge_extract"
+	case agent.WikiTaxonomyPlanPrompt:
+		return "wiki_taxonomy_plan"
+	case agent.WikiDeduplicationPrompt:
+		return "wiki_deduplication"
+	case agent.WikiIndexIntroPrompt, agent.WikiIndexIntroUpdatePrompt:
+		return "wiki_index_intro"
+	default:
+		return "wiki_generation"
+	}
+}
+
+func (s *wikiIngestService) awaitWikiPromptWarmup(ctx context.Context, key string) (func(), error) {
+	if key == "" {
+		return func() {}, nil
+	}
+	candidate := &wikiPromptWarmup{done: make(chan struct{})}
+	actual, loaded := s.promptWarmups.LoadOrStore(key, candidate)
+	entry := actual.(*wikiPromptWarmup)
+	if !loaded {
+		return func() {
+			entry.once.Do(func() { close(entry.done) })
+			// Keep the local warmed marker long enough to cover the parallel
+			// reduce burst without turning it into a persistent application cache.
+			time.AfterFunc(4*time.Minute, func() {
+				s.promptWarmups.CompareAndDelete(key, entry)
+			})
+		}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-entry.done:
+		return func() {}, nil
+	}
 }
 
 // isTransientLLMError reports whether an error from the chat provider

@@ -21,6 +21,10 @@ var errTenantAPIKeyScopeForbidden = stderrors.New("workspace API key scope forbi
 // default (fail-closed), which removes the old "remember to add APIKeyDeny"
 // footgun.
 type APIKeyRoutePolicy struct {
+	// PlatformOnly rejects workspace-bound keys even when they are full-access.
+	// It is used for control-plane routes under /system/admin and cross-workspace
+	// tenant lifecycle APIs.
+	PlatformOnly bool
 	// RequireFullAccess admits only full-access tenant API keys unless one of
 	// the listed capabilities also matches. Routes with neither full-access
 	// requirement nor capabilities are open to any valid API key.
@@ -128,6 +132,12 @@ func (a *APIKeyRouteAuthorizer) authorize(scope types.TenantAPIKeyScope, method,
 	if !ok {
 		return errTenantAPIKeyScopeForbidden
 	}
+	if policy.PlatformOnly && !scope.IsPlatform() {
+		return errTenantAPIKeyScopeForbidden
+	}
+	if policy.PlatformOnly && len(policy.Capabilities) == 0 {
+		return errTenantAPIKeyScopeForbidden
+	}
 	if scope.FullAccess {
 		return nil
 	}
@@ -158,6 +168,37 @@ func DenyAPIKeyPrincipal() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+// AllowFileServeAPIKey guards the tenant-scoped file-proxy routes (/files and
+// the KB-scoped image proxy) for X-API-Key callers. Those routes serve an
+// arbitrary storage path that only carries a tenant segment — there is no KB
+// id in the path a KB-restricted key's allow-list could be checked against —
+// so a KB-restricted key is denied outright (it must download KB content via
+// the KB-scoped routes such as /knowledge/:id/download, which DO enforce the
+// allow-list). A key passes when it is full-access, or when it is NOT
+// KB-restricted and carries the retrieve capability: that is exactly the class
+// of key that can already read any of the tenant's KB content, so exposing the
+// tenant-bounded raw file path (the handler still enforces
+// ValidateStoragePathTenant / the KB owner tenant) grants it nothing new. JWT
+// sessions carry no API-key scope and pass straight through.
+func AllowFileServeAPIKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context())
+		if !ok {
+			c.Next()
+			return
+		}
+		if scope.FullAccess ||
+			(!scope.IsKnowledgeBaseRestricted() &&
+				scope.HasCapability(types.APIKeyCapabilityRetrieve)) {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: API key scope does not allow this operation",
+		})
 	}
 }
 

@@ -83,6 +83,23 @@ type TaskPendingOpsRepository interface {
 	DeleteByDedupKey(ctx context.Context, taskType, scope, scopeID, dedupKey, op string) error
 }
 
+// TaskPendingOpsScopeCleaner is an optional extension for callers that need
+// to discard every durable pending operation owned by a deleted scope. It is
+// intentionally separate from TaskPendingOpsRepository so alternate queue
+// implementations and existing test doubles are not forced to implement a
+// lifecycle-only operation.
+type TaskPendingOpsScopeCleaner interface {
+	DeleteByScope(ctx context.Context, scope, scopeID string) error
+}
+
+// TaskPendingOpsKnowledgeBaseGuard atomically persists a KB-scoped operation
+// only while its knowledge base is still active. Implementations must
+// serialize the active-KB check with soft deletion so a detached worker cannot
+// recreate durable work after the deletion scrub has finished.
+type TaskPendingOpsKnowledgeBaseGuard interface {
+	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
+}
+
 // TaskDeadLetterRepository persists rows for the generic task dead-letter
 // archive (`task_dead_letters`). Two writers exist: the asynq
 // dead-letter middleware (one row per archived asynq task), and the

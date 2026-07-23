@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -66,7 +67,8 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 // @Param        id           path      string  true   "知识库ID"
 // @Param        page         query     int     false  "页码"
 // @Param        page_size    query     int     false  "每页数量"
-// @Param        tag_id       query     int     false  "标签ID筛选(seq_id)"
+// @Param        tag_id       query     int     false  "标签ID筛选(seq_id)，兼容旧版单标签"
+// @Param        tag_ids      query     string  false  "标签UUID筛选，逗号分隔（OR语义）"
 // @Param        keyword      query     string  false  "关键词搜索"
 // @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
 // @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
@@ -86,11 +88,12 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 		return
 	}
 
-	var tagSeqID int64
+	tagUUIDs := parseCommaSeparatedTagIDs(c.Query("tag_ids"))
+	var legacyTagSeqID int64
 	tagIDStr := c.Query("tag_id")
 	if tagIDStr != "" {
 		var err error
-		tagSeqID, err = strconv.ParseInt(tagIDStr, 10, 64)
+		legacyTagSeqID, err = strconv.ParseInt(tagIDStr, 10, 64)
 		if err != nil {
 			c.Error(errors.NewBadRequestError("tag_id 必须是整数"))
 			return
@@ -100,7 +103,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	searchField := secutils.SanitizeForLog(c.Query("search_field"))
 	sortOrder := secutils.SanitizeForLog(c.Query("sort_order"))
 
-	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagSeqID, keyword, searchField, sortOrder)
+	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagUUIDs, legacyTagSeqID, keyword, searchField, sortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -381,19 +384,35 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 
 // ExportEntries godoc
 // @Summary      导出FAQ条目
-// @Description  将所有FAQ条目导出为CSV文件
+// @Description  将所有FAQ条目导出为 CSV（默认）或 JSON。?format=json 返回与 FAQEntryPayload 结构兼容的数组。
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      text/csv
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {file}    file    "CSV文件"
-// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Produce      application/json
+// @Param        id      path      string  true   "知识库ID"
+// @Param        format  query     string  false  "导出格式：csv（默认）或 json"
+// @Success      200     {file}    file    "导出文件"
+// @Failure      400     {object}  errors.AppError  "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/export [get]
 func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
+	format := strings.ToLower(strings.TrimSpace(c.Query("format")))
+
+	if format == "json" {
+		jsonData, err := h.knowledgeService.ExportFAQEntriesJSON(ctx, kbID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(err)
+			return
+		}
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		c.Header("Content-Disposition", "attachment; filename=faq_export.json")
+		c.Data(http.StatusOK, "application/json; charset=utf-8", jsonData)
+		return
+	}
 
 	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
 	if err != nil {

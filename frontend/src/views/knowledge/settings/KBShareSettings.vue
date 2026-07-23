@@ -1,164 +1,137 @@
 <template>
-  <div class="section-content">
-    <div class="section-header">
-      <h3 class="section-title">{{ $t('organization.share.title') }}</h3>
-      <p class="section-desc">{{ $t('knowledgeEditor.share.description') }}</p>
+  <div class="share-to-space-panel">
+    <div class="share-panel-header">
+      <div class="share-panel-header-row">
+        <div class="share-panel-titlewrap">
+          <h2 class="share-panel-title">{{ $t('organization.share.title') }}</h2>
+          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="share-hint-popup-overlay"
+            :overlay-inner-style="shareHintPopupInnerStyle">
+            <button type="button" class="share-hint-trigger-btn" :aria-label="$t('knowledgeEditor.share.hintTitle')"
+              :title="$t('knowledgeEditor.share.hintTitle')">
+              <t-icon name="info-circle" size="16px" />
+            </button>
+            <template #content>
+              <div class="share-hint-popover">
+                <p class="share-hint-title">{{ $t('knowledgeEditor.share.hintTitle') }}</p>
+                <p class="share-hint-desc">{{ $t('knowledgeEditor.share.tip1') }}</p>
+                <p class="share-hint-desc">{{ $t('knowledgeEditor.share.tip2') }}</p>
+              </div>
+            </template>
+          </t-popup>
+        </div>
+      </div>
+      <p class="share-panel-desc">{{ $t('knowledgeEditor.share.description') }}</p>
     </div>
-    <div class="section-body">
-      <!-- 共享表单：仅 KB creator 或空间 Admin+ 可见，其他角色看到的是只读列表。 -->
-      <div v-if="canShare" class="share-form">
-        <div class="form-item">
-          <label class="form-label">{{ $t('organization.share.selectOrg') }}</label>
-          <div class="share-input-row">
-            <t-select
-              v-model="selectedOrgId"
-              :placeholder="$t('organization.share.selectOrgPlaceholder')"
-              :loading="loadingOrgs"
-              class="org-select org-select-dropdown"
-              :popup-props="{ overlayClassName: 'org-select-dropdown-popup' }"
-            >
-              <t-option
-                v-for="org in availableOrganizations"
-                :key="org.id"
-                :value="org.id"
-                :label="org.name"
-              >
-                <div class="org-option-content">
-                  <div class="org-option-icon-wrap">
-                    <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+
+    <div class="share-panel-list-wrap">
+      <div class="share-panel-list-header">
+        <div class="share-panel-titlewrap">
+          <span class="share-panel-list-title">{{ $t('organization.share.sharedTo') }}</span>
+          <span class="share-panel-count-badge">{{ filteredShares.length }}</span>
+        </div>
+        <div class="share-panel-actions">
+          <div class="share-panel-search">
+            <t-input v-model="searchQuery" size="small" :placeholder="$t('organization.share.searchPlaceholder')"
+              clearable>
+              <template #prefix-icon>
+                <t-icon name="search" />
+              </template>
+            </t-input>
+          </div>
+          <t-popup v-if="canShare" v-model="addPopupVisible" trigger="click" placement="bottom-end" destroy-on-close
+            overlay-class-name="share-add-popup-overlay">
+            <t-button theme="primary" variant="outline" shape="square" size="small" class="share-panel-add-btn"
+              :title="$t('knowledgeEditor.share.addShare')" :aria-label="$t('knowledgeEditor.share.addShare')">
+              <template #icon><t-icon name="add" /></template>
+            </t-button>
+            <template #content>
+              <div class="share-add-popup-inner" @click.stop>
+                <div class="member-invite-popup-title">{{ $t('organization.share.addShareDialogTitle') }}</div>
+                <div class="org-upgrade-fields">
+                  <div class="org-upgrade-field">
+                    <label class="org-upgrade-field-label">{{ $t('organization.share.selectOrg') }}</label>
+                    <ShareToSpaceOrgSelect v-model="selectedOrgId" :organizations="availableOrganizations"
+                      :loading="loadingOrgs" />
                   </div>
-                  <div class="org-option-body">
-                    <div class="org-option-header">
-                      <span class="org-option-name">{{ org.name }}</span>
-                      <t-tag v-if="org.is_owner" theme="primary" size="small" variant="light">
-                        {{ $t('organization.owner') }}
-                      </t-tag>
-                      <t-tag v-else-if="org.my_role" :theme="org.my_role === 'admin' ? 'warning' : 'default'" size="small" variant="light">
-                        {{ $t(`organization.role.${org.my_role}`) }}
-                      </t-tag>
-                    </div>
-                    <div class="org-option-meta">
-                      <span class="org-meta-tag">
-                        <t-icon name="user" class="org-meta-icon org-meta-icon-user" />
-                        {{ org.member_count ?? 0 }}
-                      </span>
-                      <span class="org-meta-tag">
-                        <img src="@/assets/img/zhishiku.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
-                        {{ org.share_count ?? 0 }}
-                      </span>
-                      <span class="org-meta-tag">
-                        <img src="@/assets/img/agent.svg" class="org-meta-icon org-meta-icon-agent" alt="" aria-hidden="true" />
-                        {{ org.agent_share_count ?? 0 }}
-                      </span>
-                    </div>
+                  <div class="org-upgrade-field org-upgrade-field--last">
+                    <label class="org-upgrade-field-label">{{ $t('organization.share.permission') }}</label>
+                    <t-select v-model="selectedPermission" size="medium">
+                      <t-option value="viewer" :label="$t('organization.share.permissionReadonly')" />
+                      <t-option value="editor" :label="$t('organization.share.permissionEditable')" />
+                    </t-select>
+                    <p class="member-form-hint">{{ $t('organization.share.permissionTip') }}</p>
                   </div>
                 </div>
-              </t-option>
-            </t-select>
-            <t-select
-              v-model="selectedPermission"
-              class="permission-select"
-            >
-              <t-option value="viewer" :label="$t('organization.share.permissionReadonly')" />
-              <t-option value="editor" :label="$t('organization.share.permissionEditable')" />
-            </t-select>
-            <t-button
-              theme="primary"
-              :loading="submitting"
-              :disabled="!selectedOrgId"
-              @click="handleShare"
-            >
-              {{ $t('knowledgeEditor.share.addShare') }}
-            </t-button>
-          </div>
-          <p class="form-tip">{{ $t('organization.share.permissionTip') }}</p>
+                <div class="invite-popup-footer">
+                  <t-button variant="outline" :disabled="submitting" @click="addPopupVisible = false">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                  <t-button theme="primary" :loading="submitting" :disabled="!selectedOrgId" @click="handleShare">
+                    {{ $t('knowledgeEditor.share.addShare') }}
+                  </t-button>
+                </div>
+              </div>
+            </template>
+          </t-popup>
         </div>
       </div>
 
-      <!-- 已共享列表 -->
-      <div class="shares-section">
-        <div class="shares-header">
-          <span class="shares-title">{{ $t('organization.share.sharedTo') }}</span>
-          <span class="shares-count">{{ shares.length }}</span>
-        </div>
-
-        <div v-if="loadingShares" class="shares-loading">
-          <t-loading size="small" />
-          <span>{{ $t('common.loading') }}</span>
-        </div>
-
-        <div v-else-if="shares.length === 0" class="shares-empty">
-          <t-icon name="share" class="empty-icon" />
-          <span>{{ $t('organization.share.noShares') }}</span>
-        </div>
-
-        <div v-else class="shares-list">
-          <div v-for="share in shares" :key="share.id" class="share-item">
-            <div class="share-info">
-              <div class="share-info-top">
-                <div class="share-org">
-                  <SpaceAvatar
-                    :name="share.organization_name || ''"
-                    :avatar="orgStore.organizations.find(o => o.id === share.organization_id)?.avatar"
-                    size="small"
-                  />
-                  <span class="org-name">{{ share.organization_name }}</span>
-                </div>
-                <t-tag
-                  :theme="share.permission === 'editor' ? 'warning' : 'default'"
-                  size="small"
-                  variant="light"
-                >
-                  {{ share.permission === 'editor' ? $t('organization.share.permissionEditable') : $t('organization.share.permissionReadonly') }}
-                </t-tag>
-              </div>
-              <div class="share-item-meta">
-                <span class="org-meta-tag">
-                  <t-icon name="user" class="org-meta-icon org-meta-icon-user" />
-                  {{ getOrgForShare(share.organization_id)?.member_count ?? 0 }}
-                </span>
-                <span class="org-meta-tag">
-                  <img src="@/assets/img/zhishiku.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
-                  {{ getOrgForShare(share.organization_id)?.share_count ?? 0 }}
-                </span>
-                <span class="org-meta-tag">
-                  <img src="@/assets/img/agent.svg" class="org-meta-icon org-meta-icon-agent" alt="" aria-hidden="true" />
-                  {{ getOrgForShare(share.organization_id)?.agent_share_count ?? 0 }}
-                </span>
-              </div>
+      <div v-if="loadingShares && shares.length === 0" class="share-panel-loading">
+        <t-loading size="small" />
+        <span>{{ $t('organization.share.loading') }}</span>
+      </div>
+      <div v-else-if="filteredShares.length === 0" class="share-panel-empty">
+        <t-empty :description="searchQuery.trim()
+          ? $t('organization.share.emptySearch', { q: searchQuery })
+          : $t('organization.share.noShares')" />
+      </div>
+      <div v-else class="share-panel-table-shell">
+        <t-table row-key="id" :data="filteredShares" :columns="shareColumns" size="medium" hover stripe
+          :loading="loadingShares">
+          <template #space="{ row }">
+            <div class="share-space-cell">
+              <span class="share-space-name">
+                <SpaceAvatar :name="row.organization_name || ''"
+                  :avatar="getOrgForShare(row.organization_id)?.avatar" size="small" />
+                <span class="share-space-name-text">{{ row.organization_name }}</span>
+              </span>
+              <span v-if="row.shared_by_username" class="share-space-meta">
+                {{ $t('organization.share.sharedFrom') }} {{ row.shared_by_username }}
+              </span>
             </div>
-            <div v-if="canShare" class="share-actions">
-              <t-select
-                :value="share.permission"
-                size="small"
-                class="permission-change-select"
-                @change="(val: string) => handleUpdatePermission(share, val)"
-              >
+          </template>
+          <template #permission="{ row }">
+            <div class="share-permission-cell">
+              <t-select v-if="canShare" :value="row.permission" size="small" class="share-permission-select"
+                @change="(val: string) => handleUpdatePermission(row, val)">
                 <t-option value="viewer" :label="$t('organization.share.permissionReadonly')" />
                 <t-option value="editor" :label="$t('organization.share.permissionEditable')" />
               </t-select>
-              <t-popconfirm
-                :content="$t('knowledgeEditor.share.unshareConfirm', { name: share.organization_name })"
-                @confirm="handleUnshare(share)"
-              >
-                <t-button variant="text" theme="danger" size="small">
-                  <t-icon name="delete" />
-                </t-button>
+              <t-tag v-else size="small"
+                :theme="row.permission === 'editor' || row.permission === 'admin' ? 'warning' : 'default'"
+                variant="light">
+                {{ permissionLabel(row.permission) }}
+              </t-tag>
+            </div>
+          </template>
+          <template #created_at="{ row }">{{ formatShareDate(row.created_at) }}</template>
+          <template #actions="{ row }">
+            <div v-if="canShare" class="share-table-actions">
+              <t-popconfirm :content="$t('knowledgeEditor.share.unshareConfirm', { name: row.organization_name })"
+                :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+                :cancel-btn="{ content: $t('common.cancel') }" placement="left" @confirm="handleUnshare(row)">
+                <t-tooltip :content="$t('organization.share.unshareAction')" placement="top">
+                  <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-tooltip>
               </t-popconfirm>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 提示信息 -->
-      <div class="share-tips">
-        <t-icon name="info-circle" class="tip-icon" />
-        <div class="tip-content">
-          <p>{{ $t('knowledgeEditor.share.tip1') }}</p>
-          <p>{{ $t('knowledgeEditor.share.tip2') }}</p>
-        </div>
+          </template>
+        </t-table>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -170,6 +143,7 @@ import { useOrganizationStore } from '@/stores/organization'
 import { shareKnowledgeBase, listKBShares, removeShare, updateSharePermission } from '@/api/organization'
 import type { KnowledgeBaseShare } from '@/api/organization'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
+import ShareToSpaceOrgSelect from '@/components/ShareToSpaceOrgSelect.vue'
 
 const { t } = useI18n()
 const orgStore = useOrganizationStore()
@@ -180,9 +154,6 @@ function getOrgForShare(organizationId: string) {
 
 interface Props {
   kbId: string
-  // 后端 POST/PUT/DELETE /knowledge-bases/:id/shares 受 OwnedKBOrAdmin
-  // 守卫：仅 KB creator 或空间 Admin+ 能改动共享。父组件根据 KB.creator_id
-  // 计算后传入，缺省 false 表示只读。
   canShare?: boolean
 }
 
@@ -190,14 +161,24 @@ const props = withDefaults(defineProps<Props>(), {
   canShare: false,
 })
 
+const shareHintPopupInnerStyle = {
+  boxSizing: 'border-box' as const,
+  padding: '0',
+  width: 'min(400px, calc(100vw - 24px))',
+  maxWidth: 'min(400px, calc(100vw - 24px))',
+  maxHeight: 'min(280px, 65vh)',
+  overflow: 'hidden',
+}
+
 const loadingOrgs = ref(false)
 const loadingShares = ref(false)
 const submitting = ref(false)
+const addPopupVisible = ref(false)
+const searchQuery = ref('')
 const selectedOrgId = ref('')
 const selectedPermission = ref<'viewer' | 'editor'>('viewer')
 const shares = ref<(KnowledgeBaseShare & { organization_name?: string })[]>([])
 
-// Only show organizations where user can share (editor or admin); exclude viewer-only orgs and already shared
 const availableOrganizations = computed(() => {
   const sharedOrgIds = new Set(shares.value.map(s => s.organization_id))
   return orgStore.organizations.filter(
@@ -207,7 +188,45 @@ const availableOrganizations = computed(() => {
   )
 })
 
-// Load organizations
+const filteredShares = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query) return shares.value
+  return shares.value.filter((share) => {
+    const haystack = [
+      share.organization_name,
+      share.shared_by_username,
+      permissionLabel(share.permission),
+    ].filter(Boolean).join(' ').toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+const shareColumns = computed(() => {
+  const cols = [
+    { colKey: 'space', title: t('organization.share.columns.space'), ellipsis: true, minWidth: 180 },
+    { colKey: 'permission', title: t('organization.share.columns.permission'), width: 132 },
+    { colKey: 'created_at', title: t('organization.share.columns.sharedAt'), width: 154 },
+  ]
+  if (props.canShare) {
+    cols.push({ colKey: 'actions', title: t('organization.share.columns.operations'), width: 72, align: 'left' } as typeof cols[number])
+  }
+  return cols
+})
+
+function permissionLabel(permission: string) {
+  if (permission === 'editor' || permission === 'admin') {
+    return t('organization.share.permissionEditable')
+  }
+  return t('organization.share.permissionReadonly')
+}
+
+function formatShareDate(dateStr?: string) {
+  if (!dateStr) return '—'
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return dateStr
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
 async function loadOrganizations() {
   loadingOrgs.value = true
   try {
@@ -217,15 +236,13 @@ async function loadOrganizations() {
   }
 }
 
-// Load shares
 async function loadShares() {
   if (!props.kbId) return
   loadingShares.value = true
   try {
     const result = await listKBShares(props.kbId)
     if (result.success && result.data) {
-      // result.data is ListSharesResponse with shares array
-      const sharesData = (result.data as any).shares || result.data
+      const sharesData = (result.data as { shares?: KnowledgeBaseShare[] }).shares || result.data
       const sharesList = Array.isArray(sharesData) ? sharesData : []
       shares.value = sharesList.map((share: KnowledgeBaseShare) => ({
         ...share,
@@ -239,7 +256,6 @@ async function loadShares() {
   }
 }
 
-// Handle share
 async function handleShare() {
   if (!selectedOrgId.value) return
 
@@ -253,18 +269,19 @@ async function handleShare() {
       MessagePlugin.success(t('organization.share.shareSuccess'))
       selectedOrgId.value = ''
       selectedPermission.value = 'viewer'
+      addPopupVisible.value = false
       await loadShares()
     } else {
       MessagePlugin.error(result.message || t('organization.share.shareFailed'))
     }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('organization.share.shareFailed'))
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : t('organization.share.shareFailed')
+    MessagePlugin.error(message)
   } finally {
     submitting.value = false
   }
 }
 
-// Handle update permission
 async function handleUpdatePermission(share: KnowledgeBaseShare, newPermission: string) {
   if (share.permission === newPermission) return
 
@@ -278,12 +295,12 @@ async function handleUpdatePermission(share: KnowledgeBaseShare, newPermission: 
     } else {
       MessagePlugin.error(result.message || t('organization.roleUpdateFailed'))
     }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('organization.roleUpdateFailed'))
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : t('organization.roleUpdateFailed')
+    MessagePlugin.error(message)
   }
 }
 
-// Handle unshare
 async function handleUnshare(share: KnowledgeBaseShare) {
   try {
     const result = await removeShare(props.kbId, share.id)
@@ -293,12 +310,12 @@ async function handleUnshare(share: KnowledgeBaseShare) {
     } else {
       MessagePlugin.error(result.message || t('organization.share.unshareFailed'))
     }
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('organization.share.unshareFailed'))
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : t('organization.share.unshareFailed')
+    MessagePlugin.error(message)
   }
 }
 
-// Watch for kbId changes
 watch(() => props.kbId, async (newKbId) => {
   if (newKbId) {
     await Promise.all([loadOrganizations(), loadShares()])
@@ -307,366 +324,9 @@ watch(() => props.kbId, async (newKbId) => {
 </script>
 
 <style scoped lang="less">
-.section-content {
-  .section-header {
-    margin-bottom: 16px;
-  }
-
-  .section-title {
-    margin: 0 0 6px 0;
-    font-family: var(--app-font-family);
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-
-  .section-desc {
-    margin: 0;
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    color: var(--td-text-color-placeholder);
-    line-height: 22px;
-  }
-}
-
-.share-form {
-  margin-bottom: 24px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--td-bg-color-secondarycontainer);
-}
-
-.form-item {
-  .form-label {
-    display: block;
-    margin-bottom: 8px;
-    font-family: var(--app-font-family);
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .form-tip {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-    line-height: 18px;
-  }
-}
-
-.share-input-row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-
-  .org-select {
-    flex: 1;
-    min-width: 240px;
-  }
-
-  .permission-select {
-    width: 120px;
-    flex-shrink: 0;
-  }
-}
-
-.shares-section {
-  margin-bottom: 24px;
-}
-
-.shares-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-
-  .shares-title {
-    font-family: var(--app-font-family);
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .shares-count {
-    padding: 2px 8px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-  }
-}
-
-.shares-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px;
-  color: var(--td-text-color-placeholder);
-  font-size: 14px;
-}
-
-.shares-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 40px 20px;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  color: var(--td-text-color-placeholder);
-
-  .empty-icon {
-    font-size: 32px;
-    opacity: 0.5;
-  }
-}
-
-.shares-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.share-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  transition: background 0.2s ease, border-color 0.2s ease;
-
-  &:hover {
-    background: var(--td-bg-color-secondarycontainer);
-    border-color: var(--td-component-stroke);
-  }
-}
-
-.share-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.share-info-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.share-org {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  .org-name {
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-}
-
-.share-item-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-
-  .org-meta-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 6px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 4px;
-  }
-
-  .org-meta-icon {
-    flex-shrink: 0;
-    vertical-align: middle;
-    color: var(--td-text-color-secondary);
-  }
-
-  .org-meta-icon-user {
-    font-size: 12px;
-  }
-
-  .org-meta-icon-kb {
-    width: 12px;
-    height: 12px;
-    opacity: 0.75;
-  }
-  .org-meta-icon-agent {
-    width: 12px;
-    height: 12px;
-    opacity: 0.75;
-  }
-}
-
-.share-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-
-  .permission-change-select {
-    width: 100px;
-  }
-}
-
-.share-tips {
-  display: flex;
-  gap: 12px;
-  padding: 16px;
-  background: var(--td-brand-color-light);
-  border-radius: 8px;
-  border: 1px solid var(--td-brand-color-focus);
-
-  .tip-icon {
-    flex-shrink: 0;
-    font-size: 16px;
-    color: var(--td-brand-color);
-    margin-top: 2px;
-  }
-
-  .tip-content {
-    flex: 1;
-
-    p {
-      margin: 0 0 4px 0;
-      font-size: 13px;
-      color: var(--td-text-color-secondary);
-      line-height: 20px;
-
-      &:last-child {
-        margin-bottom: 0;
-      }
-    }
-  }
-}
-
-// Custom option styles for organization select (compact)
-:deep(.t-select-option) {
-  height: auto;
-  align-items: center;
-  padding: 6px 12px;
-  border-radius: 4px;
-  margin: 1px 6px;
-  transition: background 0.15s ease;
-}
-
-:deep(.t-select-option:hover),
-:deep(.t-select-option.t-is-selected) {
-  background: var(--td-brand-color-light);
-}
-
-:deep(.t-select-option__content) {
-  width: 100%;
-}
-
-.org-option-content {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0;
-  min-width: 260px;
-  width: 100%;
-}
-
-.org-option-icon-wrap {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.org-option-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.org-option-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-
-  .org-option-name {
-    font-family: var(--app-font-family);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.org-option-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-
-  .org-meta-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 0px 4px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 4px;
-  }
-
-  .org-meta-icon {
-    flex-shrink: 0;
-    vertical-align: middle;
-    color: var(--td-text-color-secondary);
-  }
-
-  .org-meta-icon-user {
-    font-size: 12px;
-  }
-
-  .org-meta-icon-kb {
-    width: 12px;
-    height: 12px;
-    opacity: 0.75;
-  }
-  .org-meta-icon-agent {
-    width: 12px;
-    height: 12px;
-    opacity: 0.75;
-  }
-}
+@import '@/components/share-to-space-panel.less';
 </style>
 
 <style lang="less">
-// Global styles for organization select dropdown (compact)
-.org-select-dropdown-popup.t-select__dropdown {
-  padding: 4px 0;
-  max-height: 320px;
-  overflow-y: auto;
-  border-radius: 6px;
-  box-shadow: var(--td-shadow-2);
-}
-
-.org-select-dropdown-popup .t-select-option {
-  height: auto;
-  align-items: center;
-  padding: 6px 12px;
-  border-radius: 4px;
-  margin: 1px 6px;
-}
-
-.org-select-dropdown-popup .t-select-option__content {
-  width: 100%;
-}
+@import '@/components/share-to-space-panel.overlay.less';
 </style>

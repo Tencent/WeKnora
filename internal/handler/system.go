@@ -45,6 +45,7 @@ type SystemHandler struct {
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
 	systemSettingSvc interfaces.SystemSettingService
+	apiKeySvc        interfaces.TenantAPIKeyService
 	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
 	// tests that wire a partial container still compile. In production
 	// the dig graph always provides one.
@@ -72,6 +73,7 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	apiKeySvc interfaces.TenantAPIKeyService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
 	knowledgeSvc interfaces.KnowledgeService,
@@ -84,11 +86,148 @@ func NewSystemHandler(cfg *config.Config,
 		tenantSvc:          tenantSvc,
 		userSvc:            userSvc,
 		systemSettingSvc:   systemSettingSvc,
+		apiKeySvc:          apiKeySvc,
 		auditSvc:           auditSvc,
 		taskInspector:      taskInspector,
 		knowledgeSvc:       knowledgeSvc,
 		storageBackendRepo: storageBackendRepo,
 	}
+}
+
+type platformAPIKeyCreateRequest struct {
+	Name         string   `json:"name"`
+	Capabilities []string `json:"capabilities"`
+	ExpiresAt    *int64   `json:"expires_at_unix"`
+}
+
+// ListPlatformAPIKeys godoc
+// @Summary      List platform API keys
+// @Description  Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [get]
+func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
+	keys, err := h.apiKeySvc.ListPlatformAPIKeys(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to list platform API keys").WithDetails(err.Error()))
+		return
+	}
+	response := make([]tenantAPIKeyResponse, 0, len(keys))
+	for _, key := range keys {
+		item := tenantAPIKeyForResponse(key)
+		item.APIKey = maskManagedAPIKey(key.APIKey)
+		response = append(response, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
+}
+
+// CreatePlatformAPIKey godoc
+// @Summary      Create a platform API key
+// @Description  Creates a capability-scoped key that may target any workspace through X-Tenant-ID. The plaintext token is returned once. Human SystemAdmin only.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body platformAPIKeyCreateRequest true "Platform API key"
+// @Success      201 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [post]
+func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
+	var req platformAPIKeyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.Error(apperrors.NewValidationError("name is required"))
+		return
+	}
+	capabilities := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if len(capabilities) == 0 || len(capabilities) != len(req.Capabilities) {
+		c.Error(apperrors.NewValidationError("valid capabilities are required"))
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		value := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !value.After(time.Now().UTC()) {
+			c.Error(apperrors.NewValidationError("expires_at_unix must be in the future"))
+			return
+		}
+		expiresAt = &value
+	}
+	result, err := h.apiKeySvc.CreateAPIKey(c.Request.Context(), interfaces.TenantAPIKeyCreateRequest{
+		ScopeType:    types.APIKeyScopePlatform,
+		Name:         req.Name,
+		Capabilities: []string(capabilities),
+		ExpiresAt:    expiresAt,
+	})
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to create platform API key").WithDetails(err.Error()))
+		return
+	}
+	item := tenantAPIKeyForResponse(result.APIKey)
+	item.APIKey = maskManagedAPIKey(result.Token)
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyCreated, result.APIKey)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    tenantAPIKeyCreateResponse{tenantAPIKeyResponse: item, Token: result.Token},
+	})
+}
+
+// DeletePlatformAPIKey godoc
+// @Summary      Revoke a platform API key
+// @Description  Immediately revokes a platform API key. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Param        key_id path int true "API key ID"
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys/{key_id} [delete]
+func (h *SystemHandler) DeletePlatformAPIKey(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || id == 0 {
+		c.Error(apperrors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	if err := h.apiKeySvc.RevokePlatformAPIKey(c.Request.Context(), id); err != nil {
+		c.Error(apperrors.NewNotFoundError("Platform API key not found"))
+		return
+	}
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyRevoked, &types.TenantAPIKey{ID: id})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func maskManagedAPIKey(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 12 {
+		return "***"
+	}
+	return token[:7] + "..." + token[len(token)-4:]
+}
+
+func (h *SystemHandler) emitAPIKeyAudit(ctx context.Context, action types.AuditAction, key *types.TenantAPIKey) {
+	if h.auditSvc == nil || key == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	details, _ := json.Marshal(map[string]any{
+		"scope_type":   types.APIKeyScopePlatform,
+		"capabilities": key.Capabilities,
+	})
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID: 0, ActorUserID: actorID, ActorRole: systemAuditActorRole(ctx),
+		Action: action, TargetType: "api_key", TargetID: strconv.FormatUint(key.ID, 10),
+		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+	})
+}
+
+func systemAuditActorRole(ctx context.Context) string {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsPlatform() {
+		return "platform_api_key"
+	}
+	return "system_admin"
 }
 
 // emitAdminAudit writes one audit row for a system-admin lifecycle event
@@ -120,7 +259,7 @@ func (h *SystemHandler) emitAdminAudit(
 		// events (matches AuditActionSystemSettingChanged).
 		TenantID:    0,
 		ActorUserID: actorID,
-		ActorRole:   "system_admin",
+		ActorRole:   systemAuditActorRole(ctx),
 		Action:      action,
 		TargetType:  "user",
 		Outcome:     types.AuditOutcomeSuccess,
@@ -1773,7 +1912,7 @@ func (h *SystemHandler) emitQueueTaskAudit(
 	_ = h.auditSvc.Log(ctx, &types.AuditLog{
 		TenantID:    0,
 		ActorUserID: actorID,
-		ActorRole:   "system_admin",
+		ActorRole:   systemAuditActorRole(ctx),
 		Action:      action,
 		TargetType:  targetType,
 		TargetID:    targetID,
@@ -1925,6 +2064,43 @@ func (h *SystemHandler) purgeOrphanRuntimeTask(
 // @Router       /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action} [post]
 func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
 	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
+}
+
+// PurgeArchivedRuntimeTasks clears every archived (finally-failed) task in one
+// queue. It only touches the archived dead-letter set — live pending/active/
+// scheduled/retry tasks are untouched — and mirrors single-record delete
+// semantics by leaving business state as-is (archived tasks already had their
+// document status flipped to "failed" on their last retry).
+// @Summary      Purge all archived tasks in a queue
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Success      200 {object} map[string]interface{}
+// @Router       /system/admin/runtime/queues/{queue}/archived [delete]
+func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue"})
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	deleted, available, err := inspector.PurgeArchivedRuntimeTasks(c.Request.Context(), queue)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "purge archived queue tasks queue=%s: %v", queue, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Archived tasks could not be purged"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueArchivedPurged, queue, "",
+		map[string]string{"deleted": strconv.Itoa(deleted)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": deleted})
 }
 
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
@@ -2122,7 +2298,7 @@ func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 		_ = h.auditSvc.Log(ctx, &types.AuditLog{
 			TenantID:    0,
 			ActorUserID: actorID,
-			ActorRole:   "system_admin",
+			ActorRole:   systemAuditActorRole(ctx),
 			Action:      types.AuditActionSystemSettingChanged,
 			TargetType:  "tenant_storage_quota",
 			TargetID:    "all",

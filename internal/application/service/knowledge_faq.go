@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,7 +21,7 @@ import (
 
 // ListFAQEntries lists FAQ entries under a FAQ knowledge base.
 func (s *knowledgeService) ListFAQEntries(ctx context.Context,
-	kbID string, page *types.Pagination, tagSeqID int64, keyword string, searchField string, sortOrder string,
+	kbID string, page *types.Pagination, tagUUIDs []string, legacyTagSeqID int64, keyword string, searchField string, sortOrder string,
 ) (*types.PageResult, error) {
 	if page == nil {
 		page = &types.Pagination{}
@@ -65,19 +68,17 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		return types.NewPageResult(0, page, []*types.FAQEntry{}), nil
 	}
 
-	// Convert tagSeqID to tagID (UUID)
-	var tagID string
-	if tagSeqID > 0 {
-		tag, err := s.tagRepo.GetBySeqID(ctx, effectiveTenantID, tagSeqID)
+	if len(tagUUIDs) == 0 && legacyTagSeqID > 0 {
+		tag, err := s.tagRepo.GetBySeqID(ctx, effectiveTenantID, legacyTagSeqID)
 		if err != nil {
 			return nil, werrors.NewNotFoundError("标签不存在")
 		}
-		tagID = tag.ID
+		tagUUIDs = []string{tag.ID}
 	}
 
 	chunkType := []types.ChunkType{types.ChunkTypeFAQ}
 	chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
-		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagID, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
+		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagUUIDs, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
 	)
 	if err != nil {
 		return nil, err
@@ -245,6 +246,9 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeCreated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "source_type": "faq"})
 
 	return entry, nil
 }
@@ -303,7 +307,6 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
-
 	return entry, nil
 }
 
@@ -466,6 +469,9 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 			entry.TagName = tag.Name
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "source_type": "faq"})
 
 	return entry, nil
 }
@@ -655,6 +661,9 @@ func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 	if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, chunkStatusMap); err != nil {
 		return err
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
+		map[string]any{"entry_id": chunk.SeqID, "changed_fields": []string{"enabled"}})
 
 	return nil
 }
@@ -857,6 +866,9 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			}
 		}
 	}
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
+		"faq_entry", "", types.AuditOutcomeSuccess,
+		map[string]any{"count": len(req.ByID), "tag_groups": len(req.ByTag), "batch": true})
 
 	return nil
 }
@@ -1387,6 +1399,14 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 			return err
 		}
 	}
+	details := map[string]any{"count": len(chunksToRemove), "source_type": "faq"}
+	titles := make([]string, 0, len(chunksToRemove))
+	for _, chunk := range chunksToRemove {
+		titles = append(titles, faqChunkQuestion(chunk))
+	}
+	kbActivityAppendSampleTitles(details, titles...)
+	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeBatchDeleted,
+		"faq_entry", "", types.AuditOutcomeSuccess, details)
 	return nil
 }
 
@@ -1424,6 +1444,66 @@ func (s *knowledgeService) ExportFAQEntries(ctx context.Context, kbID string) ([
 	}
 
 	return s.buildFAQCSV(chunks, tagMap), nil
+}
+
+// ExportFAQEntriesJSON 以 JSON 数组形式导出 FAQ 知识库下的全部条目，
+// 字段与 FAQEntryPayload 兼容，便于"导出 → 编辑 → 重新 append 导入"循环。
+func (s *knowledgeService) ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error) {
+	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	faqKnowledge, err := s.findFAQKnowledge(ctx, tenantID, kb.ID)
+	if err != nil {
+		return nil, err
+	}
+	if faqKnowledge == nil {
+		return json.Marshal([]types.FAQExportEntry{})
+	}
+
+	chunks, err := s.chunkRepo.ListAllFAQChunksForExport(ctx, tenantID, faqKnowledge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list FAQ chunks: %w", err)
+	}
+
+	tagMap, err := s.buildTagMap(ctx, tenantID, kbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build tag map: %w", err)
+	}
+
+	return s.buildFAQJSON(chunks, tagMap)
+}
+
+func (s *knowledgeService) buildFAQJSON(chunks []*types.Chunk, tagMap map[string]string) ([]byte, error) {
+	entries := make([]types.FAQExportEntry, 0, len(chunks))
+	for _, chunk := range chunks {
+		meta, err := chunk.FAQMetadata()
+		if err != nil || meta == nil {
+			continue
+		}
+
+		tagName := ""
+		if chunk.TagID != "" && tagMap != nil {
+			if name, ok := tagMap[chunk.TagID]; ok {
+				tagName = name
+			}
+		}
+
+		entries = append(entries, types.FAQExportEntry{
+			ID:                chunk.SeqID,
+			TagName:           tagName,
+			StandardQuestion:  meta.StandardQuestion,
+			SimilarQuestions:  meta.SimilarQuestions,
+			NegativeQuestions: meta.NegativeQuestions,
+			Answers:           meta.Answers,
+			AnswerStrategy:    meta.AnswerStrategy,
+			IsEnabled:         chunk.IsEnabled,
+			IsRecommended:     chunk.Flags.HasFlag(types.ChunkFlagRecommended),
+		})
+	}
+	return json.Marshal(entries)
 }
 
 // buildTagMap builds a map from tag_id to tag_name for the given knowledge base.
@@ -1593,6 +1673,18 @@ func buildFAQKnowledgeTitle(kbName string) string {
 	return name
 }
 
+func faqChunkQuestion(chunk *types.Chunk) string {
+	if chunk == nil {
+		return ""
+	}
+	if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+		if question := strings.TrimSpace(meta.StandardQuestion); question != "" {
+			return question
+		}
+	}
+	return strings.TrimSpace(chunk.Content)
+}
+
 func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase, tagSeqIDMap map[string]int64) (*types.FAQEntry, error) {
 	meta, err := chunk.FAQMetadata()
 	if err != nil {
@@ -1754,6 +1846,74 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 	}
 
 	return werrors.NewBadRequestError("标准问或相似问与已有条目重复")
+}
+
+// faqTagResolver resolves a payload's TagID/TagName to the tag's internal UUID.
+type faqTagResolver func(*types.FAQEntryPayload) (string, error)
+
+// buildFAQTagResolver 预加载 entries 引用的 tag UUID 映射，避免逐条 resolveTagID。
+func (s *knowledgeService) buildFAQTagResolver(
+	ctx context.Context, kbID string, entries []types.FAQEntryPayload,
+) faqTagResolver {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+	var seqIDs []int64
+	var names []string
+	seqSeen := make(map[int64]struct{})
+	nameSeen := make(map[string]struct{})
+	for i := range entries {
+		e := &entries[i]
+		switch {
+		case e.TagID != 0:
+			if _, ok := seqSeen[e.TagID]; !ok {
+				seqSeen[e.TagID] = struct{}{}
+				seqIDs = append(seqIDs, e.TagID)
+			}
+		case e.TagName != "":
+			if _, ok := nameSeen[e.TagName]; !ok {
+				nameSeen[e.TagName] = struct{}{}
+				names = append(names, e.TagName)
+			}
+		}
+	}
+
+	seqIDToUUID := make(map[int64]string)
+	if len(seqIDs) > 0 {
+		if tags, err := s.tagRepo.GetBySeqIDs(ctx, tenantID, seqIDs); err == nil {
+			for _, t := range tags {
+				seqIDToUUID[t.SeqID] = t.ID
+			}
+		} else {
+			logger.Warnf(ctx, "buildFAQTagResolver: batch GetBySeqIDs failed (%d ids), fallback per-entry: %v",
+				len(seqIDs), err)
+		}
+	}
+
+	nameToUUID := make(map[string]string)
+	for _, name := range names {
+		if tag, err := s.tagRepo.GetByName(ctx, tenantID, kbID, name); err == nil && tag != nil {
+			nameToUUID[name] = tag.ID
+		}
+	}
+
+	return func(e *types.FAQEntryPayload) (string, error) {
+		if e.TagID != 0 {
+			if uuid, ok := seqIDToUUID[e.TagID]; ok {
+				return uuid, nil
+			}
+		} else if e.TagName != "" {
+			if uuid, ok := nameToUUID[e.TagName]; ok {
+				return uuid, nil
+			}
+		}
+		return s.resolveTagID(ctx, kbID, e)
+	}
+}
+
+// hashQuestion 计算问题内容的哈希值，用于生成稳定的 sourceID。
+func hashQuestion(question string) string {
+	h := md5.Sum([]byte(question))
+	return hex.EncodeToString(h[:4])
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name

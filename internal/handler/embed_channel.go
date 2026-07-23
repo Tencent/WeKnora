@@ -749,7 +749,7 @@ func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 		return
 	}
 
-	result, err := h.sessionService.ListSessions(ctx, &types.SessionListQuery{
+	result, err := h.sessionService.CountSessionsBySource(ctx, &types.SessionListQuery{
 		TenantID: tenantID,
 		Source:   "embed:" + channelID,
 		Page:     1,
@@ -759,10 +759,7 @@ func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	total := int64(0)
-	if result != nil {
-		total = result.Total
-	}
+	total := result
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

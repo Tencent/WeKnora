@@ -17,18 +17,22 @@
                 <h2 class="sidebar-title">{{ modalTitle }}</h2>
               </div>
               <div class="settings-nav">
-                <div v-for="item in navItems" :key="item.key"
-                  :class="['nav-item', { 'active': currentSection === item.key }]" @click="currentSection = item.key">
-                  <img v-if="item.key === 'sharedAgents'"
-                    :src="currentSection === 'sharedAgents' ? agentIconActiveSrc : agentIconSrc"
-                    class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
-                  <t-icon v-else :name="item.icon" class="nav-icon" />
-                  <span class="nav-label">{{ item.label }}</span>
-                  <span
-                    v-if="item.badge != null && (item.key === 'sharedKb' || item.key === 'sharedAgents' ? true : item.badge > 0)"
-                    :class="['nav-item-badge', { 'nav-item-badge-count': item.key === 'sharedKb' || item.key === 'sharedAgents' }]">{{
-                      item.badge }}</span>
-                </div>
+                <template v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
+                  <div v-for="item in group.items" :key="item.key"
+                    :class="['nav-item', { 'active': currentSection === item.key }]"
+                    @click="currentSection = item.key">
+                    <img v-if="item.key === 'sharedAgents'"
+                      :src="currentSection === 'sharedAgents' ? agentIconActiveSrc : agentIconSrc"
+                      class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
+                    <t-icon v-else :name="item.icon" class="nav-icon" />
+                    <span class="nav-label">{{ item.label }}</span>
+                    <span
+                      v-if="item.badge != null && (item.key === 'sharedKb' || item.key === 'sharedAgents' ? true : item.badge > 0)"
+                      :class="['nav-badge', { 'nav-badge-count': item.key === 'sharedKb' || item.key === 'sharedAgents' }]">{{
+                        item.badge }}</span>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -221,161 +225,278 @@
                   </div>
                 </div>
 
-                <!-- 成员管理（含角色权限说明） -->
+                <!-- 创建空间 - 权限说明 -->
+                <div v-if="isCreateMode" v-show="currentSection === 'permissions'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('organization.editor.permissionsTitle') }}</h2>
+                    <p class="section-description">{{ $t('organization.editor.permissionsDesc') }}</p>
+                  </div>
+
+                  <div class="permissions-info">
+                    <div class="permission-card">
+                      <div class="permission-header">
+                        <div class="permission-icon admin">
+                          <t-icon name="user-safety" />
+                        </div>
+                        <div class="permission-title">
+                          <span class="role-name">{{ $t('organization.role.admin') }}</span>
+                          <t-tag size="small" theme="primary">{{ $t('organization.editor.fullAccess') }}</t-tag>
+                        </div>
+                      </div>
+                      <ul class="permission-list">
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm1') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm2') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm3') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm4') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
+                      </ul>
+                    </div>
+                    <div class="permission-card">
+                      <div class="permission-header">
+                        <div class="permission-icon editor">
+                          <t-icon name="edit" />
+                        </div>
+                        <div class="permission-title">
+                          <span class="role-name">{{ $t('organization.role.editor') }}</span>
+                          <t-tag size="small" theme="warning">{{ $t('organization.editor.editAccess') }}</t-tag>
+                        </div>
+                      </div>
+                      <ul class="permission-list">
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm1') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm2') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
+                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
+                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.editorPerm3') }}</li>
+                      </ul>
+                    </div>
+                    <div class="permission-card">
+                      <div class="permission-header">
+                        <div class="permission-icon viewer">
+                          <t-icon name="browse" />
+                        </div>
+                        <div class="permission-title">
+                          <span class="role-name">{{ $t('organization.role.viewer') }}</span>
+                          <t-tag size="small">{{ $t('organization.editor.viewAccess') }}</t-tag>
+                        </div>
+                      </div>
+                      <ul class="permission-list">
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.viewerPerm1') }}</li>
+                        <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
+                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
+                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.viewerPerm2') }}</li>
+                        <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.viewerPerm3') }}</li>
+                      </ul>
+                    </div>
+                  </div>
+                  <div class="info-notice">
+                    <t-icon name="info-circle" />
+                    <span>{{ $t('organization.editor.ownerNote') }}</span>
+                  </div>
+                </div>
+
+                <!-- 成员管理 -->
                 <div v-show="currentSection === 'members'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('organization.manageMembers') }}</h2>
+                    <div class="section-header-row">
+                      <div class="section-header-titlewrap">
+                        <h2>{{ $t('organization.manageMembers') }}</h2>
+                        <t-popup placement="bottom-start" trigger="hover"
+                          overlay-class-name="org-permissions-popup-overlay"
+                          :overlay-inner-style="permissionsPopupInnerStyle">
+                          <button type="button" class="permissions-trigger-btn"
+                            :aria-label="$t('organization.editor.permissionsTitle')"
+                            :title="$t('organization.settings.permissionsIconHint')">
+                            <t-icon name="info-circle" size="16px" />
+                          </button>
+                          <template #content>
+                            <div class="permissions-compact permissions-compact--popover">
+                              <div class="permissions-compact-header">
+                                <span class="permissions-compact-title">{{ $t('organization.editor.permissionsTitle') }}</span>
+                                <span class="permissions-compact-desc">{{ $t('organization.editor.permissionsDesc') }}</span>
+                              </div>
+                              <div class="permissions-compact-grid">
+                                <div v-for="role in orgRoleMatrixOrder" :key="role"
+                                  :class="['perm-role-block', role, { 'is-me': orgInfo?.my_role === role }]">
+                                  <div class="perm-role-tag">
+                                    <t-icon :name="orgRoleIcon(role)" size="12px" />
+                                    <span>{{ $t(`organization.role.${role}`) }}</span>
+                                    <span v-if="orgInfo?.my_role === role" class="me-badge">{{ $t('common.me') }}</span>
+                                  </div>
+                                  <div class="perm-items">
+                                    <span v-for="(perm, idx) in orgRoleMatrix[role]" :key="idx"
+                                      :class="['perm-item', perm.has ? 'has' : 'no']">
+                                      <t-icon :name="perm.has ? 'check' : 'close'" size="12px" />
+                                      {{ $t(`organization.editor.${perm.key}`) }}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
+                        </t-popup>
+                      </div>
+                    </div>
                     <p class="section-description">{{ $t('organization.settings.membersDesc') }}</p>
                   </div>
 
-                  <!-- 角色权限说明 -->
-                  <div class="permissions-compact">
-                    <div class="permissions-compact-header">
-                      <span class="permissions-compact-title">{{ $t('organization.editor.permissionsTitle') }}</span>
-                      <span class="permissions-compact-desc">{{ $t('organization.editor.permissionsDesc') }}</span>
-                    </div>
-                    <div class="permissions-compact-grid">
-                      <div :class="['perm-role-block', 'admin', { 'is-me': orgInfo?.my_role === 'admin' }]">
-                        <div class="perm-role-tag">
-                          <t-icon name="user-safety" size="12px" />
-                          <span>{{ $t('organization.role.admin') }}</span>
-                          <span v-if="orgInfo?.my_role === 'admin'" class="me-badge">{{ $t('common.me') }}</span>
-                        </div>
-                        <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.viewerPerm1')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.editorPerm1')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.shareKBPerm')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.adminPerm1')
-                          }}</span>
-                        </div>
+                  <div class="members-list-wrap">
+                    <div class="members-list-header">
+                      <div class="members-list-titlewrap">
+                        <span class="members-list-title">{{ $t('organization.members.listTitle') }}</span>
+                        <span class="members-list-count-badge">{{ filteredMembers.length }}</span>
                       </div>
-                      <div :class="['perm-role-block', 'editor', { 'is-me': orgInfo?.my_role === 'editor' }]">
-                        <div class="perm-role-tag">
-                          <t-icon name="edit" size="12px" />
-                          <span>{{ $t('organization.role.editor') }}</span>
-                          <span v-if="orgInfo?.my_role === 'editor'" class="me-badge">{{ $t('common.me') }}</span>
+                      <div class="members-list-actions">
+                        <div class="members-list-search">
+                          <t-input v-model="memberSearchQuery" size="small"
+                            :placeholder="$t('organization.members.searchPlaceholder')" clearable>
+                            <template #prefix-icon>
+                              <t-icon name="search" />
+                            </template>
+                          </t-input>
                         </div>
-                        <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.viewerPerm1')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.editorPerm1')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
-                            $t('organization.editor.shareKBPerm')
-                          }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
-                            $t('organization.editor.adminPerm1')
-                          }}</span>
-                        </div>
-                      </div>
-                      <div :class="['perm-role-block', 'viewer', { 'is-me': orgInfo?.my_role === 'viewer' }]">
-                        <div class="perm-role-tag">
-                          <t-icon name="browse" size="12px" />
-                          <span>{{ $t('organization.role.viewer') }}</span>
-                          <span v-if="orgInfo?.my_role === 'viewer'" class="me-badge">{{ $t('common.me') }}</span>
-                        </div>
-                        <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.viewerPerm1')
-                          }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
-                            $t('organization.editor.editorPerm1')
-                          }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
-                            $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
-                            $t('organization.editor.shareKBPerm')
-                          }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
-                            $t('organization.editor.adminPerm1')
-                          }}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <!-- 申请权限升级按钮（非管理员可见） -->
-                    <div v-if="canRequestUpgrade" class="permissions-upgrade-action">
-                      <t-button variant="outline" size="small" @click="showUpgradeDialog = true"
-                        :disabled="hasPendingUpgrade">
-                        <template #icon><t-icon name="arrow-up" /></template>
-                        {{ hasPendingUpgrade ? $t('organization.upgrade.pending') :
-                          $t('organization.upgrade.requestUpgrade') }}
-                      </t-button>
-                    </div>
-                  </div>
+                        <t-popup v-if="canRequestUpgrade" v-model="upgradePopupVisible" trigger="click"
+                          placement="bottom-end" destroy-on-close overlay-class-name="org-upgrade-popup-overlay">
+                          <t-button variant="outline" shape="square" size="small" class="members-list-upgrade-btn"
+                            :disabled="hasPendingUpgrade"
+                            :title="hasPendingUpgrade ? $t('organization.upgrade.pending') : $t('organization.upgrade.requestUpgrade')"
+                            :aria-label="hasPendingUpgrade ? $t('organization.upgrade.pending') : $t('organization.upgrade.requestUpgrade')">
+                            <template #icon><t-icon name="arrow-up" /></template>
+                          </t-button>
+                          <template #content>
+                            <div class="org-upgrade-popup-inner" @click.stop>
+                              <div class="member-invite-popup-title">{{ $t('organization.upgrade.dialogTitle') }}</div>
+                              <p class="add-member-tip">{{ $t('organization.upgrade.dialogDesc') }}</p>
 
-                  <div class="settings-group members-group">
-                    <div class="members-header">
-                      <div class="members-search">
-                        <t-input v-model="memberSearchQuery" :placeholder="$t('common.search')" clearable>
-                          <template #prefix-icon>
-                            <t-icon name="search" />
+                              <div class="upgrade-current-role-bar">
+                                <span class="upgrade-current-role-label">{{ $t('organization.upgrade.currentRole') }}</span>
+                                <t-tag size="small" :theme="getRoleTheme(orgInfo?.my_role || 'viewer')" variant="light">
+                                  {{ $t(`organization.role.${orgInfo?.my_role || 'viewer'}`) }}
+                                </t-tag>
+                              </div>
+
+                              <div class="org-upgrade-fields">
+                                <div class="org-upgrade-field">
+                                  <label class="org-upgrade-field-label">{{ $t('organization.upgrade.selectRole') }}</label>
+                                  <div class="upgrade-role-pills">
+                                    <button v-for="opt in upgradeRoleOptions" :key="opt.value" type="button"
+                                      :class="['upgrade-role-pill', { active: upgradeForm.requested_role === opt.value }]"
+                                      @click="upgradeForm.requested_role = opt.value as 'editor' | 'admin'">
+                                      {{ opt.label }}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div class="org-upgrade-field org-upgrade-field--last">
+                                  <label class="org-upgrade-field-label">{{ $t('organization.upgrade.reason') }}</label>
+                                  <t-textarea v-model="upgradeForm.message" size="medium"
+                                    :placeholder="$t('organization.upgrade.reasonPlaceholder')"
+                                    :autosize="{ minRows: 2, maxRows: 4 }" :maxlength="500" />
+                                </div>
+                              </div>
+
+                              <div class="invite-popup-footer">
+                                <t-button variant="outline" :disabled="upgradeSubmitting"
+                                  @click="upgradePopupVisible = false">
+                                  {{ $t('common.cancel') }}
+                                </t-button>
+                                <t-button theme="primary" :loading="upgradeSubmitting" @click="handleSubmitUpgrade">
+                                  {{ $t('organization.upgrade.submitBtn') }}
+                                </t-button>
+                              </div>
+                            </div>
                           </template>
-                        </t-input>
+                        </t-popup>
+                        <t-popup v-if="isAdmin" v-model="addMemberPopupVisible" trigger="click" placement="bottom-end"
+                          destroy-on-close overlay-class-name="org-add-member-popup-overlay">
+                          <t-button theme="primary" variant="outline" shape="square" size="small"
+                            class="members-list-add-btn" :title="$t('organization.addMember.button')"
+                            :aria-label="$t('organization.addMember.button')">
+                            <template #icon><t-icon name="user-add" /></template>
+                          </t-button>
+                          <template #content>
+                            <div class="member-invite-popup-inner" @click.stop>
+                              <div class="member-invite-popup-title">{{ $t('organization.addMember.dialogTitle') }}</div>
+                              <p class="add-member-tip">{{ $t('organization.addMember.tipTenant') }}</p>
+                              <t-form layout="vertical" class="member-invite-form">
+                                <t-form-item :label="$t('organization.addMember.searchTenant')">
+                                  <div class="member-form-control">
+                                    <t-select v-model="selectedTenantId"
+                                      :placeholder="$t('organization.addMember.searchTenantPlaceholder')" filterable
+                                      :filter="() => true" :loading="tenantSearchLoading" @search="handleTenantSearch"
+                                      clearable :options="tenantSearchOptions" />
+                                    <p class="field-hint">{{ $t('organization.addMember.searchTenantHint') }}</p>
+                                  </div>
+                                </t-form-item>
+                                <t-form-item :label="$t('organization.addMember.selectRole')">
+                                  <t-select v-model="addMemberRole" :options="addMemberRoleOptions"
+                                    :placeholder="$t('organization.addMember.selectRole')" />
+                                </t-form-item>
+                              </t-form>
+                              <div class="invite-popup-footer">
+                                <t-button variant="outline" :disabled="addMemberSubmitting"
+                                  @click="addMemberPopupVisible = false">
+                                  {{ $t('common.cancel') }}
+                                </t-button>
+                                <t-button theme="primary" :loading="addMemberSubmitting"
+                                  :disabled="selectedTenantId == null" @click="handleAddMember">
+                                  {{ $t('organization.addMember.confirmBtn') }}
+                                </t-button>
+                              </div>
+                            </div>
+                          </template>
+                        </t-popup>
                       </div>
-                      <t-button v-if="isAdmin" variant="outline" size="small" @click="showAddMemberDialog = true">
-                        <template #icon><t-icon name="user-add" /></template>
-                        {{ $t('organization.addMember.button') }}
-                      </t-button>
                     </div>
 
-                    <t-loading :loading="membersLoading">
-                      <div class="members-list">
-                        <div v-for="member in filteredMembers" :key="member.id" class="member-item" :class="{
-                          'is-owner': isOwnerMember(member),
-                          'is-me': member.user_id === authStore.currentUserId
-                        }">
-                          <div class="member-avatar" :class="{ 'is-me': member.user_id === authStore.currentUserId }">
-                            <img v-if="member.avatar" :src="member.avatar" alt="" />
-                            <t-icon v-else name="user" size="20px" />
-                          </div>
-                          <div class="member-info">
+                    <div v-if="membersLoading && members.length === 0" class="loading-inline">
+                      <t-loading size="small" />
+                      <span>{{ $t('organization.members.loading') }}</span>
+                    </div>
+                    <div v-else-if="filteredMembers.length === 0" class="empty-state">
+                      <t-empty :description="memberSearchQuery.trim()
+                        ? $t('organization.members.emptySearch', { q: memberSearchQuery })
+                        : $t('organization.noMembers')" />
+                    </div>
+                    <div v-else class="data-table-shell">
+                      <t-table row-key="id" :data="filteredMembers" :columns="memberColumns" size="medium" hover
+                        stripe :loading="membersLoading">
+                        <template #member="{ row }">
+                          <div class="member-cell">
                             <span class="member-name">
-                              {{ memberPrimaryLabel(member) }}
-                              <span v-if="member.user_id === authStore.currentUserId" class="me-tag">{{ $t('common.me')
+                              {{ memberPrimaryLabel(row) }}
+                              <span v-if="isOwnerMember(row)" class="owner-tag">{{ $t('organization.owner') }}</span>
+                              <span v-if="row.user_id === authStore.currentUserId" class="me-tag">{{ $t('common.me')
                               }}</span>
                             </span>
-                            <span class="member-email">{{ memberSecondaryLabel(member) }}</span>
+                            <span v-if="memberSecondaryLabel(row)" class="member-email">{{ memberSecondaryLabel(row)
+                            }}</span>
                           </div>
-                          <div class="member-role">
-                            <t-select v-if="isAdmin && !isOwnerMember(member)" v-model="member.role"
-                              :options="roleOptions" size="small"
-                              @change="(val: string) => handleRoleChange(member, val)" />
-                            <t-tag v-else size="small" :theme="getRoleTheme(member.role)">
-                              {{ $t(`organization.role.${member.role}`) }}
-                              <span v-if="isOwnerMember(member)">({{ $t('organization.owner') }})</span>
+                        </template>
+                        <template #role="{ row }">
+                          <div class="role-cell">
+                            <t-select v-if="isAdmin && !isOwnerMember(row)" :model-value="row.role"
+                              class="member-role-select" size="small" :options="roleOptions"
+                              @change="(val: string) => handleRoleChange(row, val)" />
+                            <t-tag v-else size="small" :theme="getRoleTheme(row.role)">
+                              {{ $t(`organization.role.${row.role}`) }}
                             </t-tag>
                           </div>
-                          <div v-if="isAdmin && !isOwnerMember(member)" class="member-actions">
-                            <t-popconfirm
-                              :content="$t('organization.detail.removeMemberConfirm', { name: memberPrimaryLabel(member) })"
-                              :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
-                              :cancel-btn="{ content: $t('common.cancel') }"
-                              placement="left"
-                              @confirm="confirmRemoveMember(member)">
-                              <t-button variant="text" theme="danger" size="small" @click.stop>
-                                <t-icon name="delete" />
+                        </template>
+                        <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
+                        <template #actions="{ row }">
+                          <t-popconfirm v-if="isAdmin && !isOwnerMember(row)"
+                            :content="$t('organization.detail.removeMemberConfirm', { name: memberPrimaryLabel(row) })"
+                            :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+                            :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                            @confirm="confirmRemoveMember(row)">
+                            <t-tooltip :content="$t('organization.detail.removeMember')" placement="top">
+                              <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                                <template #icon><t-icon name="user-clear" /></template>
                               </t-button>
-                            </t-popconfirm>
-                          </div>
-                        </div>
-                        <div v-if="filteredMembers.length === 0" class="empty-members">
-                          {{ $t('organization.noMembers') }}
-                        </div>
-                      </div>
-                    </t-loading>
+                            </t-tooltip>
+                          </t-popconfirm>
+                        </template>
+                      </t-table>
+                    </div>
                   </div>
                 </div>
 
@@ -386,223 +507,300 @@
                     <p class="section-description">{{ $t('organization.settings.joinRequestsDesc') }}</p>
                   </div>
 
-                  <div class="settings-group">
-                    <t-loading :loading="joinRequestsLoading">
-                      <div v-if="joinRequests.length === 0 && !joinRequestsLoading" class="empty-join-requests">
-                        <div class="empty-icon">
-                          <t-icon name="check-circle" size="48px" />
-                        </div>
-                        <p class="empty-text">{{ $t('organization.settings.noPendingRequests') }}</p>
+                  <div class="members-list-wrap join-requests-wrap">
+                    <div class="members-list-header">
+                      <div class="members-list-titlewrap">
+                        <span class="members-list-title">{{ $t('organization.joinRequests.listTitle') }}</span>
+                        <span class="members-list-count-badge">{{ filteredJoinRequests.length }}</span>
                       </div>
-                      <div v-else class="join-requests-list">
-                        <div v-for="req in joinRequests" :key="req.id" class="join-request-item">
-                          <div class="request-user">
-                            <div class="request-avatar">
-                              <t-icon name="user" size="20px" />
-                            </div>
-                            <div class="request-info">
-                              <span class="request-name">
-                                {{ req.username || req.email || req.user_id }}
-                                <t-tag v-if="req.request_type === 'upgrade'" size="small" theme="warning"
-                                  class="request-type-tag">
-                                  {{ $t('organization.upgrade.upgradeRequest') }}
-                                </t-tag>
-                              </span>
-                              <span class="request-email">{{ req.email }}</span>
-                              <p v-if="req.message" class="request-message">{{ req.message }}</p>
-                              <span v-if="req.request_type === 'upgrade' && req.prev_role" class="request-prev-role">
-                                {{ $t('organization.upgrade.currentRole') }}：{{ roleLabel(req.prev_role) }} → {{
-                                  roleLabel(req.requested_role) }}
-                              </span>
-                              <span v-else class="request-requested-role">{{ $t('organization.invite.requestRole') }}：{{
-                                roleLabel(req.requested_role) }}</span>
-                              <span class="request-time">{{ formatDate(req.created_at) }}</span>
-                            </div>
-                          </div>
-                          <div class="request-actions">
-                            <div class="request-assign-role">
-                              <span class="request-assign-label">{{ $t('organization.settings.assignRole') }}</span>
-                              <t-select v-model="assignRoleMap[req.id]" class="request-role-select"
-                                :options="orgRoleOptions" size="small" />
-                            </div>
-                            <t-button theme="primary" size="small" :loading="reviewingRequestId === req.id"
-                              @click="handleApproveRequest(req)">
-                              {{ $t('organization.settings.approve') }}
-                            </t-button>
-                            <t-button theme="default" variant="outline" size="small"
-                              :loading="reviewingRequestId === req.id" @click="handleRejectRequest(req)">
-                              {{ $t('organization.settings.reject') }}
-                            </t-button>
-                          </div>
+                      <div class="members-list-actions">
+                        <div class="members-list-search">
+                          <t-input v-model="joinRequestSearchQuery" size="small"
+                            :placeholder="$t('organization.joinRequests.searchPlaceholder')" clearable>
+                            <template #prefix-icon>
+                              <t-icon name="search" />
+                            </template>
+                          </t-input>
                         </div>
                       </div>
-                    </t-loading>
+                    </div>
+
+                    <div v-if="joinRequestsLoading && joinRequests.length === 0" class="loading-inline">
+                      <t-loading size="small" />
+                      <span>{{ $t('organization.joinRequests.loading') }}</span>
+                    </div>
+                    <div v-else-if="filteredJoinRequests.length === 0" class="empty-state">
+                      <t-empty :description="joinRequestSearchQuery.trim()
+                        ? $t('organization.joinRequests.emptySearch', { q: joinRequestSearchQuery })
+                        : $t('organization.settings.noPendingRequests')" />
+                    </div>
+                    <div v-else class="data-table-shell join-requests-table">
+                      <t-table row-key="id" :data="filteredJoinRequests" :columns="joinRequestColumns" size="medium"
+                        hover stripe :loading="joinRequestsLoading">
+                        <template #applicant="{ row }">
+                          <div class="member-cell">
+                            <span class="member-name">{{ joinRequestApplicantLabel(row) }}</span>
+                            <span v-if="joinRequestApplicantSecondary(row)" class="member-email">
+                              {{ joinRequestApplicantSecondary(row) }}
+                            </span>
+                          </div>
+                        </template>
+                        <template #request_type="{ row }">
+                          <t-tag size="small" :theme="row.request_type === 'upgrade' ? 'warning' : 'primary'"
+                            variant="light">
+                            {{ row.request_type === 'upgrade'
+                              ? $t('organization.joinRequests.typeUpgrade')
+                              : $t('organization.joinRequests.typeJoin') }}
+                          </t-tag>
+                        </template>
+                        <template #requested_role="{ row }">
+                          <span v-if="row.request_type === 'upgrade' && row.prev_role" class="join-request-role-change">
+                            {{ roleLabel(row.prev_role) }}
+                            <t-icon name="arrow-right" size="12px" />
+                            {{ roleLabel(row.requested_role) }}
+                          </span>
+                          <t-tag v-else size="small" :theme="getRoleTheme(row.requested_role)" variant="light">
+                            {{ roleLabel(row.requested_role) }}
+                          </t-tag>
+                        </template>
+                        <template #message="{ row }">
+                          <span class="join-request-message" :title="row.message || undefined">
+                            {{ row.message || '—' }}
+                          </span>
+                        </template>
+                        <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+                        <template #actions="{ row }">
+                          <div class="join-request-actions">
+                            <t-popup :visible="approvePopupRequestId === row.id"
+                              placement="left-start" destroy-on-close overlay-class-name="org-approve-request-popup-overlay"
+                              @visible-change="(visible) => handleApprovePopupVisibleChange(visible, row)">
+                              <t-tooltip :content="$t('organization.settings.approve')" placement="top">
+                                <t-button theme="primary" variant="text" shape="square" size="small"
+                                  :loading="reviewingRequestId === row.id" @click.stop="openApprovePopup(row)">
+                                  <template #icon><t-icon name="check" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <template #content>
+                                <div class="org-approve-request-popup-inner" @click.stop>
+                                  <div class="member-invite-popup-title">{{ $t('organization.joinRequests.approveTitle') }}</div>
+                                  <p class="add-member-tip">
+                                    {{ $t('organization.joinRequests.approveDesc', { name: joinRequestApplicantLabel(row) }) }}
+                                  </p>
+                                  <div class="org-upgrade-field org-upgrade-field--last">
+                                    <label class="org-upgrade-field-label">{{ $t('organization.settings.assignRole') }}</label>
+                                    <t-select v-model="approveAssignRole" size="medium" :options="orgRoleOptions" />
+                                  </div>
+                                  <div class="invite-popup-footer">
+                                    <t-button variant="outline" :disabled="reviewingRequestId === row.id"
+                                      @click="closeApprovePopup">
+                                      {{ $t('common.cancel') }}
+                                    </t-button>
+                                    <t-button theme="primary" :loading="reviewingRequestId === row.id"
+                                      @click="confirmApproveRequest(row)">
+                                      {{ $t('organization.settings.approve') }}
+                                    </t-button>
+                                  </div>
+                                </div>
+                              </template>
+                            </t-popup>
+                            <t-popconfirm :content="$t('organization.joinRequests.rejectConfirm')"
+                              :confirm-btn="{ content: $t('organization.settings.reject'), theme: 'danger' }"
+                              :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                              @confirm="handleRejectRequest(row)">
+                              <t-tooltip :content="$t('organization.settings.reject')" placement="top">
+                                <t-button theme="danger" variant="text" shape="square" size="small"
+                                  :loading="reviewingRequestId === row.id" @click.stop>
+                                  <template #icon><t-icon name="close" /></template>
+                                </t-button>
+                              </t-tooltip>
+                            </t-popconfirm>
+                          </div>
+                        </template>
+                      </t-table>
+                    </div>
                   </div>
                 </div>
 
-                <!-- 共享知识库（独立侧边栏） -->
+                <!-- 共享知识库 -->
                 <div v-show="currentSection === 'sharedKb'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.sharedDesc') }}</p>
-                    <p class="section-description permission-calc-hint">
-                      <t-tooltip :content="$t('organization.settings.permissionCalcTip')" placement="top">
-                        <span class="hint-inner">
-                          <t-icon name="info-circle" size="14px" />
-                          {{ $t('organization.settings.permissionCalcFormula') }}
-                        </span>
-                      </t-tooltip>
-                    </p>
-                  </div>
-                  <div class="settings-group">
-                    <t-loading :loading="sharesLoading">
-                      <div v-if="sharedKnowledgeBases.length === 0 && !sharesLoading" class="empty-shared">
-                        <div class="empty-icon">
-                          <img src="@/assets/img/zhishiku.svg" class="empty-icon-kb" alt="" aria-hidden="true" />
-                        </div>
-                        <p class="empty-text">{{ $t('organization.settings.noSharedKB') }}</p>
-                        <p class="empty-subtext">{{ $t('organization.settings.noSharedKBTip') }}</p>
-                      </div>
-                      <div v-else class="shared-list">
-                        <div v-for="share in sharedKnowledgeBases" :key="share.id" class="shared-item"
-                          @click="handleShareClick(share)">
-                          <div class="shared-icon shared-icon-kb">
-                            <img src="@/assets/img/zhishiku.svg" class="shared-icon-kb-img" alt="" aria-hidden="true" />
-                          </div>
-                          <div class="shared-info">
-                            <span class="shared-name">{{ share.knowledge_base_name }}</span>
-                            <div class="shared-meta">
-                              <span v-if="share.shared_by_username" class="shared-by">
-                                <t-icon name="user" size="12px" />
-                                {{ share.shared_by_username }}
-                              </span>
-                              <span class="shared-time">
-                                <t-icon name="time" size="12px" />
-                                {{ formatDate(share.created_at) }}
-                              </span>
+                    <div class="section-header-row">
+                      <div class="section-header-titlewrap">
+                        <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
+                        <t-popup placement="bottom-start" trigger="hover"
+                          overlay-class-name="org-permissions-popup-overlay"
+                          :overlay-inner-style="permissionsHintPopupInnerStyle">
+                          <button type="button" class="permissions-trigger-btn"
+                            :aria-label="$t('organization.settings.permissionCalcFormula')"
+                            :title="$t('organization.settings.permissionCalcFormula')">
+                            <t-icon name="info-circle" size="16px" />
+                          </button>
+                          <template #content>
+                            <div class="permission-hint-popover">
+                              <p class="permission-hint-title">{{ $t('organization.settings.sharePermissionLabel') }}</p>
+                              <p class="permission-hint-desc">{{ $t('organization.settings.permissionCalcTip') }}</p>
                             </div>
-                          </div>
-                          <div class="shared-permissions">
-                            <t-tooltip :content="$t('organization.settings.sharePermissionLabel')" placement="top">
-                              <t-tag size="small" :theme="getPermissionTheme(share.permission)" variant="outline"
-                                class="perm-tag">
-                                {{ $t('organization.settings.sharePermissionLabel') }}: {{ (share.permission ===
-                                  'editor' ||
-                                  share.permission === 'admin') ? $t('organization.share.permissionEditable') :
-                                  $t('organization.share.permissionReadonly') }}
-                              </t-tag>
+                          </template>
+                        </t-popup>
+                      </div>
+                    </div>
+                    <p class="section-description">{{ $t('organization.settings.sharedDesc') }}</p>
+                  </div>
+
+                  <div class="shared-resources-wrap">
+                    <div class="members-list-header">
+                      <div class="members-list-titlewrap">
+                        <span class="members-list-title">{{ $t('organization.sharedResources.kbListTitle') }}</span>
+                        <span class="members-list-count-badge">{{ sharedKnowledgeBases.length }}</span>
+                      </div>
+                    </div>
+
+                    <div v-if="sharesLoading && sharedKnowledgeBases.length === 0" class="loading-inline">
+                      <t-loading size="small" />
+                      <span>{{ $t('organization.sharedResources.loading') }}</span>
+                    </div>
+                    <div v-else-if="sharedKnowledgeBases.length === 0" class="empty-state">
+                      <t-empty>
+                        <template #description>
+                          <p class="empty-state-title">{{ $t('organization.settings.noSharedKB') }}</p>
+                          <p class="empty-state-desc">{{ $t('organization.settings.noSharedKBTip') }}</p>
+                        </template>
+                      </t-empty>
+                    </div>
+                    <div v-else class="data-table-shell shared-resources-table">
+                      <t-table row-key="id" :data="sharedKnowledgeBases" :columns="sharedKbColumns" size="medium"
+                        hover stripe :loading="sharesLoading" class="shared-kb-table">
+                        <template #name="{ row }">
+                          <span class="resource-name" :title="row.knowledge_base_name">{{ row.knowledge_base_name }}</span>
+                        </template>
+                        <template #shared_by="{ row }">
+                          <span class="resource-meta">{{ row.shared_by_username || '—' }}</span>
+                        </template>
+                        <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+                        <template #space_permission="{ row }">
+                          <t-tag size="small" :theme="getPermissionTheme(row.permission)" variant="light">
+                            {{ sharePermissionLabel(row.permission) }}
+                          </t-tag>
+                        </template>
+                        <template #my_permission="{ row }">
+                          <t-tag size="small"
+                            :theme="getPermissionTheme(row.my_permission ?? row.permission)" variant="light">
+                            {{ sharePermissionLabel(row.my_permission ?? row.permission) }}
+                          </t-tag>
+                        </template>
+                        <template #actions="{ row }">
+                          <div class="resource-row-actions">
+                            <t-tooltip :content="$t('knowledgeList.detail.goToKb')" placement="top">
+                              <t-button theme="primary" shape="square" variant="text" size="small"
+                                :aria-label="$t('knowledgeList.detail.goToKb')"
+                                @click.stop="handleShareClick(row)">
+                                <template #icon><t-icon name="browse" /></template>
+                              </t-button>
                             </t-tooltip>
-                            <t-tooltip :content="$t('organization.settings.permissionCalcTip')" placement="top">
-                              <t-tag size="small" :theme="getPermissionTheme(share.my_permission ?? share.permission)"
-                                class="perm-tag">
-                                {{ $t('organization.settings.myPermissionLabel') }}: {{ ((share.my_permission ??
-                                  share.permission) ===
-                                  'editor' || (share.my_permission ?? share.permission) === 'admin') ?
-                                  $t('organization.share.permissionEditable') :
-                                  $t('organization.share.permissionReadonly') }}
-                              </t-tag>
-                            </t-tooltip>
-                          </div>
-                          <t-popconfirm v-if="isAdmin"
-                            :content="$t('organization.settings.removeShareConfirm', { name: share.knowledge_base_name || share.knowledge_base_id })"
+                            <t-popconfirm v-if="isAdmin"
+                            :content="$t('organization.settings.removeShareConfirm', { name: row.knowledge_base_name || row.knowledge_base_id })"
                             :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
-                            :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveShare(share)">
+                            :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                            @confirm="handleRemoveShare(row)">
                             <t-tooltip :content="$t('organization.settings.removeShareFromOrg')" placement="top">
-                              <t-button variant="text" size="small" theme="danger" class="shared-remove-btn"
-                                @click.stop>
-                                <t-icon name="delete" size="16px" />
+                              <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                                <template #icon><t-icon name="delete" /></template>
                               </t-button>
                             </t-tooltip>
                           </t-popconfirm>
-                        </div>
-                      </div>
-                    </t-loading>
+                          </div>
+                        </template>
+                      </t-table>
+                    </div>
                   </div>
                 </div>
 
-                <!-- 共享智能体（独立侧边栏） -->
+                <!-- 共享智能体 -->
                 <div v-show="currentSection === 'sharedAgents'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
-                    <p class="section-description permission-calc-hint">
-                      <t-tooltip :content="$t('organization.settings.sharedAgentsKbHint')" placement="top"
-                        :show-delay="300">
-                        <span class="hint-inner">
-                          <t-icon name="info-circle" size="14px" />
-                          {{ $t('organization.settings.sharedAgentsKbHintShort') }}
-                        </span>
-                      </t-tooltip>
-                    </p>
-                  </div>
-                  <div class="settings-group">
-                    <div v-if="sharedAgents.length === 0" class="empty-shared">
-                      <div class="empty-icon">
-                        <img src="@/assets/img/agent.svg" class="empty-icon-agent" alt="" aria-hidden="true" />
+                    <div class="section-header-row">
+                      <div class="section-header-titlewrap">
+                        <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
+                        <t-popup placement="bottom-start" trigger="hover"
+                          overlay-class-name="org-permissions-popup-overlay"
+                          :overlay-inner-style="permissionsHintPopupInnerStyle">
+                          <button type="button" class="permissions-trigger-btn"
+                            :aria-label="$t('organization.settings.sharedAgentsKbHintShort')"
+                            :title="$t('organization.settings.sharedAgentsKbHintShort')">
+                            <t-icon name="info-circle" size="16px" />
+                          </button>
+                          <template #content>
+                            <div class="permission-hint-popover">
+                              <p class="permission-hint-title">{{ $t('organization.settings.sharedAgents') }}</p>
+                              <p class="permission-hint-desc">{{ $t('organization.settings.sharedAgentsKbHint') }}</p>
+                            </div>
+                          </template>
+                        </t-popup>
                       </div>
-                      <p class="empty-text">{{ $t('organization.settings.noSharedAgents') }}</p>
-                      <p class="empty-subtext">{{ $t('organization.settings.noSharedAgentsTip') }}</p>
                     </div>
-                    <div v-else class="shared-list">
-                      <div v-for="share in sharedAgents" :key="share.id" class="shared-item"
-                        @mouseenter="onSharedAgentMouseEnter(share, $event)" @mousemove="onSharedAgentMouseMove($event)"
-                        @mouseleave="onSharedAgentMouseLeave">
-                        <div class="shared-icon shared-icon-agent-wrap">
-                          <AgentAvatar :name="share.agent_name || share.agent_id" size="small" />
-                        </div>
-                        <div class="shared-info">
-                          <span class="shared-name">{{ share.agent_name || share.agent_id }}</span>
-                          <div class="shared-meta">
-                            <span v-if="share.shared_by_username" class="shared-by"><t-icon name="user" size="12px" />{{
-                              share.shared_by_username }}</span>
-                            <span class="shared-time"><t-icon name="time" size="12px" />{{ formatDate(share.created_at)
-                            }}</span>
-                          </div>
-                        </div>
-                        <t-popconfirm v-if="isAdmin"
-                          :content="$t('organization.settings.removeAgentShareConfirm', { name: share.agent_name || share.agent_id })"
-                          :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
-                          :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveAgentShare(share)">
-                          <t-button variant="text" size="small" theme="danger" class="shared-remove-btn"
-                            @click.stop><t-icon name="delete" size="16px" /></t-button>
-                        </t-popconfirm>
+                    <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
+                  </div>
+
+                  <div class="shared-resources-wrap">
+                    <div class="members-list-header">
+                      <div class="members-list-titlewrap">
+                        <span class="members-list-title">{{ $t('organization.sharedResources.agentListTitle') }}</span>
+                        <span class="members-list-count-badge">{{ sharedAgents.length }}</span>
                       </div>
+                    </div>
+
+                    <div v-if="sharedAgents.length === 0" class="empty-state">
+                      <t-empty>
+                        <template #description>
+                          <p class="empty-state-title">{{ $t('organization.settings.noSharedAgents') }}</p>
+                          <p class="empty-state-desc">{{ $t('organization.settings.noSharedAgentsTip') }}</p>
+                        </template>
+                      </t-empty>
+                    </div>
+                    <div v-else class="data-table-shell shared-resources-table">
+                      <t-table row-key="id" :data="sharedAgents" :columns="sharedAgentColumns" size="medium" hover
+                        stripe class="shared-agent-table">
+                        <template #name="{ row }">
+                          <span class="resource-name" :title="row.agent_name || row.agent_id">{{ row.agent_name ||
+                            row.agent_id }}</span>
+                        </template>
+                        <template #shared_by="{ row }">
+                          <span class="resource-meta">{{ row.shared_by_username || '—' }}</span>
+                        </template>
+                        <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+                        <template #scope_kb="{ row }">
+                          <span class="resource-meta" :title="agentKbScopeLabel(row)">{{ agentKbScopeLabel(row) }}</span>
+                        </template>
+                        <template #scope_web_search="{ row }">
+                          <span class="resource-meta">{{ agentWebSearchScopeLabel(row) }}</span>
+                        </template>
+                        <template #scope_mcp="{ row }">
+                          <span class="resource-meta" :title="agentMcpScopeLabel(row)">{{ agentMcpScopeLabel(row) }}</span>
+                        </template>
+                        <template #permission>
+                          <t-tag size="small" theme="default" variant="light">
+                            {{ $t('organization.share.permissionReadonly') }}
+                          </t-tag>
+                        </template>
+                        <template #actions="{ row }">
+                          <t-popconfirm v-if="isAdmin"
+                            :content="$t('organization.settings.removeAgentShareConfirm', { name: row.agent_name || row.agent_id })"
+                            :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+                            :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                            @confirm="handleRemoveAgentShare(row)">
+                            <t-tooltip :content="$t('organization.settings.removeShareFromOrg')" placement="top">
+                              <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                                <template #icon><t-icon name="delete" /></template>
+                              </t-button>
+                            </t-tooltip>
+                          </t-popconfirm>
+                        </template>
+                      </t-table>
                     </div>
                   </div>
                 </div>
 
               </div>
-
-              <!-- 共享智能体 hover 跟随气泡 -->
-              <Teleport to="body">
-                <Transition name="agent-scope-popover-fade">
-                  <div v-if="agentScopePopover" class="agent-scope-popover-follow" :style="agentScopePopoverStyle">
-                    <div class="agent-scope-popover-card">
-                      <div class="agent-scope-popover-name">{{ agentScopePopover.share.agent_name ||
-                        agentScopePopover.share.agent_id
-                      }}</div>
-                      <div class="agent-scope-popover-meta">
-                        <span v-if="agentScopePopover.share.shared_by_username" class="popover-meta-item">
-                          <t-icon name="user" size="12px" /> {{ agentScopePopover.share.shared_by_username }}
-                        </span>
-                        <span class="popover-meta-item">
-                          <t-icon name="time" size="12px" /> {{ formatDate(agentScopePopover.share.created_at) }}
-                        </span>
-                      </div>
-                      <div class="agent-scope-popover-permission">
-                        <span class="popover-label">{{ $t('organization.settings.sharePermissionLabel') }}</span>
-                        <span class="popover-value">{{ $t('organization.share.permissionReadonly') }}</span>
-                      </div>
-                      <template v-if="getAgentScopeTags(agentScopePopover.share).length">
-                        <div class="agent-scope-popover-divider" />
-                        <div class="agent-scope-popover-section-title">{{ $t('agent.shareScope.title') }}</div>
-                        <div v-for="(tag, idx) in getAgentScopeTags(agentScopePopover.share)" :key="idx"
-                          class="agent-scope-popover-row">{{ tag }}</div>
-                      </template>
-                    </div>
-                  </div>
-                </Transition>
-              </Teleport>
 
               <!-- 底部操作按钮 -->
               <div class="settings-footer">
@@ -616,53 +814,6 @@
         </div>
       </div>
     </Transition>
-
-    <!-- 申请权限升级弹窗 -->
-    <t-dialog v-model:visible="showUpgradeDialog" :header="$t('organization.upgrade.dialogTitle')"
-      :confirm-btn="{ content: $t('common.confirm'), loading: upgradeSubmitting }" :cancel-btn="$t('common.cancel')"
-      @confirm="handleSubmitUpgrade">
-      <div class="upgrade-dialog-content">
-        <p class="upgrade-current-role">
-          {{ $t('organization.upgrade.currentRole') }}：
-          <t-tag size="small" :theme="getRoleTheme(orgInfo?.my_role || 'viewer')">
-            {{ $t(`organization.role.${orgInfo?.my_role || 'viewer'}`) }}
-          </t-tag>
-        </p>
-        <div class="upgrade-form-item">
-          <label>{{ $t('organization.upgrade.selectRole') }}</label>
-          <t-select v-model="upgradeForm.requested_role" :options="upgradeRoleOptions"
-            :placeholder="$t('organization.upgrade.selectRole')" />
-        </div>
-        <div class="upgrade-form-item">
-          <label>{{ $t('organization.upgrade.reason') }}</label>
-          <t-textarea v-model="upgradeForm.message" :placeholder="$t('organization.upgrade.reasonPlaceholder')"
-            :autosize="{ minRows: 2, maxRows: 4 }" :maxlength="500" />
-        </div>
-      </div>
-    </t-dialog>
-
-    <!-- 添加成员弹窗（按空间邀请） -->
-    <t-dialog v-model:visible="showAddMemberDialog" :header="$t('organization.addMember.dialogTitle')"
-      :confirm-btn="{ content: $t('organization.addMember.confirmBtn'), loading: addMemberSubmitting, disabled: selectedTenantId == null }"
-      :cancel-btn="$t('common.cancel')" @confirm="handleAddMember" @close="resetAddMemberDialog" width="420px">
-      <div class="add-member-dialog">
-        <p class="add-member-tip">{{ $t('organization.addMember.tipTenant') }}</p>
-
-        <div class="add-member-field">
-          <label>{{ $t('organization.addMember.searchTenant') }}</label>
-          <t-select v-model="selectedTenantId" :placeholder="$t('organization.addMember.searchTenantPlaceholder')"
-            filterable :filter="() => true" :loading="tenantSearchLoading" @search="handleTenantSearch" clearable
-            :options="tenantSearchOptions" />
-          <p class="field-hint">{{ $t('organization.addMember.searchTenantHint') }}</p>
-        </div>
-
-        <div class="add-member-field">
-          <label>{{ $t('organization.addMember.selectRole') }}</label>
-          <t-select v-model="addMemberRole" :options="addMemberRoleOptions"
-            :placeholder="$t('organization.addMember.selectRole')" />
-        </div>
-      </div>
-    </t-dialog>
   </Teleport>
 </template>
 
@@ -697,7 +848,6 @@ import {
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
-import AgentAvatar from '@/components/AgentAvatar.vue'
 import agentIconSrc from '@/assets/img/agent.svg'
 import agentIconActiveSrc from '@/assets/img/agent-green.svg'
 
@@ -730,6 +880,7 @@ const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
 const sharedAgents = ref<AgentShareResponse[]>([])
 const joinRequests = ref<JoinRequestResponse[]>([])
 const joinRequestsLoading = ref(false)
+const joinRequestSearchQuery = ref('')
 const reviewingRequestId = ref<string | null>(null)
 const sharesLoading = ref(false)
 const membersLoading = ref(false)
@@ -738,7 +889,7 @@ const submitting = ref(false)
 const refreshingCode = ref(false)
 const inviteCode = ref('')
 const inviteCodeExpiresAt = ref<string | null>(null)
-const showUpgradeDialog = ref(false)
+const upgradePopupVisible = ref(false)
 const upgradeSubmitting = ref(false)
 const hasPendingUpgrade = ref(false)
 const upgradeForm = ref({
@@ -749,7 +900,7 @@ const upgradeForm = ref({
 // 添加成员（按空间邀请）相关状态。Plan 3 之后，邀请实际上是把
 // 一整个空间拉进空间；这里的「搜索结果」是空间候选列表，每条带一个
 // 代表用户用于展示。`selectedTenantId` 是真正提交给后端的 tenant_id。
-const showAddMemberDialog = ref(false)
+const addMemberPopupVisible = ref(false)
 const addMemberSubmitting = ref(false)
 const tenantSearchLoading = ref(false)
 const tenantSearchResults = ref<TenantInviteCandidate[]>([])
@@ -765,12 +916,6 @@ const formData = ref({
   invite_code_validity_days: 7 as number,
   member_limit: 50 as number // 0 = unlimited
 })
-
-// 共享智能体 hover 跟随气泡
-const agentScopePopover = ref<{ share: AgentShareResponse; x: number; y: number } | null>(null)
-const agentScopePopoverTimer = ref<ReturnType<typeof setTimeout> | null>(null)
-const POPOVER_OFFSET = 14
-const POPOVER_DELAY = 200
 
 // 空间头像可选 Emoji（方案三：Emoji 作为头像）
 const avatarEmojiOptions = [
@@ -864,6 +1009,9 @@ const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('organization.editor.navBasic') },
   ]
+  if (isCreateMode.value) {
+    items.push({ key: 'permissions', icon: 'user-safety', label: t('organization.editor.navPermissions') })
+  }
   // 只有在编辑已有组织时才显示成员管理、加入申请（仅管理员）、共享知识库
   if (props.orgId && !isCreateMode.value) {
     items.push({ key: 'members', icon: 'user', label: t('organization.manageMembers') })
@@ -892,11 +1040,188 @@ const navItems = computed(() => {
   return items
 })
 
+const navGroups = computed(() => {
+  const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
+  const pickItems = (keys: string[]) =>
+    keys.map((key) => itemMap.get(key)).filter(Boolean) as typeof navItems.value
+  if (isCreateMode.value) {
+    return [
+      {
+        key: 'basic',
+        label: t('organization.navGroups.basic'),
+        items: pickItems(['basic', 'permissions']),
+      },
+    ].filter((group) => group.items.length > 0)
+  }
+  return [
+    {
+      key: 'basic',
+      label: t('organization.navGroups.basic'),
+      items: pickItems(['basic']),
+    },
+    {
+      key: 'management',
+      label: t('organization.navGroups.management'),
+      items: pickItems(['members', 'joinRequests']),
+    },
+    {
+      key: 'resources',
+      label: t('organization.navGroups.resources'),
+      items: pickItems(['sharedKb', 'sharedAgents']),
+    },
+  ].filter((group) => group.items.length > 0)
+})
+
 const roleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
   { label: t('organization.role.editor'), value: 'editor' },
   { label: t('organization.role.viewer'), value: 'viewer' }
 ])
+
+const permissionsPopupInnerStyle = {
+  boxSizing: 'border-box' as const,
+  padding: '0',
+  width: 'min(520px, calc(100vw - 24px))',
+  maxWidth: 'min(520px, calc(100vw - 24px))',
+  maxHeight: 'min(400px, 65vh)',
+  overflow: 'hidden',
+}
+
+const permissionsHintPopupInnerStyle = {
+  boxSizing: 'border-box' as const,
+  padding: '0',
+  width: 'min(400px, calc(100vw - 24px))',
+  maxWidth: 'min(400px, calc(100vw - 24px))',
+  maxHeight: 'min(280px, 65vh)',
+  overflow: 'hidden',
+}
+
+type OrgRole = 'admin' | 'editor' | 'viewer'
+type OrgRolePerm = { key: string; has: boolean }
+
+const orgRoleMatrixOrder: OrgRole[] = ['admin', 'editor', 'viewer']
+
+const orgRoleMatrix: Record<OrgRole, OrgRolePerm[]> = {
+  admin: [
+    { key: 'viewerPerm1', has: true },
+    { key: 'editorPerm1', has: true },
+    { key: 'useSharedAgentsPerm', has: true },
+    { key: 'shareKBPerm', has: true },
+    { key: 'adminPerm1', has: true },
+  ],
+  editor: [
+    { key: 'viewerPerm1', has: true },
+    { key: 'editorPerm1', has: true },
+    { key: 'useSharedAgentsPerm', has: true },
+    { key: 'shareKBPerm', has: false },
+    { key: 'adminPerm1', has: false },
+  ],
+  viewer: [
+    { key: 'viewerPerm1', has: true },
+    { key: 'editorPerm1', has: false },
+    { key: 'useSharedAgentsPerm', has: true },
+    { key: 'shareKBPerm', has: false },
+    { key: 'adminPerm1', has: false },
+  ],
+}
+
+function orgRoleIcon(role: OrgRole): string {
+  switch (role) {
+    case 'admin':
+      return 'user-safety'
+    case 'editor':
+      return 'edit'
+    default:
+      return 'browse'
+  }
+}
+
+const memberColumns = computed(() => {
+  const cols = [
+    { colKey: 'member', title: t('organization.members.columns.member'), ellipsis: true, minWidth: 160 },
+    { colKey: 'role', title: t('organization.members.columns.role'), width: 132 },
+    { colKey: 'joined_at', title: t('organization.members.columns.joinedAt'), width: 154 },
+  ]
+  if (isAdmin.value) {
+    cols.push({ colKey: 'actions', title: t('organization.members.columns.operations'), width: 88, align: 'left' } as typeof cols[number])
+  }
+  return cols
+})
+
+function sharePermissionLabel(permission: string): string {
+  if (permission === 'editor' || permission === 'admin') {
+    return t('organization.share.permissionEditable')
+  }
+  return t('organization.share.permissionReadonly')
+}
+
+const joinRequestColumns = computed(() => {
+  const cols = [
+    { colKey: 'applicant', title: t('organization.joinRequests.columns.applicant'), ellipsis: true, minWidth: 160 },
+    { colKey: 'request_type', title: t('organization.joinRequests.columns.type'), width: 88 },
+    { colKey: 'requested_role', title: t('organization.joinRequests.columns.requestedRole'), width: 140 },
+    { colKey: 'message', title: t('organization.joinRequests.columns.message'), ellipsis: true, minWidth: 120 },
+    { colKey: 'created_at', title: t('organization.joinRequests.columns.appliedAt'), width: 154 },
+    { colKey: 'actions', title: t('organization.members.columns.operations'), width: 88, align: 'left' },
+  ]
+  return cols
+})
+
+const sharedKbColumns = computed(() => {
+  const cols = [
+    { colKey: 'name', title: t('organization.sharedResources.columns.name'), ellipsis: true, minWidth: 180 },
+    { colKey: 'shared_by', title: t('organization.sharedResources.columns.sharedBy'), width: 120, ellipsis: true },
+    { colKey: 'created_at', title: t('organization.sharedResources.columns.sharedAt'), width: 154 },
+    { colKey: 'space_permission', title: t('organization.settings.sharePermissionLabel'), width: 108 },
+    { colKey: 'my_permission', title: t('organization.settings.myPermissionLabel'), width: 96 },
+    {
+      colKey: 'actions',
+      title: t('organization.members.columns.operations'),
+      width: isAdmin.value ? 96 : 64,
+      align: 'left',
+    },
+  ]
+  return cols
+})
+
+const sharedAgentColumns = computed(() => {
+  const cols = [
+    { colKey: 'name', title: t('organization.sharedResources.columns.name'), ellipsis: true, minWidth: 160 },
+    { colKey: 'shared_by', title: t('organization.sharedResources.columns.sharedBy'), width: 108, ellipsis: true },
+    { colKey: 'created_at', title: t('organization.sharedResources.columns.sharedAt'), width: 118 },
+    { colKey: 'scope_kb', title: t('agent.shareScope.knowledgeBase'), width: 120, ellipsis: true },
+    { colKey: 'scope_web_search', title: t('agent.shareScope.webSearch'), width: 88, ellipsis: true },
+    { colKey: 'scope_mcp', title: t('agent.shareScope.mcp'), width: 108, ellipsis: true },
+    { colKey: 'permission', title: t('organization.sharedResources.columns.permission'), width: 80 },
+  ]
+  if (isAdmin.value) {
+    cols.push({ colKey: 'actions', title: t('organization.members.columns.operations'), width: 72, align: 'left' } as typeof cols[number])
+  }
+  return cols
+})
+
+function agentKbScopeLabel(share: AgentShareResponse): string {
+  if (share.scope_kb === undefined || share.scope_kb === '') return '—'
+  if (share.scope_kb === 'all') return t('agent.shareScope.kbAll')
+  if (share.scope_kb === 'selected' && (share.scope_kb_count ?? 0) > 0) {
+    return t('agent.shareScope.kbSelected', { count: share.scope_kb_count })
+  }
+  return t('agent.shareScope.kbNone')
+}
+
+function agentWebSearchScopeLabel(share: AgentShareResponse): string {
+  if (share.scope_web_search === undefined) return '—'
+  return share.scope_web_search ? t('agent.shareScope.enabled') : t('agent.shareScope.disabled')
+}
+
+function agentMcpScopeLabel(share: AgentShareResponse): string {
+  if (share.scope_mcp === undefined || share.scope_mcp === '') return '—'
+  if (share.scope_mcp === 'all') return t('agent.shareScope.mcpAll')
+  if (share.scope_mcp === 'selected' && (share.scope_mcp_count ?? 0) > 0) {
+    return t('agent.shareScope.mcpSelected', { count: share.scope_mcp_count })
+  }
+  return t('agent.shareScope.mcpNone')
+}
 
 const filteredMembers = computed(() => {
   const query = memberSearchQuery.value.toLowerCase()
@@ -907,6 +1232,28 @@ const filteredMembers = computed(() => {
     (m.email || '').toLowerCase().includes(query)
   )
 })
+
+const filteredJoinRequests = computed(() => {
+  const query = joinRequestSearchQuery.value.trim().toLowerCase()
+  if (!query) return joinRequests.value
+  return joinRequests.value.filter((req) => {
+    const haystack = [req.username, req.email, req.user_id, req.message]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+function joinRequestApplicantLabel(req: JoinRequestResponse): string {
+  return req.username || req.email || req.user_id
+}
+
+function joinRequestApplicantSecondary(req: JoinRequestResponse): string {
+  const primary = joinRequestApplicantLabel(req)
+  if (req.email && req.email !== primary) return req.email
+  return ''
+}
 
 // 成员行的主标题：优先展示「空间名」，回退到代表用户名 / 空间 ID。Plan 3
 // 之后每一行成员都对应一个空间，UI 必须先于代表用户呈现空间身份，
@@ -1040,7 +1387,32 @@ const orgRoleOptions = [
   { label: t('organization.role.editor'), value: 'editor' },
   { label: t('organization.role.admin'), value: 'admin' },
 ]
-const assignRoleMap = ref<Record<string, 'viewer' | 'editor' | 'admin'>>({})
+const approvePopupRequestId = ref<string | null>(null)
+const approveAssignRole = ref<'viewer' | 'editor' | 'admin'>('viewer')
+
+function normalizeJoinRequestRole(role: string): 'viewer' | 'editor' | 'admin' {
+  if (role === 'admin' || role === 'editor' || role === 'viewer') return role
+  return 'viewer'
+}
+
+function openApprovePopup(req: JoinRequestResponse) {
+  approvePopupRequestId.value = req.id
+  approveAssignRole.value = normalizeJoinRequestRole(req.requested_role)
+}
+
+function closeApprovePopup() {
+  approvePopupRequestId.value = null
+}
+
+function handleApprovePopupVisibleChange(visible: boolean, req: JoinRequestResponse) {
+  if (visible) {
+    openApprovePopup(req)
+    return
+  }
+  if (approvePopupRequestId.value === req.id) {
+    closeApprovePopup()
+  }
+}
 
 function roleLabel(role: string) {
   if (role === 'admin') return t('organization.role.admin')
@@ -1055,11 +1427,6 @@ const fetchJoinRequests = async () => {
     const res = await listJoinRequests(props.orgId)
     if (res.success && res.data) {
       joinRequests.value = res.data.requests || []
-      assignRoleMap.value = {}
-      joinRequests.value.forEach((r) => {
-        const rRole = (r.requested_role === 'admin' || r.requested_role === 'editor' || r.requested_role === 'viewer') ? r.requested_role : 'viewer'
-        assignRoleMap.value[r.id] = rRole
-      })
     } else {
       joinRequests.value = []
     }
@@ -1071,21 +1438,38 @@ const fetchJoinRequests = async () => {
   }
 }
 
-const handleApproveRequest = async (req: JoinRequestResponse) => {
-  if (!props.orgId) return
+/**
+ * 审批结果会同时影响设置弹窗、空间卡片和全局侧栏中的待审批数量。
+ * 后两处读取的是 organization store，因此必须绕过列表缓存并同步最新计数。
+ */
+const refreshOrganizationAfterReview = async () => {
+  await Promise.all([
+    fetchOrgDetail(),
+    orgStore.fetchOrganizations({ force: true })
+  ])
+}
+
+const confirmApproveRequest = async (req: JoinRequestResponse) => {
+  const success = await handleApproveRequest(req, approveAssignRole.value)
+  if (success) closeApprovePopup()
+}
+
+const handleApproveRequest = async (req: JoinRequestResponse, assignRole: 'viewer' | 'editor' | 'admin'): Promise<boolean> => {
+  if (!props.orgId) return false
   reviewingRequestId.value = req.id
-  const assignRole = assignRoleMap.value[req.id] ?? (req.requested_role === 'admin' || req.requested_role === 'editor' ? req.requested_role : 'viewer')
   try {
     const res = await reviewJoinRequest(props.orgId, req.id, { approved: true, role: assignRole })
     if (res.success) {
       MessagePlugin.success(t('organization.settings.approveSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
-      await fetchOrgDetail()
-    } else {
-      MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
+      await refreshOrganizationAfterReview()
+      return true
     }
+    MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
+    return false
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('organization.settings.reviewFailed'))
+    return false
   } finally {
     reviewingRequestId.value = null
   }
@@ -1099,7 +1483,7 @@ const handleRejectRequest = async (req: JoinRequestResponse) => {
     if (res.success) {
       MessagePlugin.success(t('organization.settings.rejectSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
-      await fetchOrgDetail()
+      await refreshOrganizationAfterReview()
     } else {
       MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
     }
@@ -1193,6 +1577,14 @@ const confirmRemoveMember = async (member: OrganizationMember) => {
   }
 }
 
+watch(upgradePopupVisible, (visible) => {
+  if (visible && upgradeRoleOptions.value.length > 0) {
+    upgradeForm.value.requested_role = upgradeRoleOptions.value[0].value as 'editor' | 'admin'
+  } else if (!visible && !upgradeSubmitting.value) {
+    upgradeForm.value = { requested_role: 'editor', message: '' }
+  }
+})
+
 const handleSubmitUpgrade = async () => {
   if (!props.orgId) return
 
@@ -1204,7 +1596,7 @@ const handleSubmitUpgrade = async () => {
     })
     if (res.success) {
       MessagePlugin.success(t('organization.upgrade.submitSuccess'))
-      showUpgradeDialog.value = false
+      upgradePopupVisible.value = false
       hasPendingUpgrade.value = true
       // Reset form
       upgradeForm.value = { requested_role: 'editor', message: '' }
@@ -1262,7 +1654,7 @@ const handleAddMember = async () => {
     })
     if (res.success) {
       MessagePlugin.success(t('organization.addMember.success'))
-      showAddMemberDialog.value = false
+      addMemberPopupVisible.value = false
       resetAddMemberDialog()
       fetchMembers() // 刷新成员列表
     } else {
@@ -1444,68 +1836,6 @@ const formatDate = (dateStr: string) => {
   return `${year}-${month}-${day}`
 }
 
-/** 共享智能体能力范围标签（知识库、网络搜索、MCP） */
-function getAgentScopeTags(share: AgentShareResponse): string[] {
-  const tags: string[] = []
-  if (share.scope_kb !== undefined && share.scope_kb !== '') {
-    const kbText = share.scope_kb === 'all'
-      ? t('agent.shareScope.kbAll')
-      : share.scope_kb === 'selected' && (share.scope_kb_count ?? 0) > 0
-        ? t('agent.shareScope.kbSelected', { count: share.scope_kb_count })
-        : t('agent.shareScope.kbNone')
-    tags.push(`${t('agent.shareScope.knowledgeBase')}：${kbText}`)
-  }
-  if (share.scope_web_search !== undefined) {
-    tags.push(`${t('agent.shareScope.webSearch')}：${share.scope_web_search ? t('agent.shareScope.enabled') : t('agent.shareScope.disabled')}`)
-  }
-  if (share.scope_mcp !== undefined && share.scope_mcp !== '') {
-    const mcpText = share.scope_mcp === 'all'
-      ? t('agent.shareScope.mcpAll')
-      : share.scope_mcp === 'selected' && (share.scope_mcp_count ?? 0) > 0
-        ? t('agent.shareScope.mcpSelected', { count: share.scope_mcp_count })
-        : t('agent.shareScope.mcpNone')
-    tags.push(`${t('agent.shareScope.mcp')}：${mcpText}`)
-  }
-  return tags
-}
-
-function onSharedAgentMouseEnter(share: AgentShareResponse, e: MouseEvent) {
-  agentScopePopoverTimer.value = setTimeout(() => {
-    agentScopePopover.value = { share, x: e.clientX, y: e.clientY }
-    agentScopePopoverTimer.value = null
-  }, POPOVER_DELAY)
-}
-
-function onSharedAgentMouseMove(e: MouseEvent) {
-  if (agentScopePopover.value) {
-    agentScopePopover.value = { ...agentScopePopover.value, x: e.clientX, y: e.clientY }
-  }
-}
-
-function onSharedAgentMouseLeave() {
-  if (agentScopePopoverTimer.value) {
-    clearTimeout(agentScopePopoverTimer.value)
-    agentScopePopoverTimer.value = null
-  }
-  agentScopePopover.value = null
-}
-
-const agentScopePopoverStyle = computed(() => {
-  if (!agentScopePopover.value) return {}
-  const { x, y } = agentScopePopover.value
-  const popoverWidth = 240
-  const popoverHeight = 180
-  let left = x + POPOVER_OFFSET
-  let top = y + POPOVER_OFFSET
-  const rightEdge = window.innerWidth - popoverWidth - 12
-  const bottomEdge = window.innerHeight - popoverHeight - 12
-  if (left > rightEdge) left = rightEdge
-  if (left < 12) left = 12
-  if (top > bottomEdge) top = bottomEdge
-  if (top < 12) top = 12
-  return { left: `${left}px`, top: `${top}px` }
-})
-
 const getRoleTheme = (role: string) => {
   switch (role) {
     case 'admin': return 'primary'
@@ -1529,6 +1859,8 @@ watch(() => props.visible, (newVal) => {
   if (newVal) {
     currentSection.value = 'basic'
     memberSearchQuery.value = ''
+    joinRequestSearchQuery.value = ''
+    approvePopupRequestId.value = null
     joinRequests.value = []
     if (props.mode === 'create') {
       // 创建模式：重置表单
@@ -1543,18 +1875,18 @@ watch(() => props.visible, (newVal) => {
       fetchMembers()
       fetchSharedKBs()
     }
-  } else {
-    if (agentScopePopoverTimer.value) {
-      clearTimeout(agentScopePopoverTimer.value)
-      agentScopePopoverTimer.value = null
-    }
-    agentScopePopover.value = null
   }
 })
 
 watch(currentSection, (section) => {
   if (section === 'joinRequests' && props.orgId) {
     fetchJoinRequests()
+  }
+})
+
+watch(addMemberPopupVisible, (visible) => {
+  if (!visible) {
+    resetAddMemberDialog()
   }
 })
 </script>
@@ -1586,12 +1918,8 @@ watch(currentSection, (section) => {
   height: 85vh;
   max-height: 750px;
   background: var(--td-bg-color-container);
-  border-radius: 16px;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 4px 6px -1px rgba(15, 23, 42, 0.06),
-    0 12px 24px -4px rgba(15, 23, 42, 0.1),
-    0 24px 48px -8px rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1599,29 +1927,24 @@ watch(currentSection, (section) => {
 
 .close-btn {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 36px;
-  height: 36px;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
   border: none;
-  background: var(--td-bg-color-container-hover);
-  border-radius: 10px;
+  background: transparent;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+  transition: all 0.2s ease;
   z-index: 10;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
-    transform: scale(1.02);
-  }
-
-  &:active {
-    transform: scale(0.98);
   }
 }
 
@@ -1632,97 +1955,108 @@ watch(currentSection, (section) => {
 }
 
 .settings-sidebar {
-  width: 200px;
-  background: var(--td-bg-color-settings-modal);
+  width: 208px;
+  background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
+}
 
-  .sidebar-header {
-    padding: 26px 20px;
-    border-bottom: 1px solid var(--td-component-stroke);
+.sidebar-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
 
-    .sidebar-title {
-      margin: 0;
-      font-family: var(--app-font-family);
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--td-text-color-primary);
-      letter-spacing: -0.02em;
-    }
+.settings-nav {
+  flex: 1;
+  padding: 8px 8px 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.nav-group-title {
+  padding: 6px 14px 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  .settings-nav > &:first-child {
+    padding-top: 2px;
   }
 
-  .settings-nav {
-    flex: 1;
-    padding: 12px 8px;
-    overflow-y: auto;
+  .settings-nav > &:not(:first-child) {
+    padding-top: 8px;
+  }
+}
 
-    .nav-item {
-      display: flex;
-      align-items: center;
-      padding: 12px 14px;
-      margin-bottom: 4px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background 0.2s ease, color 0.2s ease;
-      font-family: var(--app-font-family);
-      font-size: 14px;
-      color: var(--td-text-color-secondary);
-      font-weight: 500;
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+  user-select: none;
 
-      .nav-icon {
-        margin-right: 10px;
-        font-size: 18px;
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: inherit;
-        transition: color 0.2s;
+  &:hover {
+    background-color: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
 
-        &.nav-icon-img {
-          width: 18px;
-          height: 18px;
-        }
-      }
+  &.active {
+    background-color: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+}
 
-      .nav-label {
-        flex: 1;
-        min-width: 0;
-      }
+.nav-icon {
+  margin-right: 9px;
+  font-size: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
 
-      .nav-item-badge {
-        min-width: 20px;
-        height: 20px;
-        padding: 0 6px;
-        border-radius: 10px;
-        background: rgba(250, 173, 20, 0.18);
-        color: var(--td-warning-color-active);
-        font-size: 12px;
-        font-weight: 600;
-        line-height: 20px;
-        text-align: center;
-        flex-shrink: 0;
+  &.nav-icon-img {
+    width: 16px;
+    height: 16px;
+  }
+}
 
-        &.nav-item-badge-count {
-          background: rgba(0, 0, 0, 0.06);
-          color: var(--td-text-color-secondary);
-          font-weight: 500;
-        }
-      }
+.nav-label {
+  flex: 1;
+}
 
-      &:hover {
-        background: var(--td-bg-color-container-hover);
-        color: var(--td-text-color-primary);
-      }
+.nav-badge {
+  flex-shrink: 0;
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  text-align: center;
 
-      &.active {
-        background: var(--td-bg-color-secondarycontainer);
-        color: var(--td-brand-color);
-        font-weight: 600;
-      }
-    }
+  &.nav-badge-count {
+    min-width: 20px;
   }
 }
 
@@ -1731,13 +2065,18 @@ watch(currentSection, (section) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
+  background-color: var(--td-bg-color-container);
 }
 
 .content-wrapper {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
+  min-height: 0;
+  padding: 28px 40px 48px;
+  box-sizing: border-box;
+  scroll-padding-bottom: 24px;
 }
 
 .tenant-role-hint {
@@ -1760,23 +2099,32 @@ watch(currentSection, (section) => {
 }
 
 .section {
+  width: 100%;
+  animation: sectionFadeIn 0.25s ease;
+
   .section-header {
     margin-bottom: 20px;
+    width: 100%;
+    min-width: 0;
 
     h2 {
-      margin: 0 0 8px 0;
+      margin: 0;
       font-family: var(--app-font-family);
-      font-size: 16px;
+      font-size: 20px;
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
 
+    .section-header-titlewrap h2 {
+      line-height: 1.25;
+    }
+
     .section-description {
-      margin: 0;
+      margin: 8px 0 0;
       font-family: var(--app-font-family);
       font-size: 14px;
-      color: var(--td-text-color-placeholder);
-      line-height: 22px;
+      color: var(--td-text-color-secondary);
+      line-height: 1.5;
     }
 
     .permission-calc-hint {
@@ -1794,6 +2142,18 @@ watch(currentSection, (section) => {
   }
 }
 
+@keyframes sectionFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -1804,8 +2164,10 @@ watch(currentSection, (section) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 24px;
   padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
+  min-width: 0;
 
   &:first-child {
     padding-top: 0;
@@ -1816,9 +2178,10 @@ watch(currentSection, (section) => {
   }
 
   .setting-info {
-    flex: 1;
-    max-width: 45%;
-    padding-right: 20px;
+    flex: 0 0 42%;
+    max-width: 42%;
+    min-width: 0;
+    padding-right: 0;
 
     &.full-width {
       max-width: 100%;
@@ -1827,8 +2190,8 @@ watch(currentSection, (section) => {
 
     label {
       display: block;
-      font-size: 14px;
-      font-weight: 600;
+      font-size: 15px;
+      font-weight: 500;
       color: var(--td-text-color-primary);
       margin-bottom: 4px;
 
@@ -1847,18 +2210,40 @@ watch(currentSection, (section) => {
   }
 
   .setting-control {
-    flex: 1;
-    max-width: 50%;
+    flex: 1 1 58%;
     min-width: 0;
+    max-width: 58%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
+    overflow: hidden;
 
     &.full-width {
       max-width: 100%;
+      justify-content: flex-start;
+    }
+
+    :deep(.t-select),
+    :deep(.t-input),
+    :deep(.t-textarea) {
+      width: 100%;
+      min-width: 0;
     }
   }
 
   &.setting-row-vertical {
     flex-direction: column;
     gap: 12px;
+
+    .setting-info {
+      max-width: 100%;
+      padding-right: 0;
+    }
+
+    .setting-control {
+      max-width: 100%;
+      justify-content: flex-start;
+    }
   }
 }
 
@@ -1888,11 +2273,110 @@ watch(currentSection, (section) => {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+
+  .name-input {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
-.name-input-wrapper .name-input {
-  flex: 1;
-  min-width: 0;
+// 创建模式权限说明卡片
+.permissions-info {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.permission-card {
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid var(--td-component-stroke);
+}
+
+.permission-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.permission-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-anti);
+
+  &.admin {
+    background: linear-gradient(135deg, var(--td-brand-color), var(--td-brand-color-active));
+  }
+
+  &.editor {
+    background: linear-gradient(135deg, var(--td-warning-color), var(--td-warning-color-active));
+  }
+
+  &.viewer {
+    background: var(--td-bg-color-component-disabled);
+  }
+}
+
+.permission-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .role-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+}
+
+.permission-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .check-icon {
+    color: var(--td-brand-color);
+    font-size: 14px;
+  }
+
+  .close-icon {
+    color: var(--td-error-color);
+    font-size: 14px;
+  }
+}
+
+.info-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: var(--td-brand-color-light);
+  border-radius: 8px;
+  color: var(--td-brand-color);
+  font-size: 13px;
+  line-height: 20px;
+
+  .t-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 }
 
 /* 头像 Emoji 弹层内容 */
@@ -2066,603 +2550,532 @@ watch(currentSection, (section) => {
   }
 }
 
-// 成员权限紧凑展示
+// 成员管理（对齐 TenantMembers 列表 + 权限弹层）
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+}
+
+.section-header-titlewrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+
+  h2 {
+    margin: 0;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+}
+
+.permissions-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  line-height: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+
+  :deep(.t-icon) {
+    display: block;
+  }
+
+  &:hover {
+    background-color: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 1px;
+  }
+}
+
+.members-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.members-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
+
+.members-list-titlewrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.members-list-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.members-list-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background-color: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.members-list-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.members-list-search {
+  flex: 0 0 14rem;
+  width: 14rem;
+  min-width: 0;
+
+  :deep(.t-input) {
+    width: 100%;
+  }
+}
+
+.members-list-add-btn {
+  flex-shrink: 0;
+}
+
+.members-list-upgrade-btn {
+  flex-shrink: 0;
+}
+
+.loading-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 0 8px;
+}
+
+.empty-state {
+  padding: 8px 0 16px;
+}
+
+.empty-state-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.empty-state-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.permission-hint-popover {
+  padding: 14px 16px;
+  max-width: 360px;
+
+  .permission-hint-title {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  .permission-hint-desc {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.shared-resources-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.resource-name {
+  display: block;
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-meta {
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.member-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0;
+
+  .member-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .member-email {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--td-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .me-tag,
+  .owner-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 5px;
+    height: 16px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .me-tag {
+    background: @primary-color;
+    color: var(--td-text-color-anti);
+  }
+
+  .owner-tag {
+    background: var(--td-brand-color-light);
+    color: @primary-color;
+  }
+}
+
+.data-table-shell {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-container);
+
+  :deep(thead th) {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  :deep(.t-table td),
+  :deep(.t-table th) {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  :deep(.role-cell) {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  :deep(.member-role-select.t-select) {
+    width: 100%;
+  }
+}
+
 .permissions-compact {
-  margin-bottom: 20px;
-  padding: 12px;
-  background: var(--td-bg-color-container);
-  border-radius: 8px;
+  padding: 8px;
 
   .permissions-compact-header {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 16px;
 
     .permissions-compact-title {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
 
     .permissions-compact-desc {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--td-text-color-secondary);
     }
   }
 
   .permissions-compact-grid {
-    display: flex;
-    gap: 8px;
-  }
-
-  .permissions-upgrade-action {
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px dashed var(--td-component-stroke);
-    display: flex;
-    justify-content: flex-end;
-
-    .t-button {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-
-      .t-icon {
-        font-size: 14px;
-      }
-    }
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
   }
 
   .perm-role-block {
-    flex: 1;
-    background: var(--td-bg-color-container);
-    border-radius: 6px;
-    padding: 10px;
     border: 1px solid var(--td-component-stroke);
-    transition: all 0.15s ease;
-    position: relative;
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--td-bg-color-container);
+    transition: all 0.2s ease;
 
     &.is-me {
-      border-left: 3px solid @primary-color;
-      background: rgba(7, 192, 95, 0.04);
+      border-color: var(--td-brand-color);
+      background: var(--td-brand-color-light);
     }
 
     .perm-role-tag {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 500;
-      margin-bottom: 8px;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+      margin-bottom: 12px;
 
       .me-badge {
-        padding: 0 4px;
-        background: @primary-color;
-        color: var(--td-text-color-anti);
-        border-radius: 3px;
-        font-size: 10px;
+        margin-left: auto;
+        font-size: 12px;
         font-weight: 500;
-        margin-left: 2px;
+        color: var(--td-brand-color);
+        padding: 2px 8px;
+        background: var(--td-brand-color-light);
+        border-radius: 4px;
       }
-    }
-
-    &.admin .perm-role-tag {
-      background: var(--td-brand-color-light);
-      color: @primary-color;
-    }
-
-    &.editor .perm-role-tag {
-      background: rgba(237, 112, 46, 0.1);
-      color: var(--td-warning-color);
-    }
-
-    &.viewer .perm-role-tag {
-      background: rgba(134, 144, 156, 0.1);
-      color: var(--td-text-color-secondary);
     }
 
     .perm-items {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-    }
+      gap: 6px;
 
-    .perm-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-      line-height: 1.3;
-
-      &.has {
-        color: var(--td-text-color-secondary);
-
-        .t-icon {
-          color: @primary-color;
-        }
-      }
-
-      &.no {
-        color: var(--td-text-color-placeholder);
-        text-decoration: line-through;
-
-        .t-icon {
-          color: var(--td-text-color-placeholder);
-        }
-      }
-    }
-  }
-}
-
-// Members
-.members-header {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  align-items: center;
-
-  .members-search {
-    flex: 1;
-  }
-}
-
-.members-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-
-  .member-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--td-bg-color-container);
-    border-radius: 8px;
-    transition: background 0.2s;
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    &.is-me {
-      border: 1px solid @primary-color;
-      background: rgba(7, 192, 95, 0.04);
-    }
-
-    .member-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: var(--td-bg-color-secondarycontainer);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      color: var(--td-text-color-secondary);
-
-      &.is-me {
-        background: rgba(7, 192, 95, 0.15);
-        color: @primary-color;
-        box-shadow: 0 0 0 2px @primary-color;
-      }
-
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-    }
-
-    .member-info {
-      flex: 1;
-      min-width: 0;
-
-      .member-name {
+      .perm-item {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 6px;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--td-text-color-primary);
+        font-size: 13px;
+        line-height: 1.5;
 
-        .me-tag {
-          display: inline-flex;
-          align-items: center;
-          padding: 0 5px;
-          height: 16px;
-          background: @primary-color;
-          color: var(--td-text-color-anti);
-          border-radius: 3px;
-          font-size: 10px;
-          font-weight: 500;
+        .t-icon {
+          margin-top: 2px;
           flex-shrink: 0;
         }
+
+        &.has {
+          color: var(--td-text-color-secondary);
+
+          .t-icon {
+            color: var(--td-brand-color);
+          }
+        }
+
+        &.no {
+          color: var(--td-text-color-disabled);
+
+          .t-icon {
+            color: var(--td-text-color-disabled);
+          }
+        }
       }
-
-      .member-email {
-        display: block;
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-      }
-    }
-
-    .member-role {
-      flex-shrink: 0;
-    }
-
-    .member-actions {
-      flex-shrink: 0;
     }
   }
 
-  .empty-members {
-    padding: 32px;
-    text-align: center;
-    color: var(--td-text-color-secondary);
-    font-size: 14px;
-  }
-}
-
-// Shared KBs
-.empty-shared {
-  padding: 48px 24px;
-  text-align: center;
-
-  .empty-icon {
-    width: 80px;
-    height: 80px;
-    margin: 0 auto 16px;
-    border-radius: 50%;
-    background: var(--td-bg-color-container);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--td-text-color-placeholder);
-
-    .empty-icon-agent {
-      width: 48px;
-      height: 48px;
-    }
-
-    .empty-icon-kb {
-      width: 48px;
-      height: 48px;
-    }
-  }
-
-  .empty-text {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0 0 8px;
-  }
-
-  .empty-subtext {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
+  &.permissions-compact--popover {
+    padding: 10px 12px;
     margin: 0;
-  }
+    max-height: min(392px, calc(65vh - 8px));
+    overflow-x: hidden;
+    overflow-y: auto;
 
-  &.small {
-    padding: 24px 16px;
-
-    .empty-text {
-      margin: 0;
-    }
-  }
-}
-
-.shared-subsection {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid var(--td-component-stroke);
-
-  .shared-subtitle {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 12px 0;
-  }
-}
-
-// Join requests
-.empty-join-requests {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 20px;
-
-  .empty-icon {
-    color: var(--td-brand-color);
-    margin-bottom: 16px;
-  }
-
-  .empty-text {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-  }
-}
-
-.join-requests-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-
-  .join-request-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
-    background: var(--td-bg-color-container);
-    border-radius: 8px;
-    transition: background 0.2s;
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    .request-user {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .request-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: var(--td-brand-color-light);
-      color: var(--td-brand-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .request-info {
-      display: flex;
-      flex-direction: column;
+    .permissions-compact-header {
       gap: 2px;
-      min-width: 0;
+      margin-bottom: 10px;
 
-      .request-name {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--td-text-color-primary);
-
-        .request-type-tag {
-          flex-shrink: 0;
-        }
+      .permissions-compact-title {
+        font-size: 13px;
       }
 
-      .request-email {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-      }
-
-      .request-prev-role {
-        font-size: 12px;
-        color: var(--td-warning-color);
-        margin-top: 2px;
-      }
-
-      .request-message {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-        margin: 4px 0 0;
+      .permissions-compact-desc {
+        font-size: 11px;
         line-height: 1.4;
       }
-
-      .request-requested-role {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-        margin-top: 2px;
-      }
-
-      .request-time {
-        font-size: 12px;
-        color: var(--td-text-color-placeholder);
-        margin-top: 4px;
-      }
     }
 
-    .request-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
+    .permissions-compact-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
 
-      .request-assign-role {
-        display: flex;
-        align-items: center;
-        gap: 8px;
+    .perm-role-block {
+      padding: 8px 10px;
+      border-radius: 6px;
 
-        .request-assign-label {
-          font-size: 12px;
-          color: var(--td-text-color-secondary);
-          white-space: nowrap;
+      .perm-role-tag {
+        font-size: 12px;
+        margin-bottom: 6px;
+        gap: 4px;
+
+        .me-badge {
+          font-size: 10px;
+          padding: 1px 5px;
         }
+      }
 
-        .request-role-select {
-          min-width: 100px;
+      .perm-items {
+        gap: 3px;
+
+        .perm-item {
+          font-size: 11px;
+          line-height: 1.35;
+          gap: 4px;
+
+          .t-icon {
+            margin-top: 1px;
+          }
         }
       }
     }
   }
+
+  @media (max-width: 480px) {
+    &.permissions-compact--popover .permissions-compact-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 }
 
-.shared-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
+@media (max-width: 560px) {
+  .members-list-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 
-  .shared-item {
-    display: flex;
+  .members-list-search {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+  }
+}
+
+// Join requests table
+.join-requests-wrap {
+  .join-request-message {
+    display: block;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .join-request-role-change {
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--td-bg-color-container);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
 
-    &:hover {
-      background: var(--td-brand-color-light);
-    }
-
-    .shared-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 8px;
-      height: 26px;
-      border-radius: 6px;
-      gap: 4px;
-
-      &.type-document {
-        background: rgba(7, 192, 95, 0.08);
-        color: var(--td-brand-color-active);
-      }
-
-      &.type-faq {
-        background: rgba(0, 82, 217, 0.08);
-        color: var(--td-brand-color);
-      }
-
-      & .shared-icon-org {
-        background: rgba(7, 192, 95, 0.08);
-        color: var(--td-brand-color-active);
-      }
-
-      &.shared-icon-agent-wrap {
-        padding: 0;
-        height: auto;
-        background: transparent;
-      }
-
-      &.shared-icon-kb {
-        background: rgba(7, 192, 95, 0.08);
-        color: var(--td-brand-color-active);
-      }
-
-      .shared-icon-kb-img {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-      }
-
-      .shared-icon-agent {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-      }
-
-      .org-icon-img {
-        width: 18px;
-        height: 18px;
-        flex-shrink: 0;
-      }
-
-      .badge-count {
-        font-size: 12px;
-        font-weight: 500;
-      }
-    }
-
-    .shared-info {
-      flex: 1;
-      min-width: 0;
-
-      .shared-name {
-        display: block;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--td-text-color-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        margin-bottom: 4px;
-      }
-
-      .shared-meta {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-
-        .shared-by,
-        .shared-time {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-      }
-
-      .shared-desc {
-        display: block;
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-
-    .shared-permissions {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
+    .t-icon {
       flex-shrink: 0;
-      margin-left: auto;
-
-      .perm-tag {
-        white-space: nowrap;
-      }
+      color: var(--td-text-color-placeholder);
     }
+  }
 
-    .shared-remove-btn {
-      flex-shrink: 0;
-      margin-left: 4px;
-    }
+  .join-request-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
   }
 }
 
 .settings-footer {
-  padding: 20px 32px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 12px 40px;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
+  background-color: var(--td-bg-color-container);
+}
+
+.settings-nav::-webkit-scrollbar,
+.content-wrapper::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-nav::-webkit-scrollbar-track {
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.settings-nav::-webkit-scrollbar-thumb {
+  background: var(--td-gray-color-5);
+  border-radius: 3px;
+}
+
+.settings-nav::-webkit-scrollbar-thumb:hover {
+  background: var(--td-gray-color-6);
+}
+
+.content-wrapper::-webkit-scrollbar-track {
   background: var(--td-bg-color-container);
+}
+
+.content-wrapper::-webkit-scrollbar-thumb {
+  background: var(--td-gray-color-5);
+  border-radius: 3px;
+}
+
+.content-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--td-gray-color-6);
 }
 
 // Transitions
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-
-  .settings-modal {
-    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
+  transition: all 0.3s ease;
 }
 
 .modal-enter-from,
@@ -2670,168 +3083,362 @@ watch(currentSection, (section) => {
   opacity: 0;
 
   .settings-modal {
-    transform: scale(0.92) translateY(-8px);
+    transform: scale(0.95);
   }
 }
 
-.modal-enter-to,
-.modal-leave-from {
-  .settings-modal {
-    transform: scale(1) translateY(0);
-  }
+// 权限升级申请弹出层（对齐添加成员 popup）
+
+.add-member-tip {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
 }
 
-// 升级申请弹窗样式
-.upgrade-dialog-content {
-  .upgrade-current-role {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 16px;
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-  }
+.member-invite-popup-inner {
+  width: min(400px, calc(100vw - 32px));
+  max-width: 100%;
+}
 
-  .upgrade-form-item {
-    margin-bottom: 16px;
+.member-invite-popup-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 12px;
+  line-height: 1.35;
+}
 
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-    }
+.member-invite-form {
+  :deep(.t-form__item) {
+    margin-bottom: 14px;
 
     &:last-child {
-      margin-bottom: 0;
+      margin-bottom: 4px;
+    }
+  }
+
+  :deep(.t-form__label) {
+    font-weight: 500;
+    padding-bottom: 6px;
+  }
+
+  :deep(.t-select) {
+    width: 100%;
+  }
+
+  :deep(.t-textarea) {
+    width: 100%;
+  }
+
+  .member-form-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .field-hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    line-height: 1.45;
+  }
+}
+
+.invite-popup-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--td-component-stroke);
+}
+</style>
+
+<style lang="less">
+/* 权限说明 / 提示弹出层（t-popup 挂到 body，须全局样式） */
+.org-permissions-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    overflow: hidden;
+  }
+
+  .permission-hint-popover {
+    padding: 14px 16px;
+
+    .permission-hint-title {
+      margin: 0 0 6px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+      line-height: 1.35;
+    }
+
+    .permission-hint-desc {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  .permissions-compact.permissions-compact--popover {
+    padding: 12px 14px;
+    margin: 0;
+    max-height: min(392px, calc(65vh - 8px));
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    .permissions-compact-header {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 10px;
+
+      .permissions-compact-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+      }
+
+      .permissions-compact-desc {
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--td-text-color-secondary);
+      }
+    }
+
+    .permissions-compact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .perm-role-block {
+      border: 1px solid var(--td-component-stroke);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: var(--td-bg-color-container);
+
+      &.is-me {
+        border-color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+      }
+
+      .perm-role-tag {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+        margin-bottom: 6px;
+
+        .me-badge {
+          margin-left: auto;
+          font-size: 10px;
+          font-weight: 500;
+          color: var(--td-brand-color);
+          padding: 1px 5px;
+          background: var(--td-brand-color-light);
+          border-radius: 4px;
+        }
+      }
+
+      .perm-items {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        .perm-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 4px;
+          font-size: 11px;
+          line-height: 1.35;
+          color: var(--td-text-color-secondary);
+
+          .t-icon {
+            margin-top: 1px;
+            flex-shrink: 0;
+          }
+
+          &.has .t-icon {
+            color: var(--td-brand-color);
+          }
+
+          &.no {
+            color: var(--td-text-color-disabled);
+
+            .t-icon {
+              color: var(--td-text-color-disabled);
+            }
+          }
+        }
+      }
     }
   }
 }
 
-.add-member-dialog {
+:root[theme-mode='dark'] .org-permissions-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+@media (max-width: 480px) {
+  .org-permissions-popup-overlay .permissions-compact.permissions-compact--popover .permissions-compact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 添加成员 / 权限升级弹出层（与空间成员管理邀请弹层一致） */
+.org-add-member-popup-overlay,
+.org-upgrade-popup-overlay,
+.org-approve-request-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--td-component-stroke);
+    box-shadow: var(--td-shadow-2), 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+}
+
+.org-upgrade-popup-overlay,
+.org-approve-request-popup-overlay {
+  .org-upgrade-popup-inner,
+  .org-approve-request-popup-inner {
+    width: min(360px, calc(100vw - 32px));
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .member-invite-popup-title {
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+  }
+
   .add-member-tip {
-    margin: 0 0 20px;
+    margin: 0 0 12px;
     padding: 10px 12px;
-    background: var(--td-bg-color-container);
-    border-radius: 6px;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
     font-size: 13px;
     color: var(--td-text-color-secondary);
     line-height: 1.5;
   }
 
-  .add-member-field {
-    margin-bottom: 20px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-    }
-
-    .t-select {
-      width: 100%;
-    }
-
-    .field-hint {
-      margin: 6px 0 0;
-      font-size: 12px;
-      color: var(--td-text-color-secondary);
-    }
+  .upgrade-current-role-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
   }
-}
-</style>
 
-<style lang="less">
-/* 共享智能体 hover 跟随气泡（Teleport 到 body） */
-.agent-scope-popover-follow {
-  position: fixed;
-  z-index: 10000;
-  pointer-events: none;
-}
+  .upgrade-current-role-label {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
 
-.agent-scope-popover-card {
-  min-width: 220px;
-  max-width: 280px;
-  padding: 14px 16px;
-  background: var(--td-bg-color-container);
-  border-radius: 10px;
-  box-shadow: var(--td-shadow-3), 0 2px 8px rgba(0, 0, 0, 0.06);
-  border: 1px solid var(--td-component-stroke);
-}
+  .org-upgrade-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
 
-.agent-scope-popover-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  margin-bottom: 8px;
-  line-height: 1.3;
-  padding-right: 8px;
-}
+  .org-upgrade-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
 
-.agent-scope-popover-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  margin-bottom: 10px;
+  .org-upgrade-field-label {
+    display: block;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
 
-  .popover-meta-item {
+  .upgrade-role-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .upgrade-role-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-  }
-}
-
-.agent-scope-popover-permission {
-  font-size: 12px;
-  margin-bottom: 10px;
-
-  .popover-label {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    background: var(--td-bg-color-secondarycontainer);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.4;
     color: var(--td-text-color-secondary);
-    margin-right: 6px;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 8%, var(--td-bg-color-secondarycontainer));
+      outline: none;
+    }
+
+    &.active {
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+      color: var(--td-brand-color);
+      font-weight: 500;
+    }
   }
 
-  .popover-value {
-    color: var(--td-text-color-primary);
-    font-weight: 500;
+  .org-upgrade-field .t-textarea,
+  .org-upgrade-field .t-select {
+    width: 100%;
+    box-sizing: border-box;
   }
-}
 
-.agent-scope-popover-divider {
-  height: 1px;
-  background: var(--td-bg-color-secondarycontainer);
-  margin: 10px 0;
-}
-
-.agent-scope-popover-section-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  margin-bottom: 8px;
-}
-
-.agent-scope-popover-row {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  line-height: 1.7;
-  padding: 2px 0;
-}
-
-.agent-scope-popover-fade-enter-active,
-.agent-scope-popover-fade-leave-active {
-  transition: opacity 0.12s ease;
-}
-
-.agent-scope-popover-fade-enter-from,
-.agent-scope-popover-fade-leave-to {
-  opacity: 0;
+  .invite-popup-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
 }
 </style>
