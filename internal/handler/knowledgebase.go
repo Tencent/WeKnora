@@ -1081,10 +1081,11 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	// Create KB clone payload
 	payload := types.KBClonePayload{
-		TenantID: tenantID.(uint64),
-		TaskID:   taskID,
-		SourceID: req.SourceID,
-		TargetID: req.TargetID,
+		TenantID:  tenantID.(uint64),
+		TaskID:    taskID,
+		SourceID:  req.SourceID,
+		TargetID:  req.TargetID,
+		Initiator: types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 

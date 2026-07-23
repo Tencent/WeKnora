@@ -185,6 +185,10 @@ type WikiPageService interface {
 	// DeleteFolder removes an empty folder. Fails if it still contains pages
 	// or child folders (the UI must move or delete contents first).
 	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// PruneEmptyFolderChains deletes candidate folders that are still empty,
+	// walking upward through newly-empty ancestors. Candidates are supplied by
+	// document retract cleanup so unrelated user-created empty folders remain.
+	PruneEmptyFolderChains(ctx context.Context, kbID string, folderIDs []string) ([]string, error)
 	// FindOrCreateFolderPath resolves a category path (e.g. ["AI","RAG"]) to a
 	// folder id, creating any missing intermediate folders. Returns the leaf
 	// folder id and the canonical (cleaned) path. An empty/blank path resolves

@@ -143,5 +143,24 @@ export default defineConfig({
         secure: false,
       }
     }
+  },
+  // `vite preview` 用生产构建产物(dist)本地起服务，是最接近 release 镜像的环境：
+  // 同样的压缩 / 拆包 / CSS 加载顺序，可提前暴露只在生产构建出现的问题
+  // （如主题变量被打包顺序覆盖）。用法：npm run build && npm run preview
+  preview: {
+    port: 4173,
+    host: true,
+    proxy: {
+      '/api': {
+        target: DEV_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
+      '/files': {
+        target: DEV_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   }
 })

@@ -3316,6 +3316,36 @@ export default {
   },
 
   knowledgeEditor: {
+    activity: {
+      title: 'История действий',
+      description: 'Важные изменения и фоновые задачи этой базы знаний. Срок хранения соответствует политике аудита.',
+      allOutcomes: 'Все результаты', allActions: 'Все действия', refresh: 'Обновить', retry: 'Повторить', empty: 'Действий пока нет', emptyFiltered: 'Нет подходящих записей активности', clearFilters: 'Сбросить фильтры',
+      loadMore: 'Загрузить ещё', loadingMore: 'Загрузка…', end: 'Более ранних записей нет', loadFailed: 'Не удалось загрузить историю', viewDetails: 'Подробнее',
+      columns: { time: 'Время', action: 'Действие', target: 'Объект', actor: 'Инициатор', outcome: 'Результат' },
+      expanded: { targetType: 'Тип объекта', targetId: 'ID объекта', actorId: 'ID инициатора', details: 'Подробности' },
+      drawer: { sectionSummary: 'Сводка', sectionIdentifiers: 'Идентификаторы', sectionTask: 'Информация о задаче', targetChange: 'Детали изменения' },
+      systemActor: 'Система', knowledgeBase: 'База знаний', countItems: '{count} элем.', titleWithCount: '{title} и ещё {count}', importSummary: 'Успешно {success} / Ошибок {failed} / Пропущено {skipped}',
+      targets: { knowledge_base: 'База знаний', knowledge: 'Знание', faq_entry: 'FAQ', knowledge_tag: 'Тег', data_source: 'Источник данных', knowledge_base_share: 'Общий доступ', knowledge_move: 'Перемещение', wiki: 'Wiki' },
+      outcomes: { accepted: 'Принято', success: 'Успешно', failed: 'Ошибка', partial: 'Частично', canceled: 'Отменено', denied: 'Отклонено' },
+      detailFields: { task_id: 'ID задачи', trigger: 'Запуск', processing_status: 'Статус обработки', source_kb_id: 'ID исходной базы', target_kb_id: 'ID целевой базы', sync_log_id: 'ID журнала синхронизации', mode: 'Режим', attempt: 'Попытка', count: 'Количество', total: 'Всего', processed: 'Обработано', failed: 'Ошибок', skipped: 'Пропущено', failure_stage: 'Этап ошибки' },
+      detailValues: { user: 'Запущено пользоватем', manual: 'Вручную', schedule: 'По расписанию', system: 'Система', pending: 'Ожидает', completed: 'Завершено', partial: 'Частично завершено', canceled: 'Отменено', failed: 'Ошибка', enqueue: 'Постановка в очередь', reuse_vectors: 'Повторное использование векторов', reparse: 'Повторный разбор', viewer: 'Только чтение', editor: 'Редактирование', admin: 'Управление', append: 'Добавление', replace: 'Замена' },
+      actions: {
+        'kb.created': 'База знаний создана', 'kb.updated': 'База знаний обновлена', 'kb.deleted': 'База знаний удалена',
+        'kb.duplicated': 'База знаний скопирована', 'kb.clone_started': 'Клонирование начато', 'kb.clone_completed': 'Клонирование завершено',
+        'kb.clone_failed': 'Ошибка клонирования',
+        'knowledge.created': 'Знание добавлено', 'knowledge.updated': 'Знание обновлено', 'knowledge.deleted': 'Знание удалено',
+        'knowledge.batch_deleted': 'Знания удалены пакетом', 'knowledge.reparse_started': 'Повторный разбор начат',
+        'knowledge.parse_canceled': 'Разбор отменён', 'knowledge.move_started': 'Перемещение начато',
+        'knowledge.move_completed': 'Перемещение завершено', 'knowledge.move_failed': 'Ошибка перемещения',
+        'tag.created': 'Тег создан', 'tag.updated': 'Тег обновлён', 'tag.deleted': 'Тег удалён',
+        'datasource.created': 'Источник данных создан', 'datasource.updated': 'Источник данных обновлён', 'datasource.deleted': 'Источник данных удалён',
+        'datasource.sync_started': 'Синхронизация начата', 'datasource.sync_completed': 'Синхронизация завершена', 'datasource.sync_failed': 'Ошибка синхронизации',
+        'datasource.paused': 'Источник приостановлен', 'datasource.resumed': 'Источник возобновлён',
+        'kb.share_added': 'Общий доступ добавлен', 'kb.share_permission_changed': 'Права доступа изменены', 'kb.share_removed': 'Общий доступ удалён',
+        'wiki.content_changed': 'Содержимое Wiki обновлено',
+        'faq.import_started': 'Импорт FAQ начат', 'faq.import_completed': 'Импорт FAQ завершён', 'faq.import_failed': 'Ошибка импорта FAQ',
+      },
+    },
     titleCreate: 'Создать базу знаний',
     titleEdit: 'Настройки базы знаний',
     navGroups: {
@@ -3323,6 +3353,7 @@ export default {
       processing: 'Индексация и разбор',
       data: 'Хранение и данные',
       integration: 'Публикация',
+      management: 'Управление и аудит',
     },
     sidebar: {
       basic: 'Основная информация',
@@ -3338,6 +3369,7 @@ export default {
       storage: 'Storage Engine',
       datasource: 'Источники данных',
       share: 'Sharing',
+      activity: 'История активности',
       indexing: 'Стратегия индексации',
     },
     errors: {
@@ -3657,7 +3689,9 @@ export default {
       downloadExampleExcel: 'Скачать пример Excel'
     },
     faqExport: {
-      exportButton: 'Экспорт CSV',
+      exportButton: 'Экспорт',
+      exportCSV: 'Экспорт CSV',
+      exportJSON: 'Экспорт JSON',
       exportSuccess: 'Экспорт успешен',
       exportFailed: 'Ошибка экспорта'
     },
@@ -5588,9 +5622,13 @@ export default {
       recentResult: 'Последние результаты импорта',
       totalData: 'Данные импорта',
       success: 'Успешно',
+      added: 'Добавлено',
+      merged: 'Объединено',
+      partialFailed: 'Частично неудачно',
       failed: 'Ошибка',
       skipped: 'Пропущено',
       unit: 'запись(ей)',
+      progressHint: 'Проверка и импорт данных FAQ...',
       downloadReasons: 'Скачать причины',
       appendMode: 'Режим добавления',
       replaceMode: 'Режим замены',

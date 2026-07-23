@@ -92,4 +92,46 @@ func TestSendReplyAcceptsAny2xxAndBuildsPayload(t *testing.T) {
 	if len(payload.NotifyParams) != 1 || len(payload.NotifyParams[0].Values) != 1 || payload.NotifyParams[0].Values[0] != "user" {
 		t.Fatalf("notify params = %#v", payload.NotifyParams)
 	}
+	if payload.Param == nil || payload.Param.FormatType != markdownFormatType {
+		t.Fatalf("expected markdown format param by default, got %#v", payload.Param)
+	}
+}
+
+func TestSendReplyFormatTypeOverride(t *testing.T) {
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", 10, "yunzhijia.com")
+	var payload sendMessagePayload
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusNoContent,
+			Body:       io.NopCloser(bytes.NewReader(nil)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	incoming := &im.IncomingMessage{UserID: "user"}
+
+	// Empty string explicitly disables the param.
+	if err := adapter.SendReply(context.Background(), incoming, &im.ReplyMessage{
+		Content: "answer",
+		Extra:   map[string]string{"yunzhijia_format_type": ""},
+	}); err != nil {
+		t.Fatalf("SendReply() error = %v", err)
+	}
+	if payload.Param != nil {
+		t.Fatalf("expected no param when format type overridden to empty, got %#v", payload.Param)
+	}
+
+	// Non-empty override replaces the default markdown formatType.
+	if err := adapter.SendReply(context.Background(), incoming, &im.ReplyMessage{
+		Content: "answer",
+		Extra:   map[string]string{"yunzhijia_format_type": "text"},
+	}); err != nil {
+		t.Fatalf("SendReply() error = %v", err)
+	}
+	if payload.Param == nil || payload.Param.FormatType != "text" {
+		t.Fatalf("expected overridden format type 'text', got %#v", payload.Param)
+	}
 }

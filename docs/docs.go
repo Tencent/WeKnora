@@ -3962,6 +3962,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/activity": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "获取知识库活动记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "游标：返回 id 小于此值的记录",
+                        "name": "after_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页大小，1-100，默认 50",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 action 精确过滤",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 outcome 精确过滤",
+                        "name": "outcome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 actor_user_id 精确过滤",
+                        "name": "actor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.auditLogListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/duplicate": {
             "post": {
                 "security": [
@@ -14849,7 +14919,38 @@ const docTemplate = `{
                 "system.queue_task_retried",
                 "system.queue_task_deleted",
                 "system.queue_task_run_now",
-                "system.queue_task_cancelled"
+                "system.queue_task_cancelled",
+                "kb.created",
+                "kb.updated",
+                "kb.deleted",
+                "kb.duplicated",
+                "kb.clone_started",
+                "kb.clone_completed",
+                "kb.clone_failed",
+                "knowledge.created",
+                "knowledge.updated",
+                "knowledge.deleted",
+                "knowledge.batch_deleted",
+                "knowledge.reparse_started",
+                "knowledge.parse_canceled",
+                "knowledge.move_started",
+                "knowledge.move_completed",
+                "knowledge.move_failed",
+                "tag.created",
+                "tag.updated",
+                "tag.deleted",
+                "datasource.created",
+                "datasource.updated",
+                "datasource.deleted",
+                "datasource.sync_started",
+                "datasource.sync_completed",
+                "datasource.sync_failed",
+                "datasource.paused",
+                "datasource.resumed",
+                "kb.share_added",
+                "kb.share_permission_changed",
+                "kb.share_removed",
+                "wiki.content_changed"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -14877,7 +14978,38 @@ const docTemplate = `{
                 "AuditActionSystemQueueTaskRetried",
                 "AuditActionSystemQueueTaskDeleted",
                 "AuditActionSystemQueueTaskRunNow",
-                "AuditActionSystemQueueTaskCancelled"
+                "AuditActionSystemQueueTaskCancelled",
+                "AuditActionKBCreated",
+                "AuditActionKBUpdated",
+                "AuditActionKBDeleted",
+                "AuditActionKBDuplicated",
+                "AuditActionKBCloneStarted",
+                "AuditActionKBCloneCompleted",
+                "AuditActionKBCloneFailed",
+                "AuditActionKnowledgeCreated",
+                "AuditActionKnowledgeUpdated",
+                "AuditActionKnowledgeDeleted",
+                "AuditActionKnowledgeBatchDeleted",
+                "AuditActionKnowledgeReparseStarted",
+                "AuditActionKnowledgeParseCanceled",
+                "AuditActionKnowledgeMoveStarted",
+                "AuditActionKnowledgeMoveCompleted",
+                "AuditActionKnowledgeMoveFailed",
+                "AuditActionTagCreated",
+                "AuditActionTagUpdated",
+                "AuditActionTagDeleted",
+                "AuditActionDataSourceCreated",
+                "AuditActionDataSourceUpdated",
+                "AuditActionDataSourceDeleted",
+                "AuditActionDataSourceSyncStarted",
+                "AuditActionDataSourceSyncCompleted",
+                "AuditActionDataSourceSyncFailed",
+                "AuditActionDataSourcePaused",
+                "AuditActionDataSourceResumed",
+                "AuditActionKBShareAdded",
+                "AuditActionKBSharePermissionChanged",
+                "AuditActionKBShareRemoved",
+                "AuditActionWikiContentChanged"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
@@ -14913,6 +15045,12 @@ const docTemplate = `{
                 "request_path": {
                     "type": "string"
                 },
+                "scope_id": {
+                    "type": "string"
+                },
+                "scope_type": {
+                    "type": "string"
+                },
                 "target_id": {
                     "type": "string"
                 },
@@ -14931,11 +15069,19 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "success",
-                "denied"
+                "accepted",
+                "denied",
+                "failed",
+                "partial",
+                "canceled"
             ],
             "x-enum-varnames": [
                 "AuditOutcomeSuccess",
-                "AuditOutcomeDenied"
+                "AuditOutcomeAccepted",
+                "AuditOutcomeDenied",
+                "AuditOutcomeFailed",
+                "AuditOutcomePartial",
+                "AuditOutcomeCanceled"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.COSEngineConfig": {

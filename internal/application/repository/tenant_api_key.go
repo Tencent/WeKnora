@@ -57,7 +57,7 @@ func (r *tenantAPIKeyRepository) ListPlatformAPIKeys(ctx context.Context) ([]*ty
 }
 
 func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).
 		Where("id = ? AND tenant_id = ? AND revoked_at IS NULL", id, tenantID).
@@ -72,7 +72,7 @@ func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint
 }
 
 func (r *tenantAPIKeyRepository) RevokePlatformAPIKey(ctx context.Context, id uint64) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).
 		Where("id = ? AND scope_type = ? AND revoked_at IS NULL", id, types.APIKeyScopePlatform).

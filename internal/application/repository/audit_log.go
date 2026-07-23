@@ -68,6 +68,15 @@ func (r *auditLogRepository) List(
 		if q.ActorUserID != "" {
 			tx = tx.Where("actor_user_id = ?", q.ActorUserID)
 		}
+		if q.ScopeType != "" {
+			tx = tx.Where("scope_type = ?", q.ScopeType)
+		}
+		if q.ScopeID != "" {
+			tx = tx.Where("scope_id = ?", q.ScopeID)
+		}
+		if q.UnscopedOnly {
+			tx = tx.Where("scope_type = ''")
+		}
 	}
 
 	var entries []*types.AuditLog
