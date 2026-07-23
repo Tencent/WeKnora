@@ -283,6 +283,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
 		}
+		embeddingModel = withEmbeddingCache(embeddingModel, s.contentCacheRepo, knowledge.TenantID)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
