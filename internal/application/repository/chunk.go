@@ -136,10 +136,44 @@ func (r *chunkRepository) ListChunksBySeqID(
 	if len(seqIDs) == 0 {
 		return []*types.Chunk{}, nil
 	}
+	uniqueSeqIDs := make([]int64, 0, len(seqIDs))
+	seen := make(map[int64]struct{}, len(seqIDs))
+	for _, seqID := range seqIDs {
+		if _, exists := seen[seqID]; exists {
+			continue
+		}
+		seen[seqID] = struct{}{}
+		uniqueSeqIDs = append(uniqueSeqIDs, seqID)
+	}
+
+	const batchSize = 5000
 	var chunks []*types.Chunk
-	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND seq_id IN ?", tenantID, seqIDs).
-		Find(&chunks).Error; err != nil {
+	if len(uniqueSeqIDs) <= batchSize {
+		if err := r.db.WithContext(ctx).
+			Where("tenant_id = ? AND seq_id IN ?", tenantID, uniqueSeqIDs).
+			Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+		return chunks, nil
+	}
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(uniqueSeqIDs); start += batchSize {
+			end := start + batchSize
+			if end > len(uniqueSeqIDs) {
+				end = len(uniqueSeqIDs)
+			}
+			var batch []*types.Chunk
+			if err := tx.
+				Where("tenant_id = ? AND seq_id IN ?", tenantID, uniqueSeqIDs[start:end]).
+				Find(&batch).Error; err != nil {
+				return err
+			}
+			chunks = append(chunks, batch...)
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -397,7 +431,29 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	if len(chunks) == 0 {
 		return nil
 	}
+	const batchSize = 5000
+	if len(chunks) <= batchSize {
+		return r.updateChunksBatch(ctx, chunks)
+	}
 
+	// Keep the caller-visible operation atomic even though MySQL's prepared
+	// statement protocol limits one statement to 65,535 placeholders.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batchRepo := &chunkRepository{db: tx}
+		for start := 0; start < len(chunks); start += batchSize {
+			end := start + batchSize
+			if end > len(chunks) {
+				end = len(chunks)
+			}
+			if err := batchRepo.updateChunksBatch(ctx, chunks[start:end]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *chunkRepository) updateChunksBatch(ctx context.Context, chunks []*types.Chunk) error {
 	// Build batch update SQL with CASE expressions
 	var ids []string
 	contentCases := make([]string, 0, len(chunks))
@@ -412,6 +468,9 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	var flagsArgs []interface{}
 	var statusArgs []interface{}
 
+	dialectName := r.db.Dialector.Name()
+	isPostgres := dialectName == "postgres"
+
 	for _, chunk := range chunks {
 		ids = append(ids, chunk.ID)
 		content := common.CleanInvalidUTF8(chunk.Content)
@@ -419,22 +478,47 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
+		// PostgreSQL accepts 'true'/'false' string literals in a
+		// boolean context (and the SQL below casts with ::boolean). MySQL
+		// under STRICT_TRANS_TABLES rejects string->BOOLEAN coercion with
+		// Error 1292, so pass an integer 0/1 there. SQLite accepts both.
+		var isEnabledVal interface{}
+		if isPostgres {
+			if chunk.IsEnabled {
+				isEnabledVal = "true"
+			} else {
+				isEnabledVal = "false"
+			}
+		} else {
+			if chunk.IsEnabled {
+				isEnabledVal = 1
+			} else {
+				isEnabledVal = 0
+			}
 		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledVal)
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
 
+		// flags / status are INTEGER columns. PostgreSQL tolerates a
+		// text literal because the SQL casts with ::integer, but MySQL
+		// strict mode rejects it (Error 1292). Pass native int32 for
+		// non-PostgreSQL dialects.
+		var flagsVal interface{}
+		var statusVal interface{}
+		if isPostgres {
+			flagsVal = fmt.Sprintf("%d", chunk.Flags)
+			statusVal = fmt.Sprintf("%d", chunk.Status)
+		} else {
+			flagsVal = chunk.Flags
+			statusVal = chunk.Status
+		}
 		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
-
+		flagsArgs = append(flagsArgs, chunk.ID, flagsVal)
 		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
+		statusArgs = append(statusArgs, chunk.ID, statusVal)
 	}
 
 	// Build IN clause placeholders
@@ -454,46 +538,43 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
-	var sql string
+	// One SQL template, dialect-aware bits hoisted into small variables:
+	//   - Postgres needs ::boolean / ::integer casts on CASE results
+	//     (the bind values are string literals).
+	//   - Postgres and MySQL both use NOW() for the timestamp; SQLite has
+	//     neither NOW() nor casts, so it uses datetime('now').
+	//   - The bind values are already shaped per-dialect above (string
+	//     for Postgres, native int for MySQL/SQLite), so the only thing
+	//     that differs in the SQL is the cast suffix and timestamp expr.
+	boolCast, intCast := "", ""
 	if isPostgres {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = (CASE %s END)::boolean,
-				tag_id = CASE %s END,
-				flags = (CASE %s END)::integer,
-				status = (CASE %s END)::integer,
-				updated_at = NOW()
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
-	} else {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = CASE %s END,
-				tag_id = CASE %s END,
-				flags = CASE %s END,
-				status = CASE %s END,
-				updated_at = datetime('now')
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
+		boolCast, intCast = "::boolean", "::integer"
 	}
+	tsExpr := "NOW()"
+	if dialectName == "mysql" {
+		tsExpr = "NOW(6)" // microsecond precision to match DATETIME(6) columns
+	}
+	if dialectName == "sqlite" {
+		tsExpr = "datetime('now')"
+	}
+	sql := fmt.Sprintf(`
+		UPDATE chunks SET
+			content = CASE %s END,
+			is_enabled = (CASE %s END)%s,
+			tag_id = CASE %s END,
+			flags = (CASE %s END)%s,
+			status = (CASE %s END)%s,
+			updated_at = %s
+		WHERE id IN (%s)
+	`,
+		strings.Join(contentCases, " "),
+		strings.Join(isEnabledCases, " "), boolCast,
+		strings.Join(tagIDCases, " "),
+		strings.Join(flagsCases, " "), intCast,
+		strings.Join(statusCases, " "), intCast,
+		tsExpr,
+		strings.Join(inPlaceholders, ","),
+	)
 
 	return r.db.WithContext(ctx).Exec(sql, args...).Error
 }
@@ -852,7 +933,46 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 	if len(allIDs) == 0 {
 		return nil
 	}
+	const batchSize = 5000
+	if len(allIDs) > batchSize {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			batchRepo := &chunkRepository{db: tx}
+			for start := 0; start < len(allIDs); start += batchSize {
+				end := start + batchSize
+				if end > len(allIDs) {
+					end = len(allIDs)
+				}
+				batchSet := make(map[string]types.ChunkFlags, end-start)
+				batchClear := make(map[string]types.ChunkFlags, end-start)
+				for _, id := range allIDs[start:end] {
+					if flag, ok := setFlags[id]; ok {
+						batchSet[id] = flag
+					}
+					if flag, ok := clearFlags[id]; ok {
+						batchClear[id] = flag
+					}
+				}
+				if err := batchRepo.updateChunkFlagsBatch(
+					ctx, tenantID, kbID, batchSet, batchClear, allIDs[start:end],
+				); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 
+	return r.updateChunkFlagsBatch(ctx, tenantID, kbID, setFlags, clearFlags, allIDs)
+}
+
+func (r *chunkRepository) updateChunkFlagsBatch(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	setFlags map[string]types.ChunkFlags,
+	clearFlags map[string]types.ChunkFlags,
+	allIDs []string,
+) error {
 	// Build CASE expression for flags update
 	// flags = (flags | setFlag) & ~clearFlag
 	var setCases, clearCases []string
@@ -888,6 +1008,9 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 	}
 
 	nowFunc := "NOW()"
+	if r.db.Dialector.Name() == "mysql" {
+		nowFunc = "NOW(6)"
+	}
 	if r.db.Dialector.Name() == "sqlite" {
 		nowFunc = "datetime('now')"
 	}
@@ -922,12 +1045,19 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	newTagID *string,
 	excludeIDs []string,
 ) ([]string, error) {
-	// First, get the IDs of chunks that will be affected (for is_enabled sync)
+	const maxInlineExclusions = 5000
+	if len(excludeIDs) > maxInlineExclusions {
+		return r.updateChunkFieldsByTagIDWithLargeExclusionSet(
+			ctx, tenantID, kbID, tagID, isEnabled, setFlags, clearFlags, newTagID, excludeIDs,
+		)
+	}
+
+	// First, get the IDs whose retriever-visible fields will change.
 	var affectedIDs []string
-	if isEnabled != nil {
+	if isEnabled != nil || newTagID != nil {
 		var chunks []*types.Chunk
 		query := r.db.WithContext(ctx).
-			Select("id").
+			Select("id, is_enabled, tag_id").
 			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
 				tenantID, kbID, types.ChunkTypeFAQ)
 		if tagID != "" {
@@ -938,8 +1068,17 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 			query = query.Where("id NOT IN ?", excludeIDs)
 		}
 
-		// Only get chunks that need to change
-		query = query.Where("is_enabled != ?", *isEnabled)
+		var changeClauses []string
+		var changeArgs []interface{}
+		if isEnabled != nil {
+			changeClauses = append(changeClauses, "is_enabled != ?")
+			changeArgs = append(changeArgs, *isEnabled)
+		}
+		if newTagID != nil {
+			changeClauses = append(changeClauses, "tag_id != ?")
+			changeArgs = append(changeArgs, *newTagID)
+		}
+		query = query.Where("("+strings.Join(changeClauses, " OR ")+")", changeArgs...)
 		if err := query.Find(&chunks).Error; err != nil {
 			return nil, err
 		}
@@ -983,7 +1122,7 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 		if clearFlags != 0 {
 			flagsExpr = fmt.Sprintf("(%s & ~%d)", flagsExpr, int(clearFlags))
 		}
-		updates["flags"] = r.db.Raw(flagsExpr)
+		updates["flags"] = gorm.Expr(flagsExpr)
 	}
 
 	if err := query.Updates(updates).Error; err != nil {
@@ -1086,6 +1225,89 @@ func diffFAQChunkIDsByContentHash(src, dst []chunkIDHash) (
 		}
 	}
 	return chunksToAdd, chunksToDelete, matched
+}
+
+func (r *chunkRepository) updateChunkFieldsByTagIDWithLargeExclusionSet(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagID string,
+	isEnabled *bool,
+	setFlags types.ChunkFlags,
+	clearFlags types.ChunkFlags,
+	newTagID *string,
+	excludeIDs []string,
+) ([]string, error) {
+	excluded := make(map[string]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excluded[id] = struct{}{}
+	}
+
+	var affectedIDs []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidates []*types.Chunk
+		query := tx.Select("id, is_enabled, tag_id").
+			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
+				tenantID, kbID, types.ChunkTypeFAQ)
+		if tagID != "" {
+			query = query.Where("tag_id = ?", tagID)
+		}
+		if err := query.Find(&candidates).Error; err != nil {
+			return err
+		}
+
+		includedIDs := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			if _, skip := excluded[candidate.ID]; skip {
+				continue
+			}
+			includedIDs = append(includedIDs, candidate.ID)
+			if (isEnabled != nil && candidate.IsEnabled != *isEnabled) ||
+				(newTagID != nil && candidate.TagID != *newTagID) {
+				affectedIDs = append(affectedIDs, candidate.ID)
+			}
+		}
+		if len(includedIDs) == 0 {
+			return nil
+		}
+
+		updates := map[string]interface{}{"updated_at": time.Now().UTC()}
+		if isEnabled != nil {
+			updates["is_enabled"] = *isEnabled
+		}
+		if newTagID != nil {
+			updates["tag_id"] = *newTagID
+		}
+		if setFlags != 0 || clearFlags != 0 {
+			flagsExpr := "flags"
+			if setFlags != 0 {
+				flagsExpr = fmt.Sprintf("(%s | %d)", flagsExpr, int(setFlags))
+			}
+			if clearFlags != 0 {
+				flagsExpr = fmt.Sprintf("(%s & ~%d)", flagsExpr, int(clearFlags))
+			}
+			updates["flags"] = gorm.Expr(flagsExpr)
+		}
+
+		const batchSize = 5000
+		for start := 0; start < len(includedIDs); start += batchSize {
+			end := start + batchSize
+			if end > len(includedIDs) {
+				end = len(includedIDs)
+			}
+			if err := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND id IN ?",
+					tenantID, kbID, types.ChunkTypeFAQ, includedIDs[start:end]).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return affectedIDs, nil
 }
 
 // FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.

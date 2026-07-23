@@ -1,0 +1,198 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+MySQL Deployment, Service, PVC, and Secret.
+Rendered only when mysql.enabled is true.
+*/}}
+{{- if .Values.mysql.enabled }}
+{{/* Reuse previously generated random passwords on upgrade. */}}
+{{- $secretName := include "weknora.mysqlSecretName" . }}
+{{- $managedSecretName := printf "%s-mysql" (include "weknora.fullname" .) }}
+{{- $existing := dict }}
+{{- if not .Values.mysql.auth.existingSecret }}
+{{- $existing = lookup "v1" "Secret" .Release.Namespace $managedSecretName }}
+{{- end }}
+{{- $existingPassword := "" }}
+{{- $existingRootPassword := "" }}
+{{- if and $existing $existing.data }}
+  {{- if index $existing.data "MYSQL_PASSWORD" }}
+    {{- $existingPassword = index $existing.data "MYSQL_PASSWORD" | b64dec }}
+  {{- end }}
+  {{- if index $existing.data "MYSQL_ROOT_PASSWORD" }}
+    {{- $existingRootPassword = index $existing.data "MYSQL_ROOT_PASSWORD" | b64dec }}
+  {{- end }}
+{{- end }}
+{{- $mysqlPassword := .Values.mysql.auth.password | default $existingPassword | default (randAlphaNum 24) }}
+{{- $mysqlRootPassword := .Values.mysql.auth.rootPassword | default $existingRootPassword | default (randAlphaNum 24) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "database" "context" .) | nindent 6 }}
+  # Use Recreate strategy for database to avoid data corruption
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "database" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mysql
+          image: {{ .Values.mysql.image }}
+          imagePullPolicy: IfNotPresent
+          {{- with .Values.mysql.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_0900_ai_ci
+            - --default-time-zone=+00:00
+          ports:
+            - containerPort: 3306
+              name: mysql
+              protocol: TCP
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: MYSQL_ROOT_PASSWORD
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+          resources:
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h localhost
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h localhost
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: mysql-data
+          {{- if .Values.mysql.primary.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.mysql.primary.persistence.existingClaim | default (printf "%s-mysql" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.mysql.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mysql.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mysql.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Service name is "mysql" - app references this as DB_HOST when mysql.enabled
+  name: mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "database" "context" .) | nindent 4 }}
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      protocol: TCP
+---
+{{/* MySQL PVC */}}
+{{- if and .Values.mysql.primary.persistence.enabled (not .Values.mysql.primary.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mysql.primary.persistence.size }}
+  {{- $storageClass := .Values.mysql.primary.persistence.storageClass }}
+  {{- if $storageClass }}
+  {{- if eq $storageClass "-" }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}
+  {{- else }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+  {{- end }}
+---
+{{- end }}
+{{- if not .Values.mysql.auth.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  MYSQL_DATABASE: {{ .Values.mysql.auth.database | quote }}
+  MYSQL_USER: {{ .Values.mysql.auth.username | quote }}
+  MYSQL_PASSWORD: {{ $mysqlPassword | quote }}
+  MYSQL_ROOT_PASSWORD: {{ $mysqlRootPassword | quote }}
+{{- end }}
+{{- end }}

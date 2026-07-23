@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -90,8 +91,17 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	q := r.db.WithContext(ctx).Where("searchable = ?", true)
 	if query != "" {
 		pattern := "%" + query + "%"
-		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间。
+		// id 是 varchar(36)，本身就是文本类型，PG 上原来的 id::text
+		// 是冗余的；去掉后查询在 mysql/sqlite 上也直接可用。
+		// CaseInsensitiveLike 保留 PG 的 ILIKE（命中 pg_trgm 索引），
+		// 其余方言用 LOWER() LIKE LOWER()。
+		dialect := r.db.Dialector.Name()
+		q = q.Where(
+			database.CaseInsensitiveLike(dialect, "name", "?")+" OR "+
+				database.CaseInsensitiveLike(dialect, "description", "?")+" OR "+
+				database.CaseInsensitiveLike(dialect, "id", "?"),
+			pattern, pattern, pattern)
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {

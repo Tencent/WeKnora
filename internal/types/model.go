@@ -94,11 +94,10 @@ type ModelParameters struct {
 // (mutates an entity that other code may still be using).
 
 // ModelIDMaxLen is the upper bound on `models.id`. Matches the actual
-// schema width on both PostgreSQL (varchar(64) in migrations/versioned/
-// 000000_init.up.sql) and SQLite (varchar(64) in migrations/sqlite/
-// 000000_init.up.sql). Loaders that accept user-provided ids (e.g. the
-// built-in models YAML loader) must reject anything longer to avoid a
-// "value too long for type" failure at INSERT time.
+// schema width on PostgreSQL, SQLite, and MySQL. Loaders that accept
+// user-provided ids (e.g. the built-in models YAML loader) must reject
+// anything longer to avoid a "value too long for type" failure at INSERT
+// time.
 const ModelIDMaxLen = 64
 
 // DefaultBuiltinModelTenantID is the tenant id that built-in models are
@@ -111,7 +110,7 @@ const DefaultBuiltinModelTenantID uint64 = 10000
 // Model represents the AI model
 type Model struct {
 	// Unique identifier of the model. The actual DB schema width is
-	// varchar(64) on both PostgreSQL and SQLite (see ModelIDMaxLen);
+	// varchar(64) on PostgreSQL, SQLite, and MySQL (see ModelIDMaxLen);
 	// GORM's struct tag is documented to match so AutoMigrate paths
 	// produce the same shape.
 	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(64);primaryKey"`

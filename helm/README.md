@@ -190,6 +190,25 @@ helm install weknora ./helm \
 | `postgresql.persistence.enabled` | Enable persistence | `true` |
 | `postgresql.persistence.size` | PVC size | `10Gi` |
 
+### MySQL and External Database
+
+MySQL is a metadata database and requires an external retriever such as
+Qdrant. Configure only one of `postgresql.enabled`, `mysql.enabled`, and
+`database.external`.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `mysql.enabled` | Enable in-chart MySQL | `false` |
+| `mysql.auth.existingSecret` | Secret with `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` | `""` |
+| `mysql.primary.persistence.size` | MySQL PVC size | `20Gi` |
+| `database.external` | Use an externally managed database | `false` |
+| `database.driver` | External driver (`postgres` or `mysql`) | `postgres` |
+| `database.host` | External database hostname | `""` |
+| `database.port` | External port; empty selects the driver default | `""` |
+| `database.existingSecret` | Optional dedicated Secret with `DB_USER`, `DB_PASSWORD`, `DB_NAME`; otherwise reuse the application Secret | `""` |
+| `database.tls.enabled` | Require TLS for external MySQL | `false` |
+| `database.tls.existingSecret` | Secret containing CA/client certificate files | `""` |
+
 ### Redis
 
 | Parameter | Description | Default |
@@ -215,11 +234,11 @@ helm install weknora ./helm \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `secrets.dbUser` | Database username | `postgres` |
-| `secrets.dbPassword` | Database password | `""` (required) |
+| `secrets.dbPassword` | In-chart PostgreSQL password | `""` (required with PostgreSQL) |
 | `secrets.dbName` | Database name | `weknora` |
 | `secrets.redisPassword` | Redis password | `""` (required) |
 | `secrets.jwtSecret` | JWT signing secret | `""` (required) |
-| `secrets.existingSecret` | Use existing secret | `""` |
+| `secrets.existingSecret` | Existing application Secret; also supplies `DB_*` for PostgreSQL or an external database without `database.existingSecret` | `""` |
 
 ### Optional Components
 
@@ -229,7 +248,11 @@ These map to docker-compose profiles:
 |-----------|-------------|---------|
 | `minio.enabled` | Enable MinIO storage | `false` |
 | `neo4j.enabled` | Enable Neo4j (GraphRAG) | `false` |
-| `qdrant.enabled` | Enable Qdrant vector DB | `false` |
+| `qdrant.enabled` | Enable in-chart Qdrant vector DB | `false` |
+| `qdrant.connection.host` | External Qdrant host; defaults to `qdrant` when enabled | `""` |
+| `qdrant.connection.port` | Qdrant gRPC port | `6334` |
+| `qdrant.auth.existingSecret` | Secret containing the Qdrant API key | `""` |
+| `qdrant.persistence.size` | Qdrant PVC size | `10Gi` |
 
 ## Security Best Practices
 

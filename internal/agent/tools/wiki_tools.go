@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -771,7 +770,7 @@ func NewWikiSearchTool(
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
-			`Search wiki pages using PostgreSQL POSIX regular expressions (~* operator, case-insensitive).
+			`Search wiki pages using case-insensitive regular expressions.
 STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
 Returns matching pages with titles, slugs, and summaries (each tagged with its short bN knowledge_base_id).
 Examples:
@@ -779,7 +778,11 @@ Examples:
 - Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
 - Prefix matching: "^entity/.*" (finds all entities)
 - Plain text: "engine" (matches anywhere in title/content/slug/summary)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
+Use the portable syntax shared by supported databases: literals, character ranges, grouping, alternation,
+anchors, and quantifiers. Do not use engine-specific escapes such as \d, \s, \w, \b or constructs beginning with "(?".
+IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments.
+For example, to search for literal "C++" write "C\\+\\+", NOT "C\+\+".
+Plain "\+" is an invalid JSON escape and will fail to parse.
 Use this to find relevant wiki pages when you don't know the exact slug.`,
 			json.RawMessage(`{
   "type": "object",
@@ -826,6 +829,11 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 
 	if len(queriesToRun) == 0 {
 		return &types.ToolResult{Success: false, Error: "Missing 'queries' parameter"}, nil
+	}
+	for _, query := range queriesToRun {
+		if _, err := compilePortableCaseInsensitiveRegex(query); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 	}
 
 	if params.Limit <= 0 {
@@ -1039,7 +1047,7 @@ func extractSnippet(content string, query string) string {
 	if content == "" || query == "" {
 		return ""
 	}
-	re, err := regexp.Compile("(?i)" + query)
+	re, err := compilePortableCaseInsensitiveRegex(query)
 	if err != nil {
 		return ""
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -144,16 +145,18 @@ func (r *sessionRepository) QueryPaged(
 ) ([]*types.SessionListItem, int64, error) {
 	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
 	isPostgres := r.db.Dialector.Name() == "postgres"
-	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
-	if isPostgres {
-		titleLikeExpr = "s.title ILIKE ?"
-	}
-	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
-	// nulls ordering puts NULLs first for DESC, which is actually what we want
-	// for pinned_at (rows with pinned_at=NULL are never pinned, so they get
-	// filtered to the tail by the preceding is_pinned DESC anyway).
+	isMySQL := r.db.Dialector.Name() == "mysql"
+	// CaseInsensitiveLike keeps ILIKE on Postgres (where pg_trgm GIN
+	// indexes can serve it) and emits LOWER() LIKE LOWER() elsewhere.
+	titleLikeExpr := database.CaseInsensitiveLike(r.db.Dialector.Name(), "s.title", "?")
+	// PostgreSQL supports NULLS LAST natively. MySQL does not, so emulate
+	// it with a CASE expression (NULL pinned_at sorts last). SQLite's
+	// default nulls ordering for DESC already puts NULLs first, which is
+	// acceptable for pinned_at (NULL = never pinned, filtered by is_pinned).
 	orderClause := "s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC"
-	if !isPostgres {
+	if isMySQL {
+		orderClause = "s.is_pinned DESC, CASE WHEN s.pinned_at IS NULL THEN 1 ELSE 0 END, s.pinned_at DESC, s.updated_at DESC"
+	} else if !isPostgres {
 		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
 	}
 

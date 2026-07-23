@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +35,56 @@ func setupModelUsageTestDB(t *testing.T) *gorm.DB {
 	db := setupKBTestDB(t)
 	require.NoError(t, db.Exec(customAgentsTestDDL).Error)
 	return db
+}
+
+func setupModelUsageMySQLDryRunDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	sqlDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      sqlDB,
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true})
+	require.NoError(t, err)
+	return db
+}
+
+func TestModelUsageScopesUnquoteMySQLJSONStringValues(t *testing.T) {
+	db := setupModelUsageMySQLDryRunDB(t)
+	modelID := "model-1"
+
+	knowledgeBaseQuery := scopeKnowledgeBasesByModelID(
+		db.Model(&types.KnowledgeBase{}),
+		modelID,
+	).Find(&[]types.KnowledgeBase{})
+	knowledgeBaseSQL := knowledgeBaseQuery.Statement.SQL.String()
+	for _, expression := range []string{
+		"JSON_UNQUOTE(JSON_EXTRACT(image_processing_config, '$.model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(vlm_config, '$.model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(asr_config, '$.model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(wiki_config, '$.synthesis_model_id')) = ?",
+	} {
+		require.Contains(t, knowledgeBaseSQL, expression)
+	}
+
+	customAgentQuery := scopeCustomAgentsByModelID(
+		db.Model(&types.CustomAgent{}),
+		modelID,
+	).Find(&[]types.CustomAgent{})
+	customAgentSQL := customAgentQuery.Statement.SQL.String()
+	for _, expression := range []string{
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.rerank_model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.vlm_model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.asr_model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.query_understand_model_id')) = ?",
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.question_suggestions.follow_ups.model_id')) = ?",
+	} {
+		require.Contains(t, customAgentSQL, expression)
+	}
 }
 
 func TestCountByModelID_KnowledgeBase(t *testing.T) {

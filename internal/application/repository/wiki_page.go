@@ -31,17 +31,12 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
-	}
-	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	dialect := wikiDialectName(r.db)
+	return "CASE WHEN " + wikiJSONArrayLength(dialect, "category_path") + " > 0 THEN 0 ELSE 1 END ASC"
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
-	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return wikiJSONArrayLength(wikiDialectName(r.db), "in_links") + " = 0"
 }
 
 // Create inserts a new wiki page record
@@ -319,12 +314,25 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		// Dialect-aware full-text search. PostgreSQL keeps to_tsvector /
+		// plainto_tsquery (PG-specific GIN-backed full-text). MySQL /
+		// SQLite use multi-column LOWER() LIKE LOWER() substring matching.
+		// Its matching and ranking semantics are not equivalent to PostgreSQL
+		// full-text search, but the query remains executable on every supported
+		// metadata database.
+		dialect := wikiDialectName(r.db)
+		frag := wikiFullTextSearch(dialect)
+		// PG's to_tsvector takes the raw query (plainto_tsquery does its
+		// own tokenisation); its aliases ILIKE branch and every MySQL /
+		// SQLite LIKE column want %query%.
+		var args []interface{}
+		if dialect == "postgres" {
+			args = []interface{}{req.Query, "%" + req.Query + "%"}
+		} else {
+			pattern := "%" + req.Query + "%"
+			args = []interface{}{pattern, pattern, pattern}
+		}
+		query = query.Where(frag, args...)
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -340,11 +348,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
-				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
-			} else {
-				query = query.Where("category_path = ?", string(encoded))
-			}
+			dialect := wikiDialectName(r.db)
+			query = query.Where(wikiJSONEqual(dialect, "category_path"), string(encoded))
 		}
 	}
 
@@ -462,6 +467,11 @@ func (r *wikiPageRepository) ListByTypeLight(
 
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
+//
+// Dialect-aware: PostgreSQL uses jsonb containment (@> ?::jsonb), MySQL
+// uses JSON_CONTAINS, SQLite uses json_each. The legacy "knowledgeID|title"
+// prefix form falls back to a text LIKE on the serialized JSON, which is
+// portable across all three dialects.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
 	// Build the JSON needle safely so arbitrary IDs cannot break out of the
 	// quoted string (e.g. ids containing quotes or backslashes).
@@ -486,11 +496,16 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 	// with %…% to match anywhere in the serialized JSON array.
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
+	dialect := wikiDialectName(r.db)
+	containsFrag := wikiJSONContains(dialect, "source_refs")
+	containsArg := wikiJSONContainsArg(dialect, string(needle), sourceKnowledgeID)
+	textFrag := wikiJSONAsText(dialect, "source_refs") + " LIKE ?"
+
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+containsFrag+" OR "+textFrag+")",
 			kbID,
-			string(needle),
+			containsArg,
 			likePattern,
 		).
 		Find(&pages).Error; err != nil {
@@ -523,12 +538,17 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	}
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
+	dialect := wikiDialectName(r.db)
+	containsFrag := wikiJSONContains(dialect, "source_refs")
+	containsArg := wikiJSONContainsArg(dialect, string(needle), sourceKnowledgeID)
+	textFrag := wikiJSONAsText(dialect, "source_refs") + " LIKE ?"
+
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+containsFrag+" OR "+textFrag+")",
 			kbID,
-			string(needle),
+			containsArg,
 			likePattern,
 		).
 		Pluck("slug", &slugs).Error; err != nil {
@@ -696,7 +716,29 @@ func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id s
 	// Keep the emptiness test in the same SQL statement as the soft delete.
 	// A page move or child-folder create can race the service's earlier checks;
 	// a check-then-delete sequence would otherwise leave a dangling folder_id.
-	result := r.db.WithContext(ctx).Exec(`
+	var result *gorm.DB
+	if wikiDialectName(r.db) == "mysql" {
+		// MySQL rejects an UPDATE whose WHERE subquery reads the target table
+		// (error 1093). A self-join UPDATE expresses the same atomic guard
+		// without reopening wiki_folders from a subquery.
+		result = r.db.WithContext(ctx).Exec(`
+UPDATE wiki_folders AS target
+LEFT JOIN wiki_pages AS page
+  ON page.knowledge_base_id = target.knowledge_base_id
+ AND page.folder_id = target.id
+ AND page.deleted_at IS NULL
+LEFT JOIN wiki_folders AS child
+  ON child.knowledge_base_id = target.knowledge_base_id
+ AND child.parent_id = target.id
+ AND child.deleted_at IS NULL
+SET target.deleted_at = ?
+WHERE target.knowledge_base_id = ?
+  AND target.id = ?
+  AND target.deleted_at IS NULL
+  AND page.id IS NULL
+  AND child.id IS NULL`, time.Now().UTC(), kbID, id)
+	} else {
+		result = r.db.WithContext(ctx).Exec(`
 UPDATE wiki_folders
 SET deleted_at = ?
 WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
@@ -707,7 +749,8 @@ WHERE knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM wiki_folders AS child
     WHERE child.knowledge_base_id = ? AND child.parent_id = ? AND child.deleted_at IS NULL
-  )`, time.Now(), kbID, id, kbID, id, kbID, id)
+  )`, time.Now().UTC(), kbID, id, kbID, id, kbID, id)
+	}
 	if result.Error != nil {
 		return result.Error
 	}
@@ -817,6 +860,9 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 	// Build OR clauses without using overly-clever GORM tricks: assemble
 	// raw SQL fragments + args. Keeping this defensive because source_refs
 	// patterns include user-controlled knowledge ids.
+	dialect := wikiDialectName(r.db)
+	containsFrag := wikiJSONContains(dialect, "source_refs")
+	textFrag := wikiJSONAsText(dialect, "source_refs") + " LIKE ?"
 	clauses := make([]string, 0, len(kids)*2)
 	args := make([]interface{}, 0, len(kids)*2)
 	for _, kid := range kids {
@@ -827,8 +873,8 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
+		clauses = append(clauses, containsFrag)
+		args = append(args, wikiJSONContainsArg(dialect, string(needle), kid))
 
 		prefix, err := json.Marshal(kid + "|")
 		if err != nil {
@@ -838,7 +884,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		clauses = append(clauses, textFrag)
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {
@@ -1004,16 +1050,14 @@ func (r *wikiPageRepository) ListByTypeRecent(
 }
 
 // FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
+// title matches the query. PostgreSQL uses pg_trgm similarity (backed by
+// idx_wiki_pages_title_trgm); MySQL and SQLite use a deterministic
+// contains-match fallback. Used by the dedup pre-filter to surface candidate
+// merge targets without loading every entity/concept page into Go.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
-// limit is clamped to [1, 50]. Pages whose title similarity is below
-// 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// limit is clamped to [1, 50]. PostgreSQL applies its configured
+// pg_trgm.similarity_threshold; the fallback dialects require containment.
 func (r *wikiPageRepository) FindSimilarPages(
 	ctx context.Context,
 	kbID string,
@@ -1036,13 +1080,31 @@ func (r *wikiPageRepository) FindSimilarPages(
 
 	q := strings.ToLower(strings.TrimSpace(query))
 
+	dialect := wikiDialectName(r.db)
+	simRank := wikiSimilarityRank(dialect, "title", "?")
+	simThreshold := wikiSimilarityThreshold(dialect, "title", "?")
+	// Order clause: under PG, similarity() yields a graded rank so
+	// `sim DESC` produces a meaningful ordering. Under MySQL/SQLite the
+	// helper degrades to a binary 0/1 contains-match, so every matching
+	// row ties at sim=1 and the ORDER BY needs deterministic tiebreakers
+	// (title length ascending = prefer concise titles, then updated_at
+	// descending = prefer recently-edited pages) to avoid nondeterministic
+	// result order across calls.
+	orderClause := "sim DESC"
+	switch dialect {
+	case "mysql":
+		orderClause = "sim DESC, CHAR_LENGTH(title) ASC, updated_at DESC"
+	case "sqlite":
+		orderClause = "sim DESC, LENGTH(title) ASC, updated_at DESC"
+	}
+
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
+		Select("slug, title, page_type, status, aliases, out_links, "+simRank+" AS sim", q).
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND "+simThreshold,
 			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
+		Order(orderClause).
 		Limit(limit).
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -1135,8 +1197,9 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+// Search performs a case-insensitive pattern search on wiki pages within a
+// knowledge base. PostgreSQL uses ~*, MySQL uses REGEXP_LIKE, and SQLite
+// retains its historical LIKE fallback.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -1162,17 +1225,29 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 	// alias so the DB only computes the rank once. Parameterized four
 	// times with the same regex to avoid coupling to GORM's positional
 	// arg rewriting quirks.
+	//
+	// Dialect-aware: PostgreSQL keeps the ~* regex operator (pg_trgm GIN
+	// index can serve it). MySQL uses REGEXP_LIKE with an explicit
+	// case-insensitive flag. SQLite falls back to LIKE with different matching
+	// semantics.
+	dialect := wikiDialectName(r.db)
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN " + wikiCaseInsensitiveRegex(dialect, "title", "?") + " THEN 4 " +
+		"WHEN " + wikiCaseInsensitiveRegex(dialect, "slug", "?") + " THEN 3 " +
+		"WHEN " + wikiCaseInsensitiveRegex(dialect, "summary", "?") + " THEN 2 " +
+		"WHEN " + wikiCaseInsensitiveRegex(dialect, "content", "?") + " THEN 1 " +
 		"ELSE 0 END AS match_rank"
+
+	matchPred := "(" +
+		wikiCaseInsensitiveRegex(dialect, "title", "?") + " OR " +
+		wikiCaseInsensitiveRegex(dialect, "content", "?") + " OR " +
+		wikiCaseInsensitiveRegex(dialect, "summary", "?") + " OR " +
+		wikiCaseInsensitiveRegex(dialect, "slug", "?") + ")"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
 		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
+		Where("knowledge_base_id = ? AND "+matchPred,
 			kbID, query, query, query, query).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").

@@ -246,7 +246,7 @@ var validBuiltinModelStatuses = map[ModelStatus]struct{}{
 // either crash the INSERT or silently produce an unusable row:
 //
 //   - empty id (cannot UPSERT)
-//   - id longer than the DB column (PG/SQLite cap at varchar(64),
+//   - id longer than the DB column (PG/SQLite/MySQL cap at varchar(64),
 //     see ModelIDMaxLen) which would fail at INSERT time
 //   - empty or misspelled type (provider factories match exact strings)
 //   - explicit non-empty status outside the known set
