@@ -7,9 +7,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// Confluence supports resumable streaming sync; the service prefers FetchStream
+// over FetchAll/FetchIncremental when a connector implements StreamingConnector.
+var _ datasource.StreamingConnector = (*Connector)(nil)
+
+// confluenceStreamCheckpointInterval is how many processed pages pass between
+// durable checkpoints. PDF export is slow (~seconds each), so a small interval
+// ensures progress is not lost on timeout.
+var confluenceStreamCheckpointInterval = 20
+
+// confluenceStreamCheckpointMaxInterval bounds checkpointing by wall-clock time.
+var confluenceStreamCheckpointMaxInterval = 30 * time.Second
 
 // Connector implements the datasource.Connector interface for Confluence 7.x.
 type Connector struct{}
@@ -312,6 +325,157 @@ func (c *Connector) fetchPageAsPDF(
 			"creator":    page.Version.By.DisplayName,
 		},
 	}, nil
+}
+
+// FetchStream performs a resumable, memory-bounded sync. It unifies the full
+// and incremental paths: with cursor == nil it fetches everything, and with a
+// cursor it skips pages whose recorded version time is unchanged. Instead of
+// accumulating every item in memory (FetchAll), it Emits each item as it is
+// fetched and Checkpoints the cursor periodically, so progress is durable
+// across the Asynq task's timeout.
+func (c *Connector) FetchStream(
+	ctx context.Context, config *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	resourceIDs := config.ResourceIDs
+	if len(resourceIDs) == 0 {
+		return nil, fmt.Errorf("no resource IDs (space IDs) configured")
+	}
+
+	cfg, err := parseConfluenceConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decode prior cursor (if any).
+	var prev *confluenceCursor
+	if cursor != nil && cursor.ConnectorCursor != nil {
+		prev = unmarshalCursor(cursor.ConnectorCursor)
+	}
+
+	newCursor := &confluenceCursor{
+		LastSyncTime:   time.Now(),
+		SpacePageTimes: make(map[string]map[string]string),
+	}
+
+	// Fetch space list once and build a lookup map.
+	spaces, err := client.ListSpaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list spaces: %w", err)
+	}
+	spaceMap := make(map[string]*confluenceSpace, len(spaces))
+	for i := range spaces {
+		spaceMap[spaces[i].ID] = &spaces[i]
+	}
+
+	processed := 0
+	lastCheckpoint := time.Now()
+
+	for _, resourceID := range resourceIDs {
+		prefix, id := parseResourceID(resourceID)
+		if prefix != "s" {
+			logger.Warnf(ctx, "[Confluence] skipping unsupported resource type %q", prefix)
+			continue
+		}
+
+		space, ok := spaceMap[id]
+		if !ok {
+			logger.Warnf(ctx, "[Confluence] space %s not found, skipping", id)
+			continue
+		}
+
+		// List all pages in this space.
+		var pages []confluencePage
+		if cfg.IsCloud() {
+			pages, err = client.GetAllPagesInSpaceV2(ctx, space.ID, space.Key, space.Name)
+		} else {
+			pages, err = client.GetAllPagesInSpace(ctx, space.Key)
+		}
+		if err != nil {
+			logger.Warnf(ctx, "[Confluence] failed to list pages in space %s: %v", space.Key, err)
+			continue
+		}
+
+		currentPages := make(map[string]bool)
+		newCursor.SpacePageTimes[resourceID] = make(map[string]string)
+
+		for i, page := range pages {
+			currentPages[page.ID] = true
+			newCursor.SpacePageTimes[resourceID][page.ID] = page.Version.When
+
+			// Skip unchanged pages (resume/incremental fast-path).
+			if prev != nil && prev.SpacePageTimes != nil {
+				if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
+					if prevTime, exists := prevTimes[page.ID]; exists && prevTime == page.Version.When {
+						continue
+					}
+				}
+			}
+
+			// Page is new or changed — export as PDF and emit immediately.
+			item, ferr := c.fetchPageAsPDF(ctx, client, cfg, page, resourceID)
+			if ferr != nil {
+				if eerr := h.Emit(ctx, types.FetchedItem{
+					ExternalID:       page.ID,
+					Title:            page.Title,
+					SourceResourceID: resourceID,
+					Metadata: map[string]string{
+						"error":   ferr.Error(),
+						"channel": types.ChannelConfluence,
+					},
+				}); eerr != nil {
+					return nil, eerr
+				}
+			} else if item != nil {
+				if eerr := h.Emit(ctx, *item); eerr != nil {
+					return nil, eerr
+				}
+			}
+
+			processed++
+			if processed%confluenceStreamCheckpointInterval == 0 ||
+				time.Since(lastCheckpoint) >= confluenceStreamCheckpointMaxInterval {
+				if cerr := h.Checkpoint(ctx, newCursor.toSyncCursor()); cerr != nil {
+					logger.Warnf(ctx, "[Confluence] stream checkpoint failed: %v", cerr)
+				}
+				lastCheckpoint = time.Now()
+			}
+			if n := i + 1; n%100 == 0 {
+				logger.Infof(ctx, "[Confluence] stream progress space=%s %d/%d",
+					space.Key, n, len(pages))
+			}
+		}
+
+		logger.Infof(ctx, "[Confluence] space %s (key=%s): total pages=%d",
+			space.Name, space.Key, len(pages))
+
+		// Deletion detection: pages in prior cursor but absent now.
+		if prev != nil && prev.SpacePageTimes != nil {
+			if prevTimes, ok := prev.SpacePageTimes[resourceID]; ok {
+				for prevPageID := range prevTimes {
+					if !currentPages[prevPageID] {
+						if eerr := h.Emit(ctx, types.FetchedItem{
+							ExternalID:       prevPageID,
+							IsDeleted:        true,
+							SourceResourceID: resourceID,
+							Metadata: map[string]string{
+								"channel": types.ChannelConfluence,
+							},
+						}); eerr != nil {
+							return nil, eerr
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return newCursor.toSyncCursor(), nil
 }
 
 // --- Resource ID helpers ---

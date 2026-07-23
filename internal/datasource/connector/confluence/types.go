@@ -397,3 +397,14 @@ func unmarshalCursor(m map[string]interface{}) *confluenceCursor {
 	_ = json.Unmarshal(b, &c)
 	return &c
 }
+
+// toSyncCursor converts the internal confluenceCursor to the generic SyncCursor wrapper.
+func (c *confluenceCursor) toSyncCursor() *types.SyncCursor {
+	cursorMap := make(map[string]interface{})
+	b, _ := json.Marshal(c)
+	_ = json.Unmarshal(b, &cursorMap)
+	return &types.SyncCursor{
+		LastSyncTime:    c.LastSyncTime,
+		ConnectorCursor: cursorMap,
+	}
+}
