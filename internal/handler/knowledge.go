@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -290,6 +291,23 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 	return info.ID, nil
 }
 
+type createKnowledgeFromURLRequest struct {
+	URL              string                           `json:"url" binding:"required"`
+	FileName         string                           `json:"file_name"`
+	FileType         string                           `json:"file_type"`
+	EnableMultimodel *bool                            `json:"enable_multimodel"`
+	Title            string                           `json:"title"`
+	TagIDs           []string                         `json:"tag_ids"`
+	Channel          string                           `json:"channel"`
+	ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+	FolderID         nullableFolderID                 `json:"folder_id"`
+}
+
+type createManualKnowledgeRequest struct {
+	types.ManualKnowledgePayload
+	FolderID nullableFolderID `json:"folder_id"`
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -301,7 +319,8 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        fileName          formData  string  false  "自定义文件名"
 // @Param        metadata          formData  string  false  "元数据JSON"
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
-// @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
+// @Param        tag_ids           formData  string  false  "分类ID列表，逗号分隔"
+// @Param        folder_id         formData  string  false  "目标目录UUID；省略表示知识库根目录"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
 // @Success      200               {object}  map[string]interface{}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
@@ -332,6 +351,11 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	if err != nil {
 		logger.Error(ctx, "File upload failed", err)
 		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
+		return
+	}
+	folderID, appErr := parseOptionalMultipartKnowledgeFolderID(c)
+	if appErr != nil {
+		c.Error(appErr)
 		return
 	}
 
@@ -407,7 +431,18 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	channel := c.PostForm("channel")
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(
+		ctx,
+		kbID,
+		file,
+		metadata,
+		enableMultimodel,
+		customFileName,
+		tagIDs,
+		channel,
+		processOverrides,
+		folderID,
+	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -417,8 +452,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		writeKnowledgeCreateServiceError(c, err)
 		return
 	}
 
@@ -441,7 +475,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
+// @Param        request  body      createKnowledgeFromURLRequest  true  "URL请求；folder_id 省略或 null 表示知识库根目录"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -467,19 +501,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	}
 
 	// Parse URL from request body
-	var req struct {
-		URL              string                           `json:"url" binding:"required"`
-		FileName         string                           `json:"file_name"`
-		FileType         string                           `json:"file_type"`
-		EnableMultimodel *bool                            `json:"enable_multimodel"`
-		Title            string                           `json:"title"`
-		TagIDs           []string                         `json:"tag_ids"`
-		Channel          string                           `json:"channel"`
-		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
-	}
+	var req createKnowledgeFromURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	folderID, appErr := validateOptionalKnowledgeCreateFolderID(req.FolderID.Value)
+	if appErr != nil {
+		c.Error(appErr)
 		return
 	}
 
@@ -504,7 +534,17 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx,
+		kbID,
+		req.URL,
+		req.FileName,
+		req.FileType,
+		req.EnableMultimodel,
+		req.Title,
+		req.TagIDs,
+		req.Channel,
+		req.ProcessConfig,
+		folderID,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
@@ -515,8 +555,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		writeKnowledgeCreateServiceError(c, err)
 		return
 	}
 
@@ -539,7 +578,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                       true  "知识库ID"
-// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
+// @Param        request  body      createManualKnowledgeRequest true  "手工知识内容；folder_id 省略或 null 表示知识库根目录"
 // @Success      200      {object}  map[string]interface{}       "创建的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
@@ -563,23 +602,31 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	var req types.ManualKnowledgePayload
+	var req createManualKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	folderID, appErr := validateOptionalKnowledgeCreateFolderID(req.FolderID.Value)
+	if appErr != nil {
+		c.Error(appErr)
+		return
+	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(
+		ctx,
+		kbID,
+		&req.ManualKnowledgePayload,
+		req.Channel,
+		folderID,
+	)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 			return
 		}
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"kb_id": kbID,
-		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		writeKnowledgeCreateServiceError(c, err)
 		return
 	}
 
@@ -589,6 +636,47 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+func parseOptionalMultipartKnowledgeFolderID(c *gin.Context) (*string, *errors.AppError) {
+	if c.Request.MultipartForm == nil {
+		return nil, nil
+	}
+	values, present := c.Request.MultipartForm.Value["folder_id"]
+	if !present {
+		return nil, nil
+	}
+	if len(values) != 1 {
+		return nil, errors.NewBadRequestError("folder_id must be provided at most once")
+	}
+	return validateOptionalKnowledgeCreateFolderID(&values[0])
+}
+
+func validateOptionalKnowledgeCreateFolderID(folderID *string) (*string, *errors.AppError) {
+	if folderID == nil {
+		return nil, nil
+	}
+	normalized := strings.TrimSpace(*folderID)
+	if !isValidFolderUUID(normalized) {
+		return nil, errors.NewBadRequestError("invalid folder ID")
+	}
+	return &normalized, nil
+}
+
+func writeKnowledgeCreateServiceError(c *gin.Context, err error) {
+	switch {
+	case goerrors.Is(err, service.ErrInvalidFolderScope):
+		c.Error(errors.NewBadRequestError("invalid folder scope"))
+	case goerrors.Is(err, service.ErrInvalidFolderID):
+		c.Error(errors.NewBadRequestError("invalid folder ID"))
+	case goerrors.Is(err, service.ErrTargetFolderNotFound):
+		c.Error(errors.NewNotFoundError("folder not found"))
+	default:
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
+			"knowledge_base_id": c.Param("id"),
+		})
+		c.Error(errors.NewInternalServerError("internal server error"))
+	}
 }
 
 // GetKnowledge godoc
@@ -919,6 +1007,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        file_type     query     string  false  "文件类型筛选"
 // @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
+// @Param        folder_id     query     string  false  "目录筛选：省略=全部；无关键词时空值/UUID=根目录/指定目录直属文件；有关键词时空值=全库、UUID=该目录子树"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
@@ -956,6 +1045,25 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
 	}
+	folderValues, folderFilterSet := c.Request.URL.Query()["folder_id"]
+	if folderFilterSet {
+		if len(folderValues) != 1 {
+			c.Error(errors.NewBadRequestError("folder_id must be provided at most once"))
+			return
+		}
+		filter.FolderIDSet = true
+		if rawFolderID := strings.TrimSpace(folderValues[0]); rawFolderID != "" {
+			if !isValidFolderUUID(rawFolderID) {
+				c.Error(errors.NewBadRequestError("invalid folder ID"))
+				return
+			}
+			filter.FolderID = &rawFolderID
+		}
+	}
+	if strings.TrimSpace(filter.Keyword) == "" {
+		filter.Keyword = ""
+	}
+	filter.IncludeFolderDescendants = filter.FolderIDSet && filter.Keyword != ""
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
@@ -992,8 +1100,16 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	// Retrieve paginated knowledge entries
 	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, filter)
 	if err != nil {
+		if goerrors.Is(err, service.ErrTargetFolderNotFound) {
+			c.Error(errors.NewNotFoundError("folder not found"))
+			return
+		}
+		if goerrors.Is(err, service.ErrInvalidFolderScope) {
+			c.Error(errors.NewBadRequestError("invalid folder scope"))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1010,6 +1126,218 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+type MoveKnowledgeToFolderRequest struct {
+	FolderID nullableFolderID `json:"folder_id"`
+}
+
+const maxKnowledgeFolderBatchSize = 200
+
+// BatchMoveKnowledgeToFolderRequest is the body schema for the atomic folder
+// move endpoint. nullableFolderID distinguishes a missing target from an
+// explicit null target (the knowledge-base root).
+type BatchMoveKnowledgeToFolderRequest struct {
+	KBID     string           `json:"kb_id" binding:"required"`
+	IDs      []string         `json:"ids" binding:"required"`
+	FolderID nullableFolderID `json:"folder_id"`
+}
+
+// MoveKnowledgeToFolder godoc
+// @Summary      移动知识到目录
+// @Description  将已有知识移动到指定目录；folder_id 为 null 时移回知识库根目录
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id            path  string                        true  "知识库ID"
+// @Param        knowledge_id  path  string                        true  "知识ID"
+// @Param        request       body  MoveKnowledgeToFolderRequest  true  "目标目录"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Failure      500  {object}  errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/{knowledge_id}/folder [patch]
+func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
+	ctx, tenantID, knowledgeBaseID, ok := folderRequestScope(c)
+	if !ok {
+		return
+	}
+	knowledgeID := strings.TrimSpace(c.Param("knowledge_id"))
+	if !isValidFolderUUID(knowledgeID) {
+		c.Error(errors.NewBadRequestError("invalid knowledge ID"))
+		return
+	}
+
+	var req MoveKnowledgeToFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid request body"))
+		return
+	}
+	if !req.FolderID.Present {
+		c.Error(errors.NewBadRequestError("folder_id is required"))
+		return
+	}
+	if req.FolderID.Value != nil {
+		folderID := strings.TrimSpace(*req.FolderID.Value)
+		if !isValidFolderUUID(folderID) {
+			c.Error(errors.NewBadRequestError("invalid folder ID"))
+			return
+		}
+		req.FolderID.Value = &folderID
+	}
+
+	knowledge, err := h.kgService.MoveKnowledgeToFolder(
+		ctx,
+		tenantID,
+		knowledgeBaseID,
+		knowledgeID,
+		req.FolderID.Value,
+	)
+	if err != nil {
+		writeKnowledgeFolderServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    knowledge,
+	})
+}
+
+// BatchMoveKnowledgeToFolder godoc
+// @Summary      批量移动知识到目录
+// @Description  在单个事务内将同一知识库中的知识移动到指定目录；folder_id 为 null 时移动到知识库根目录
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body  BatchMoveKnowledgeToFolderRequest  true  "批量移动请求"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
+// @Failure      403  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Failure      409  {object}  errors.AppError
+// @Failure      500  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledge/batch-move-folder [post]
+func (h *KnowledgeHandler) BatchMoveKnowledgeToFolder(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req BatchMoveKnowledgeToFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid request body"))
+		return
+	}
+	if !req.FolderID.Present {
+		c.Error(errors.NewBadRequestError("folder_id is required"))
+		return
+	}
+
+	kbID := strings.TrimSpace(req.KBID)
+	if !isValidFolderUUID(kbID) {
+		c.Error(errors.NewBadRequestError("invalid knowledge base ID"))
+		return
+	}
+	if req.FolderID.Value != nil {
+		folderID := strings.TrimSpace(*req.FolderID.Value)
+		if !isValidFolderUUID(folderID) {
+			c.Error(errors.NewBadRequestError("invalid folder ID"))
+			return
+		}
+		req.FolderID.Value = &folderID
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, rawID := range req.IDs {
+		id := strings.TrimSpace(rawID)
+		if !isValidFolderUUID(id) {
+			c.Error(errors.NewBadRequestError("invalid knowledge ID"))
+			return
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("ids cannot be empty"))
+		return
+	}
+	if len(ids) > maxKnowledgeFolderBatchSize {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"too many ids (max %d per batch)",
+			maxKnowledgeFolderBatchSize,
+		)))
+		return
+	}
+	sort.Strings(ids)
+
+	_, scopedKBID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to move knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, scopedKBID); err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	movedCount, err := h.kgService.MoveKnowledgeBatchToFolder(
+		ctx,
+		effectiveTenantID,
+		scopedKBID,
+		ids,
+		req.FolderID.Value,
+	)
+	if err != nil {
+		writeKnowledgeFolderServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge moved successfully",
+		"data": gin.H{
+			"moved_count": movedCount,
+		},
+	})
+}
+
+func writeKnowledgeFolderServiceError(c *gin.Context, err error) {
+	switch {
+	case goerrors.Is(err, service.ErrInvalidFolderScope):
+		c.Error(errors.NewBadRequestError("invalid folder scope"))
+	case goerrors.Is(err, service.ErrInvalidKnowledgeBatch):
+		c.Error(errors.NewBadRequestError("invalid knowledge batch"))
+	case goerrors.Is(err, repository.ErrKnowledgeNotFound):
+		c.Error(errors.NewNotFoundError("knowledge not found"))
+	case goerrors.Is(err, service.ErrTargetFolderNotFound):
+		c.Error(errors.NewNotFoundError("folder not found"))
+	case goerrors.Is(err, service.ErrKnowledgeAlreadyInTargetFolder):
+		c.Error(errors.NewConflictError("one or more knowledge entries are already in the target folder"))
+	case goerrors.Is(err, service.ErrFolderHierarchyCorrupted):
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
+			"knowledge_base_id": c.Param("id"),
+			"knowledge_id":      c.Param("knowledge_id"),
+		})
+		c.Error(errors.NewInternalServerError("internal server error"))
+	case goerrors.Is(err, service.ErrKnowledgeBatchUpdateMismatch):
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
+			"knowledge_base_id": c.Param("id"),
+		})
+		c.Error(errors.NewInternalServerError("internal server error"))
+	default:
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
+			"knowledge_base_id": c.Param("id"),
+			"knowledge_id":      c.Param("knowledge_id"),
+		})
+		c.Error(errors.NewInternalServerError("internal server error"))
+	}
 }
 
 // DeleteKnowledge godoc

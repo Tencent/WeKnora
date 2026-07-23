@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/url"
@@ -12,12 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -27,6 +30,7 @@ import (
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -225,7 +229,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Save knowledge record to database after the file is safely stored.
 	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.createKnowledgeInFolder(ctx, tenantID, kbID, folderID, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
 			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
@@ -333,6 +337,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
@@ -340,7 +345,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides, folderID,
 		)
 	}
 
@@ -429,7 +434,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.createKnowledgeInFolder(ctx, tenantID, kbID, folderID, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
@@ -560,6 +565,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	tagIDs []string,
 	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -683,7 +689,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.createKnowledgeInFolder(ctx, tenantID, kbID, folderID, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
@@ -771,7 +777,7 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
-	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	kbID string, payload *types.ManualKnowledgePayload, channel string, folderID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
@@ -852,7 +858,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		}
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.createKnowledgeInFolder(ctx, tenantID, kbID, folderID, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
 		return nil, err
 	}
@@ -1024,6 +1030,67 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		logger.Infof(ctx, "Knowledge from passage created successfully, ID: %s", knowledge.ID)
 	}
 	return knowledge, nil
+}
+
+// createKnowledgeInFolder persists a new Knowledge row while holding the same
+// scoped Folder row lock used by FolderService.DeleteFolder. The folder
+// assignment is part of the initial INSERT; there is no follow-up UPDATE.
+func (s *knowledgeService) createKnowledgeInFolder(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	folderID *string,
+	knowledge *types.Knowledge,
+) error {
+	if err := validateFolderScope(tenantID, knowledgeBaseID); err != nil {
+		return err
+	}
+	if knowledge == nil {
+		return errors.New("knowledge is required")
+	}
+
+	normalizedFolderID, err := normalizeKnowledgeCreateFolderID(folderID)
+	if err != nil {
+		return err
+	}
+	knowledge.TenantID = tenantID
+	knowledge.KnowledgeBaseID = knowledgeBaseID
+	knowledge.FolderID = copyFolderID(normalizedFolderID)
+
+	return s.repo.WithinFolderTransaction(
+		ctx,
+		func(
+			knowledgeRepo interfaces.KnowledgeRepository,
+			folderRepo interfaces.FolderRepository,
+		) error {
+			if normalizedFolderID != nil {
+				if _, err := folderRepo.GetByIDForUpdate(
+					ctx,
+					tenantID,
+					knowledgeBaseID,
+					*normalizedFolderID,
+				); err != nil {
+					if errors.Is(err, repository.ErrFolderNotFound) {
+						return ErrTargetFolderNotFound
+					}
+					return err
+				}
+			}
+			return knowledgeRepo.CreateKnowledge(ctx, knowledge)
+		},
+	)
+}
+
+func normalizeKnowledgeCreateFolderID(folderID *string) (*string, error) {
+	if folderID == nil {
+		return nil, nil
+	}
+	normalized := strings.TrimSpace(*folderID)
+	id, err := uuid.Parse(normalized)
+	if err != nil || id == uuid.Nil {
+		return nil, ErrInvalidFolderID
+	}
+	return &normalized, nil
 }
 
 // UpdateManualKnowledge updates manual Markdown knowledge content.

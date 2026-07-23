@@ -1,5 +1,6 @@
 import { safeRemoveItem, safeSetItem } from "@/composables/preferenceStorage";
 import { reconcileBuiltinAgentMode } from "@/utils/agent-mode";
+import { normalizeSelectedFolderScopes } from "@/utils/folderScope";
 
 export const SETTINGS_STORAGE_KEY = "WeKnora_settings";
 
@@ -16,26 +17,37 @@ export function isStoredSettingsRecord(
 
 type ReconcilableSettings = {
   selectedTags?: unknown;
+  selectedKnowledgeBases?: unknown;
   selectedMCPServices?: unknown;
   selectedSkills?: unknown;
   selectedTools?: unknown;
   selectedFileKbMap?: unknown;
+  selectedFolderScopes?: unknown;
   enableMemory?: unknown;
   isAgentEnabled: boolean;
   selectedAgentId?: string;
 };
 
-function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
+export function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
   loaded.selectedTags ||= [];
   loaded.selectedMCPServices ||= [];
   loaded.selectedSkills ||= (loaded.selectedTools as string[] | undefined) || [];
   loaded.selectedFileKbMap ||= {};
+  const previousFolderScopes = JSON.stringify(loaded.selectedFolderScopes ?? {});
+  const selectedKnowledgeBaseIDs = Array.isArray(loaded.selectedKnowledgeBases)
+    ? loaded.selectedKnowledgeBases.filter((id): id is string => typeof id === "string")
+    : undefined;
+  loaded.selectedFolderScopes = normalizeSelectedFolderScopes(
+    loaded.selectedFolderScopes,
+    selectedKnowledgeBaseIDs,
+  );
+  const reconciledFolderScopes = previousFolderScopes !== JSON.stringify(loaded.selectedFolderScopes);
   const removedLegacyMemorySetting = Object.prototype.hasOwnProperty.call(loaded, "enableMemory");
   if (removedLegacyMemorySetting) {
     delete loaded.enableMemory;
   }
   const reconciledAgentMode = reconcileBuiltinAgentMode(loaded);
-  if (removedLegacyMemorySetting || reconciledAgentMode) {
+  if (removedLegacyMemorySetting || reconciledAgentMode || reconciledFolderScopes) {
     safeSetItem(SETTINGS_STORAGE_KEY, JSON.stringify(loaded));
   }
   return loaded;

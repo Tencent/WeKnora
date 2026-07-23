@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+defineProps<{ message?: string }>()
 const { t } = useI18n()
 </script>
 <template>
     <div class="empty">
         <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-        <span class="empty-txt">{{ $t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
+        <span class="empty-txt">{{ message || $t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
         <span class="empty-type-txt">{{ $t('knowledgeBase.pdfDocFormat') }}</span>
         <span class="empty-type-txt">{{ $t('knowledgeBase.textMarkdownFormat') }}</span>
     </div>

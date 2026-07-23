@@ -25,6 +25,7 @@ interface KnowledgeBaseOption {
 interface KnowledgeDetailResponse {
   id: string
   knowledge_base_id: string
+  folder_id: string | null
   title?: string
   file_name?: string
   metadata?: any
@@ -419,7 +420,10 @@ const previewHTML = computed(() => {
   return sanitizeHTML(html)
 })
 
-const kbDisabled = computed(() => mode.value === 'edit' && !!form.kbId)
+const kbDisabled = computed(() =>
+  (mode.value === 'edit' && !!form.kbId) ||
+  (mode.value === 'create' && uiStore.manualEditorFolderContext),
+)
 
 const dialogTitle = computed(() =>
   mode.value === 'edit' ? t('manualEditor.title.edit') : t('manualEditor.title.create'),
@@ -620,6 +624,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       status: string
       tag_ids?: string[]
       process_config?: KnowledgeProcessOverrides
+      folder_id?: string | null
     } = {
       title: form.title.trim(),
       content: form.content,
@@ -627,6 +632,9 @@ const handleSave = async (targetStatus: ManualStatus) => {
     }
     if (tagIdsToUpload && tagIdsToUpload.length > 0) {
       payload.tag_ids = tagIdsToUpload
+    }
+    if (mode.value === 'create' && uiStore.manualEditorFolderContext) {
+      payload.folder_id = uiStore.manualEditorFolderId
     }
 
     if (targetStatus === 'publish') {
@@ -653,6 +661,9 @@ const handleSave = async (targetStatus: ManualStatus) => {
             content: payload.content,
             tagIds: tagIdsToUpload,
           },
+          targetFolderLabel: uiStore.manualEditorFolderContext
+            ? (uiStore.manualEditorFolderName || t('knowledgeFolder.root'))
+            : '',
         })
         payload.process_config = confirmResult.processConfig
       } catch {
@@ -829,6 +840,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <p v-if="lastUpdatedText" class="form-desc">{{ lastUpdatedText }}</p>
+          <p v-if="mode === 'create' && uiStore.manualEditorFolderContext" class="form-desc folder-target-desc">
+            <t-icon name="folder" />
+            {{ t('knowledgeFolder.createTarget', {
+              name: uiStore.manualEditorFolderName || t('knowledgeFolder.root'),
+            }) }}
+          </p>
         </div>
       </section>
 
@@ -961,6 +978,12 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.folder-target-desc {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .kb-row {

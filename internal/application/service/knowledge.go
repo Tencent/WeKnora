@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -37,6 +39,21 @@ var (
 	ErrDuplicateURL = errors.New("URL already exists")
 	// ErrImageNotParse is returned when trying to update image information without enabling multimodel
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
+	// ErrTargetFolderNotFound is returned when a requested knowledge target
+	// folder is absent from the exact tenant/knowledge-base scope.
+	ErrTargetFolderNotFound = errors.New("target folder not found")
+	// ErrInvalidFolderID is returned when a create request supplies a non-UUID
+	// folder identifier. A nil identifier always means the knowledge-base root.
+	ErrInvalidFolderID = errors.New("invalid folder ID")
+	// ErrInvalidKnowledgeBatch is returned when a batch move has no usable
+	// knowledge IDs.
+	ErrInvalidKnowledgeBatch = errors.New("invalid knowledge batch")
+	// ErrKnowledgeAlreadyInTargetFolder makes an entire batch fail when any
+	// selected knowledge is already in the requested target folder.
+	ErrKnowledgeAlreadyInTargetFolder = errors.New("knowledge already in target folder")
+	// ErrKnowledgeBatchUpdateMismatch indicates that a scoped batch UPDATE did
+	// not affect every row locked earlier in the same transaction.
+	ErrKnowledgeBatchUpdateMismatch = errors.New("knowledge batch update count mismatch")
 )
 
 // knowledgeService implements the knowledge service interface
@@ -81,9 +98,10 @@ type knowledgeService struct {
 }
 
 const (
-	manualContentMaxLength = 200000
-	manualFileExtension    = ".md"
-	faqImportBatchSize     = 50 // 每批处理的FAQ条目数
+	manualContentMaxLength          = 200000
+	manualFileExtension             = ".md"
+	faqImportBatchSize              = 50 // 每批处理的FAQ条目数
+	maxKnowledgeFolderMoveBatchSize = 200
 )
 
 // NewKnowledgeService creates a new knowledge service instance
@@ -487,6 +505,263 @@ func (s *knowledgeService) GetKnowledgeByID(ctx context.Context, id string) (*ty
 	return knowledge, nil
 }
 
+// MoveKnowledgeToFolder changes only the folder assignment of an existing
+// knowledge row. Knowledge is locked first, then the current and target folder
+// rows are locked in stable ID order so this operation uses the same folder-row
+// lock protocol as FolderService.DeleteFolder.
+func (s *knowledgeService) MoveKnowledgeToFolder(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeID string,
+	targetFolderID *string,
+) (*types.Knowledge, error) {
+	if err := validateFolderScope(tenantID, knowledgeBaseID); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(knowledgeID) == "" {
+		return nil, repository.ErrKnowledgeNotFound
+	}
+	if targetFolderID != nil && strings.TrimSpace(*targetFolderID) == "" {
+		return nil, ErrTargetFolderNotFound
+	}
+
+	if targetFolderID != nil {
+		trimmedTargetFolderID := strings.TrimSpace(*targetFolderID)
+		targetFolderID = &trimmedTargetFolderID
+	}
+	var moved *types.Knowledge
+	err := s.repo.WithinFolderTransaction(
+		ctx,
+		func(
+			knowledgeRepo interfaces.KnowledgeRepository,
+			folderRepo interfaces.FolderRepository,
+		) error {
+			knowledge, err := knowledgeRepo.GetKnowledgeByIDForUpdate(
+				ctx,
+				tenantID,
+				knowledgeBaseID,
+				knowledgeID,
+			)
+			if err != nil {
+				return err
+			}
+			if knowledge.FolderID != nil && strings.TrimSpace(*knowledge.FolderID) == "" {
+				return ErrFolderHierarchyCorrupted
+			}
+
+			for _, folderID := range stableKnowledgeFolderLockIDs(
+				knowledge.FolderID,
+				targetFolderID,
+			) {
+				if _, err := folderRepo.GetByIDForUpdate(
+					ctx,
+					tenantID,
+					knowledgeBaseID,
+					folderID,
+				); err != nil {
+					if errors.Is(err, repository.ErrFolderNotFound) {
+						if knowledge.FolderID != nil &&
+							folderID == strings.TrimSpace(*knowledge.FolderID) {
+							return ErrFolderHierarchyCorrupted
+						}
+						if targetFolderID != nil && folderID == *targetFolderID {
+							return ErrTargetFolderNotFound
+						}
+						return ErrFolderHierarchyCorrupted
+					}
+					return err
+				}
+			}
+
+			if sameFolderID(knowledge.FolderID, targetFolderID) {
+				moved = knowledge
+				return nil
+			}
+			if err := knowledgeRepo.UpdateKnowledgeFolder(
+				ctx,
+				tenantID,
+				knowledgeBaseID,
+				knowledgeID,
+				targetFolderID,
+			); err != nil {
+				return err
+			}
+			moved, err = knowledgeRepo.GetKnowledgeByIDForUpdate(
+				ctx,
+				tenantID,
+				knowledgeBaseID,
+				knowledgeID,
+			)
+			return err
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	s.attachTagsToKnowledge(ctx, moved)
+	return moved, nil
+}
+
+// MoveKnowledgeBatchToFolder atomically moves a stable, de-duplicated set of
+// knowledge rows. It locks all knowledge rows first, then all source/target
+// folder rows in deterministic order, and finally performs one scoped UPDATE.
+func (s *knowledgeService) MoveKnowledgeBatchToFolder(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeIDs []string,
+	targetFolderID *string,
+) (int, error) {
+	if err := validateFolderScope(tenantID, knowledgeBaseID); err != nil {
+		return 0, err
+	}
+	ids, err := stableUniqueKnowledgeIDs(knowledgeIDs)
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) > maxKnowledgeFolderMoveBatchSize {
+		return 0, ErrInvalidKnowledgeBatch
+	}
+	if targetFolderID != nil {
+		trimmedTargetFolderID := strings.TrimSpace(*targetFolderID)
+		if trimmedTargetFolderID == "" {
+			return 0, ErrTargetFolderNotFound
+		}
+		targetFolderID = &trimmedTargetFolderID
+	}
+
+	movedCount := 0
+	err = s.repo.WithinFolderTransaction(
+		ctx,
+		func(
+			knowledgeRepo interfaces.KnowledgeRepository,
+			folderRepo interfaces.FolderRepository,
+		) error {
+			knowledges, err := knowledgeRepo.GetKnowledgeBatchForUpdate(
+				ctx,
+				tenantID,
+				knowledgeBaseID,
+				ids,
+			)
+			if err != nil {
+				return err
+			}
+			if len(knowledges) != len(ids) {
+				return repository.ErrKnowledgeNotFound
+			}
+
+			sourceFolderIDs := make(map[string]struct{}, len(knowledges))
+			folderPointers := make([]*string, 0, len(knowledges)+1)
+			for index, knowledge := range knowledges {
+				if knowledge == nil || knowledge.ID != ids[index] ||
+					knowledge.TenantID != tenantID ||
+					knowledge.KnowledgeBaseID != knowledgeBaseID {
+					return repository.ErrKnowledgeNotFound
+				}
+				if knowledge.FolderID == nil {
+					continue
+				}
+				sourceFolderID := strings.TrimSpace(*knowledge.FolderID)
+				if sourceFolderID == "" {
+					return ErrFolderHierarchyCorrupted
+				}
+				sourceFolderIDs[sourceFolderID] = struct{}{}
+				folderPointers = append(folderPointers, &sourceFolderID)
+			}
+			folderPointers = append(folderPointers, targetFolderID)
+
+			for _, folderID := range stableKnowledgeFolderLockIDs(folderPointers...) {
+				if _, err := folderRepo.GetByIDForUpdate(
+					ctx,
+					tenantID,
+					knowledgeBaseID,
+					folderID,
+				); err != nil {
+					if errors.Is(err, repository.ErrFolderNotFound) {
+						if _, isSource := sourceFolderIDs[folderID]; isSource {
+							return ErrFolderHierarchyCorrupted
+						}
+						if targetFolderID != nil && folderID == *targetFolderID {
+							return ErrTargetFolderNotFound
+						}
+						return ErrFolderHierarchyCorrupted
+					}
+					return err
+				}
+			}
+
+			for _, knowledge := range knowledges {
+				if sameFolderID(knowledge.FolderID, targetFolderID) {
+					return ErrKnowledgeAlreadyInTargetFolder
+				}
+			}
+
+			rowsAffected, err := knowledgeRepo.UpdateKnowledgeFolderBatch(
+				ctx,
+				tenantID,
+				knowledgeBaseID,
+				ids,
+				targetFolderID,
+			)
+			if err != nil {
+				return err
+			}
+			if rowsAffected != int64(len(ids)) {
+				return ErrKnowledgeBatchUpdateMismatch
+			}
+			movedCount = len(ids)
+			return nil
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return movedCount, nil
+}
+
+func stableUniqueKnowledgeIDs(knowledgeIDs []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(knowledgeIDs))
+	ids := make([]string, 0, len(knowledgeIDs))
+	for _, rawID := range knowledgeIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, ErrInvalidKnowledgeBatch
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, ErrInvalidKnowledgeBatch
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func stableKnowledgeFolderLockIDs(folderIDs ...*string) []string {
+	seen := make(map[string]struct{}, len(folderIDs))
+	ids := make([]string, 0, len(folderIDs))
+	for _, folderID := range folderIDs {
+		if folderID == nil {
+			continue
+		}
+		id := strings.TrimSpace(*folderID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
 func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
 	return s.repo.GetKnowledgeByIDOnly(ctx, id)
@@ -534,8 +809,34 @@ func (s *knowledgeService) ListKnowledgeByKnowledgeBaseID(ctx context.Context,
 func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
 	kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 ) (*types.PageResult, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if strings.TrimSpace(filter.Keyword) == "" {
+		filter.Keyword = ""
+	}
+	filter.IncludeFolderDescendants = filter.FolderIDSet && filter.Keyword != ""
+	if filter.FolderIDSet && filter.FolderID != nil {
+		if strings.TrimSpace(*filter.FolderID) == "" {
+			return nil, ErrTargetFolderNotFound
+		}
+		err := s.repo.WithinFolderTransaction(
+			ctx,
+			func(
+				_ interfaces.KnowledgeRepository,
+				folderRepo interfaces.FolderRepository,
+			) error {
+				_, err := folderRepo.GetByID(ctx, tenantID, kbID, *filter.FolderID)
+				if errors.Is(err, repository.ErrFolderNotFound) {
+					return ErrTargetFolderNotFound
+				}
+				return err
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	knowledges, total, err := s.repo.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-		ctx.Value(types.TenantIDContextKey).(uint64), kbID, page, filter)
+		tenantID, kbID, page, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -690,6 +991,65 @@ func (s *knowledgeService) ListKnowledgeIDsByTagIDs(
 	tagIDs []string,
 ) ([]string, error) {
 	return s.repo.ListIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
+}
+
+func (s *knowledgeService) ListKnowledgeIDsByFolderScopes(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+) ([]string, error) {
+	uniqueFolderIDs := make([]string, 0, len(folderIDs))
+	seen := make(map[string]struct{}, len(folderIDs))
+	for _, rawFolderID := range folderIDs {
+		folderID := strings.TrimSpace(rawFolderID)
+		if folderID == "" {
+			return nil, ErrInvalidFolderID
+		}
+		if _, err := uuid.Parse(folderID); err != nil {
+			return nil, ErrInvalidFolderID
+		}
+		if _, exists := seen[folderID]; exists {
+			continue
+		}
+		seen[folderID] = struct{}{}
+		uniqueFolderIDs = append(uniqueFolderIDs, folderID)
+	}
+	if len(uniqueFolderIDs) == 0 {
+		return nil, ErrInvalidFolderID
+	}
+	sort.Strings(uniqueFolderIDs)
+
+	var knowledgeIDs []string
+	err := s.repo.WithinFolderTransaction(
+		ctx,
+		func(
+			knowledgeRepo interfaces.KnowledgeRepository,
+			folderRepo interfaces.FolderRepository,
+		) error {
+			folders, err := folderRepo.ListByIDs(ctx, tenantID, kbID, uniqueFolderIDs)
+			if err != nil {
+				return err
+			}
+			if len(folders) != len(uniqueFolderIDs) {
+				return ErrTargetFolderNotFound
+			}
+			knowledgeIDs, err = knowledgeRepo.ListIDsByFolderScopes(
+				ctx,
+				tenantID,
+				kbID,
+				uniqueFolderIDs,
+			)
+			return err
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if knowledgeIDs == nil {
+		knowledgeIDs = []string{}
+	}
+	return knowledgeIDs, nil
 }
 
 // validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.

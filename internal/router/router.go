@@ -13,12 +13,14 @@ import (
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -79,6 +81,7 @@ type RouterParams struct {
 	ResourceCatalog              interfaces.ResourceCatalog
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
+	FolderHandler                *handler.FolderHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
 	SkillHandler                 *handler.SkillHandler
@@ -230,6 +233,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterFolderRoutes(v1, params.FolderHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
@@ -342,6 +346,13 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
+		kb.PATCH(
+			"/:knowledge_id/folder",
+			requireUUIDPathParam("id", "knowledge base ID"),
+			g.OwnedKBOrAdmin(),
+			g.KBAccessWrite("id"),
+			handler.MoveKnowledgeToFolder,
+		)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
@@ -385,6 +396,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
+
 		// Batch / cross-KB content writes: JWT Contributor+, or an API key
 		// with the ingest capability (or full access). Each handler binds the
 		// operation to a single (move: source+target) KB and rejects any KB
@@ -394,6 +406,14 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+
+		// Folder batch move remains JWT Contributor-only because its KB scope is
+		// carried in the request body and API-key scope validation is not supported.
+		kgrp.POST(
+			"/batch-move-folder",
+			g.Contributor(),
+			handler.BatchMoveKnowledgeToFolder,
+		)
 	}
 }
 
@@ -506,6 +526,59 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 			GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
+	}
+}
+
+// RegisterFolderRoutes wires the flat knowledge-base folder APIs. Reads inherit
+// the KB read guard; mutations inherit the same creator/admin plus KB-write
+// matrix used by tags, documents, FAQ entries, and other KB sub-resources.
+func RegisterFolderRoutes(r *gin.RouterGroup, handler *handler.FolderHandler, g *rbacGuards) {
+	if handler == nil {
+		return
+	}
+	folders := g.apiKeyGroup(
+		r.Group("/knowledge-bases/:id/folders"),
+		apiKeyIngest(apiKeyFullAccess()),
+	)
+	folderRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	validateKBID := requireUUIDPathParam("id", "knowledge base ID")
+
+	folderRead.GET("", validateKBID, g.Viewer(), g.KBAccessRead("id"), handler.ListFolders)
+	folderRead.GET("/:folder_id", validateKBID, g.Viewer(), g.KBAccessRead("id"), handler.GetFolder)
+	folders.POST("", validateKBID, g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateFolder)
+	folders.PATCH(
+		"/:folder_id/name",
+		validateKBID,
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.RenameFolder,
+	)
+	folders.PATCH(
+		"/:folder_id/parent",
+		validateKBID,
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.MoveFolder,
+	)
+	folders.DELETE(
+		"/:folder_id",
+		validateKBID,
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.DeleteFolder,
+	)
+}
+
+func requireUUIDPathParam(param, label string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		value := strings.TrimSpace(c.Param(param))
+		id, err := uuid.Parse(value)
+		if err != nil || id == uuid.Nil {
+			_ = c.Error(errors.NewBadRequestError("invalid " + label))
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 

@@ -12,6 +12,7 @@ interface KnowledgeItem {
 
 const props = defineProps<{
   item: KnowledgeItem;
+  canEdit: boolean;
   canMutateKnowledge: boolean;
   traceVisible: boolean;
 }>();
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
+  (e: 'move-folder'): void;
   (e: 'move'): void;
   (e: 'batch-manage'): void;
   (e: 'delete'): void;
@@ -80,7 +82,12 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     </div>
   </t-popconfirm>
 
-  <!-- 移动到... -->
+  <div v-if="canEdit" class="doc-action-menu-item" @click.stop="emit('move-folder')">
+    <t-icon class="icon" name="folder" />
+    <span>{{ $t('knowledgeFolderMove.moveKnowledge') }}</span>
+  </div>
+
+  <!-- Existing cross-knowledge-base move flow. -->
   <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move')">
     <t-icon class="icon" name="swap" />
     <span>{{ $t('knowledgeBase.moveDocument') }}</span>

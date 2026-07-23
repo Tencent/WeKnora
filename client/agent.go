@@ -27,6 +27,7 @@ type AgentQARequest struct {
 	Query            string            `json:"query"`                        // Required query text
 	KnowledgeBaseIDs []string          `json:"knowledge_base_ids,omitempty"` // Optional KBs for this query
 	KnowledgeIDs     []string          `json:"knowledge_ids,omitempty"`      // Optional specific knowledge IDs for this query
+	FolderScopes     []FolderScope     `json:"folder_scopes,omitempty"`      // Optional folder scopes paired with KB IDs
 	AgentEnabled     bool              `json:"agent_enabled"`                // Whether to run in agent mode
 	AgentID          string            `json:"agent_id,omitempty"`           // Optional custom agent ID
 	WebSearchEnabled bool              `json:"web_search_enabled"`           // Whether to enable web search

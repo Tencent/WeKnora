@@ -207,18 +207,43 @@ type ImageAttachment struct {
 	Caption string `json:"caption,omitempty"` // VLM analysis result
 }
 
+// FolderScope represents a union of folder subtree boundaries for one knowledge
+// base. FolderID remains available for legacy callers; new callers should use
+// FolderIDs and omit the entire scope for whole-KB retrieval.
+type FolderScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	FolderIDs       []string `json:"folder_ids,omitempty"`
+	FolderID        *string  `json:"folder_id,omitempty"`
+}
+
+func (s FolderScope) MarshalJSON() ([]byte, error) {
+	if len(s.FolderIDs) > 0 {
+		return json.Marshal(struct {
+			KnowledgeBaseID string   `json:"knowledge_base_id"`
+			FolderIDs       []string `json:"folder_ids"`
+			FolderID        *string  `json:"folder_id,omitempty"`
+		}{s.KnowledgeBaseID, s.FolderIDs, s.FolderID})
+	}
+	// Preserve the old SDK's ability to send explicit folder_id:null.
+	return json.Marshal(struct {
+		KnowledgeBaseID string  `json:"knowledge_base_id"`
+		FolderID        *string `json:"folder_id"`
+	}{s.KnowledgeBaseID, s.FolderID})
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
-	Query            string            `json:"query"`              // Query text for knowledge base search
-	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"` // Selected knowledge base IDs for this request
-	KnowledgeIDs     []string          `json:"knowledge_ids"`      // Selected knowledge IDs for this request
-	AgentEnabled     bool              `json:"agent_enabled"`      // Whether agent mode is enabled for this request
-	AgentID          string            `json:"agent_id"`           // Selected custom agent ID for this request
-	WebSearchEnabled bool              `json:"web_search_enabled"` // Whether web search is enabled for this request
-	SummaryModelID   string            `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
-	DisableTitle     bool              `json:"disable_title"`      // Whether to disable auto title generation
-	Images           []ImageAttachment `json:"images,omitempty"`   // Attached images for multimodal chat
-	Channel          string            `json:"channel,omitempty"`  // Source channel: "web", "api", "im", etc.
+	Query            string            `json:"query"`                   // Query text for knowledge base search
+	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"`      // Selected knowledge base IDs for this request
+	KnowledgeIDs     []string          `json:"knowledge_ids"`           // Selected knowledge IDs for this request
+	FolderScopes     []FolderScope     `json:"folder_scopes,omitempty"` // Folder scopes paired with KB IDs
+	AgentEnabled     bool              `json:"agent_enabled"`           // Whether agent mode is enabled for this request
+	AgentID          string            `json:"agent_id"`                // Selected custom agent ID for this request
+	WebSearchEnabled bool              `json:"web_search_enabled"`      // Whether web search is enabled for this request
+	SummaryModelID   string            `json:"summary_model_id"`        // Optional summary model ID (overrides session default)
+	DisableTitle     bool              `json:"disable_title"`           // Whether to disable auto title generation
+	Images           []ImageAttachment `json:"images,omitempty"`        // Attached images for multimodal chat
+	Channel          string            `json:"channel,omitempty"`       // Source channel: "web", "api", "im", etc.
 }
 
 // LLMToolCall represents a function/tool call from the LLM
@@ -453,6 +478,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseID  string          `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
 	KnowledgeBaseIDs []string        `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
 	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	FolderScopes     []FolderScope   `json:"folder_scopes,omitempty"`      // Folder scopes paired with KB IDs
 	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
 }

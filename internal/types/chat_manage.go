@@ -13,10 +13,14 @@ type PipelineRequest struct {
 	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
 	KnowledgeIDs     []string      `json:"knowledge_ids,omitempty"`
 	SearchTargets    SearchTargets `json:"-"`
-	VectorThreshold  float64       `json:"vector_threshold"`
-	KeywordThreshold float64       `json:"keyword_threshold"`
-	EmbeddingTopK    int           `json:"embedding_top_k"`
-	VectorDatabase   string        `json:"vector_database"`
+	// FolderKnowledgeIDs records the folder subtree expansion per KB for this
+	// request. Presence of a KB key means a folder boundary exists; an empty
+	// slice means the folder is valid but contains no active knowledge.
+	FolderKnowledgeIDs map[string][]string `json:"-"`
+	VectorThreshold    float64             `json:"vector_threshold"`
+	KeywordThreshold   float64             `json:"keyword_threshold"`
+	EmbeddingTopK      int                 `json:"embedding_top_k"`
+	VectorDatabase     string              `json:"vector_database"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -181,11 +185,16 @@ func (c *ChatManage) Clone() *ChatManage {
 				KnowledgeBaseID:         t.KnowledgeBaseID,
 				TenantID:                t.TenantID,
 				KnowledgeIDs:            kidsCopy,
+				KnowledgeIDsSet:         t.KnowledgeIDsSet,
 				TagIDs:                  tagIDsCopy,
 				ScopeTagIDs:             scopeTagIDsCopy,
 				DisableRecallThresholds: t.DisableRecallThresholds,
 			}
 		}
+	}
+	folderKnowledgeIDs := make(map[string][]string, len(c.FolderKnowledgeIDs))
+	for kbID, ids := range c.FolderKnowledgeIDs {
+		folderKnowledgeIDs[kbID] = append([]string(nil), ids...)
 	}
 
 	// Deep copy Entity using in search entity plugin
@@ -207,6 +216,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
 			SearchTargets:            searchTargets,
+			FolderKnowledgeIDs:       folderKnowledgeIDs,
 			VectorThreshold:          c.VectorThreshold,
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,

@@ -303,11 +303,19 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, folderKnowledgeIDs, err := s.buildSearchTargetsWithFolderScopes(
+		ctx,
+		agentTenantID,
+		agentConfig.KnowledgeBases,
+		agentConfig.KnowledgeIDs,
+		req.TagScopes,
+		req.FolderScopes,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	agentConfig.FolderKnowledgeIDs = folderKnowledgeIDs
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the

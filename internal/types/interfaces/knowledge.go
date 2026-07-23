@@ -13,6 +13,7 @@ import (
 type KnowledgeService interface {
 	// CreateKnowledgeFromFile creates knowledge from a file.
 	// channel identifies the ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web".
+	// folderID is optional; nil creates the knowledge in the knowledge-base root.
 	CreateKnowledgeFromFile(
 		ctx context.Context,
 		kbID string,
@@ -23,11 +24,13 @@ type KnowledgeService interface {
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		folderID *string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
 	// channel identifies the ingestion channel; empty defaults to "web".
+	// folderID is optional; nil creates the knowledge in the knowledge-base root.
 	CreateKnowledgeFromURL(
 		ctx context.Context,
 		kbID string,
@@ -39,6 +42,7 @@ type KnowledgeService interface {
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		folderID *string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
@@ -47,14 +51,35 @@ type KnowledgeService interface {
 	CreateKnowledgeFromPassageSync(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)
 	// CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 	// channel identifies the ingestion channel; empty defaults to "web".
+	// folderID is optional; nil creates the knowledge in the knowledge-base root.
 	CreateKnowledgeFromManual(
 		ctx context.Context,
 		kbID string,
 		payload *types.ManualKnowledgePayload,
 		channel string,
+		folderID *string,
 	) (*types.Knowledge, error)
 	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)
+	// MoveKnowledgeToFolder moves one knowledge item within its existing
+	// tenant/knowledge-base scope. A nil targetFolderID means the KB root.
+	MoveKnowledgeToFolder(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeID string,
+		targetFolderID *string,
+	) (*types.Knowledge, error)
+	// MoveKnowledgeBatchToFolder atomically moves all requested knowledge
+	// items within one tenant/knowledge-base scope. A nil targetFolderID
+	// means the KB root.
+	MoveKnowledgeBatchToFolder(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeIDs []string,
+		targetFolderID *string,
+	) (int, error)
 	// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetOwningKBCreatorID resolves a knowledge ID to the CreatorID of its
@@ -72,6 +97,9 @@ type KnowledgeService interface {
 	// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of
 	// the specified KB-local tags.
 	ListKnowledgeIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
+	// ListKnowledgeIDsByFolderScopes returns the de-duplicated union of active
+	// knowledge IDs under all requested folder subtrees.
+	ListKnowledgeIDsByFolderScopes(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base
@@ -209,6 +237,46 @@ type KnowledgeService interface {
 type KnowledgeRepository interface {
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)
+	// WithinFolderTransaction runs a callback with Knowledge and Folder
+	// repositories bound to the same database transaction.
+	WithinFolderTransaction(
+		ctx context.Context,
+		fn func(KnowledgeRepository, FolderRepository) error,
+	) error
+	// GetKnowledgeByIDForUpdate returns one active knowledge row in the exact
+	// tenant/KB scope and applies FOR UPDATE on PostgreSQL.
+	GetKnowledgeByIDForUpdate(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeID string,
+	) (*types.Knowledge, error)
+	// GetKnowledgeBatchForUpdate returns active knowledge rows in the exact
+	// tenant/KB scope ordered by ID and applies FOR UPDATE on PostgreSQL.
+	GetKnowledgeBatchForUpdate(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeIDs []string,
+	) ([]*types.Knowledge, error)
+	// UpdateKnowledgeFolder updates only folder_id and updated_at in the exact
+	// tenant/KB/knowledge scope.
+	UpdateKnowledgeFolder(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeID string,
+		folderID *string,
+	) error
+	// UpdateKnowledgeFolderBatch updates only folder_id and updated_at for
+	// the exact scoped ID set and returns the number of affected rows.
+	UpdateKnowledgeFolderBatch(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeBaseID string,
+		knowledgeIDs []string,
+		folderID *string,
+	) (int64, error)
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
@@ -273,6 +341,8 @@ type KnowledgeRepository interface {
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics).
 	ListIDsByTagIDs(ctx context.Context, tenantID uint64, kbID string, tagIDs []string) ([]string, error)
+	// ListIDsByFolderScopes returns active knowledge IDs under a union of folder subtrees.
+	ListIDsByFolderScopes(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error)
 	// SetKnowledgeTags replaces all tags for a single knowledge entry (deletes old, inserts new).
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
 	// GetKnowledgeTags returns tags for multiple knowledge IDs.

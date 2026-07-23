@@ -556,6 +556,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 				// Individual retrieval for specific-knowledge targets
 				for _, target := range knowledgeTargets {
 					st := target
+					if st.Type == types.SearchTargetTypeKnowledge && len(st.KnowledgeIDs) == 0 {
+						continue
+					}
 					innerWg.Add(1)
 					go func() {
 						defer innerWg.Done()

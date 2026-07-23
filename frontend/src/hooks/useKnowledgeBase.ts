@@ -8,6 +8,8 @@ import {
   getKnowledgeDetails,
   delKnowledgeDetails,
   getKnowledgeDetailsCon,
+  buildKnowledgeListScopeKey,
+  type KnowledgeListQueryParams,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
@@ -39,27 +41,26 @@ export default function (knowledgeBaseId?: string) {
     tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
+  let activeKnowledgeListScope = '';
   const getKnowled = (
-    query: {
-      page: number;
-      page_size: number;
-      tag_ids?: string;
-      keyword?: string;
-      file_type?: string;
-      parse_status?: string;
-      source?: string;
-      start_time?: string;
-      end_time?: string;
-    } = { page: 1, page_size: 35 },
+    query: KnowledgeListQueryParams = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
     if (!targetKbId) return Promise.resolve();
-    const requestGeneration = query.page === 1 ? ++knowledgeListGeneration : knowledgeListGeneration;
+    const requestScope = buildKnowledgeListScopeKey(targetKbId, query);
+    if (query.page === 1) {
+      activeKnowledgeListScope = requestScope;
+      knowledgeListGeneration += 1;
+    } else if (requestScope !== activeKnowledgeListScope) {
+      return Promise.resolve();
+    }
+    const requestGeneration = knowledgeListGeneration;
 
     return listKnowledgeFiles(targetKbId, query)
       .then((result: any) => {
         if (requestGeneration !== knowledgeListGeneration) return;
+        if (requestScope !== activeKnowledgeListScope) return;
 
         const currentRouteKbId = (route.params as any)?.kbId as string | undefined;
         if (currentRouteKbId && currentRouteKbId !== targetKbId) return;

@@ -36,6 +36,7 @@ export interface OpenUploadConfirmOptions {
   reparse?: UploadConfirmReparseSource
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  targetFolderLabel?: string
 }
 
 export const useUploadConfirmStore = defineStore('uploadConfirm', {
@@ -49,6 +50,7 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
     reparse: null as UploadConfirmReparseSource | null,
     acceptFileTypes: '',
     supportedFileTypes: [] as string[],
+    targetFolderLabel: '',
     pendingResolve: null as ((value: UploadConfirmResult) => void) | null,
     pendingReject: null as (() => void) | null,
   }),
@@ -65,6 +67,7 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
         this.reparse = options.reparse || null
         this.acceptFileTypes = options.acceptFileTypes || ''
         this.supportedFileTypes = options.supportedFileTypes ? [...options.supportedFileTypes] : []
+        this.targetFolderLabel = options.targetFolderLabel || ''
         this.pendingResolve = resolve
         this.pendingReject = reject
       })
@@ -90,6 +93,7 @@ export const useUploadConfirmStore = defineStore('uploadConfirm', {
       this.reparse = null
       this.acceptFileTypes = ''
       this.supportedFileTypes = []
+      this.targetFolderLabel = ''
       this.pendingResolve = null
       this.pendingReject = null
     },

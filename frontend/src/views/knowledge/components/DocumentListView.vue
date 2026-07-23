@@ -13,6 +13,7 @@ interface Tag {
 
 interface KnowledgeItem {
   id: string;
+  folder_id: string | null;
   file_name: string;
   file_type?: string;
   file_size?: number | string;
@@ -29,6 +30,7 @@ interface KnowledgeItem {
 
 const props = defineProps<{
   items: KnowledgeItem[];
+  displayPaths?: ReadonlyMap<string, string>;
   selectedIds: Set<string>;
   canEdit: boolean;
   canMutateKnowledge: boolean;
@@ -42,13 +44,15 @@ const props = defineProps<{
   moveSelectedTargetName: string;
   moveMode: 'reuse_vectors' | 'reparse';
   moveSubmitting: boolean;
+  draggingKnowledgeId: string | null;
+  dragSubmitting: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move-folder' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   // Move sub-flow emits
@@ -57,9 +61,12 @@ const emit = defineEmits<{
   (e: 'move-confirm'): void;
   (e: 'update:moveMode', mode: 'reuse_vectors' | 'reparse'): void;
   (e: 'reset-move-state'): void;
+  (e: 'knowledgeDragStart', event: DragEvent, item: KnowledgeItem): void;
+  (e: 'dragEnd'): void;
 }>();
 
 const { t } = useI18n();
+const getDisplayPath = (knowledgeId: string) => props.displayPaths?.get(knowledgeId) || '';
 
 const {
   setupTagChipsObserver,
@@ -204,7 +211,7 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move-folder' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
     moreOpen.value = null;
@@ -234,7 +241,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
     <div class="doc-list-body">
       <div v-for="item in items" :key="item.id" class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
+        :class="{
+          selected: selectedIds.has(item.id),
+          'menu-open': moreOpen === item.id,
+          'is-dragging': draggingKnowledgeId === item.id,
+        }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
@@ -242,12 +253,32 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         </div>
 
         <div class="cell cell-name">
+          <span
+            v-if="canEdit && selectedIds.size === 0"
+            class="knowledge-drag-handle"
+            :class="{ disabled: dragSubmitting }"
+            :draggable="!dragSubmitting"
+            :title="t('knowledgeFolderDrag.dragHandle', { name: item.file_name || item.id })"
+            :aria-label="t('knowledgeFolderDrag.dragHandle', { name: item.file_name || item.id })"
+            @click.stop
+            @dragstart.stop="emit('knowledgeDragStart', $event, item)"
+            @dragend.stop="emit('dragEnd')"
+          >
+            <t-icon name="move" />
+          </span>
           <span class="row-file-icon-wrap">
             <t-icon :name="getFileIcon(item)" />
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
-            <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
+            <span
+              v-if="getDisplayPath(item.id)"
+              class="row-file-path"
+              :title="getDisplayPath(item.id)"
+              :aria-label="t('knowledgeFolderMove.searchResultPath', { path: getDisplayPath(item.id) })"
+              data-document-path
+            >{{ getDisplayPath(item.id) }}</span>
+            <span v-else-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
 
@@ -317,12 +348,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
               <div v-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
+                  :can-edit="canEdit"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="!!traceVisibleIds[item.id] || (item.parse_status === 'pending' || item.parse_status === 'processing' || item.parse_status === 'finalizing')"
                   @edit="handleAction('edit', item)"
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @move="handleAction('move', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
@@ -497,6 +530,36 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   &.selected .row-more-btn {
     opacity: 1;
   }
+
+  &.is-dragging {
+    opacity: 0.5;
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.knowledge-drag-handle {
+  width: 18px;
+  height: 26px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  color: var(--td-text-color-placeholder);
+  cursor: grab;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
 }
 
 .cell {
@@ -596,6 +659,15 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.row-file-path {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
   color: var(--td-text-color-placeholder);
 }
 

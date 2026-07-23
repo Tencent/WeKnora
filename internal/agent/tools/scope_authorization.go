@@ -22,6 +22,7 @@ func searchTargetsAllowKnowledgeID(
 
 	var tagIDs []string
 	matchedKB := false
+	var matchedKnowledgeTagIDs []string
 	for _, target := range searchTargets {
 		if target == nil || target.KnowledgeBaseID != kbID {
 			continue
@@ -30,12 +31,30 @@ func searchTargetsAllowKnowledgeID(
 		if target.Type == types.SearchTargetTypeKnowledgeBase && len(target.TagIDs) == 0 {
 			return true, nil
 		}
+		if target.KnowledgeIDsSet && len(target.KnowledgeIDs) == 0 {
+			continue
+		}
 		for _, allowedID := range target.KnowledgeIDs {
 			if allowedID == knowledgeID {
+				if len(target.TagIDs) > 0 {
+					matchedKnowledgeTagIDs = append(matchedKnowledgeTagIDs, target.TagIDs...)
+					continue
+				}
 				return true, nil
 			}
 		}
-		tagIDs = append(tagIDs, target.TagIDs...)
+		if !target.KnowledgeIDsSet {
+			tagIDs = append(tagIDs, target.TagIDs...)
+		}
+	}
+	if len(matchedKnowledgeTagIDs) > 0 && knowledgeService != nil {
+		matches, err := knowledgeIDsMatchingAnyTag(ctx, []string{knowledgeID}, matchedKnowledgeTagIDs, knowledgeService.GetKnowledgeTags)
+		if err != nil {
+			return false, err
+		}
+		if matches[knowledgeID] {
+			return true, nil
+		}
 	}
 	if !matchedKB || len(tagIDs) == 0 || knowledgeService == nil {
 		return false, nil
