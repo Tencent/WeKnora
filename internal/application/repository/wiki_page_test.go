@@ -332,3 +332,38 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(clampedEntries), 200)
 }
+
+func TestSearch_SQLiteRanksMatchesAndExcludesArchived(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	titleHit := makeWikiPage("kb-search", "entity/title-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "Alpha topic"
+	slugHit := makeWikiPage("kb-search", "entity/alpha-slug", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	slugHit.Title = "Slug page"
+	summaryHit := makeWikiPage("kb-search", "entity/summary-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	summaryHit.Title = "Summary page"
+	summaryHit.Summary = "Mentions alpha in summary"
+	contentHit := makeWikiPage("kb-search", "entity/content-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "Content page"
+	contentHit.Content = "Mentions alpha in body"
+	archived := makeWikiPage("kb-search", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "Alpha archived"
+	otherKB := makeWikiPage("kb-other", "entity/leaked", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.Title = "Alpha leaked"
+
+	for _, p := range []*types.WikiPage{contentHit, summaryHit, slugHit, titleHit, archived, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, err := repo.Search(ctx, "kb-search", "alpha", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	assert.Equal(t, []string{
+		"entity/title-hit",
+		"entity/alpha-slug",
+		"entity/summary-hit",
+		"entity/content-hit",
+	}, []string{got[0].Slug, got[1].Slug, got[2].Slug, got[3].Slug})
+}

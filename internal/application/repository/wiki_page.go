@@ -982,8 +982,10 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+// Search performs case-insensitive search on wiki pages within a knowledge base.
+// PostgreSQL interprets the query as a POSIX regular expression (via ~*);
+// SQLite falls back to a literal substring match because it has no built-in
+// equivalent regex operator.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -1005,22 +1007,13 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
-	// CASE expression is evaluated per-row during SELECT; we order by the
-	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
-	// arg rewriting quirks.
-	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
-		"ELSE 0 END AS match_rank"
+	rankExpr, rankArgs, whereExpr, whereArgs := r.wikiSearchExpressions(query)
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, rankArgs...).
+		Where("knowledge_base_id = ?", kbID).
+		Where(whereExpr, whereArgs...).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
@@ -1028,6 +1021,35 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		return nil, err
 	}
 	return pages, nil
+}
+
+func (r *wikiPageRepository) wikiSearchExpressions(query string) (string, []interface{}, string, []interface{}) {
+	// CASE expression is evaluated per-row during SELECT; we order by the
+	// alias so the DB only computes the rank once. Parameterized four
+	// times with the same pattern to avoid coupling to GORM's positional
+	// arg rewriting quirks.
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		pattern := "%" + escapeLikePattern(strings.ToLower(query)) + "%"
+		args := []interface{}{pattern, pattern, pattern, pattern}
+		rankExpr := "CASE " +
+			"WHEN LOWER(title) LIKE ? ESCAPE '\\' THEN 4 " +
+			"WHEN LOWER(slug) LIKE ? ESCAPE '\\' THEN 3 " +
+			"WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 2 " +
+			"WHEN LOWER(content) LIKE ? ESCAPE '\\' THEN 1 " +
+			"ELSE 0 END AS match_rank"
+		whereExpr := "(LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(slug) LIKE ? ESCAPE '\\')"
+		return rankExpr, args, whereExpr, args
+	}
+
+	args := []interface{}{query, query, query, query}
+	rankExpr := "CASE " +
+		"WHEN title ~* ? THEN 4 " +
+		"WHEN slug ~* ? THEN 3 " +
+		"WHEN summary ~* ? THEN 2 " +
+		"WHEN content ~* ? THEN 1 " +
+		"ELSE 0 END AS match_rank"
+	whereExpr := "(title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)"
+	return rankExpr, args, whereExpr, args
 }
 
 // CountByType returns page counts grouped by type for a knowledge base
