@@ -84,7 +84,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status", "kbId"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 const hasTimelineSpans = ref(false);
@@ -1095,7 +1095,7 @@ const handleDetailsScroll = () => {
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
           <div class="header-actions">
-            <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
+            <t-button v-if="canDownloadKB && (details.type === 'file' || details.type === 'manual')" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
               @click="downloadFile()">
               <template #icon>
