@@ -56,6 +56,26 @@ func StableChunkID(tenantID uint64, knowledgeID string, chunkType ChunkType, con
 	return formatUUIDFromHash(sum)
 }
 
+// StableImageChildChunkID derives a deterministic ID for image OCR/caption child chunks.
+func StableImageChildChunkID(
+	tenantID uint64,
+	knowledgeID string,
+	parentChunkID string,
+	chunkType ChunkType,
+	canonicalText string,
+) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		stableChunkIDNamespace,
+		"image_child",
+		fmt.Sprintf("%d", tenantID),
+		knowledgeID,
+		parentChunkID,
+		string(chunkType),
+		ContentHash(canonicalText, ""),
+	}, "\x00")))
+	return formatUUIDFromHash(sum)
+}
+
 func formatUUIDFromHash(sum [32]byte) string {
 	id := sum[:16]
 	id[6] = (id[6] & 0x0f) | 0x80

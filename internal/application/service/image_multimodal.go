@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +21,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -48,6 +49,8 @@ const (
 		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
 		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
 		"</instructions>"
+	vlmCacheModeOCR     = "ocr"
+	vlmCacheModeCaption = "caption"
 )
 
 func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
@@ -57,6 +60,31 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	}
 	prompt := fmt.Sprintf("Provide a brief and concise description of the main content of the image in %s.", language)
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
+}
+
+func resolvedVLMCacheModelID(cfg types.VLMConfig) string {
+	if id := strings.TrimSpace(cfg.ModelID); id != "" {
+		return id
+	}
+	return "legacy_inline"
+}
+
+func vlmCacheKey(imageBytes []byte, modelID, mode, prompt string) string {
+	return fmt.Sprintf("vlm:%s:%s:%s:%s",
+		sha256Hex(imageBytes),
+		strings.TrimSpace(modelID),
+		mode,
+		sha256StringHex(prompt),
+	)
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func sha256StringHex(s string) string {
+	return sha256Hex([]byte(s))
 }
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
@@ -73,6 +101,8 @@ type ImageMultimodalService struct {
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
+
+	contentCacheRepo interfaces.ContentCacheRepository
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
@@ -101,26 +131,28 @@ func NewImageMultimodalService(
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
+	contentCacheRepo interfaces.ContentCacheRepository,
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
-		chunkService:    chunkService,
-		modelService:    modelService,
-		kbService:       kbService,
-		knowledgeRepo:   knowledgeRepo,
-		tenantRepo:      tenantRepo,
-		retrieveEngine:  retrieveEngine,
-		ownership:       ownership,
-		ollamaService:   ollamaService,
-		taskEnqueuer:    taskEnqueuer,
-		redisClient:     redisClient,
-		fileSvc:         fileSvc,
-		storageResolver: storageResolver,
-		resourceCatalog: resourceCatalog,
-		spanTracker:     spanTracker,
+		chunkService:     chunkService,
+		modelService:     modelService,
+		kbService:        kbService,
+		knowledgeRepo:    knowledgeRepo,
+		tenantRepo:       tenantRepo,
+		retrieveEngine:   retrieveEngine,
+		ownership:        ownership,
+		ollamaService:    ollamaService,
+		taskEnqueuer:     taskEnqueuer,
+		redisClient:      redisClient,
+		contentCacheRepo: contentCacheRepo,
+		fileSvc:          fileSvc,
+		storageResolver:  storageResolver,
+		resourceCatalog:  resourceCatalog,
+		spanTracker:      spanTracker,
 	}
 }
 
@@ -131,6 +163,54 @@ func (s *ImageMultimodalService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+func (s *ImageMultimodalService) getOrComputeVLMResult(
+	ctx context.Context,
+	tenantID uint64,
+	cacheKind string,
+	mode string,
+	modelID string,
+	imageBytes []byte,
+	prompt string,
+	compute func() (string, error),
+) (string, bool, error) {
+	key := vlmCacheKey(imageBytes, modelID, mode, prompt)
+	if s.contentCacheRepo != nil {
+		entry, err := s.contentCacheRepo.GetByKey(ctx, tenantID, cacheKind, key)
+		if err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] VLM cache get failed kind=%s mode=%s: %v", cacheKind, mode, err)
+		} else if entry != nil {
+			var cached string
+			if err := json.Unmarshal(entry.Payload, &cached); err != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] VLM cache decode failed kind=%s mode=%s: %v", cacheKind, mode, err)
+			} else {
+				return cached, true, nil
+			}
+		}
+	}
+
+	result, err := compute()
+	if err != nil {
+		return "", false, err
+	}
+	if s.contentCacheRepo == nil {
+		return result, false, nil
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache encode failed kind=%s mode=%s: %v", cacheKind, mode, err)
+		return result, false, nil
+	}
+	if err := s.contentCacheRepo.Upsert(ctx, &types.ContentCacheEntry{
+		TenantID:  tenantID,
+		CacheKind: cacheKind,
+		CacheKey:  key,
+		Payload:   types.JSON(payload),
+	}); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache upsert failed kind=%s mode=%s: %v", cacheKind, mode, err)
+	}
+	return result, false, nil
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
@@ -268,12 +348,27 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, cacheHit, ocrErr := s.getOrComputeVLMResult(
+			ctx,
+			payload.TenantID,
+			types.ContentCacheKindImageOCR,
+			vlmCacheModeOCR,
+			resolvedVLMCacheModelID(vlmCfg),
+			imgBytes,
+			prompt,
+			func() (string, error) {
+				text, err := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+				if err != nil {
+					return "", err
+				}
+				return sanitizeOCRText(text), nil
+			},
+		)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
+			imgOut["ocr_cache_hit"] = cacheHit
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -286,14 +381,29 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	caption, captionCacheHit, capErr := s.getOrComputeVLMResult(
+		ctx,
+		payload.TenantID,
+		types.ContentCacheKindImageCaption,
+		vlmCacheModeCaption,
+		resolvedVLMCacheModelID(vlmCfg),
+		imgBytes,
+		captionPrompt,
+		func() (string, error) {
+			return vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+		},
+	)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	} else {
+		imgOut["caption_cache_hit"] = captionCacheHit
+		if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
@@ -302,7 +412,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: types.StableImageChildChunkID(
+				payload.TenantID,
+				payload.KnowledgeID,
+				payload.ChunkID,
+				types.ChunkTypeImageOCR,
+				imageInfo.OCRText,
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -319,7 +435,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: types.StableImageChildChunkID(
+				payload.TenantID,
+				payload.KnowledgeID,
+				payload.ChunkID,
+				types.ChunkTypeImageCaption,
+				imageInfo.Caption,
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -342,6 +464,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Persist chunks
+	if err := s.chunkService.GetRepository().PurgeSoftDeletedByKnowledgeID(ctx, payload.TenantID, payload.KnowledgeID); err != nil {
+		handleErr = fmt.Errorf("purge soft-deleted multimodal chunks: %w", err)
+		return handleErr
+	}
 	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
 		return handleErr
