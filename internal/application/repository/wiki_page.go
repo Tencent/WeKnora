@@ -43,6 +43,40 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
 }
 
+func (r *wikiPageRepository) wikiSourceRefPredicate(sourceKnowledgeID string) (string, []interface{}, error) {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return `EXISTS (
+			SELECT 1 FROM json_each(wiki_pages.source_refs) AS source_ref
+			WHERE source_ref.value = ? OR source_ref.value LIKE ? ESCAPE '\'
+		)`, []interface{}{sourceKnowledgeID, escapeLikePattern(sourceKnowledgeID+"|") + "%"}, nil
+	}
+
+	// Build the JSON needle safely so arbitrary IDs cannot break out of the
+	// quoted string (e.g. ids containing quotes or backslashes).
+	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal source ref needle: %w", err)
+	}
+
+	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
+	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
+	prefix, err := json.Marshal(sourceKnowledgeID + "|")
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal source ref prefix: %w", err)
+	}
+	// prefix is a JSON string including the surrounding quotes; e.g. "abc|".
+	// We strip the trailing quote so LIKE can continue into the title portion.
+	prefixStr := string(prefix)
+	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
+		prefixStr = prefixStr[:len(prefixStr)-1]
+	}
+	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
+	// with %...% to match anywhere in the serialized JSON array.
+	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+
+	return "source_refs @> ?::jsonb OR source_refs::text LIKE ? ESCAPE '\\'", []interface{}{string(needle), likePattern}, nil
+}
+
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
@@ -317,36 +351,15 @@ func (r *wikiPageRepository) ListByTypeLight(
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
-	// Build the JSON needle safely so arbitrary IDs cannot break out of the
-	// quoted string (e.g. ids containing quotes or backslashes).
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	predicate, args, err := r.wikiSourceRefPredicate(sourceKnowledgeID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return nil, err
 	}
-
-	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
-	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
-	prefix, err := json.Marshal(sourceKnowledgeID + "|")
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
-	}
-	// prefix is a JSON string including the surrounding quotes; e.g. "abc|".
-	// We strip the trailing quote so LIKE can continue into the title portion.
-	prefixStr := string(prefix)
-	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-		prefixStr = prefixStr[:len(prefixStr)-1]
-	}
-	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
-	// with %…% to match anywhere in the serialized JSON array.
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where("("+predicate+")", args...).
 		Find(&pages).Error; err != nil {
 		return nil, err
 	}
@@ -363,28 +376,16 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // containment branch and idx_wiki_pages_source_refs_text for the legacy
 // text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	predicate, args, err := r.wikiSourceRefPredicate(sourceKnowledgeID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return nil, err
 	}
-	prefix, err := json.Marshal(sourceKnowledgeID + "|")
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
-	}
-	prefixStr := string(prefix)
-	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-		prefixStr = prefixStr[:len(prefixStr)-1]
-	}
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where("("+predicate+")", args...).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
 	}
@@ -653,10 +654,9 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		return nil, nil
 	}
 
-	// Build a JSONB containment-OR with one needle per knowledge id,
-	// plus a single text-LIKE OR over the legacy prefix forms. The
-	// containment branches each get their own GIN index probe; the
-	// LIKE branch falls back to the text fulltext GIN.
+	// Build a dialect-aware source_refs OR with one predicate per knowledge id.
+	// PostgreSQL uses JSONB containment plus the legacy text prefix match;
+	// SQLite uses json_each over the stored JSON array.
 	type row struct {
 		Content    string            `gorm:"column:content"`
 		SourceRefs types.StringArray `gorm:"column:source_refs"`
@@ -677,23 +677,12 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if kid == "" {
 			continue
 		}
-		needle, err := json.Marshal([]string{kid})
+		predicate, predicateArgs, err := r.wikiSourceRefPredicate(kid)
 		if err != nil {
-			return nil, fmt.Errorf("marshal kid needle: %w", err)
+			return nil, err
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
-
-		prefix, err := json.Marshal(kid + "|")
-		if err != nil {
-			return nil, fmt.Errorf("marshal kid prefix: %w", err)
-		}
-		prefixStr := string(prefix)
-		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-			prefixStr = prefixStr[:len(prefixStr)-1]
-		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		clauses = append(clauses, "("+predicate+")")
+		args = append(args, predicateArgs...)
 	}
 	if len(clauses) == 0 {
 		return nil, nil
