@@ -76,6 +76,17 @@ func StableImageChildChunkID(
 	return formatUUIDFromHash(sum)
 }
 
+// StableGeneratedQuestionID derives a deterministic ID for generated question metadata.
+func StableGeneratedQuestionID(chunkID string, question string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		stableChunkIDNamespace,
+		"generated_question",
+		chunkID,
+		ContentHash(question, ""),
+	}, "\x00")))
+	return formatUUIDFromHash(sum)
+}
+
 func formatUUIDFromHash(sum [32]byte) string {
 	id := sum[:16]
 	id[6] = (id[6] & 0x0f) | 0x80

@@ -164,6 +164,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	contentCacheRepo  interfaces.ContentCacheRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -178,6 +179,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	contentCacheRepo interfaces.ContentCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -187,6 +189,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		contentCacheRepo:  contentCacheRepo,
 		spanTracker:       spanTracker,
 	}
 }
@@ -329,11 +332,21 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	cacheKey := graphChunkCacheKey(chunk, chatModel, template, extractCfg)
+	var graph *types.GraphData
+	var cachedGraph types.GraphData
+	if getContentCacheJSON(ctx, s.contentCacheRepo, p.TenantID, types.ContentCacheKindGraphChunk, cacheKey, &cachedGraph) {
+		graph = cloneGraphDataForChunk(&cachedGraph, chunk.ID)
+		graphOut["cache_hit"] = true
+	} else {
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		setContentCacheJSON(ctx, s.contentCacheRepo, p.TenantID, types.ContentCacheKindGraphChunk, cacheKey, graph)
+		graphOut["cache_hit"] = false
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -343,8 +356,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
+	if graph == nil {
+		graph = &types.GraphData{}
+	}
 	for _, node := range graph.Node {
-		node.Chunks = []string{chunk.ID}
+		if node != nil {
+			node.Chunks = []string{chunk.ID}
+		}
 	}
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},

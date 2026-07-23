@@ -12,6 +12,9 @@ const (
 	ContentCacheKindImageOCR     = "image_ocr"
 	ContentCacheKindImageCaption = "image_caption"
 	ContentCacheKindWikiMap      = "wiki_map"
+	ContentCacheKindGraphChunk   = "graph_chunk"
+	ContentCacheKindSummary      = "summary"
+	ContentCacheKindQuestion     = "question"
 )
 
 // ContentCacheEntry stores reusable deterministic processing artifacts.

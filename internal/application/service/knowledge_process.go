@@ -840,9 +840,17 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	}
 
 	// Generate summary using AI model
+	langName := types.LanguageNameFromContext(ctx)
 	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
-		"language": types.LanguageNameFromContext(ctx),
+		"language": langName,
 	})
+	cacheKey := summaryCacheKey(knowledge.ID, contentWithMetadata, summaryModel, summaryPrompt, langName, maxInputChars, maxTokens)
+	var cachedSummary string
+	if getContentCacheJSON(ctx, s.contentCacheRepo, knowledge.TenantID, types.ContentCacheKindSummary, cacheKey, &cachedSummary) {
+		logger.GetLogger(ctx).WithField("summary", cachedSummary).Infof("GetSummary cache hit")
+		return cachedSummary, nil
+	}
+
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
 	summary, err := summaryModel.Chat(modelCtx, []chat.Message{
@@ -864,6 +872,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		return "", err
 	}
 	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
+	setContentCacheJSON(ctx, s.contentCacheRepo, knowledge.TenantID, types.ContentCacheKindSummary, cacheKey, summary.Content)
 	return summary.Content, nil
 }
 
@@ -1536,7 +1545,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
+			questionID := types.StableGeneratedQuestionID(chunk.ID, question)
 			generatedQuestions[j] = types.GeneratedQuestion{
 				ID:       questionID,
 				Question: question,
@@ -1865,7 +1874,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
+				ID:       types.StableGeneratedQuestionID(chunk.ID, question),
 				Question: question,
 			}
 		}
@@ -1943,6 +1952,13 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	})
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
+	cacheKey := questionCacheKey(
+		content, prevContent, nextContent, docName, chatModel, prompt, customInstructions, langName, questionCount)
+	var cachedQuestions []string
+	if getContentCacheJSON(ctx, s.contentCacheRepo, tenantIDFromContext(ctx), types.ContentCacheKindQuestion, cacheKey, &cachedQuestions) {
+		return cachedQuestions, nil
+	}
+
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
 	response, err := chatModel.Chat(modelCtx, []chat.Message{
@@ -1977,6 +1993,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		}
 	}
 
+	setContentCacheJSON(ctx, s.contentCacheRepo, tenantIDFromContext(ctx), types.ContentCacheKindQuestion, cacheKey, questions)
 	return questions, nil
 }
 

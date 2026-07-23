@@ -109,3 +109,20 @@ func TestStableImageChildChunkID_IsolatedByModeAndContent(t *testing.T) {
 		StableImageChildChunkID(1, "knowledge-a", "parent-b", ChunkTypeImageOCR, "same"),
 	)
 }
+
+func TestStableGeneratedQuestionID(t *testing.T) {
+	id1 := StableGeneratedQuestionID("chunk-a", " What is the answer? ")
+	id2 := StableGeneratedQuestionID("chunk-a", "What is the answer?")
+
+	assert.Equal(t, id1, id2)
+	assert.Len(t, id1, 36)
+	_, err := uuid.Parse(id1)
+	require.NoError(t, err)
+}
+
+func TestStableGeneratedQuestionID_IsolatedByChunkAndQuestion(t *testing.T) {
+	id := StableGeneratedQuestionID("chunk-a", "What is the answer?")
+
+	assert.NotEqual(t, id, StableGeneratedQuestionID("chunk-b", "What is the answer?"))
+	assert.NotEqual(t, id, StableGeneratedQuestionID("chunk-a", "What changed?"))
+}
