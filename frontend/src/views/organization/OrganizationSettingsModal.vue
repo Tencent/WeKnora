@@ -507,57 +507,117 @@
                     <p class="section-description">{{ $t('organization.settings.joinRequestsDesc') }}</p>
                   </div>
 
-                  <div class="settings-group">
-                    <t-loading :loading="joinRequestsLoading">
-                      <div v-if="joinRequests.length === 0 && !joinRequestsLoading" class="empty-join-requests">
-                        <div class="empty-icon">
-                          <t-icon name="check-circle" size="48px" />
-                        </div>
-                        <p class="empty-text">{{ $t('organization.settings.noPendingRequests') }}</p>
+                  <div class="members-list-wrap join-requests-wrap">
+                    <div class="members-list-header">
+                      <div class="members-list-titlewrap">
+                        <span class="members-list-title">{{ $t('organization.joinRequests.listTitle') }}</span>
+                        <span class="members-list-count-badge">{{ filteredJoinRequests.length }}</span>
                       </div>
-                      <div v-else class="join-requests-list">
-                        <div v-for="req in joinRequests" :key="req.id" class="join-request-item">
-                          <div class="request-user">
-                            <div class="request-avatar">
-                              <t-icon name="user" size="20px" />
-                            </div>
-                            <div class="request-info">
-                              <span class="request-name">
-                                {{ req.username || req.email || req.user_id }}
-                                <t-tag v-if="req.request_type === 'upgrade'" size="small" theme="warning"
-                                  class="request-type-tag">
-                                  {{ $t('organization.upgrade.upgradeRequest') }}
-                                </t-tag>
-                              </span>
-                              <span class="request-email">{{ req.email }}</span>
-                              <p v-if="req.message" class="request-message">{{ req.message }}</p>
-                              <span v-if="req.request_type === 'upgrade' && req.prev_role" class="request-prev-role">
-                                {{ $t('organization.upgrade.currentRole') }}：{{ roleLabel(req.prev_role) }} → {{
-                                  roleLabel(req.requested_role) }}
-                              </span>
-                              <span v-else class="request-requested-role">{{ $t('organization.invite.requestRole') }}：{{
-                                roleLabel(req.requested_role) }}</span>
-                              <span class="request-time">{{ formatDate(req.created_at) }}</span>
-                            </div>
-                          </div>
-                          <div class="request-actions">
-                            <div class="request-assign-role">
-                              <span class="request-assign-label">{{ $t('organization.settings.assignRole') }}</span>
-                              <t-select v-model="assignRoleMap[req.id]" class="request-role-select"
-                                :options="orgRoleOptions" size="small" />
-                            </div>
-                            <t-button theme="primary" size="small" :loading="reviewingRequestId === req.id"
-                              @click="handleApproveRequest(req)">
-                              {{ $t('organization.settings.approve') }}
-                            </t-button>
-                            <t-button theme="default" variant="outline" size="small"
-                              :loading="reviewingRequestId === req.id" @click="handleRejectRequest(req)">
-                              {{ $t('organization.settings.reject') }}
-                            </t-button>
-                          </div>
+                      <div class="members-list-actions">
+                        <div class="members-list-search">
+                          <t-input v-model="joinRequestSearchQuery" size="small"
+                            :placeholder="$t('organization.joinRequests.searchPlaceholder')" clearable>
+                            <template #prefix-icon>
+                              <t-icon name="search" />
+                            </template>
+                          </t-input>
                         </div>
                       </div>
-                    </t-loading>
+                    </div>
+
+                    <div v-if="joinRequestsLoading && joinRequests.length === 0" class="loading-inline">
+                      <t-loading size="small" />
+                      <span>{{ $t('organization.joinRequests.loading') }}</span>
+                    </div>
+                    <div v-else-if="filteredJoinRequests.length === 0" class="empty-state">
+                      <t-empty :description="joinRequestSearchQuery.trim()
+                        ? $t('organization.joinRequests.emptySearch', { q: joinRequestSearchQuery })
+                        : $t('organization.settings.noPendingRequests')" />
+                    </div>
+                    <div v-else class="data-table-shell join-requests-table">
+                      <t-table row-key="id" :data="filteredJoinRequests" :columns="joinRequestColumns" size="medium"
+                        hover stripe :loading="joinRequestsLoading">
+                        <template #applicant="{ row }">
+                          <div class="member-cell">
+                            <span class="member-name">{{ joinRequestApplicantLabel(row) }}</span>
+                            <span v-if="joinRequestApplicantSecondary(row)" class="member-email">
+                              {{ joinRequestApplicantSecondary(row) }}
+                            </span>
+                          </div>
+                        </template>
+                        <template #request_type="{ row }">
+                          <t-tag size="small" :theme="row.request_type === 'upgrade' ? 'warning' : 'primary'"
+                            variant="light">
+                            {{ row.request_type === 'upgrade'
+                              ? $t('organization.joinRequests.typeUpgrade')
+                              : $t('organization.joinRequests.typeJoin') }}
+                          </t-tag>
+                        </template>
+                        <template #requested_role="{ row }">
+                          <span v-if="row.request_type === 'upgrade' && row.prev_role" class="join-request-role-change">
+                            {{ roleLabel(row.prev_role) }}
+                            <t-icon name="arrow-right" size="12px" />
+                            {{ roleLabel(row.requested_role) }}
+                          </span>
+                          <t-tag v-else size="small" :theme="getRoleTheme(row.requested_role)" variant="light">
+                            {{ roleLabel(row.requested_role) }}
+                          </t-tag>
+                        </template>
+                        <template #message="{ row }">
+                          <span class="join-request-message" :title="row.message || undefined">
+                            {{ row.message || '—' }}
+                          </span>
+                        </template>
+                        <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+                        <template #actions="{ row }">
+                          <div class="join-request-actions">
+                            <t-popup :visible="approvePopupRequestId === row.id"
+                              placement="left-start" destroy-on-close overlay-class-name="org-approve-request-popup-overlay"
+                              @visible-change="(visible) => handleApprovePopupVisibleChange(visible, row)">
+                              <t-tooltip :content="$t('organization.settings.approve')" placement="top">
+                                <t-button theme="primary" variant="text" shape="square" size="small"
+                                  :loading="reviewingRequestId === row.id" @click.stop="openApprovePopup(row)">
+                                  <template #icon><t-icon name="check" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <template #content>
+                                <div class="org-approve-request-popup-inner" @click.stop>
+                                  <div class="member-invite-popup-title">{{ $t('organization.joinRequests.approveTitle') }}</div>
+                                  <p class="add-member-tip">
+                                    {{ $t('organization.joinRequests.approveDesc', { name: joinRequestApplicantLabel(row) }) }}
+                                  </p>
+                                  <div class="org-upgrade-field org-upgrade-field--last">
+                                    <label class="org-upgrade-field-label">{{ $t('organization.settings.assignRole') }}</label>
+                                    <t-select v-model="approveAssignRole" size="medium" :options="orgRoleOptions" />
+                                  </div>
+                                  <div class="invite-popup-footer">
+                                    <t-button variant="outline" :disabled="reviewingRequestId === row.id"
+                                      @click="closeApprovePopup">
+                                      {{ $t('common.cancel') }}
+                                    </t-button>
+                                    <t-button theme="primary" :loading="reviewingRequestId === row.id"
+                                      @click="confirmApproveRequest(row)">
+                                      {{ $t('organization.settings.approve') }}
+                                    </t-button>
+                                  </div>
+                                </div>
+                              </template>
+                            </t-popup>
+                            <t-popconfirm :content="$t('organization.joinRequests.rejectConfirm')"
+                              :confirm-btn="{ content: $t('organization.settings.reject'), theme: 'danger' }"
+                              :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                              @confirm="handleRejectRequest(row)">
+                              <t-tooltip :content="$t('organization.settings.reject')" placement="top">
+                                <t-button theme="danger" variant="text" shape="square" size="small"
+                                  :loading="reviewingRequestId === row.id" @click.stop>
+                                  <template #icon><t-icon name="close" /></template>
+                                </t-button>
+                              </t-tooltip>
+                            </t-popconfirm>
+                          </div>
+                        </template>
+                      </t-table>
+                    </div>
                   </div>
                 </div>
 
@@ -820,6 +880,7 @@ const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
 const sharedAgents = ref<AgentShareResponse[]>([])
 const joinRequests = ref<JoinRequestResponse[]>([])
 const joinRequestsLoading = ref(false)
+const joinRequestSearchQuery = ref('')
 const reviewingRequestId = ref<string | null>(null)
 const sharesLoading = ref(false)
 const membersLoading = ref(false)
@@ -1094,6 +1155,18 @@ function sharePermissionLabel(permission: string): string {
   return t('organization.share.permissionReadonly')
 }
 
+const joinRequestColumns = computed(() => {
+  const cols = [
+    { colKey: 'applicant', title: t('organization.joinRequests.columns.applicant'), ellipsis: true, minWidth: 160 },
+    { colKey: 'request_type', title: t('organization.joinRequests.columns.type'), width: 88 },
+    { colKey: 'requested_role', title: t('organization.joinRequests.columns.requestedRole'), width: 140 },
+    { colKey: 'message', title: t('organization.joinRequests.columns.message'), ellipsis: true, minWidth: 120 },
+    { colKey: 'created_at', title: t('organization.joinRequests.columns.appliedAt'), width: 154 },
+    { colKey: 'actions', title: t('organization.members.columns.operations'), width: 88, align: 'left' },
+  ]
+  return cols
+})
+
 const sharedKbColumns = computed(() => {
   const cols = [
     { colKey: 'name', title: t('organization.sharedResources.columns.name'), ellipsis: true, minWidth: 180 },
@@ -1159,6 +1232,28 @@ const filteredMembers = computed(() => {
     (m.email || '').toLowerCase().includes(query)
   )
 })
+
+const filteredJoinRequests = computed(() => {
+  const query = joinRequestSearchQuery.value.trim().toLowerCase()
+  if (!query) return joinRequests.value
+  return joinRequests.value.filter((req) => {
+    const haystack = [req.username, req.email, req.user_id, req.message]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+function joinRequestApplicantLabel(req: JoinRequestResponse): string {
+  return req.username || req.email || req.user_id
+}
+
+function joinRequestApplicantSecondary(req: JoinRequestResponse): string {
+  const primary = joinRequestApplicantLabel(req)
+  if (req.email && req.email !== primary) return req.email
+  return ''
+}
 
 // 成员行的主标题：优先展示「空间名」，回退到代表用户名 / 空间 ID。Plan 3
 // 之后每一行成员都对应一个空间，UI 必须先于代表用户呈现空间身份，
@@ -1292,7 +1387,32 @@ const orgRoleOptions = [
   { label: t('organization.role.editor'), value: 'editor' },
   { label: t('organization.role.admin'), value: 'admin' },
 ]
-const assignRoleMap = ref<Record<string, 'viewer' | 'editor' | 'admin'>>({})
+const approvePopupRequestId = ref<string | null>(null)
+const approveAssignRole = ref<'viewer' | 'editor' | 'admin'>('viewer')
+
+function normalizeJoinRequestRole(role: string): 'viewer' | 'editor' | 'admin' {
+  if (role === 'admin' || role === 'editor' || role === 'viewer') return role
+  return 'viewer'
+}
+
+function openApprovePopup(req: JoinRequestResponse) {
+  approvePopupRequestId.value = req.id
+  approveAssignRole.value = normalizeJoinRequestRole(req.requested_role)
+}
+
+function closeApprovePopup() {
+  approvePopupRequestId.value = null
+}
+
+function handleApprovePopupVisibleChange(visible: boolean, req: JoinRequestResponse) {
+  if (visible) {
+    openApprovePopup(req)
+    return
+  }
+  if (approvePopupRequestId.value === req.id) {
+    closeApprovePopup()
+  }
+}
 
 function roleLabel(role: string) {
   if (role === 'admin') return t('organization.role.admin')
@@ -1307,11 +1427,6 @@ const fetchJoinRequests = async () => {
     const res = await listJoinRequests(props.orgId)
     if (res.success && res.data) {
       joinRequests.value = res.data.requests || []
-      assignRoleMap.value = {}
-      joinRequests.value.forEach((r) => {
-        const rRole = (r.requested_role === 'admin' || r.requested_role === 'editor' || r.requested_role === 'viewer') ? r.requested_role : 'viewer'
-        assignRoleMap.value[r.id] = rRole
-      })
     } else {
       joinRequests.value = []
     }
@@ -1334,21 +1449,27 @@ const refreshOrganizationAfterReview = async () => {
   ])
 }
 
-const handleApproveRequest = async (req: JoinRequestResponse) => {
-  if (!props.orgId) return
+const confirmApproveRequest = async (req: JoinRequestResponse) => {
+  const success = await handleApproveRequest(req, approveAssignRole.value)
+  if (success) closeApprovePopup()
+}
+
+const handleApproveRequest = async (req: JoinRequestResponse, assignRole: 'viewer' | 'editor' | 'admin'): Promise<boolean> => {
+  if (!props.orgId) return false
   reviewingRequestId.value = req.id
-  const assignRole = assignRoleMap.value[req.id] ?? (req.requested_role === 'admin' || req.requested_role === 'editor' ? req.requested_role : 'viewer')
   try {
     const res = await reviewJoinRequest(props.orgId, req.id, { approved: true, role: assignRole })
     if (res.success) {
       MessagePlugin.success(t('organization.settings.approveSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
       await refreshOrganizationAfterReview()
-    } else {
-      MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
+      return true
     }
+    MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
+    return false
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('organization.settings.reviewFailed'))
+    return false
   } finally {
     reviewingRequestId.value = null
   }
@@ -1738,6 +1859,8 @@ watch(() => props.visible, (newVal) => {
   if (newVal) {
     currentSection.value = 'basic'
     memberSearchQuery.value = ''
+    joinRequestSearchQuery.value = ''
+    approvePopupRequestId.value = null
     joinRequests.value = []
     if (props.mode === 'create') {
       // 创建模式：重置表单
@@ -2876,139 +2999,35 @@ watch(addMemberPopupVisible, (visible) => {
   }
 }
 
-// Join requests
-.empty-join-requests {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 20px;
-
-  .empty-icon {
-    color: var(--td-brand-color);
-    margin-bottom: 16px;
-  }
-
-  .empty-text {
-    font-size: 14px;
+// Join requests table
+.join-requests-wrap {
+  .join-request-message {
+    display: block;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
     color: var(--td-text-color-secondary);
-    margin: 0;
   }
-}
 
-.join-requests-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-
-  .join-request-item {
-    display: flex;
+  .join-request-role-change {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
-    background: var(--td-bg-color-container);
-    border-radius: 8px;
-    transition: background 0.2s;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
 
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    .request-user {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .request-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: var(--td-brand-color-light);
-      color: var(--td-brand-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .t-icon {
       flex-shrink: 0;
+      color: var(--td-text-color-placeholder);
     }
+  }
 
-    .request-info {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-
-      .request-name {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--td-text-color-primary);
-
-        .request-type-tag {
-          flex-shrink: 0;
-        }
-      }
-
-      .request-email {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-      }
-
-      .request-prev-role {
-        font-size: 12px;
-        color: var(--td-warning-color);
-        margin-top: 2px;
-      }
-
-      .request-message {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-        margin: 4px 0 0;
-        line-height: 1.4;
-      }
-
-      .request-requested-role {
-        font-size: 12px;
-        color: var(--td-text-color-secondary);
-        margin-top: 2px;
-      }
-
-      .request-time {
-        font-size: 12px;
-        color: var(--td-text-color-placeholder);
-        margin-top: 4px;
-      }
-    }
-
-    .request-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-
-      .request-assign-role {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-
-        .request-assign-label {
-          font-size: 12px;
-          color: var(--td-text-color-secondary);
-          white-space: nowrap;
-        }
-
-        .request-role-select {
-          min-width: 100px;
-        }
-      }
-    }
+  .join-request-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
   }
 }
 
@@ -3292,7 +3311,8 @@ watch(addMemberPopupVisible, (visible) => {
 
 /* 添加成员 / 权限升级弹出层（与空间成员管理邀请弹层一致） */
 .org-add-member-popup-overlay,
-.org-upgrade-popup-overlay {
+.org-upgrade-popup-overlay,
+.org-approve-request-popup-overlay {
   z-index: 3050 !important;
 
   .t-popup__content {
@@ -3303,8 +3323,10 @@ watch(addMemberPopupVisible, (visible) => {
   }
 }
 
-.org-upgrade-popup-overlay {
-  .org-upgrade-popup-inner {
+.org-upgrade-popup-overlay,
+.org-approve-request-popup-overlay {
+  .org-upgrade-popup-inner,
+  .org-approve-request-popup-inner {
     width: min(360px, calc(100vw - 32px));
     max-width: 100%;
     box-sizing: border-box;
@@ -3404,7 +3426,8 @@ watch(addMemberPopupVisible, (visible) => {
     }
   }
 
-  .org-upgrade-field .t-textarea {
+  .org-upgrade-field .t-textarea,
+  .org-upgrade-field .t-select {
     width: 100%;
     box-sizing: border-box;
   }
