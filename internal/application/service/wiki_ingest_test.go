@@ -79,6 +79,52 @@ func TestAppendUnique(t *testing.T) {
 	}
 }
 
+func TestWikiContentLanguage(t *testing.T) {
+	t.Run("defaults to simplified Chinese", func(t *testing.T) {
+		t.Setenv("WEKNORA_LANGUAGE", "")
+		if got := wikiContentLanguage(); got != "zh-CN" {
+			t.Fatalf("wikiContentLanguage() = %q, want zh-CN", got)
+		}
+	})
+
+	t.Run("uses configured system content language", func(t *testing.T) {
+		t.Setenv("WEKNORA_LANGUAGE", "ja-JP")
+		if got := wikiContentLanguage(); got != "ja-JP" {
+			t.Fatalf("wikiContentLanguage() = %q, want ja-JP", got)
+		}
+	})
+}
+
+func TestDecodePendingRowsNormalizesWikiLanguage(t *testing.T) {
+	t.Setenv("WEKNORA_LANGUAGE", "zh-CN")
+	svc := &wikiIngestService{}
+
+	rows := []*types.TaskPendingOp{
+		{
+			ID:       1,
+			Op:       WikiOpIngest,
+			DedupKey: "missing-language",
+			Payload:  []byte(`{"op":"ingest","knowledge_id":"missing-language"}`),
+		},
+		{
+			ID:       2,
+			Op:       WikiOpIngest,
+			DedupKey: "browser-english",
+			Payload:  []byte(`{"op":"ingest","knowledge_id":"browser-english","language":"en-US"}`),
+		},
+	}
+
+	ops, ids := svc.decodePendingRows(context.Background(), rows)
+	if len(ops) != 2 || len(ids) != 2 {
+		t.Fatalf("decodePendingRows() returned %d ops and %d ids, want 2 and 2", len(ops), len(ids))
+	}
+	for _, op := range ops {
+		if op.Language != "zh-CN" {
+			t.Errorf("op %q language = %q, want zh-CN", op.KnowledgeID, op.Language)
+		}
+	}
+}
+
 func TestReconstructContent(t *testing.T) {
 	chunks := []*types.Chunk{
 		{ChunkIndex: 2, ChunkType: types.ChunkTypeText, Content: "Third paragraph."},
