@@ -21,7 +21,7 @@ import (
 
 // ListFAQEntries lists FAQ entries under a FAQ knowledge base.
 func (s *knowledgeService) ListFAQEntries(ctx context.Context,
-	kbID string, page *types.Pagination, tagSeqID int64, keyword string, searchField string, sortOrder string,
+	kbID string, page *types.Pagination, tagUUIDs []string, legacyTagSeqID int64, keyword string, searchField string, sortOrder string,
 ) (*types.PageResult, error) {
 	if page == nil {
 		page = &types.Pagination{}
@@ -68,19 +68,17 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		return types.NewPageResult(0, page, []*types.FAQEntry{}), nil
 	}
 
-	// Convert tagSeqID to tagID (UUID)
-	var tagID string
-	if tagSeqID > 0 {
-		tag, err := s.tagRepo.GetBySeqID(ctx, effectiveTenantID, tagSeqID)
+	if len(tagUUIDs) == 0 && legacyTagSeqID > 0 {
+		tag, err := s.tagRepo.GetBySeqID(ctx, effectiveTenantID, legacyTagSeqID)
 		if err != nil {
 			return nil, werrors.NewNotFoundError("标签不存在")
 		}
-		tagID = tag.ID
+		tagUUIDs = []string{tag.ID}
 	}
 
 	chunkType := []types.ChunkType{types.ChunkTypeFAQ}
 	chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
-		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagID, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
+		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagUUIDs, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
 	)
 	if err != nil {
 		return nil, err

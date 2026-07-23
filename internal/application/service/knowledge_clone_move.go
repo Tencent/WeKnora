@@ -317,7 +317,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 				PageSize: chunkPageSize,
 			},
 			chunkType,
-			"",
+			nil,
 			"",
 			"",
 			"",

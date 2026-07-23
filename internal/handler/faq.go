@@ -67,7 +67,8 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 // @Param        id           path      string  true   "知识库ID"
 // @Param        page         query     int     false  "页码"
 // @Param        page_size    query     int     false  "每页数量"
-// @Param        tag_id       query     int     false  "标签ID筛选(seq_id)"
+// @Param        tag_id       query     int     false  "标签ID筛选(seq_id)，兼容旧版单标签"
+// @Param        tag_ids      query     string  false  "标签UUID筛选，逗号分隔（OR语义）"
 // @Param        keyword      query     string  false  "关键词搜索"
 // @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
 // @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
@@ -87,11 +88,12 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 		return
 	}
 
-	var tagSeqID int64
+	tagUUIDs := parseCommaSeparatedTagIDs(c.Query("tag_ids"))
+	var legacyTagSeqID int64
 	tagIDStr := c.Query("tag_id")
 	if tagIDStr != "" {
 		var err error
-		tagSeqID, err = strconv.ParseInt(tagIDStr, 10, 64)
+		legacyTagSeqID, err = strconv.ParseInt(tagIDStr, 10, 64)
 		if err != nil {
 			c.Error(errors.NewBadRequestError("tag_id 必须是整数"))
 			return
@@ -101,7 +103,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	searchField := secutils.SanitizeForLog(c.Query("search_field"))
 	sortOrder := secutils.SanitizeForLog(c.Query("sort_order"))
 
-	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagSeqID, keyword, searchField, sortOrder)
+	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagUUIDs, legacyTagSeqID, keyword, searchField, sortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)

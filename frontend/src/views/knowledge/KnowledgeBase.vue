@@ -2330,6 +2330,7 @@ async function createNewSession(value: string): Promise<void> {
     @open-manage="openTagManageFromEditDialog" />
 
   <KbTagManageDrawer
+    v-if="!isFAQ"
     v-model:visible="tagManageDrawerVisible"
     :kb-id="kbId"
     :is-faq="isFAQ"

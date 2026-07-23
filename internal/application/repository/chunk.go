@@ -158,7 +158,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	knowledgeID string,
 	page *types.Pagination,
 	chunkType []types.ChunkType,
-	tagID string,
+	tagIDs []string,
 	keyword string,
 	searchField string,
 	sortOrder string,
@@ -171,8 +171,8 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
-		if tagID != "" {
-			db = db.Where("tag_id = ?", tagID)
+		if len(tagIDs) > 0 {
+			db = db.Where("tag_id IN ?", tagIDs)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
