@@ -304,8 +304,8 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 // TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp exercises the
 // SQLite branch of UpdateChunks (datetime('now')) so the three-dialect
 // switch has a red-capable unit test that does not need a live DB.
-// The corresponding MySQL / PostgreSQL paths are covered by
-// TestUpdateChunks_RealDB_AllDialects under the integration_db tag.
+// The MySQL path is covered by TestMySQLDatabaseIntegration in
+// internal/container.
 func TestUpdateChunks_SQLite_RewritesFieldsAndTimestamp(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

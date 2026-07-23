@@ -10,7 +10,7 @@ import (
 //   - sqlite3:// → migrations/sqlite     (squash baseline, no version history)
 //   - mysql://    → migrations/mysql      (squash baseline, no version history)
 //   - anything else (postgres://, etc.) → migrations/versioned (the full
-//     72-migration PostgreSQL history)
+//     PostgreSQL migration history)
 //
 // These tests are the contract, written before the helper exists.
 // The function will not compile until added to migration.go.

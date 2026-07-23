@@ -14,8 +14,8 @@ import (
 // JSON path in resolveStorageProviderPending. SQLite stores JSON as TEXT
 // and uses json_extract(..., '$.provider'); the historical code used
 // PostgreSQL's ->>'provider' which errors on MySQL once any row has
-// non-null JSON. The MySQL path is covered by an integration_db test
-// against a live mysql:8.0 container.
+// non-null JSON. The MySQL path is covered by
+// TestMySQLDatabaseIntegration against a live mysql:8.0 container.
 func TestResolveStorageProviderPending_SQLite(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

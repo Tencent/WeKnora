@@ -24,9 +24,8 @@ type MySQLPoolConfig struct {
 // buildMySQLDSN constructs the two DSN strings WeKnora needs for a
 // MySQL metadata database, plus the parsed pool configuration.
 //
-// Returns an error if any configuration value is invalid (bad port,
-// bad duration, maxIdle > maxOpen, TLS cert without key, etc.) so the
-// caller can fail fast instead of starting with a broken connection.
+// Returns an error when required coordinates are missing or maxIdle exceeds
+// maxOpen. Invalid optional numeric/duration values fall back to defaults.
 //
 // env is an os.Getenv-shaped function so tests can inject values.
 func buildMySQLDSN(env func(string) string) (gormDSN, migrateDSN string, pool MySQLPoolConfig, err error) {
@@ -41,6 +40,16 @@ func buildMySQLDSN(env func(string) string) (gormDSN, migrateDSN string, pool My
 
 	if host == "" {
 		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_HOST is empty; cannot construct MySQL DSN")
+	}
+	if user == "" {
+		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_USER is empty; cannot construct MySQL DSN")
+	}
+	if dbname == "" {
+		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_NAME is empty; cannot construct MySQL DSN")
+	}
+	portNumber, portErr := strconv.Atoi(port)
+	if portErr != nil || portNumber < 1 || portNumber > 65535 {
+		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_PORT must be an integer between 1 and 65535, got %q", port)
 	}
 
 	// net.JoinHostPort wraps IPv6 hosts in [...] (e.g. "[::1]:3306").
@@ -65,10 +74,6 @@ func buildMySQLDSN(env func(string) string) (gormDSN, migrateDSN string, pool My
 	cfg.ReadTimeout = getEnvDuration(env, "DB_READ_TIMEOUT", 30*time.Second)
 	cfg.WriteTimeout = getEnvDuration(env, "DB_WRITE_TIMEOUT", 30*time.Second)
 
-	// TLS: operators who need mTLS can register a named TLS config via the
-	// go-sql-driver in a follow-up. For v1 the driver's built-in tls=true
-	// (set via cfg.Params) covers the common case.
-
 	gormDSN = cfg.FormatDSN()
 
 	// golang-migrate DSN: same coordinates + multiStatements for batch DDL.
@@ -89,7 +94,10 @@ func buildMySQLDSN(env func(string) string) (gormDSN, migrateDSN string, pool My
 
 	maxOpen := getEnvInt(env, "DB_MAX_OPEN_CONNS", 50)
 	maxIdle := getEnvInt(env, "DB_MAX_IDLE_CONNS", 10)
-	if maxIdle > maxOpen {
+	if maxOpen < 0 || maxIdle < 0 {
+		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_MAX_OPEN_CONNS and DB_MAX_IDLE_CONNS must not be negative")
+	}
+	if maxOpen > 0 && maxIdle > maxOpen {
 		return "", "", MySQLPoolConfig{}, fmt.Errorf("DB_MAX_IDLE_CONNS (%d) must not exceed DB_MAX_OPEN_CONNS (%d)", maxIdle, maxOpen)
 	}
 

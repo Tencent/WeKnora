@@ -177,6 +177,9 @@ func TestValidateDriverCombination_ErrorIsActionable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for mysql+postgres")
 	}
+	if strings.Contains(err.Error(), "elasticsearch_v7") {
+		t.Fatalf("error must not suggest a keyword-only engine: %v", err)
+	}
 	// Must mention at least one external engine the operator can switch to.
 	for _, hint := range []string{"qdrant", "milvus", "elasticsearch_v8", "opensearch"} {
 		if strings.Contains(err.Error(), hint) {

@@ -291,7 +291,7 @@ mysql:
   enabled: false
 
   # -- MySQL image (full reference including repository:tag).
-  # Defaults match the upstream MySQL 8.0 image.
+  # Pinned to the version used by the integration test.
   image: mysql:8.0.37
 
   # -- Resource requests and limits

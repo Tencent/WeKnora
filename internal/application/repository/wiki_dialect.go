@@ -67,17 +67,6 @@ func wikiJSONEqual(dialectName, column string) string {
 	}
 }
 
-func wikiEmptyJSONArray(dialectName string) string {
-	switch dialectName {
-	case "postgres":
-		return "'[]'::JSONB"
-	case "mysql":
-		return "(JSON_ARRAY())"
-	default:
-		return "'[]'"
-	}
-}
-
 // wikiCaseInsensitiveRegex: PG ~*, MySQL REGEXP_LIKE('i'), SQLite LIKE.
 func wikiCaseInsensitiveRegex(dialectName, column, placeholder string) string {
 	switch dialectName {
@@ -112,6 +101,13 @@ func wikiSimilarityThreshold(dialectName, column, placeholder string) string {
 	default:
 		return fmt.Sprintf("LOWER(%s) LIKE '%%' || LOWER(%s) || '%%'", column, placeholder)
 	}
+}
+
+func wikiTextLength(dialectName, column string) string {
+	if dialectName == "mysql" {
+		return fmt.Sprintf("CHAR_LENGTH(%s)", column)
+	}
+	return fmt.Sprintf("LENGTH(%s)", column)
 }
 
 // wikiFullTextSearch: PG to_tsvector; MySQL/SQLite use multi-column LIKE.

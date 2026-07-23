@@ -15,7 +15,7 @@ import (
 // PostgreSQL `metadata->>? = ?` syntax which fails on MySQL with
 // "Invalid JSON path expression" and is not the SQLite idiom either.
 //
-// The corresponding MySQL path is covered by an integration_db test
+// The corresponding MySQL path is covered by TestMySQLDatabaseIntegration
 // against a live mysql:8.0 container; this SQLite test is the
 // red-capable unit-level loop.
 func TestFindByMetadataKey_SQLite(t *testing.T) {

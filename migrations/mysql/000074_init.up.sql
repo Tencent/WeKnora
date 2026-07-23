@@ -1,6 +1,6 @@
 -- MySQL 8.0.16+ baseline schema for WeKnora metadata layer.
--- Squashed from migrations/versioned/*.up.sql (PostgreSQL, 72 incremental
--- migrations). Fresh MySQL deployments only need this head schema.
+-- Squashed from migrations/versioned/*.up.sql through version 74.
+-- Fresh MySQL deployments only need this head schema.
 --
 -- Requires MySQL 8.0.16+ (CHECK constraint enforcement, JSON expression
 -- defaults, utf8mb4_0900_ai_ci).
@@ -366,6 +366,8 @@ CREATE TABLE mcp_oauth_tokens (
     refresh_token TEXT,
     token_type VARCHAR(32),
     expires_at DATETIME(6) NULL,
+    refresh_lease_id VARCHAR(36),
+    refresh_lease_until DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     CONSTRAINT fk_mcp_oauth_tokens_service FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE,
@@ -869,11 +871,14 @@ CREATE TABLE audit_logs (
     request_method VARCHAR(16) NOT NULL DEFAULT '',
     outcome VARCHAR(16) NOT NULL DEFAULT 'success',
     details JSON NOT NULL DEFAULT (JSON_OBJECT()),
+    scope_type VARCHAR(32) NOT NULL DEFAULT '',
+    scope_id VARCHAR(64) NOT NULL DEFAULT '',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     INDEX idx_audit_logs_tenant_id_desc (tenant_id, id DESC),
     INDEX idx_audit_logs_actor (actor_user_id),
     INDEX idx_audit_logs_tenant_action (tenant_id, action),
-    INDEX idx_audit_logs_created_at (created_at)
+    INDEX idx_audit_logs_created_at (created_at),
+    INDEX idx_audit_logs_tenant_scope_desc (tenant_id, scope_type, scope_id, id DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- user_resource_favorites

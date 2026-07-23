@@ -94,6 +94,29 @@ func TestBuildMySQLDSN_EmptyHostErrors(t *testing.T) {
 	}
 }
 
+func TestBuildMySQLDSN_RequiredFieldsAndPortAreValidated(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "empty user", key: "DB_USER", value: ""},
+		{name: "empty database", key: "DB_NAME", value: ""},
+		{name: "non-numeric port", key: "DB_PORT", value: "mysql"},
+		{name: "port out of range", key: "DB_PORT", value: "70000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := baseEnv()
+			env[tt.key] = tt.value
+			_, _, _, err := buildMySQLDSN(testEnv(env))
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestBuildMySQLDSN_DefaultPortWhenUnset(t *testing.T) {
 	env := baseEnv()
 	delete(env, "DB_PORT")
@@ -131,5 +154,24 @@ func TestBuildMySQLDSN_MaxIdleExceedsMaxOpenErrors(t *testing.T) {
 	_, _, _, err := buildMySQLDSN(testEnv(env))
 	if err == nil {
 		t.Fatal("expected error when maxIdle > maxOpen")
+	}
+}
+
+func TestBuildMySQLDSN_UnlimitedMaxOpenAndNegativePoolValues(t *testing.T) {
+	env := baseEnv()
+	env["DB_MAX_OPEN_CONNS"] = "0"
+	env["DB_MAX_IDLE_CONNS"] = "10"
+	_, _, pool, err := buildMySQLDSN(testEnv(env))
+	if err != nil {
+		t.Fatalf("max open 0 means unlimited and should be accepted: %v", err)
+	}
+	if pool.MaxOpenConns != 0 || pool.MaxIdleConns != 10 {
+		t.Fatalf("unexpected pool config: %+v", pool)
+	}
+
+	env["DB_MAX_IDLE_CONNS"] = "-1"
+	_, _, _, err = buildMySQLDSN(testEnv(env))
+	if err == nil {
+		t.Fatal("negative pool values must be rejected")
 	}
 }

@@ -34,7 +34,7 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 
 // Enqueue inserts a single op. Callers must populate TenantID/TaskType/
 // Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
-// EnqueuedAt is filled with the DB-side default if left zero.
+// EnqueuedAt is normalized in preparePendingOp if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
 	if err := preparePendingOp(op); err != nil {
 		return err
@@ -58,11 +58,14 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
+	if op.EnqueuedAt.IsZero() {
+		op.EnqueuedAt = time.Now().UTC()
+	}
 	return nil
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
+// durable work after a KB was soft-deleted. On Postgres/MySQL the share lock
 // serializes this check+insert transaction against the row update performed by
 // soft deletion: whichever operation acquires the row first determines the
 // order, and the deletion path's subsequent scope scrub removes any insert
@@ -83,7 +86,7 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
 		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		if dialectSupportsSkipLocked(dialector.Name()) {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -406,6 +409,9 @@ func (r *taskDeadLetterRepository) Insert(ctx context.Context, dl *types.TaskDea
 	}
 	if len(dl.Payload) == 0 {
 		dl.Payload = []byte("{}")
+	}
+	if dl.FailedAt.IsZero() {
+		dl.FailedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(dl).Error
 }

@@ -74,20 +74,30 @@ func TestJSONPathExpr_Postgres_UsesArrow(t *testing.T) {
 func TestJSONPathExpr_MySQL_UsesDollarPath(t *testing.T) {
 	got, err := JSONPathExpr("mysql", "metadata", "external_id")
 	assert.NoError(t, err)
-	assert.Equal(t, "metadata ->> '$.external_id'", got,
+	assert.Equal(t, "metadata ->> '$.\"external_id\"'", got,
 		"mysql requires the $.key JSON path prefix; bare-key form errors with 1064")
 }
 
 func TestJSONPathExpr_SQLite_UsesJsonExtract(t *testing.T) {
 	got, err := JSONPathExpr("sqlite", "metadata", "external_id")
 	assert.NoError(t, err)
-	assert.Equal(t, "json_extract(metadata, '$.external_id')", got)
+	assert.Equal(t, "json_extract(metadata, '$.\"external_id\"')", got)
 }
 
 func TestJSONPathExpr_QualifiedColumnPreserved(t *testing.T) {
 	got, err := JSONPathExpr("mysql", "kb.metadata", "external_id")
 	assert.NoError(t, err)
-	assert.Equal(t, "kb.metadata ->> '$.external_id'", got)
+	assert.Equal(t, "kb.metadata ->> '$.\"external_id\"'", got)
+}
+
+func TestJSONPathExpr_HyphenatedKeyIsQuoted(t *testing.T) {
+	mysqlExpr, err := JSONPathExpr("mysql", "metadata", "source-resource-id")
+	assert.NoError(t, err)
+	assert.Equal(t, "metadata ->> '$.\"source-resource-id\"'", mysqlExpr)
+
+	sqliteExpr, err := JSONPathExpr("sqlite", "metadata", "source-resource-id")
+	assert.NoError(t, err)
+	assert.Equal(t, "json_extract(metadata, '$.\"source-resource-id\"')", sqliteExpr)
 }
 
 // validateJSONPathKey must reject anything outside [a-zA-Z0-9_-] or

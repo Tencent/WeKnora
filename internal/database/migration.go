@@ -79,8 +79,8 @@ func captureMigrationFailure(m *migrate.Migrate, err error) error {
 }
 
 // migrationsPathForDSN picks the migration directory based on the DSN's
-// scheme. SQLite and MySQL ship as a squashed baseline (one big init
-// file rather than 72 incremental ALTERs), since fresh deployments of
+// scheme. SQLite and MySQL ship as a squashed baseline (one head-schema
+// file rather than the incremental PostgreSQL history), since fresh deployments of
 // those dialects only ever need the head schema. PostgreSQL keeps its
 // full versioned history because existing deployments may be at any
 // historical version and need to replay forward.

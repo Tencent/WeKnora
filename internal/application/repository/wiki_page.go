@@ -921,7 +921,7 @@ func (r *wikiPageRepository) FindSimilarPages(
 	// result order across calls.
 	orderClause := "sim DESC"
 	if dialect != "postgres" {
-		orderClause = "sim DESC, CHAR_LENGTH(title) ASC, updated_at DESC"
+		orderClause = "sim DESC, " + wikiTextLength(dialect, "title") + " ASC, updated_at DESC"
 	}
 
 	var rows []types.WikiPageLite
@@ -1108,11 +1108,11 @@ func (r *wikiPageRepository) CountByType(ctx context.Context, kbID string) (map[
 // CountOrphans returns the number of pages with no inbound links
 func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int64, error) {
 	var count int64
-	emptyArray := wikiEmptyJSONArray(wikiDialectName(r.db))
+	emptyInLinks := wikiJSONArrayLength(wikiDialectName(r.db), "in_links") + " = 0"
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", kbID).
-		Where("(in_links IS NULL OR in_links = "+emptyArray+")").
+		Where(emptyInLinks).
 		// Exclude index and log pages as they are naturally root pages
 		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
 		Count(&count).Error; err != nil {

@@ -25,8 +25,8 @@ func CaseInsensitiveLike(dialectName, column, placeholder string) string {
 // a JSON column at the given key, shaped for the active database dialect.
 //
 //   - postgres: "col ->> 'key'"              (jsonb text extraction)
-//   - mysql:    "col ->> '$.key'"            (MySQL 8.0+ JSON path)
-//   - sqlite:   "json_extract(col, '$.key')" (portable across SQLite versions)
+//   - mysql:    "col ->> '$.\"key\"'"            (MySQL 8.0+ JSON path)
+//   - sqlite:   "json_extract(col, '$.\"key\"')" (portable across SQLite versions)
 //
 // key must be a simple identifier matching [a-zA-Z0-9_-]. Dotted paths
 // and metacharacters are rejected with an error rather than silently
@@ -40,9 +40,9 @@ func JSONPathExpr(dialectName, column, key string) (string, error) {
 	case "postgres":
 		return fmt.Sprintf("%s ->> '%s'", column, key), nil
 	case "mysql":
-		return fmt.Sprintf("%s ->> '$.%s'", column, key), nil
+		return fmt.Sprintf("%s ->> '$.\"%s\"'", column, key), nil
 	default:
-		return fmt.Sprintf("json_extract(%s, '$.%s')", column, key), nil
+		return fmt.Sprintf("json_extract(%s, '$.\"%s\"')", column, key), nil
 	}
 }
 

@@ -9,9 +9,8 @@ import (
 
 // TestWikiDialectHelpers covers the SQL fragment shape for each
 // dialect-aware wiki helper. These are pure-string functions, so the
-// test asserts the exact output per dialect. The behavioural
-// round-trip (do the fragments actually run on each DB) is covered by
-// integration_db tests against a live mysql:8.0 container.
+// test asserts the exact output per dialect. The behavioural MySQL
+// round-trip is covered by TestMySQLDatabaseIntegration.
 
 func TestWikiJSONArrayLength(t *testing.T) {
 	tests := []struct {
@@ -65,12 +64,6 @@ func TestWikiJSONEqual(t *testing.T) {
 	assert.Equal(t, "category_path = ?", wikiJSONEqual("sqlite", "category_path"))
 }
 
-func TestWikiEmptyJSONArray(t *testing.T) {
-	assert.Equal(t, "'[]'::JSONB", wikiEmptyJSONArray("postgres"))
-	assert.Equal(t, "(JSON_ARRAY())", wikiEmptyJSONArray("mysql"))
-	assert.Equal(t, "'[]'", wikiEmptyJSONArray("sqlite"))
-}
-
 func TestWikiCaseInsensitiveRegex(t *testing.T) {
 	assert.Equal(t, "title ~* ?", wikiCaseInsensitiveRegex("postgres", "title", "?"))
 	// MySQL uses REGEXP_LIKE with the 'i' match-type flag so the
@@ -100,6 +93,12 @@ func TestWikiSimilarityThreshold(t *testing.T) {
 	assert.Contains(t, wikiSimilarityThreshold("postgres", "title", "?"), "lower(title) % ?")
 	assert.Contains(t, wikiSimilarityThreshold("mysql", "title", "?"), "LOWER(title) LIKE CONCAT")
 	assert.Contains(t, wikiSimilarityThreshold("sqlite", "title", "?"), "LOWER(title) LIKE")
+}
+
+func TestWikiTextLength(t *testing.T) {
+	assert.Equal(t, "CHAR_LENGTH(title)", wikiTextLength("mysql", "title"))
+	assert.Equal(t, "LENGTH(title)", wikiTextLength("postgres", "title"))
+	assert.Equal(t, "LENGTH(title)", wikiTextLength("sqlite", "title"))
 }
 
 func TestWikiFullTextSearch(t *testing.T) {

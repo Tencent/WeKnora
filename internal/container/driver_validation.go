@@ -142,16 +142,24 @@ func hasVectorCapableEngine(drivers []string, registry map[string][]types.Retrie
 	return false
 }
 
-// validExternalRetrieveEnginesHint returns a human-readable list of
-// retriever engines that are usable under DB_DRIVER=mysql. It is built
-// from the actual registry (internal/types/tenant.go) minus the
-// local-only engines, so the hint can never go stale or suggest a name
-// the system does not recognise.
+// validExternalRetrieveEnginesHint returns vector-capable retriever engines
+// usable under DB_DRIVER=mysql. Building this from the registry keeps error
+// messages from suggesting keyword-only engines such as elasticsearch_v7.
 func validExternalRetrieveEnginesHint() string {
 	registry := types.GetRetrieverEngineMapping()
 	var names []string
-	for name := range registry {
+	for name, capabilities := range registry {
 		if _, isLocal := localOnlyRetrieveEngines[name]; isLocal {
+			continue
+		}
+		vectorCapable := false
+		for _, capability := range capabilities {
+			if capability.RetrieverType == types.VectorRetrieverType {
+				vectorCapable = true
+				break
+			}
+		}
+		if !vectorCapable {
 			continue
 		}
 		names = append(names, name)

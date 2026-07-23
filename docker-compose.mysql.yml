@@ -34,7 +34,7 @@
 
 services:
   postgres:  # keep the name so the app's depends_on: postgres resolves
-    image: mysql:8.0.37   # pinned patch version (latest 8.0 release)
+    image: mysql:8.0.37   # pinned, known-compatible MySQL 8.0 patch
     container_name: WeKnora-mysql
     environment:
       # Clear the inherited PostgreSQL env vars — without this the MySQL

@@ -47,7 +47,7 @@ WeKnora 使用 [golang-migrate](https://github.com/golang-migrate/migrate) 管�
 
 ### MySQL 迁移文件
 
-MySQL 使用独立的 squash baseline（`migrations/mysql/000000_init.up.sql`），而不是 PostgreSQL 的 71 个增量迁移。全新 MySQL 部署只需要这一个文件。
+MySQL 使用独立的 squash baseline（`migrations/mysql/000074_init.up.sql`），其版本号与当前 PostgreSQL schema head 对齐。全新 MySQL 部署只需要这一个文件；后续两种数据库从 `000075` 开始使用相同的迁移版本序列。
 
 ### 手动迁移
 
@@ -105,17 +105,6 @@ DB_DRIVER=mysql ./scripts/migrate.sh down
 | `DB_READ_TIMEOUT` | 30s | 读超时 |
 | `DB_WRITE_TIMEOUT` | 30s | 写超时 |
 
-### TLS
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `DB_USE_TLS` | false | 启用 TLS |
-| `DB_TLS_SERVER_NAME` | | TLS 服务器名（SNI） |
-| `DB_TLS_CA` | | CA 证书文件路径 |
-| `DB_TLS_CERT` | | 客户端证书文件路径 |
-| `DB_TLS_KEY` | | 客户端私钥文件路径 |
-| `DB_TLS_INSECURE_SKIP_VERIFY` | false | 跳过证书验证（仅开发环境） |
-
 ### 时区
 
 所有时间戳以 UTC 存储：
@@ -156,6 +145,10 @@ app:
     RETRIEVE_DRIVER: qdrant  # MySQL 模式必须使用外部检索引擎
 
 # 也可以使用外部数据库（不渲染内部 DB）
+postgresql:
+  enabled: false
+mysql:
+  enabled: false
 database:
   external: true
   driver: mysql

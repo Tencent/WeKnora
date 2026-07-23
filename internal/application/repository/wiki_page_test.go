@@ -357,3 +357,18 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), got)
 }
+
+func TestFindSimilarPages_SQLiteUsesPortableLengthFunction(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	page := makeWikiPage("kb-similar", "entity/mysql", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	page.Title = "MySQL"
+	require.NoError(t, repo.Create(ctx, page))
+
+	got, err := repo.FindSimilarPages(ctx, "kb-similar", "mysql", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, page.Slug, got[0].Slug)
+}

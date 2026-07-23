@@ -11,8 +11,9 @@ import (
 
 // Schema parity test for the MySQL squash baseline.
 //
-// The squash in migrations/mysql/000000_init.up.sql is a hand-translated
-// distillation of 72 PostgreSQL migrations into one MySQL file. It is
+// The squash in migrations/mysql/000074_init.up.sql is a hand-translated
+// distillation of PostgreSQL migrations 000000 through 000074 into one
+// MySQL file. It is
 // mechanical but human-error-prone — a missed table or column surfaces
 // as a late runtime error on a user's MySQL instance. These tests parse
 // the file (no live MySQL needed) and assert structural invariants:
@@ -33,7 +34,7 @@ import (
 // (internal/database/), so the repo root is three levels up.
 func pathToMySqlBaseline(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs("../../migrations/mysql/000000_init.up.sql")
+	abs, err := filepath.Abs("../../migrations/mysql/000074_init.up.sql")
 	if err != nil {
 		t.Fatalf("resolve mysql baseline path: %v", err)
 	}
@@ -45,7 +46,7 @@ func pathToMySqlBaseline(t *testing.T) string {
 
 // requiredMetadataTables is the canonical list of tables that must
 // exist in the MySQL baseline. This mirrors the final-state table set
-// after applying all 72 PostgreSQL migrations (accounting for RENAMEs
+// after applying PostgreSQL migrations through version 74 (accounting for RENAMEs
 // and the deliberate exclusion of the deprecated
 // organization_members_pre_plan3 table, which a fresh MySQL deployment
 // does not need). If a new metadata table is added in a future PG
@@ -140,7 +141,7 @@ var jsonArrayColumns = []struct {
 // and asserts that every JSON column whose Go type is a slice uses
 // DEFAULT (JSON_ARRAY()) - not JSON_OBJECT(). A parsing test so it runs
 // without a live MySQL; the behavioural round-trip is covered by
-// TestJSONArrayDefaultsRoundTrip under the integration_db tag.
+// TestMySQLDatabaseIntegration in internal/container.
 func TestMySQLBaseline_JSONSliceColumnsDefaultToArray(t *testing.T) {
 	content, err := os.ReadFile(pathToMySqlBaseline(t))
 	if err != nil {
@@ -310,7 +311,7 @@ func TestMySQLBaseline_TenantsAutoIncrement10000(t *testing.T) {
 
 func TestMySQLBaseline_DownDropsAllUpTables(t *testing.T) {
 	upPath := pathToMySqlBaseline(t)
-	downPath := filepath.Dir(upPath) + "/000000_init.down.sql"
+	downPath := filepath.Dir(upPath) + "/000074_init.down.sql"
 	if _, err := os.Stat(downPath); err != nil {
 		t.Fatalf("down migration file not found at %s: %v", downPath, err)
 	}
@@ -410,6 +411,8 @@ var requiredColumnsByTable = map[string][]string{
 	"chunks":                  {"id", "tenant_id", "knowledge_base_id", "content", "is_enabled", "flags", "status", "tag_id"},
 	"knowledge_bases":         {"id", "tenant_id", "name", "storage_provider_config"},
 	"storage_backends":        {"id", "tenant_id", "provider"},
+	"audit_logs":              {"id", "tenant_id", "scope_type", "scope_id"},
+	"mcp_oauth_tokens":        {"id", "refresh_lease_id", "refresh_lease_until"},
 }
 
 // TestMySQLBaseline_RequiredColumnsPresent asserts that every column
@@ -423,7 +426,7 @@ var requiredColumnsByTable = map[string][]string{
 //
 // It does NOT check column types, defaults, nullability, or indexes -
 // those are covered by the JSON-defaults tests above and the
-// integration_db round-trip tests in this package. The goal here is to
+// the opt-in MySQL integration test. The goal here is to
 // cheaply catch the dominant failure mode (column name drift) without
 // maintaining a full type map.
 func TestMySQLBaseline_RequiredColumnsPresent(t *testing.T) {

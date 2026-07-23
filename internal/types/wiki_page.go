@@ -152,7 +152,7 @@ type WikiPage struct {
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
 	// URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
 	// Unique within a knowledge base
-	Slug string `json:"slug" gorm:"type:varchar(255);index:idx_wiki_pages_kb_slug_live"`
+	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
 	// Human-readable title
 	Title string `json:"title" gorm:"type:varchar(512)"`
 	// Page type: summary, entity, concept, index, log, synthesis, comparison

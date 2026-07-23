@@ -86,6 +86,7 @@ func TestTaskPendingOps_Enqueue_AssignsIDAndDefaults(t *testing.T) {
 	require.NoError(t, repo.Enqueue(ctx, op))
 	assert.NotZero(t, op.ID)
 	assert.Equal(t, json.RawMessage("{}"), op.Payload, "nil payload should default to {}")
+	assert.False(t, op.EnqueuedAt.IsZero(), "zero enqueue time must be normalized before insert")
 }
 
 // TestTaskPendingOps_Enqueue_RejectsMissingFields covers the validation
@@ -624,6 +625,7 @@ func TestTaskDeadLetter_Insert_DefaultsAndAssignsID(t *testing.T) {
 	assert.NotZero(t, dl.ID)
 	assert.Equal(t, types.TaskScopeUnknown, dl.Scope)
 	assert.Equal(t, json.RawMessage("{}"), dl.Payload)
+	assert.False(t, dl.FailedAt.IsZero(), "zero failure time must be normalized before insert")
 }
 
 // TestTaskDeadLetter_Insert_RejectsMissingFields verifies the guard

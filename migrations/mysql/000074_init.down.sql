@@ -1,4 +1,4 @@
--- Reverse of 000000_init.up.sql: drop all tables in reverse dependency
+-- Reverse of 000074_init.up.sql: drop all tables in reverse dependency
 -- order. Foreign keys are disabled so drop order within the SET block
 -- is tolerant of any remaining references.
 
