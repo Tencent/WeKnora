@@ -275,29 +275,71 @@ func TestServeFilesRejectsPathWithoutTenantSegment(t *testing.T) {
 	}
 }
 
-func TestServeFilesRejectsAPIKeyPrincipal(t *testing.T) {
+// /files carries its own API-key guard (middleware.AllowFileServeAPIKey):
+// full-access and tenant-wide retrieve keys may serve tenant-bounded paths,
+// but KB-restricted keys (and keys lacking retrieve) are denied because a raw
+// storage path cannot be bounded to a KB allow-list.
+func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "local")
 
-	engine := gin.New()
-	serveFiles(engine, &stubFileService{
-		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called for API-key principal, got %q", filePath)
-			return nil, nil
+	const filePath = "local://42/docs/example.txt"
+
+	cases := []struct {
+		name     string
+		scope    types.TenantAPIKeyScope
+		wantCode int
+	}{
+		{
+			name:     "full access allowed",
+			scope:    types.TenantAPIKeyScope{FullAccess: true},
+			wantCode: http.StatusOK,
 		},
-	})
+		{
+			name: "tenant-wide retrieve allowed",
+			scope: types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantCode: http.StatusOK,
+		},
+		{
+			name: "kb-restricted retrieve denied",
+			scope: types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-1"},
+				Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name: "non-retrieve capability denied",
+			scope: types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityChat)},
+			},
+			wantCode: http.StatusForbidden,
+		},
+	}
 
-	filePath := "local://42/docs/example.txt"
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
-	ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
-	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
-	req = req.WithContext(ctx)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := gin.New()
+			serveFiles(engine, &stubFileService{
+				getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader("body")), nil
+				},
+			})
 
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
+			req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+			ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
+			ctx = types.WithTenantAPIKeyScope(ctx, tc.scope)
+			req = req.WithContext(ctx)
 
-	if got, want := recorder.Code, http.StatusForbidden; got != want {
-		t.Fatalf("status = %d, want %d body=%s", got, want, recorder.Body.String())
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, req)
+
+			if got := recorder.Code; got != tc.wantCode {
+				t.Fatalf("status = %d, want %d body=%s", got, tc.wantCode, recorder.Body.String())
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -771,6 +773,39 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 		t.Errorf("expected 4 items, got %d", len(items))
 		for i, it := range items {
 			t.Logf("  item[%d]: %s (obj_type=%s)", i, it.Title, it.Metadata["obj_type"])
+		}
+	}
+}
+
+func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
+	nodes := []wikiNode{
+		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800"},
+		{NodeToken: "nt4", ObjToken: "obj4", ObjType: "mindnote", Title: "Mind", NodeEditTime: "1711468800"},
+		{NodeToken: "nt5", ObjToken: "obj5", ObjType: "slides", Title: "Slides", NodeEditTime: "1711468800"},
+	}
+	ts, cfg := fakeFeishu(nodes)
+	defer ts.Close()
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stderr)
+
+	c := NewConnector(RegionFeishu)
+	if _, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"}); err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"sync summary",
+		"discovered=3",
+		"fetched=1",
+		"skipped_unsupported=2",
+		"mindnote:1",
+		"slides:1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary log missing %q; got:\n%s", want, out)
 		}
 	}
 }

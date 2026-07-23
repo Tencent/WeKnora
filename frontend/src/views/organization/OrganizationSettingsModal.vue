@@ -1071,6 +1071,17 @@ const fetchJoinRequests = async () => {
   }
 }
 
+/**
+ * 审批结果会同时影响设置弹窗、空间卡片和全局侧栏中的待审批数量。
+ * 后两处读取的是 organization store，因此必须绕过列表缓存并同步最新计数。
+ */
+const refreshOrganizationAfterReview = async () => {
+  await Promise.all([
+    fetchOrgDetail(),
+    orgStore.fetchOrganizations({ force: true })
+  ])
+}
+
 const handleApproveRequest = async (req: JoinRequestResponse) => {
   if (!props.orgId) return
   reviewingRequestId.value = req.id
@@ -1080,7 +1091,7 @@ const handleApproveRequest = async (req: JoinRequestResponse) => {
     if (res.success) {
       MessagePlugin.success(t('organization.settings.approveSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
-      await fetchOrgDetail()
+      await refreshOrganizationAfterReview()
     } else {
       MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
     }
@@ -1099,7 +1110,7 @@ const handleRejectRequest = async (req: JoinRequestResponse) => {
     if (res.success) {
       MessagePlugin.success(t('organization.settings.rejectSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
-      await fetchOrgDetail()
+      await refreshOrganizationAfterReview()
     } else {
       MessagePlugin.error(res.message || t('organization.settings.reviewFailed'))
     }

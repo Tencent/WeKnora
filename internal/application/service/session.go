@@ -22,6 +22,52 @@ func sessionUserIDFromContext(ctx context.Context) string {
 	return types.SessionOwnerIDFromContext(ctx)
 }
 
+// loadSessionForRead loads a session honoring the caller's per-user scope, with
+// an Admin+ fallback that additionally permits reading tenant channel sessions
+// (API-key, IM, and embed) from the Web console. Non-admin callers must not
+// open channel-managed rows even when legacy empty user_id scope would match.
+// Write paths keep the strict scope and must not use this helper.
+func loadSessionForRead(
+	ctx context.Context,
+	repo interfaces.SessionRepository,
+	tenantID uint64,
+	ownerID, sessionID string,
+) (*types.Session, error) {
+	isAdmin := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
+	principal, hasPrincipal := types.PrincipalFromContext(ctx)
+	isIMRuntime := hasPrincipal && principal.Type == types.PrincipalIMUser
+
+	session, err := repo.Get(ctx, tenantID, ownerID, sessionID)
+	if err == nil {
+		imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, sessionID)
+		if types.SessionRequiresAdminConsoleRead(session, imPlatform) && !isAdmin && !isIMRuntime {
+			return nil, apperrors.ErrSessionNotFound
+		}
+		if imPlatform != "" {
+			session.IMPlatform = imPlatform
+		}
+		return session, nil
+	}
+	if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
+		return session, err
+	}
+	if !isAdmin {
+		return nil, err
+	}
+	s, e := repo.GetByID(ctx, tenantID, sessionID)
+	if e != nil {
+		return nil, err
+	}
+	imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, sessionID)
+	if !types.SessionRequiresAdminConsoleRead(s, imPlatform) {
+		return nil, err
+	}
+	if imPlatform != "" {
+		s.IMPlatform = imPlatform
+	}
+	return s, nil
+}
+
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
 	return fmt.Sprintf("%s-%s", uuid.New().String()[:8], suffix)
@@ -120,7 +166,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	logger.Infof(ctx, "Retrieving session, ID: %s, tenant ID: %d", id, tenantID)
 
 	// Get session from repository
-	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+	session, err := loadSessionForRead(ctx, s.sessionRepo, tenantID, userID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
@@ -129,8 +175,32 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 		return nil, err
 	}
 
+	// Best-effort IM origin so the Web console can classify the session's
+	// folder on read; a lookup failure must not fail the detail request.
+	if session.IMPlatform == "" {
+		if platform, pErr := s.sessionRepo.GetIMPlatform(ctx, tenantID, session.ID); pErr == nil {
+			session.IMPlatform = platform
+		} else {
+			logger.Warnf(ctx, "Failed to resolve IM platform for session %s: %v", session.ID, pErr)
+		}
+	}
+
 	logger.Infof(ctx, "Session retrieved successfully, ID: %s, tenant ID: %d", session.ID, session.TenantID)
 	return session, nil
+}
+
+// GetOwnedSession loads a session strictly within the caller's owner scope.
+// Unlike GetSession it does NOT apply the Admin+ API-key read fallback
+// (loadSessionForRead), so it is the correct check for write/mutation
+// endpoints: a tenant admin may open and read an API-key session, but must not
+// be able to modify it (title, attachments, streaming state, messages).
+func (s *sessionService) GetOwnedSession(ctx context.Context, id string) (*types.Session, error) {
+	if id == "" {
+		return nil, stderrors.New("session id is required")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+	return s.sessionRepo.Get(ctx, tenantID, userID, id)
 }
 
 // GetSessionByID loads a session by tenant and id without user scoping.
@@ -211,7 +281,18 @@ func (s *sessionService) ListSessions(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
+	// API / IM / embed source filters are tenant-wide admin views over channel
+	// traffic. Gate them behind Admin+ and drop the per-user owner scope so an
+	// Owner/admin can observe sessions that are otherwise isolated per key,
+	// visitor, or IM identity; everyone else stays scoped to their own principal.
+	if types.SessionListSourceRequiresAdmin(query.Source) {
+		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+			return nil, apperrors.NewForbiddenError(
+				"listing channel sessions requires tenant admin or owner role",
+			)
+		}
+		query.UserID = ""
+	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
 	}
 
@@ -229,6 +310,33 @@ func (s *sessionService) ListSessions(
 
 	pagination := &types.Pagination{Page: query.Page, PageSize: query.PageSize}
 	return types.NewPageResult(total, pagination, items), nil
+}
+
+// CountSessionsBySource returns the total session count for a source filter
+// without the Admin+ gate used by ListSessions. Aggregate stats endpoints may
+// expose counts to Viewer+ while keeping session rows admin-only.
+func (s *sessionService) CountSessionsBySource(
+	ctx context.Context, query *types.SessionListQuery,
+) (int64, error) {
+	if query == nil {
+		query = &types.SessionListQuery{}
+	}
+	query.TenantID = types.MustTenantIDFromContext(ctx)
+	if types.SessionListSourceRequiresAdmin(query.Source) {
+		query.UserID = ""
+	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
+		query.UserID = uid
+	}
+	_, total, err := s.sessionRepo.QueryPaged(ctx, query)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": query.TenantID,
+			"user_id":   query.UserID,
+			"source":    query.Source,
+		})
+		return 0, err
+	}
+	return total, nil
 }
 
 // SetSessionPinned pins or unpins a session for the current user scope.

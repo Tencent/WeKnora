@@ -63,26 +63,67 @@ services:
     env_file:
       - .env
     environment:
-      - LOG_LEVEL=${LOG_LEVEL:-}
+      # ========== 日志 ==========
+      # 日志级别，默认debug
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      # 日志文件路径（留空则只输出 stdout）；LLM_DEBUG_LOG 开启时同目录写 llm_debug.log
+      - LOG_PATH=${LOG_PATH:-}
+      # 自定义日志格式模板（留空用内置默认格式）
+      - LOG_FORMAT=${LOG_FORMAT:-}
+      # LLM 调试日志：true 写 LOG_PATH 同目录 llm_debug.log，或指定路径；留空关闭
+      - LLM_DEBUG_LOG=${LLM_DEBUG_LOG:-false}
+      # ========== 运行时基础 ==========
+      # gin mod
+      # 可选值: debug(开发模式，有详细日志), release(生产模式，禁用Swagger文档)
+      - GIN_MODE=${GIN_MODE:-release}
+      # 时区，默认为Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
+      # 文档处理语言（问题/摘要生成）。优先级：此环境变量（部署级覆盖，非空即生效）
+      # > Accept-Language 请求头 > 内置默认值 (zh-CN)。留空则跟随请求方 Accept-Language。
+      - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-}
+      # gin 信任的代理 CIDR（逗号分隔）；显式设为空字符串则禁用代理信任。
+      # 默认信任 loopback + 私网段（容器网络内 nginx 已覆盖）
+      # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
+      # 启动时自动执行数据库迁移；设为 false 禁用，默认启用
+      - AUTO_MIGRATE=${AUTO_MIGRATE:-true}
+      # 本地存储后端生成下载链接用的外部可达 URL（IM 渠道 local 后端必填）
+      # - APP_EXTERNAL_URL=${APP_EXTERNAL_URL:-}
+      # 前端外部 origin，用于邀请链接等绝对 URL（留空走 host-relative）
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-}
+      # ========== 对象存储 - 腾讯云 COS ==========
       - COS_SECRET_ID=${COS_SECRET_ID:-}
       - COS_SECRET_KEY=${COS_SECRET_KEY:-}
       - COS_REGION=${COS_REGION:-}
       - COS_BUCKET_NAME=${COS_BUCKET_NAME:-}
       - COS_APP_ID=${COS_APP_ID:-}
       - COS_PATH_PREFIX=${COS_PATH_PREFIX:-}
-      - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN:-}
-      - GIN_MODE=${GIN_MODE:-release}
+      - COS_TEMP_BUCKET_NAME=${COS_TEMP_BUCKET_NAME:-}
+      - COS_TEMP_REGION=${COS_TEMP_REGION:-}
+
+      # 认证 / 租户 / RBAC / 审计
+      # 禁止新用户注册（生产建议 true）
       - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-false}
-      - WEKNORA_AUTH_DEFAULT_TENANT_MODE=${WEKNORA_AUTH_DEFAULT_TENANT_MODE:-}
-      - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED=${WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED:-}
+      # 公开注册后的默认空间策略：create_personal（默认，自动创建个人空间）/ tenantless
+      - WEKNORA_AUTH_DEFAULT_TENANT_MODE=${WEKNORA_AUTH_DEFAULT_TENANT_MODE:-create_personal}
+      # 是否允许普通用户登录后主动创建空间（默认 true；false 仅能邀请加入，超管不受影响）
+      - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED=${WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED:-true}
+      # 启用跨租户访问（需配合用户的 CanAccessAllTenants 权限；默认 false
+      - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=${WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS:-false}
+      # 新建空间默认存储配额（GB，默认 10）
+      - WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB=${WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB:-10}
+      # 租户邀请链接 TTL（Go duration，默认 168h=7 天）
+      - WEKNORA_INVITATION_TTL=${WEKNORA_INVITATION_TTL:-168h}
+      # 审计日志保留天数（0 禁用清理，默认 90）
+      - WEKNORA_AUDIT_RETENTION_DAYS=${WEKNORA_AUDIT_RETENTION_DAYS:-90}
+      # 数据库设置
       - DB_DRIVER=${DB_DRIVER:-postgres}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
-      - TZ=${TZ:-Asia/Shanghai}
-      - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
+      # SQLite 驱动时使用（DB_DRIVER=sqlite）；postgres 驱动忽略
+      # - DB_PATH=${DB_PATH:-}
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.
@@ -98,7 +139,8 @@ services:
       - LANGFUSE_REQUEST_TIMEOUT=${LANGFUSE_REQUEST_TIMEOUT:-}
       - LANGFUSE_SAMPLE_RATE=${LANGFUSE_SAMPLE_RATE:-}
       - LANGFUSE_DEBUG=${LANGFUSE_DEBUG:-}
-      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-}
+      # 向量库 / 检索引擎
+      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-postgres}
       - ELASTICSEARCH_ADDR=${ELASTICSEARCH_ADDR:-}
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
@@ -111,6 +153,25 @@ services:
       - MILVUS_ADDRESS=${MILVUS_ADDRESS:-milvus:19530}
       - MILVUS_COLLECTION=${MILVUS_COLLECTION:-weknora_embeddings}
       - MILVUS_METRIC_TYPE=${MILVUS_METRIC_TYPE:-IP}
+      - MILVUS_USERNAME=${MILVUS_USERNAME:-}
+      - MILVUS_PASSWORD=${MILVUS_PASSWORD:-}
+      - MILVUS_DB_NAME=${MILVUS_DB_NAME:-}
+      # 多向量库并行检索超时（秒，RETRIEVE_DRIVER 含多个驱动时生效）
+      - MULTI_STORE_RETRIEVE_TIMEOUT_SEC=${MULTI_STORE_RETRIEVE_TIMEOUT_SEC:-}
+      # ========== OpenSearch（RETRIEVE_DRIVER=opensearch）==========
+      - OPENSEARCH_ADDR=${OPENSEARCH_ADDR:-}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+      - OPENSEARCH_INSECURE_SKIP_VERIFY=${OPENSEARCH_INSECURE_SKIP_VERIFY:-false}
+      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-}
+      # ========== 腾讯云 VectorDB（RETRIEVE_DRIVER=tencent_vectordb）==========
+      - TENCENT_VECTORDB_ADDR=${TENCENT_VECTORDB_ADDR:-}
+      - TENCENT_VECTORDB_USERNAME=${TENCENT_VECTORDB_USERNAME:-}
+      - TENCENT_VECTORDB_API_KEY=${TENCENT_VECTORDB_API_KEY:-}
+      - TENCENT_VECTORDB_DATABASE=${TENCENT_VECTORDB_DATABASE:-}
+      - TENCENT_VECTORDB_COLLECTION=${TENCENT_VECTORDB_COLLECTION:-}
+      - TENCENT_VECTORDB_REPLICA_NUMBER=${TENCENT_VECTORDB_REPLICA_NUMBER:-}
+      # Docreader 解析调优
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
       # docreader gRPC TLS / 认证（客户端侧）
@@ -120,45 +181,104 @@ services:
       - GRPC_TLS_CA=${GRPC_TLS_CA:-}
       - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
       - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
-      - WEAVIATE_HOST=${WEAVIATE_HOST:-weaviate:8080}
-      - WEAVIATE_GRPC_ADDRESS=${WEAVIATE_GRPC_ADDRESS:-weaviate:50051}
-      - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-http}
-      - WEAVIATE_AUTH_ENABLED=${WEAVIATE_AUTH_ENABLED:-false}
+      - WEAVIATE_HOST=${WEAVIATE_HOST:-}
+      - WEAVIATE_GRPC_ADDRESS=${WEAVIATE_GRPC_ADDRESS:-}
+      - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-}
+      - WEAVIATE_AUTH_ENABLED=${WEAVIATE_AUTH_ENABLED:-}
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:-}
-      - DORIS_ADDR=${DORIS_ADDR:-doris-fe:9030}
-      - DORIS_HTTP_PORT=${DORIS_HTTP_PORT:-8030}
-      - DORIS_DATABASE=${DORIS_DATABASE:-weknora}
-      - DORIS_USERNAME=${DORIS_USERNAME:-root}
+      - DORIS_ADDR=${DORIS_ADDR:-}
+      - DORIS_HTTP_PORT=${DORIS_HTTP_PORT:-}
+      - DORIS_DATABASE=${DORIS_DATABASE:-}
+      - DORIS_USERNAME=${DORIS_USERNAME:-}
       - DORIS_PASSWORD=${DORIS_PASSWORD:-}
-      - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-weknora_embeddings}
-      - DORIS_COMPAT_MODE=${DORIS_COMPAT_MODE:-auto}
-      - STORAGE_TYPE=${STORAGE_TYPE:-}
-      - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
+      - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-}
+      - DORIS_COMPAT_MODE=${DORIS_COMPAT_MODE:-}
+      # ========== 文件存储 ==========
+      - STORAGE_TYPE=${STORAGE_TYPE:-local}
+      # 允许用户使用的存储类型白名单（逗号分隔，留空允许全部）
+      - STORAGE_ALLOW_LIST=${STORAGE_ALLOW_LIST:-}
+      - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-/data/files}
+      # 本地存储路径前缀（legacy 回填用，一般留空）
+      - LOCAL_STORAGE_PATH_PREFIX=${LOCAL_STORAGE_PATH_PREFIX:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
+      # ----- MinIO（STORAGE_TYPE=minio）-----
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
       - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
+      - MINIO_PATH_PREFIX=${MINIO_PATH_PREFIX:-}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      # ----- 火山引擎 TOS（STORAGE_TYPE=tos）-----
+      - TOS_ENDPOINT=${TOS_ENDPOINT:-}
+      - TOS_REGION=${TOS_REGION:-}
+      - TOS_ACCESS_KEY=${TOS_ACCESS_KEY:-}
+      - TOS_SECRET_KEY=${TOS_SECRET_KEY:-}
+      - TOS_BUCKET_NAME=${TOS_BUCKET_NAME:-}
+      - TOS_PATH_PREFIX=${TOS_PATH_PREFIX:-}
+      - TOS_TEMP_BUCKET_NAME=${TOS_TEMP_BUCKET_NAME:-}
+      - TOS_TEMP_REGION=${TOS_TEMP_REGION:-}
+      # ----- AWS S3（STORAGE_TYPE=s3）-----
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_REGION=${S3_REGION:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-}
+      - S3_PATH_PREFIX=${S3_PATH_PREFIX:-weknora/}
+      - S3_USE_SSL=${S3_USE_SSL:-true}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-false}
+      # ----- 华为云 OBS（STORAGE_TYPE=obs）-----
       - OBS_ENDPOINT=${OBS_ENDPOINT:-}
       - OBS_REGION=${OBS_REGION:-}
       - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
       - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
       - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
-      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-weknora/}
+      - OBS_USE_SSL=${OBS_USE_SSL:-true}
       - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
+      # ----- 阿里云 OSS（STORAGE_TYPE=oss）-----
+      - OSS_ENDPOINT=${OSS_ENDPOINT:-}
+      - OSS_REGION=${OSS_REGION:-}
+      - OSS_ACCESS_KEY=${OSS_ACCESS_KEY:-}
+      - OSS_SECRET_KEY=${OSS_SECRET_KEY:-}
+      - OSS_BUCKET_NAME=${OSS_BUCKET_NAME:-}
+      - OSS_PATH_PREFIX=${OSS_PATH_PREFIX:-weknora/}
+      - OSS_TEMP_BUCKET_NAME=${OSS_TEMP_BUCKET_NAME:-}
+      - OSS_TEMP_REGION=${OSS_TEMP_REGION:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Ollama 不可用时仅告警不阻断（true 时生效）
+      - OLLAMA_OPTIONAL=${OLLAMA_OPTIONAL:-true}
+      # 批量 embedding 大小
+      - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
+      # VLM 单次 HTTP 请求超时（秒，默认 180）
+      - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
+      # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
+      - WEKNORA_LLM_STREAM_RAW_DUMP=${WEKNORA_LLM_STREAM_RAW_DUMP:-}
+      - WEKNORA_LLM_STREAM_RAW_DUMP_DIR=${WEKNORA_LLM_STREAM_RAW_DUMP_DIR:-}
       - STREAM_MANAGER_TYPE=${STREAM_MANAGER_TYPE:-}
       - REDIS_ADDR=${REDIS_ADDR:-redis:6379}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-}
       - REDIS_PREFIX=${REDIS_PREFIX:-}
-      - ENABLE_GRAPH_RAG=${ENABLE_GRAPH_RAG:-}
+      # Redis TLS（托管 Redis 加密传输；REDIS_USE_TLS=true 时生效，详见 .env.example）
+      - REDIS_TLS_SERVER_NAME=${REDIS_TLS_SERVER_NAME:-}
+      - REDIS_TLS_INSECURE_SKIP_VERIFY=${REDIS_TLS_INSECURE_SKIP_VERIFY:-}
+      # Redis 频道命名空间后缀（多部署共享同一 Redis 时隔离用）
+      - WEKNORA_REDIS_NAMESPACE=${WEKNORA_REDIS_NAMESPACE:-}
+      # Asynq 客户端 Redis 读写超时（毫秒，默认 500）
+      - WEKNORA_REDIS_OP_TIMEOUT_MS=${WEKNORA_REDIS_OP_TIMEOUT_MS:-}
+      # 知识图谱唯一开关是 NEO4J_ENABLE（见下方）。ENABLE_GRAPH_RAG 自 v0.1.6 起已被
+      # NEO4J_ENABLE 取代，Go 主应用不再读取，此处不再透传。
       - NEO4J_ENABLE=${NEO4J_ENABLE:-}
       - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
       - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
-      - TENANT_AES_KEY=${TENANT_AES_KEY:-}
+      # 数据库中 API Key 等敏感字段落盘加密的 AES-256 主密钥（必须为 32 字节）。
+      # 加密范围：tenants.api_key、模型 API key、向量库凭证、web search provider key、
+      # WeKnoraCloud.AppSecret 等。缺失或长度不对时，已加密字段无法解密（UI 显示为空，
+      # 需重新填写）。生产环境必须显式设置且妥善保管，丢失则所有加密数据不可恢复。
+      # （TENANT_AES_KEY / CRYPTO_MASTER_KEY / CRYPTO_SALT 已废弃：v0.4.0 起加密统一
+      #   改用 SYSTEM_AES_KEY，Go 主应用不再读取这三个变量。）
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
@@ -174,13 +294,16 @@ services:
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
-      # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
-      # 若不设置则自动生成并持久化到 data-files volume（/data/files/.crypto_state.json）
-      # 重启时自动从文件恢复，保证已加密数据可继续解密
-      - CRYPTO_MASTER_KEY=${CRYPTO_MASTER_KEY:-}
-      - CRYPTO_SALT=${CRYPTO_SALT:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      # 文档处理任务总超时（Go duration，默认 2h）
+      - WEKNORA_DOCUMENT_PROCESS_TIMEOUT=${WEKNORA_DOCUMENT_PROCESS_TIMEOUT:-}
+      # 单次 DocReader RPC 超时（默认 30m，须小于上一项）
+      - WEKNORA_DOCREADER_CALL_TIMEOUT=${WEKNORA_DOCREADER_CALL_TIMEOUT:-}
+      # 知识库巡检回收（回收卡在 processing 的脏数据；false 禁用，不建议）
+      - WEKNORA_HOUSEKEEPING_ENABLED=${WEKNORA_HOUSEKEEPING_ENABLED:-}
+      # 自定义 Skills 目录（挂载后指定，免重建镜像）
+      - WEKNORA_SKILLS_DIR=${WEKNORA_SKILLS_DIR:-}
       - WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=${WEKNORA_CHAT_ATTACHMENT_TTL_HOURS:-24}
       - WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC=${WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC:-60}
       - WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY=${WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY:-8}
@@ -192,6 +315,8 @@ services:
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
+      # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
+      - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
       # Tenant / RBAC（详见 docs/RBAC说明.md 与 .env.example 注释）
       # - WEKNORA_TENANT_ENABLE_RBAC: 是否启用空间角色强制鉴权（true / false），默认 true
       # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 单个非超管自助创建空间的上限
@@ -210,6 +335,19 @@ services:
       - WEKNORA_MODEL_MAX_CONCURRENCY=${WEKNORA_MODEL_MAX_CONCURRENCY:-32}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
       - WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL=${WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL:-}
+      # ========== OIDC 认证（可选，OIDC_AUTH_ENABLE=true 启用，详见 .env.example）==========
+      - OIDC_AUTH_ENABLE=${OIDC_AUTH_ENABLE:-false}
+      - OIDC_AUTH_ISSUER_URL=${OIDC_AUTH_ISSUER_URL:-}
+      - OIDC_AUTH_DISCOVERY_URL=${OIDC_AUTH_DISCOVERY_URL:-}
+      - OIDC_AUTH_PROVIDER_DISPLAY_NAME=${OIDC_AUTH_PROVIDER_DISPLAY_NAME:-}
+      - OIDC_AUTH_CLIENT_ID=${OIDC_AUTH_CLIENT_ID:-}
+      - OIDC_AUTH_CLIENT_SECRET=${OIDC_AUTH_CLIENT_SECRET:-}
+      - OIDC_AUTH_AUTHORIZATION_ENDPOINT=${OIDC_AUTH_AUTHORIZATION_ENDPOINT:-}
+      - OIDC_AUTH_TOKEN_ENDPOINT=${OIDC_AUTH_TOKEN_ENDPOINT:-}
+      - OIDC_AUTH_USER_INFO_ENDPOINT=${OIDC_AUTH_USER_INFO_ENDPOINT:-}
+      - OIDC_AUTH_SCOPES=${OIDC_AUTH_SCOPES:-}
+      - OIDC_USER_INFO_MAPPING_USER_NAME=${OIDC_USER_INFO_MAPPING_USER_NAME:-}
+      - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
     depends_on:
       redis:
         condition: service_started
@@ -254,25 +392,79 @@ services:
     volumes:
       - docreader-tmp:/tmp/docreader
     environment:
+      # ========== 基础 ==========
       - TZ=${TZ:-Asia/Shanghai}
+      - LOG_LEVEL=${LOG_LEVEL:-}
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
-      - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      # docreader 对外 HTTP 抓取的 SSRF 白名单（逗号分隔；与 app 共用同名变量）
+      - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-}
+      # ========== gRPC 服务端 TLS / 认证 ==========
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
+      # true 时强制要求客户端证书（mTLS）
+      - GRPC_MTLS_REQUIRE_CLIENT_CERT=${GRPC_MTLS_REQUIRE_CLIENT_CERT:-false}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      # ========== gRPC 服务参数 ==========
+      - DOCREADER_GRPC_MAX_WORKERS=${DOCREADER_GRPC_MAX_WORKERS:-4}
+      - DOCREADER_GRPC_MAX_FILE_SIZE_MB=${DOCREADER_GRPC_MAX_FILE_SIZE_MB:-${MAX_FILE_SIZE_MB:-50}}
+      - DOCREADER_GRPC_PORT=${DOCREADER_GRPC_PORT:-50051}
+      # ========== 解析通用 ==========
+      - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
+      - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # 出站 HTTP/HTTPS 代理（抓取网页 / 远程图片时）
+      - DOCREADER_EXTERNAL_HTTP_PROXY=${DOCREADER_EXTERNAL_HTTP_PROXY:-}
+      - DOCREADER_EXTERNAL_HTTPS_PROXY=${DOCREADER_EXTERNAL_HTTPS_PROXY:-}
+      # ========== OpenDataLoader hybrid ==========
       - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
       - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}
       - DOCREADER_ODL_HYBRID_URL=${DOCREADER_ODL_HYBRID_URL:-http://odl-hybrid:5002}
       - DOCREADER_ODL_HYBRID_MODE=${DOCREADER_ODL_HYBRID_MODE:-auto}
       - DOCREADER_ODL_HYBRID_FALLBACK=${DOCREADER_ODL_HYBRID_FALLBACK:-false}
       - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
-      - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # ========== PDF 渲染 ==========
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
+      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全）。留空走代码默认 min(4,cpu)，
+      # 避免在低核容器上过度并行（写死数值会覆盖 CPU 感知逻辑）。
+      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
-      - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-90}
-      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
-      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
-      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
-      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
-      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      # JPEG 质量（代码默认 85；compose 此前误写 90，已对齐）
+      - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-85}
+      # 渲染页图最大长边像素（防超大页撑爆 gRPC 消息上限；密集中文建议 >=1600）
+      - DOCREADER_PDF_RENDER_MAX_EDGE=${DOCREADER_PDF_RENDER_MAX_EDGE:-2000}
+      # 强制 PDF 全页按扫描件解析（文本层差但可 OCR 时；速度/成本上升）
+      - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
+      # ========== PDF 版式 / 文本调优 ==========
+      # glyph 间距超过 median 字宽的多少倍时插空格（默认 0.4）
+      - DOCREADER_PDF_WORD_GAP_WIDTH_RATIO=${DOCREADER_PDF_WORD_GAP_WIDTH_RATIO:-0.4}
+      # 丢弃窄边栏（arXiv 侧栏）的页宽比例阈值（默认 0.12）
+      - DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO=${DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO:-0.12}
+      - DOCREADER_PDF_MIN_HEADING_LINE_CHARS=${DOCREADER_PDF_MIN_HEADING_LINE_CHARS:-8}
+      # 清理 U+FFFE/软连字符、剥离矢量图轴文字、图表区按 JPEG 渲染
+      - DOCREADER_PDF_SANITIZE_TEXT=${DOCREADER_PDF_SANITIZE_TEXT:-true}
+      - DOCREADER_PDF_STRIP_CHART_DEBRIS=${DOCREADER_PDF_STRIP_CHART_DEBRIS:-true}
+      - DOCREADER_PDF_RENDER_VECTOR_FIGURES=${DOCREADER_PDF_RENDER_VECTOR_FIGURES:-true}
+      - DOCREADER_PDF_DETECT_HEADINGS=${DOCREADER_PDF_DETECT_HEADINGS:-}
+      - DOCREADER_PDF_LAYOUT_ORDERING=${DOCREADER_PDF_LAYOUT_ORDERING:-}
+      - DOCREADER_PDF_FILTER_HIDDEN_TEXT=${DOCREADER_PDF_FILTER_HIDDEN_TEXT:-}
+      # 扫描件判定：图片面积占比 >= 此值视为扫描页（默认留空走代码默认）
+      - DOCREADER_PDF_SCAN_IMAGE_RATIO=${DOCREADER_PDF_SCAN_IMAGE_RATIO:-}
+      - DOCREADER_PDF_SCAN_MIN_CHARS=${DOCREADER_PDF_SCAN_MIN_CHARS:-}
+      # 嵌入图片抽取
+      - DOCREADER_PDF_EXTRACT_EMBEDDED_IMAGES=${DOCREADER_PDF_EXTRACT_EMBEDDED_IMAGES:-}
+      - DOCREADER_PDF_EMBED_MIN_PIXELS=${DOCREADER_PDF_EMBED_MIN_PIXELS:-}
+      - DOCREADER_PDF_EMBED_MIN_AREA_RATIO=${DOCREADER_PDF_EMBED_MIN_AREA_RATIO:-}
+      - DOCREADER_PDF_EMBED_REPEAT_PAGE_FRAC=${DOCREADER_PDF_EMBED_REPEAT_PAGE_FRAC:-}
+      - DOCREADER_PDF_EMBED_MAX_IMAGES=${DOCREADER_PDF_EMBED_MAX_IMAGES:-}
+      # 图表区识别
+      - DOCREADER_PDF_MIN_CHART_REGION_AREA=${DOCREADER_PDF_MIN_CHART_REGION_AREA:-}
+      - DOCREADER_PDF_MIN_CHART_REGION_CHARS=${DOCREADER_PDF_MIN_CHART_REGION_CHARS:-}
+      - DOCREADER_PDF_MAX_CHART_REGION_AREA=${DOCREADER_PDF_MAX_CHART_REGION_AREA:-}
+      - DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO=${DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
@@ -790,6 +982,14 @@ services:
     environment:
       - WEKNORA_BASE_URL=http://app:8080/api/v1
       - WEKNORA_API_KEY=${WEKNORA_API_KEY:-}
+      # HTTP/SSE 传输必填：mcp-server 启动时若缺少此项会拒绝启动（客户端以 Authorization: Bearer 携带）
+      - MCP_SERVER_AUTH_TOKEN=${MCP_SERVER_AUTH_TOKEN:-}
+      # 调用 WeKnora REST 的读超时（秒，默认 300）
+      - WEKNORA_CHAT_TIMEOUT=${WEKNORA_CHAT_TIMEOUT:-300}
+      # 是否校验 WeKnora 后端 TLS 证书（默认 true；自签证书可设 false）
+      - WEKNORA_VERIFY_SSL=${WEKNORA_VERIFY_SSL:-true}
+      # 允许上传的目录白名单（逗号分隔；留空禁用文件上传工具）
+      - MCP_ALLOWED_UPLOAD_DIRS=${MCP_ALLOWED_UPLOAD_DIRS:-}
     depends_on:
       app:
         condition: service_healthy

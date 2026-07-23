@@ -184,7 +184,8 @@
           </div>
 
           <div class="form-content">
-            <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical">
+            <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical"
+              label-align="top">
               <t-form-item :label="$t('auth.email')" name="email">
                 <t-input v-model="formData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
                   autocomplete="email" size="large" :disabled="loading" />
@@ -267,7 +268,7 @@
 
           <div class="form-content">
             <t-form ref="registerFormRef" :data="registerData" :rules="registerRules" @submit="handleRegister"
-              layout="vertical">
+              layout="vertical" label-align="top">
               <t-form-item :label="$t('auth.username')" name="username">
                 <t-input v-model="registerData.username" :placeholder="$t('auth.usernamePlaceholder')" size="large"
                   :disabled="loading" />

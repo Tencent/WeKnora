@@ -232,6 +232,22 @@ func TestInvitationService_Create_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestInvitationService_Create_APIKeyCannotInviteOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invitation must not be persisted, got %d rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 	svc, _, memberSvc := newInvitationSvc()
 	ctx := context.Background()
@@ -458,6 +474,22 @@ func TestInvitationService_CreateShareLink_RejectsInvalidRole(t *testing.T) {
 		context.Background(), 1, types.TenantRole("magician"), nil, "")
 	if !errors.Is(err, ErrInvalidTenantRole) {
 		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
+	}
+}
+
+func TestInvitationService_CreateShareLink_APIKeyCannotAssignOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, _, err := svc.CreateShareLink(ctx, 1, types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invite link must not be persisted, got %d rows", len(repo.rows))
 	}
 }
 

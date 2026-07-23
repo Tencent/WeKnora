@@ -54,6 +54,39 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// TaskInitiator is the authenticated caller that submitted an asynchronous
+// task. Workers restore it into their context so audit entries describe who
+// initiated the operation, while tasks created by schedulers remain
+// attributable to the system.
+type TaskInitiator struct {
+	UserID string     `json:"user_id,omitempty"`
+	Role   TenantRole `json:"role,omitempty"`
+}
+
+// TaskInitiatorFromContext snapshots the real caller identity for a task
+// payload. Synthetic API-key users are service identities, not people, and are
+// intentionally left empty so the activity feed presents them as system work.
+func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
+	userID, ok := UserIDFromContext(ctx)
+	if !ok || IsSyntheticUserID(userID) {
+		return TaskInitiator{}
+	}
+	return TaskInitiator{UserID: userID, Role: TenantRoleFromContext(ctx)}
+}
+
+// Apply restores a captured task initiator onto a worker context. Empty or
+// legacy payloads are a no-op and therefore retain the system-task fallback.
+func (i TaskInitiator) Apply(ctx context.Context) context.Context {
+	if i.UserID == "" {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, UserIDContextKey, i.UserID)
+	if i.Role.IsValid() {
+		ctx = context.WithValue(ctx, TenantRoleContextKey, i.Role)
+	}
+	return ctx
+}
+
 // IsSyntheticUserID reports whether id refers to the synthetic system
 // user that the X-API-Key auth path attaches to each tenant
 // (User.ID = "system-<tenantID>"). These users have no real human

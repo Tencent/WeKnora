@@ -127,8 +127,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
 	}
 
-	// Get session
-	session, err := h.sessionService.GetSession(ctx, sessionID)
+	// Get session. QA writes new messages into the session, so use the strict
+	// owner scope: a tenant admin may read an API-key session but must not be
+	// able to post messages to it (which would otherwise fail later at message
+	// creation with a 500 instead of a clean not-found).
+	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session, session ID: %s, error: %v", sessionID, err)
 		return nil, nil, errors.NewNotFoundError("Session not found")

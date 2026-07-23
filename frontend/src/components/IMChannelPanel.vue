@@ -154,7 +154,8 @@
             <div class="option-chips">
               <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
-                :disabled="formData.platform === 'mattermost'" @click="formData.mode = 'websocket'">
+                :disabled="formData.platform === 'mattermost'"
+                @click="formData.mode = 'websocket'">
                 WebSocket
               </button>
               <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
@@ -164,7 +165,8 @@
             </div>
             <p class="form-desc">
               {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') :
-                $t('agentEditor.im.modeHint') }}
+                formData.platform === 'yunzhijia' ? $t('agentEditor.im.yunzhijiaModeHint') :
+                  $t('agentEditor.im.modeHint') }}
             </p>
           </div>
 
@@ -472,6 +474,57 @@
                 </div>
               </div>
             </template>
+
+            <!-- Yunzhijia credentials -->
+            <template v-if="formData.platform === 'yunzhijia'">
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSendMsgUrl') }}</label>
+                <t-input v-model="formData.credentials.send_msg_url"
+                  placeholder="https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=0&yzjtoken=..." />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaSendMsgUrlHint') }}
+                  <a href="https://www.yunzhijia.com/opendocs/docs.html#/guide/im/robot" target="_blank"
+                    rel="noopener noreferrer" class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaRobotDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
+                <t-input v-model="formData.credentials.secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppId') }}</label>
+                <t-input v-model="formData.credentials.app_id"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppIdPlaceholder')" />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaAppCredentialHint') }}
+                  <a href="https://www.yunzhijia.com/developers/" target="_blank" rel="noopener noreferrer"
+                    class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaImageDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppSecret') }}</label>
+                <t-input v-model="formData.credentials.app_secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppSecretPlaceholder')" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaTimeout') }}</label>
+                <t-input-number v-model="formData.credentials.timeout_seconds" placeholder="10" :min="1" :max="60"
+                  style="width: 100%;" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaTimeoutHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffix') }}</label>
+                <t-input v-model="formData.credentials.allowed_webhook_host_suffix" placeholder="yunzhijia.com" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffixHint') }}</p>
+              </div>
+            </template>
+
             <!-- WeChat credentials (QR code binding) -->
             <template v-if="formData.platform === 'wechat'">
               <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
@@ -545,6 +598,7 @@ import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
+import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
 
 type IMPlatform = IMChannel['platform'];
 
@@ -558,6 +612,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   mattermost: mattermostLogo,
   wechat: wechatLogo,
   qqbot: qqbotLogo,
+  yunzhijia: yunzhijiaLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -609,6 +664,7 @@ const platformOptions = computed(() => ([
   { value: 'mattermost' as IMPlatform, label: t('agentEditor.im.mattermost'), logo: mattermostLogo },
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
+  { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
 ]));
 
 // Feishu and Lark are the same product on separate clouds, so each has its own
@@ -756,12 +812,31 @@ function onPlatformChange(val: string | number | boolean) {
   if (val === 'wechat') {
     formData.value.mode = 'longpoll';
     formData.value.output_mode = 'full';
+  } else if (val === 'mattermost' || val === 'yunzhijia') {
+    formData.value.mode = 'webhook';
+    formData.value.output_mode = 'stream';
+    if (val === 'yunzhijia') {
+      formData.value.credentials = {
+        timeout_seconds: 10,
+        allowed_webhook_host_suffix: 'yunzhijia.com',
+      };
+    }
   } else {
     formData.value.mode = 'websocket';
     formData.value.output_mode = 'stream';
   }
   if (!channelNameTouched.value) {
     formData.value.name = defaultChannelName(String(val));
+  }
+}
+
+function normalizeYunzhijiaCredentials() {
+  if (formData.value.platform !== 'yunzhijia') return;
+  if (!formData.value.credentials.allowed_webhook_host_suffix) {
+    formData.value.credentials.allowed_webhook_host_suffix = 'yunzhijia.com';
+  }
+  if (!formData.value.credentials.timeout_seconds) {
+    formData.value.credentials.timeout_seconds = 10;
   }
 }
 
@@ -924,6 +999,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
   };
+  normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
@@ -956,6 +1032,15 @@ async function handleSave() {
     if (formData.value.platform === 'wechat' && !formData.value.credentials.bot_token) {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
+    }
+    if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
+      normalizeYunzhijiaCredentials();
+      if (!String(formData.value.credentials.send_msg_url || '').trim()) {
+        MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
     }
 
     if (editingChannel.value) {
@@ -1192,6 +1277,11 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
+
+  .doc-link {
+    margin-left: 4px;
+    color: var(--td-brand-color);
+  }
 }
 
 .option-chips {
@@ -1284,6 +1374,7 @@ onUnmounted(() => {
 .platform-link-hint {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 12px;
   line-height: 1.4;

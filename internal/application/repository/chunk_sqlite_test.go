@@ -326,7 +326,7 @@ func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
 	maxRate := 0.5
 	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
-		[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
 		&types.ChunkFeedbackFilter{MaxPositiveRate: &maxRate},
 	)
 	require.NoError(t, err)
@@ -337,7 +337,7 @@ func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
 	needsOptimization := true
 	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
-		[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
 		&types.ChunkFeedbackFilter{NeedsOptimization: &needsOptimization},
 	)
 	require.NoError(t, err)

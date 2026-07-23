@@ -230,6 +230,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
 		// /files route cannot serve because it enforces same-tenant paths.
@@ -355,10 +356,18 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kRead := k.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		// Cross-knowledge endpoints (no :id) can't be gated on a single
-		// KB — they accept arbitrary knowledge IDs and the handler must
-		// fan out the access check itself. /batch and /search are read
-		// routes; /move and /batch-delete stay JWT Contributor-gated and are
-		// not declared for API keys.
+		// KB via the URL — they accept a kb_id (or source/target KB) in the
+		// body and the handler fans out the access check itself. /batch and
+		// /search are read routes (retrieve). /move, /batch-delete,
+		// /batch-reparse and /tags are content writes that each bound
+		// themselves to a single (or source+target) KB and enforce the API
+		// key's KB allow-list downstream — MoveKnowledge via
+		// requireTenantAPIKeyKnowledgeBases(source,target); the batch ops via
+		// validateKnowledgeBaseAccessWithKBID (requireTenantAPIKeyKnowledgeBase)
+		// plus a per-item "belongs to the authorized KB" check in the handler
+		// and service. They are therefore declared for API keys under the
+		// ingest capability, matching their single-document siblings
+		// (k.DELETE("/:id"), k.POST("/:id/reparse"), k.PUT("/:id")).
 		kRead.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
 		kRead.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
@@ -373,13 +382,15 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
-		// Batch / cross-KB write ops stay Contributor-gated for JWT and are
-		// NOT declared for API keys (default-deny): they fan out to arbitrary
-		// KBs with no single owning KB to bound a key's scope against.
-		kgrp.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		kgrp.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
-		kgrp.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		kgrp.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// Batch / cross-KB content writes: JWT Contributor+, or an API key
+		// with the ingest capability (or full access). Each handler binds the
+		// operation to a single (move: source+target) KB and rejects any KB
+		// or knowledge id outside the key's allow-list, so a scoped ingest key
+		// can only touch KBs it is already permitted to write.
+		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
 }
 
@@ -493,6 +504,17 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
 	}
+}
+
+// RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity
+// feed. It intentionally stays JWT-only: audit history is a sensitive owner
+// surface and no existing workspace API-key capability grants audit access.
+func RegisterKnowledgeBaseActivityRoutes(r *gin.RouterGroup, auditHandler *handler.AuditLogHandler, g *rbacGuards) {
+	if auditHandler == nil {
+		return
+	}
+	r.GET("/knowledge-bases/:id/activity",
+		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), auditHandler.ListKnowledgeBaseActivity)
 }
 
 // RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
@@ -648,10 +670,9 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 // EnableCrossTenantAccess flag, replacing the 12-line if-block that
 // previously opened ListAllTenants and SearchTenants.
 //
-// POST /tenants and GET /tenants stay open to authenticated users —
-// the previous handler comments claimed CanAccessAllTenants gating
-// "is in the handler" but the bodies never enforced it; this PR is a
-// pure refactor and does not introduce new gates.
+// JWT behavior for POST /tenants and GET /tenants remains unchanged. Platform
+// API keys may create tenants through system_tenants_manage; workspace keys
+// remain default-denied on tenant-catalog operations.
 func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
@@ -662,8 +683,12 @@ func RegisterTenantRoutes(
 ) {
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.
-	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
-	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/all",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.ListAllTenants)
+	g.apiKeyRoute(r, http.MethodGet, "/tenants/search",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+		g.CrossTenant(), handler.SearchTenants)
 
 	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
@@ -676,7 +701,8 @@ func RegisterTenantRoutes(
 		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
 		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
 		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
-		tenantRoutes.POST("", handler.CreateTenant)
+		g.apiKeyRoute(tenantRoutes, http.MethodPost, "",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
@@ -694,9 +720,13 @@ func RegisterTenantRoutes(
 		// opts in below through the manage_members capability.
 		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
 		{
-			tenantByID.GET("", g.Viewer(), handler.GetTenant)
-			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
-			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
+			g.apiKeyRoute(tenantByID, http.MethodGet, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
+				g.Viewer(), handler.GetTenant)
+			g.apiKeyRoute(tenantByID, http.MethodPut, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.UpdateTenant)
+			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
 			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
 			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
@@ -942,30 +972,45 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
+		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
+		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
+		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)
 
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
 		// wrapping), matching the project's axios interceptor convention
 		// — see frontend/src/utils/request.ts:97.
-		adminRoutes.GET("/settings", handler.ListSystemSettings)
-		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
-		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
-		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.ListSystemSettings)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead, types.APIKeyCapabilitySystemSettingsManage),
+			handler.GetSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodPut, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.UpdateSystemSetting)
+		g.apiKeyRoute(adminRoutes, http.MethodDelete, "/settings/:key",
+			apiKeyPlatform(types.APIKeyCapabilitySystemSettingsManage), handler.ResetSystemSetting)
 
 		// Runtime operations: live asynq queue depths, safe task projections,
 		// and state-checked task actions for the SystemAdmin dashboard. Lite
 		// mode returns available=false.
-		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
-		adminRoutes.GET("/runtime/queues/:queue/tasks", handler.ListRuntimeTasks)
-		adminRoutes.POST("/runtime/queues/:queue/tasks/:task_id/actions/:action", handler.MutateRuntimeTask)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.GetRuntimeQueues)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues/:queue/tasks",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.ListRuntimeTasks)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/runtime/queues/:queue/tasks/:task_id/actions/:action",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.MutateRuntimeTask)
+		g.apiKeyRoute(adminRoutes, http.MethodDelete, "/runtime/queues/:queue/archived",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeManage), handler.PurgeArchivedRuntimeTasks)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of
 		// /settings because it changes tenants, not the setting row.
-		adminRoutes.POST(
-			"/tenants/apply-default-storage-quota",
-			handler.ApplyDefaultStorageQuotaToAllTenants,
-		)
+		g.apiKeyRoute(adminRoutes, http.MethodPost, "/tenants/apply-default-storage-quota",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
+			handler.ApplyDefaultStorageQuotaToAllTenants)
 
 		// Platform-wide audit feed (tenant_id=0 rows). Covers
 		// system.setting_changed / system.admin_promoted /
@@ -975,7 +1020,8 @@ func RegisterSystemAdminRoutes(
 		// out by tenant_id). Optional: skip when audit deps are
 		// absent, matching RegisterTenantRoutes' /audit-log handling.
 		if auditLogHandler != nil {
-			adminRoutes.GET("/audit-log", auditLogHandler.ListSystemAuditLog)
+			g.apiKeyRoute(adminRoutes, http.MethodGet, "/audit-log",
+				apiKeyPlatform(types.APIKeyCapabilitySystemAuditRead), auditLogHandler.ListSystemAuditLog)
 		}
 	}
 }
@@ -1716,12 +1762,15 @@ func serveFilesWithResources(
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
-	// /files sits outside the /api/v1 APIKeyGate; storage paths cannot be
-	// attributed to a key's KB allow-list, so API keys are denied outright
-	// (embed routes use their own /embed/.../files handler).
+	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
+	// API-key guard. A KB-restricted key is denied (a raw storage path cannot
+	// be bounded to its allow-list); full-access keys and tenant-wide retrieve
+	// keys pass, since the handler still enforces same-tenant paths
+	// (ValidateStoragePathTenant). Embed routes use their own
+	// /embed/.../files handler.
 	r.GET(
 		"/files",
-		middleware.DenyAPIKeyPrincipal(),
+		middleware.AllowFileServeAPIKey(),
 		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
 	)
 }
@@ -1834,11 +1883,17 @@ func serveKBScopedFiles(
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
-	// API keys are denied outright (as on /files): a signed URL's tenant/KB
-	// scope cannot authorize serving an arbitrary file_path under the owner
-	// tenant, and this route deliberately crosses the caller's own tenant.
-	r.GET("/knowledge-bases/:id/files",
-		middleware.DenyAPIKeyPrincipal(),
+	// API-key access mirrors /files: KB-restricted keys are denied (an
+	// arbitrary file_path under the KB owner tenant cannot be bounded to a
+	// key's allow-list), while full-access and tenant-wide retrieve keys pass
+	// — KBAccessRead still confines them to KBs they may read (own /
+	// org-shared / agent-visible), exactly as it does for a JWT Viewer. The
+	// route is declared to the gate with the retrieve policy so it is reachable
+	// at all; AllowFileServeAPIKey then applies the stricter not-KB-restricted
+	// constraint.
+	g.apiKeyRoute(r, http.MethodGet, "/knowledge-bases/:id/files",
+		apiKeyRetrieve(apiKeyFullAccess()),
+		middleware.AllowFileServeAPIKey(),
 		g.Viewer(),
 		g.KBAccessRead("id"),
 		newKBScopedFileServeHandlerWithResources(
