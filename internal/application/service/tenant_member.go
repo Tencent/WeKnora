@@ -54,6 +54,14 @@ var (
 	// value that is not one of the four defined TenantRole constants.
 	ErrInvalidTenantRole = errors.New("invalid tenant role")
 
+	// ErrAPIKeyCannotAssignOwner is returned when an API-key principal
+	// attempts to persist the Owner role through member or invitation
+	// management. manage_members deliberately excludes ownership transfer:
+	// a machine principal may manage lower roles, but must never mint a
+	// durable human Owner who could subsequently manage API keys or delete
+	// the tenant.
+	ErrAPIKeyCannotAssignOwner = errors.New("API keys cannot assign the owner role")
+
 	// ErrLastOwner is returned when an operation would leave the tenant
 	// without an active Owner. Demoting the last Owner or removing them
 	// is forbidden; an explicit ownership transfer must happen first.
@@ -111,6 +119,21 @@ func auditActor(ctx context.Context) string {
 	return uid
 }
 
+// rejectAPIKeyOwnerAssignment is the service-layer boundary shared by
+// direct membership writes and both invitation creation paths. Route RBAC
+// intentionally defers API-key authorization to APIKeyGate, so checking the
+// authenticated principal in the service is required to preserve the
+// manage_members "no ownership transfer" contract across every caller.
+func rejectAPIKeyOwnerAssignment(ctx context.Context, role types.TenantRole) error {
+	if role != types.TenantRoleOwner {
+		return nil
+	}
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return ErrAPIKeyCannotAssignOwner
+	}
+	return nil
+}
+
 // AddMember inserts a new active membership row. Returns
 // ErrMembershipAlreadyExists if the user is already an active member of
 // the tenant, and ErrInvalidTenantRole for unknown roles.
@@ -123,6 +146,9 @@ func (s *tenantMemberService) AddMember(
 ) (*types.TenantMember, error) {
 	if !role.IsValid() {
 		return nil, ErrInvalidTenantRole
+	}
+	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
+		return nil, err
 	}
 	existing, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -272,6 +298,9 @@ func (s *tenantMemberService) UpdateRole(
 ) error {
 	if !newRole.IsValid() {
 		return ErrInvalidTenantRole
+	}
+	if err := rejectAPIKeyOwnerAssignment(ctx, newRole); err != nil {
+		return err
 	}
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
