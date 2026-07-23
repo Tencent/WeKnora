@@ -19,6 +19,8 @@ function fallbackText(type: string) {
       return 'F'
     case 'lark':
       return 'L'
+    case 'dingtalk':
+      return 'D'
     case 'notion':
       return 'N'
     case 'yuque':
