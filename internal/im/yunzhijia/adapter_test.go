@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -289,6 +290,120 @@ func TestDownloadFile(t *testing.T) {
 	}
 	if string(body) != "image-bytes" || fileName != "message.png" {
 		t.Fatalf("body=%q fileName=%q", string(body), fileName)
+	}
+}
+
+func TestDownloadFileFollowsSingleRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			http.Redirect(w, r, "/cdn/file-1", http.StatusFound)
+		case "/cdn/file-1":
+			// Bearer token must NOT be forwarded across the redirect.
+			if r.Header.Get("Authorization") != "" {
+				t.Fatalf("Authorization forwarded to redirect target: %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("image-bytes"))
+		default:
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	validateDownloadFileURL = func(string) error { return nil }
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.httpClient = noRedirectClient(server)
+	reader, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1", FileName: "message.png"})
+	if err != nil {
+		t.Fatalf("DownloadFile() error = %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "image-bytes" {
+		t.Fatalf("body = %q", string(body))
+	}
+}
+
+// noRedirectClient returns a client bound to the test server transport that does
+// not auto-follow redirects, mirroring the production adapter's CheckRedirect.
+func noRedirectClient(server *httptest.Server) *http.Client {
+	client := server.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client
+}
+
+func TestDownloadFileRejectsRedirectOffAllowedHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			http.Redirect(w, r, "https://evil.example.com/steal", http.StatusFound)
+		default:
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	// Allow the test server host but reject anything off-host, mimicking the
+	// real yunzhijia.com suffix check for redirect targets.
+	validateDownloadFileURL = func(rawURL string) error {
+		if strings.Contains(rawURL, "evil.example.com") {
+			return fmt.Errorf("host not allowed")
+		}
+		return nil
+	}
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.httpClient = noRedirectClient(server)
+	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
+		t.Fatalf("DownloadFile() error = %v, want redirect rejected", err)
+	}
+}
+
+func TestLimitedReadCloserEnforcesMaxSize(t *testing.T) {
+	reader := newLimitedReadCloser(io.NopCloser(strings.NewReader("0123456789")), 4)
+	defer reader.Close()
+	if _, err := io.ReadAll(reader); err == nil || !strings.Contains(err.Error(), "max download size") {
+		t.Fatalf("read error = %v, want max download size error", err)
+	}
+
+	ok := newLimitedReadCloser(io.NopCloser(strings.NewReader("1234")), 4)
+	defer ok.Close()
+	if got, err := io.ReadAll(ok); err != nil || string(got) != "1234" {
+		t.Fatalf("read got=%q err=%v, want full read within limit", string(got), err)
 	}
 }
 

@@ -5985,9 +5985,7 @@ export default {
       yunzhijiaTimeoutHint: 'Timeout for sending replies via Send Message URL, default 10 seconds',
       yunzhijiaAllowedHostSuffix: 'Allowed Host Suffix',
       yunzhijiaAllowedHostSuffixHint: 'Restrict Send Message URL host to this suffix for security (e.g. yunzhijia.com)',
-      yunzhijiaRequiredCredentials: 'Enter the Send Message URL and allowed host suffix',
       yunzhijiaSendMsgUrlRequired: 'Enter the Send Message URL from Yunzhijia robot settings',
-      yunzhijiaAllowedHostSuffixRequired: 'Enter the allowed host suffix',
       mattermostModeHint: 'Mattermost only supports Webhook mode (outgoing webhook + bot token).',
       mattermostPostToMain: 'Post replies in channel timeline',
       mattermostPostToMainHint:

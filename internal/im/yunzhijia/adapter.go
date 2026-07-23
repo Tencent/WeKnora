@@ -41,6 +41,16 @@ var validateDownloadFileURL = func(rawURL string) error {
 	return err
 }
 
+// maxDownloadFileSize caps the size of a file downloaded from Yunzhijia and read
+// into memory, to avoid unbounded memory usage from a large/malicious response.
+const maxDownloadFileSize = 32 << 20 // 32 MiB
+
+// maxDownloadRedirects limits how many redirects DownloadFile follows manually.
+// The shared httpClient disables automatic redirects (SSRF safety), but the
+// Yunzhijia download endpoint may 302 to a signed URL, so we follow a single hop
+// while re-validating the target host stays within the allowed suffix.
+const maxDownloadRedirects = 1
+
 // Adapter implements im.Adapter for Yunzhijia (云之家).
 type Adapter struct {
 	sendMsgURL               string
@@ -355,17 +365,12 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("download url rejected: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	resp, err := a.fetchDownload(ctx, downloadURL, accessToken)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("download file: %w", err)
+		return nil, "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		return nil, "", fmt.Errorf("download file returned %d: %s", resp.StatusCode, string(body))
 	}
@@ -375,7 +380,87 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		fileName = fileID
 	}
 	fileName = resolveDownloadFileName(fileName, resp)
-	return resp.Body, fileName, nil
+	return newLimitedReadCloser(resp.Body, maxDownloadFileSize), fileName, nil
+}
+
+// fetchDownload performs the download request, following at most maxDownloadRedirects
+// redirects. Each redirect target is re-validated against the allowed host suffix so
+// the request cannot be redirected off the trusted domain. The bearer token is only
+// sent on the initial request and never forwarded across a redirect.
+func (a *Adapter) fetchDownload(ctx context.Context, downloadURL, accessToken string) (*http.Response, error) {
+	currentURL := downloadURL
+	for redirects := 0; ; redirects++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create download request: %w", err)
+		}
+		if redirects == 0 {
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+		}
+		resp, err := a.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("download file: %w", err)
+		}
+		if resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
+			return resp, nil
+		}
+
+		// Redirect (3xx): re-validate the target before following.
+		location := strings.TrimSpace(resp.Header.Get("Location"))
+		resp.Body.Close()
+		if redirects >= maxDownloadRedirects {
+			return nil, fmt.Errorf("download file: too many redirects")
+		}
+		if location == "" {
+			return nil, fmt.Errorf("download file: redirect without Location")
+		}
+		resolved, err := resolveRedirectURL(currentURL, location)
+		if err != nil {
+			return nil, fmt.Errorf("download file: invalid redirect location: %w", err)
+		}
+		if err := validateDownloadFileURL(resolved); err != nil {
+			return nil, fmt.Errorf("download redirect rejected: %w", err)
+		}
+		currentURL = resolved
+	}
+}
+
+func resolveRedirectURL(base, location string) (string, error) {
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+	locURL, err := url.Parse(location)
+	if err != nil {
+		return "", err
+	}
+	return baseURL.ResolveReference(locURL).String(), nil
+}
+
+// newLimitedReadCloser wraps rc so that reading more than limit bytes returns an
+// error instead of silently truncating, while Close still closes the underlying body.
+func newLimitedReadCloser(rc io.ReadCloser, limit int64) io.ReadCloser {
+	return &limitedReadCloser{r: io.LimitReader(rc, limit+1), body: rc, limit: limit}
+}
+
+type limitedReadCloser struct {
+	r     io.Reader
+	body  io.Closer
+	limit int64
+	read  int64
+}
+
+func (l *limitedReadCloser) Read(p []byte) (int, error) {
+	n, err := l.r.Read(p)
+	l.read += int64(n)
+	if l.read > l.limit {
+		return n, fmt.Errorf("yunzhijia file exceeds max download size of %d bytes", l.limit)
+	}
+	return n, err
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.body.Close()
 }
 
 func buildDownloadFileURL(fileID string) string {

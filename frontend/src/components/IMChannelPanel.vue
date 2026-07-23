@@ -1034,13 +1034,11 @@ async function handleSave() {
       return;
     }
     if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
       normalizeYunzhijiaCredentials();
       if (!String(formData.value.credentials.send_msg_url || '').trim()) {
         MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
-        return;
-      }
-      if (!String(formData.value.credentials.allowed_webhook_host_suffix || '').trim()) {
-        MessagePlugin.warning(t('agentEditor.im.yunzhijiaAllowedHostSuffixRequired'));
         return;
       }
     }

@@ -5916,9 +5916,7 @@ export default {
       yunzhijiaTimeoutHint: "메시지 전송 URL을 통한 응답 전송 타임아웃, 기본 10초",
       yunzhijiaAllowedHostSuffix: "허용 호스트 접미사",
       yunzhijiaAllowedHostSuffixHint: "보안을 위해 메시지 전송 URL 호스트를 이 접미사로 제한 (예: yunzhijia.com)",
-      yunzhijiaRequiredCredentials: "메시지 전송 URL과 허용 호스트 접미사를 입력하세요",
       yunzhijiaSendMsgUrlRequired: "Yunzhijia 로봇 설정의 메시지 전송 URL을 입력하세요",
-      yunzhijiaAllowedHostSuffixRequired: "허용 호스트 접미사를 입력하세요",
       mattermostModeHint: "Mattermost는 Webhook(아웃고잉 웹훅 + 봇 토큰)만 지원합니다.",
       mattermostPostToMain: "답변을 채널 메인 타임라인에 표시",
       mattermostPostToMainHint:

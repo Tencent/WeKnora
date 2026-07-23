@@ -5969,9 +5969,7 @@ export default {
       yunzhijiaTimeoutHint: "通过发送消息地址回复的超时时间，默认 10 秒",
       yunzhijiaAllowedHostSuffix: "允许的主机后缀",
       yunzhijiaAllowedHostSuffixHint: "限制发送消息地址的目标域名后缀，提升安全性（如 yunzhijia.com）",
-      yunzhijiaRequiredCredentials: "请填写发送消息地址和允许的主机后缀",
       yunzhijiaSendMsgUrlRequired: "请填写云之家机器人设置中的发送消息地址",
-      yunzhijiaAllowedHostSuffixRequired: "请填写允许的主机后缀",
       mattermostModeHint: "Mattermost 仅支持 Webhook（出站 Webhook + Bot Token）。",
       mattermostPostToMain: "回复显示在频道主时间线",
       mattermostPostToMainHint:

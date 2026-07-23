@@ -5488,9 +5488,7 @@ export default {
       yunzhijiaTimeoutHint: 'Таймаут отправки ответов через URL отправки сообщений, по умолчанию 10 секунд',
       yunzhijiaAllowedHostSuffix: 'Допустимый суффикс хоста',
       yunzhijiaAllowedHostSuffixHint: 'Ограничить хост URL отправки сообщений этим суффиксом для безопасности (напр. yunzhijia.com)',
-      yunzhijiaRequiredCredentials: 'Укажите URL отправки сообщений и допустимый суффикс хоста',
       yunzhijiaSendMsgUrlRequired: 'Укажите URL отправки сообщений из настроек робота Yunzhijia',
-      yunzhijiaAllowedHostSuffixRequired: 'Укажите допустимый суффикс хоста',
       mattermostModeHint: 'Mattermost поддерживает только режим Webhook (исходящий вебхук + токен бота).',
       mattermostPostToMain: 'Ответы в основной ленте канала',
       mattermostPostToMainHint:
