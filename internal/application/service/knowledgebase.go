@@ -731,7 +731,16 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	// Stop both ephemeral queue work and durable wiki operations that target
 	// the now-deleted KB. ProcessKBDelete repeats this with document IDs and
 	// performs one final scrub after heavy cleanup to close enqueue races.
-	s.cleanupTasksForKnowledgeBase(ctx, id, nil, nil)
+	//
+	// Run detached with a bounded timeout so a disconnecting API client cannot
+	// truncate this best-effort scrub mid-scan, matching ProcessKBDelete's
+	// cleanup semantics. The KB row is already soft-deleted, so the async
+	// delete task remains the durable backstop even if this pass is cut short.
+	kbCleanupCtx, cancelKBCleanup := context.WithTimeout(
+		context.WithoutCancel(ctx), kbTaskCleanupTimeout,
+	)
+	s.cleanupTasksForKnowledgeBase(kbCleanupCtx, id, nil, nil)
+	cancelKBCleanup()
 
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
 	if s.shareRepo != nil {
@@ -744,7 +753,11 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	// schedules and in-flight sync logs do not keep running against a deleted KB.
 	dataSourceIDs := s.deleteDataSourcesForKnowledgeBase(ctx, id)
 	if len(dataSourceIDs) > 0 {
-		s.cancelTasksForKnowledgeBase(ctx, id, nil, dataSourceIDs)
+		dsCancelCtx, cancelDSCancel := context.WithTimeout(
+			context.WithoutCancel(ctx), kbTaskCleanupTimeout,
+		)
+		s.cancelTasksForKnowledgeBase(dsCancelCtx, id, nil, dataSourceIDs)
+		cancelDSCancel()
 	}
 
 	// Step 2: Enqueue async task for heavy cleanup operations
