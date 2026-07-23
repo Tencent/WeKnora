@@ -66,6 +66,8 @@ type knowledgeService struct {
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 
+	contentCacheRepo interfaces.ContentCacheRepository
+
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
@@ -96,6 +98,7 @@ func NewKnowledgeService(
 	tenantService interfaces.TenantService,
 	chunkService interfaces.ChunkService,
 	chunkRepo interfaces.ChunkRepository,
+	contentCacheRepo interfaces.ContentCacheRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
@@ -144,6 +147,8 @@ func NewKnowledgeService(
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 		audit:           audit,
+
+		contentCacheRepo: contentCacheRepo,
 	}, nil
 }
 
