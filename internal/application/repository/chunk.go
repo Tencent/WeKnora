@@ -467,6 +467,14 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 	).Delete(&types.Chunk{}).Error
 }
 
+// PurgeSoftDeletedByKnowledgeID permanently removes chunks that were already
+// soft-deleted for the given knowledge ID. Live rows are intentionally excluded.
+func (r *chunkRepository) PurgeSoftDeletedByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
+	return r.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND knowledge_id = ? AND deleted_at IS NOT NULL", tenantID, knowledgeID).
+		Delete(&types.Chunk{}).Error
+}
+
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
 // No chunk_type filter — collects from text, image_ocr, and image_caption chunks.
 func (r *chunkRepository) ListImageInfoByKnowledgeIDs(

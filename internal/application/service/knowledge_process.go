@@ -383,17 +383,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// === Parent-Child Chunking: create parent chunks first ===
+	chunkIDAllocator := types.NewChunkIDAllocator(knowledge.TenantID, knowledge.ID)
 	hasParentChild := len(options.ParentChunks) > 0
 	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			chunkID, contentHash := chunkIDAllocator.Allocate(types.ChunkTypeParentText, pc.Content, "")
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              chunkID,
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
 				Content:         pc.Content,
+				ContentHash:     contentHash,
 				ChunkIndex:      pc.Seq,
 				IsEnabled:       true,
 				CreatedAt:       time.Now(),
@@ -427,13 +430,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// 创建主文本Chunk
+		chunkID, contentHash := chunkIDAllocator.Allocate(types.ChunkTypeText, chunkData.Content, chunkData.ContextHeader)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              chunkID,
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
 			Content:         chunkData.Content,
 			ContextHeader:   chunkData.ContextHeader,
+			ContentHash:     contentHash,
 			ChunkIndex:      int(chunkData.Seq),
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -494,6 +499,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
+	if err := s.chunkService.GetRepository().PurgeSoftDeletedByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.failStage(ctx, knowledge.ID, types.StageChunking,
+			werrors.ErrCodeChunkingFailed, "purge soft-deleted chunks failed", err)
+		return
+	}
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()

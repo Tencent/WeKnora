@@ -197,6 +197,59 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+func TestPurgeSoftDeletedByKnowledgeID_SQLite_AllowsStableIDRecreate(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	liveKnowledgeID := uuid.New().String()
+	stableID := types.StableChunkID(1, knowledgeID, types.ChunkTypeText, types.ContentHash("stable content", ""), 0)
+
+	softDeleted := &types.Chunk{
+		ID:              stableID,
+		TenantID:        1,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     knowledgeID,
+		Content:         "stable content",
+		ContentHash:     types.ContentHash("stable content", ""),
+		ChunkType:       types.ChunkTypeText,
+		IsEnabled:       true,
+	}
+	liveSameKnowledge := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	liveOtherKnowledge := makeChunk(kbID, liveKnowledgeID, types.ChunkTypeText)
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{softDeleted, liveSameKnowledge, liveOtherKnowledge}))
+	require.NoError(t, repo.DeleteChunk(ctx, 1, stableID))
+
+	require.NoError(t, repo.PurgeSoftDeletedByKnowledgeID(ctx, 1, knowledgeID))
+
+	var totalRows int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Count(&totalRows).Error)
+	assert.Equal(t, int64(2), totalRows, "only the already soft-deleted chunk should be purged")
+
+	var liveCount int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("knowledge_id IN ?", []string{knowledgeID, liveKnowledgeID}).Count(&liveCount).Error)
+	assert.Equal(t, int64(2), liveCount, "live chunks must not be purged")
+
+	recreated := &types.Chunk{
+		ID:              stableID,
+		TenantID:        1,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     knowledgeID,
+		Content:         "stable content",
+		ContentHash:     types.ContentHash("stable content", ""),
+		ChunkType:       types.ChunkTypeText,
+		IsEnabled:       true,
+	}
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}))
+
+	var active types.Chunk
+	require.NoError(t, db.First(&active, "id = ?", stableID).Error)
+	assert.Equal(t, "stable content", active.Content)
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()
