@@ -79,7 +79,7 @@ func interpolateBuiltinModelEnv(s string) string {
 //     therefore the supported way to retire a built-in model — no manual
 //     SQL needed.
 //   - If is_default=true is set on a YAML entry, the loader first clears
-//     is_default on any other rows in the same (tenant_id, type) bucket,
+//     is_default on any other builtin rows in the same (tenant_id, type) bucket,
 //     mirroring the invariant enforced by the API path. Multiple entries
 //     with is_default=true for the same bucket result in last-one-wins with
 //     a warning.
@@ -159,8 +159,8 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 		if m.IsDefault {
 			if err := db.WithContext(ctx).
 				Model(&Model{}).
-				Where("tenant_id = ? AND type = ? AND id <> ? AND is_default = ?",
-					m.TenantID, m.Type, m.ID, true).
+				Where("tenant_id = ? AND type = ? AND id <> ? AND is_default = ? AND is_builtin = ?",
+					m.TenantID, m.Type, m.ID, true, true).
 				Update("is_default", false).Error; err != nil {
 				log.Printf("[builtin-models] WARN: clear existing default for tenant=%d type=%s failed: %v; continuing",
 					m.TenantID, m.Type, err)

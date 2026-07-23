@@ -4814,6 +4814,7 @@ export default {
       addModel: "모델 추가",
       debugModel: "모델 테스트",
       setDefault: "기본값으로 설정",
+      unsetDefault: "기본값 해제",
     },
     source: {
       remote: "Remote",
@@ -4860,6 +4861,8 @@ export default {
       deleteFailed: "모델 삭제 실패",
       setDefault: "기본 모델로 설정되었습니다",
       setDefaultFailed: "기본 모델 설정 실패",
+      unsetDefault: "기본 모델 설정이 해제되었습니다",
+      unsetDefaultFailed: "기본 모델 설정 해제 실패",
       builtinCannotEdit: "기본 제공 모델은 편집할 수 없습니다",
       builtinCannotDelete: "기본 제공 모델은 삭제할 수 없습니다",
       builtinCannotCopy: "기본 제공 모델은 복사할 수 없습니다",

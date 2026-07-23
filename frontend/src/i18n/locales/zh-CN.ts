@@ -4852,6 +4852,7 @@ export default {
       addModel: "添加模型",
       debugModel: "模型测试",
       setDefault: "设为默认",
+      unsetDefault: "取消默认",
     },
     source: {
       remote: "Remote",
@@ -4898,6 +4899,8 @@ export default {
       deleteFailed: "删除模型失败",
       setDefault: "已设为默认模型",
       setDefaultFailed: "设置默认模型失败",
+      unsetDefault: "已取消默认模型",
+      unsetDefaultFailed: "取消默认模型失败",
       builtinCannotEdit: "内置模型不能编辑",
       builtinCannotDelete: "内置模型不能删除",
       builtinCannotCopy: "内置模型不能复制",

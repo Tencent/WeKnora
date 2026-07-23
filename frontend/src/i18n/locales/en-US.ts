@@ -4810,7 +4810,8 @@ export default {
     actions: {
       addModel: 'Add Model',
       debugModel: 'Model Test',
-      setDefault: 'Set as Default'
+      setDefault: 'Set as Default',
+      unsetDefault: 'Unset as Default'
     },
     source: {
       remote: 'Remote',
@@ -4857,6 +4858,8 @@ export default {
       deleteFailed: 'Failed to delete model',
       setDefault: 'Set as default',
       setDefaultFailed: 'Failed to set default model',
+      unsetDefault: 'Default model unset',
+      unsetDefaultFailed: 'Failed to unset default model',
       builtinCannotEdit: 'Built-in models cannot be edited',
       builtinCannotDelete: 'Built-in models cannot be deleted',
       builtinCannotCopy: 'Built-in models cannot be copied',

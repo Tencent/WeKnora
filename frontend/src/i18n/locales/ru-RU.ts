@@ -4469,7 +4469,8 @@ export default {
     actions: {
       addModel: 'Добавить модель',
       debugModel: 'Тест модели',
-      setDefault: 'Сделать по умолчанию'
+      setDefault: 'Сделать по умолчанию',
+      unsetDefault: 'Отменить выбор по умолчанию'
     },
     chat: {
       title: 'Модели диалога',
@@ -4516,6 +4517,8 @@ export default {
       deleteFailed: 'Не удалось удалить модель',
       setDefault: 'Установлено по умолчанию',
       setDefaultFailed: 'Не удалось установить по умолчанию',
+      unsetDefault: 'Выбор модели по умолчанию отменён',
+      unsetDefaultFailed: 'Не удалось отменить выбор модели по умолчанию',
       builtinCannotEdit: 'Встроенные модели нельзя редактировать',
       builtinCannotDelete: 'Встроенные модели нельзя удалить',
       builtinCannotCopy: 'Встроенные модели нельзя копировать',
