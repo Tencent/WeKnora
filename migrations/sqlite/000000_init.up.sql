@@ -351,6 +351,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     request_method VARCHAR(16) NOT NULL DEFAULT '',
     outcome VARCHAR(16) NOT NULL DEFAULT 'success',
     details TEXT NOT NULL DEFAULT '{}',
+    scope_type VARCHAR(32) NOT NULL DEFAULT '',
+    scope_id VARCHAR(64) NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id_desc
@@ -361,6 +363,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
     ON audit_logs(tenant_id, action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
     ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_scope_desc
+    ON audit_logs(tenant_id, scope_type, scope_id, id DESC);
 
 -- user_resource_favorites — sqlite mirror of migration 000047. Same
 -- composite PK (user_id, tenant_id, resource_type, resource_id) so the
@@ -497,6 +501,8 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
     refresh_token TEXT,
     token_type VARCHAR(32),
     expires_at DATETIME,
+    refresh_lease_id VARCHAR(36),
+    refresh_lease_until DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE

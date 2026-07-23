@@ -5045,6 +5045,7 @@ export default {
     oauthScopes: "Scopes（可选，空格分隔）",
     oauthAuthorization: "授权状态",
     oauthAuthorized: "已授权",
+    oauthRefreshable: "Token 已过期，将在下次使用时自动刷新",
     oauthUnauthorized: "未授权",
     oauthAuthorize: "去授权",
     oauthReauthorize: "重新授权",

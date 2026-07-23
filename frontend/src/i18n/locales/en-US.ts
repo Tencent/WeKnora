@@ -4997,6 +4997,7 @@ export default {
     authTypeNone: 'None / Custom Header',
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (authorize on first connect)',
+    oauthRefreshable: 'Token expired; it will refresh automatically on next use',
     oauthAuthorizeHint: 'Clicking "Authorize" saves the current config first, then starts authorization (each user authorizes individually).',
     apiKeyHeader: 'Header Name',
     apiKeyHeaderDesc: 'Defaults to X-API-Key. For Bearer, set Authorization and put "Bearer <token>" in the value below; for raw-token services use Authorization with the raw token.',

@@ -4119,8 +4119,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "标签ID筛选(seq_id)",
+                        "description": "标签ID筛选(seq_id)，兼容旧版单标签",
                         "name": "tag_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "标签UUID筛选，逗号分隔（OR语义）",
+                        "name": "tag_ids",
                         "in": "query"
                     },
                     {
@@ -4285,12 +4291,13 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "将所有FAQ条目导出为CSV文件",
+                "description": "将所有FAQ条目导出为 CSV（默认）或 JSON。?format=json 返回与 FAQEntryPayload 结构兼容的数组。",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
-                    "text/csv"
+                    "text/csv",
+                    "application/json"
                 ],
                 "tags": [
                     "FAQ管理"
@@ -4303,11 +4310,17 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "导出格式：csv（默认）或 json",
+                        "name": "format",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "CSV文件",
+                        "description": "导出文件",
                         "schema": {
                             "type": "file"
                         }
@@ -8147,7 +8160,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "{authorization_url: string}",
+                        "description": "{authorization_url: string, authorization_attempt: string}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -8169,7 +8182,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "返回当前用户对指定 MCP 服务是否已完成 OAuth 授权",
+                "description": "返回当前用户的 OAuth Token 生命周期状态；传 authorization_attempt 时只检查本次授权流程",
                 "produces": [
                     "application/json"
                 ],
@@ -8184,11 +8197,17 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "本次授权尝试 ID；传入后不会接受历史 Token",
+                        "name": "authorization_attempt",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "{authorized: bool}",
+                        "description": "{authorized: bool, state: string, refresh_available: bool, expires_at?: string}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -14950,7 +14969,10 @@ const docTemplate = `{
                 "kb.share_added",
                 "kb.share_permission_changed",
                 "kb.share_removed",
-                "wiki.content_changed"
+                "wiki.content_changed",
+                "faq.import_started",
+                "faq.import_completed",
+                "faq.import_failed"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -15009,7 +15031,10 @@ const docTemplate = `{
                 "AuditActionKBShareAdded",
                 "AuditActionKBSharePermissionChanged",
                 "AuditActionKBShareRemoved",
-                "AuditActionWikiContentChanged"
+                "AuditActionWikiContentChanged",
+                "AuditActionFAQImportStarted",
+                "AuditActionFAQImportCompleted",
+                "AuditActionFAQImportFailed"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
