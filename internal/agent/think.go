@@ -41,6 +41,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 	messages = e.sourceRefs.EncodeMessages(messages)
 	messages = e.resourceRefs.EncodeMessages(messages)
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
