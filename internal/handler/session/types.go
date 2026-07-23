@@ -45,6 +45,7 @@ type CreateKnowledgeQARequest struct {
 	Query                 string                       `json:"query"              binding:"required"` // Query text for knowledge base search
 	KnowledgeBaseIDs      []string                     `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
 	KnowledgeIds          []string                     `json:"knowledge_ids"`                         // Selected knowledge ID for this request
+	FolderScopes          []types.FolderScope          `json:"folder_scopes,omitempty"`               // Folder scopes paired with KB IDs
 	AgentEnabled          bool                         `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
 	AgentID               string                       `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its workspace from share relation)
 	WebSearchEnabled      bool                         `json:"web_search_enabled"`                    // Whether web search is enabled for this request
@@ -74,6 +75,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseID  string                 `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
+	FolderScopes     []types.FolderScope    `json:"folder_scopes,omitempty"`               // Folder scopes paired with KB IDs
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 }

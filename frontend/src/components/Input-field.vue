@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, listFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -22,12 +22,15 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
+import type { Folder } from '@/types/folder';
+import { resolveFolderScopeState, type ResolvedFolderScopeState } from '@/utils/folderScope';
 import {
   kbSatisfiesAgentRequirements,
   deriveKbFilterForAgent,
   toolsConsumeFiles,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+import { collectFolderSubtreeIds } from '@/views/knowledge/utils/folderTree';
 import {
   isAgentWebSearchEnabled,
   isAgentWebSearchReady,
@@ -42,6 +45,10 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import {
+  selectEntireKnowledgeBaseScope,
+  toggleSourceFolderScope,
+} from '@/utils/sourceFolderSelection';
 
 const route = useRoute();
 const router = useRouter();
@@ -470,6 +477,16 @@ const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
 
+interface FolderScopeCacheEntry {
+  folders?: Folder[];
+  loading: boolean;
+  error?: string | null;
+  requestId: number;
+}
+
+const folderScopeCache = ref<Record<string, FolderScopeCacheEntry>>({});
+let folderScopeRequestSeq = 0;
+
 // 共享智能体时用于标识「共享空间」的展示名（组织名或共享者），供 @ 列表与已选标签显示角标
 const sharedAgentOrgName = computed(() => {
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -503,6 +520,7 @@ const props = defineProps({
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
+const selectedFolderScopes = computed(() => settingsStore.settings.selectedFolderScopes || {});
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
@@ -541,6 +559,126 @@ const selectedKbs = computed(() => {
   }));
   return [...own, ...sharedOnly, ...sharedFromAgent];
 });
+
+const extractFolderList = (response: any): Folder[] => {
+  const payload = response?.data ?? response;
+  const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
+  return list.filter((folder: any): folder is Folder => folder && typeof folder.id === 'string');
+};
+
+const ensureFolderScopeFolders = async (kbId: string, force = false) => {
+  if (!kbId) return;
+  const cached = folderScopeCache.value[kbId];
+  if (!force && (cached?.loading || cached?.folders)) return;
+
+  const requestId = ++folderScopeRequestSeq;
+  folderScopeCache.value = {
+    ...folderScopeCache.value,
+    [kbId]: {
+      folders: cached?.folders,
+      loading: true,
+      error: null,
+      requestId,
+    },
+  };
+
+  try {
+    const response: any = await listFolders(kbId, { all: true });
+    if (folderScopeCache.value[kbId]?.requestId !== requestId) return;
+    const folders = extractFolderList(response)
+      .filter(folder => !folder.knowledge_base_id || String(folder.knowledge_base_id) === kbId);
+    folderScopeCache.value = {
+      ...folderScopeCache.value,
+      [kbId]: {
+        folders,
+        loading: false,
+        error: null,
+        requestId,
+      },
+    };
+  } catch (error: any) {
+    if (folderScopeCache.value[kbId]?.requestId !== requestId) return;
+    folderScopeCache.value = {
+      ...folderScopeCache.value,
+      [kbId]: {
+        folders: cached?.folders,
+        loading: false,
+        error: error?.message || String(error),
+        requestId,
+      },
+    };
+  }
+};
+
+const getFolderScopeState = (kbId: string): ResolvedFolderScopeState => {
+  const folderIds = selectedFolderScopes.value[kbId];
+  const cached = folderScopeCache.value[kbId];
+  return resolveFolderScopeState(folderIds, cached?.folders, !!cached?.loading, cached?.error);
+};
+
+const getFolderScopeLabel = (kbId: string) => {
+  const state = getFolderScopeState(kbId);
+  if (state.status === 'valid') {
+    return state.folders.length === 1
+      ? t('input.folderScope.selectedFolderSingle')
+      : t('input.folderScope.selectedFolderCount', { count: state.folders.length });
+  }
+  if (state.status === 'invalid') return t('input.folderScope.partialInvalidShort');
+  if (state.status === 'load-error') return t('input.folderScope.loadFailedShort');
+  if (state.status === 'loading') return t('input.folderScope.loadingShort');
+  return t('input.folderScope.entireKnowledgeBase');
+};
+
+const getFolderScopeTitle = (kbId: string) => {
+  const state = getFolderScopeState(kbId);
+  if (state.status === 'valid') return state.paths.join(', ');
+  if (state.status === 'invalid') return t('input.folderScope.partialInvalid');
+  if (state.status === 'load-error') return t('input.folderScope.loadFailed');
+  if (state.status === 'loading') return t('input.folderScope.loading');
+  return t('input.folderScope.entireKnowledgeBase');
+};
+
+const getFolderScopeClass = (kbId: string) => {
+  const status = getFolderScopeState(kbId).status;
+  return `mention-chip__scope--${status}`;
+};
+
+const getScopedFolderIds = (kbId: string): Set<string> | null => {
+  const folderIds = selectedFolderScopes.value[kbId];
+  if (!folderIds?.length) return null;
+  const folders = folderScopeCache.value[kbId]?.folders;
+  if (!folders) return null;
+  const union = new Set<string>();
+  folderIds.forEach(folderId => {
+    collectFolderSubtreeIds(folders, folderId).forEach(id => union.add(id));
+  });
+  return union;
+};
+
+const isKnowledgeInCurrentFolderScope = (knowledge: any): boolean => {
+  const kbId = knowledge?.knowledge_base_id ?? knowledge?.kb_id;
+  if (!kbId) return true;
+  const knowledgeBaseId = String(kbId);
+  if (!selectedKbIds.value.includes(knowledgeBaseId)) return true;
+  const scopedFolderIds = getScopedFolderIds(knowledgeBaseId);
+  if (!scopedFolderIds) return true;
+  const folderId = knowledge?.folder_id;
+  return typeof folderId === 'string' && scopedFolderIds.has(folderId);
+};
+
+const invalidFolderScopeKbNames = computed(() => {
+  return selectedKbs.value
+    .filter(kb => getFolderScopeState(kb.id).status === 'invalid')
+    .map(kb => kb.name);
+});
+
+const toggleFolderScopeFromMention = (item: MentionItem, folderId: string) => {
+  toggleSourceFolderScope(settingsStore, item.id, folderId, isKnowledgeBaseDisabledByAgent.value);
+};
+
+const clearFolderScopeFromMention = (item: MentionItem) => {
+  selectEntireKnowledgeBaseScope(settingsStore, item.id, isKnowledgeBaseDisabledByAgent.value);
+};
 
 const selectedFiles = computed(() => {
   // If we have file details in fileList, use them.
@@ -798,6 +936,15 @@ const loadMCPServices = async () => {
 watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
+
+watch([selectedKbIds, () => ({ ...selectedFolderScopes.value })], () => {
+  const selected = new Set(selectedKbIds.value);
+  Object.entries(selectedFolderScopes.value).forEach(([kbId, folderIds]) => {
+    if (selected.has(kbId) && folderIds?.length) {
+      void ensureFolderScopeFolders(kbId);
+    }
+  });
+}, { immediate: true, deep: true });
 
 const isWebSearchConfigured = computed(() => {
   if (hasAgentConfig.value) {
@@ -1344,6 +1491,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
       const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
       const agentId = selectedAgentId.value;
+      const hasFolderScopes = Object.values(selectedFolderScopes.value)
+        .some(folderIDs => Array.isArray(folderIDs) && folderIDs.length > 0);
       const searchOptions = {
         ...(sourceTenantId && agentId ? { agent_id: agentId } : {}),
         recent: !fileSearchKeyword,
@@ -1356,10 +1505,12 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         searchOptions
       );
       console.log('[Mention] searchKnowledge response:', res);
+      let globalHasMore = false;
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
         const rawTotal = typeof res.total === 'number' ? res.total : undefined;
         const apiPageSize = res.data.length;
+        globalHasMore = !!res.has_more;
         // 按当前 @ 会话的兼容 KB 集合过滤：
         //   - 非智能体场景：`mentionAllowedKbIds` 为 null，跳过；
         //   - 智能体场景（含 shared agent）：'selected' 会把 ID 收敛到用户勾的 KB，
@@ -1372,6 +1523,11 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
             return kbId != null && allowed.has(String(kbId));
           });
         }
+        // The list API exposes only one folder_id. For multi-folder scopes we
+        // keep a single global request and apply the loaded folder-tree union
+        // locally. When the tree is not loaded, candidates remain visible;
+        // the backend folder_scopes boundary is authoritative at send time.
+        files = files.filter((f: any) => isKnowledgeInCurrentFolderScope(f));
         const sharedKbOrgMap: Record<string, string> = {};
         (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
           if (s.knowledge_base?.id != null && s.org_name) {
@@ -1379,7 +1535,13 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           }
         });
         const agentOrgLabel = sourceTenantId && agentId ? sharedAgentOrgName.value : '';
-        fileItems = files.map((f: any) => {
+        const seenFileIds = new Set<string>();
+        fileItems = files.filter((f: any) => {
+          const id = f?.id != null ? String(f.id) : '';
+          if (!id || seenFileIds.has(id)) return false;
+          seenFileIds.add(id);
+          return true;
+        }).map((f: any) => {
           const kbId = f.knowledge_base_id ?? f.kb_id;
           const kbIdStr = kbId != null ? String(kbId) : '';
           const fileOrgName = agentOrgLabel || (kbIdStr ? sharedKbOrgMap[kbIdStr] : undefined);
@@ -1393,7 +1555,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           };
         });
         if (!append) {
-          const clientFiltered = !!mentionAllowedKbIds.value && fileItems.length < apiPageSize;
+          const clientFiltered = (!!mentionAllowedKbIds.value || hasFolderScopes) && fileItems.length < apiPageSize;
           if (!clientFiltered && rawTotal != null) {
             mentionGroupCounts.value.file = rawTotal;
           } else {
@@ -1401,7 +1563,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           }
         }
       }
-      mentionHasMore.value = res.has_more || false;
+      mentionHasMore.value = globalHasMore;
       mentionOffset.value += fileItems.length;
     } catch (e) {
       console.error('[Mention] searchKnowledge error:', e);
@@ -1676,7 +1838,13 @@ const onMentionSelect = (item: any) => {
     }
   }
 
-  showMention.value = false;
+  if (isMentionTriggeredByButton.value) {
+    showMention.value = true;
+    mentionQuery.value = '';
+    void loadMentionItems('');
+  } else {
+    showMention.value = false;
+  }
 };
 
 const removeFile = (id: string) => {
@@ -1915,6 +2083,12 @@ const createSession = async (val: string) => {
       notReadyKeys,
       settingsStore.selectedAgentSourceTenantId ?? undefined,
     );
+    return;
+  }
+  if (invalidFolderScopeKbNames.value.length > 0) {
+    MessagePlugin.warning(t('input.folderScope.sendBlockedInvalid', {
+      names: formatLocalizedList(invalidFolderScopeKbNames.value, locale.value),
+    }));
     return;
   }
   // 获取@提及的知识库和文件信息
@@ -2498,7 +2672,18 @@ defineExpose({
                 class="mention-chip__org-img" alt="" aria-hidden="true" />
             </span>
           </span>
-          <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
+          <span class="mention-chip__content">
+            <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
+            <span
+              v-if="item.type === 'kb' && !embeddedMode"
+              class="mention-chip__scope"
+              :class="getFolderScopeClass(item.id)"
+              :title="getFolderScopeTitle(item.id)"
+            >
+              <t-icon name="folder" />
+              <span class="mention-chip__scope-text">{{ getFolderScopeLabel(item.id) }}</span>
+            </span>
+          </span>
           <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
             :aria-label="$t('common.remove')">×</span>
         </span>
@@ -2699,14 +2884,20 @@ defineExpose({
     <!-- Mention Selector -->
     <Teleport to="body">
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
-        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts"
+        :selected-knowledge-base-ids="selectedKbIds" :selected-folder-scopes="selectedFolderScopes"
+        :folder-scope-cache="folderScopeCache" :folder-scope-disabled="isKnowledgeBaseDisabledByAgent"
+        v-model:activeIndex="mentionActiveIndex"
+        @select="onMentionSelect" @loadMore="loadMoreMentionItems"
+        @load-folder-scopes="ensureFolderScopeFolders" @toggle-folder-scope="toggleFolderScopeFromMention"
+        @clear-folder-scope="clearFolderScopeFromMention" />
     </Teleport>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
       <KnowledgeBaseSelector v-model:visible="showKbSelector" :anchorEl="atButtonRef" @close="showKbSelector = false" />
     </Teleport>
+
   </div>
 </template>
 <script lang="ts">
@@ -2835,6 +3026,59 @@ const getImgSrc = (url: string) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: currentColor;
+}
+
+.mention-chip__content {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 260px;
+}
+
+.mention-chip__scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 140px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--td-component-border, #e7e9eb);
+  border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer, #f5f7f8);
+  color: var(--td-text-color-secondary, #6b7280);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: default;
+}
+
+.mention-chip__scope-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-chip__scope--valid {
+  color: var(--td-brand-color, #07c05f);
+  border-color: rgba(7, 192, 95, 0.28);
+  background: var(--td-brand-color-light, #eefdf5);
+}
+
+.mention-chip__scope--invalid {
+  color: var(--td-error-color, #d54941);
+  border-color: var(--td-error-color-3, #f8c9c9);
+  background: var(--td-error-color-1, #fff0ed);
+}
+
+.mention-chip__scope--load-error {
+  color: var(--td-warning-color, #e37318);
+  border-color: var(--td-warning-color-3, #f9d7b9);
+  background: var(--td-warning-color-1, #fff4e8);
+}
+
+.mention-chip__scope--loading {
+  color: var(--td-text-color-placeholder, #9ca3af);
 }
 
 .mention-chip__remove {

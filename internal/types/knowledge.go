@@ -88,6 +88,19 @@ const (
 // KnowledgeListFilter aggregates optional filters for listing knowledge entries
 // under a knowledge base. Empty / zero fields mean "no filter on that dimension".
 type KnowledgeListFilter struct {
+	// FolderIDSet distinguishes an omitted folder filter from an explicit root
+	// filter. When false, FolderID is ignored and all folders are included.
+	// By default, true with FolderID nil means the KB root and true with a
+	// non-nil FolderID means that direct folder. IncludeFolderDescendants may
+	// widen those explicit scopes for keyword search.
+	FolderIDSet bool
+	FolderID    *string
+	// IncludeFolderDescendants is an application-internal switch used only
+	// when an explicit folder scope is combined with a non-empty keyword.
+	// It is not exposed as an HTTP parameter. With a concrete FolderID it
+	// includes that folder and all active descendants; with a nil FolderID it
+	// leaves the tenant/KB scope unqualified, which represents the root subtree.
+	IncludeFolderDescendants bool
 	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
 	TagIDs []string
 	// Keyword performs a LIKE match on file_name / title when non-empty.
@@ -116,6 +129,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the folder containing this knowledge; nil means the knowledge-base root.
+	FolderID *string `json:"folder_id" gorm:"column:folder_id;type:varchar(36);default:null"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

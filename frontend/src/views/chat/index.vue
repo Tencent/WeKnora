@@ -159,6 +159,7 @@ import {
 } from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { buildFolderScopes } from '@/utils/folderScope';
 
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
@@ -803,6 +804,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
+    const folderScopes = props.embeddedMode
+        ? []
+        : buildFolderScopes(kbIds, useSettingsStoreInstance.settings.selectedFolderScopes || {});
 
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
 
@@ -816,6 +820,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
+        folder_scopes: folderScopes.length > 0 ? folderScopes : undefined,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,

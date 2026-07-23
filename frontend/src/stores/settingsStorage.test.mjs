@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { normalizeSelectedFolderScopes } from "../utils/folderScope.ts";
 
 const SETTINGS_STORAGE_KEY = "WeKnora_settings";
 const BUILTIN_QUICK_ANSWER_ID = "builtin-quick-answer";
@@ -31,6 +32,10 @@ function reconcileLoadedSettings(loaded) {
   loaded.selectedMCPServices ||= [];
   loaded.selectedSkills ||= loaded.selectedTools || [];
   loaded.selectedFileKbMap ||= {};
+  loaded.selectedFolderScopes = normalizeSelectedFolderScopes(
+    loaded.selectedFolderScopes,
+    loaded.selectedKnowledgeBases,
+  );
   if (reconcileBuiltinAgentMode(loaded)) {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(loaded));
   }
@@ -65,10 +70,12 @@ function makeDefaults() {
   return {
     isAgentEnabled: false,
     selectedAgentId: BUILTIN_QUICK_ANSWER_ID,
+    selectedKnowledgeBases: [],
     selectedTags: [],
     selectedMCPServices: [],
     selectedSkills: [],
     selectedFileKbMap: {},
+    selectedFolderScopes: {},
     nested: { items: ["a"] },
   };
 }
@@ -150,4 +157,14 @@ test("loadAndReconcileSettings keeps valid stored settings", () => {
   assert.equal(loaded.isAgentEnabled, false);
   assert.equal(loaded.selectedTags.length, 1);
   assert.equal(loaded.selectedTags[0].id, "t1");
+});
+
+test("legacy folder scope strings migrate to deduplicated arrays", () => {
+  const loaded = reconcileLoadedSettings({
+    ...makeDefaults(),
+    selectedKnowledgeBases: ["kb1"],
+    selectedFolderScopes: { kb1: "folder1", kb2: ["ignored"], kb3: [] },
+  });
+
+  assert.deepEqual(loaded.selectedFolderScopes, { kb1: ["folder1"] });
 });

@@ -3,15 +3,19 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,6 +25,16 @@ type createKnowledgeFileRepoStub struct {
 	createCalls      int
 	createErr        error
 	createdKnowledge *types.Knowledge
+	folder           *types.Folder
+	folderErr        error
+	folderLockCalls  int
+}
+
+func (r *createKnowledgeFileRepoStub) WithinFolderTransaction(
+	ctx context.Context,
+	fn func(interfaces.KnowledgeRepository, interfaces.FolderRepository) error,
+) error {
+	return fn(r, &createKnowledgeFileFolderRepoStub{owner: r})
 }
 
 func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
@@ -37,6 +51,31 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 	copied := *knowledge
 	r.createdKnowledge = &copied
 	return r.createErr
+}
+
+type createKnowledgeFileFolderRepoStub struct {
+	interfaces.FolderRepository
+	owner *createKnowledgeFileRepoStub
+}
+
+func (r *createKnowledgeFileFolderRepoStub) GetByIDForUpdate(
+	_ context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	folderID string,
+) (*types.Folder, error) {
+	r.owner.folderLockCalls++
+	if r.owner.folderErr != nil {
+		return nil, r.owner.folderErr
+	}
+	if r.owner.folder == nil ||
+		r.owner.folder.ID != folderID ||
+		r.owner.folder.TenantID != tenantID ||
+		r.owner.folder.KnowledgeBaseID != knowledgeBaseID ||
+		r.owner.folder.DeletedAt.Valid {
+		return nil, repository.ErrFolderNotFound
+	}
+	return r.owner.folder, nil
 }
 
 // GetKnowledgeTags is invoked by setAndAttachKnowledgeTags after create even
@@ -116,7 +155,8 @@ func (s *createKnowledgeFileServiceStub) CopyFile(ctx context.Context, srcPath s
 }
 
 type createKnowledgeTaskEnqueuerStub struct {
-	calls int
+	calls   int
+	payload []byte
 }
 
 func (s *createKnowledgeTaskEnqueuerStub) Enqueue(
@@ -124,6 +164,7 @@ func (s *createKnowledgeTaskEnqueuerStub) Enqueue(
 	opts ...asynq.Option,
 ) (*asynq.TaskInfo, error) {
 	s.calls++
+	s.payload = append([]byte(nil), task.Payload()...)
 	return &asynq.TaskInfo{ID: "task-1", Queue: "default"}, nil
 }
 
@@ -147,6 +188,7 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 		"",
 		nil,
 		"",
+		nil,
 		nil,
 	)
 
@@ -178,6 +220,7 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 		"",
 		nil,
 		"",
+		nil,
 		nil,
 	)
 
@@ -212,6 +255,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 		"",
 		nil,
 		"",
+		nil,
 		nil,
 	)
 
@@ -251,6 +295,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 		nil,
 		"",
 		overrides,
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -267,6 +312,91 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	metadataMap, err := repo.createdKnowledge.Metadata.Map()
 	require.NoError(t, err)
 	require.Equal(t, "test", metadataMap["source"])
+}
+
+func TestCreateKnowledgeFromFilePersistsFolderBeforeEnqueue(t *testing.T) {
+	t.Parallel()
+
+	folderID := uuid.NewString()
+	repo := &createKnowledgeFileRepoStub{
+		folder: &types.Folder{
+			ID:              folderID,
+			TenantID:        1,
+			KnowledgeBaseID: "kb-1",
+		},
+	}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "doc.txt", "hello"),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+		&folderID,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.NotNil(t, knowledge.FolderID)
+	assert.Equal(t, folderID, *knowledge.FolderID)
+	require.NotNil(t, repo.createdKnowledge)
+	require.NotNil(t, repo.createdKnowledge.FolderID)
+	assert.Equal(t, folderID, *repo.createdKnowledge.FolderID)
+	assert.Equal(t, 1, repo.folderLockCalls)
+	assert.Equal(t, 1, repo.createCalls)
+	assert.Equal(t, 1, task.calls, "the parse task is enqueued after the row is persisted")
+
+	var payload types.DocumentProcessPayload
+	require.NoError(t, json.Unmarshal(task.payload, &payload))
+	assert.Equal(t, knowledge.ID, payload.KnowledgeID)
+	assert.Equal(t, "kb-1", payload.KnowledgeBaseID)
+}
+
+func TestCreateKnowledgeFromFileDeletesStoredFileWhenFolderIsMissing(t *testing.T) {
+	t.Parallel()
+
+	folderID := uuid.NewString()
+	repo := &createKnowledgeFileRepoStub{}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+	}
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		newCreateKnowledgeFileContext(),
+		"kb-1",
+		newMultipartFileHeader(t, "doc.txt", "hello"),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+		&folderID,
+	)
+
+	assert.ErrorIs(t, err, ErrTargetFolderNotFound)
+	assert.Nil(t, knowledge)
+	assert.Equal(t, 1, repo.folderLockCalls)
+	assert.Zero(t, repo.createCalls)
+	assert.Equal(t, 1, fileSvc.deleteCalls)
+	assert.Zero(t, task.calls)
 }
 
 func newCreateKnowledgeFileContext() context.Context {

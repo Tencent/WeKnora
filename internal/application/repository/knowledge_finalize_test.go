@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata TEXT,
     tag_id VARCHAR(36),
+    folder_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
     channel VARCHAR(50) NOT NULL DEFAULT 'web',

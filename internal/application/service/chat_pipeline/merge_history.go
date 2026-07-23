@@ -35,6 +35,10 @@ func filterHistoryResults(
 	if len(raw) == 0 {
 		return nil
 	}
+	raw = filterHistoryResultsByFolderScope(ctx, chatManage, raw)
+	if len(raw) == 0 {
+		return nil
+	}
 
 	// Build a set of chunk IDs already in current results for fast dedup
 	existingIDs := make(map[string]struct{}, len(currentResults))
@@ -80,6 +84,64 @@ func filterHistoryResults(
 		if len(filtered) >= maxHistoryResults {
 			break
 		}
+	}
+	return filtered
+}
+
+func filterHistoryResultsByFolderScope(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	results []*types.SearchResult,
+) []*types.SearchResult {
+	if chatManage == nil || len(chatManage.FolderKnowledgeIDs) == 0 || len(results) == 0 {
+		return results
+	}
+	allowedByKB := make(map[string]map[string]struct{}, len(chatManage.FolderKnowledgeIDs))
+	for kbID, ids := range chatManage.FolderKnowledgeIDs {
+		set := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			set[id] = struct{}{}
+		}
+		allowedByKB[kbID] = set
+	}
+
+	filtered := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if result.KnowledgeID == "" {
+			pipelineInfo(ctx, "Merge", "history_folder_drop", map[string]interface{}{
+				"chunk_id": result.ID,
+				"reason":   "missing_knowledge_id",
+			})
+			continue
+		}
+		if result.KnowledgeBaseID == "" {
+			pipelineInfo(ctx, "Merge", "history_folder_drop", map[string]interface{}{
+				"chunk_id": result.ID,
+				"reason":   "missing_knowledge_base_id",
+			})
+			continue
+		}
+		allowedSet, restricted := allowedByKB[result.KnowledgeBaseID]
+		if !restricted {
+			filtered = append(filtered, result)
+			continue
+		}
+		if _, ok := allowedSet[result.KnowledgeID]; ok {
+			filtered = append(filtered, result)
+			continue
+		}
+		pipelineInfo(ctx, "Merge", "history_folder_drop", map[string]interface{}{
+			"chunk_id":           result.ID,
+			"knowledge_id":       result.KnowledgeID,
+			"knowledge_base_id":  result.KnowledgeBaseID,
+			"folder_scope_empty": len(allowedSet) == 0,
+		})
 	}
 	return filtered
 }

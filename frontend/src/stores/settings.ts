@@ -4,6 +4,13 @@ import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent
 import { getApiBaseUrl } from "@/utils/api-base";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import {
+  normalizeFolderIDs,
+  normalizeSelectedFolderScopes,
+  pruneFolderScopes as pruneSelectedFolderScopes,
+  restoreFolderScopes as restoreSelectedFolderScopes,
+  type SelectedFolderScopes,
+} from "@/utils/folderScope";
 
 // 定义设置接口
 interface Settings {
@@ -13,6 +20,7 @@ interface Settings {
   isAgentEnabled: boolean;
   agentConfig: AgentConfig;
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
+  selectedFolderScopes: SelectedFolderScopes; // 知识库ID -> Folder IDs；缺失表示整个知识库
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
@@ -82,6 +90,7 @@ const defaultSettings: Settings = {
     system_prompt: "",
   },
   selectedKnowledgeBases: [],  // 默认为空数组
+  selectedFolderScopes: {},
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
@@ -179,7 +188,13 @@ export const useSettingsStore = defineStore("settings", {
   actions: {
     // 保存设置
     saveSettings(settings: Settings) {
-      this.settings = { ...settings };
+      this.settings = {
+        ...settings,
+        selectedFolderScopes: normalizeSelectedFolderScopes(
+          settings.selectedFolderScopes,
+          settings.selectedKnowledgeBases || [],
+        ),
+      };
       // 保存到localStorage
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
@@ -293,12 +308,16 @@ export const useSettingsStore = defineStore("settings", {
     // 选择知识库（替换整个列表）
     selectKnowledgeBases(kbIds: string[]) {
       this.settings.selectedKnowledgeBases = kbIds;
+      this.settings.selectedFolderScopes = pruneSelectedFolderScopes(this.settings.selectedFolderScopes, kbIds);
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 添加单个知识库
     addKnowledgeBase(kbId: string) {
       if (!this.settings.selectedKnowledgeBases.includes(kbId)) {
+        if (this.settings.selectedFolderScopes) {
+          delete this.settings.selectedFolderScopes[kbId];
+        }
         this.settings.selectedKnowledgeBases.push(kbId);
         localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
       }
@@ -308,18 +327,114 @@ export const useSettingsStore = defineStore("settings", {
     removeKnowledgeBase(kbId: string) {
       this.settings.selectedKnowledgeBases = 
         this.settings.selectedKnowledgeBases.filter((id: string) => id !== kbId);
+      if (this.settings.selectedFolderScopes) {
+        delete this.settings.selectedFolderScopes[kbId];
+      }
+      if (this.settings.selectedTags) {
+        this.settings.selectedTags = this.settings.selectedTags.filter(tag => tag.kbId !== kbId);
+      }
+      if (this.settings.selectedFileKbMap) {
+        const removedFileIds = new Set(
+          Object.entries(this.settings.selectedFileKbMap)
+            .filter(([, fileKbId]) => fileKbId === kbId)
+            .map(([fileId]) => fileId),
+        );
+        if (removedFileIds.size > 0) {
+          this.settings.selectedFiles = (this.settings.selectedFiles || []).filter(fileId => !removedFileIds.has(fileId));
+          removedFileIds.forEach(fileId => delete this.settings.selectedFileKbMap[fileId]);
+        }
+      }
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 清空知识库选择
     clearKnowledgeBases() {
       this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFolderScopes = {};
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 获取选中的知识库列表
     getSelectedKnowledgeBases(): string[] {
       return this.settings.selectedKnowledgeBases || [];
+    },
+
+    setFolderScopes(knowledgeBaseID: string, folderIDs: readonly string[]) {
+      const kbID = typeof knowledgeBaseID === "string" ? knowledgeBaseID.trim() : "";
+      const normalizedFolderIDs = normalizeFolderIDs(folderIDs);
+      if (!kbID) return;
+      if (!this.settings.selectedKnowledgeBases.includes(kbID)) return;
+      this.settings.selectedFolderScopes ||= {};
+      if (normalizedFolderIDs.length === 0) {
+        delete this.settings.selectedFolderScopes[kbID];
+      } else {
+        this.settings.selectedFolderScopes[kbID] = normalizedFolderIDs;
+      }
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // Legacy single-value setter retained for callers outside the source selector.
+    addFolderScope(knowledgeBaseID: string, folderID: string) {
+      const current = this.getFolderScopes(knowledgeBaseID);
+      this.setFolderScopes(knowledgeBaseID, [...current, folderID]);
+    },
+
+    removeFolderScope(knowledgeBaseID: string, folderID: string) {
+      const selectedFolderID = typeof folderID === "string" ? folderID.trim() : "";
+      if (!selectedFolderID) return;
+      this.setFolderScopes(
+        knowledgeBaseID,
+        this.getFolderScopes(knowledgeBaseID).filter(id => id !== selectedFolderID),
+      );
+    },
+
+    toggleFolderScope(knowledgeBaseID: string, folderID: string) {
+      const selectedFolderID = typeof folderID === "string" ? folderID.trim() : "";
+      if (!selectedFolderID) return;
+      const current = this.getFolderScopes(knowledgeBaseID);
+      if (current.includes(selectedFolderID)) {
+        this.removeFolderScope(knowledgeBaseID, selectedFolderID);
+      } else {
+        this.addFolderScope(knowledgeBaseID, selectedFolderID);
+      }
+    },
+
+    clearFolderScopes(knowledgeBaseID: string) {
+      if (!this.settings.selectedFolderScopes) return;
+      delete this.settings.selectedFolderScopes[knowledgeBaseID];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolderScope(knowledgeBaseID: string) {
+      this.clearFolderScopes(knowledgeBaseID);
+    },
+
+    clearAllFolderScopes() {
+      this.settings.selectedFolderScopes = {};
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    getFolderScopes(knowledgeBaseID: string): string[] {
+      return normalizeFolderIDs(this.settings.selectedFolderScopes?.[knowledgeBaseID]);
+    },
+
+    getFolderScope(knowledgeBaseID: string): string | undefined {
+      return this.getFolderScopes(knowledgeBaseID)[0];
+    },
+
+    pruneFolderScopes(validKnowledgeBaseIDs: string[]) {
+      this.settings.selectedFolderScopes = pruneSelectedFolderScopes(
+        this.settings.selectedFolderScopes,
+        validKnowledgeBaseIDs,
+      );
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    restoreFolderScopes(
+      scopes: SessionLastRequestStatePayload["folder_scopes"],
+      validKnowledgeBaseIDs?: string[],
+    ) {
+      this.settings.selectedFolderScopes = restoreSelectedFolderScopes(scopes, validKnowledgeBaseIDs);
     },
     
     // 启用/禁用网络搜索
@@ -460,6 +575,7 @@ export const useSettingsStore = defineStore("settings", {
       // 切换智能体时重置知识库和文件选择状态
       // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
       this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFolderScopes = {};
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
       this.settings.selectedTags = [];
@@ -520,6 +636,18 @@ export const useSettingsStore = defineStore("settings", {
         }
         if (Array.isArray(state.knowledge_base_ids)) {
           this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
+          this.settings.selectedFolderScopes = pruneSelectedFolderScopes(
+            this.settings.selectedFolderScopes,
+            this.settings.selectedKnowledgeBases,
+          );
+        }
+        if (Object.prototype.hasOwnProperty.call(state, "folder_scopes")) {
+          const validKnowledgeBaseIDs = Array.isArray(state.knowledge_base_ids)
+            ? this.settings.selectedKnowledgeBases
+            : [];
+          this.restoreFolderScopes(state.folder_scopes, validKnowledgeBaseIDs);
+        } else {
+          this.settings.selectedFolderScopes = {};
         }
         if (Array.isArray(state.knowledge_ids)) {
           this.settings.selectedFiles = [...state.knowledge_ids];
@@ -585,6 +713,11 @@ export interface SessionLastRequestStatePayload {
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];
+  folder_scopes?: Array<{
+    knowledge_base_id?: string;
+    folder_ids?: string[] | null;
+    folder_id?: string | null;
+  }>;
   mcp_service_ids?: string[];
   skill_names?: string[];
   mentioned_items?: Array<{

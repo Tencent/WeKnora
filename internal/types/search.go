@@ -1,8 +1,14 @@
 package types
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
 // SearchTargetType represents the type of search target
@@ -21,6 +27,195 @@ type TagScope struct {
 	TagIDs          []string `json:"tag_ids"`
 }
 
+// FolderScope represents the union of one or more folder subtrees inside one
+// knowledge base. FolderID is accepted only for legacy clients. New snapshots
+// and responses use FolderIDs exclusively.
+type FolderScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	FolderIDs       []string `json:"folder_ids,omitempty"`
+	FolderID        *string  `json:"folder_id,omitempty"`
+
+	folderIDsPresent bool
+	folderIDsNull    bool
+	folderIDPresent  bool
+	folderIDNull     bool
+}
+
+// UnmarshalJSON records field presence so request validation can distinguish
+// missing fields from explicit null/empty values. That distinction prevents a
+// malformed restricted scope from silently widening to the whole KB.
+func (s *FolderScope) UnmarshalJSON(data []byte) error {
+	type wireScope struct {
+		KnowledgeBaseID string          `json:"knowledge_base_id"`
+		FolderIDs       json.RawMessage `json:"folder_ids"`
+		FolderID        json.RawMessage `json:"folder_id"`
+	}
+	var wire wireScope
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = FolderScope{KnowledgeBaseID: wire.KnowledgeBaseID}
+
+	if wire.FolderIDs != nil {
+		s.folderIDsPresent = true
+		if bytes.Equal(bytes.TrimSpace(wire.FolderIDs), []byte("null")) {
+			s.folderIDsNull = true
+		} else if err := json.Unmarshal(wire.FolderIDs, &s.FolderIDs); err != nil {
+			return err
+		}
+	}
+	if wire.FolderID != nil {
+		s.folderIDPresent = true
+		if bytes.Equal(bytes.TrimSpace(wire.FolderID), []byte("null")) {
+			s.folderIDNull = true
+		} else {
+			var folderID string
+			if err := json.Unmarshal(wire.FolderID, &folderID); err != nil {
+				return err
+			}
+			s.FolderID = &folderID
+		}
+	}
+	return nil
+}
+
+// MarshalJSON emits the canonical multi-folder field for normalized scopes,
+// while preserving legacy folder_id when an old stored value is read back.
+func (s FolderScope) MarshalJSON() ([]byte, error) {
+	type canonicalScope struct {
+		KnowledgeBaseID string   `json:"knowledge_base_id"`
+		FolderIDs       []string `json:"folder_ids,omitempty"`
+	}
+	type legacyScope struct {
+		KnowledgeBaseID string  `json:"knowledge_base_id"`
+		FolderID        *string `json:"folder_id"`
+	}
+	type conflictingScope struct {
+		KnowledgeBaseID string   `json:"knowledge_base_id"`
+		FolderIDs       []string `json:"folder_ids"`
+		FolderID        *string  `json:"folder_id"`
+	}
+
+	if len(s.FolderIDs) > 0 && (s.FolderID != nil || s.folderIDPresent) {
+		return json.Marshal(conflictingScope{
+			KnowledgeBaseID: s.KnowledgeBaseID,
+			FolderIDs:       s.FolderIDs,
+			FolderID:        s.FolderID,
+		})
+	}
+	if len(s.FolderIDs) > 0 || s.folderIDsPresent {
+		return json.Marshal(canonicalScope{
+			KnowledgeBaseID: s.KnowledgeBaseID,
+			FolderIDs:       s.FolderIDs,
+		})
+	}
+	if s.FolderID != nil || s.folderIDPresent {
+		return json.Marshal(legacyScope{
+			KnowledgeBaseID: s.KnowledgeBaseID,
+			FolderID:        s.FolderID,
+		})
+	}
+	return json.Marshal(canonicalScope{KnowledgeBaseID: s.KnowledgeBaseID})
+}
+
+func (s FolderScope) HasFolderIDsField() bool {
+	return s.folderIDsPresent || s.FolderIDs != nil
+}
+
+func (s FolderScope) FolderIDsWereNull() bool {
+	return s.folderIDsNull
+}
+
+func (s FolderScope) HasLegacyFolderIDField() bool {
+	return s.folderIDPresent || s.FolderID != nil
+}
+
+func (s FolderScope) LegacyFolderIDWasNull() bool {
+	return s.folderIDNull
+}
+
+// NormalizeFolderScopes is the single presence-aware compatibility boundary
+// for request DTOs and stored execution snapshots. It returns canonical
+// folder_ids scopes; an explicit legacy folder_id:null means whole KB and is
+// therefore omitted.
+func NormalizeFolderScopes(scopes []FolderScope) ([]FolderScope, error) {
+	if len(scopes) == 0 {
+		return nil, nil
+	}
+	seenKBs := make(map[string]struct{}, len(scopes))
+	normalized := make([]FolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		kbID := strings.TrimSpace(scope.KnowledgeBaseID)
+		if kbID == "" {
+			return nil, fmt.Errorf("folder_scopes.knowledge_base_id is required")
+		}
+		if _, err := uuid.Parse(kbID); err != nil {
+			return nil, fmt.Errorf("invalid folder_scopes.knowledge_base_id")
+		}
+		if _, exists := seenKBs[kbID]; exists {
+			return nil, fmt.Errorf("duplicate folder scope for knowledge base")
+		}
+		seenKBs[kbID] = struct{}{}
+
+		hasFolderIDs := scope.HasFolderIDsField()
+		hasLegacyID := scope.HasLegacyFolderIDField()
+		if !hasFolderIDs && !hasLegacyID {
+			return nil, fmt.Errorf("folder scope must include folder_ids or folder_id")
+		}
+		if hasFolderIDs {
+			if scope.FolderIDsWereNull() {
+				return nil, fmt.Errorf("folder_ids must not be null")
+			}
+			if len(scope.FolderIDs) == 0 {
+				return nil, fmt.Errorf("folder_ids must not be empty")
+			}
+			if hasLegacyID {
+				return nil, fmt.Errorf("folder_ids and folder_id cannot both be provided")
+			}
+			folderIDs, err := normalizeFolderScopeIDs(scope.FolderIDs, "folder_ids entry")
+			if err != nil {
+				return nil, err
+			}
+			normalized = append(normalized, FolderScope{KnowledgeBaseID: kbID, FolderIDs: folderIDs})
+			continue
+		}
+
+		if scope.LegacyFolderIDWasNull() {
+			continue
+		}
+		if scope.FolderID == nil {
+			return nil, fmt.Errorf("folder_id is required")
+		}
+		folderIDs, err := normalizeFolderScopeIDs([]string{*scope.FolderID}, "folder_id")
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, FolderScope{KnowledgeBaseID: kbID, FolderIDs: folderIDs})
+	}
+	return normalized, nil
+}
+
+func normalizeFolderScopeIDs(rawIDs []string, field string) ([]string, error) {
+	seen := make(map[string]struct{}, len(rawIDs))
+	ids := make([]string, 0, len(rawIDs))
+	for _, rawID := range rawIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, fmt.Errorf("invalid %s", field)
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, fmt.Errorf("invalid %s", field)
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 // SearchTarget represents a unified search target
 // Either search an entire knowledge base, or specific knowledge files within a knowledge base
 type SearchTarget struct {
@@ -34,6 +229,10 @@ type SearchTarget struct {
 	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
 	// Only used when Type is SearchTargetTypeKnowledge
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+	// KnowledgeIDsSet distinguishes an explicit empty knowledge scope from an
+	// omitted KnowledgeIDs filter. It is required for folder/tag/file
+	// intersections where an empty set is a valid hard boundary.
+	KnowledgeIDsSet bool `json:"knowledge_ids_set,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
 	// ScopeTagIDs records the logical tag scope selected by the user. For

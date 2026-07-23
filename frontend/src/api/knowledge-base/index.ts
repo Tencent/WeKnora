@@ -1,6 +1,36 @@
-import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { get, post, put, patch, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import type { Knowledge } from '@/types/knowledge';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
+import {
+  buildKnowledgeListSearchParams,
+  type KnowledgeListQueryParams,
+} from './query';
+import {
+  buildKnowledgeUploadFormData,
+  type UploadKnowledgeFileData,
+} from './create';
+import {
+  buildBatchMoveKnowledgePayload,
+  buildKnowledgeFolderMovePayload,
+  type BatchMoveKnowledgePayload,
+} from './move';
+
+export * from './folder';
+export { buildKnowledgeUploadFormData } from './create';
+export type { UploadKnowledgeFileData } from './create';
+export {
+  buildBatchMoveKnowledgePayload,
+  buildFolderMovePayload,
+  buildKnowledgeFolderMovePayload,
+} from './move';
+export type { BatchMoveKnowledgePayload } from './move';
+export {
+  buildFolderListSearchParams,
+  buildKnowledgeListScopeKey,
+  buildKnowledgeListSearchParams,
+} from './query';
+export type { FolderListQueryOptions, KnowledgeListQueryParams } from './query';
 
 export type KnowledgeBaseActivity = AuditLog;
 
@@ -23,7 +53,9 @@ export async function listKnowledgeBaseActivity(
   if (params.outcome) query.set('outcome', params.outcome);
   if (params.actor) query.set('actor', params.actor);
   const qs = query.toString();
-  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
+  return (await get(
+    `/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`,
+  )) as unknown as ListAuditLogResponse;
 }
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
@@ -201,27 +233,10 @@ export function togglePinKnowledgeBase(id: string) {
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function uploadKnowledgeFile(
   kbId: string,
-  data: {
-    file: File
-    tag_ids?: string[]
-    fileName?: string
-    process_config?: KnowledgeProcessOverrides | string
-    [key: string]: any
-  } = { file: new File([], '') },
+  data: UploadKnowledgeFileData = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
 ) {
-  const formData = new FormData();
-  Object.keys(data).forEach(key => {
-    const value = data[key];
-    if (value === undefined) return;
-    if (key === 'tag_ids' && Array.isArray(value)) {
-      formData.append(key, value.join(','));
-    } else if (key === 'process_config' && value && typeof value !== 'string') {
-      formData.append(key, JSON.stringify(value));
-    } else {
-      formData.append(key, value);
-    }
-  });
+  const formData = buildKnowledgeUploadFormData(data);
   return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
 }
 
@@ -229,7 +244,13 @@ export function uploadKnowledgeFile(
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: {
+    url: string
+    enable_multimodel?: boolean
+    tag_ids?: string[]
+    process_config?: KnowledgeProcessOverrides
+    folder_id?: string | null
+  },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
@@ -244,6 +265,7 @@ export function createManualKnowledge(
     status: string
     tag_ids?: string[]
     process_config?: KnowledgeProcessOverrides
+    folder_id?: string | null
   },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, data);
@@ -251,30 +273,41 @@ export function createManualKnowledge(
 
 export function listKnowledgeFiles(
   kbId: string,
-  params: {
-    page: number;
-    page_size: number;
-    tag_ids?: string;
-    keyword?: string;
-    file_type?: string;
-    parse_status?: string;
-    source?: string;
-    start_time?: string;
-    end_time?: string;
-  },
+  params: KnowledgeListQueryParams,
 ) {
-  const query = new URLSearchParams();
-  query.append('page', String(params.page));
-  query.append('page_size', String(params.page_size));
-  if (params.tag_ids) query.append('tag_ids', params.tag_ids);
-  if (params.keyword) query.append('keyword', params.keyword);
-  if (params.file_type) query.append('file_type', params.file_type);
-  if (params.parse_status) query.append('parse_status', params.parse_status);
-  if (params.source) query.append('source', params.source);
-  if (params.start_time) query.append('start_time', params.start_time);
-  if (params.end_time) query.append('end_time', params.end_time);
-  const qs = query.toString();
+  const qs = buildKnowledgeListSearchParams(params).toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+export interface KnowledgeResponse {
+  success: boolean
+  data: Knowledge
+}
+
+export function moveKnowledgeToFolder(
+  kbId: string,
+  knowledgeId: string,
+  folderId: string | null,
+) {
+  return patch<KnowledgeResponse>(
+    `/api/v1/knowledge-bases/${kbId}/knowledge/${knowledgeId}/folder`,
+    buildKnowledgeFolderMovePayload(folderId),
+  );
+}
+
+export interface BatchMoveKnowledgeResponse {
+  success: boolean
+  message: string
+  data: {
+    moved_count: number
+  }
+}
+
+export function batchMoveKnowledgeToFolder(payload: BatchMoveKnowledgePayload) {
+  return post<BatchMoveKnowledgeResponse>(
+    '/api/v1/knowledge/batch-move-folder',
+    buildBatchMoveKnowledgePayload(payload.kb_id, payload.ids, payload.folder_id),
+  );
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {

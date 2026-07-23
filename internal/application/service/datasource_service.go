@@ -1191,6 +1191,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs,        // auto-tag from data source
 			channel,
 			nil,
+			nil, // connector imports remain in the KB root
 		)
 		return isUpdate, err
 	}
@@ -1208,6 +1209,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs, // auto-tag from data source
 			channel,
 			nil,
+			nil, // connector imports remain in the KB root
 		)
 		return isUpdate, err
 	}

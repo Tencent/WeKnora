@@ -37,75 +37,102 @@
       </div>
       <!-- Knowledge Bases Group -->
       <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
-        <t-popup
-          v-for="(item, index) in kbItems"
-          :key="item.id"
-          placement="right-start"
-          trigger="hover"
-          :show-arrow="false"
-          :delay="[320, 80]"
-          :disabled="isScrolling"
-          :overlay-class-name="'mention-detail-popup'"
-          :overlay-inner-class-name="'mention-detail-popup-wrap'"
-          @visible-change="(v: boolean) => v && fetchKbDetail(item)"
-        >
-          <div
-            class="mention-item"
-            :class="{ active: index === activeIndex }"
-            @click="$emit('select', item)"
-            @mouseenter="$emit('update:activeIndex', index)"
+        <div v-for="(item, index) in kbItems" :key="item.id" class="mention-kb-entry">
+          <t-popup
+            placement="right-start"
+            trigger="hover"
+            :show-arrow="false"
+            :delay="[320, 80]"
+            :disabled="isScrolling || expandedKbIds.has(item.id)"
+            :overlay-class-name="'mention-detail-popup'"
+            :overlay-inner-class-name="'mention-detail-popup-wrap'"
+            @visible-change="(v: boolean) => v && fetchKbDetail(item)"
           >
-            <div class="icon-wrap">
-              <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
-                <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+            <button
+              type="button"
+              class="mention-item mention-kb-row"
+              :class="{
+                active: index === activeIndex,
+                selected: selectedKnowledgeBaseIds.includes(item.id),
+              }"
+              :disabled="folderScopeDisabled"
+              :aria-selected="selectedKnowledgeBaseIds.includes(item.id)"
+              :aria-expanded="expandedKbIds.has(item.id)"
+              @click.stop="selectAndExpandKb(item)"
+              @mouseenter="$emit('update:activeIndex', index)"
+            >
+              <span class="mention-kb-row__expand" aria-hidden="true">
+                <t-icon name="chevron-right" :class="{ expanded: expandedKbIds.has(item.id) }" />
+              </span>
+              <div class="icon-wrap">
+                <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
+                  <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                </div>
               </div>
-            </div>
-            <div class="item-main">
-              <span class="name">{{ item.name }}</span>
-              <span class="count">{{ item.count || 0 }}</span>
-            </div>
-          </div>
-          <template #content>
-            <div class="mention-detail-content">
-              <template v-if="detailCache[item.id]?.loading">
-                <div class="detail-loading"><t-loading size="small" /></div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.error">
-                <div class="detail-error">{{ detailCache[item.id].error }}</div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.data">
-                <div class="detail-header">
-                  <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
-                  <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
-                    {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
-                  </span>
-                </div>
-                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
-                <div class="detail-meta">
-                  <span v-if="detailCache[item.id].data.type === 'faq'">
-                    {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-else>
-                    {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
-                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                    <span
-                      class="detail-value clickable"
-                      @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
-                    >
-                      {{ detailCache[item.id].data.org_name || item.orgName }}
+              <div class="item-main">
+                <span class="name" :title="item.name">{{ item.name }}</span>
+                <span class="mention-kb-row__scope" :class="`is-${getKbFolderScopeState(item.id).status}`">
+                  {{ getKbFolderScopeLabel(item.id) }}
+                </span>
+                <span class="count">{{ item.count || 0 }}</span>
+              </div>
+              <t-icon v-if="selectedKnowledgeBaseIds.includes(item.id)" class="mention-kb-row__check" name="check" />
+            </button>
+            <template #content>
+              <div class="mention-detail-content">
+                <template v-if="detailCache[item.id]?.loading">
+                  <div class="detail-loading"><t-loading size="small" /></div>
+                </template>
+                <template v-else-if="detailCache[item.id]?.error">
+                  <div class="detail-error">{{ detailCache[item.id].error }}</div>
+                </template>
+                <template v-else-if="detailCache[item.id]?.data">
+                  <div class="detail-header">
+                    <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
+                    <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
+                      {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
                     </span>
-                  </span>
-                  <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
-                    {{ $t('mentionDetail.readOnlyFromAgent') }}
-                  </span>
-                </div>
-              </template>
-            </div>
-          </template>
-        </t-popup>
+                  </div>
+                  <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                  <div class="detail-meta">
+                    <span v-if="detailCache[item.id].data.type === 'faq'">
+                      {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                    </span>
+                    <span v-else>
+                      {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                    </span>
+                    <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
+                      <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                      <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                      <span
+                        class="detail-value clickable"
+                        @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
+                      >
+                        {{ detailCache[item.id].data.org_name || item.orgName }}
+                      </span>
+                    </span>
+                    <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
+                      {{ $t('mentionDetail.readOnlyFromAgent') }}
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </t-popup>
+          <FolderScopeSelector
+            v-if="expandedKbIds.has(item.id) && !folderScopeDisabled"
+            :visible="true"
+            :knowledge-base-name="item.name"
+            :model-value="selectedFolderScopes[item.id]"
+            :folders="folderScopeCache[item.id]?.folders"
+            :loading="folderScopeCache[item.id]?.loading"
+            :error="folderScopeCache[item.id]?.error"
+            @close="collapseKb(item.id)"
+            @toggle="$emit('toggleFolderScope', item, $event)"
+            @clear="$emit('clearFolderScope', item)"
+            @retry="$emit('loadFolderScopes', item.id, true)"
+          />
+        </div>
       </div>
 
       <template v-for="group in activeExtraGroups" :key="group.type">
@@ -266,8 +293,17 @@ import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { MentionItem, MentionItemType } from '@/types/mention';
+import type { Folder } from '@/types/folder';
+import { resolveFolderScopeState } from '@/utils/folderScope';
+import FolderScopeSelector from './FolderScopeSelector.vue';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
+type FolderScopeCacheEntry = {
+  folders?: Folder[];
+  loading?: boolean;
+  error?: string | null;
+  requestId?: number;
+};
 
 const props = defineProps<{
   visible: boolean;
@@ -282,9 +318,20 @@ const props = defineProps<{
   query?: string;
   // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
   groupCounts?: Partial<Record<MentionItemType, number>>;
+  selectedKnowledgeBaseIds?: string[];
+  selectedFolderScopes?: Record<string, string[] | undefined>;
+  folderScopeCache?: Record<string, FolderScopeCacheEntry>;
+  folderScopeDisabled?: boolean;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
+const emit = defineEmits([
+  'select',
+  'update:activeIndex',
+  'loadMore',
+  'loadFolderScopes',
+  'toggleFolderScope',
+  'clearFolderScope',
+]);
 
 const router = useRouter();
 const { t } = useI18n();
@@ -296,6 +343,7 @@ const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
+const expandedKbIds = ref<Set<string>>(new Set());
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 onBeforeUnmount(() => {
@@ -311,6 +359,58 @@ const agentIdForDetail = computed(() => {
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
+const selectedKnowledgeBaseIds = computed(() => props.selectedKnowledgeBaseIds || []);
+const selectedFolderScopes = computed(() => props.selectedFolderScopes || {});
+const folderScopeCache = computed(() => props.folderScopeCache || {});
+
+const getKbFolderScopeState = (kbId: string) => {
+  const cached = folderScopeCache.value[kbId];
+  return resolveFolderScopeState(
+    selectedFolderScopes.value[kbId],
+    cached?.folders,
+    !!cached?.loading,
+    cached?.error,
+  );
+};
+
+const getKbFolderScopeLabel = (kbId: string) => {
+  const state = getKbFolderScopeState(kbId);
+  if (state.status === 'valid') {
+    return state.folders.length === 1
+      ? t('input.folderScope.selectedFolderSingle')
+      : t('input.folderScope.selectedFolderCount', { count: state.folders.length });
+  }
+  if (state.status === 'invalid') return t('input.folderScope.partialInvalidShort');
+  if (state.status === 'load-error') return t('input.folderScope.loadFailedShort');
+  if (state.status === 'loading' && selectedFolderScopes.value[kbId]?.length) {
+    return t('input.folderScope.loadingShort');
+  }
+  return t('input.folderScope.entireKnowledgeBase');
+};
+
+const expandKb = (kbId: string) => {
+  if (props.folderScopeDisabled) return;
+  const next = new Set(expandedKbIds.value);
+  next.add(kbId);
+  expandedKbIds.value = next;
+  emit('loadFolderScopes', kbId, false);
+};
+
+const collapseKb = (kbId: string) => {
+  const next = new Set(expandedKbIds.value);
+  next.delete(kbId);
+  expandedKbIds.value = next;
+};
+
+const selectAndExpandKb = (item: MentionItem) => {
+  if (props.folderScopeDisabled) return;
+  emit('select', item);
+  if (expandedKbIds.value.has(item.id)) {
+    collapseKb(item.id);
+  } else {
+    expandKb(item.id);
+  }
+};
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
@@ -432,7 +532,12 @@ const confirmActive = () => {
   if (!group) return;
   const localIndex = props.activeIndex - group.offset;
   const item = group.items[localIndex];
-  if (item) emit('select', item);
+  if (!item) return;
+  if (group.type === 'kb') {
+    selectAndExpandKb(item);
+  } else {
+    emit('select', item);
+  }
 };
 
 defineExpose({
@@ -521,6 +626,10 @@ watch(isFlatMode, (flat) => {
 });
 
 watch(() => props.visible, (newVisible) => {
+  if (!newVisible) {
+    expandedKbIds.value = new Set();
+    return;
+  }
   if (newVisible) {
     nextTick(() => {
       if (listRef.value) listRef.value.scrollTop = 0;
@@ -565,7 +674,7 @@ const scrollToItem = (index: number) => {
   border: 1px solid var(--td-component-stroke, #e7e9eb);
   border-radius: var(--td-radius-extraLarge, 12px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
-  width: 220px;
+  width: min(380px, calc(100vw - 24px));
   max-height: 388px;
   overflow: hidden;
   display: flex;
@@ -663,6 +772,64 @@ const scrollToItem = (index: number) => {
 
 .mention-group {
   padding: 2px 0 5px;
+}
+
+.mention-kb-entry {
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+}
+
+.mention-kb-entry:last-child {
+  border-bottom: 0;
+}
+
+.mention-kb-row {
+  width: calc(100% - 12px);
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.mention-kb-row.selected {
+  background: color-mix(in srgb, var(--td-brand-color, #07c05f) 8%, transparent);
+}
+
+.mention-kb-row__expand {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-placeholder, #999);
+}
+
+.mention-kb-row__expand :deep(.t-icon) {
+  transition: transform 0.15s ease;
+}
+
+.mention-kb-row__expand :deep(.t-icon.expanded) {
+  transform: rotate(90deg);
+}
+
+.mention-kb-row__scope {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-kb-row__scope.is-invalid,
+.mention-kb-row__scope.is-load-error {
+  color: var(--td-error-color, #d54941);
+}
+
+.mention-kb-row__check {
+  flex: 0 0 auto;
+  color: var(--td-brand-color, #07c05f);
 }
 
 .mention-group:not(:last-child) {

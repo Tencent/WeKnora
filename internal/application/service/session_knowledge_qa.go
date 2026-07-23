@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -87,7 +90,14 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, folderKnowledgeIDs, err := s.buildSearchTargetsWithFolderScopes(
+		ctx,
+		retrievalTenantID,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		req.TagScopes,
+		req.FolderScopes,
+	)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -111,6 +121,7 @@ func (s *sessionService) KnowledgeQA(
 			KnowledgeBaseIDs:        knowledgeBaseIDs,
 			KnowledgeIDs:            knowledgeIDs,
 			SearchTargets:           searchTargets,
+			FolderKnowledgeIDs:      folderKnowledgeIDs,
 			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
 			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
 			EmbeddingTopK:           s.cfg.Conversation.EmbeddingTopK,
@@ -433,7 +444,28 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
 ) (types.SearchTargets, error) {
+	targets, _, err := s.buildSearchTargetsWithFolderScopes(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, nil)
+	return targets, err
+}
+
+func (s *sessionService) buildSearchTargetsWithFolderScopes(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
+) (types.SearchTargets, map[string][]string, error) {
+	folderScopeMap, err := normalizeServiceFolderScopes(folderScopes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(folderScopeMap) > 0 {
+		return s.buildFolderScopedSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, folderScopeMap)
+	}
+
 	var targets types.SearchTargets
+	folderKnowledgeIDs := map[string][]string(nil)
 	tagIDsByKB := mergeTagScopesByKB(tagScopes)
 
 	// Build a map from KB ID to TenantID for all KBs we need to process
@@ -507,7 +539,7 @@ func (s *sessionService) buildSearchTargets(
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
-			return targets, nil // Return what we have, don't fail
+			return targets, folderKnowledgeIDs, nil // Return what we have, don't fail
 		}
 
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
@@ -561,7 +593,7 @@ func (s *sessionService) buildSearchTargets(
 		if useDocumentTagResolution {
 			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
 			if err != nil {
-				return nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
+				return nil, nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
 			}
 			if len(explicitKnowledgeIDs) > 0 {
 				tagKnowledgeIDs = intersectStrings(tagKnowledgeIDs, explicitKnowledgeIDs)
@@ -600,7 +632,270 @@ func (s *sessionService) buildSearchTargets(
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
-	return targets, nil
+	return targets, folderKnowledgeIDs, nil
+}
+
+func (s *sessionService) buildFolderScopedSearchTargets(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	tagScopes []types.TagScope,
+	folderScopeMap map[string][]string,
+) (types.SearchTargets, map[string][]string, error) {
+	tagIDsByKB := mergeTagScopesByKB(tagScopes)
+	selectedKBIDs := uniqueNonEmptyStrings(knowledgeBaseIDs)
+	fullKBSet := make(map[string]bool, len(selectedKBIDs))
+	for _, kbID := range selectedKBIDs {
+		fullKBSet[kbID] = true
+	}
+
+	kbIDsToFetch := append([]string(nil), selectedKBIDs...)
+	for kbID := range tagIDsByKB {
+		kbIDsToFetch = append(kbIDsToFetch, kbID)
+	}
+	for kbID := range folderScopeMap {
+		kbIDsToFetch = append(kbIDsToFetch, kbID)
+	}
+	kbIDsToFetch = uniqueNonEmptyStrings(kbIDsToFetch)
+
+	kbByID := make(map[string]*types.KnowledgeBase, len(kbIDsToFetch))
+	if len(kbIDsToFetch) > 0 {
+		kbs, kbFetchErr := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDsToFetch)
+		if kbFetchErr != nil {
+			logger.Warnf(ctx, "Failed to fetch knowledge bases for folder-scoped search targets: %v", kbFetchErr)
+		}
+		for _, kb := range kbs {
+			if kb != nil {
+				kbByID[kb.ID] = kb
+			}
+		}
+	}
+
+	kbTenantMap := make(map[string]uint64, len(kbIDsToFetch))
+	callerTenantRole := types.TenantRoleFromContext(ctx)
+	userID, _ := types.UserIDFromContext(ctx)
+	resolveKBTenant := func(kbID string) uint64 {
+		if kbTenantMap[kbID] != 0 {
+			return kbTenantMap[kbID]
+		}
+		kb := kbByID[kbID]
+		if kb == nil {
+			kbTenantMap[kbID] = tenantID
+		} else if kb.TenantID == tenantID {
+			kbTenantMap[kbID] = tenantID
+		} else if s.kbShareService != nil && userID != "" {
+			hasAccess, _ := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
+			if hasAccess {
+				kbTenantMap[kbID] = kb.TenantID
+			} else {
+				kbTenantMap[kbID] = tenantID
+			}
+		} else {
+			kbTenantMap[kbID] = tenantID
+		}
+		return kbTenantMap[kbID]
+	}
+
+	kbToKnowledgeIDs := make(map[string][]string)
+	if len(knowledgeIDs) > 0 {
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get knowledge batch for folder-scoped search targets: %v", err)
+			return nil, nil, errors.NewInternalServerError("failed to resolve knowledge scope")
+		}
+		for _, k := range knowledgeList {
+			if k == nil || k.KnowledgeBaseID == "" {
+				continue
+			}
+			if kbTenantMap[k.KnowledgeBaseID] == 0 {
+				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
+			}
+			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
+			if _, ok := kbByID[k.KnowledgeBaseID]; !ok {
+				kbByID[k.KnowledgeBaseID] = &types.KnowledgeBase{
+					ID:       k.KnowledgeBaseID,
+					TenantID: k.TenantID,
+				}
+			}
+		}
+	}
+
+	allowedKBSet := make(map[string]bool)
+	for _, kbID := range selectedKBIDs {
+		allowedKBSet[kbID] = true
+	}
+	for kbID := range tagIDsByKB {
+		allowedKBSet[kbID] = true
+	}
+	for kbID := range kbToKnowledgeIDs {
+		allowedKBSet[kbID] = true
+	}
+	for kbID := range folderScopeMap {
+		if !allowedKBSet[kbID] {
+			return nil, nil, errors.NewForbiddenError("folder scope is not allowed for the selected knowledge bases")
+		}
+	}
+
+	folderKnowledgeIDs := make(map[string][]string, len(folderScopeMap))
+	for _, kbID := range sortedStringMapKeys(folderScopeMap) {
+		kbTenant := resolveKBTenant(kbID)
+		ids, err := s.knowledgeService.ListKnowledgeIDsByFolderScopes(ctx, kbTenant, kbID, folderScopeMap[kbID])
+		if err != nil {
+			switch {
+			case stderrors.Is(err, ErrInvalidFolderID), stderrors.Is(err, ErrInvalidFolderScope):
+				return nil, nil, errors.NewBadRequestError("invalid folder scope")
+			case stderrors.Is(err, ErrTargetFolderNotFound):
+				return nil, nil, errors.NewNotFoundError("folder not found")
+			default:
+				logger.Warnf(ctx, "Failed to resolve folder scope for kb_id=%s: %v", kbID, err)
+				return nil, nil, errors.NewInternalServerError("failed to resolve folder scope")
+			}
+		}
+		folderKnowledgeIDs[kbID] = uniqueNonEmptyStrings(ids)
+	}
+
+	kbOrder := make([]string, 0, len(allowedKBSet))
+	seenKB := make(map[string]bool, len(allowedKBSet))
+	addKB := func(kbID string) {
+		if kbID == "" || seenKB[kbID] {
+			return
+		}
+		seenKB[kbID] = true
+		kbOrder = append(kbOrder, kbID)
+	}
+	for _, kbID := range selectedKBIDs {
+		addKB(kbID)
+	}
+	for _, kbID := range sortedStringMapKeys(kbToKnowledgeIDs) {
+		addKB(kbID)
+	}
+	for _, scope := range tagScopes {
+		addKB(scope.KnowledgeBaseID)
+	}
+	for _, kbID := range sortedStringMapKeys(folderScopeMap) {
+		addKB(kbID)
+	}
+
+	var targets types.SearchTargets
+	for _, kbID := range kbOrder {
+		kbTenant := resolveKBTenant(kbID)
+		tagIDs := tagIDsByKB[kbID]
+		explicitKnowledgeIDs := uniqueNonEmptyStrings(kbToKnowledgeIDs[kbID])
+		folderIDs, hasFolderScope := folderKnowledgeIDs[kbID]
+		kb := kbByID[kbID]
+
+		if len(tagIDs) == 0 {
+			if hasFolderScope {
+				allowedIDs := append([]string(nil), folderIDs...)
+				if len(explicitKnowledgeIDs) > 0 {
+					allowedIDs = intersectStrings(allowedIDs, explicitKnowledgeIDs)
+				}
+				targets = append(targets, newKnowledgeIDTarget(kbID, kbTenant, allowedIDs, nil, nil))
+				continue
+			}
+			if fullKBSet[kbID] {
+				targets = append(targets, &types.SearchTarget{
+					Type:            types.SearchTargetTypeKnowledgeBase,
+					KnowledgeBaseID: kbID,
+					TenantID:        kbTenant,
+				})
+				continue
+			}
+			if len(explicitKnowledgeIDs) > 0 {
+				targets = append(targets, newKnowledgeIDTarget(kbID, kbTenant, explicitKnowledgeIDs, nil, nil))
+			}
+			continue
+		}
+
+		useDocumentTagResolution := kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ
+		if kb == nil {
+			logger.Warnf(ctx, "Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution", kbID)
+		}
+		if useDocumentTagResolution {
+			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
+			}
+			allowedIDs := uniqueNonEmptyStrings(tagKnowledgeIDs)
+			if hasFolderScope {
+				allowedIDs = intersectStrings(allowedIDs, folderIDs)
+			}
+			if len(explicitKnowledgeIDs) > 0 {
+				allowedIDs = intersectStrings(allowedIDs, explicitKnowledgeIDs)
+			}
+			if len(allowedIDs) == 0 && !hasFolderScope {
+				continue
+			}
+			targets = append(targets, newKnowledgeIDTarget(kbID, kbTenant, allowedIDs, nil, tagIDs))
+			continue
+		}
+
+		if hasFolderScope {
+			allowedIDs := append([]string(nil), folderIDs...)
+			if len(explicitKnowledgeIDs) > 0 {
+				allowedIDs = intersectStrings(allowedIDs, explicitKnowledgeIDs)
+			}
+			targets = append(targets, newKnowledgeIDTarget(kbID, kbTenant, allowedIDs, tagIDs, tagIDs))
+			continue
+		}
+
+		target := &types.SearchTarget{
+			Type:                    types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID:         kbID,
+			TenantID:                kbTenant,
+			TagIDs:                  append([]string(nil), tagIDs...),
+			ScopeTagIDs:             append([]string(nil), tagIDs...),
+			DisableRecallThresholds: true,
+		}
+		if len(explicitKnowledgeIDs) > 0 {
+			target.Type = types.SearchTargetTypeKnowledge
+			target.KnowledgeIDs = explicitKnowledgeIDs
+			target.KnowledgeIDsSet = true
+		}
+		targets = append(targets, target)
+	}
+
+	logger.Infof(ctx, "Built %d folder-aware search targets, folder_scopes=%d, kbTenantMap=%v",
+		len(targets), len(folderScopeMap), kbTenantMap)
+	return targets, folderKnowledgeIDs, nil
+}
+
+func normalizeServiceFolderScopes(scopes []types.FolderScope) (map[string][]string, error) {
+	canonical, err := types.NormalizeFolderScopes(scopes)
+	if err != nil {
+		return nil, errors.NewBadRequestError(err.Error())
+	}
+	normalized := make(map[string][]string, len(canonical))
+	for _, scope := range canonical {
+		normalized[scope.KnowledgeBaseID] = append([]string(nil), scope.FolderIDs...)
+	}
+	return normalized, nil
+}
+
+func newKnowledgeIDTarget(kbID string, tenantID uint64, knowledgeIDs, tagIDs, scopeTagIDs []string) *types.SearchTarget {
+	return &types.SearchTarget{
+		Type:                    types.SearchTargetTypeKnowledge,
+		KnowledgeBaseID:         kbID,
+		TenantID:                tenantID,
+		KnowledgeIDs:            uniqueNonEmptyStrings(knowledgeIDs),
+		KnowledgeIDsSet:         true,
+		TagIDs:                  append([]string(nil), tagIDs...),
+		ScopeTagIDs:             append([]string(nil), scopeTagIDs...),
+		DisableRecallThresholds: true,
+	}
+}
+
+func sortedStringMapKeys[V any](values map[string]V) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func mergeTagScopesByKB(scopes []types.TagScope) map[string][]string {
@@ -798,7 +1093,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, folderScopes []types.FolderScope, query string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
@@ -812,7 +1107,14 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, folderKnowledgeIDs, err := s.buildSearchTargetsWithFolderScopes(
+		ctx,
+		tenantID,
+		knowledgeBaseIDs,
+		knowledgeIDs,
+		tagScopes,
+		folderScopes,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
@@ -833,17 +1135,18 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
-			Query:            query,
-			UserID:           userID,
-			KnowledgeBaseIDs: knowledgeBaseIDs,
-			KnowledgeIDs:     knowledgeIDs,
-			SearchTargets:    searchTargets,
-			MaxRounds:        s.cfg.Conversation.MaxRounds,
-			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
-			VectorThreshold:  rc.GetEffectiveVectorThreshold(),
-			KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
-			RerankTopK:       rc.GetEffectiveRerankTopK(),
-			RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+			Query:              query,
+			UserID:             userID,
+			KnowledgeBaseIDs:   knowledgeBaseIDs,
+			KnowledgeIDs:       knowledgeIDs,
+			SearchTargets:      searchTargets,
+			FolderKnowledgeIDs: folderKnowledgeIDs,
+			MaxRounds:          s.cfg.Conversation.MaxRounds,
+			EmbeddingTopK:      rc.GetEffectiveEmbeddingTopK(),
+			VectorThreshold:    rc.GetEffectiveVectorThreshold(),
+			KeywordThreshold:   rc.GetEffectiveKeywordThreshold(),
+			RerankTopK:         rc.GetEffectiveRerankTopK(),
+			RerankThreshold:    rc.GetEffectiveRerankThreshold(),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery: query,

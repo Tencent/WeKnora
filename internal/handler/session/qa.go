@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	goerrors "errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -36,6 +37,7 @@ type qaRequestContext struct {
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
+	folderScopes          []types.FolderScope
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
@@ -70,6 +72,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
 		TagScopes:          rc.tagScopes,
+		FolderScopes:       rc.folderScopes,
 		MCPServiceIDs:      rc.mcpServiceIDs,
 		SkillNames:         rc.skillNames,
 		ImageURLs:          imageURLs,
@@ -288,6 +291,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	folderScopes, err := normalizeFolderScopes(request.FolderScopes)
+	if err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
 	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
 		return nil, nil, errors.NewBadRequestError(err.Error())
@@ -305,6 +312,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
 		tagScopes,
+		folderScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -334,6 +342,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:             tagScopes,
+		folderScopes:          folderScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
@@ -363,6 +372,7 @@ func buildMessageExecutionContext(
 	knowledgeIDs []string,
 	tagIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -377,6 +387,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
 		TagScopes:        cloneTagScopes(tagScopes),
+		FolderScopes:     cloneFolderScopes(folderScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -411,6 +422,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
 		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
+		FolderScopes        []types.FolderScope             `json:"folder_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
@@ -418,6 +430,7 @@ func buildMessageExecutionContext(
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
 		TagScopes:           snapshot.TagScopes,
+		FolderScopes:        snapshot.FolderScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -443,6 +456,27 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 		})
 	}
 	return cloned
+}
+
+func cloneFolderScopes(scopes []types.FolderScope) []types.FolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.FolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || len(scope.FolderIDs) == 0 {
+			continue
+		}
+		cloned = append(cloned, types.FolderScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			FolderIDs:       append([]string(nil), scope.FolderIDs...),
+		})
+	}
+	return cloned
+}
+
+func normalizeFolderScopes(scopes []types.FolderScope) ([]types.FolderScope, error) {
+	return types.NormalizeFolderScopes(scopes)
 }
 
 // resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
@@ -646,6 +680,12 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	folderScopes, err := normalizeFolderScopes(request.FolderScopes)
+	if err != nil {
+		logger.Error(ctx, err.Error())
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(knowledgeBaseIDs)); err != nil {
 		logger.Error(ctx, err.Error())
 		c.Error(errors.NewBadRequestError(err.Error()))
@@ -665,18 +705,19 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
+		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, folder scopes: %d, query: %s",
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
 		secutils.SanitizeForLogArray(request.KnowledgeIDs),
 		len(tagScopes),
+		len(folderScopes),
 		secutils.SanitizeForLog(request.Query),
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, folderScopes, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(mapFolderScopeError(err))
 		return
 	}
 
@@ -685,6 +726,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		"success": true,
 		"data":    searchResults,
 	})
+}
+
+func mapFolderScopeError(err error) *errors.AppError {
+	var appErr *errors.AppError
+	if goerrors.As(err, &appErr) {
+		return appErr
+	}
+	return errors.NewInternalServerError("internal server error")
 }
 
 // KnowledgeQA godoc
@@ -1292,6 +1341,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,
+		FolderScopes:     cloneFolderScopes(reqCtx.folderScopes),
 		MCPServiceIDs:    reqCtx.mcpServiceIDs,
 		SkillNames:       reqCtx.skillNames,
 		MentionedItems:   reqCtx.mentionedItems,

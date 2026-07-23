@@ -81,6 +81,10 @@
                 <template v-if="activeSection === 'overview'">
                   <h2 class="main-title">{{ dialogTitle }}</h2>
                   <p class="main-desc">{{ dialogDesc }}</p>
+                  <p v-if="targetFolderLabel" class="main-target-folder">
+                    <t-icon name="folder" />
+                    {{ t('knowledgeFolder.createTarget', { name: targetFolderLabel }) }}
+                  </p>
                 </template>
                 <template v-else>
                   <button
@@ -317,6 +321,7 @@ const props = withDefaults(defineProps<{
   tagId?: string
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  targetFolderLabel?: string
 }>(), {
   mode: 'file',
   files: () => [],
@@ -325,6 +330,7 @@ const props = withDefaults(defineProps<{
   reparsePreview: null,
   acceptFileTypes: '',
   supportedFileTypes: () => [],
+  targetFolderLabel: '',
 })
 
 const emit = defineEmits<{
@@ -1169,6 +1175,15 @@ const handleConfirm = () => {
   font-size: 13px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.main-target-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
 }
 
 .back-link {

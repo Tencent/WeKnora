@@ -5,6 +5,7 @@ defineProps<{
   count: number;
   deleteLoading?: boolean;
   reparseLoading?: boolean;
+  moveLoading?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
@@ -14,6 +15,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
   (e: 'reparse'): void;
+  (e: 'move'): void;
 }>();
 
 const { t } = useI18n();
@@ -31,11 +33,18 @@ const { t } = useI18n();
           </t-button>
         </div>
         <div class="batch-bar-actions">
+          <t-button theme="default" variant="outline" size="small"
+            :disabled="count === 0 || deleteLoading || reparseLoading || moveLoading" :loading="moveLoading"
+            @click="emit('move')">
+            <template #icon><t-icon name="move" size="14px" /></template>
+            {{ t('knowledgeFolderMove.moveSelected') }}
+          </t-button>
+
           <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchReparseDocument', { count })"
             :confirm-btn="{ content: t('knowledgeBase.confirmBatchReparse'), theme: 'warning' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reparse')">
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="reparseLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || moveLoading" :loading="reparseLoading" @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
               {{ t('knowledgeBase.rebuildDocument') }}
             </t-button>
@@ -45,7 +54,7 @@ const { t } = useI18n();
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
             <t-button theme="danger" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="deleteLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || moveLoading" :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeBase.batchDelete') }}
             </t-button>

@@ -3,15 +3,55 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
+
+const folderSubtreeKnowledgePredicate = `knowledges.folder_id IN (
+	WITH RECURSIVE folder_subtree(id) AS (
+		SELECT id
+		FROM folders
+		WHERE tenant_id = ?
+		  AND knowledge_base_id = ?
+		  AND id = ?
+		  AND deleted_at IS NULL
+		UNION
+		SELECT child.id
+		FROM folders AS child
+		JOIN folder_subtree AS parent ON child.parent_id = parent.id
+		WHERE child.tenant_id = ?
+		  AND child.knowledge_base_id = ?
+		  AND child.deleted_at IS NULL
+	)
+	SELECT id FROM folder_subtree
+)`
+
+const folderSubtreesKnowledgePredicate = `knowledges.folder_id IN (
+	WITH RECURSIVE folder_subtree(id) AS (
+		SELECT id
+		FROM folders
+		WHERE tenant_id = ?
+		  AND knowledge_base_id = ?
+		  AND id IN ?
+		  AND deleted_at IS NULL
+		UNION
+		SELECT child.id
+		FROM folders AS child
+		JOIN folder_subtree AS parent ON child.parent_id = parent.id
+		WHERE child.tenant_id = ?
+		  AND child.knowledge_base_id = ?
+		  AND child.deleted_at IS NULL
+	)
+	SELECT id FROM folder_subtree
+)`
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
@@ -70,6 +110,129 @@ func (r *knowledgeRepository) GetKnowledgeByID(
 	return &knowledge, nil
 }
 
+func (r *knowledgeRepository) WithinFolderTransaction(
+	ctx context.Context,
+	fn func(interfaces.KnowledgeRepository, interfaces.FolderRepository) error,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(
+			&knowledgeRepository{db: tx},
+			&folderRepository{db: tx},
+		)
+	})
+}
+
+func (r *knowledgeRepository) GetKnowledgeByIDForUpdate(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeID string,
+) (*types.Knowledge, error) {
+	var knowledge types.Knowledge
+	query := r.db.WithContext(ctx).Where(
+		"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+		tenantID,
+		knowledgeBaseID,
+		knowledgeID,
+	)
+	if r.db.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&knowledge).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrKnowledgeNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
+func (r *knowledgeRepository) GetKnowledgeBatchForUpdate(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeIDs []string,
+) ([]*types.Knowledge, error) {
+	if len(knowledgeIDs) == 0 {
+		return nil, ErrKnowledgeNotFound
+	}
+	ids := append([]string(nil), knowledgeIDs...)
+	sort.Strings(ids)
+
+	var knowledges []*types.Knowledge
+	query := r.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id IN ?",
+			tenantID,
+			knowledgeBaseID,
+			ids,
+		).
+		Order("id ASC")
+	if r.db.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Find(&knowledges).Error; err != nil {
+		return nil, err
+	}
+	return knowledges, nil
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeFolder(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeID string,
+	folderID *string,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			tenantID,
+			knowledgeBaseID,
+			knowledgeID,
+		).
+		Updates(map[string]any{
+			"folder_id":  folderID,
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrKnowledgeNotFound
+	}
+	return nil
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeFolderBatch(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeIDs []string,
+	folderID *string,
+) (int64, error) {
+	if len(knowledgeIDs) == 0 {
+		return 0, ErrKnowledgeNotFound
+	}
+	ids := append([]string(nil), knowledgeIDs...)
+	sort.Strings(ids)
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id IN ?",
+			tenantID,
+			knowledgeBaseID,
+			ids,
+		).
+		Updates(map[string]any{
+			"folder_id":  folderID,
+			"updated_at": time.Now(),
+		})
+	return result.RowsAffected, result.Error
+}
+
 // GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 func (r *knowledgeRepository) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
@@ -97,7 +260,35 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // applyKnowledgeListFilter applies the optional filter dimensions of
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
-func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+func applyKnowledgeListFilter(
+	query *gorm.DB,
+	tenantID uint64,
+	knowledgeBaseID string,
+	filter types.KnowledgeListFilter,
+) *gorm.DB {
+	if filter.FolderIDSet {
+		switch {
+		case filter.IncludeFolderDescendants && filter.FolderID != nil:
+			// UNION (rather than UNION ALL) makes a corrupted folder cycle
+			// converge instead of repeatedly generating the same IDs. Keeping
+			// the subtree in SQL preserves database pagination and avoids a
+			// potentially large host-parameter list on SQLite.
+			query = query.Where(folderSubtreeKnowledgePredicate,
+				tenantID,
+				knowledgeBaseID,
+				*filter.FolderID,
+				tenantID,
+				knowledgeBaseID,
+			)
+		case filter.IncludeFolderDescendants:
+			// The explicit root subtree is the complete tenant/KB scope, which
+			// the caller has already applied. No folder predicate is needed.
+		case filter.FolderID == nil:
+			query = query.Where("folder_id IS NULL")
+		default:
+			query = query.Where("folder_id = ?", *filter.FolderID)
+		}
+	}
 	if len(filter.TagIDs) > 0 {
 		query = query.Where(
 			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
@@ -167,6 +358,8 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	scope := func(q *gorm.DB) *gorm.DB {
 		return applyKnowledgeListFilter(
 			q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
+			tenantID,
+			kbID,
 			filter,
 		)
 	}
@@ -177,6 +370,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 	if err := scope(r.db.WithContext(ctx)).
 		Order("created_at DESC").
+		Order("id DESC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
 		Find(&knowledges).Error; err != nil {
@@ -826,6 +1020,52 @@ func (r *knowledgeRepository) ListIDsByTagIDs(
 		Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND ktr.tag_id IN (?)",
 			tenantID, kbID, tagIDs).
 		Distinct("knowledges.id").
+		Order("knowledges.id ASC").
 		Pluck("knowledges.id", &ids).Error
 	return ids, err
+}
+
+func (r *knowledgeRepository) ListIDsByFolderScopes(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return []string{}, nil
+	}
+	var ids []string
+	query := applyFolderScopesKnowledgeFilter(
+		r.db.WithContext(ctx).Model(&types.Knowledge{}),
+		tenantID,
+		kbID,
+		folderIDs,
+	)
+	err := query.
+		Distinct("knowledges.id").
+		Order("knowledges.id ASC").
+		Pluck("knowledges.id", &ids).Error
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, err
+}
+
+func applyFolderScopesKnowledgeFilter(
+	query *gorm.DB,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+) *gorm.DB {
+	return query.Where(`knowledges.tenant_id = ?
+			AND knowledges.knowledge_base_id = ?
+			AND `+folderSubtreesKnowledgePredicate,
+		tenantID,
+		kbID,
+		tenantID,
+		kbID,
+		folderIDs,
+		tenantID,
+		kbID,
+	)
 }

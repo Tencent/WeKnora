@@ -15,6 +15,7 @@ interface Tag {
 interface KnowledgeCard {
   id: string;
   knowledge_base_id?: string;
+  folder_id: string | null;
   parse_status: string;
   summary_status?: string;
   description?: string;
@@ -37,6 +38,7 @@ interface KnowledgeCard {
 
 const props = defineProps<{
   items: KnowledgeCard[];
+  displayPaths?: ReadonlyMap<string, string>;
   selectedIds: Set<string>;
   batchMode: boolean;
   canEdit: boolean;
@@ -50,22 +52,27 @@ const props = defineProps<{
   moveSelectedTargetName: string;
   moveMode: 'reuse_vectors' | 'reparse';
   moveSubmitting: boolean;
+  draggingKnowledgeId: string | null;
+  dragSubmitting: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
-  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
+  (e: 'action', action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move-folder' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tag-edit', item: KnowledgeCard): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
   (e: 'move-confirm'): void;
   (e: 'update:moveMode', mode: 'reuse_vectors' | 'reparse'): void;
+  (e: 'knowledgeDragStart', event: DragEvent, item: KnowledgeCard): void;
+  (e: 'dragEnd'): void;
 }>();
 
 const { t } = useI18n();
+const getDisplayPath = (knowledgeId: string) => props.displayPaths?.get(knowledgeId) || '';
 
 const {
   setupTagChipsObserver,
@@ -250,7 +257,7 @@ const onCardMouseLeave = () => {
 };
 
 // --- Action handlers ---
-const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
+const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move-folder' | 'move' | 'batch-manage' | 'delete', item: KnowledgeCard) => {
   // Don't close menu for move — it triggers the sub-flow
   if (action !== 'move') {
     if (item.isMore !== undefined) item.isMore = false;
@@ -258,13 +265,22 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
   emit('action', action, item);
 };
+
+const onKnowledgeDragStart = (event: DragEvent, item: KnowledgeCard) => {
+  onCardMouseLeave();
+  emit('knowledgeDragStart', event, item);
+};
 </script>
 
 <template>
   <div class="doc-card-list doc-card-list-animated">
     <div
       class="knowledge-card"
-      :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
+      :class="{
+        'is-selected': selectedIds.has(item.id),
+        'batch-mode': batchMode,
+        'is-dragging': draggingKnowledgeId === item.id,
+      }"
       :data-select-id="item.id"
       v-for="(item, index) in items"
       :key="item.id"
@@ -283,6 +299,19 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               @change="(checked: boolean, ctx?: { e?: Event }) => emit('toggle-checkbox', item.id, checked, ctx)"
             />
           </div>
+          <span
+            v-if="canEdit && !batchMode && selectedIds.size === 0"
+            class="knowledge-drag-handle"
+            :class="{ disabled: dragSubmitting }"
+            :draggable="!dragSubmitting"
+            :title="t('knowledgeFolderDrag.dragHandle', { name: item.file_name || item.title || item.id })"
+            :aria-label="t('knowledgeFolderDrag.dragHandle', { name: item.file_name || item.title || item.id })"
+            @click.stop
+            @dragstart.stop="onKnowledgeDragStart($event, item)"
+            @dragend.stop="emit('dragEnd')"
+          >
+            <t-icon name="move" />
+          </span>
           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
           <t-popup
             v-if="canEdit"
@@ -306,12 +335,14 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               <div v-if="moveMenuMode === 'normal'" class="card-menu">
                 <DocumentActionMenu
                   :item="item"
+                  :can-edit="canEdit"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="isTraceMenuVisible(item)"
                   @edit="handleAction('edit', item)"
                   @view-trace="handleAction('view-trace', item)"
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @move="handleAction('move', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
@@ -389,6 +420,17 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
               </div>
             </template>
           </t-popup>
+        </div>
+
+        <div
+          v-if="getDisplayPath(item.id)"
+          class="card-document-path"
+          :title="getDisplayPath(item.id)"
+          :aria-label="t('knowledgeFolderMove.searchResultPath', { path: getDisplayPath(item.id) })"
+          data-document-path
+        >
+          <t-icon name="folder" />
+          <span>{{ getDisplayPath(item.id) }}</span>
         </div>
 
         <!-- Parse status display -->
@@ -631,6 +673,11 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
   }
 
+  &.is-dragging {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+
   .card-nav-check {
     flex-shrink: 0;
     display: inline-flex;
@@ -649,6 +696,31 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
       :deep(.t-checkbox__label) { display: none !important; width: 0 !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; }
       :deep(.t-checkbox__input) { margin: 0; }
       :deep(.t-checkbox__input-wrapper) { margin: 0; }
+    }
+  }
+
+  .knowledge-drag-handle {
+    width: 18px;
+    height: 24px;
+    flex: 0 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 5px;
+    color: var(--td-text-color-placeholder);
+    cursor: grab;
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    &.disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
     }
   }
 
@@ -738,6 +810,29 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     font-weight: 600;
     letter-spacing: 0.01em;
     margin-right: 8px;
+  }
+
+  .card-document-path {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: -2px 0 5px;
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    line-height: 16px;
+
+    :deep(.t-icon) {
+      flex: 0 0 auto;
+      font-size: 12px;
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .more-wrap {
