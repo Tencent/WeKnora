@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -526,6 +527,11 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			}
 			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
 			if err != nil {
+				if errors.Is(err, embedding.ErrUnsupportedEmbedderSource) {
+					logger.GetLogger(ctx).WithField("error", err).WithField("model_id", key.EmbeddingModelID).
+						Warnf("DeleteKnowledge skipping vector cleanup for unsupported embedder source")
+					continue
+				}
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge get embedding model failed")
 				return err
 			}
@@ -646,8 +652,13 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		} else {
 			embeddingModel, modelErr := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
 			if modelErr != nil {
-				logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
-				cleanupErr = errors.Join(cleanupErr, modelErr)
+				if errors.Is(modelErr, embedding.ErrUnsupportedEmbedderSource) {
+					logger.GetLogger(ctx).WithField("error", modelErr).WithField("model_id", knowledge.EmbeddingModelID).
+						Warn("cleanupKnowledgeResources skipping vector cleanup for unsupported embedder source")
+				} else {
+					logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
+					cleanupErr = errors.Join(cleanupErr, modelErr)
+				}
 			} else {
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 					logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge index")

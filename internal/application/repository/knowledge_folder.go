@@ -130,7 +130,7 @@ func (r *knowledgeRepository) CountKnowledgesInFolder(ctx context.Context, kbID 
 	var count int64
 	if err := r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).
-		Where("knowledge_base_id = ? AND folder_id = ?", kbID, folderID).
+		Where("knowledge_base_id = ? AND folder_id = ? AND deleted_at IS NULL", kbID, folderID).
 		Count(&count).Error; err != nil {
 		return 0, err
 	}
@@ -146,7 +146,7 @@ func (r *knowledgeRepository) CountKnowledgesByFolder(ctx context.Context, kbID 
 	if err := r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).
 		Select("folder_id, COUNT(*) as cnt").
-		Where("knowledge_base_id = ?", kbID).
+		Where("knowledge_base_id = ? AND deleted_at IS NULL", kbID).
 		Group("folder_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func (r *knowledgeRepository) ListKnowledgesByFolderIDs(
 	}
 	var knowledges []*types.Knowledge
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND folder_id IN ?", kbID, folderIDs).
+		Where("knowledge_base_id = ? AND folder_id IN ? AND deleted_at IS NULL", kbID, folderIDs).
 		Find(&knowledges).Error; err != nil {
 		return nil, err
 	}

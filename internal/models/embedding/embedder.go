@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// ErrUnsupportedEmbedderSource is returned when a model's source is not
+// supported by the embedder factory (e.g. legacy/custom mock models).
+var ErrUnsupportedEmbedderSource = errors.New("unsupported embedder source")
 
 // Embedder defines the interface for text vectorization
 type Embedder interface {
@@ -276,6 +281,6 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			return embedder, err
 		}
 	default:
-		return nil, fmt.Errorf("unsupported embedder source: %s", config.Source)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedEmbedderSource, config.Source)
 	}
 }
