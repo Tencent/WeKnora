@@ -205,10 +205,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	})
 }
 
-const (
-	modelDebugMaxInputBytes = 64 * 1024
-	modelDebugMaxFileBytes  = 20 * 1024 * 1024
-)
+const modelDebugMaxInputBytes = 64 * 1024
 
 // ModelDebugOptions contains the cross-provider parameters exposed by the
 // model debugger. Pointer fields preserve explicit zero/false values.
@@ -397,17 +394,19 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		defer file.Close()
 		fileName = header.Filename
 		fileSize = header.Size
-		if fileSize > modelDebugMaxFileBytes {
-			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+		maxFileBytes := secutils.GetMaxFileSize()
+		maxFileSizeMB := secutils.GetMaxFileSizeMB()
+		if fileSize > maxFileBytes {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("file cannot exceed %d MB", maxFileSizeMB)))
 			return
 		}
-		fileBytes, err = io.ReadAll(io.LimitReader(file, modelDebugMaxFileBytes+1))
+		fileBytes, err = io.ReadAll(io.LimitReader(file, maxFileBytes+1))
 		if err != nil {
 			c.Error(errors.NewBadRequestError("failed to read uploaded file"))
 			return
 		}
-		if len(fileBytes) > modelDebugMaxFileBytes {
-			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+		if int64(len(fileBytes)) > maxFileBytes {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("file cannot exceed %d MB", maxFileSizeMB)))
 			return
 		}
 		fileSize = int64(len(fileBytes))

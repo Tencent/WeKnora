@@ -395,7 +395,7 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 // actual swap happens asynchronously inside mapOneDocument (see its
 // oldPageSlugs handling) — that's where we have both the old page set and
 // the freshly extracted candidate slugs, which is exactly the information
-// the WikiPageModifyPrompt needs to do a correct replace-not-append.
+// the WikiPageModifyUserPrompt needs to do a correct replace-not-append.
 //
 // So the only thing worth doing synchronously at reparse time is keeping
 // the Redis pending list clean so the re-ingest enqueued by

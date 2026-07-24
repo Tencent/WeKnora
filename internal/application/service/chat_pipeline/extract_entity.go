@@ -184,7 +184,8 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))
 	// logger.Debugf(ctx, "chat user: %s", generator.User(ctx, content))
 
-	chatResponse, err := e.chat.Chat(ctx, generator.Render(ctx, content), e.chatOpt)
+	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
+	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to chat: %v", err)
 		return nil, err

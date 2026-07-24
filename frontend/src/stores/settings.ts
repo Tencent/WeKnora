@@ -418,8 +418,12 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedFiles || [];
     },
 
-    /** Scope for suggested-questions API (KB / file / tag @mentions). */
-    getSuggestedQuestionsParams(limit = 6) {
+    /**
+     * Scope for suggested-questions API (KB / file / tag @mentions).
+     * Leave `limit` undefined to let the backend apply the agent's configured
+     * starter count; pass a number only to request a specific count.
+     */
+    getSuggestedQuestionsParams(limit?: number) {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
