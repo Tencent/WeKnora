@@ -655,7 +655,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "返回数量上限（默认6）",
+                        "description": "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）",
                         "name": "limit",
                         "in": "query"
                     }
@@ -9987,7 +9987,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户",
+                "description": "按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重",
                 "produces": [
                     "application/json"
                 ],
@@ -10005,7 +10005,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（空间名、用户名或邮箱）",
+                        "description": "搜索关键词（空间名）",
                         "name": "q",
                         "in": "query",
                         "required": true
