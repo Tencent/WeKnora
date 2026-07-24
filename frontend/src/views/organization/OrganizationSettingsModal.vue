@@ -573,7 +573,7 @@
                           <div class="join-request-actions">
                             <t-popup :visible="approvePopupRequestId === row.id"
                               placement="left-start" destroy-on-close overlay-class-name="org-approve-request-popup-overlay"
-                              @visible-change="(visible) => handleApprovePopupVisibleChange(visible, row)">
+                              @visible-change="(visible: boolean) => handleApprovePopupVisibleChange(visible, row)">
                               <t-tooltip :content="$t('organization.settings.approve')" placement="top">
                                 <t-button theme="primary" variant="text" shape="square" size="small"
                                   :loading="reviewingRequestId === row.id" @click.stop="openApprovePopup(row)">
@@ -824,21 +824,10 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   getOrganization,
-  listMembers,
-  updateOrganization,
-  updateMemberRole,
-  removeMember,
-  generateInviteCode,
   listOrgShares,
   listOrgAgentShares,
   listJoinRequests,
-  reviewJoinRequest,
-  removeShare,
-  removeAgentShare,
-  requestRoleUpgrade,
   searchTenantsForInvite,
-  inviteMember,
-  type Organization,
   type OrganizationMember,
   type KnowledgeBaseShare,
   type AgentShareResponse,
@@ -874,8 +863,8 @@ const emit = defineEmits<{
 
 // State
 const currentSection = ref('basic')
-const orgInfo = ref<Organization | null>(null)
-const members = ref<OrganizationMember[]>([])
+const orgInfo = computed(() => orgStore.currentOrganization)
+const members = computed(() => orgStore.currentMembers)
 const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
 const sharedAgents = ref<AgentShareResponse[]>([])
 const joinRequests = ref<JoinRequestResponse[]>([])
@@ -1318,7 +1307,7 @@ const fetchOrgDetail = async () => {
   try {
     const res = await getOrganization(props.orgId)
     if (res.success && res.data) {
-      orgInfo.value = res.data
+      orgStore.setCurrentOrganization(res.data)
       const validity = res.data.invite_code_validity_days
       const memberLimit = res.data.member_limit
       formData.value = {
@@ -1344,10 +1333,7 @@ const fetchMembers = async () => {
   if (!props.orgId) return
   membersLoading.value = true
   try {
-    const res = await listMembers(props.orgId)
-    if (res.success && res.data) {
-      members.value = res.data.members || []
-    }
+    await orgStore.fetchMembers(props.orgId)
   } catch (error) {
     console.error('Failed to fetch members:', error)
   } finally {
@@ -1445,7 +1431,7 @@ const fetchJoinRequests = async () => {
 const refreshOrganizationAfterReview = async () => {
   await Promise.all([
     fetchOrgDetail(),
-    orgStore.fetchOrganizations({ force: true })
+    fetchMembers()
   ])
 }
 
@@ -1458,7 +1444,11 @@ const handleApproveRequest = async (req: JoinRequestResponse, assignRole: 'viewe
   if (!props.orgId) return false
   reviewingRequestId.value = req.id
   try {
-    const res = await reviewJoinRequest(props.orgId, req.id, { approved: true, role: assignRole })
+    const res = await orgStore.reviewOrganizationJoinRequest(
+      props.orgId,
+      req.id,
+      { approved: true, role: assignRole }
+    )
     if (res.success) {
       MessagePlugin.success(t('organization.settings.approveSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
@@ -1479,7 +1469,11 @@ const handleRejectRequest = async (req: JoinRequestResponse) => {
   if (!props.orgId) return
   reviewingRequestId.value = req.id
   try {
-    const res = await reviewJoinRequest(props.orgId, req.id, { approved: false })
+    const res = await orgStore.reviewOrganizationJoinRequest(
+      props.orgId,
+      req.id,
+      { approved: false }
+    )
     if (res.success) {
       MessagePlugin.success(t('organization.settings.rejectSuccess'))
       joinRequests.value = joinRequests.value.filter(r => r.id !== req.id)
@@ -1519,7 +1513,7 @@ const handleSave = async () => {
     } else {
       // 编辑模式
       if (!props.orgId) return
-      const res = await updateOrganization(props.orgId, {
+      const result = await orgStore.updateOrganization(props.orgId, {
         name: formData.value.name.trim(),
         description: formData.value.description.trim(),
         avatar: formData.value.avatar || undefined,
@@ -1528,12 +1522,12 @@ const handleSave = async () => {
         invite_code_validity_days: formData.value.invite_code_validity_days,
         member_limit: formData.value.member_limit
       })
-      if (res.success) {
+      if (result) {
         MessagePlugin.success(t('common.saveSuccess'))
         emit('saved')
         handleClose()
       } else {
-        MessagePlugin.error(res.message || t('common.saveFailed'))
+        MessagePlugin.error(orgStore.error || t('common.saveFailed'))
       }
     }
   } catch (error: any) {
@@ -1546,13 +1540,15 @@ const handleSave = async () => {
 const handleRoleChange = async (member: OrganizationMember, newRole: string) => {
   if (!props.orgId) return
   try {
-    const res = await updateMemberRole(props.orgId, member.tenant_id, {
-      role: newRole as 'admin' | 'editor' | 'viewer'
-    })
-    if (res.success) {
+    const success = await orgStore.changeMemberRole(
+      props.orgId,
+      member.tenant_id,
+      newRole as 'admin' | 'editor' | 'viewer'
+    )
+    if (success) {
       MessagePlugin.success(t('organization.roleUpdated'))
     } else {
-      MessagePlugin.error(res.message || t('organization.roleUpdateFailed'))
+      MessagePlugin.error(orgStore.error || t('organization.roleUpdateFailed'))
       fetchMembers()
     }
   } catch (error: any) {
@@ -1565,12 +1561,11 @@ const confirmRemoveMember = async (member: OrganizationMember) => {
   if (!props.orgId) return
 
   try {
-    const res = await removeMember(props.orgId, member.tenant_id)
-    if (res.success) {
+    const success = await orgStore.kickMember(props.orgId, member.tenant_id)
+    if (success) {
       MessagePlugin.success(t('organization.memberRemoved'))
-      fetchMembers()
     } else {
-      MessagePlugin.error(res.message || t('organization.memberRemoveFailed'))
+      MessagePlugin.error(orgStore.error || t('organization.memberRemoveFailed'))
     }
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('organization.memberRemoveFailed'))
@@ -1590,7 +1585,7 @@ const handleSubmitUpgrade = async () => {
 
   upgradeSubmitting.value = true
   try {
-    const res = await requestRoleUpgrade(props.orgId, {
+    const res = await orgStore.requestOrganizationRoleUpgrade(props.orgId, {
       requested_role: upgradeForm.value.requested_role,
       message: upgradeForm.value.message
     })
@@ -1647,7 +1642,7 @@ const handleAddMember = async () => {
 
   addMemberSubmitting.value = true
   try {
-    const res = await inviteMember(props.orgId, {
+    const res = await orgStore.inviteOrganizationMember(props.orgId, {
       tenant_id: selectedTenantId.value,
       representative_user_id: candidate?.representative_user_id,
       role: addMemberRole.value,
@@ -1721,13 +1716,13 @@ const refreshInviteCode = async () => {
   if (!props.orgId) return
   refreshingCode.value = true
   try {
-    const res = await generateInviteCode(props.orgId) as any
-    if (res.success) {
-      inviteCode.value = res.invite_code || (res as any).data?.invite_code
+    const code = await orgStore.refreshInviteCode(props.orgId)
+    if (code) {
+      inviteCode.value = code
       MessagePlugin.success(t('organization.inviteCodeRefreshed'))
       await fetchOrgDetail()
     } else {
-      MessagePlugin.error(res.message || t('organization.inviteCodeRefreshFailed'))
+      MessagePlugin.error(orgStore.error || t('organization.inviteCodeRefreshFailed'))
     }
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('organization.inviteCodeRefreshFailed'))
@@ -1739,12 +1734,14 @@ const refreshInviteCode = async () => {
 const handleValidityChange = async (value: number) => {
   if (!props.orgId) return
   try {
-    const res = await updateOrganization(props.orgId, { invite_code_validity_days: value })
-    if (res.success) {
+    const result = await orgStore.updateOrganization(props.orgId, {
+      invite_code_validity_days: value
+    })
+    if (result) {
       MessagePlugin.success(t('common.saveSuccess'))
     } else {
       formData.value.invite_code_validity_days = orgInfo.value?.invite_code_validity_days ?? 7
-      MessagePlugin.error(res.message || t('common.saveFailed'))
+      MessagePlugin.error(orgStore.error || t('common.saveFailed'))
     }
   } catch (error: any) {
     formData.value.invite_code_validity_days = orgInfo.value?.invite_code_validity_days ?? 7
@@ -1756,15 +1753,15 @@ const handleValidityChange = async (value: number) => {
 const handleApprovalToggle = async (value: boolean) => {
   if (!props.orgId) return
   try {
-    const res = await updateOrganization(props.orgId, {
+    const result = await orgStore.updateOrganization(props.orgId, {
       require_approval: value
     })
-    if (res.success) {
+    if (result) {
       MessagePlugin.success(t('common.saveSuccess'))
     } else {
       // 回滚
       formData.value.require_approval = !value
-      MessagePlugin.error(res.message || t('common.saveFailed'))
+      MessagePlugin.error(orgStore.error || t('common.saveFailed'))
     }
   } catch (error: any) {
     // 回滚
@@ -1777,14 +1774,14 @@ const handleApprovalToggle = async (value: boolean) => {
 const handleSearchableToggle = async (value: boolean) => {
   if (!props.orgId) return
   try {
-    const res = await updateOrganization(props.orgId, {
+    const result = await orgStore.updateOrganization(props.orgId, {
       searchable: value
     })
-    if (res.success) {
+    if (result) {
       MessagePlugin.success(t('common.saveSuccess'))
     } else {
       formData.value.searchable = !value
-      MessagePlugin.error(res.message || t('common.saveFailed'))
+      MessagePlugin.error(orgStore.error || t('common.saveFailed'))
     }
   } catch (error: any) {
     formData.value.searchable = !value
@@ -1800,7 +1797,11 @@ const handleShareClick = (share: KnowledgeBaseShare) => {
 const handleRemoveShare = async (share: KnowledgeBaseShare) => {
   if (!props.orgId) return
   try {
-    const res = await removeShare(share.knowledge_base_id, share.id)
+    const res = await orgStore.unshareKnowledgeBase(
+      share.knowledge_base_id,
+      share.id,
+      props.orgId
+    )
     if (res.success) {
       MessagePlugin.success(t('organization.settings.removeShareSuccess'))
       sharedKnowledgeBases.value = sharedKnowledgeBases.value.filter(s => s.id !== share.id)
@@ -1815,7 +1816,7 @@ const handleRemoveShare = async (share: KnowledgeBaseShare) => {
 const handleRemoveAgentShare = async (share: AgentShareResponse) => {
   if (!props.orgId) return
   try {
-    const res = await removeAgentShare(share.agent_id, share.id)
+    const res = await orgStore.unshareAgent(share.agent_id, share.id, props.orgId)
     if (res.success) {
       MessagePlugin.success(t('organization.settings.removeShareSuccess'))
       sharedAgents.value = sharedAgents.value.filter(s => s.id !== share.id)
@@ -1865,8 +1866,7 @@ watch(() => props.visible, (newVal) => {
     if (props.mode === 'create') {
       // 创建模式：重置表单
       formData.value = { name: '', description: '', avatar: '', require_approval: false, searchable: false, invite_code_validity_days: 7, member_limit: 50 }
-      orgInfo.value = null
-      members.value = []
+      orgStore.clearCurrentOrganizationContext()
       sharedKnowledgeBases.value = []
       inviteCode.value = ''
       inviteCodeExpiresAt.value = null

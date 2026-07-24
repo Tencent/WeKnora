@@ -99,10 +99,10 @@
                   <span class="card-title" :title="org.name">{{ org.name }}</span>
                 </div>
               </div>
-              <t-popup v-model="org.showMore" overlayClassName="card-more-popup"
+              <t-popup v-model="organizationMenuVisibility[org.id]" overlayClassName="card-more-popup"
                 :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)" trigger="click"
                 destroy-on-close placement="bottom-right">
-                <div class="more-wrap" @click.stop :class="{ 'active-more': org.showMore }">
+                <div class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
                   <img class="more-icon" src="@/assets/img/more.png" alt="" />
                 </div>
                 <template #content>
@@ -201,7 +201,7 @@
 
     <!-- Organization Settings Modal (用于创建和编辑组织) -->
     <OrganizationSettingsModal :visible="showSettingsModal" :org-id="settingsOrgId" :mode="settingsMode"
-      @update:visible="showSettingsModal = $event" @saved="handleSettingsSaved" />
+      @update:visible="showSettingsModal = $event" />
 
     <!-- Delete Confirm Dialog -->
     <t-dialog v-model:visible="deleteVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
@@ -474,22 +474,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
 import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
-import { previewOrganization, joinOrganization, submitJoinRequest, searchSearchableOrganizations, joinOrganizationById } from '@/api/organization'
+import { previewOrganization, submitJoinRequest } from '@/api/organization'
 import { useI18n } from 'vue-i18n'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
 
-interface OrgWithUI extends Organization {
-  showMore?: boolean
-}
+type OrgWithUI = Organization
 
 const { t } = useI18n()
 const route = useRoute()
@@ -534,12 +532,11 @@ const invitePreviewError = ref('')
 // 加入方式：邀请码 / 搜索空间
 const joinStep = ref<'invite' | 'search'>('invite')
 const searchQuery = ref('')
-const searchableList = ref<SearchableOrganizationItem[]>([])
+const searchableList = computed(() => orgStore.searchableOrganizations)
 const searchLoading = ref(false)
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 // 搜索结果缓存：避免重复点击时重复请求导致高度跳动
-const searchCache = ref<{ query: string; data: SearchableOrganizationItem[]; timestamp: number } | null>(null)
-const CACHE_DURATION = 5 * 60 * 1000 // 缓存5分钟
+const organizationMenuVisibility = reactive<Record<string, boolean>>({})
 
 // Tab 内容容器 ref，用于高度过渡
 const tabContentWrapperRef = ref<HTMLElement | null>(null)
@@ -693,7 +690,7 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
     invitePreviewLoading.value = false
     joinStep.value = 'invite'
     searchQuery.value = ''
-    searchableList.value = []
+    orgStore.clearSearchableOrganizations()
     // 注意：不清空缓存，保留搜索结果以便下次快速显示
     showInvitePreview.value = true
   }
@@ -704,7 +701,7 @@ const spaceSelection = ref<'all' | 'created' | 'joined'>('all')
 
 // Computed
 const loading = computed(() => orgStore.loading)
-const organizations = ref<OrgWithUI[]>([])
+const organizations = computed<OrgWithUI[]>(() => orgStore.organizations)
 
 const createdCount = computed(() => organizations.value.filter(o => o.is_owner).length)
 const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
@@ -758,15 +755,6 @@ const emptyStateDesc = computed(() => {
   return t('organization.emptyDesc')
 })
 
-// Watch store changes and update local organizations
-watch(
-  () => orgStore.organizations,
-  (newOrgs) => {
-    organizations.value = newOrgs.map(org => ({ ...org, showMore: false }))
-  },
-  { immediate: true }
-)
-
 // Methods
 function getRoleTheme(role: string) {
   switch (role) {
@@ -778,7 +766,7 @@ function getRoleTheme(role: string) {
 
 const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
   if (!visible) {
-    org.showMore = false
+    organizationMenuVisibility[org.id] = false
   }
 }
 
@@ -806,13 +794,13 @@ function handleJoinOrganization() {
   invitePreviewLoading.value = false
   joinStep.value = 'invite'
   searchQuery.value = ''
-  searchableList.value = []
+  orgStore.clearSearchableOrganizations()
   showInvitePreview.value = true
 }
 
 function handleCardClick(org: OrgWithUI) {
   // 如果弹窗正在显示，不触发设置
-  if (org.showMore) {
+  if (organizationMenuVisibility[org.id]) {
     return
   }
   settingsOrgId.value = org.id
@@ -820,20 +808,15 @@ function handleCardClick(org: OrgWithUI) {
   showSettingsModal.value = true
 }
 
-function handleSettingsSaved() {
-  orgStore.fetchOrganizations()
-}
-
-
 function handleSettings(org: OrgWithUI) {
-  org.showMore = false
+  organizationMenuVisibility[org.id] = false
   settingsOrgId.value = org.id
   settingsMode.value = 'edit'
   showSettingsModal.value = true
 }
 
 function handleLeave(org: OrgWithUI) {
-  org.showMore = false
+  organizationMenuVisibility[org.id] = false
   leavingOrg.value = org
   leaveVisible.value = true
 }
@@ -851,7 +834,7 @@ async function confirmLeave() {
 }
 
 function handleDelete(org: OrgWithUI) {
-  org.showMore = false
+  organizationMenuVisibility[org.id] = false
   deletingOrg.value = org
   deleteVisible.value = true
 }
@@ -936,18 +919,16 @@ async function confirmJoinOrganization() {
       }
     } else {
       // 直接加入
-      const result = await joinOrganization({ invite_code: inviteCode.value })
-      if (result.success) {
+      const result = await orgStore.join(inviteCode.value)
+      if (result) {
         MessagePlugin.success(t('organization.invite.joinSuccess'))
         showInvitePreview.value = false
         inviteCode.value = ''
         invitePreviewData.value = null
         // 清除 URL 中的 invite_code 参数
         router.replace({ path: route.path, query: {} })
-        // 刷新组织列表
-        orgStore.fetchOrganizations()
       } else {
-        MessagePlugin.error(result.message || t('organization.invite.joinFailed'))
+        MessagePlugin.error(orgStore.error || t('organization.invite.joinFailed'))
       }
     }
   } catch (e: any) {
@@ -977,7 +958,7 @@ function closeInvitePreview() {
   invitePreviewError.value = ''
   joinStep.value = 'invite'
   searchQuery.value = ''
-  searchableList.value = []
+  orgStore.clearSearchableOrganizations()
   inviteRequestRole.value = 'viewer'
   inviteRequestMessage.value = ''
   router.replace({ path: route.path, query: {} })
@@ -994,60 +975,21 @@ function backFromPreview() {
   }
 }
 
-// 处理搜索标签点击：如果有缓存，先显示缓存，避免高度跳动
+// 搜索缓存由 Store 统一管理，切换标签时直接读取缓存或请求最新结果
 function handleSearchTabClick() {
   joinStep.value = 'search'
-
-  // 检查是否有有效的缓存
-  const currentQuery = searchQuery.value.trim()
-  if (searchCache.value &&
-    searchCache.value.query === currentQuery &&
-    Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
-    // 先显示缓存结果（已过滤已加入空间），避免高度跳动
-    searchableList.value = searchCache.value.data
-    // 然后在后台刷新（可选，如果需要最新数据）
-    // doSearchSearchable()
-  } else {
-    // 没有缓存或缓存过期，执行搜索
-    doSearchSearchable()
-  }
+  void doSearchSearchable()
 }
 
 // 搜索可加入空间
 async function doSearchSearchable() {
   const currentQuery = searchQuery.value.trim()
 
-  // 检查缓存
-  if (searchCache.value &&
-    searchCache.value.query === currentQuery &&
-    Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
-    // 使用缓存（已是过滤后的列表），不重新请求
-    searchableList.value = searchCache.value.data
-    return
-  }
-
   searchLoading.value = true
   try {
-    const res = await searchSearchableOrganizations(currentQuery, 20)
-    if (res.success && res.data) {
-      const raw = res.data.data || []
-      // 不展示已加入的空间
-      const data = raw.filter((org: SearchableOrganizationItem) => !org.is_already_member)
-      searchableList.value = data
-      // 更新缓存（存过滤后的列表）
-      searchCache.value = {
-        query: currentQuery,
-        data: data,
-        timestamp: Date.now()
-      }
-    } else {
-      searchableList.value = []
-      // 清空缓存
-      searchCache.value = null
-    }
+    await orgStore.fetchSearchableOrganizations(currentQuery, { limit: 20 })
   } catch (e) {
-    searchableList.value = []
-    searchCache.value = null
+    orgStore.clearSearchableOrganizations()
   } finally {
     searchLoading.value = false
   }
@@ -1142,17 +1084,21 @@ async function joinBySearchOrg() {
     // 如果需要审核，传递角色和消息；否则直接加入
     const message = invitePreviewData.value.require_approval ? inviteRequestMessage.value?.trim() || undefined : undefined
     const role = invitePreviewData.value.require_approval ? inviteRequestRole.value : undefined
-    const result = await joinOrganizationById(invitePreviewData.value.id, message, role)
+    const result = await orgStore.joinById(
+      invitePreviewData.value.id,
+      message,
+      role,
+      { requiresApproval: invitePreviewData.value.require_approval }
+    )
     if (result.success) {
       if (invitePreviewData.value.require_approval) {
         MessagePlugin.success(t('organization.invite.requestSubmitted'))
       } else {
         MessagePlugin.success(t('organization.invite.joinSuccess'))
-        orgStore.fetchOrganizations()
       }
       showInvitePreview.value = false
       invitePreviewData.value = null
-      searchableList.value = []
+      orgStore.clearSearchableOrganizations()
       searchQuery.value = ''
       joinStep.value = 'invite'
       inviteRequestRole.value = 'viewer'
@@ -1169,7 +1115,7 @@ async function joinBySearchOrg() {
 
 // Lifecycle
 onMounted(async () => {
-  orgStore.fetchOrganizations()
+  void orgStore.fetchOrganizations()
   window.addEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
 
   // 检查 URL 中是否有邀请码

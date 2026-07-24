@@ -122,7 +122,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useOrganizationStore } from '@/stores/organization'
-import { shareAgent, listAgentShares, removeAgentShare } from '@/api/organization'
+import { listAgentShares } from '@/api/organization'
 import type { AgentShareResponse } from '@/api/organization'
 import type { CustomAgent } from '@/api/agent'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
@@ -224,7 +224,7 @@ async function handleShare() {
   if (!selectedOrgId.value) return
   submitting.value = true
   try {
-    const result = await shareAgent(props.agentId, {
+    const result = await orgStore.shareAgent(props.agentId, {
       organization_id: selectedOrgId.value,
       permission: 'viewer'
     })
@@ -246,7 +246,11 @@ async function handleShare() {
 
 async function handleUnshare(share: AgentShareResponse) {
   try {
-    const result = await removeAgentShare(props.agentId, share.id)
+    const result = await orgStore.unshareAgent(
+      props.agentId,
+      share.id,
+      share.organization_id
+    )
     if (result.success) {
       MessagePlugin.success(t('organization.share.unshareSuccess'))
       await loadShares()
