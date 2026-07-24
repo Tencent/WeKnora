@@ -1299,6 +1299,10 @@ const remainingValidityText = computed(() => {
 
 // Methods
 const handleClose = () => {
+  // Blur before unmount so TDesign textarea autosize won't run on a detached node.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
   emit('update:visible', false)
 }
 
@@ -1306,6 +1310,7 @@ const fetchOrgDetail = async () => {
   if (!props.orgId) return
   try {
     const res = await getOrganization(props.orgId)
+    if (!props.visible) return
     if (res.success && res.data) {
       orgStore.setCurrentOrganization(res.data)
       const validity = res.data.invite_code_validity_days
@@ -1575,10 +1580,10 @@ const confirmRemoveMember = async (member: OrganizationMember) => {
 }
 
 watch(upgradePopupVisible, (visible) => {
-  if (visible && upgradeRoleOptions.value.length > 0) {
-    upgradeForm.value.requested_role = upgradeRoleOptions.value[0].value as 'editor' | 'admin'
-  } else if (!visible && !upgradeSubmitting.value) {
-    upgradeForm.value = { requested_role: 'editor', message: '' }
+  if (!visible) return
+  upgradeForm.value = {
+    requested_role: (upgradeRoleOptions.value[0]?.value as 'editor' | 'admin') || 'editor',
+    message: '',
   }
 })
 
@@ -1593,10 +1598,8 @@ const handleSubmitUpgrade = async () => {
     })
     if (res.success) {
       MessagePlugin.success(t('organization.upgrade.submitSuccess'))
-      upgradePopupVisible.value = false
       hasPendingUpgrade.value = true
-      // Reset form
-      upgradeForm.value = { requested_role: 'editor', message: '' }
+      upgradePopupVisible.value = false
     } else {
       MessagePlugin.error(res.message || t('organization.upgrade.submitFailed'))
     }
