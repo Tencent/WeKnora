@@ -67,6 +67,8 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		config = openai.DefaultConfig(apiKey)
 		if baseURL := chatConfig.BaseURL; baseURL != "" {
 			config.BaseURL = baseURL
+		} else if providerName == provider.ProviderDeepSeek {
+			config.BaseURL = provider.DeepSeekBaseURL
 		}
 	}
 
@@ -100,7 +102,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		modelName:        modelName,
 		client:           openai.NewClientWithConfig(config),
 		modelID:          chatConfig.ModelID,
-		baseURL:          chatConfig.BaseURL,
+		baseURL:          strings.TrimRight(config.BaseURL, "/"),
 		apiKey:           apiKey,
 		provider:         providerName,
 		appID:            chatConfig.AppID,
@@ -255,6 +257,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, err
 	}
 	c.applyCompletionToolCallMetadata(body, result)
+	applyRawPromptCacheUsage(body, &result.Usage)
 	logUsage(ctx, c.modelName, &result.Usage)
 	return result, nil
 }

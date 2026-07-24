@@ -50,10 +50,11 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 	if config == nil {
 		return false
 	}
-	if len(config.KnowledgeBases) > 0 || len(config.KnowledgeIDs) > 0 {
-		return true
-	}
-	return len(config.SearchTargets) > 0
+	return types.HasKnowledgeRetrievalScope(
+		config.SearchTargets,
+		config.KnowledgeBases,
+		config.KnowledgeIDs,
+	)
 }
 
 // knowledgeBaseIDsForPrompt returns KB IDs to show in runtime_context metadata.
@@ -725,7 +726,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			pageResult, err := s.knowledgeService.ListFAQEntries(ctx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
-			}, 0, "", "", "")
+			}, nil, 0, "", "", "")
 			if err == nil && pageResult != nil {
 				docCount = int(pageResult.Total)
 				if entries, ok := pageResult.Data.([]*types.FAQEntry); ok {

@@ -1,5 +1,30 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
+
+export type KnowledgeBaseActivity = AuditLog;
+
+export interface ListKnowledgeBaseActivityParams {
+  after_id?: number;
+  limit?: number;
+  action?: string;
+  outcome?: AuditOutcome;
+  actor?: string;
+}
+
+export async function listKnowledgeBaseActivity(
+  id: string,
+  params: ListKnowledgeBaseActivityParams = {},
+): Promise<ListAuditLogResponse> {
+  const query = new URLSearchParams();
+  if (params.after_id) query.set('after_id', String(params.after_id));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.action) query.set('action', params.action);
+  if (params.outcome) query.set('outcome', params.outcome);
+  if (params.actor) query.set('actor', params.actor);
+  const qs = query.toString();
+  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
+}
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
@@ -367,7 +392,7 @@ const buildQuery = (params?: Record<string, any>) => {
 
 export function listFAQEntries(
   kbId: string,
-  params?: { page?: number; page_size?: number; tag_id?: number; keyword?: string },
+  params?: { page?: number; page_size?: number; tag_id?: number; tag_ids?: string; keyword?: string },
 ) {
   const query = buildQuery(params);
   return get(`/api/v1/knowledge-bases/${kbId}/faq/entries${query}`);
@@ -420,10 +445,11 @@ export function searchFAQEntries(
   return post(`/api/v1/knowledge-bases/${kbId}/faq/search`, data);
 }
 
-// Export FAQ entries as CSV file
-export async function exportFAQEntries(kbId: string): Promise<Blob> {
-  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export`);
-  return response as unknown as Blob;
+// Export FAQ entries as CSV or JSON file
+export async function exportFAQEntries(kbId: string, format: 'csv' | 'json' = 'csv'): Promise<Blob> {
+  const suffix = format === 'json' ? '?format=json' : ''
+  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export${suffix}`)
+  return response as unknown as Blob
 }
 
 // FAQ Import Progress API

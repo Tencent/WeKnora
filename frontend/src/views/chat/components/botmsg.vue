@@ -17,12 +17,14 @@
             <div v-if="session.isRagMode" class="rag-answer-stack">
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
-                    :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading" />
+                    :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
+                    @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
-                    v-if="session.isAgentMode" :follow-up-loading="followUpLoading" />
+                    v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
+                    @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
@@ -32,14 +34,6 @@
             <!-- 只有当有实际内容时才显示包围框 -->
             <div class="content-wrapper" v-if="hasActualContent">
                 <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
-                </div>
-            </div>
-            <!-- Streaming indicator (non-Agent mode) -->
-            <div v-if="hasActualContent && !session.is_completed" class="loading-indicator">
-                <div class="loading-typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
                 </div>
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
@@ -125,7 +119,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -211,6 +205,14 @@ const { displayed: typedAnswer } = useTypewriter(
 // displayed text has caught up, so actions never appear beside a moving answer.
 const answerFullyRendered = computed(() =>
     Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
+);
+
+watch(
+    answerFullyRendered,
+    (ready) => {
+        if (!props.session?.isAgentMode) emit('render-complete-change', ready);
+    },
+    { immediate: true },
 );
 
 // 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
@@ -420,57 +422,6 @@ onBeforeUnmount(() => {
     width: 24px;
     height: 18px;
     margin-left: 16px;
-}
-
-.thinking-loading {
-    padding: 8px 0;
-}
-
-.loading-indicator {
-    padding: 8px 0;
-}
-
-.loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--td-brand-color);
-        animation: typingBounce 1.4s ease-in-out infinite;
-        // Composite the dots so the bounce stays smooth and ghost-free while the
-        // answer relayouts each streamed token.
-        will-change: transform;
-        backface-visibility: hidden;
-
-        &:nth-child(1) {
-            animation-delay: 0s;
-        }
-
-        &:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        &:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-    }
-}
-
-@keyframes typingBounce {
-
-    0%,
-    60%,
-    100% {
-        transform: translate3d(0, 0, 0);
-    }
-
-    30% {
-        transform: translate3d(0, -6px, 0);
-    }
 }
 
 .img_loading {

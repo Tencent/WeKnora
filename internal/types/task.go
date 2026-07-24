@@ -29,15 +29,19 @@ const (
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
-	QueuePostProcess = "postprocess"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueDefault = "default"
+	// QueueChatAttachment carries session-scoped chat attachment parsing. It
+	// lives in the core pool but with a higher weight than QueueDefault so
+	// interactive chat uploads are not starved by knowledge-base batch imports.
+	QueueChatAttachment = "chat_attachment"
+	QueuePostProcess    = "postprocess"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -55,6 +59,11 @@ type QueueDefinition struct {
 var queueDefinitions = []QueueDefinition{
 	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
 		TypeDocumentProcess, TypeManualProcess,
+	}},
+	// Interactive chat attachment parsing: higher core weight than the default
+	// queue so a large KB import cannot make chat uploads queue behind it.
+	{Name: QueueChatAttachment, Pool: WorkerPoolCore, Weight: 3, SharedWeight: 3, TaskTypes: []string{
+		TypeTemporaryDocumentProcess,
 	}},
 	{Name: QueuePostProcess, Pool: WorkerPoolPostProcess, Weight: 1, TaskTypes: []string{
 		TypeKnowledgePostProcess,
@@ -218,24 +227,25 @@ type WorkerServerStat struct {
 }
 
 const (
-	TypeChunkExtract         = "chunk:extract"
-	TypeDocumentProcess      = "document:process"       // 文档处理任务
-	TypeFAQImport            = "faq:import"             // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration   = "question:generation"    // 问题生成任务
-	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
-	TypeKBClone              = "kb:clone"               // 知识库复制任务
-	TypeIndexDelete          = "index:delete"           // 索引删除任务
-	TypeKBDelete             = "kb:delete"              // 知识库删除任务
-	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
-	TypeKnowledgeListReparse = "knowledge:list_reparse" // 批量重解析知识任务
-	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
-	TypeDataTableSummary     = "datatable:summary"      // 表格摘要任务
-	TypeImageMultimodal      = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
-	TypeKnowledgePostProcess = "knowledge:post_process" // 知识后处理任务（统一调度）
-	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
-	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
-	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
-	TypeWikiFinalize         = "wiki:finalize"          // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
+	TypeChunkExtract             = "chunk:extract"
+	TypeDocumentProcess          = "document:process"           // 文档处理任务
+	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
+	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
+	TypeKBClone                  = "kb:clone"                   // 知识库复制任务
+	TypeIndexDelete              = "index:delete"               // 索引删除任务
+	TypeKBDelete                 = "kb:delete"                  // 知识库删除任务
+	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
+	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
+	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
+	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
+	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
+	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
+	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
+	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
+	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
+	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
+	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -295,6 +305,8 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
 	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
+	InstanceID  string            `json:"instance_id,omitempty"`
+	Initiator   TaskInitiator     `json:"initiator,omitempty"`
 }
 
 // QuestionGenerationPayload represents the question generation task payload
@@ -357,10 +369,11 @@ type SummaryGenerationPayload struct {
 // KBClonePayload represents the knowledge base clone task payload
 type KBClonePayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
+	TenantID  uint64        `json:"tenant_id"`
+	TaskID    string        `json:"task_id"`
+	SourceID  string        `json:"source_id"`
+	TargetID  string        `json:"target_id"`
+	Initiator TaskInitiator `json:"initiator,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -383,6 +396,7 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
+	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means
@@ -393,8 +407,9 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID     uint64        `json:"tenant_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
@@ -403,17 +418,19 @@ type KnowledgeListReparsePayload struct {
 	TenantID      uint64                     `json:"tenant_id"`
 	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator     TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	TaskID       string   `json:"task_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
-	SourceKBID   string   `json:"source_kb_id"`
-	TargetKBID   string   `json:"target_kb_id"`
-	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+	TenantID     uint64        `json:"tenant_id"`
+	TaskID       string        `json:"task_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	SourceKBID   string        `json:"source_kb_id"`
+	TargetKBID   string        `json:"target_kb_id"`
+	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task

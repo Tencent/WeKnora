@@ -101,9 +101,12 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed"
-                :class="{ 'submenu--scope-fallback': showSessionScopeFallback }">
-                <div v-if="showSessionScopeFallback" class="session-list-scope-fallback">
+            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+                <!-- Stable, always-mounted source filter: reserving its row here
+                     (instead of embedding it in the first date group, which
+                     appears/disappears while a bucket loads) prevents the
+                     top-right control from jumping when switching session type. -->
+                <div v-if="showSessionSourceFilter && !batchMode" class="session-list-scope-header">
                     <SessionSourceFilter inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
                         :current="activeSessionBucketKey" @select="switchSessionBucket" />
                 </div>
@@ -130,15 +133,11 @@
                         <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
                     </template>
                     <template v-else>
-                        <template v-for="(group, groupIndex) in filteredGroupedSessions" :key="group.key">
-                            <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat"
-                                :class="{ 'timeline_header--with-scope': groupIndex === 0 && showSessionSourceFilter && !batchMode }">
+                        <template v-for="group in filteredGroupedSessions" :key="group.key">
+                            <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
                                 <span class="session-list-row__body">
                                     <span class="timeline_header-label">{{ group.label }}</span>
                                 </span>
-                                <SessionSourceFilter v-if="groupIndex === 0 && showSessionSourceFilter && !batchMode"
-                                    inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
-                                    :current="activeSessionBucketKey" @select="switchSessionBucket" />
                             </div>
                             <div v-for="subitem in group.items" :key="subitem.id"
                                 class="submenu_item_p session-chat-row" :class="{
@@ -168,27 +167,26 @@
                     </template>
                 </div>
             </div>
-
-            <!-- 批量管理底部操作条 -->
-            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
-                <div class="batch-footer-left">
-                    <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                        @change="toggleBatchSelectAll">
-                        {{ t('batchManage.selectAll') }}
-                    </t-checkbox>
-                </div>
-                <div class="batch-footer-right">
-                    <t-button size="small" variant="text" @click="exitBatchMode">
-                        {{ t('batchManage.cancel') }}
-                    </t-button>
-                    <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
-                        :loading="batchDeleting" @click="handleInlineBatchDelete">
-                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
-                    </t-button>
-                </div>
-            </div>
         </div>
 
+        <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
+        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+            <div class="batch-footer-left">
+                <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                    @change="toggleBatchSelectAll">
+                    {{ t('batchManage.selectAll') }}
+                </t-checkbox>
+            </div>
+            <div class="batch-footer-right">
+                <t-button size="small" variant="text" @click="exitBatchMode">
+                    {{ t('batchManage.cancel') }}
+                </t-button>
+                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                    :loading="batchDeleting" @click="handleInlineBatchDelete">
+                    {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
+                </t-button>
+            </div>
+        </div>
 
         <!-- 下半部分：用户菜单 -->
         <div class="menu_bottom">
@@ -202,10 +200,18 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession, updateSession } from "@/api/chat/index";
+import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
+import {
+    clearSession,
+    removeSession,
+    renameSession,
+    SESSION_MUTATION_EVENT,
+    setSessionPinned,
+    type SessionMutationDetail,
+} from './sessionMutations';
 import SessionSourceFilter from './SessionSourceFilter.vue';
 import {
     SIDEBAR_BUCKET_PAGE_SIZE,
@@ -255,6 +261,7 @@ const chatResources = useChatResourcesStore();
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
+import larkLogo from '@/assets/img/im/lark.svg';
 import slackLogo from '@/assets/img/im/slack.svg';
 import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
@@ -265,6 +272,7 @@ import qqbotLogo from '@/assets/img/im/qqbot.png';
 const PLATFORM_LOGO: Record<string, string> = {
     wecom: wecomLogo,
     feishu: feishuLogo,
+    lark: larkLogo,
     slack: slackLogo,
     telegram: telegramLogo,
     dingtalk: dingtalkLogo,
@@ -470,15 +478,6 @@ const filteredGroupedSessions = computed(() => {
     );
 });
 
-const showSessionScopeFallback = computed(() => {
-    if (!showSessionSourceFilter.value || batchMode.value) return false;
-    if (sessionListBooting.value && !hasAnySession.value) return true;
-    const bucket = activeBucket.value;
-    if (bucket?.loading && !bucket.loaded && filteredGroupedSessions.value.length === 0) return true;
-    if (bucket?.loaded && filteredGroupedSessions.value.length === 0) return true;
-    return false;
-});
-
 const refreshSessionListScrollability = async () => {
     await nextTick();
     const container = scrollContainer.value;
@@ -607,7 +606,7 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin-filled', size: '16px' }),
         });
     } else {
         options.push({
@@ -642,19 +641,8 @@ const updateSessionInBuckets = (
 
 const renameSessionTitle = async (item: any, title: string) => {
     try {
-        const res: any = await updateSession(item.id, {
-            title,
-            description: item.description || '',
-        });
-        if (res && res.success) {
-            updateSessionInBuckets(item.id, {
-                title: res.data?.title || title,
-                isNoTitle: false,
-            });
-            MessagePlugin.success(t('menu.renameSessionSuccess'));
-        } else {
-            MessagePlugin.error(t('menu.renameSessionFailed'));
-        }
+        await renameSession(item.id, title, item.description || '');
+        MessagePlugin.success(t('menu.renameSessionSuccess'));
     } catch {
         MessagePlugin.error(t('menu.renameSessionFailed'));
     }
@@ -664,17 +652,7 @@ const togglePin = (item: any, pin: boolean) => {
     if (pinningIds.value.has(item.id)) return;
     pinningIds.value.add(item.id);
 
-    const call = pin ? pinSession(item.id) : unpinSession(item.id);
-    call.then((res: any) => {
-        if (res && res.success) {
-            updateSessionInBuckets(item.id, {
-                is_pinned: pin,
-                pinned_at: pin ? new Date().toISOString() : null,
-            });
-        } else {
-            MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
-        }
-    }).catch(() => {
+    setSessionPinned(item.id, pin).catch(() => {
         MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
     }).finally(() => {
         pinningIds.value.delete(item.id);
@@ -682,33 +660,15 @@ const togglePin = (item: any, pin: boolean) => {
 };
 
 const clearMessages = (item: any) => {
-    clearSessionMessages(item.id).then((res: any) => {
-        if (res && res.success) {
-            MessagePlugin.success(t('menu.clearMessagesSuccess'));
-            if (item.id === route.params.chatid) {
-                window.dispatchEvent(new CustomEvent('session-messages-cleared', { detail: { sessionId: item.id } }));
-            }
-        } else {
-            MessagePlugin.error(t('menu.clearMessagesFailed'));
-        }
+    clearSession(item.id).then(() => {
+        MessagePlugin.success(t('menu.clearMessagesSuccess'));
     }).catch(() => {
         MessagePlugin.error(t('menu.clearMessagesFailed'));
     });
 };
 
 const delCard = (item: any) => {
-    delSession(item.id).then((res: any) => {
-        if (res && (res as any).success) {
-            sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, item.id);
-            syncMenuStoreFromBuckets();
-
-            if (item.id == route.params.chatid) {
-                router.push('/platform/creatChat');
-            }
-        } else {
-            MessagePlugin.error(t('chat.deleteSessionFailed'));
-        }
-    })
+    removeSession(item.id).catch(() => MessagePlugin.error(t('chat.deleteSessionFailed')))
 }
 
 
@@ -731,6 +691,7 @@ const mapSessionRow = (item: any) => ({
     pinned_at: item.pinned_at || null,
     im_platform: item.im_platform || '',
     description: item.description || '',
+    user_id: item.user_id || '',
 });
 
 const syncMenuStoreFromBuckets = () => {
@@ -751,6 +712,7 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
         im_platform: typeof item.im_platform === 'string' ? item.im_platform : '',
         description: typeof item.description === 'string' ? item.description : '',
+        user_id: typeof item.user_id === 'string' ? item.user_id : '',
     };
 };
 
@@ -783,7 +745,9 @@ const rebuildBucketDefinitions = () => buildBucketDefinitions(
         web: t('menu.myChats'),
         imPlatform: (platform) => t(`agentEditor.im.${platform}`),
         embedChannel: (name) => name,
+        api: t('menu.apiChats'),
     },
+    { includeAdminChannelBuckets: authStore.hasRole('admin') },
 );
 
 /** 首屏轻量探测各渠道是否有会话（page_size=1 只取 total），避免展示空文件夹 */
@@ -864,6 +828,27 @@ const syncActiveBucketFromChat = async (sessionId: string | undefined) => {
             ?.find((item) => item.id === sessionId);
         if (fromStore) {
             bucketKey = originGroupKey(resolveSessionOrigin(menuChildToSessionRow(fromStore)));
+        }
+    }
+    // On a hard refresh only the web bucket is loaded, so a session opened from
+    // any other folder (IM, embed, or the admin-only API folder) isn't in any
+    // bucket or the menu store. Fetch its detail and classify its origin folder
+    // so the sidebar stays in sync with the chat pane instead of snapping back
+    // to "my chats". Only switch when that folder is actually present.
+    if (!bucketKey) {
+        try {
+            const res: any = await getSession(sessionId);
+            const candidate = originGroupKey(resolveSessionOrigin({
+                id: sessionId,
+                im_platform: res?.data?.im_platform || '',
+                description: res?.data?.description || '',
+                user_id: res?.data?.user_id || '',
+            }));
+            if (sessionBuckets.value[candidate]) {
+                bucketKey = candidate;
+            }
+        } catch {
+            // Fall through: leave the default bucket active on lookup failure.
         }
     }
     if (!bucketKey || bucketKey === activeSessionBucketKey.value) return;
@@ -962,10 +947,22 @@ const loadSessionOriginMeta = async () => {
     }
 };
 
-const handleSessionTitleUpdated = (event: Event) => {
-    const detail = (event as CustomEvent<{ sessionId?: string; title?: string }>).detail;
-    if (!detail?.sessionId || !detail.title) return;
-    updateSessionInBuckets(detail.sessionId, { title: detail.title, isNoTitle: false });
+const handleSessionMutation = (event: Event) => {
+    const detail = (event as CustomEvent<SessionMutationDetail>).detail;
+    if (!detail?.sessionId) return;
+    if (detail.patch) {
+        updateSessionInBuckets(detail.sessionId, {
+            ...detail.patch,
+            ...(detail.patch.title ? { isNoTitle: false } : {}),
+        });
+    }
+    if (detail.removed) {
+        sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, detail.sessionId);
+        syncMenuStoreFromBuckets();
+        if (detail.sessionId === route.params.chatid) {
+            router.push('/platform/creatChat');
+        }
+    }
 };
 
 onMounted(async () => {
@@ -975,7 +972,7 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
 
-    window.addEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 
     isLiteEdition.value = authStore.isLiteMode
     getSystemInfo().then(res => {
@@ -1001,7 +998,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-    window.removeEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 });
 
 watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
@@ -1477,6 +1474,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu {
+        position: relative;
         font-family: var(--app-font-family);
         font-size: 14px;
         font-style: normal;
@@ -1567,48 +1565,33 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         white-space: nowrap;
     }
 
-    .timeline_header--with-scope {
-        justify-content: space-between;
-        gap: 10px;
-
-        :deep(.session-source-filter--inline) {
-            flex: 0 1 auto;
-            min-width: 0;
-            max-width: 52%;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-        }
-
-        &:hover :deep(.session-source-filter--inline),
-        &:focus-within :deep(.session-source-filter--inline),
-        :deep(.session-source-filter--inline.session-source-filter--emphasized) {
-            opacity: 1;
-        }
-    }
-
-    .submenu--scope-fallback {
-        position: relative;
-        padding-top: 18px;
-    }
-
-    .session-list-scope-fallback {
+    // Stable filter control: always mounted and absolutely pinned to the list's
+    // top-right so it visually sits on the first row (e.g. beside "近30天") and
+    // never jumps when switching session type reloads a bucket. It overlays the
+    // empty right side of the first header row, so it needs no reserved height.
+    .session-list-scope-header {
         position: absolute;
-        top: 1px;
+        top: 4px;
         right: 10px;
-        z-index: 1;
+        z-index: 2;
         display: flex;
         justify-content: flex-end;
         max-width: calc(100% - var(--sidebar-inset-x) - 10px);
 
         :deep(.session-source-filter--inline) {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 100%;
             opacity: 0;
             transition: opacity 0.15s ease;
         }
+    }
 
-        &:hover :deep(.session-source-filter--inline),
-        :deep(.session-source-filter--inline.session-source-filter--emphasized) {
-            opacity: 1;
-        }
+    .submenu:hover .session-list-scope-header :deep(.session-source-filter--inline),
+    .session-list-scope-header:hover :deep(.session-source-filter--inline),
+    .session-list-scope-header:focus-within :deep(.session-source-filter--inline),
+    .session-list-scope-header :deep(.session-source-filter--inline.session-source-filter--emphasized) {
+        opacity: 1;
     }
 
     .submenu_item_p {
@@ -1721,9 +1704,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 }
 
 .batch-inline-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
     flex-shrink: 0;
     display: flex;
     align-items: center;

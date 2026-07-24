@@ -1460,16 +1460,95 @@ func (s *wikiPageService) DeleteFolder(ctx context.Context, kbID string, id stri
 		return err
 	}
 	if len(children) > 0 {
-		return errors.New("folder is not empty: it still has sub-folders")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{id})
 	if err != nil {
 		return err
 	}
 	if len(pages) > 0 {
-		return errors.New("folder is not empty: it still contains pages")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	return s.repo.DeleteFolder(ctx, kbID, id)
+}
+
+// PruneEmptyFolderChains removes folders that became empty after retracting a
+// document, followed by any ancestors made empty by those removals. It only
+// considers the supplied folder chains, so intentionally-empty folders
+// elsewhere in the wiki are preserved. Callers must wait for the KB's ingest
+// queue to drain before invoking this method: taxonomy planning creates a
+// folder before reduce writes the page that will reference it.
+func (s *wikiPageService) PruneEmptyFolderChains(
+	ctx context.Context, kbID string, folderIDs []string,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	all, err := s.repo.ListAllFolders(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*types.WikiFolder, len(all))
+	for _, folder := range all {
+		if folder != nil {
+			byID[folder.ID] = folder
+		}
+	}
+
+	candidates := make(map[string]*types.WikiFolder)
+	for _, id := range folderIDs {
+		seen := make(map[string]struct{})
+		for id != types.WikiFolderRootID {
+			if _, cycle := seen[id]; cycle {
+				break
+			}
+			seen[id] = struct{}{}
+			folder := byID[id]
+			if folder == nil {
+				break
+			}
+			candidates[id] = folder
+			id = folder.ParentID
+		}
+	}
+
+	ordered := make([]*types.WikiFolder, 0, len(candidates))
+	for _, folder := range candidates {
+		ordered = append(ordered, folder)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Depth == ordered[j].Depth {
+			return ordered[i].Path > ordered[j].Path
+		}
+		return ordered[i].Depth > ordered[j].Depth
+	})
+
+	deleted := make([]string, 0, len(ordered))
+	for _, folder := range ordered {
+		children, err := s.repo.ListChildFolders(ctx, kbID, folder.ID)
+		if err != nil {
+			return deleted, err
+		}
+		if len(children) > 0 {
+			continue
+		}
+		pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{folder.ID})
+		if err != nil {
+			return deleted, err
+		}
+		if len(pages) > 0 {
+			continue
+		}
+		if err := s.repo.DeleteFolder(ctx, kbID, folder.ID); err != nil {
+			if errors.Is(err, repository.ErrWikiFolderNotFound) ||
+				errors.Is(err, repository.ErrWikiFolderNotEmpty) {
+				continue
+			}
+			return deleted, err
+		}
+		deleted = append(deleted, folder.ID)
+	}
+	return deleted, nil
 }
 
 // InjectCrossLinks scans affected pages and injects [[wiki-links]] for mentions

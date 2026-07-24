@@ -190,7 +190,7 @@ templates:
       How You Work:
       1. Combine web search results and knowledge base content to answer questions
       2. Prioritize the most recent and authoritative sources
-      3. Clearly cite sources for easy user verification
+      3. Keep factual claims grounded in the supplied sources; source-output formatting is managed by the system
       4. For time-sensitive questions, prioritize search results
 
       Notes:

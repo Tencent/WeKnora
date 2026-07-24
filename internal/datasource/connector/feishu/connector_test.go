@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -384,7 +386,7 @@ func TestParseFeishuConfig(t *testing.T) {
 				"app_secret": "sec1",
 				"base_url":   "https://open.feishu.cn",
 			},
-		})
+		}, RegionFeishu)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -394,7 +396,7 @@ func TestParseFeishuConfig(t *testing.T) {
 	})
 
 	t.Run("nil config", func(t *testing.T) {
-		_, err := parseFeishuConfig(nil)
+		_, err := parseFeishuConfig(nil, RegionFeishu)
 		if err == nil {
 			t.Fatal("expected error for nil config")
 		}
@@ -406,7 +408,7 @@ func TestParseFeishuConfig(t *testing.T) {
 				"app_id": "id1",
 				// missing app_secret
 			},
-		})
+		}, RegionFeishu)
 		if err == nil {
 			t.Fatal("expected error for missing app_secret")
 		}
@@ -418,7 +420,7 @@ func TestParseFeishuConfig(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestConnectorType(t *testing.T) {
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	if c.Type() != types.ConnectorTypeFeishu {
 		t.Errorf("Type() = %q, want %q", c.Type(), types.ConnectorTypeFeishu)
 	}
@@ -428,7 +430,7 @@ func TestConnectorValidate(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	err := c.Validate(context.Background(), makeConfig(cfg, nil))
 	if err != nil {
 		t.Fatalf("Validate() error: %v", err)
@@ -436,7 +438,7 @@ func TestConnectorValidate(t *testing.T) {
 }
 
 func TestConnectorValidate_BadCredentials(t *testing.T) {
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	err := c.Validate(context.Background(), &types.DataSourceConfig{
 		Credentials: map[string]interface{}{
 			"app_id":     "bad",
@@ -453,7 +455,7 @@ func TestConnectorListResources(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	resources, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources() error: %v", err)
@@ -492,7 +494,7 @@ func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
 	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 
 	// Root listing: only the space, no descendants.
 	spaces, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
@@ -555,7 +557,7 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 
 	// A deeply nested node resolves to its space plus every intermediate parent.
 	ancestors, err := c.ResolveResourceAncestors(
@@ -615,7 +617,7 @@ func TestFetchAll_DocxNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -657,7 +659,7 @@ func TestFetchAll_SheetNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -682,7 +684,7 @@ func TestFetchAll_BitableNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -706,7 +708,7 @@ func TestFetchAll_FileNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -736,7 +738,7 @@ func TestFetchAll_SkipsMindnoteAndSlides(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -760,7 +762,7 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -775,6 +777,39 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 	}
 }
 
+func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
+	nodes := []wikiNode{
+		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800"},
+		{NodeToken: "nt4", ObjToken: "obj4", ObjType: "mindnote", Title: "Mind", NodeEditTime: "1711468800"},
+		{NodeToken: "nt5", ObjToken: "obj5", ObjType: "slides", Title: "Slides", NodeEditTime: "1711468800"},
+	}
+	ts, cfg := fakeFeishu(nodes)
+	defer ts.Close()
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stderr)
+
+	c := NewConnector(RegionFeishu)
+	if _, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"}); err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"sync summary",
+		"discovered=3",
+		"fetched=1",
+		"skipped_unsupported=2",
+		"mindnote:1",
+		"slides:1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary log missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
 func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
 	nodes := []wikiNode{
 		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
@@ -783,7 +818,8 @@ func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
 	defer ts.Close()
 
-	items, err := NewConnector().FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
+	conn := NewConnector(RegionFeishu)
+	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll must not abort when one child listing fails: %v", err)
 	}
@@ -838,7 +874,8 @@ func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
 	defer ts.Close()
 
 	resourceID := "space1:nt-root"
-	items, err := NewConnector().FetchAll(context.Background(), makeConfig(cfg, []string{resourceID}), []string{resourceID})
+	conn := NewConnector(RegionFeishu)
+	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{resourceID}), []string{resourceID})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -876,7 +913,7 @@ func TestFetchIncremental_FirstSync(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	// First sync with no cursor → all items should be fetched
@@ -903,7 +940,7 @@ func TestFetchIncremental_NoChanges(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	// First sync
@@ -931,7 +968,7 @@ func TestFetchIncremental_DetectsDeleted(t *testing.T) {
 	}
 	ts, cfg := fakeFeishu(allNodes)
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	_, cursor1, err := c.FetchIncremental(context.Background(), dsConfig, nil)
@@ -971,7 +1008,7 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector()
+	c := NewConnector(RegionFeishu)
 	dsConfig := makeConfig(cfg, nil) // no resource IDs
 	dsConfig.ResourceIDs = nil
 
@@ -992,7 +1029,8 @@ func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *test
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
 	defer ts.Close()
 
-	items, cursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
+	conn := NewConnector(RegionFeishu)
+	items, cursor, err := conn.FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
 	if err != nil {
 		t.Fatalf("FetchIncremental must not abort when one child listing fails: %v", err)
 	}
@@ -1029,7 +1067,8 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	}
 	ts, cfg := fakeFeishuHierarchy(firstNodes, firstChildren, "")
 
-	firstItems, cursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
+	conn := NewConnector(RegionFeishu)
+	firstItems, cursor, err := conn.FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
 	if err != nil {
 		t.Fatalf("first sync error: %v", err)
 	}
@@ -1044,7 +1083,7 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	ts2, cfg2 := fakeFeishuHierarchy(secondNodes, nil, "nt-parent")
 	defer ts2.Close()
 
-	items, nextCursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg2, []string{"space1"}), cursor)
+	items, nextCursor, err := conn.FetchIncremental(context.Background(), makeConfig(cfg2, []string{"space1"}), cursor)
 	if err != nil {
 		t.Fatalf("partial second sync error: %v", err)
 	}

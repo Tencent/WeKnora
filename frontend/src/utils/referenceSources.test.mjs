@@ -85,10 +85,93 @@ test('resolveReferenceHighlightKey matches web url', () => {
   assert.equal(key, 'web:https://news.example.com/post')
 })
 
+test('resolveReferenceHighlightKey matches any chunk merged into a document item', () => {
+  const refs = [
+    {
+      id: 'chunk-1',
+      chunk_ids: ['chunk-1', 'chunk-2'],
+      knowledge_id: 'doc-1',
+      knowledge_title: 'Policy',
+    },
+  ]
+
+  assert.equal(
+    resolveReferenceHighlightKey(refs, { chunkId: 'chunk-2' }),
+    'doc:doc-1',
+  )
+})
+
+test('resolveReferenceHighlightKey falls back to document title and knowledge base', () => {
+  const refs = [
+    {
+      id: 'available-chunk',
+      knowledge_id: 'doc-1',
+      knowledge_title: 'Claude Sonnet 5.md',
+      knowledge_base_id: 'kb-1',
+    },
+  ]
+
+  assert.equal(
+    resolveReferenceHighlightKey(refs, {
+      chunkId: 'cited-chunk-missing-from-legacy-replay',
+      documentTitle: 'Claude Sonnet 5.md',
+      knowledgeBaseId: 'kb-1',
+    }),
+    'doc:doc-1',
+  )
+})
+
 test('normalizeReferenceUrl trims trailing slash', () => {
   assert.equal(
     normalizeReferenceUrl('https://example.com/path/'),
     'https://example.com/path',
+  )
+})
+
+test('buildReferenceList uses domain instead of raw url title', () => {
+  const items = buildReferenceList([
+    {
+      id: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+      chunk_type: 'web_search',
+      knowledge_title: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+      metadata: {
+        url: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+        snippet: '根据提供的网页内容...',
+      },
+      content: '根据提供的网页内容...',
+    },
+  ])
+
+  assert.equal(items[0].title, 'bj.bendibao.com')
+  assert.equal(items[0].domain, 'bj.bendibao.com')
+})
+
+test('buildReferenceList prefers metadata title for web references', () => {
+  const items = buildReferenceList([
+    {
+      id: 'https://example.com/post',
+      chunk_type: 'web_search',
+      knowledge_title: 'https://example.com/post',
+      metadata: {
+        url: 'https://example.com/post',
+        title: 'Example headline',
+        snippet: 'snippet text',
+      },
+    },
+  ])
+
+  assert.equal(items[0].title, 'Example headline')
+})
+
+test('formatReferenceSnippet strips markdown noise from preview text', async () => {
+  const { formatReferenceSnippet } = await import('./referenceSources.ts')
+  assert.equal(
+    formatReferenceSnippet('... [Free Online Lectures](https://example.com) **Everything I Know**'),
+    'Free Online Lectures Everything I Know',
+  )
+  assert.equal(
+    formatReferenceSnippet('![Logo](local://image.jpg) Summary text'),
+    'Summary text',
   )
 })
 

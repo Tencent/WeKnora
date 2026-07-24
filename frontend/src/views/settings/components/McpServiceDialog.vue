@@ -220,8 +220,11 @@
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthAuthorization', '授权状态') }}</label>
             <div class="oauth-status">
-              <t-tag v-if="oauthAuthorized" theme="success" variant="light">
+              <t-tag v-if="oauthTokenState === 'authorized'" theme="success" variant="light">
                 {{ t('mcpServiceDialog.oauthAuthorized', '已授权') }}
+              </t-tag>
+              <t-tag v-else-if="oauthTokenState === 'refreshable'" theme="primary" variant="light">
+                {{ t('mcpServiceDialog.oauthRefreshable', 'Token 已过期，将自动刷新') }}
               </t-tag>
               <t-tag v-else theme="warning" variant="light">
                 {{ t('mcpServiceDialog.oauthUnauthorized', '未授权') }}
@@ -232,10 +235,10 @@
                 :loading="oauthAuthorizing || oauthChecking || submitting"
                 @click="handleAuthorize"
               >
-                {{ oauthAuthorized ? t('mcpServiceDialog.oauthReauthorize', '重新授权') : t('mcpServiceDialog.oauthAuthorize', '去授权') }}
+                {{ oauthTokenState === 'reauth_required' ? t('mcpServiceDialog.oauthAuthorize', '去授权') : t('mcpServiceDialog.oauthReauthorize', '重新授权') }}
               </t-button>
               <t-button
-                v-if="oauthAuthorized && props.service?.id"
+                v-if="oauthTokenState !== 'reauth_required' && props.service?.id"
                 size="small"
                 theme="danger"
                 variant="outline"
@@ -374,12 +377,14 @@ import {
   deleteMCPCredentialField,
   testMCPService,
   getMCPOAuthAuthorizeURL,
+  getMCPOAuthAuthorizationStatus,
   getMCPOAuthStatus,
   revokeMCPOAuthToken,
   MCP_OAUTH_CALLBACK_PATH,
   type MCPService,
   type McpCredentialField,
   type MCPTestResult,
+  type MCPOAuthTokenState,
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import McpTestResultBody from './McpTestResultBody.vue'
@@ -607,6 +612,7 @@ const authTypeOptions = computed(() => [
 
 // ---- OAuth authorization state (edit mode only) ----
 const oauthAuthorized = ref(false)
+const oauthTokenState = ref<MCPOAuthTokenState>('reauth_required')
 const oauthChecking = ref(false)
 const oauthAuthorizing = ref(false)
 
@@ -614,7 +620,9 @@ async function refreshOAuthStatus() {
   if (props.mode !== 'edit' || !props.service?.id || !isOAuth.value) return
   oauthChecking.value = true
   try {
-    oauthAuthorized.value = await getMCPOAuthStatus(props.service.id)
+    const status = await getMCPOAuthAuthorizationStatus(props.service.id)
+    oauthAuthorized.value = status.authorized
+    oauthTokenState.value = status.state
   } catch (e) {
     console.error('Failed to query MCP OAuth status:', e)
   } finally {
@@ -634,21 +642,22 @@ async function startAuthorize(serviceId: string) {
     // app root is harmless; the popup is closed by the opener below once the
     // authorization status flips, so this page is only shown briefly.
     const frontendRedirect = window.location.origin + '/'
-    const authUrl = await getMCPOAuthAuthorizeURL(serviceId, {
+    const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,
     })
-    if (!authUrl) {
+    if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
       MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
       oauthAuthorizing.value = false
       return
     }
-    const popup = window.open(authUrl, 'mcp_oauth', 'width=600,height=720')
+    const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
     // Poll for completion: either the popup closes or the status flips.
     const timer = window.setInterval(async () => {
       const closed = !popup || popup.closed
       try {
-        oauthAuthorized.value = await getMCPOAuthStatus(serviceId)
+        oauthAuthorized.value = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
+        if (oauthAuthorized.value) oauthTokenState.value = 'authorized'
       } catch { /* keep polling */ }
       if (oauthAuthorized.value || closed) {
         window.clearInterval(timer)
@@ -704,6 +713,7 @@ async function handleRevokeOAuth() {
   try {
     await revokeMCPOAuthToken(props.service.id)
     oauthAuthorized.value = false
+    oauthTokenState.value = 'reauth_required'
     MessagePlugin.success(t('mcpServiceDialog.toasts.revoked', '已撤销授权') as string)
   } catch (e) {
     console.error('Failed to revoke MCP OAuth token:', e)
@@ -961,6 +971,7 @@ watch(
         },
       }
       oauthAuthorized.value = false
+      oauthTokenState.value = 'reauth_required'
       refreshOAuthStatus()
     } else {
       resetForm()

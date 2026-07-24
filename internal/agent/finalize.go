@@ -19,8 +19,8 @@ func finalAnswerImageRequirement(hasRetrievedImage bool) string {
 		return ""
 	}
 	return `
-6. Retrieved tool results contain Markdown images. Unless the user explicitly requested text-only output or every image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. Preserve its complete URL exactly. Use ASCII half-width parentheses exactly as ![alt](url) and never use full-width （ or ）. Place the image immediately after the paragraph it supports. When multiple images support different sections, distribute them across those sections instead of stopping after the first image.
-7. Before finishing, silently verify that the answer contains a Markdown image when requirement 6 applies.`
+5. Retrieved tool results contain Markdown images. Unless the user explicitly requested text-only output or every image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. Preserve its complete URL exactly. Use ASCII half-width parentheses exactly as ![alt](url) and never use full-width （ or ）. Place the image immediately after the paragraph it supports. When multiple images support different sections, distribute them across those sections instead of stopping after the first image.
+6. Before finishing, silently verify that the answer contains a Markdown image when requirement 5 applies.`
 }
 
 // streamFinalAnswerToEventBus streams the final answer generation through EventBus
@@ -58,9 +58,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
 				hasRetrievedImage = true
 			}
+			modelOutput := e.sourceRefs.ModelOutput(toolCall.Result)
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -79,10 +80,9 @@ User question: %s
 
 Requirements:
 1. Answer based on the actually retrieved content
-2. Cite sources by document title or name; never expose chunk_id, knowledge_id, tool names, or other internal identifiers
-3. Organize the answer in a structured format
-4. If information is insufficient, honestly state so
-5. IMPORTANT: Respond in the same language as the user's question
+2. Organize the answer in a structured format
+3. If information is insufficient, honestly state so
+4. IMPORTANT: Respond in the same language as the user's question
 %s
 
 Now generate the final answer:`, query, imageRequirement)

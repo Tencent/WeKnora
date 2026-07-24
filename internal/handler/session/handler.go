@@ -29,8 +29,8 @@ type Handler struct {
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
 	storageResolver      interfaces.StorageBackendResolver
 	modelService         interfaces.ModelService // Service for model management (VLM access)
-	userService          interfaces.UserService  // Service for resolving per-user preferences (e.g. enable_memory default)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
+	temporaryDocuments   interfaces.TemporaryDocumentService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -48,9 +48,9 @@ func NewHandler(
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
-	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
+	temporaryDocuments interfaces.TemporaryDocumentService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -66,7 +66,7 @@ func NewHandler(
 		fileService:          fileService,
 		storageResolver:      storageResolver,
 		modelService:         modelService,
-		userService:          userService,
+		temporaryDocuments:   temporaryDocuments,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -201,7 +201,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "标题模糊搜索"
-// @Param        source     query     string  false  "来源过滤：web / feishu / wechat / slack / ..."
+// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"

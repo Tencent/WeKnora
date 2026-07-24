@@ -221,7 +221,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
+// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
@@ -1849,6 +1849,21 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+  // Only block while the file is still uploading (no document ID yet). Once
+  // uploaded, sending is allowed even if parsing is still in progress: the
+  // backend shows a "parsing attachment" step on the timeline and waits.
+  const pendingAttachment = uploadedAttachments.value.find(item =>
+    item.status === 'uploading'
+  );
+  if (pendingAttachment) {
+    MessagePlugin.warning(t('chat.attachmentStillProcessing', { name: pendingAttachment.name }));
+    return;
+  }
+  const failedAttachment = uploadedAttachments.value.find(item => item.status === 'failed');
+  if (failedAttachment) {
+    MessagePlugin.error(failedAttachment.error || t('chat.attachmentParseFailed'));
+    return;
+  }
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
@@ -1856,6 +1871,19 @@ const createSession = async (val: string) => {
     if (textarea) textarea.blur();
     emit('send-msg', val, selectedModelId.value || '', [], [], []);
     clearvalue();
+    return;
+  }
+
+  // Images and non-embedded attachments both travel to the backend as
+  // `attachment_ids`, which enforces a combined cap (MaxTemporaryAttachmentsPerMessage).
+  // The per-picker limits (5 images / 5 attachments) are independent, so guard the
+  // merged total here to avoid a late 400 after the files are already uploaded.
+  const MAX_TOTAL_ATTACHMENTS = 5;
+  const combinedAttachmentCount =
+    uploadedImages.value.length +
+    uploadedAttachments.value.filter(item => item.status !== 'failed').length;
+  if (combinedAttachmentCount > MAX_TOTAL_ATTACHMENTS) {
+    MessagePlugin.warning(t('chat.attachmentTotalTooMany', { max: MAX_TOTAL_ATTACHMENTS }));
     return;
   }
 
@@ -2096,16 +2124,8 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
   settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
 
-  // 同步智能体的配置状态（含内置、自定义、共享智能体）：模型、网络搜索、知识库由 watch 同步
-  // 1. 同步网络搜索状态
-  const agentWebSearch = agent.config?.web_search_enabled;
-  if (agentWebSearch !== undefined) {
-    settingsStore.toggleWebSearch(agentWebSearch);
-  } else if (agent.is_builtin) {
-    // 内置智能体未配置时保留当前用户设置
-  }
-
-  // 2. 同步模型（选中的对话模型随智能体切换，含共享智能体）
+  // 同步模型（选中的对话模型随智能体切换，含共享智能体）。
+  // 网络搜索已由 selectAgent 重置为关闭，智能体配置只控制该开关是否可用。
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
@@ -2137,6 +2157,17 @@ const clearvalue = () => {
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;
   query.value = "";
+}
+
+// Drop any pending images/attachments and stop their status polling. Used when
+// switching sessions: leftover documentIds belong to the previous session, so
+// keeping them would make polling 404 (falsely marking them failed) or send IDs
+// the new session does not own ("attachment ... not found in this session").
+const clearPendingUploads = () => {
+  uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+  uploadedImages.value = [];
+  attachmentUploadRef.value?.clear();
+  uploadedAttachments.value = [];
 }
 
 const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode: number; shiftKey: any; ctrlKey: any; }; }) => {
@@ -2418,6 +2449,7 @@ const handleStop = async () => {
 
 onBeforeRouteUpdate((to, from, next) => {
   clearvalue()
+  clearPendingUploads()
   next()
 })
 
@@ -2446,7 +2478,8 @@ defineExpose({
       </div>
 
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
-      <AttachmentUpload ref="attachmentUploadRef" :max-files="5" :max-size="20"
+      <AttachmentUpload ref="attachmentUploadRef" :max-files="5"
+        :session-id="sessionId" :agent-id="selectedAgentId"
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
@@ -2711,7 +2744,7 @@ const getImgSrc = (url: string) => {
 .rich-input-container {
   position: relative;
   width: 100%;
-  max-width: 800px;
+  max-width: 960px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);

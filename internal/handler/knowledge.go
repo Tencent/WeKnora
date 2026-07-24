@@ -249,6 +249,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	payload := types.KnowledgeListDeletePayload{
 		TenantID:     tenantID,
 		KnowledgeIDs: ids,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -273,6 +274,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		TenantID:      tenantID,
 		KnowledgeIDs:  ids,
 		ProcessConfig: processConfig,
+		Initiator:     types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -1274,7 +1276,10 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	// Keep a handler-level Editor check in addition to the route guard. The
+	// original file is more sensitive than parsed-content reads and must not
+	// be downloadable through a read-only organization share.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
@@ -2219,6 +2224,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		SourceKBID:   req.SourceKBID,
 		TargetKBID:   req.TargetKBID,
 		Mode:         req.Mode,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 

@@ -103,7 +103,7 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 }
 
 type DataAnalysisInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
+	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
 	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
 }
 

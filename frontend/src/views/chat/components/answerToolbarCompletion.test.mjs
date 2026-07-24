@@ -35,3 +35,16 @@ test('follow-up loading is shown compactly inside both answer toolbars', () => {
   assert.match(sharedStyles, /background-clip: text/)
   assert.match(sharedStyles, /follow-up-toolbar-loading-leave-to/)
 })
+
+test('follow-up suggestions wait until the answer is fully rendered', () => {
+  assert.match(
+    chatView,
+    /@render-complete-change="\(ready\) => handleAnswerRenderComplete\(session, ready\)"/,
+  )
+  assert.match(
+    chatView,
+    /<FollowUpSuggestions v-if="session\.answerFullyRendered && !session\.suggestionsDismissed"/,
+  )
+  assert.match(botMessage, /emit\('render-complete-change', ready\)/)
+  assert.match(agentStream, /emit\('render-complete-change', ready\)/)
+})

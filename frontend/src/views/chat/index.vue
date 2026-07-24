@@ -4,6 +4,7 @@
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
     }">
+        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -77,16 +78,18 @@
 
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
-                            :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode">
+                            :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
+                            :session-id="session_id">
                         </usermsg>
                     </div>
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
-                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)">
+                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
+                            @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                         </botmsg>
-                        <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+                        <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
                             :allow-regenerate="session.suggestionSet?.allow_regenerate"
@@ -96,13 +99,9 @@
                             @dismiss="(set) => dismissSuggestions(session, set)" />
                     </div>
                 </div>
-                <div v-if="showGlobalTypingIndicator"
-                    style="height: 41px;display: flex;align-items: center;padding-left: 4px;">
-                    <div class="loading-typing">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
+                <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
+                    :aria-label="t('chat.thinkingAlt')">
+                    <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                 </div>
             </div>
         </div>
@@ -122,6 +121,7 @@
         :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
+    <ChatAttachmentPreviewDrawer />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
@@ -132,6 +132,7 @@ import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
+import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
@@ -144,15 +145,23 @@ import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
+import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
+import ChatHeader from '@/components/ChatHeader.vue';
+import {
+    notifySessionMutation,
+    SESSION_MUTATION_EVENT,
+} from '@/components/sessionMutations';
 import {
     ensureMessageSuggestions,
     getMessageSuggestions,
     recordMessageSuggestionEvent,
 } from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 
 const referencesDrawer = provideChatReferencesDrawer();
+provideChatAttachmentPreviewDrawer();
 const { visible: referencesDrawerVisible } = referencesDrawer;
 
 const props = defineProps({
@@ -205,6 +214,7 @@ const attachStreamDebugToMessage = (message) => {
 };
 const route = useRoute();
 const session_id = ref(props.session_id || route.params.chatid);
+const currentSession = ref(null);
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -213,7 +223,8 @@ const loadSessionAndHydrate = async (sid) => {
     if (!sid || props.embeddedMode) return;
     try {
         const sessionRes = await getSession(sid);
-        if (sessionRes?.data) {
+        if (sessionRes?.data && sid === session_id.value) {
+            currentSession.value = sessionRes.data;
             const lastState = sessionRes.data.last_request_state;
             if (lastState) {
                 // 先把当前的"全局默认"快照下来，再用 session 状态覆盖；
@@ -303,7 +314,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams(6));
+        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -328,6 +339,10 @@ const handleSuggestedQuestionClick = (question) => {
 };
 
 const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+
+const handleAnswerRenderComplete = (message, ready) => {
+    message.answerFullyRendered = Boolean(ready);
+};
 
 const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
     const messageId = resolveAssistantMessageId(message);
@@ -427,6 +442,7 @@ watch([() => route.params], async (newvalue) => {
         }
         messagesList.splice(0);
         session_id.value = newvalue[0].chatid;
+        currentSession.value = null;
         clearCitationChunkCache();
 
         // 切换会话时，重置状态
@@ -647,30 +663,85 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     prepareForNewOutgoingMessage();
     isReplying.value = true;
     loading.value = true;
+    const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
 
-    // Convert images to base64 data URIs for backend processing and local display
+    // Images are unified with the attachment pipeline: on the authenticated web
+    // client they upload as temporary documents (understood in the background by
+    // the VLM) and are sent as attachment_ids. The inline base64 `images`
+    // payload is kept only for the embedded/public API path. A base64 fallback
+    // is used per-image if the async upload fails.
     let imageAttachments = [];
     let userImages = [];
+    const imageAttachmentIds = [];
     if (imageFiles && imageFiles.length > 0) {
-        try {
-            for (const file of imageFiles) {
-                const dataURI = await fileToBase64(file);
-                imageAttachments.push({ data: dataURI });
-                userImages.push({ url: dataURI });
+        for (const file of imageFiles) {
+            let dataURI;
+            try {
+                dataURI = await fileToBase64(file);
+            } catch (e) {
+                console.error('[Image] Failed to read images:', e);
+                loading.value = false;
+                isReplying.value = false;
+                return;
             }
-        } catch (e) {
-            console.error('[Image] Failed to read images:', e);
+            userImages.push({ url: dataURI });
+            if (props.embeddedMode) {
+                imageAttachments.push({ data: dataURI });
+                continue;
+            }
+            try {
+                const upload = await uploadTemporaryAttachment(session_id.value, file, selectedAgentId, 'auto');
+                imageAttachmentIds.push(upload.data.id);
+            } catch (e) {
+                console.error('[Image] Temporary image upload failed, falling back to inline:', e);
+                imageAttachments.push({ data: dataURI });
+            }
+        }
+    }
+
+    // The create-chat page cannot upload before its session exists. Once it
+    // navigates here, move those local files through the same asynchronous
+    // upload/parse flow before starting the first stream.
+    const localAttachments = (attachmentFiles || []).filter(attachment => !attachment.documentId);
+    if (!props.embeddedMode && localAttachments.length > 0) {
+        try {
+            // Only upload to obtain a document ID; parsing continues in the
+            // background and is awaited by the backend (shown on the timeline).
+            await Promise.all(localAttachments.map(async (attachment) => {
+                attachment.status = 'uploading';
+                const upload = await uploadTemporaryAttachment(
+                    session_id.value, attachment.file, selectedAgentId, 'auto'
+                );
+                attachment.documentId = upload.data.id;
+                attachment.status = upload.data.status;
+            }));
+        } catch (error) {
+            console.error('[Attachment] Temporary document upload failed:', error);
+            await Promise.all(localAttachments
+                .filter(attachment => attachment.documentId)
+                .map(attachment => deleteTemporaryAttachment(session_id.value, attachment.documentId).catch(() => undefined)));
+            MessagePlugin.error(error?.message || t('chat.attachmentParseFailed'));
             loading.value = false;
             isReplying.value = false;
             return;
         }
     }
 
-    // Convert attachment files to base64 for backend processing
+    // Send any successfully uploaded attachment (parsing may still be running);
+    // the backend waits for readiness and reports progress on the timeline.
+    const attachmentIds = (attachmentFiles || [])
+        .filter(attachment => attachment.documentId && attachment.status !== 'failed')
+        .map(attachment => attachment.documentId);
+    attachmentIds.push(...imageAttachmentIds);
+	// Embedded public routes do not expose the authenticated session upload API;
+	// keep their existing inline payload for compatibility.
+    const legacyAttachmentFiles = props.embeddedMode
+        ? (attachmentFiles || []).filter(attachment => !attachment.documentId)
+        : [];
     let attachmentUploads = [];
-    if (attachmentFiles && attachmentFiles.length > 0) {
+    if (legacyAttachmentFiles.length > 0) {
         try {
-            for (const attachment of attachmentFiles) {
+            for (const attachment of legacyAttachmentFiles) {
                 const reader = new FileReader();
                 const base64Promise = new Promise((resolve, reject) => {
                     reader.onload = () => {
@@ -698,7 +769,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
@@ -709,13 +780,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
-
-    // Memory toggle is now a server-side per-user preference (see PUT
-    // /auth/me/preferences). For the normal logged-in chat we leave the
-    // field unset so the backend reads `user.preferences.enable_memory`;
-    // for embedded widgets we still send an explicit `false` so a user's
-    // personal "memory on" setting doesn't leak into a KB-embed context.
-    const enableMemoryOverride = props.embeddedMode ? false : undefined;
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -740,9 +804,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
-    // Get selected agent ID (backend resolves shared agent and its tenant from share relation)
-    const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
-
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
 
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
@@ -758,7 +819,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
-        enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
@@ -766,6 +826,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
+        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         query: value,
         suggestion_attribution: suggestionAttribution || undefined,
         method: 'POST',
@@ -849,17 +910,27 @@ onChunk((data) => {
             });
             usemenuStore.updatasessionTitle(data.data.session_id, title);
             usemenuStore.changeIsFirstSession(false);
-            window.dispatchEvent(new CustomEvent('session-title-updated', {
-                detail: { sessionId: data.data.session_id, title },
-            }));
+            notifySessionMutation({
+                sessionId: data.data.session_id,
+                patch: { title },
+            });
         }
         return;
     }
     processStreamChunk(data);
 });
 
-const handleSessionCleared = (e) => {
-    if (e.detail?.sessionId === session_id.value) {
+const handleSessionMutation = (event) => {
+    const detail = event.detail;
+    if (detail?.sessionId !== session_id.value) return;
+
+    if (detail.patch) {
+        currentSession.value = {
+            ...(currentSession.value || { id: session_id.value }),
+            ...detail.patch,
+        };
+    }
+    if (detail.messagesCleared) {
         messagesList.splice(0);
         created_at.value = '';
         hasMoreHistory.value = true;
@@ -887,7 +958,7 @@ onBeforeMount(async () => {
 });
 
 onMounted(async () => {
-    window.addEventListener('session-messages-cleared', handleSessionCleared);
+    window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     messagesList.splice(0);
 
     // 初始化状态：加载历史消息时不应显示loading
@@ -928,7 +999,7 @@ const clearData = () => {
     isImRecovering.value = false;
 }
 onUnmounted(() => {
-    window.removeEventListener('session-messages-cleared', handleSessionCleared);
+    window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
 });
 onBeforeRouteLeave((to, from, next) => {
@@ -948,7 +1019,7 @@ onBeforeRouteUpdate((to, from, next) => {
 .chat {
     font-size: 20px;
     // 右侧不留 padding，滚动条贴到内容区最右缘
-    padding: 20px 0 20px 20px;
+    padding: 0 0 20px 20px;
     box-sizing: border-box;
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
@@ -984,6 +1055,10 @@ onBeforeRouteUpdate((to, from, next) => {
         @media (min-width: 960px) {
             padding-right: 420px;
             box-sizing: border-box;
+
+            .chat_scroll_box {
+                padding-top: 0;
+            }
         }
     }
 
@@ -1026,6 +1101,8 @@ onBeforeRouteUpdate((to, from, next) => {
     // this box instead of stretching it.
     min-height: 0;
     width: 100%;
+    padding-top: 8px;
+    box-sizing: border-box;
     overflow-y: auto;
     // 使用系统原生滚动条（macOS 滚动时自动显示 overlay 滚动条，类似 ChatGPT）
     scrollbar-width: auto;
@@ -1104,7 +1181,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     gap: 20px;
-    max-width: 800px;
+    max-width: 960px;
     padding: 16px 0;
     animation: contentFadeIn 0.3s ease-out;
 }
@@ -1126,7 +1203,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
-    max-width: 800px;
+    max-width: 960px;
     box-sizing: border-box;
     position: relative;
 
@@ -1145,7 +1222,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-width: 800px;
+    max-width: 960px;
     flex: 1;
     margin: 0 auto;
     width: 100%;
@@ -1172,43 +1249,33 @@ onBeforeRouteUpdate((to, from, next) => {
         margin-left: 16px;
     }
 
-    .loading-typing {
+    .chat-global-wait {
         display: flex;
         align-items: center;
-        gap: 4px;
+        min-height: 28px;
+        padding-left: 4px;
+    }
 
-        span {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--td-text-color-placeholder);
-            animation: typingBounce 1.4s ease-in-out infinite;
-
-            &:nth-child(1) {
-                animation-delay: 0s;
-            }
-
-            &:nth-child(2) {
-                animation-delay: 0.2s;
-            }
-
-            &:nth-child(3) {
-                animation-delay: 0.4s;
-            }
-        }
+    .chat-global-wait__spinner {
+        width: 12px;
+        height: 12px;
+        box-sizing: border-box;
+        border: 1.5px solid var(--td-component-stroke);
+        border-top-color: var(--td-text-color-secondary);
+        border-radius: 50%;
+        animation: chatGlobalWaitSpin 0.8s linear infinite;
     }
 }
 
-@keyframes typingBounce {
-
-    0%,
-    60%,
-    100% {
-        transform: translateY(0);
+@keyframes chatGlobalWaitSpin {
+    to {
+        transform: rotate(360deg);
     }
+}
 
-    30% {
-        transform: translateY(-8px);
+@media (prefers-reduced-motion: reduce) {
+    .chat-global-wait__spinner {
+        animation: none;
     }
 }
 

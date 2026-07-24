@@ -620,6 +620,17 @@
                       </div>
                     </div>
 
+                    <!-- 来源引用 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.citationEnabled') }}</label>
+                        <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.citation_enabled" />
+                      </div>
+                    </div>
+
                     <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
                     <div
                       v-if="showRerankModelField"
@@ -693,7 +704,7 @@
                   </div>
                 </div>
 
-                <!-- 多模态配置 -->
+                <!-- 附件上传 -->
                 <div v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
@@ -701,7 +712,7 @@
                   </div>
 
                   <div class="settings-group">
-                    <!-- 图片上传（多模态） -->
+                    <!-- 图片上传 -->
                     <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
@@ -724,6 +735,31 @@
                           @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
                           @add-model="handleAddModel('vllm')"
                           :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
+                      </div>
+                    </div>
+
+                    <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
+                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.attachment_image_understanding" />
+                      </div>
+                    </div>
+
+                    <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
+                    <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
+                      class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.ocrMaxPagesDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_ocr_max_pages" :min="0" :max="64"
+                          :step="1" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
                       </div>
                     </div>
 
@@ -777,6 +813,33 @@
                           @add-model="handleAddModel('asr')"
                           :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
                       </div>
+                    </div>
+
+                    <!-- 单轮等待附件解析超时（秒） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_parse_wait_timeout_sec" :min="0" :max="600"
+                          :step="10" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
+                      </div>
+                    </div>
+
+                    <!-- 聊天附件解析策略 -->
+                    <div class="parser-policy-block">
+                      <div class="parser-policy-block__header">
+                        <label>{{ $t('agentEditor.chatParser.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
+                      </div>
+                      <KBParserSettings
+                        embedded
+                        :parser-engine-rules="formData.config.chat_parser_engine_rules"
+                        :relevant-extensions="CHAT_PARSER_EXTENSIONS"
+                        @update:parser-engine-rules="(val: any) => formData.config.chat_parser_engine_rules = val"
+                      />
                     </div>
 
                   </div>
@@ -1137,7 +1200,7 @@
                     </div>
 
                     <!-- 选择指定 MCP 服务 -->
-                    <div v-if="mcpSelectionMode === 'selected' && mcpOptions.length > 0" class="setting-row">
+                    <div v-if="mcpSelectionMode === 'selected' && showMcpServiceSelect" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.mcp.selectLabel') }}</label>
                         <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
@@ -1145,7 +1208,8 @@
                       <div class="setting-control">
                         <t-select v-model="formData.config.mcp_services" multiple
                           :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
-                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label" />
+                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label"
+                            :disabled="mcp.disabled" />
                         </t-select>
                       </div>
                     </div>
@@ -1589,7 +1653,6 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
-import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
@@ -1601,6 +1664,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
@@ -1610,6 +1674,13 @@ import {
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+
+// File extensions offered in the agent-level chat attachment parsing policy.
+const CHAT_PARSER_EXTENSIONS = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'mhtml',
+  'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'yaml', 'yml', 'log',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+];
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
@@ -1757,7 +1828,43 @@ const agentTypePresets = ref<AgentTypePreset[]>([]);
 // Agent 系统提示词模板缓存（用于切换智能体类型时根据 system_prompt_id 解析出实际文本填入）
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
 const intentPromptTemplates = ref<PromptTemplate[]>([]);
-const mcpOptions = ref<{ label: string; value: string }[]>([]);
+type McpSelectOption = { label: string; value: string; disabled?: boolean };
+
+const mcpOptions = computed<McpSelectOption[]>(() => {
+  const services = editorResources.mcpServices || [];
+  const selectedIds = new Set(formData.value.config.mcp_services || []);
+  const serviceById = new Map(services.map((mcp) => [mcp.id, mcp]));
+  const options: McpSelectOption[] = [];
+
+  for (const mcp of services) {
+    if (mcp.enabled) {
+      options.push({ label: mcp.name, value: mcp.id });
+    }
+  }
+
+  for (const id of selectedIds) {
+    const mcp = serviceById.get(id);
+    if (mcp && !mcp.enabled) {
+      options.push({
+        label: `${mcp.name} (${t('mcpSettings.disabled')})`,
+        value: mcp.id,
+        disabled: true,
+      });
+    } else if (!mcp) {
+      options.push({
+        label: t('agentEditor.mcp.unavailableService'),
+        value: id,
+        disabled: true,
+      });
+    }
+  }
+
+  return options;
+});
+
+const showMcpServiceSelect = computed(() =>
+  mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
+);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
@@ -2117,7 +2224,7 @@ const navItems = computed(() => {
     items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
   }
   items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
-  items.push({ key: 'multimodal', icon: 'image', label: t('agentEditor.imageUpload.navLabel') });
+  items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
   // Agent 模式能力
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
@@ -2178,6 +2285,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 2048,
     thinking: false, // 默认禁用思考模式
+    citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
@@ -2200,10 +2308,18 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置
+    // 附件上传设置
     image_upload_enabled: false,
     vlm_model_id: '',
     image_storage_provider: '',
+    // 附件图片理解 / 扫描件 OCR 开关（默认关闭，避免解析耗时增加）
+    attachment_image_understanding: false,
+    // 扫描件 OCR 最大页数（0 = 使用全局默认）
+    attachment_ocr_max_pages: 0,
+    // 单轮问答等待附件解析完成的最长时间（秒，0 = 使用全局默认）
+    attachment_parse_wait_timeout_sec: 0,
+    // 聊天附件解析引擎策略（按文件类型选引擎）
+    chat_parser_engine_rules: [] as ParserEngineRule[],
     // 文件类型限制
     supported_file_types: [] as string[],
     // 数据分析阶段开关（默认关闭，避免在普通问答上多一次 LLM 调用生成 SQL）
@@ -2822,6 +2938,10 @@ watch(() => props.visible, async (val) => {
       }
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
+      if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
+      // 附件解析调优字段：旧数据缺省时置 0（表示使用全局默认）
+      if (agentData.config.attachment_ocr_max_pages == null) agentData.config.attachment_ocr_max_pages = 0;
+      if (agentData.config.attachment_parse_wait_timeout_sec == null) agentData.config.attachment_parse_wait_timeout_sec = 0;
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
       if (!agentData.config.agent_mode) {
@@ -3220,10 +3340,6 @@ const loadDependencies = async () => {
       .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
       .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
-
-    mcpOptions.value = editorResources.mcpServices
-      .filter((mcp: MCPService) => mcp.enabled)
-      .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
 
     skillsAvailable.value = editorResources.skillsAvailable;
     skillOptions.value = editorResources.skills;
@@ -4506,12 +4622,38 @@ const handleSave = async () => {
   gap: 0;
 }
 
+.parser-policy-block {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &__header {
+    margin-bottom: 12px;
+
+    label {
+      display: block;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+      margin-bottom: 4px;
+    }
+
+    .desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+      line-height: 1.5;
+    }
+  }
+}
+
 .setting-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 24px;
   padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
+  min-width: 0;
 
   &:last-child {
     border-bottom: none;
@@ -4569,9 +4711,10 @@ const handleSave = async () => {
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 55%;
-  padding-right: 24px;
+  flex: 0 0 42%;
+  max-width: 42%;
+  min-width: 0;
+  padding-right: 0;
 
   &.full-width {
     max-width: 100%;
@@ -4615,15 +4758,18 @@ const handleSave = async () => {
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 360px;
+  flex: 1 1 58%;
+  min-width: 0;
+  max-width: 58%;
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+  overflow: hidden;
 
   &.setting-control-full {
     width: 100%;
     min-width: 100%;
+    max-width: 100%;
     justify-content: flex-start;
   }
 
@@ -4632,6 +4778,22 @@ const handleSave = async () => {
   :deep(.t-input),
   :deep(.t-textarea) {
     width: 100%;
+    min-width: 0;
+  }
+
+  :deep(.t-select-input) {
+    min-width: 0;
+  }
+
+  :deep(.t-select .t-tag) {
+    max-width: 160px;
+  }
+
+  :deep(.t-select .t-tag__text) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   :deep(.t-input-number) {

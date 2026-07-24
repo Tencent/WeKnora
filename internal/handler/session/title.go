@@ -1,6 +1,7 @@
 package session
 
 import (
+	stderrors "errors"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -42,9 +43,16 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 		return
 	}
 
-	// Get session from database
-	session, err := h.sessionService.GetSession(ctx, sessionID)
+	// Get session from database. Title generation writes the session row, so use
+	// the strict owner scope: a tenant admin may read an API-key session but must
+	// not be able to (re)generate its title.
+	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
 	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return

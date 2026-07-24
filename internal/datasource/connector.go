@@ -51,6 +51,48 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// StreamHandler receives items and progress checkpoints emitted during a
+// streaming fetch. The service implements it to ingest each item as it arrives
+// (bounding memory to one item instead of the whole wiki) and to persist the
+// connector cursor at page boundaries, so a sync that times out mid-traversal
+// resumes from the last checkpoint instead of restarting from scratch
+// (Tencent/WeKnora#2136).
+type StreamHandler interface {
+	// Emit ingests a single fetched item. Returning an error aborts the
+	// stream: the connector stops fetching and propagates the error, since a
+	// failed ingest means the sync is failing and further API calls are wasted.
+	Emit(ctx context.Context, item types.FetchedItem) error
+
+	// Checkpoint persists the cursor reached so far. The cursor is only valid
+	// for the duration of the call (the connector may keep mutating its backing
+	// maps afterwards), so implementations must serialize it synchronously.
+	//
+	// The cursor MUST be a complete resumable snapshot, not a delta: resuming
+	// from it must reproduce all progress so far. This is what lets the service
+	// treat a checkpoint as a safe restart point and, for a full sync, drop the
+	// prior baseline without losing already-synced state.
+	Checkpoint(ctx context.Context, cursor *types.SyncCursor) error
+}
+
+// StreamingConnector is an optional interface. Connectors that implement it let
+// the service interleave fetch→ingest→checkpoint so a large sync persists
+// incrementally and resumes after a timeout, rather than holding every item in
+// memory and losing all progress on retry. Connectors that do not implement it
+// fall back to FetchAll / FetchIncremental unchanged.
+type StreamingConnector interface {
+	Connector
+
+	// FetchStream walks the configured resources starting from cursor (nil =
+	// from the beginning / full sync), calling h.Emit for each changed item and
+	// h.Checkpoint at page boundaries. It returns the final cursor for the next
+	// sync. Nodes already recorded in cursor at their current edit time are
+	// skipped, which is what makes a resumed sync converge.
+	FetchStream(
+		ctx context.Context, config *types.DataSourceConfig,
+		cursor *types.SyncCursor, h StreamHandler,
+	) (*types.SyncCursor, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector
@@ -111,6 +153,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeFeishu,
 		Name:         "Feishu (飞书)",
 		Description:  "Sync documents, wikis, and content from Feishu",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLark: {
+		Type:         types.ConnectorTypeLark,
+		Name:         "Lark",
+		Description:  "Sync documents, wikis, and content from Lark (Feishu international)",
 		Priority:     0,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},

@@ -1,4 +1,28 @@
 import { get, post, put, del } from '@/utils/request'
+import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
+
+export interface CreatePlatformAPIKeyPayload {
+  name: string
+  capabilities: TenantAPIKeyCapability[]
+  expires_at_unix?: number
+}
+
+export async function listPlatformAPIKeys(): Promise<{ success: boolean; data?: TenantAPIKey[] }> {
+  return await get('/api/v1/system/admin/api-keys') as unknown as { success: boolean; data?: TenantAPIKey[] }
+}
+
+export async function createPlatformAPIKey(
+  payload: CreatePlatformAPIKeyPayload,
+): Promise<{ success: boolean; data?: CreatedTenantAPIKey }> {
+  return await post('/api/v1/system/admin/api-keys', payload) as unknown as {
+    success: boolean
+    data?: CreatedTenantAPIKey
+  }
+}
+
+export async function deletePlatformAPIKey(keyId: number): Promise<{ success: boolean }> {
+  return await del(`/api/v1/system/admin/api-keys/${keyId}`) as unknown as { success: boolean }
+}
 
 export interface SystemInfo {
   version: string
@@ -71,7 +95,7 @@ export interface ParserEngineInfo {
   UnavailableReason?: string
 }
 
-/** 解析引擎配置（引擎相关存空间；docreader 地址由环境变量配置） */
+/** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string
@@ -626,4 +650,19 @@ export async function mutateRuntimeTask(
   await post(
     `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks/${encodeURIComponent(taskID)}/actions/${encodeURIComponent(action)}`,
   )
+}
+
+/**
+ * Clear every archived (finally-failed) task in one queue in a single call.
+ * Only touches the archived dead-letter set — live tasks are never affected.
+ * Backend: DELETE /api/v1/system/admin/runtime/queues/{queue}/archived.
+ * Returns the object directly (no {data: ...} wrapping, see request.ts).
+ */
+export async function purgeArchivedRuntimeTasks(
+  queue: string,
+): Promise<{ success: boolean; deleted: number }> {
+  const response = await del(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/archived`,
+  )
+  return response as unknown as { success: boolean; deleted: number }
 }

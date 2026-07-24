@@ -35,7 +35,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -50,7 +49,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
-	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -73,6 +71,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/telegram"
 	"github.com/Tencent/WeKnora/internal/im/wechat"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
+	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -158,7 +157,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -218,7 +216,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
-	must(container.Provide(memoryService.NewMemoryService))
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
@@ -233,6 +230,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(repository.NewStorageBackendRepository))
 	must(container.Provide(repository.NewResourceRepository))
+	must(container.Provide(repository.NewTemporaryDocumentRepository))
 	must(container.Provide(service.NewResourceCatalog))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
@@ -303,6 +301,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
+	must(container.Provide(service.NewTemporaryDocumentService))
+	must(container.Invoke(startTemporaryDocumentCleanup))
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -335,7 +335,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
-	must(container.Invoke(chatpipeline.NewMemoryPlugin))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer
@@ -1541,6 +1540,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("baidu", infra_web_search.NewBaiduProvider)
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
 	registry.Register("keenable", infra_web_search.NewKeenableProvider)
+	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform
@@ -1548,13 +1548,16 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 // in its own subpackage to keep this file focused on wiring.
 func registerIMAdapterFactories(imService *imPkg.Service) {
 	imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
-	imService.RegisterAdapterFactory("feishu", feishu.NewFactory())
+	imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
+	// Lark is Feishu's international cloud: same adapter, different host/tenant.
+	imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
 	imService.RegisterAdapterFactory("slack", slack.NewFactory())
 	imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
 	imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
 	imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
 	imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
 	imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
+	imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {
@@ -1569,8 +1572,12 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
-	if err := registry.Register(feishuConnector.NewConnector()); err != nil {
+	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
+	}
+	// Lark is Feishu's international cloud: same connector, different host/tenant.
+	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
@@ -1621,6 +1628,31 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
 		svc.Stop()
+		return nil
+	})
+}
+
+// startTemporaryDocumentCleanup removes expired session attachments and their
+// extracted images. The durable expiry timestamp is the source of truth; the
+// ticker only controls how quickly storage is reclaimed.
+func startTemporaryDocumentCleanup(svc interfaces.TemporaryDocumentService, cleaner interfaces.ResourceCleaner) {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := svc.CleanupExpired(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[TemporaryDocument] cleanup failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("TemporaryDocumentCleanup", func() error {
+		close(stop)
 		return nil
 	})
 }

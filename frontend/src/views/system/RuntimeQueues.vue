@@ -15,16 +15,19 @@
             :aria-label="t('system.globalSettings.runtime.autoRefresh')"
           />
         </label>
-        <t-button
-          variant="outline"
-          size="small"
-          :loading="loading"
+        <button
+          type="button"
+          class="rq-refresh"
           :disabled="loading"
+          :title="t('system.globalSettings.runtime.refresh')"
+          :aria-label="t('system.globalSettings.runtime.refresh')"
           @click="reload"
         >
-          <template #icon><t-icon name="refresh" /></template>
-          {{ t('system.globalSettings.runtime.refresh') }}
-        </t-button>
+          <t-icon
+            :name="loading ? 'loading' : 'refresh'"
+            :class="{ 'rq-refresh-spin': loading }"
+          />
+        </button>
       </div>
     </header>
 
@@ -336,15 +339,34 @@
           <h4 class="setting-drawer__section-title">
             {{ t('system.globalSettings.runtime.tasks.listTitle', { state: taskStateLabel(taskState) }) }}
           </h4>
-          <t-button
-            variant="text"
-            size="small"
-            :loading="tasksLoading && !tasksLoadingMore"
-            @click="reloadRuntimeTasks"
-          >
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('system.globalSettings.runtime.refresh') }}
-          </t-button>
+          <div class="rq-failed-section-actions">
+            <t-popconfirm
+              v-if="taskState === 'archived' && tasks.length > 0"
+              theme="danger"
+              :content="t('system.globalSettings.runtime.tasks.purgeArchivedConfirm', { count: taskStateCount(taskQueue, 'archived') })"
+              @confirm="purgeArchivedTasks"
+            >
+              <t-button
+                variant="text"
+                size="small"
+                theme="danger"
+                :loading="purging"
+                :disabled="Boolean(taskActionID)"
+              >
+                <template #icon><t-icon name="clear" /></template>
+                {{ t('system.globalSettings.runtime.tasks.purgeArchived') }}
+              </t-button>
+            </t-popconfirm>
+            <t-button
+              variant="text"
+              size="small"
+              :loading="tasksLoading && !tasksLoadingMore"
+              @click="reloadRuntimeTasks"
+            >
+              <template #icon><t-icon name="refresh" /></template>
+              {{ t('system.globalSettings.runtime.refresh') }}
+            </t-button>
+          </div>
         </div>
 
         <div v-if="tasksLoading && tasks.length === 0" class="rq-failed-loading">
@@ -494,6 +516,7 @@ import {
   getRuntimeTasks,
   getRuntimeQueues,
   mutateRuntimeTask,
+  purgeArchivedRuntimeTasks,
   type ModelRuntimeStat,
   type QueueStat,
   type RuntimeTask,
@@ -528,12 +551,14 @@ const tasksHasMore = ref(false)
 const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
 const taskAction = ref<RuntimeTaskAction | ''>('')
+const purging = ref(false)
 
 const TASK_PAGE_SIZE = 20
 const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
 const runtimeTaskTypeKeys: Record<string, string> = {
   'document:process': 'documentProcess',
   'manual:process': 'manualProcess',
+	'temporary_document:process': 'temporaryDocumentProcess',
   'knowledge:post_process': 'postProcess',
   'summary:generation': 'summary',
   'datatable:summary': 'tableSummary',
@@ -856,6 +881,22 @@ async function runTaskAction(task: RuntimeTask, action: RuntimeTaskAction) {
   }
 }
 
+async function purgeArchivedTasks() {
+  const queue = taskQueue.value?.name
+  if (!queue || purging.value) return
+  purging.value = true
+  try {
+    const { deleted } = await purgeArchivedRuntimeTasks(queue)
+    MessagePlugin.success(t('system.globalSettings.runtime.tasks.purgeArchivedSuccess', { count: deleted }))
+    await Promise.all([reloadRuntimeTasks(), load(false)])
+    taskQueue.value = queues.value.find((item) => item.name === queue) ?? taskQueue.value
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.tasks.purgeArchivedError'))
+  } finally {
+    purging.value = false
+  }
+}
+
 async function load(showSpinner: boolean) {
   if (showSpinner) loading.value = true
   try {
@@ -960,7 +1001,7 @@ onUnmounted(() => {
   h2 {
     margin: 0 0 8px;
     color: var(--td-text-color-primary);
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
     line-height: 1.3;
     letter-spacing: -0.01em;
@@ -981,6 +1022,54 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.rq-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  :deep(.t-icon) {
+    font-size: 12px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
+.rq-refresh-spin {
+  animation: rq-refresh-rotate 0.8s linear infinite;
+}
+
+@keyframes rq-refresh-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .rq-auto-refresh {
@@ -1423,6 +1512,13 @@ onUnmounted(() => {
   .setting-drawer__section-title {
     margin-bottom: 0;
   }
+}
+
+.rq-failed-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .rq-failed-loading {

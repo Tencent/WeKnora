@@ -13,6 +13,7 @@ import {
 
 const sourceLabels = {
   web: 'Web',
+  api: 'API',
   embedFallback: 'Embed',
   embedChannel: (id: string) => `Embed ${id}`,
   imPlatform: (p: string) => `IM ${p}`,
@@ -30,6 +31,10 @@ test('resolveSessionOrigin distinguishes web, IM, and embed sessions', () => {
       description: `${EMBED_SESSION_MARKER_PREFIX}ch-1`,
     }),
     { kind: 'embed', channelId: 'ch-1' },
+  )
+  assert.deepEqual(
+    resolveSessionOrigin({ id: '4', user_id: 'api_tenant_key:1:10' }),
+    { kind: 'api' },
   )
 })
 

@@ -231,7 +231,7 @@ sudo bash /opt/weknora-tools/scripts/cloud-image/cleanup.sh
 
 用户用你的镜像创建实例后，第一次开机时 `weknora-firstboot.service` 会：
 
-1. 生成随机的 `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `SYSTEM_AES_KEY` / `TENANT_AES_KEY`
+1. 生成随机的 `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `SYSTEM_AES_KEY`
 2. 写回 `/opt/WeKnora/.env`
 3. `docker compose up -d` 启动全部服务
 4. 把生成的凭证写到 `/root/weknora-credentials.txt`（仅 root 可读）

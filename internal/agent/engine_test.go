@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +70,22 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
 }
 
+func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `c1"/>`, Done: true},
+	}}}}
+	engine := newTestEngine(t, model)
+	engine.sourceRefs.RegisterChunk(llmreference.ChunkReference{
+		ChunkID:         "chunk-1",
+		KnowledgeBaseID: "kb-1",
+		DocumentTitle:   "Doc",
+	})
+	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, `answer <kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`, result.Content)
+}
+
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
@@ -86,6 +103,23 @@ func withMaxIterations(n int) testEngineOption {
 	return func(cfg *types.AgentConfig) {
 		cfg.MaxIterations = n
 	}
+}
+
+func withCitationsEnabled(enabled bool) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.CitationEnabled = &enabled
+	}
+}
+
+func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
+	model := &mockChat{}
+	enabledEngine := newTestEngine(t, model)
+	require.Contains(t, enabledEngine.buildSystemPrompt(context.Background()), "Source citations are enabled")
+
+	disabledEngine := newTestEngine(t, model, withCitationsEnabled(false))
+	prompt := disabledEngine.buildSystemPrompt(context.Background())
+	require.Contains(t, prompt, "Source citations are disabled")
+	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {

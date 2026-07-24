@@ -65,7 +65,7 @@ type mcpOAuthAuthorizeRequest struct {
 // @Produce      json
 // @Param        id       path      string                    true  "MCP 服务 ID"
 // @Param        request  body      map[string]interface{}    true  "{redirect_uri: string, frontend_redirect?: string}"
-// @Success      200      {object}  map[string]interface{}    "{authorization_url: string}"
+// @Success      200      {object}  map[string]interface{}    "{authorization_url: string, authorization_attempt: string}"
 // @Failure      400      {object}  errors.AppError
 // @Security     Bearer
 // @Router       /mcp-services/{id}/oauth/authorize-url [post]
@@ -103,7 +103,9 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		return
 	}
 
-	authURL, err := h.oauth.StartAuthorization(ctx, service, tenantID, principal, req.RedirectURI, req.FrontendRedirect)
+	authURL, attemptID, err := h.oauth.StartAuthorization(
+		ctx, service, tenantID, principal, req.RedirectURI, req.FrontendRedirect,
+	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
@@ -112,7 +114,10 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorization_url": authURL}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"authorization_url":     authURL,
+		"authorization_attempt": attemptID,
+	}})
 }
 
 // Callback receives the authorization-server redirect. It is registered as a
@@ -146,7 +151,7 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	frontendRedirect, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	frontendRedirect, serviceID, err := h.oauth.CompleteAuthorization(ctx, state, code)
 	if frontendRedirect == "" {
 		frontendRedirect = fallbackRedirect
 	}
@@ -155,6 +160,12 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_error="+urlQueryEscape("authorization_failed"))
 		return
 	}
+	// The old transport may have been created with an OAuth client registration
+	// that was invalidated together with the refresh token. Recreate it against
+	// the freshly persisted token/client on next use.
+	if h.mcpManager != nil && serviceID != "" {
+		_ = h.mcpManager.CloseClient(serviceID)
+	}
 	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
 }
 
@@ -162,11 +173,12 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 //
 // Status godoc
 // @Summary      查询 MCP OAuth 授权状态
-// @Description  返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+// @Description  返回当前用户的 OAuth Token 生命周期状态；传 authorization_attempt 时只检查本次授权流程
 // @Tags         MCP服务
 // @Produce      json
 // @Param        id   path      string                  true  "MCP 服务 ID"
-// @Success      200  {object}  map[string]interface{}  "{authorized: bool}"
+// @Param        authorization_attempt  query  string  false  "本次授权尝试 ID；传入后不会接受历史 Token"
+// @Success      200  {object}  map[string]interface{}  "{authorized: bool, state: string, refresh_available: bool, expires_at?: string}"
 // @Security     Bearer
 // @Router       /mcp-services/{id}/oauth/status [get]
 func (h *MCPOAuthHandler) Status(c *gin.Context) {
@@ -179,12 +191,32 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 		return
 	}
 
-	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
+	attemptID := strings.TrimSpace(c.Query("authorization_attempt"))
+	if attemptID != "" {
+		authorized, err := h.oauth.IsAuthorizationAttemptComplete(
+			ctx, tenantID, principal, serviceID, attemptID,
+		)
+		if err != nil {
+			c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+			return
+		}
+		state := "pending"
+		if authorized {
+			state = "authorized"
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"authorized": authorized,
+			"state":      state,
+		}})
+		return
+	}
+
+	status, err := h.oauth.AuthorizationStatus(ctx, tenantID, principal, serviceID)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorized": authorized}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
 }
 
 // Revoke removes the current user's stored token and recycles connections.

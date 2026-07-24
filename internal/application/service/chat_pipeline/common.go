@@ -113,6 +113,18 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	return chatMessages
 }
 
+func withPromptCacheMetadata(
+	ctx context.Context,
+	chatModel chat.Chat,
+	messages []chat.Message,
+	opts *chat.ChatOptions,
+	purpose string,
+) context.Context {
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	_ = chatModel // model identity is already captured by the usage sink
+	return types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
+}
+
 // AppendHistoryMessages appends prior Q&A rounds in chronological order.
 // History is already filtered and truncated upstream by the load_history plugin.
 func AppendHistoryMessages(messages []chat.Message, history []*types.History) []chat.Message {
@@ -145,14 +157,18 @@ func loadAndProcessHistory(
 			h = &types.History{}
 		}
 		if message.Role == "user" {
-			if message.RenderedContent != "" {
-				h.Query = message.RenderedContent
-			} else {
-				h.Query = message.Content
-			}
+			// RenderedContent is a snapshot of the prompt/context format used by
+			// the original turn. Replaying it would mix legacy <context id="…">
+			// envelopes and old citation instructions into the current protocol.
+			// Historical references are carried separately in KnowledgeReferences
+			// and can be re-merged into this turn's freshly rendered context.
+			h.Query = message.Content
 			h.CreateAt = message.CreatedAt
-			if desc := extractImageCaptions(message.Images); desc != "" && message.RenderedContent == "" {
+			if desc := extractImageCaptions(message.Images); desc != "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc
+			}
+			if len(message.Attachments) > 0 {
+				h.Query += message.Attachments.BuildPrompt()
 			}
 		} else {
 			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")
