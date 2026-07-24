@@ -27,6 +27,7 @@ import (
 // KnowledgeBaseHandler defines the HTTP handler for knowledge base operations
 type KnowledgeBaseHandler struct {
 	service            interfaces.KnowledgeBaseService
+	unifiedSearch      interfaces.UnifiedSearchService
 	knowledgeService   interfaces.KnowledgeService
 	kbShareService     interfaces.KBShareService
 	agentShareService  interfaces.AgentShareService
@@ -40,6 +41,7 @@ type KnowledgeBaseHandler struct {
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
 func NewKnowledgeBaseHandler(
 	service interfaces.KnowledgeBaseService,
+	unifiedSearch interfaces.UnifiedSearchService,
 	knowledgeService interfaces.KnowledgeService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
@@ -49,6 +51,7 @@ func NewKnowledgeBaseHandler(
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		service:            service,
+		unifiedSearch:      unifiedSearch,
 		knowledgeService:   knowledgeService,
 		kbShareService:     kbShareService,
 		agentShareService:  agentShareService,
@@ -334,6 +337,49 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    results,
+	})
+}
+
+// UnifiedSearch godoc
+// @Summary      统一 RAG + Wiki 检索
+// @Description  并行检索文档片段和 Wiki 页面，使用 RRF 融合并按正文指纹去重
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                     true  "知识库ID"
+// @Param        request  body      types.UnifiedSearchRequest true  "统一检索参数"
+// @Success      200      {object}  types.UnifiedSearchResponse  "统一检索结果"
+// @Failure      400      {object}  errors.AppError             "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/unified-search [post]
+func (h *KnowledgeBaseHandler) UnifiedSearch(c *gin.Context) {
+	ctx := c.Request.Context()
+	_, id, _, _, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	var req types.UnifiedSearchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	results, err := h.unifiedSearch.Search(ctx, id, req)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": id})
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, types.UnifiedSearchResponse{
+		Success: true,
+		Data:    results,
 	})
 }
 

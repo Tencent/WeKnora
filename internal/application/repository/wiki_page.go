@@ -1005,6 +1005,24 @@ func escapeLikePattern(s string) string {
 // because they mention 王新 in their body and were updated more recently.
 // updated_at stays as the tiebreaker so same-rank ties stay deterministic.
 func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
+	return r.search(ctx, kbID, query, limit, "status != ?", types.WikiPageStatusArchived)
+}
+
+// SearchPublished performs case-insensitive POSIX regex search over published
+// wiki pages. The status predicate is applied before LIMIT so draft pages
+// cannot displace user-visible results during an ingest.
+func (r *wikiPageRepository) SearchPublished(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
+	return r.search(ctx, kbID, query, limit, "status = ?", types.WikiPageStatusPublished)
+}
+
+func (r *wikiPageRepository) search(
+	ctx context.Context,
+	kbID string,
+	query string,
+	limit int,
+	statusPredicate string,
+	status string,
+) ([]*types.WikiPage, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1028,7 +1046,7 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		Select("*, "+rankExpr, query, query, query, query).
 		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
 			kbID, query, query, query, query).
-		Where("status != ?", "archived").
+		Where(statusPredicate, status).
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
 		Find(&pages).Error; err != nil {

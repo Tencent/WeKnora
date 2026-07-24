@@ -6,10 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -72,6 +74,44 @@ func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
 	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
 	return db
+}
+
+func setupWikiPagesSQLMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock, func()) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		Conn:                 sqlDB,
+		PreferSimpleProtocol: true,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+	return db, mock, func() { require.NoError(t, sqlDB.Close()) }
+}
+
+func TestSearchPublishedFiltersNonPublishedPagesBeforeLimit(t *testing.T) {
+	db, mock, closeDB := setupWikiPagesSQLMockDB(t)
+
+	query := "refund"
+	limit := 20
+	mock.ExpectQuery(`status = \$10.*LIMIT \$11`).
+		WithArgs(
+			query, query, query, query,
+			"kb-1", query, query, query, query,
+			types.WikiPageStatusPublished, limit,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "knowledge_base_id", "slug", "title", "status", "content", "summary",
+		}).AddRow(
+			"page-published", "kb-1", "refund", "Refund", types.WikiPageStatusPublished, "refund policy", "",
+		))
+	mock.ExpectClose()
+
+	pages, err := NewWikiPageRepository(db).SearchPublished(context.Background(), "kb-1", query, limit)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	require.Equal(t, types.WikiPageStatusPublished, pages[0].Status)
+	closeDB()
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // makeWikiPage builds a minimal WikiPage suitable for insert. Title is

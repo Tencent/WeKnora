@@ -8,11 +8,30 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type wikiSearchRepositoryStub struct {
+	interfaces.WikiPageRepository
+	query     string
+	published bool
+}
+
+func (s *wikiSearchRepositoryStub) Search(_ context.Context, _ string, query string, _ int) ([]*types.WikiPage, error) {
+	s.query = query
+	s.published = false
+	return nil, nil
+}
+
+func (s *wikiSearchRepositoryStub) SearchPublished(_ context.Context, _ string, query string, _ int) ([]*types.WikiPage, error) {
+	s.query = query
+	s.published = true
+	return nil, nil
+}
 
 func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
@@ -67,6 +86,51 @@ func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
 	input := "保留 [citation]、[C003]、[c12] 和 [[concept/c003|页面链接]]。"
 	if got := stripWikiInlineChunkCitations(input); got != input {
 		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
+	}
+}
+
+func TestSearchPagesLiteralEscapesPostgresRegexCharacters(t *testing.T) {
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{query: "refund (", want: `refund \(`},
+		{query: "[draft", want: `\[draft`},
+		{query: `path\`, want: `path\\`},
+		{query: "price.*", want: `price\.\*`},
+	}
+	for _, test := range tests {
+		t.Run(test.query, func(t *testing.T) {
+			repo := &wikiSearchRepositoryStub{}
+			service := &wikiPageService{repo: repo}
+
+			_, err := service.SearchPagesLiteral(context.Background(), "kb-1", test.query, 10)
+			if err != nil {
+				t.Fatalf("SearchPagesLiteral() error = %v", err)
+			}
+			if repo.query != test.want {
+				t.Fatalf("SearchPagesLiteral() query = %q, want %q", repo.query, test.want)
+			}
+			if !repo.published {
+				t.Fatal("SearchPagesLiteral() must use the published-only repository path")
+			}
+		})
+	}
+}
+
+func TestSearchPagesPreservesExistingRegexSemantics(t *testing.T) {
+	repo := &wikiSearchRepositoryStub{}
+	service := &wikiPageService{repo: repo}
+
+	_, err := service.SearchPages(context.Background(), "kb-1", "price.*", 10)
+	if err != nil {
+		t.Fatalf("SearchPages() error = %v", err)
+	}
+	if repo.query != "price.*" {
+		t.Fatalf("SearchPages() query = %q, want %q", repo.query, "price.*")
+	}
+	if repo.published {
+		t.Fatal("SearchPages() must preserve the existing non-archived repository path")
 	}
 }
 

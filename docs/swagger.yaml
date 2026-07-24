@@ -3633,6 +3633,87 @@ definitions:
         description: Whether the tool executed successfully
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest:
+    properties:
+      query:
+        minLength: 1
+        type: string
+      rag_weight:
+        minimum: 0
+        type: number
+      rrf_k:
+        maximum: 1000
+        minimum: 1
+        type: integer
+      sources:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource'
+        type: array
+      top_k:
+        maximum: 50
+        minimum: 1
+        type: integer
+      wiki_weight:
+        minimum: 0
+        type: number
+    required:
+    - query
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult'
+        type: array
+      success:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResult:
+    properties:
+      content:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      score:
+        type: number
+      sources:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource'
+        type: array
+      summary:
+        type: string
+      title:
+        type: string
+      wiki_page_id:
+        type: string
+      wiki_slug:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchResultSource:
+    properties:
+      id:
+        type: string
+      knowledge_id:
+        type: string
+      title:
+        type: string
+      type:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource'
+      wiki_slug:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UnifiedSearchSource:
+    enum:
+    - rag
+    - wiki
+    type: string
+    x-enum-varnames:
+    - UnifiedSearchSourceRAG
+    - UnifiedSearchSourceWiki
   github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest:
     properties:
       role:
@@ -9410,6 +9491,40 @@ paths:
       summary: 更新标签
       tags:
       - 标签管理
+  /knowledge-bases/{id}/unified-search:
+    post:
+      consumes:
+      - application/json
+      description: 并行检索文档片段和 Wiki 页面，使用 RRF 融合并按正文指纹去重
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 统一检索参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一检索结果
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UnifiedSearchResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 统一 RAG + Wiki 检索
+      tags:
+      - 知识库
   /knowledge-bases/copy:
     post:
       consumes:

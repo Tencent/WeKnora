@@ -214,6 +214,8 @@ type WikiPageService interface {
 
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+	// SearchPagesLiteral performs full-text search while treating query as literal text.
+	SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// CreateIssue logs a new issue for a wiki page.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error)
@@ -367,6 +369,8 @@ type WikiPageRepository interface {
 
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+	// SearchPublished performs full-text search on published wiki pages only.
+	SearchPublished(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
