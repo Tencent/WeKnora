@@ -239,6 +239,9 @@ func (s *sessionService) buildAgentConfig(
 	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
 		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
 	}
+	if s.cfg.Agent != nil && s.cfg.Agent.WebFetchToolTimeout > 0 {
+		agentConfig.WebFetchToolTimeout = s.cfg.Agent.WebFetchToolTimeout
+	}
 
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
