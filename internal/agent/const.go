@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +25,9 @@ const (
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
 	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
+	// defaultWebFetchToolExecTimeout gives web_fetch a longer budget because it may
+	// run browser rendering, HTTP fallback, and optional LLM summarization.
+	defaultWebFetchToolExecTimeout = 180 * time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -70,6 +74,18 @@ func (e *AgentEngine) getLLMCallTimeout() time.Duration {
 		return time.Duration(e.config.LLMCallTimeout) * time.Second
 	}
 	return defaultLLMCallTimeout
+}
+
+// getToolExecTimeout returns the per-tool execution timeout. Most tools keep
+// the short default, while web_fetch gets a longer configurable budget.
+func (e *AgentEngine) getToolExecTimeout(toolName string) time.Duration {
+	if toolName == agenttools.ToolWebFetch {
+		if e.config.WebFetchToolTimeout > 0 {
+			return time.Duration(e.config.WebFetchToolTimeout) * time.Second
+		}
+		return defaultWebFetchToolExecTimeout
+	}
+	return defaultToolExecTimeout
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability

@@ -59,6 +59,10 @@ type AgentConfig struct {
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
+	// Web fetch tool timeout in seconds (default: 180). Only applies to web_fetch;
+	// other tools keep the default tool execution timeout.
+	WebFetchToolTimeout int `json:"web_fetch_tool_timeout,omitempty"`
+
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.
 	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`

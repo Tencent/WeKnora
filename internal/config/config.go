@@ -46,6 +46,9 @@ type AgentConfig struct {
 	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
 	// Default: 120 (standard agents) or 300 (can be overridden by Env).
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout"`
+	// WebFetchToolTimeout is the maximum time allowed for a single web_fetch tool call in seconds.
+	// 0 means default 180 seconds.
+	WebFetchToolTimeout int `yaml:"web_fetch_tool_timeout" json:"web_fetch_tool_timeout"`
 	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
 	// 0 means default 600 (10 minutes).
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
@@ -777,6 +780,14 @@ func applyAgentEnvOverrides(cfg *Config) {
 		} else if sec, err := time.ParseDuration(value + "s"); err == nil {
 			// Handle case where user just provides a number like "300"
 			cfg.Agent.LLMCallTimeout = int(sec.Seconds())
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_WEB_FETCH_TOOL_TIMEOUT")); value != "" {
+		if timeout, err := time.ParseDuration(value); err == nil {
+			cfg.Agent.WebFetchToolTimeout = int(timeout.Seconds())
+		} else if sec, err := time.ParseDuration(value + "s"); err == nil {
+			// Handle case where user just provides a number like "180"
+			cfg.Agent.WebFetchToolTimeout = int(sec.Seconds())
 		}
 	}
 	// MCP tool human-approval wait timeout (issue #1173). Accepts Go duration

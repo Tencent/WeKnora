@@ -393,6 +393,7 @@ func (e *AgentEngine) runToolCall(
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
+	toolExecTimeout := e.getToolExecTimeout(tc.Function.Name)
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
@@ -402,10 +403,10 @@ func (e *AgentEngine) runToolCall(
 		// ApprovalCtx keeps the round-level ctx without the per-tool 60s timeout,
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,
-		ExecTimeout: defaultToolExecTimeout,
+		ExecTimeout: toolExecTimeout,
 	})
 
-	execCtx, toolCancel := context.WithTimeout(toolExecCtx, defaultToolExecTimeout)
+	execCtx, toolCancel := context.WithTimeout(toolExecCtx, toolExecTimeout)
 	result, err := e.toolRegistry.ExecuteTool(
 		execCtx, tc.Function.Name,
 		json.RawMessage(tc.Function.Arguments),
