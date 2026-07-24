@@ -26,13 +26,10 @@ type StageProgress struct {
 	toolName   string
 }
 
-// ShouldEmitQueryUnderstandProgress reports whether the query-understand stage
-// will actually run (rewrite enabled or images attached).
+// Query understanding always runs in quick-answer mode because routing is
+// independent from optional query rewriting.
 func ShouldEmitQueryUnderstandProgress(chatManage *types.ChatManage) bool {
-	if chatManage == nil {
-		return false
-	}
-	return chatManage.EnableRewrite || len(chatManage.Images) > 0
+	return chatManage != nil
 }
 
 // IsConsolidatedRetrievalStage reports whether a pipeline stage belongs to the
@@ -45,7 +42,7 @@ func IsConsolidatedRetrievalStage(stage types.EventType, chatManage *types.ChatM
 	case types.CHUNK_SEARCH_PARALLEL, types.CHUNK_RERANK, types.CHUNK_MERGE, types.FILTER_TOP_K:
 		return chatManage.NeedsRetrieval()
 	case types.WEB_FETCH:
-		return chatManage.WebSearchEnabled
+		return chatManage.RetrievalPlan.UsesWeb()
 	case types.DATA_ANALYSIS:
 		return chatManage.DataAnalysisEnabled && chatManage.NeedsRetrieval()
 	default:
@@ -241,8 +238,35 @@ func hasKBRetrievalTargets(chatManage *types.ChatManage) bool {
 }
 
 func retrievalSearchSource(chatManage *types.ChatManage) string {
-	hasKB := hasKBRetrievalTargets(chatManage)
-	hasWeb := chatManage != nil && chatManage.WebSearchEnabled
+	results := retrievalResults(chatManage)
+	if len(results) > 0 {
+		hasKB, hasWeb := false, false
+		for _, result := range results {
+			if result == nil {
+				continue
+			}
+			if isWebSearchResult(result) {
+				hasWeb = true
+			} else {
+				hasKB = true
+			}
+		}
+		switch {
+		case hasKB && hasWeb:
+			return retrievalSourceMixed
+		case hasWeb:
+			return retrievalSourceWeb
+		default:
+			return retrievalSourceKnowledge
+		}
+	}
+
+	hasKB := chatManage != nil && chatManage.RetrievalPlan.UsesKB()
+	hasWeb := chatManage != nil && chatManage.RetrievalPlan.UsesWeb()
+	if chatManage != nil && chatManage.RetrievalPlan.Mode == types.RetrievalPlanKBThenWeb {
+		// The first step is KB-only; report mixed only if fallback actually ran.
+		hasWeb = false
+	}
 	switch {
 	case hasKB && hasWeb:
 		return retrievalSourceMixed

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -233,6 +234,7 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		UserInstructions:            customAgent.Config.UserInstructions,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -264,10 +266,12 @@ func (s *sessionService) buildAgentConfig(
 	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
 	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
-	// Use custom agent's system prompt if specified
-	if customAgent.Config.SystemPrompt != "" {
-		agentConfig.UseCustomSystemPrompt = true
-		agentConfig.SystemPrompt = customAgent.Config.SystemPrompt
+	// Resolve only trusted managed templates. User-owned text is appended later
+	// as lower-priority behavior instructions by the agent engine.
+	if customAgent.Config.SystemPromptID != "" && s.cfg.PromptTemplates != nil {
+		if prompt := config.FindPromptTemplateByID(s.cfg.PromptTemplates.AgentSystemPrompt, customAgent.Config.SystemPromptID); prompt != nil {
+			agentConfig.ManagedSystemPrompt = prompt.Content
+		}
 	}
 
 	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",

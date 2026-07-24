@@ -64,7 +64,7 @@ func TestShouldEmitQueryUnderstandProgress(t *testing.T) {
 	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))
 
 	cm.EnableRewrite = false
-	assert.False(t, ShouldEmitQueryUnderstandProgress(cm))
+	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))
 
 	cm.Images = []string{"data:image/png;base64,abc"}
 	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))
@@ -130,6 +130,7 @@ func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
 		},
 		PipelineContext: types.PipelineContext{EventBus: bus},
 		PipelineState: types.PipelineState{
+			RetrievalPlan: types.RetrievalPlan{Mode: types.RetrievalPlanWebOnly},
 			MergeResult: []*types.SearchResult{
 				{ID: "w1", ChunkType: "web_search"},
 				{ID: "w2", KnowledgeSource: "web_search"},

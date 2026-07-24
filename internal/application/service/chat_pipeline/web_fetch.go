@@ -34,7 +34,7 @@ func (p *PluginWebFetch) OnEvent(
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {
-	if !chatManage.WebFetchEnabled || !chatManage.WebSearchEnabled {
+	if !chatManage.WebFetchEnabled || !chatManage.WebSearchEnabled || !chatManage.RetrievalPlan.UsesWeb() {
 		pipelineInfo(ctx, "WebFetch", "skip", map[string]any{"reason": "disabled"})
 		return next()
 	}

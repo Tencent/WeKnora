@@ -125,6 +125,7 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
+	prompt = types.AppendCustomPromptInstructions(prompt, e.config.UserInstructions, "agent")
 	return strings.TrimRight(prompt, " \t\r\n") + llmreference.ProtocolPrompt(e.config.CitationsEnabled())
 }
 

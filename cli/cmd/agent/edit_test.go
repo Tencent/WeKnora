@@ -209,11 +209,11 @@ func TestEdit_ConfigFile_FullReplacesBaseline(t *testing.T) {
 		getResp: &sdk.Agent{
 			Name: "X",
 			Config: &sdk.AgentConfig{
-				SystemPrompt:   "Existing prompt",
-				ModelID:        "old-model",
-				Temperature:    0.1,
-				AgentMode:      "smart-reasoning",
-				KnowledgeBases: []string{"kb_existing"},
+				UserInstructions: "Existing prompt",
+				ModelID:          "old-model",
+				Temperature:      0.1,
+				AgentMode:        "smart-reasoning",
+				KnowledgeBases:   []string{"kb_existing"},
 			},
 		},
 		updateResp: &sdk.Agent{},
@@ -227,7 +227,7 @@ func TestEdit_ConfigFile_FullReplacesBaseline(t *testing.T) {
 	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "file-only", svc.updateReq.Config.ModelID, "file's model_id applied")
-	assert.Equal(t, "", svc.updateReq.Config.SystemPrompt, "file fully replaces baseline; unset fields are zeroed")
+	assert.Equal(t, "", svc.updateReq.Config.UserInstructions, "file fully replaces baseline; unset fields are zeroed")
 	assert.InDelta(t, 0.0, svc.updateReq.Config.Temperature, 0.001, "unset fields zeroed")
 	assert.Equal(t, "", svc.updateReq.Config.AgentMode, "unset fields zeroed")
 	assert.Empty(t, svc.updateReq.Config.KnowledgeBases, "unset fields zeroed")
@@ -271,19 +271,19 @@ func TestEdit_Temperature_Bounds(t *testing.T) {
 	}
 }
 
-func TestEdit_SystemPromptFile(t *testing.T) {
+func TestEdit_UserInstructionsFile(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEditSvc{
 		getResp:    &sdk.Agent{Config: &sdk.AgentConfig{ModelID: "m"}},
 		updateResp: &sdk.Agent{},
 	}
 	opts := &EditOptions{
-		AgentID:            "ag_abc",
-		SystemPromptReader: strings.NewReader("new prompt\n"),
-		flags:              editFlagSet{systemPromptSet: true},
+		AgentID:                "ag_abc",
+		UserInstructionsReader: strings.NewReader("new prompt\n"),
+		flags:                  editFlagSet{userInstructionsSet: true},
 	}
 	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	assert.Equal(t, "new prompt", svc.updateReq.Config.SystemPrompt)
+	assert.Equal(t, "new prompt", svc.updateReq.Config.UserInstructions)
 }
 
 // withRootHarnessAgent wraps `weknora agent update ...` under a synthetic root

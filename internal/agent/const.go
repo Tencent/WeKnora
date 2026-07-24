@@ -13,9 +13,6 @@ const (
 	DefaultAgentTemperature = 0.7
 	// DefaultAgentMaxIterations is the default maximum number of iterations for the agent
 	DefaultAgentMaxIterations = 20
-	// DefaultUseCustomSystemPrompt is the default whether to use custom system prompt for the agent
-	DefaultUseCustomSystemPrompt = false
-
 	// defaultLLMCallTimeout is the default maximum time allowed for a single LLM call.
 	// This prevents a single slow call from consuming the entire pipeline deadline.
 	// Can be overridden via AgentConfig.LLMCallTimeout.

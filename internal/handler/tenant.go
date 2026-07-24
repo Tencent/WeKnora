@@ -1215,7 +1215,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1240,9 +1240,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	switch key {
 	case "web-search-config":
 		h.GetTenantWebSearchConfig(c)
-		return
-	case "prompt-templates":
-		h.GetPromptTemplates(c)
 		return
 	case "parser-engine-config":
 		h.GetTenantParserEngineConfig(c)
@@ -1506,46 +1503,6 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		"success": true,
 		"data":    types.StorageEngineConfigForResponse(updatedTenant.StorageEngineConfig, true),
 		"message": "存储引擎配置已更新",
-	})
-}
-
-// GetPromptTemplates godoc
-// @Summary      获取提示词模板
-// @Description  获取系统配置的提示词模板列表
-// @Tags         空间管理
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "提示词模板配置"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /tenants/kv/prompt-templates [get]
-func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
-	// Return prompt templates from config.yaml
-	templates := h.config.PromptTemplates
-	if templates == nil {
-		templates = &config.PromptTemplatesConfig{}
-	}
-
-	// Determine user language from context (set by Language middleware)
-	lang, _ := types.LanguageFromContext(c.Request.Context())
-
-	// Build a localized copy so the original config is never mutated
-	localized := &config.PromptTemplatesConfig{
-		SystemPrompt:         config.LocalizeTemplates(templates.SystemPrompt, lang),
-		ContextTemplate:      config.LocalizeTemplates(templates.ContextTemplate, lang),
-		Rewrite:              config.LocalizeTemplates(templates.Rewrite, lang),
-		Fallback:             config.LocalizeTemplates(templates.Fallback, lang),
-		GenerateSessionTitle: templates.GenerateSessionTitle,
-		GenerateSummary:      templates.GenerateSummary,
-		KeywordsExtraction:   templates.KeywordsExtraction,
-		AgentSystemPrompt:    config.LocalizeTemplates(templates.AgentSystemPrompt, lang),
-		IntentPrompts:        config.LocalizeTemplates(templates.IntentPrompts, lang),
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    localized,
 	})
 }
 

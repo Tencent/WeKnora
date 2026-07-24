@@ -1188,8 +1188,6 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 	// key granted manage_agents may author agents without full Owner.
 	agentsWrite := agents.With(apiKeyManageAgents(apiKeyFullAccess()))
 	{
-		// Get placeholder definitions (must be before /:id to avoid conflict) — Viewer+
-		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
 		// Create custom agent — Contributor+

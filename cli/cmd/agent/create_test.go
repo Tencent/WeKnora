@@ -135,17 +135,17 @@ func TestCreate_RepeatedKB_ImpliesSelectedMode(t *testing.T) {
 	assert.Equal(t, "selected", svc.createReq.Config.KBSelectionMode, "passing --attach-kb implies selected mode")
 }
 
-func TestCreate_SystemPromptFile_ReaderRead(t *testing.T) {
+func TestCreate_UserInstructionsFile_ReaderRead(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new"}}
 	opts := &CreateOptions{
-		Name:               "Test",
-		Model:              "model-x",
-		SystemPromptReader: strings.NewReader("You are a helpful assistant.\n"),
-		flags:              createFlagSet{systemPromptSet: true},
+		Name:                   "Test",
+		Model:                  "model-x",
+		UserInstructionsReader: strings.NewReader("You are a helpful assistant.\n"),
+		flags:                  createFlagSet{userInstructionsSet: true},
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	assert.Equal(t, "You are a helpful assistant.", svc.createReq.Config.SystemPrompt, "TrimSpace removes trailing newline")
+	assert.Equal(t, "You are a helpful assistant.", svc.createReq.Config.UserInstructions, "TrimSpace removes trailing newline")
 }
 
 func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
@@ -153,15 +153,15 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	// other 33 AgentConfig fields must round-trip from the copied agent.
 	// Pre-fix, runCreate built `cfg` from a zero AgentConfig{} baseline,
 	// so UpdateAgent shipped temperature=0.9 plus every other field
-	// zeroed — clobbering source SystemPrompt / AgentMode / KBs.
+	// zeroed — clobbering source UserInstructions / AgentMode / KBs.
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{
 		copyResp: &sdk.Agent{ID: "ag_clone", Config: &sdk.AgentConfig{
-			ModelID:        "model-y",
-			SystemPrompt:   "Source prompt",
-			AgentMode:      "smart-reasoning",
-			Temperature:    0.5,
-			KnowledgeBases: []string{"kb_src_a", "kb_src_b"},
+			ModelID:          "model-y",
+			UserInstructions: "Source prompt",
+			AgentMode:        "smart-reasoning",
+			Temperature:      0.5,
+			KnowledgeBases:   []string{"kb_src_a", "kb_src_b"},
 		}},
 		updateResp: &sdk.Agent{ID: "ag_clone"},
 	}
@@ -174,7 +174,7 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq)
 	require.NotNil(t, svc.updateReq.Config)
-	assert.Equal(t, "Source prompt", svc.updateReq.Config.SystemPrompt, "source SystemPrompt must round-trip")
+	assert.Equal(t, "Source prompt", svc.updateReq.Config.UserInstructions, "source UserInstructions must round-trip")
 	assert.Equal(t, "smart-reasoning", svc.updateReq.Config.AgentMode, "source AgentMode must round-trip")
 	assert.Equal(t, []string{"kb_src_a", "kb_src_b"}, svc.updateReq.Config.KnowledgeBases, "source KB list must round-trip when --attach-kb not passed")
 	assert.InDelta(t, 0.9, svc.updateReq.Config.Temperature, 0.001, "Temperature overridden")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -153,7 +154,7 @@ func (s *sessionService) resolveRetrievalTenantID(
 
 // applyAgentOverridesToChatManage applies custom agent configuration overrides
 // to a ChatManage object that was initialized with system defaults.
-// This covers: system prompt, context template, temperature, max tokens, thinking,
+// This covers: managed prompt references, user instructions, temperature, max tokens, thinking,
 // citation output, retrieval thresholds, rewrite settings, fallback settings, FAQ strategy,
 // and history turns.
 func (s *sessionService) applyAgentOverridesToChatManage(
@@ -168,15 +169,19 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// Ensure defaults are set
 	customAgent.EnsureDefaults()
 
-	// Override summary config fields
-	if customAgent.Config.SystemPrompt != "" {
-		cm.SummaryConfig.Prompt = customAgent.Config.SystemPrompt
-		logger.Infof(ctx, "Using custom agent's system_prompt")
+	// Managed prompt templates are referenced by ID; users only own additive
+	// role, tone, and business instructions.
+	if customAgent.Config.SystemPromptID != "" && s.cfg.PromptTemplates != nil {
+		if prompt := config.FindPromptTemplateByID(s.cfg.PromptTemplates.SystemPrompt, customAgent.Config.SystemPromptID); prompt != nil {
+			cm.SummaryConfig.Prompt = prompt.Content
+		}
 	}
-	if customAgent.Config.ContextTemplate != "" {
-		cm.SummaryConfig.ContextTemplate = customAgent.Config.ContextTemplate
-		logger.Infof(ctx, "Using custom agent's context_template")
+	if customAgent.Config.ContextTemplateID != "" && s.cfg.PromptTemplates != nil {
+		if prompt := config.FindPromptTemplateByID(s.cfg.PromptTemplates.ContextTemplate, customAgent.Config.ContextTemplateID); prompt != nil {
+			cm.SummaryConfig.ContextTemplate = prompt.Content
+		}
 	}
+	cm.UserInstructions = customAgent.Config.UserInstructions
 	if customAgent.Config.Temperature >= 0 {
 		cm.SummaryConfig.Temperature = customAgent.Config.Temperature
 		logger.Infof(ctx, "Using custom agent's temperature: %f", customAgent.Config.Temperature)
@@ -217,12 +222,6 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// Override rewrite settings
 	cm.EnableRewrite = customAgent.Config.EnableRewrite
 	cm.EnableQueryExpansion = customAgent.Config.EnableQueryExpansion
-	if customAgent.Config.RewritePromptSystem != "" {
-		cm.RewritePromptSystem = customAgent.Config.RewritePromptSystem
-	}
-	if customAgent.Config.RewritePromptUser != "" {
-		cm.RewritePromptUser = customAgent.Config.RewritePromptUser
-	}
 	if customAgent.Config.QueryUnderstandModelID != "" {
 		cm.QueryUnderstandModelID = customAgent.Config.QueryUnderstandModelID
 		logger.Infof(ctx, "Using custom agent's query_understand_model_id: %s",
@@ -236,11 +235,13 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if customAgent.Config.FallbackResponse != "" {
 		cm.FallbackResponse = customAgent.Config.FallbackResponse
 	}
-	if customAgent.Config.FallbackPrompt != "" {
-		cm.FallbackPrompt = customAgent.Config.FallbackPrompt
-	}
 
 	// Override web search settings
+	cm.WebSearchMode = customAgent.Config.EffectiveWebSearchMode()
+	// The per-request visitor/session switch is still a capability gate.
+	if !cm.WebSearchEnabled {
+		cm.WebSearchMode = types.WebSearchModeOff
+	}
 	if customAgent.Config.WebSearchMaxResults > 0 {
 		cm.WebSearchMaxResults = customAgent.Config.WebSearchMaxResults
 	}
@@ -270,10 +271,6 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "Data analysis pipeline stage enabled by custom agent")
 	}
 
-	if len(customAgent.Config.IntentPrompts) > 0 {
-		cm.IntentPromptOverrides = customAgent.Config.IntentPrompts
-		logger.Infof(ctx, "Using custom agent's intent_prompts (%d overrides)", len(cm.IntentPromptOverrides))
-	}
 }
 
 // restrictMentionsToAgentScope filters user-provided @mention targets (KB IDs

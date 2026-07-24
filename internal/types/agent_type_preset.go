@@ -166,15 +166,9 @@ func GetAgentTypePreset(id string) *AgentTypePresetEntry {
 	return agentTypePresets[id]
 }
 
-// ResolveAgentTypePresetPromptRefs iterates over all presets and resolves
-// system_prompt_id references into the actual prompt template content via the
-// provided resolver. This lets downstream services treat the `system_prompt_id`
-// field as a concrete prompt string if they need to.
-//
-// We keep system_prompt_id as-is in the preset (it's also what the editor
-// writes back to CustomAgentConfig), so this hook is only used to validate
-// that every referenced template actually exists at startup.
-func ResolveAgentTypePresetPromptRefs(resolver func(id string) string) {
+// ValidateAgentTypePresetPromptRefs checks that every smart-agent preset
+// references an existing managed agent protocol template.
+func ValidateAgentTypePresetPromptRefs(resolver func(id string) string) {
 	agentTypePresetsMu.Lock()
 	defer agentTypePresetsMu.Unlock()
 	for _, entry := range agentTypePresets {

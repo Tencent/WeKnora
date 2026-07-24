@@ -10,18 +10,12 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
-	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// promptPreviewWidth caps inline KV row prompt previews. Multi-line prompts
-// collapse to one line via text.OneLine; the Templates section gets the
-// full multi-line treatment instead.
-const promptPreviewWidth = 80
-
 // agentViewFields enumerates the top-level Agent keys surfaced in `--help`
 // as a hint for `--jq` projection. Nested AgentConfig fields are reachable
-// via `--jq '.config.system_prompt'` or by selecting `config` whole and
+// via `--jq '.config.user_instructions'` or by selecting `config` whole and
 // post-processing.
 var agentViewFields = []string{
 	"id", "name", "description", "avatar",
@@ -41,14 +35,14 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show a custom agent's configuration",
 		Long: `Renders the agent's metadata and full AgentConfig as grouped KV
 sections (Identity / LLM / KB attachment / Retrieval / Query rewrite /
-Tools / FAQ / Web search / Multi-turn / Fallback / Templates). Zero-value
+Tools / FAQ / Web search / Multi-turn / Fallback / Prompt protocol). Zero-value
 fields are omitted; sections with no set fields are suppressed entirely.
 
 Pass --format json for the bare SDK Agent object (config nested, not flattened).
 Use --jq to project specific fields or reach into nested config.`,
 		Example: `  weknora agent view ag_abc
   weknora agent view ag_abc --format json --jq '{id, name, config}'   # top-level projection
-  weknora agent view ag_abc --format json --jq '.config.system_prompt'`,
+  weknora agent view ag_abc --format json --jq '.config.user_instructions'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -194,12 +188,6 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 	if c.QueryUnderstandModelID != "" {
 		qr = append(qr, row{"Query understand model ID", c.QueryUnderstandModelID})
 	}
-	if c.RewritePromptSystem != "" {
-		qr = append(qr, row{"Rewrite prompt (system)", text.OneLine(promptPreviewWidth, c.RewritePromptSystem)})
-	}
-	if c.RewritePromptUser != "" {
-		qr = append(qr, row{"Rewrite prompt (user)", text.OneLine(promptPreviewWidth, c.RewritePromptUser)})
-	}
 	emit("Query rewrite", qr)
 
 	// Tools
@@ -259,24 +247,15 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 	if c.FallbackResponse != "" {
 		fb = append(fb, row{"Response", c.FallbackResponse})
 	}
-	if c.FallbackPrompt != "" {
-		fb = append(fb, row{"Prompt", text.OneLine(promptPreviewWidth, c.FallbackPrompt)})
-	}
 	emit("Fallback", fb)
 
-	// Templates — system_prompt and context_template can be multi-line;
-	// render headed blocks rather than KV rows for readability.
-	if c.SystemPrompt != "" || c.ContextTemplate != "" {
+	if c.PromptProtocolVersion != 0 {
+		emit("Prompt protocol", []row{{"Version", fmt.Sprintf("v%d", c.PromptProtocolVersion)}})
+	}
+	if c.UserInstructions != "" {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Templates:")
-		if c.SystemPrompt != "" {
-			fmt.Fprintln(w, "  System prompt:")
-			writeIndented(w, c.SystemPrompt, "    ")
-		}
-		if c.ContextTemplate != "" {
-			fmt.Fprintln(w, "  Context template:")
-			writeIndented(w, c.ContextTemplate, "    ")
-		}
+		fmt.Fprintln(w, "User instructions:")
+		writeIndented(w, c.UserInstructions, "  ")
 	}
 }
 

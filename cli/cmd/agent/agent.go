@@ -21,8 +21,8 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Manage custom agents (CRUD + status/check)",
-		Long: `Custom Agents bundle a system prompt, model, tool allow-list, and KB
-scope into an addressable resource. Create, update, list, view, check,
+		Long: `Custom Agents bundle user instructions, a system-managed prompt protocol,
+model, tool allow-list, and KB scope into an addressable resource. Create, update, list, view, check,
 or delete agents. To invoke an agent, use: weknora session ask --agent <id>`,
 	}
 	cmd.AddCommand(NewCmdList(f))

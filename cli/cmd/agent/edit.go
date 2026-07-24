@@ -31,21 +31,21 @@ type EditService interface {
 // reader-based file inputs are tracked alongside per-flag *Set bits in
 // editFlagSet so empty strings are distinguishable from "unset".
 type EditOptions struct {
-	AgentID            string
-	Name               string
-	Description        string
-	Model              string
-	SystemPrompt       string
-	SystemPromptReader io.Reader
-	AgentMode          string
-	RerankModel        string
-	Temperature        float64
-	AddKBs             []string
-	RemoveKBs          []string
-	KBSelectionMode    string
-	ConfigFileBody     io.Reader
-	ConfigFileKind     string // "yaml" or "json"
-	DryRun             bool
+	AgentID                string
+	Name                   string
+	Description            string
+	Model                  string
+	UserInstructions       string
+	UserInstructionsReader io.Reader
+	AgentMode              string
+	RerankModel            string
+	Temperature            float64
+	AddKBs                 []string
+	RemoveKBs              []string
+	KBSelectionMode        string
+	ConfigFileBody         io.Reader
+	ConfigFileKind         string // "yaml" or "json"
+	DryRun                 bool
 
 	flags editFlagSet
 }
@@ -54,17 +54,17 @@ type EditOptions struct {
 // values are valid (clear semantics) so cmd.Flags().Changed() is the only
 // reliable signal of "user supplied this flag."
 type editFlagSet struct {
-	nameSet            bool
-	descriptionSet     bool
-	modelSet           bool
-	systemPromptSet    bool
-	agentModeSet       bool
-	rerankModelSet     bool
-	temperatureSet     bool
-	addKBsSet          bool
-	removeKBsSet       bool
-	kbSelectionModeSet bool
-	configFileSet      bool
+	nameSet             bool
+	descriptionSet      bool
+	modelSet            bool
+	userInstructionsSet bool
+	agentModeSet        bool
+	rerankModelSet      bool
+	temperatureSet      bool
+	addKBsSet           bool
+	removeKBsSet        bool
+	kbSelectionModeSet  bool
+	configFileSet       bool
 }
 
 const agentEditLong = `Update a custom agent's fields surgically.
@@ -95,13 +95,13 @@ retry with -y after explicit approval. Other failure codes: resource.not_found
 const agentEditExample = `  weknora agent update ag_abc --name "Renamed" -y
   weknora agent update ag_abc --description "" -y              # clear description
   weknora agent update ag_abc --add-kb kb_new --remove-kb kb_old -y
-  weknora agent update ag_abc --system-prompt-file ./prompt.md -y
+  weknora agent update ag_abc --user-instructions-file ./prompt.md -y
   weknora agent update ag_abc --config-file ./tuned.yaml --temperature 0.9 -y`
 
 // NewCmdEdit builds `weknora agent update <agent-id>`.
 func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	opts := &EditOptions{}
-	var systemPromptFile, configFile string
+	var userInstructionsFile, configFile string
 
 	cmd := &cobra.Command{
 		Use:     "update <agent-id>",
@@ -114,7 +114,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			opts.flags.nameSet = cmd.Flags().Changed("name")
 			opts.flags.descriptionSet = cmd.Flags().Changed("description")
 			opts.flags.modelSet = cmd.Flags().Changed("model")
-			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") || cmd.Flags().Changed("system-prompt-file")
+			opts.flags.userInstructionsSet = cmd.Flags().Changed("user-instructions") || cmd.Flags().Changed("user-instructions-file")
 			opts.flags.agentModeSet = cmd.Flags().Changed("agent-mode")
 			opts.flags.rerankModelSet = cmd.Flags().Changed("rerank-model")
 			opts.flags.temperatureSet = cmd.Flags().Changed("temperature")
@@ -136,12 +136,12 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 
-			if systemPromptFile != "" {
-				r, err := cmdutil.OpenInput(systemPromptFile)
+			if userInstructionsFile != "" {
+				r, err := cmdutil.OpenInput(userInstructionsFile)
 				if err != nil {
-					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
+					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--user-instructions-file: %v", err))
 				}
-				opts.SystemPromptReader = r
+				opts.UserInstructionsReader = r
 			}
 			if configFile != "" {
 				r, kind, err := openConfigFile(configFile)
@@ -201,11 +201,11 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 				if opts.flags.configFileSet {
 					planArgs["config_file"] = configFile
 				}
-				if opts.flags.systemPromptSet {
-					if systemPromptFile != "" {
-						planArgs["system_prompt_file"] = systemPromptFile
+				if opts.flags.userInstructionsSet {
+					if userInstructionsFile != "" {
+						planArgs["user_instructions_file"] = userInstructionsFile
 					} else {
-						planArgs["system_prompt"] = opts.SystemPrompt
+						planArgs["user_instructions"] = opts.UserInstructions
 					}
 				}
 				if handled, err := cmdutil.HandleDryRun(cmd, true, cmdutil.DryRunPlan{
@@ -217,10 +217,10 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			}
 			yes, _ := cmd.Flags().GetBool("yes")
 			// Build the retry command from the flags the user actually passed.
-			// --add-kb/--remove-kb/--system-prompt-file/--config-file are excluded
+			// --add-kb/--remove-kb/--user-instructions-file/--config-file are excluded
 			// (multi-value / file-based — a precise single argv is impractical).
 			retryCmd := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", opts.AgentID},
-				"name", "description", "model", "system-prompt", "agent-mode",
+				"name", "description", "model", "user-instructions", "agent-mode",
 				"rerank-model", "temperature", "kb-selection-mode", "format")
 			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "agent", opts.AgentID, "agent.update", retryCmd); err != nil {
 				return err
@@ -251,9 +251,9 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Name, "name", "", "New agent name")
 	cmd.Flags().StringVar(&opts.Description, "description", "", `New description (use "" to clear)`)
 	cmd.Flags().StringVar(&opts.Model, "model", "", "LLM model id")
-	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
-	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
-	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
+	cmd.Flags().StringVar(&opts.UserInstructions, "user-instructions", "", "User instructions text (mutex with --user-instructions-file)")
+	cmd.Flags().StringVar(&userInstructionsFile, "user-instructions-file", "", "Read user instructions from FILE, or '-' for stdin")
+	cmd.MarkFlagsMutuallyExclusive("user-instructions", "user-instructions-file")
 	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
 	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
@@ -284,13 +284,12 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-
 // editHasAnyFlag reports whether opts carries at least one surgical update
 // signal. Required-flag validation lives in runEdit (not PreRunE) so unit
 // tests can invoke runEdit with a hand-built EditOptions directly.
 func editHasAnyFlag(opts *EditOptions) bool {
 	fl := opts.flags
-	return fl.nameSet || fl.descriptionSet || fl.modelSet || fl.systemPromptSet ||
+	return fl.nameSet || fl.descriptionSet || fl.modelSet || fl.userInstructionsSet ||
 		fl.agentModeSet || fl.rerankModelSet || fl.temperatureSet ||
 		fl.addKBsSet || fl.removeKBsSet || fl.kbSelectionModeSet || fl.configFileSet
 }
@@ -324,13 +323,13 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 		base = *parsed
 	}
 
-	// Resolve --system-prompt-file before flag overlay.
-	if opts.SystemPromptReader != nil {
-		body, err := io.ReadAll(opts.SystemPromptReader)
+	// Resolve --user-instructions-file before flag overlay.
+	if opts.UserInstructionsReader != nil {
+		body, err := io.ReadAll(opts.UserInstructionsReader)
 		if err != nil {
-			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file read: %v", err))
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--user-instructions-file read: %v", err))
 		}
-		opts.SystemPrompt = strings.TrimSpace(string(body))
+		opts.UserInstructions = strings.TrimSpace(string(body))
 	}
 
 	// Resolve --model / --rerank-model (id or name) and validate they exist,
@@ -353,7 +352,7 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 
 	overrides := cmdutil.AgentConfigFlags{
 		AgentMode: opts.AgentMode, AgentModeSet: opts.flags.agentModeSet,
-		SystemPrompt: opts.SystemPrompt, SystemPromptSet: opts.flags.systemPromptSet,
+		UserInstructions: opts.UserInstructions, UserInstructionsSet: opts.flags.userInstructionsSet,
 		ModelID: opts.Model, ModelIDSet: opts.flags.modelSet,
 		RerankModelID: opts.RerankModel, RerankModelIDSet: opts.flags.rerankModelSet,
 		Temperature: opts.Temperature, TemperatureSet: opts.flags.temperatureSet,

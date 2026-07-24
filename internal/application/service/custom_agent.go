@@ -107,7 +107,7 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Set defaults
 	agent.EnsureDefaults()
-	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+	if err := agent.Config.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -290,7 +290,7 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	// Ensure defaults
 	existingAgent.EnsureDefaults()
-	if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+	if err := existingAgent.Config.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -326,7 +326,7 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
 		existingAgent.EnsureDefaults()
-		if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		if err := existingAgent.Config.Validate(); err != nil {
 			return nil, err
 		}
 
@@ -356,7 +356,7 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		UpdatedAt:   time.Now(),
 	}
 	newAgent.EnsureDefaults()
-	if err := newAgent.Config.QuestionSuggestions.Validate(); err != nil {
+	if err := newAgent.Config.Validate(); err != nil {
 		return nil, err
 	}
 

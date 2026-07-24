@@ -28,6 +28,7 @@ builtin_agents:
       context_template_id: "default_context"
       temperature: 0.7
       max_completion_tokens: 2048
+      web_search_mode: "on_demand"
       web_search_enabled: true
       web_search_max_results: 5
       multi_turn_enabled: true
@@ -68,7 +69,6 @@ builtin_agents:
     config:
       agent_mode: "smart-reasoning"
       agent_type: "rag-qa"
-      system_prompt: ""
       temperature: 0.7
       max_completion_tokens: 2048
       max_iterations: 50
@@ -232,4 +232,3 @@ builtin_agents:
       vector_threshold: 0.5
       rerank_top_k: 10
       rerank_threshold: 0.3
-

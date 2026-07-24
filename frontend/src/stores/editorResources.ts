@@ -3,17 +3,15 @@ import { ref } from 'vue'
 import {
   getStorageEngineConfig,
   getStorageEngineStatus,
-  getPromptTemplates,
   getParserEngines,
   getSystemInfo,
-  type PromptTemplatesConfig,
   type StorageEngineStatusItem,
   type ParserEngineInfo,
   type SystemInfo,
 } from '@/api/system'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listSkills, type SkillInfo } from '@/api/skill'
-import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
+import { getAgentTypePresets, type AgentTypePreset } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 
 const CACHE_TTL_MS = 60_000
@@ -44,8 +42,6 @@ type EditorResourceKey =
   | 'mcpServices'
   | 'skills'
   | 'agentTypePresets'
-  | 'promptTemplates'
-  | 'placeholders'
   | 'tenantRetrievalConfig'
   | 'parserEngines'
   | 'systemInfo'
@@ -58,8 +54,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const skills = ref<SkillInfo[]>([])
   const skillsAvailable = ref(true)
   const agentTypePresets = ref<AgentTypePreset[]>([])
-  const promptTemplates = ref<PromptTemplatesConfig | null>(null)
-  const placeholders = ref<PlaceholdersResponse | null>(null)
   const tenantRetrievalConfig = ref<Record<string, unknown> | null>(null)
   const parserEngines = ref<ParserEngineInfo[]>([])
   const systemInfo = ref<SystemInfo | null>(null)
@@ -132,22 +126,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     })
   }
 
-  async function ensurePromptTemplates(force = false): Promise<void> {
-    return runOnce('promptTemplates', force, async () => {
-      const tmplRes = await getPromptTemplates()
-      promptTemplates.value = tmplRes?.data ?? null
-      loadedAt.value.promptTemplates = Date.now()
-    })
-  }
-
-  async function ensurePlaceholders(force = false): Promise<void> {
-    return runOnce('placeholders', force, async () => {
-      const placeholdersRes = await getPlaceholders()
-      placeholders.value = placeholdersRes?.data ?? null
-      loadedAt.value.placeholders = Date.now()
-    })
-  }
-
   async function ensureTenantRetrievalConfig(force = false): Promise<void> {
     return runOnce('tenantRetrievalConfig', force, async () => {
       const retrievalRes: any = await getTenantRetrievalConfig()
@@ -178,9 +156,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       ensureMcpServices(force),
       ensureSkills(force),
       ensureAgentTypePresets(force),
-      ensurePromptTemplates(force),
       ensureStorageEngine(force),
-      ensurePlaceholders(force),
       ensureTenantRetrievalConfig(force),
     ])
   }
@@ -194,8 +170,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       mcpServices.value = []
       skills.value = []
       agentTypePresets.value = []
-      promptTemplates.value = null
-      placeholders.value = null
       tenantRetrievalConfig.value = null
       parserEngines.value = []
       systemInfo.value = null
@@ -216,8 +190,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     skills,
     skillsAvailable,
     agentTypePresets,
-    promptTemplates,
-    placeholders,
     tenantRetrievalConfig,
     parserEngines,
     systemInfo,
@@ -226,8 +198,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     ensureMcpServices,
     ensureSkills,
     ensureAgentTypePresets,
-    ensurePromptTemplates,
-    ensurePlaceholders,
     ensureTenantRetrievalConfig,
     ensureParserEngines,
     ensureSystemInfo,

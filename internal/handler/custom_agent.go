@@ -508,35 +508,9 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	})
 }
 
-// GetPlaceholders godoc
-// @Summary      获取占位符定义
-// @Description  获取所有可用的提示词占位符定义，按字段类型分组
-// @Tags         智能体
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "占位符定义"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /agents/placeholders [get]
-func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
-	// Return all placeholder definitions grouped by field type
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"all":                   types.AllPlaceholders(),
-			"system_prompt":         types.PlaceholdersByField(types.PromptFieldSystemPrompt),
-			"agent_system_prompt":   types.PlaceholdersByField(types.PromptFieldAgentSystemPrompt),
-			"context_template":      types.PlaceholdersByField(types.PromptFieldContextTemplate),
-			"rewrite_system_prompt": types.PlaceholdersByField(types.PromptFieldRewriteSystemPrompt),
-			"rewrite_prompt":        types.PlaceholdersByField(types.PromptFieldRewritePrompt),
-			"fallback_prompt":       types.PlaceholdersByField(types.PromptFieldFallbackPrompt),
-		},
-	})
-}
-
 // GetAgentTypePresets godoc
 // @Summary      获取智能体类型预设列表
-// @Description  返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于编辑器自动填充系统提示词、工具和 KB 兼容性
+// @Description  返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于选择受管协议、工具和 KB 兼容性
 // @Tags         智能体
 // @Accept       json
 // @Produce      json

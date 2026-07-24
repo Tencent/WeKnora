@@ -6,7 +6,9 @@
 
 智能体 API 用于管理自定义智能体（Custom Agent）。系统提供了内置智能体，同时支持用户创建自定义智能体来满足不同的业务场景需求。
 
-> 智能体的共享与跨组织分发（`/agents/:id/shares` 等）属于组织协作能力，文档见 [组织管理 API](./organization.md)。本文件只覆盖智能体自身的 CRUD、复制、占位符、类型预设以及推荐问题接口。
+> 智能体的共享与跨组织分发（`/agents/:id/shares` 等）属于组织协作能力，文档见 [组织管理 API](./organization.md)。本文件只覆盖智能体自身的 CRUD、复制、类型预设以及推荐问题接口。
+
+智能体的检索路由、工具调用、安全、引用和输出格式由系统 Prompt 协议统一管理并按版本升级。智能体作者只能通过 `user_instructions` 配置角色、语气、回答偏好和业务规则，不能直接覆盖这些协议。
 
 ### 内置智能体
 
@@ -35,7 +37,6 @@
 | PUT    | `/agents/:id`              | 更新智能体                 |
 | DELETE | `/agents/:id`              | 删除智能体                 |
 | POST   | `/agents/:id/copy`         | 复制智能体                 |
-| GET    | `/agents/placeholders`     | 获取占位符定义             |
 
 ---
 
@@ -64,10 +65,12 @@ curl --location 'http://localhost:8080/api/v1/agents' \
     "avatar": "🤖",
     "config": {
         "agent_mode": "smart-reasoning",
-        "system_prompt": "你是一个专业的助手...",
+        "user_instructions": "你是面向新员工的产品助手，回答先给结论再给步骤。",
+        "prompt_protocol_version": 2,
         "temperature": 0.7,
         "max_iterations": 10,
         "kb_selection_mode": "all",
+        "web_search_mode": "on_demand",
         "web_search_enabled": true,
         "multi_turn_enabled": true,
         "history_turns": 5
@@ -90,7 +93,8 @@ curl --location 'http://localhost:8080/api/v1/agents' \
         "created_by": "user-123",
         "config": {
             "agent_mode": "smart-reasoning",
-            "system_prompt": "你是一个专业的助手...",
+            "user_instructions": "你是面向新员工的产品助手，回答先给结论再给步骤。",
+            "prompt_protocol_version": 2,
             "temperature": 0.7,
             "max_iterations": 10
         },
@@ -199,8 +203,8 @@ curl --location 'http://localhost:8080/api/v1/agents/builtin-quick-answer' \
         "tenant_id": 1,
         "config": {
             "agent_mode": "quick-answer",
-            "system_prompt": "",
-            "context_template": "请根据以下参考资料回答用户问题...",
+            "user_instructions": "",
+            "prompt_protocol_version": 2,
             "temperature": 0.7,
             "max_completion_tokens": 2048,
             "kb_selection_mode": "all",
@@ -374,36 +378,6 @@ curl --location --request POST 'http://localhost:8080/api/v1/agents/builtin-smar
 
 ---
 
-## GET `/agents/placeholders` - 获取占位符定义
-
-获取所有可用的提示词占位符定义，按字段类型分组。这些占位符可用于系统提示词和上下文模板中。
-
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
---header 'X-API-Key: your_api_key'
-```
-
-**响应**:
-
-```json
-{
-    "success": true,
-    "data": {
-        "all": [...],
-        "system_prompt": [...],
-        "agent_system_prompt": [...],
-        "context_template": [...],
-        "rewrite_system_prompt": [...],
-        "rewrite_prompt": [...],
-        "fallback_prompt": [...]
-    }
-}
-```
-
----
-
 ## 配置参数
 
 智能体的 `config` 对象支持以下配置项：
@@ -413,10 +387,10 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `agent_mode` | string | - | 智能体模式：`quick-answer`（RAG）或 `smart-reasoning`（ReAct） |
-| `system_prompt` | string | - | 系统提示词，支持使用占位符 |
-| `system_prompt_id` | string | - | 系统提示词模板 ID（引用 `prompt_templates/` YAML 文件中的模板） |
-| `context_template` | string | - | 上下文模板（仅 quick-answer 模式使用） |
-| `context_template_id` | string | - | 上下文模板 ID（引用 `prompt_templates/` YAML 文件中的模板） |
+| `user_instructions` | string | - | 用户可编辑的角色、语气、回答偏好和业务规则，最多 4000 字符；不能覆盖系统协议 |
+| `prompt_protocol_version` | int | 当前版本 | 系统 Prompt 协议版本；由服务端规范化和升级 |
+| `system_prompt_id` | string | - | 系统维护的 Prompt 模板引用；通常由内置配置或类型预设设置 |
+| `context_template_id` | string | - | 系统维护的上下文模板引用；通常不需要用户直接设置 |
 
 ### 模型设置
 
@@ -468,7 +442,8 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `web_search_enabled` | bool | true | 是否启用网络搜索 |
+| `web_search_mode` | string | `on_demand` | 快速问答网络来源策略：`off` / `on_demand` / `always` |
+| `web_search_enabled` | bool | true | 兼容字段及请求能力开关；新配置以 `web_search_mode` 为准 |
 | `web_search_max_results` | int | 5 | 网络搜索最大结果数 |
 | `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用空间默认提供者 |
 | `web_fetch_enabled` | bool | false | 是否自动获取重排后的搜索结果页面全文 |
@@ -521,11 +496,10 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `enable_query_expansion` | bool | true | 是否启用查询扩展 |
 | `enable_rewrite` | bool | true | 是否启用多轮对话查询改写 |
-| `rewrite_prompt_system` | string | - | 改写系统提示词 |
-| `rewrite_prompt_user` | string | - | 改写用户提示词模板 |
 | `fallback_strategy` | string | `model` | 回退策略：`fixed`（固定回复）或 `model`（模型生成）；未设置时在服务端默认为 `model` |
 | `fallback_response` | string | - | 固定回退回复（`fallback_strategy` 为 `fixed` 时使用） |
-| `fallback_prompt` | string | - | 回退提示词（`fallback_strategy` 为 `model` 时使用） |
+
+问题改写、查询理解、响应模式和模型兜底 Prompt 均属于系统托管协议，不作为智能体配置字段开放。旧配置中的这些字段在读取时会被忽略；旧 `system_prompt` 仅在没有受管模板引用时一次性迁移为 `user_instructions`。
 
 ---
 

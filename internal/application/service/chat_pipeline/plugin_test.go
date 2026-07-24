@@ -15,7 +15,11 @@ func TestIntoChatMessage_NoKBRetrieval(t *testing.T) {
 			Query: "hello world",
 		},
 		PipelineState: types.PipelineState{
-			Intent: types.IntentChitchat,
+			Understanding: types.QueryUnderstanding{
+				ResponseMode:  types.ResponseModeChitchat,
+				RetrievalNeed: types.RetrievalNeedNone,
+			},
+			RetrievalPlan: types.RetrievalPlan{Mode: types.RetrievalPlanNone},
 		},
 	}
 	plugin := &PluginIntoChatMessage{messageService: nil}
@@ -80,7 +84,8 @@ func TestIntoChatMessage_ImageDescriptionAppended(t *testing.T) {
 			ChatModelSupportsVision: false,
 		},
 		PipelineState: types.PipelineState{
-			Intent:           types.IntentChitchat,
+			Understanding:    types.QueryUnderstanding{ResponseMode: types.ResponseModeChitchat, RetrievalNeed: types.RetrievalNeedNone},
+			RetrievalPlan:    types.RetrievalPlan{Mode: types.RetrievalPlanNone},
 			ImageDescription: "a cat sitting on a mat",
 		},
 	}
