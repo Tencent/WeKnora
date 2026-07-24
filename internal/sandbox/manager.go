@@ -186,11 +186,6 @@ func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) erro
 	return nil
 }
 
-// validateExecution is a thin wrapper preserved for backwards compatibility;
-// it delegates to the shared runScriptValidation helper.
-func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
-	return runScriptValidation(m.validator, config)
-}
 
 // Cleanup releases all sandbox resources
 func (m *DefaultManager) Cleanup(ctx context.Context) error {
@@ -244,9 +239,9 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
 //
-// For SandboxTypeCube the returned manager is a SessionBoundManager, which
-// keeps one persistent MicroVM per SessionID; for other types the returned
-// manager is a DefaultManager. Both satisfy the Manager interface.
+// Session-scoped remote backends (Cube, E2B) route to SessionBoundManager,
+// which keeps one persistent MicroVM per SessionID; stateless backends
+// (Docker, Local, Disabled) route to DefaultManager. Both satisfy Manager.
 func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
@@ -256,6 +251,8 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		sType = SandboxTypeLocal
 	case "cube":
 		sType = SandboxTypeCube
+	case "e2b":
+		sType = SandboxTypeE2B
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:
@@ -269,10 +266,22 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		config.DockerImage = dockerImage
 	}
 
-	if sType == SandboxTypeCube {
+	switch sType {
+	case SandboxTypeCube:
 		client, err := NewCubeRemoteClient(config)
 		if err != nil {
 			return nil, fmt.Errorf("sandbox: build Cube client: %w", err)
+		}
+		return NewSessionBoundManager(SessionBoundManagerConfig{
+			Config:  config,
+			Client:  client,
+			Store:   NewMemorySessionSandboxBindingStore(),
+			Checker: PermissiveSessionExistenceChecker{},
+		})
+	case SandboxTypeE2B:
+		client, err := NewE2BRemoteClient(config)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox: build E2B client: %w", err)
 		}
 		return NewSessionBoundManager(SessionBoundManagerConfig{
 			Config:  config,

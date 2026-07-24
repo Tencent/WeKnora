@@ -329,68 +329,133 @@ func TestRemoteSessionLifecycleProviderMismatchNeverUsesOldID(t *testing.T) {
 }
 
 func TestRemoteSessionLifecycleRecoversOldestMetadataCandidate(t *testing.T) {
-	store := NewMemorySessionSandboxBindingStore()
-	client := newFakeRemoteClient(SandboxTypeCube)
-	checker := &fakeSessionExistenceChecker{exists: true}
-	lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
-	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
-	metadata := lifecycle.metadata(key)
-	client.addSandbox("newer", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
-	client.addSandbox("older", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
+	for _, provider := range []RemoteProvider{SandboxTypeCube, SandboxTypeE2B} {
+		t.Run(string(provider), func(t *testing.T) {
+			store := NewMemorySessionSandboxBindingStore()
+			client := newFakeRemoteClient(provider)
+			checker := &fakeSessionExistenceChecker{exists: true}
+			lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
+			key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+			metadata := lifecycle.metadata(key)
+			client.addSandbox("newer", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
+			client.addSandbox("older", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
 
-	handle, err := lifecycle.Resolve(context.Background(), key)
-	require.NoError(t, err)
-	require.Equal(t, "older", handle.ID())
-	creates, connects, _, lists, _ := client.counts()
-	require.Zero(t, creates)
-	require.Equal(t, 1, connects)
-	require.Equal(t, 1, lists)
+			handle, err := lifecycle.Resolve(context.Background(), key)
+			require.NoError(t, err)
+			require.Equal(t, "older", handle.ID())
+			creates, connects, _, lists, _ := client.counts()
+			require.Zero(t, creates)
+			require.Equal(t, 1, connects)
+			require.Equal(t, 1, lists)
+		})
+	}
 }
 
 func TestRemoteSessionLifecycleDeletesDuplicateMetadataCandidates(t *testing.T) {
-	store := NewMemorySessionSandboxBindingStore()
-	client := newFakeRemoteClient(SandboxTypeCube)
-	checker := &fakeSessionExistenceChecker{exists: true}
-	lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
-	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
-	metadata := lifecycle.metadata(key)
-	client.addSandbox("selected", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
-	client.addSandbox("duplicate", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
+	for _, provider := range []RemoteProvider{SandboxTypeCube, SandboxTypeE2B} {
+		t.Run(string(provider), func(t *testing.T) {
+			store := NewMemorySessionSandboxBindingStore()
+			client := newFakeRemoteClient(provider)
+			checker := &fakeSessionExistenceChecker{exists: true}
+			lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
+			key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+			metadata := lifecycle.metadata(key)
+			client.addSandbox("selected", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
+			client.addSandbox("duplicate", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
 
-	handle, err := lifecycle.Resolve(context.Background(), key)
-	require.NoError(t, err)
-	require.Equal(t, "selected", handle.ID())
-	require.True(t, client.hasSandbox("selected"))
-	require.False(t, client.hasSandbox("duplicate"))
-	_, _, _, _, deletes := client.counts()
-	require.Equal(t, 1, deletes)
+			handle, err := lifecycle.Resolve(context.Background(), key)
+			require.NoError(t, err)
+			require.Equal(t, "selected", handle.ID())
+			require.True(t, client.hasSandbox("selected"))
+			require.False(t, client.hasSandbox("duplicate"))
+			_, _, _, _, deletes := client.counts()
+			require.Equal(t, 1, deletes)
+		})
+	}
 }
 
 func TestRemoteSessionLifecycleStopsDuplicateCleanupAfterLockLoss(t *testing.T) {
-	base := NewMemorySessionSandboxBindingStore()
-	store := &cancelableLifecycleStore{SessionSandboxBindingStore: base}
-	client := newFakeRemoteClient(SandboxTypeCube)
-	checker := &fakeSessionExistenceChecker{exists: true}
-	lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
-	key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
-	metadata := lifecycle.metadata(key)
-	client.addSandbox("selected", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
-	client.addSandbox("duplicate", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
-	client.deleteHook = func(ctx context.Context, sandboxID string) error {
-		if sandboxID == "duplicate" {
-			store.cancelLock()
-		}
-		return ctx.Err()
+	for _, provider := range []RemoteProvider{SandboxTypeCube, SandboxTypeE2B} {
+		t.Run(string(provider), func(t *testing.T) {
+			base := NewMemorySessionSandboxBindingStore()
+			store := &cancelableLifecycleStore{SessionSandboxBindingStore: base}
+			client := newFakeRemoteClient(provider)
+			checker := &fakeSessionExistenceChecker{exists: true}
+			lifecycle := newTestRemoteSessionLifecycle(t, client, store, checker)
+			key := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+			metadata := lifecycle.metadata(key)
+			client.addSandbox("selected", "template-a", RemoteStateRunning, metadata, time.Unix(100, 0))
+			client.addSandbox("duplicate", "template-a", RemoteStateRunning, metadata, time.Unix(200, 0))
+			client.deleteHook = func(ctx context.Context, sandboxID string) error {
+				if sandboxID == "duplicate" {
+					store.cancelLock()
+				}
+				return ctx.Err()
+			}
+
+			handle, err := lifecycle.Resolve(context.Background(), key)
+			require.Error(t, err)
+			require.Nil(t, handle)
+			require.True(t, client.hasSandbox("selected"))
+			require.True(t, client.hasSandbox("duplicate"))
+			binding, getErr := base.Get(context.Background(), key)
+			require.NoError(t, getErr)
+			require.Nil(t, binding)
+		})
+	}
+}
+
+func TestE2BRemoteSessionLifecycleBindingStoreContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		newStore func(*testing.T) SessionSandboxBindingStore
+	}{
+		{
+			name: "memory",
+			newStore: func(*testing.T) SessionSandboxBindingStore {
+				return NewMemorySessionSandboxBindingStore()
+			},
+		},
+		{
+			name: "redis",
+			newStore: func(t *testing.T) SessionSandboxBindingStore {
+				store, _, _ := newRedisBindingTestStore(t)
+				return store
+			},
+		},
 	}
 
-	handle, err := lifecycle.Resolve(context.Background(), key)
-	require.Error(t, err)
-	require.Nil(t, handle)
-	require.True(t, client.hasSandbox("selected"))
-	require.True(t, client.hasSandbox("duplicate"))
-	binding, getErr := base.Get(context.Background(), key)
-	require.NoError(t, getErr)
-	require.Nil(t, binding)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := tt.newStore(t)
+			client := newFakeRemoteClient(SandboxTypeE2B)
+			checker := &fakeSessionExistenceChecker{exists: true}
+			first := newTestRemoteSessionLifecycle(t, client, store, checker)
+			second := newTestRemoteSessionLifecycle(t, client, store, checker)
+			key := SessionSandboxKey{TenantID: 42, SessionID: "session-e2b"}
+
+			firstHandle, err := first.Resolve(context.Background(), key)
+			require.NoError(t, err)
+			secondHandle, err := second.Resolve(context.Background(), key)
+			require.NoError(t, err)
+			require.Equal(t, firstHandle.ID(), secondHandle.ID())
+			require.Equal(t, SandboxTypeE2B, secondHandle.Provider())
+
+			creates, _, _, _, _ := client.counts()
+			require.Equal(t, 1, creates)
+			binding, err := store.Get(context.Background(), key)
+			require.NoError(t, err)
+			require.NotNil(t, binding)
+			require.Equal(t, SandboxTypeE2B, binding.Provider)
+			require.Equal(t, firstHandle.ID(), binding.SandboxID)
+
+			require.NoError(t, second.Destroy(context.Background(), key))
+			require.False(t, client.hasSandbox(firstHandle.ID()))
+			binding, err = store.Get(context.Background(), key)
+			require.NoError(t, err)
+			require.Nil(t, binding)
+		})
+	}
 }
 
 func TestRemoteSessionLifecycleCleansCreatedSandboxWhenSessionDisappears(t *testing.T) {

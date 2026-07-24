@@ -18,6 +18,7 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"net/http"
 )
 
 // RemoteErrorKind is the stable, provider-neutral classification of a
@@ -147,32 +148,6 @@ func IsRemoteNotFound(err error) bool {
 	}
 }
 
-// IsRemoteTerminal reports whether err classifies specifically as a terminal
-// sandbox state (as opposed to a plain not-found).
-func IsRemoteTerminal(err error) bool {
-	return remoteKind(err) == RemoteErrorKindTerminal
-}
-
-// IsRemoteUnsupported reports whether err classifies as an unsupported
-// capability on this provider.
-func IsRemoteUnsupported(err error) bool {
-	return remoteKind(err) == RemoteErrorKindUnsupported
-}
-
-// IsRemoteTransient reports whether err classifies as a transient failure
-// that MUST preserve the caller's session binding (retry or backoff).
-func IsRemoteTransient(err error) bool {
-	switch remoteKind(err) {
-	case RemoteErrorKindTimeout,
-		RemoteErrorKindUnavailable,
-		RemoteErrorKindCapacity,
-		RemoteErrorKindConflict,
-		RemoteErrorKindAuthentication:
-		return true
-	default:
-		return false
-	}
-}
 
 // IsRemoteInvalidRequest reports whether err classifies as a caller-side
 // error (bad template, oversized payload, malformed path, etc.).
@@ -192,9 +167,32 @@ func CanReplaceRemoteBinding(err error) bool {
 	}
 }
 
-// ShouldPreserveRemoteBinding reports whether a failed remote operation must
-// leave the authoritative session binding unchanged. Every non-nil error that
-// does not prove the sandbox is gone is preserved by default.
-func ShouldPreserveRemoteBinding(err error) bool {
-	return err != nil && !CanReplaceRemoteBinding(err)
+
+// httpErrorKind maps an HTTP status code to a RemoteErrorKind. It is shared
+// by all remote sandbox adapter backends (Cube, E2B).
+func httpErrorKind(op string, status int) RemoteErrorKind {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return RemoteErrorKindInvalidRequest
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return RemoteErrorKindAuthentication
+	case http.StatusNotFound:
+		if op == "Create" {
+			return RemoteErrorKindInvalidRequest
+		}
+		return RemoteErrorKindNotFound
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return RemoteErrorKindTimeout
+	case http.StatusConflict:
+		return RemoteErrorKindConflict
+	case http.StatusGone:
+		return RemoteErrorKindTerminal
+	case http.StatusTooManyRequests, http.StatusInsufficientStorage:
+		return RemoteErrorKindCapacity
+	default:
+		if status >= 500 {
+			return RemoteErrorKindUnavailable
+		}
+		return RemoteErrorKindInternal
+	}
 }

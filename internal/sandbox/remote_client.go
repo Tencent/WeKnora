@@ -2,7 +2,7 @@
 //
 // This file introduces the RemoteSandboxClient interface and the neutral
 // data-transfer types that SessionBoundManager depends on. Concrete backends
-// (Cube, E2B, future E2B-compatible providers) each provide an implementation
+// (Cube, E2B) each provide an implementation
 // in a separate adapter file.
 //
 // The interface is deliberately minimal: it covers only the operations
@@ -95,6 +95,49 @@ type RemoteCreateRequest struct {
 
 	// EnvVars is baked into the sandbox at creation time. Optional.
 	EnvVars map[string]string
+
+	// Network is the neutral outbound-network policy for the new sandbox.
+	// A zero-value policy asks the adapter to apply the provider's default
+	// behaviour (see RemoteNetworkPolicy for the exact semantics).
+	Network RemoteNetworkPolicy
+}
+
+// RemoteNetworkPolicy is the provider-neutral outbound-network policy for a
+// new sandbox. Only the fields both Cube and E2B accept live here; provider-
+// specific extensions (E2B request rules, Cube L7 policy, egress proxies,
+// masked host names) stay inside the adapters until we have a second caller
+// that needs them expressed at this layer.
+//
+// Field semantics match the underlying providers:
+//
+//   - AllowInternetAccess: top-level egress switch. When nil the adapter
+//     leaves it unset so the provider server-side default (typically true)
+//     applies. When *false the sandbox has no default egress; specific
+//     hosts must appear in AllowOut.
+//   - AllowPublicTraffic: whether the sandbox is reachable from the public
+//     internet by URL. nil defers to the provider default; false hides the
+//     sandbox behind a per-sandbox traffic access token.
+//   - AllowOut / DenyOut: CIDR blocks or domain names. Cube treats these as
+//     L3/L4 filters; E2B applies domain-level filtering only on HTTP(S).
+//     Both providers require that specific domain allow-lists be paired
+//     with a deny-all (DenyOut: ["0.0.0.0/0"]) — the adapters surface the
+//     provider-native error unchanged so callers can react.
+type RemoteNetworkPolicy struct {
+	AllowInternetAccess *bool
+	AllowPublicTraffic  *bool
+	AllowOut            []string
+	DenyOut             []string
+}
+
+// IsZero reports whether the policy carries no caller-specified fields, in
+// which case adapters apply their own permissive defaults for backwards
+// compatibility with WeKnora deployments that predate provider-neutral
+// network policy.
+func (p RemoteNetworkPolicy) IsZero() bool {
+	return p.AllowInternetAccess == nil &&
+		p.AllowPublicTraffic == nil &&
+		len(p.AllowOut) == 0 &&
+		len(p.DenyOut) == 0
 }
 
 // RemoteSandboxSummary is the neutral view of a sandbox listing / probe.
@@ -255,6 +298,13 @@ type RemoteSandboxCapabilities struct {
 	// SupportsTimeoutRefresh indicates the provider can extend a sandbox's
 	// idle timeout after creation. Informational.
 	SupportsTimeoutRefresh bool
+
+	// SupportsFilesystemEnumeration is true when the provider implements
+	// ListDir, MakeDir, Stat, and Remove. SessionBoundManager only
+	// advertises the SessionFileStore capability when this is true — the
+	// application layer then knows to deregister list/read/attachment
+	// staging tools that would otherwise fail at request time.
+	SupportsFilesystemEnumeration bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All

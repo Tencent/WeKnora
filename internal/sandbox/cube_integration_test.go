@@ -9,15 +9,16 @@
 //	go test -tags=integration -run Integration -count=1 ./internal/sandbox/...
 //
 // If the environment variables are unset the tests fall back to the local
-// dev defaults (127.0.0.1:33000 for the CubeAPI, 127.0.0.1:12088 for the
+// dev defaults (127.0.0.1:33000 for the CubeAPI, 127.0.0.1:80 for the
 // CubeProxy). A ready template is auto-discovered from /templates unless
 // CUBE_TEMPLATE_ID is supplied.
 //
-// Every test hands its sandboxes back through Cleanup / DestroySession, so a
+// Every test hands its sandboxes back through Cleanup / Delete, so a
 // clean run should leave no live MicroVMs behind.
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -25,8 +26,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	cubesandbox "github.com/tencentcloud/CubeSandbox/sdk/go"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -40,6 +39,10 @@ const (
 	// static SPA server, not a routing proxy.
 	integrationDefaultAPIURL   = "http://127.0.0.1:33000"
 	integrationDefaultProxyURL = "http://127.0.0.1:80"
+
+	integrationSandboxTTL         = 5 * time.Minute
+	integrationHTTPTimeout        = 30 * time.Second
+	integrationDefaultExecTimeout = 60 * time.Second
 )
 
 // integrationConfig builds a Config suitable for talking to the on-host Cube
@@ -63,11 +66,9 @@ func integrationConfig(t *testing.T) *Config {
 		cfg.CubeProxyURL = integrationDefaultProxyURL
 	}
 	cfg.CubeSandboxDomain = DefaultCubeSandboxDomain
-	cfg.CubeEnvdPort = DefaultCubeEnvdPort
-	cfg.CubeHTTPTimeout = 30 * time.Second
-	cfg.CubeSandboxTTL = 5 * time.Minute
-	cfg.CubeIdleTTL = time.Minute
-	cfg.DefaultTimeout = 60 * time.Second
+	cfg.CubeHTTPTimeout = integrationHTTPTimeout
+	cfg.CubeSandboxTTL = integrationSandboxTTL
+	cfg.DefaultTimeout = integrationDefaultExecTimeout
 
 	if v := strings.TrimSpace(os.Getenv("CUBE_TEMPLATE_ID")); v != "" {
 		cfg.CubeTemplate = v
@@ -138,7 +139,7 @@ func writeIntegrationScript(t *testing.T, name, body string) string {
 }
 
 // -----------------------------------------------------------------------------
-// Client-level tests (thin wrapper directly over cubeClient)
+// Client-level tests (CubeRemoteClient directly)
 // -----------------------------------------------------------------------------
 
 // TestIntegrationCubeClient_HealthAndList sanity-checks that the /health
@@ -146,7 +147,10 @@ func writeIntegrationScript(t *testing.T, name, body string) string {
 // always means CubeAPI isn't running on the expected port.
 func TestIntegrationCubeClient_HealthAndList(t *testing.T) {
 	cfg := integrationConfig(t)
-	client := newCubeClient(cfg)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -154,227 +158,236 @@ func TestIntegrationCubeClient_HealthAndList(t *testing.T) {
 	if err := client.Health(ctx); err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	summaries, err := client.ListSandboxes(ctx)
+	summaries, err := client.List(ctx, RemoteListFilter{})
 	if err != nil {
-		t.Fatalf("ListSandboxes: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	t.Logf("current live sandboxes: %d", len(summaries))
 }
 
-// TestIntegrationCubeClient_ConnectRoundTripRequiresTimeout verifies the
-// real CubeAPI /sandboxes/{id}/connect path against the local deployment.
-// CubeAPI v0.5.11 rejects the official SDK's empty connect body with HTTP 422
-// (missing timeout). WeKnora injects that timeout in connectBodyRewriter; if
-// the patch regresses, this test fails against the real service instead of a
-// mock server.
-func TestIntegrationCubeClient_ConnectRoundTripRequiresTimeout(t *testing.T) {
+// TestIntegrationCubeClient_CreateConnectRoundTrip validates that Create +
+// Connect + Get form a consistent lifecycle round-trip through the real
+// CubeAPI. It replaces the old ConnectRoundTripRequiresTimeout test which
+// verified the SDK connect body patch — that patch is now handled internally
+// by CubeRemoteClient.
+func TestIntegrationCubeClient_CreateConnectRoundTrip(t *testing.T) {
 	cfg := integrationConfig(t)
-	client := newCubeClient(cfg)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	info, err := client.CreateSandbox(ctx, cfg.CubeTemplate, cfg.CubeSandboxTTL)
+	handle, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: cfg.CubeTemplate,
+		Timeout: RemoteTimeoutPolicy{
+			Mode:   RemoteTimeoutExplicit,
+			Value:  integrationSandboxTTL,
+			Action: RemoteOnTimeoutKill,
+		},
+	})
 	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
-	t.Logf("created sandbox %s (domain=%s)", info.ID, info.Domain)
+	sandboxID := handle.ID()
+	t.Logf("created sandbox %s", sandboxID)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := client.killSandboxByInfo(cleanupCtx, info); err != nil {
-			t.Logf("cleanup kill sandbox %s: %v", info.ID, err)
+		if err := client.Delete(cleanupCtx, sandboxID); err != nil {
+			t.Logf("cleanup delete sandbox %s: %v", sandboxID, err)
 		}
 	})
 
-	reattached, err := client.reattach(ctx, info.ID)
+	// Verify the sandbox is immediately visible via Get.
+	summary, err := client.Get(ctx, sandboxID)
+	if err != nil {
+		t.Fatalf("Get after create: %v", err)
+	}
+	if summary == nil || summary.ID != sandboxID {
+		t.Fatalf("Get returned unexpected summary: %#v", summary)
+	}
+
+	// Reconnect to the same sandbox — this is the critical path that
+	// exercises CubeAPI's /sandboxes/{id}/connect endpoint.
+	reattached, err := client.Connect(ctx, sandboxID)
 	if err != nil {
 		t.Fatalf("Connect existing sandbox via real CubeAPI: %v", err)
 	}
-	if reattached == nil || reattached.SandboxID != info.ID {
-		t.Fatalf("reattached sandbox ID = %#v, want %s", reattached, info.ID)
+	if reattached == nil || reattached.ID() != sandboxID {
+		t.Fatalf("reattached sandbox ID = %s, want %s", reattached.ID(), sandboxID)
 	}
 
-	remoteInfo, err := reattached.GetInfo(ctx)
+	// Verify the reattached handle can also be looked up.
+	summary2, err := client.Get(ctx, sandboxID)
 	if err != nil {
-		t.Fatalf("GetInfo after real connect: %v", err)
+		t.Fatalf("Get after reconnect: %v", err)
 	}
-	if remoteInfo == nil || remoteInfo.SandboxID != info.ID {
-		t.Fatalf("GetInfo sandbox ID = %#v, want %s", remoteInfo, info.ID)
+	if summary2 == nil || summary2.ID != sandboxID {
+		t.Fatalf("Get after reconnect returned unexpected summary: %#v", summary2)
 	}
-}
-
-// TestIntegrationOfficialSDK_ConnectWithoutTimeout_ShowsFailure calls the
-// official CubeSandbox SDK directly, without WeKnora's connectBodyRewriter.
-// It is intentionally written to FAIL so the raw CubeAPI error is visible in
-// `go test -v` output. Run it alone when you want to inspect the official SDK
-// /sandboxes/{id}/connect failure shape.
-func TestIntegrationOfficialSDK_ConnectWithoutTimeout_ShowsFailure(t *testing.T) {
-	cfg := integrationConfig(t)
-	client := newCubeClient(cfg)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	info, err := client.CreateSandbox(ctx, cfg.CubeTemplate, cfg.CubeSandboxTTL)
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	t.Logf("created sandbox %s (domain=%s)", info.ID, info.Domain)
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := client.killSandboxByInfo(cleanupCtx, info); err != nil {
-			t.Logf("cleanup kill sandbox %s: %v", info.ID, err)
-		}
-	})
-
-	sdkCfg := cubesandbox.Config{
-		APIURL:         strings.TrimRight(cfg.CubeAPIURL, "/"),
-		APIKey:         cfg.CubeAPIKey,
-		TemplateID:     cfg.CubeTemplate,
-		SandboxDomain:  cfg.CubeSandboxDomain,
-		RequestTimeout: cfg.CubeHTTPTimeout,
-	}
-	if proxyHost, proxyPort, proxyScheme, ok := parseProxyURL(cfg.CubeProxyURL); ok {
-		sdkCfg.ProxyNodeIP = proxyHost
-		sdkCfg.ProxyPortHTTP = proxyPort
-		sdkCfg.ProxyScheme = proxyScheme
-	}
-
-	officialSDK := cubesandbox.NewClient(sdkCfg)
-	_, err = officialSDK.Connect(ctx, info.ID)
-	if err != nil {
-		t.Fatalf("official SDK Connect failed without WeKnora timeout patch, raw error: %v", err)
-	}
-	t.Fatalf("official SDK Connect unexpectedly succeeded without WeKnora timeout patch; sandbox=%s", info.ID)
 }
 
 // TestIntegrationCubeClient_LifecycleRoundTrip exercises the full lifecycle
-// against a real sandbox: Create → WriteFile → RunCommand → ReadFile → Kill.
+// against a real sandbox: Create → WriteFile → ReadFile → Exec → Delete.
 func TestIntegrationCubeClient_LifecycleRoundTrip(t *testing.T) {
 	cfg := integrationConfig(t)
-	client := newCubeClient(cfg)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	info, err := client.CreateSandbox(ctx, cfg.CubeTemplate, cfg.CubeSandboxTTL)
+	handle, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: cfg.CubeTemplate,
+		Timeout: RemoteTimeoutPolicy{
+			Mode:   RemoteTimeoutExplicit,
+			Value:  integrationSandboxTTL,
+			Action: RemoteOnTimeoutKill,
+		},
+	})
 	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
-	t.Logf("created sandbox %s (domain=%s)", info.ID, info.Domain)
+	sandboxID := handle.ID()
+	t.Logf("created sandbox %s", sandboxID)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := client.killSandboxByInfo(cleanupCtx, info); err != nil {
-			t.Logf("cleanup kill sandbox %s: %v", info.ID, err)
+		if err := client.Delete(cleanupCtx, sandboxID); err != nil {
+			t.Logf("cleanup delete sandbox %s: %v", sandboxID, err)
 		}
 	})
 
+	// Write a file inside the sandbox.
 	path := "/tmp/weknora-integration.txt"
 	payload := []byte("hello from weknora integration\n")
-	if err := client.WriteFile(ctx, info, path, payload); err != nil {
+	if err := client.WriteFile(ctx, handle, path, payload); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// Read the file back through envd's /files GET path.
-	got, err := client.ReadFile(ctx, info, path)
+	// Read the file back.
+	got, err := client.ReadFile(ctx, handle, path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(got) != string(payload) {
+	if !bytes.Equal(got, payload) {
 		t.Fatalf("read back mismatch: got=%q want=%q", string(got), string(payload))
 	}
 
-	// Run a shell command that echoes the file to stdout, so we cover both
-	// the process.Process/Start streaming path and the filesystem write.
-	result, err := client.RunCommand(ctx, info, "cat", []string{path}, "", nil, "/tmp")
+	// Run a shell command that echoes the file to stdout.
+	result, err := client.Exec(ctx, handle, RemoteExecRequest{
+		Command: "cat",
+		Args:    []string{path},
+		WorkDir: "/tmp",
+		Timeout: integrationDefaultExecTimeout,
+	})
 	if err != nil {
-		t.Fatalf("RunCommand: %v", err)
+		t.Fatalf("Exec: %v", err)
 	}
 	if result.ExitCode != 0 {
-		t.Fatalf("RunCommand exit code: %d stderr=%q", result.ExitCode, result.Stderr)
+		t.Fatalf("Exec exit code: %d stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if !strings.Contains(result.Stdout, "hello from weknora integration") {
 		t.Fatalf("stdout missing marker: %q", result.Stdout)
 	}
 
-	// Kill leg is handled by t.Cleanup above; do an explicit kill so we can
-	// assert that a subsequent GetSandbox surfaces the absence gracefully.
-	if err := client.killSandboxByInfo(ctx, info); err != nil {
-		t.Fatalf("kill sandbox: %v", err)
+	// Explicitly delete and verify it's gone.
+	if err := client.Delete(ctx, sandboxID); err != nil {
+		t.Fatalf("Delete: %v", err)
 	}
-	summary, err := client.GetSandbox(ctx, info.ID)
+	summary, err := client.Get(ctx, sandboxID)
 	if err != nil {
-		t.Fatalf("GetSandbox after kill: %v", err)
+		if IsRemoteNotFound(err) {
+			t.Logf("sandbox %s confirmed deleted (not-found)", sandboxID)
+			return
+		}
+		t.Fatalf("Get after delete: %v", err)
 	}
 	if summary != nil {
-		t.Logf("sandbox still visible right after kill (state=%s) — acceptable eventual-consistency window", summary.State)
+		t.Logf("sandbox still visible right after delete (state=%s) — acceptable eventual-consistency window", summary.State)
 	}
 }
 
-// TestIntegrationCubeClient_FilesystemOps covers the filesystem RPCs we
-// wrap: MakeDir, ListDir, Move, Stat and Remove. It's kept separate from
+// TestIntegrationCubeClient_FilesystemOps covers the filesystem RPCs:
+// MakeDir, WriteFile, ListDir, Stat, and Remove. It's kept separate from
 // the lifecycle test so failures point at the right subsystem.
 func TestIntegrationCubeClient_FilesystemOps(t *testing.T) {
 	cfg := integrationConfig(t)
-	client := newCubeClient(cfg)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	info, err := client.CreateSandbox(ctx, cfg.CubeTemplate, cfg.CubeSandboxTTL)
+	handle, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: cfg.CubeTemplate,
+		Timeout: RemoteTimeoutPolicy{
+			Mode:   RemoteTimeoutExplicit,
+			Value:  integrationSandboxTTL,
+			Action: RemoteOnTimeoutKill,
+		},
+	})
 	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = client.killSandboxByInfo(cleanupCtx, info)
+		_ = client.Delete(cleanupCtx, handle.ID())
 	})
 
 	base := "/tmp/weknora-fs"
-	if err := client.MakeDir(ctx, info, base); err != nil {
+	if err := client.MakeDir(ctx, handle, base); err != nil {
 		t.Fatalf("MakeDir %s: %v", base, err)
 	}
 
+	// Write two files to verify listing.
 	src := base + "/one.txt"
-	dst := base + "/two.txt"
-	if err := client.WriteFile(ctx, info, src, []byte("aaa")); err != nil {
+	another := base + "/another.txt"
+	if err := client.WriteFile(ctx, handle, src, []byte("aaa")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := client.Move(ctx, info, src, dst); err != nil {
-		t.Fatalf("Move %s -> %s: %v", src, dst, err)
+	if err := client.WriteFile(ctx, handle, another, []byte("bbb")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 
-	entries, err := client.ListDir(ctx, info, base)
+	entries, err := client.ListDir(ctx, handle, base)
 	if err != nil {
 		t.Fatalf("ListDir %s: %v", base, err)
 	}
-	found := false
+	foundOne := false
+	foundAnother := false
 	for _, e := range entries {
-		if e.Name == "two.txt" {
-			found = true
-			break
+		if e.Name == "one.txt" {
+			foundOne = true
+		}
+		if e.Name == "another.txt" {
+			foundAnother = true
 		}
 	}
-	if !found {
-		t.Fatalf("ListDir did not surface 'two.txt': %#v", entries)
+	if !foundOne || !foundAnother {
+		t.Fatalf("ListDir did not surface expected files: %#v", entries)
 	}
 
-	stat, err := client.Stat(ctx, info, dst)
+	stat, err := client.Stat(ctx, handle, src)
 	if err != nil {
-		t.Fatalf("Stat %s: %v", dst, err)
+		t.Fatalf("Stat %s: %v", src, err)
 	}
 	if stat == nil {
-		t.Fatalf("Stat returned nil for existing path %s", dst)
+		t.Fatalf("Stat returned nil for existing path %s", src)
 	}
-	if stat.Type != "file" {
+	if stat.Type != RemoteEntryFile {
 		t.Fatalf("Stat type=%q, want file", stat.Type)
 	}
 
-	missing, err := client.Stat(ctx, info, base+"/does-not-exist")
+	missing, err := client.Stat(ctx, handle, base+"/does-not-exist")
 	if err != nil {
 		t.Fatalf("Stat missing: unexpected error %v", err)
 	}
@@ -382,17 +395,26 @@ func TestIntegrationCubeClient_FilesystemOps(t *testing.T) {
 		t.Fatalf("Stat missing returned entry: %#v", missing)
 	}
 
-	if err := client.Remove(ctx, info, dst); err != nil {
-		t.Fatalf("Remove %s: %v", dst, err)
+	if err := client.Remove(ctx, handle, src); err != nil {
+		t.Fatalf("Remove %s: %v", src, err)
 	}
-	if err := client.Remove(ctx, info, base); err != nil {
+	remaining, err := client.ListDir(ctx, handle, base)
+	if err != nil {
+		t.Fatalf("ListDir after remove: %v", err)
+	}
+	for _, e := range remaining {
+		if e.Name == "one.txt" {
+			t.Fatalf("'one.txt' still present after Remove")
+		}
+	}
+
+	if err := client.Remove(ctx, handle, base); err != nil {
 		t.Fatalf("Remove %s: %v", base, err)
 	}
 }
 
 // -----------------------------------------------------------------------------
-// End-to-end tests through the WeKnora sandbox surface (CubeSandbox +
-// SessionBoundManager)
+// End-to-end tests through SessionBoundManager
 // -----------------------------------------------------------------------------
 
 // TestIntegrationRemoteSandbox_EphemeralExecute exercises the empty-SessionID
