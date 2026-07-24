@@ -98,6 +98,10 @@ type chunkIndex struct {
 	matchTypes      map[string]types.MatchType
 	matchedContents map[string]string
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
+	// feedbackFactors / originalScores carry the feedback weight adjustment
+	// (applied pre-truncation) into the assembled SearchResult metadata.
+	feedbackFactors map[string]float64
+	originalScores  map[string]float64
 }
 
 // buildChunkIndex collects knowledge/chunk IDs and builds score/matchType maps
@@ -108,6 +112,8 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		matchTypes:      make(map[string]types.MatchType, len(chunks)),
 		matchedContents: make(map[string]string, len(chunks)),
 		processedIDs:    make(map[string]bool, len(chunks)*2),
+		feedbackFactors: make(map[string]float64),
+		originalScores:  make(map[string]float64),
 	}
 
 	processedKnowledgeIDs := make(map[string]bool)
@@ -120,6 +126,10 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		idx.scores[chunk.ChunkID] = chunk.Score
 		idx.matchTypes[chunk.ChunkID] = chunk.MatchType
 		idx.matchedContents[chunk.ChunkID] = chunk.Content
+		if chunk.FeedbackFactor != 0 && chunk.FeedbackFactor != 1 {
+			idx.feedbackFactors[chunk.ChunkID] = chunk.FeedbackFactor
+			idx.originalScores[chunk.ChunkID] = chunk.OriginalScore
+		}
 	}
 	return idx
 }
@@ -240,7 +250,9 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			sr := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
+			stampFeedbackMetadata(sr, idx.feedbackFactors[chunk.ID], idx.originalScores[chunk.ID])
+			searchResults = append(searchResults, sr)
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -307,27 +319,27 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	matchedContent string,
 ) *types.SearchResult {
 	return &types.SearchResult{
-		ID:                chunk.ID,
-		Content:           chunk.Content,
-		KnowledgeID:       chunk.KnowledgeID,
-		ChunkIndex:        chunk.ChunkIndex,
-		KnowledgeTitle:    knowledge.Title,
-		StartAt:           chunk.StartAt,
-		EndAt:             chunk.EndAt,
-		Seq:               chunk.ChunkIndex,
-		Score:             score,
-		MatchType:         matchType,
-		Metadata:          knowledge.GetMetadata(),
-		ChunkType:         string(chunk.ChunkType),
-		ParentChunkID:     chunk.ParentChunkID,
-		ImageInfo:         chunk.ImageInfo,
+		ID:                   chunk.ID,
+		Content:              chunk.Content,
+		KnowledgeID:          chunk.KnowledgeID,
+		ChunkIndex:           chunk.ChunkIndex,
+		KnowledgeTitle:       knowledge.Title,
+		StartAt:              chunk.StartAt,
+		EndAt:                chunk.EndAt,
+		Seq:                  chunk.ChunkIndex,
+		Score:                score,
+		MatchType:            matchType,
+		Metadata:             knowledge.GetMetadata(),
+		ChunkType:            string(chunk.ChunkType),
+		ParentChunkID:        chunk.ParentChunkID,
+		ImageInfo:            chunk.ImageInfo,
 		KnowledgeFilename:    knowledge.FileName,
 		KnowledgeSource:      knowledge.Source,
 		KnowledgeChannel:     knowledge.Channel,
 		KnowledgeDescription: knowledge.Description,
-		ChunkMetadata:     chunk.Metadata,
-		MatchedContent:    matchedContent,
-		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
+		ChunkMetadata:        chunk.Metadata,
+		MatchedContent:       matchedContent,
+		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
 	}
 }
 

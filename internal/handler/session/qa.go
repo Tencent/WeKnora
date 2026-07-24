@@ -1324,7 +1324,20 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
-	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	if err := h.messageService.UpdateMessage(ctx, assistantMessage); err != nil {
+		// Bail out before writing reference facts or indexing: a message that
+		// failed to persist must not leave orphaned side artifacts behind.
+		logger.Warnf(ctx, "persist completed assistant message %s failed: %v", assistantMessage.ID, err)
+		return
+	}
+
+	// Persist answer->chunk reference facts so feedback attribution and
+	// per-chunk session stats do not depend on anyone rating the answer.
+	if h.feedbackService != nil {
+		if err := h.feedbackService.RecordMessageReferences(ctx, assistantMessage); err != nil {
+			logger.Warnf(ctx, "persist chunk references for message %s failed: %v", assistantMessage.ID, err)
+		}
+	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

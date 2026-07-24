@@ -35,6 +35,31 @@ type RetrievalConfig struct {
 	RRFVectorWeight float64 `json:"rrf_vector_weight,omitempty"`
 	// RRFKeywordWeight is the keyword counterpart. Default: 0.3.
 	RRFKeywordWeight float64 `json:"rrf_keyword_weight,omitempty"`
+
+	// FeedbackRankingEnabled gates whether stored chunk recall weights (from
+	// answer like/dislike feedback) are applied to retrieval candidate
+	// ordering. Weights are always maintained; this only controls application,
+	// so enabling later takes effect immediately. Default: false.
+	FeedbackRankingEnabled bool `json:"feedback_ranking_enabled,omitempty"`
+	// FeedbackBoostThreshold is the positive rate at or above which a chunk's
+	// recall weight is boosted (0-1, default: 0.8).
+	FeedbackBoostThreshold float64 `json:"feedback_boost_threshold,omitempty"`
+	// FeedbackPenaltyThreshold is the positive rate below which a chunk's
+	// recall weight is penalized (0-1, default: 0.5).
+	FeedbackPenaltyThreshold float64 `json:"feedback_penalty_threshold,omitempty"`
+	// FeedbackBoostFactor multiplies candidate scores of boosted chunks
+	// (>= 1, default: 1.1).
+	FeedbackBoostFactor float64 `json:"feedback_boost_factor,omitempty"`
+	// FeedbackPenaltyFactor multiplies candidate scores of penalized chunks
+	// (0-1, default: 0.9).
+	FeedbackPenaltyFactor float64 `json:"feedback_penalty_factor,omitempty"`
+	// FeedbackMinSamples is the minimum number of ratings a chunk needs
+	// before its weight deviates from neutral (default: 3).
+	FeedbackMinSamples int `json:"feedback_min_samples,omitempty"`
+	// FeedbackNeedsOptimizationThreshold is the positive rate below which a
+	// chunk is flagged as needing optimization (0-1, default: 0.2). Must not
+	// exceed FeedbackPenaltyThreshold.
+	FeedbackNeedsOptimizationThreshold float64 `json:"feedback_needs_optimization_threshold,omitempty"`
 }
 
 // GetEffectiveEmbeddingTopK returns EmbeddingTopK with a fallback default.
@@ -102,18 +127,95 @@ func (c *RetrievalConfig) GetEffectiveRRFWeights() (vector, keyword float64) {
 	return v, k
 }
 
+// GetEffectiveFeedbackRankingEnabled reports whether feedback-based ranking
+// adjustments are applied at retrieval time.
+func (c *RetrievalConfig) GetEffectiveFeedbackRankingEnabled() bool {
+	return c != nil && c.FeedbackRankingEnabled
+}
+
+// GetEffectiveFeedbackBoostThreshold returns the boost threshold with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackBoostThreshold() float64 {
+	if c == nil || c.FeedbackBoostThreshold <= 0 {
+		return 0.8
+	}
+	return c.FeedbackBoostThreshold
+}
+
+// GetEffectiveFeedbackPenaltyThreshold returns the penalty threshold with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackPenaltyThreshold() float64 {
+	if c == nil || c.FeedbackPenaltyThreshold <= 0 {
+		return 0.5
+	}
+	return c.FeedbackPenaltyThreshold
+}
+
+// GetEffectiveFeedbackBoostFactor returns the boost factor with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackBoostFactor() float64 {
+	if c == nil || c.FeedbackBoostFactor <= 0 {
+		return 1.1
+	}
+	return c.FeedbackBoostFactor
+}
+
+// GetEffectiveFeedbackPenaltyFactor returns the penalty factor with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackPenaltyFactor() float64 {
+	if c == nil || c.FeedbackPenaltyFactor <= 0 {
+		return 0.9
+	}
+	return c.FeedbackPenaltyFactor
+}
+
+// GetEffectiveFeedbackMinSamples returns the minimum sample count with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackMinSamples() int {
+	if c == nil || c.FeedbackMinSamples <= 0 {
+		return 3
+	}
+	return c.FeedbackMinSamples
+}
+
+// GetEffectiveFeedbackNeedsOptimizationThreshold returns the needs-optimization
+// threshold with a fallback default.
+func (c *RetrievalConfig) GetEffectiveFeedbackNeedsOptimizationThreshold() float64 {
+	if c == nil || c.FeedbackNeedsOptimizationThreshold <= 0 {
+		return 0.2
+	}
+	return c.FeedbackNeedsOptimizationThreshold
+}
+
+// RetrievalConfigFingerprint returns a stable serialization of a retrieval
+// config, used to detect concurrent config changes during an async feedback
+// weight recomputation. A nil config fingerprints to the empty string.
+func RetrievalConfigFingerprint(c *RetrievalConfig) string {
+	if c == nil {
+		return ""
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // Value implements the driver.Valuer interface for database serialization
 func (c RetrievalConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface for database deserialization
+// Scan implements the sql.Scanner interface for database deserialization.
+// The JSONB column comes back as []byte on PostgreSQL but as string on
+// SQLite (Lite mode), so both forms are handled — otherwise a tenant's
+// retrieval config would silently deserialize to all-defaults on SQLite.
 func (c *RetrievalConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
 		return nil
 	}
 	return json.Unmarshal(b, c)

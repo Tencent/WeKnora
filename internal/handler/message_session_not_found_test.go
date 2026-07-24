@@ -45,6 +45,15 @@ func (s *stubMessageService) DeleteMessage(ctx context.Context, sessionID, id st
 	return s.deleteMessage(ctx, sessionID, id)
 }
 
+// stubFeedbackService only needs the per-caller feedback stamping that
+// LoadMessages performs on its success paths; a no-op keeps these routing
+// tests focused on error mapping.
+type stubFeedbackService struct {
+	interfaces.MessageFeedbackService
+}
+
+func (s *stubFeedbackService) AttachUserFeedback(context.Context, []*types.Message) {}
+
 // newMessageTestRouter mounts the standard ErrorHandler middleware so
 // c.Error(NewNotFoundError(...)) renders as a real 404 envelope —
 // matching production routing exactly.
@@ -52,7 +61,7 @@ func newMessageTestRouter(svc interfaces.MessageService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	h := &MessageHandler{MessageService: svc}
+	h := &MessageHandler{MessageService: svc, FeedbackService: &stubFeedbackService{}}
 	r.GET("/messages/:session_id/load", h.LoadMessages)
 	r.DELETE("/messages/:session_id/:id", h.DeleteMessage)
 	return r

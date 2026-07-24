@@ -20,17 +20,23 @@ import (
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
-	MessageService interfaces.MessageService // Service that implements message business logic
+	MessageService  interfaces.MessageService         // Service that implements message business logic
+	FeedbackService interfaces.MessageFeedbackService // Service that stamps per-caller feedback state
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
 // Parameters:
 //   - messageService: Service that implements message business logic
+//   - feedbackService: Service that stamps per-caller feedback state on loaded messages
 //
 // Returns a pointer to a new MessageHandler
-func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler {
+func NewMessageHandler(
+	messageService interfaces.MessageService,
+	feedbackService interfaces.MessageFeedbackService,
+) *MessageHandler {
 	return &MessageHandler{
-		MessageService: messageService,
+		MessageService:  messageService,
+		FeedbackService: feedbackService,
 	}
 }
 
@@ -92,6 +98,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.FeedbackService.AttachUserFeedback(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    messages,
@@ -132,6 +139,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.FeedbackService.AttachUserFeedback(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    messages,

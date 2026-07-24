@@ -57,9 +57,12 @@ const (
 	// ChunkFlagRecommended 表示可推荐状态（1 << 0 = 1）
 	// 当设置此标志时，该 Chunk 可以被推荐给用户
 	ChunkFlagRecommended ChunkFlags = 1 << 0
+	// ChunkFlagNeedsOptimization 表示该片段因好评率过低被自动标记为"待优化"，
+	// 提醒后台人工整改（由问答点赞点踩反馈驱动）
+	ChunkFlagNeedsOptimization ChunkFlags = 1 << 1
 	// 未来可扩展更多标志位：
-	// ChunkFlagPinned ChunkFlags = 1 << 1  // 置顶
-	// ChunkFlagHot    ChunkFlags = 1 << 2  // 热门
+	// ChunkFlagPinned ChunkFlags = 1 << 2  // 置顶
+	// ChunkFlagHot    ChunkFlags = 1 << 3  // 热门
 )
 
 // HasFlag 检查是否设置了指定标志
@@ -156,6 +159,15 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount is the cumulative thumbs-up count attributed from answer feedback
+	LikeCount int `json:"like_count"               gorm:"column:like_count;not null;default:0"`
+	// DislikeCount is the cumulative thumbs-down count attributed from answer feedback
+	DislikeCount int `json:"dislike_count"            gorm:"column:dislike_count;not null;default:0"`
+	// PositiveRate is like/(like+dislike), stored for portable filtering and sorting
+	PositiveRate float64 `json:"positive_rate"            gorm:"column:positive_rate;not null;default:0"`
+	// RecallWeight is the retrieval score multiplier derived from feedback
+	// (neutral 1.0); applied only when the tenant enables feedback ranking
+	RecallWeight float64 `json:"recall_weight"            gorm:"column:recall_weight;not null;default:1"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

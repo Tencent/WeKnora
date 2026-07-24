@@ -104,6 +104,115 @@
           @change="handleParamChange"
         />
       </div>
+
+      <!-- Feedback Ranking -->
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('retrievalSettings.feedback.enabledLabel') }}</span>
+          <t-switch
+            v-model="localConfig.feedback_ranking_enabled"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+        <p class="setting-desc">{{ t('retrievalSettings.feedback.enabledDescription') }}</p>
+      </div>
+
+      <template v-if="localConfig.feedback_ranking_enabled">
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.boostThresholdLabel') }}</span>
+            <span class="value-display">{{ (localConfig.feedback_boost_threshold ?? 0.8).toFixed(2) }}</span>
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.feedback.boostThresholdDescription') }}</p>
+          <t-slider
+            v-model="localConfig.feedback_boost_threshold"
+            :min="0.05"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.penaltyThresholdLabel') }}</span>
+            <span class="value-display">{{ (localConfig.feedback_penalty_threshold ?? 0.5).toFixed(2) }}</span>
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.feedback.penaltyThresholdDescription') }}</p>
+          <t-slider
+            v-model="localConfig.feedback_penalty_threshold"
+            :min="0.05"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.boostFactorLabel') }}</span>
+            <span class="value-display">{{ (localConfig.feedback_boost_factor ?? 1.1).toFixed(2) }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.feedback_boost_factor"
+            :min="1"
+            :max="2"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.penaltyFactorLabel') }}</span>
+            <span class="value-display">{{ (localConfig.feedback_penalty_factor ?? 0.9).toFixed(2) }}</span>
+          </div>
+          <t-slider
+            v-model="localConfig.feedback_penalty_factor"
+            :min="0.1"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.minSamplesLabel') }}</span>
+            <span class="value-display">{{ localConfig.feedback_min_samples ?? 3 }}</span>
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.feedback.minSamplesDescription') }}</p>
+          <t-slider
+            v-model="localConfig.feedback_min_samples"
+            :min="1"
+            :max="20"
+            :step="1"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedback.needsOptThresholdLabel') }}</span>
+            <span class="value-display">{{ (localConfig.feedback_needs_optimization_threshold ?? 0.2).toFixed(2) }}</span>
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.feedback.needsOptThresholdDescription') }}</p>
+          <t-slider
+            v-model="localConfig.feedback_needs_optimization_threshold"
+            :min="0.05"
+            :max="1"
+            :step="0.05"
+            :disabled="!canEdit"
+            @change="handleParamChange"
+          />
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -134,6 +243,13 @@ const defaultConfig: RetrievalConfig = {
   rerank_top_k: 10,
   rerank_threshold: 0.2,
   rerank_model_id: '',
+  feedback_ranking_enabled: false,
+  feedback_boost_threshold: 0.8,
+  feedback_penalty_threshold: 0.5,
+  feedback_boost_factor: 1.1,
+  feedback_penalty_factor: 0.9,
+  feedback_min_samples: 3,
+  feedback_needs_optimization_threshold: 0.2,
 }
 
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
@@ -152,6 +268,14 @@ const loadConfig = async () => {
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
+        feedback_ranking_enabled: cfg.feedback_ranking_enabled ?? defaultConfig.feedback_ranking_enabled,
+        feedback_boost_threshold: cfg.feedback_boost_threshold || defaultConfig.feedback_boost_threshold,
+        feedback_penalty_threshold: cfg.feedback_penalty_threshold || defaultConfig.feedback_penalty_threshold,
+        feedback_boost_factor: cfg.feedback_boost_factor || defaultConfig.feedback_boost_factor,
+        feedback_penalty_factor: cfg.feedback_penalty_factor || defaultConfig.feedback_penalty_factor,
+        feedback_min_samples: cfg.feedback_min_samples || defaultConfig.feedback_min_samples,
+        feedback_needs_optimization_threshold:
+          cfg.feedback_needs_optimization_threshold || defaultConfig.feedback_needs_optimization_threshold,
       })
       initialConfig = { ...localConfig }
     }

@@ -36,6 +36,10 @@ type TenantHandler struct {
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	// feedbackService recomputes stored chunk recall weights after a
+	// retrieval config change so threshold updates apply to low-traffic
+	// chunks too, not only ones that receive new ratings.
+	feedbackService interfaces.MessageFeedbackService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -63,6 +67,7 @@ func NewTenantHandler(
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	feedbackService interfaces.MessageFeedbackService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -72,6 +77,7 @@ func NewTenantHandler(
 		kbService:        kbService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		feedbackService:  feedbackService,
 	}
 }
 
@@ -1697,6 +1703,10 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
 	}
+	if err := validateFeedbackRankingConfig(&cfg); err != nil {
+		c.Error(err)
+		return
+	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
@@ -1704,6 +1714,10 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Workspace is empty"))
 		return
 	}
+
+	// Capture the weight-deriving feedback params before overwriting so the
+	// (potentially large) recompute only runs when they actually changed.
+	recomputeNeeded := feedbackWeightParamsChanged(tenant.RetrievalConfig, &cfg)
 
 	tenant.RetrievalConfig = &cfg
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
@@ -1716,11 +1730,85 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		}
 		return
 	}
+
+	// Refresh stored feedback weights asynchronously so the new thresholds
+	// reach chunks that would otherwise wait for their next rating. Skipped
+	// when only unrelated retrieval fields (top-K, rerank, RRF) changed. The
+	// recompute aborts itself if the config changes again mid-flight.
+	if h.feedbackService != nil && recomputeNeeded {
+		bgCtx := context.WithoutCancel(ctx)
+		tenantID := updatedTenant.ID
+		go func() {
+			if _, err := h.feedbackService.RecomputeTenantFeedbackWeights(bgCtx, tenantID); err != nil {
+				logger.Warnf(bgCtx, "feedback weight recompute after config save failed for tenant %d: %v", tenantID, err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    updatedTenant.RetrievalConfig,
 		"message": "Retrieval configuration updated successfully",
 	})
+}
+
+// feedbackWeightParamsChanged reports whether any of the effective feedback
+// parameters that derive a chunk's stored recall weight differ between two
+// configs. FeedbackRankingEnabled is deliberately excluded: toggling it only
+// changes whether weights are applied at retrieval, not the stored weights.
+func feedbackWeightParamsChanged(oldCfg, newCfg *types.RetrievalConfig) bool {
+	return oldCfg.GetEffectiveFeedbackBoostThreshold() != newCfg.GetEffectiveFeedbackBoostThreshold() ||
+		oldCfg.GetEffectiveFeedbackPenaltyThreshold() != newCfg.GetEffectiveFeedbackPenaltyThreshold() ||
+		oldCfg.GetEffectiveFeedbackBoostFactor() != newCfg.GetEffectiveFeedbackBoostFactor() ||
+		oldCfg.GetEffectiveFeedbackPenaltyFactor() != newCfg.GetEffectiveFeedbackPenaltyFactor() ||
+		oldCfg.GetEffectiveFeedbackMinSamples() != newCfg.GetEffectiveFeedbackMinSamples() ||
+		oldCfg.GetEffectiveFeedbackNeedsOptimizationThreshold() != newCfg.GetEffectiveFeedbackNeedsOptimizationThreshold()
+}
+
+// validateFeedbackRankingConfig checks the feedback ranking knobs. Raw
+// negative values are rejected first (they would otherwise be silently
+// replaced by defaults via the effective getters and persisted). Relationship
+// checks then run on effective values (zero means "use default") so
+// partially-filled requests stay coherent: 0 <= needsOptimization <= penalty
+// <= boost <= 1, boost factor >= 1, penalty factor in (0, 1], min samples >= 1.
+func validateFeedbackRankingConfig(cfg *types.RetrievalConfig) error {
+	for _, f := range []struct {
+		name string
+		val  float64
+	}{
+		{"feedback_boost_threshold", cfg.FeedbackBoostThreshold},
+		{"feedback_penalty_threshold", cfg.FeedbackPenaltyThreshold},
+		{"feedback_needs_optimization_threshold", cfg.FeedbackNeedsOptimizationThreshold},
+		{"feedback_boost_factor", cfg.FeedbackBoostFactor},
+		{"feedback_penalty_factor", cfg.FeedbackPenaltyFactor},
+	} {
+		if f.val < 0 {
+			return errors.NewBadRequestError(f.name + " must not be negative")
+		}
+	}
+
+	boost := cfg.GetEffectiveFeedbackBoostThreshold()
+	penalty := cfg.GetEffectiveFeedbackPenaltyThreshold()
+	needsOpt := cfg.GetEffectiveFeedbackNeedsOptimizationThreshold()
+	if boost > 1 {
+		return errors.NewBadRequestError("feedback_boost_threshold must be between 0 and 1")
+	}
+	if penalty > boost {
+		return errors.NewBadRequestError("feedback_penalty_threshold must not exceed feedback_boost_threshold")
+	}
+	if needsOpt > penalty {
+		return errors.NewBadRequestError("feedback_needs_optimization_threshold must not exceed feedback_penalty_threshold")
+	}
+	if cfg.GetEffectiveFeedbackBoostFactor() < 1 {
+		return errors.NewBadRequestError("feedback_boost_factor must be >= 1")
+	}
+	if pf := cfg.GetEffectiveFeedbackPenaltyFactor(); pf <= 0 || pf > 1 {
+		return errors.NewBadRequestError("feedback_penalty_factor must be in (0, 1]")
+	}
+	if cfg.FeedbackMinSamples < 0 {
+		return errors.NewBadRequestError("feedback_min_samples must be >= 1")
+	}
+	return nil
 }
 
 func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {

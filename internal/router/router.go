@@ -60,6 +60,7 @@ type RouterParams struct {
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	MessageFeedbackHandler       *handler.MessageFeedbackHandler
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
@@ -248,7 +249,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
-		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		RegisterMessageRoutes(v1, params.MessageHandler, params.MessageFeedbackHandler, rbacGuards)
+		RegisterKnowledgeBaseFeedbackRoutes(v1, params.MessageFeedbackHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
@@ -552,7 +554,12 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 // user must own the session). We add Viewer+ here so non-members
 // (e.g. revoked accounts retained in the tenant for audit) cannot
 // reach the endpoints at all once RBAC is on.
-func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
+func RegisterMessageRoutes(
+	r *gin.RouterGroup,
+	handler *handler.MessageHandler,
+	feedbackHandler *handler.MessageFeedbackHandler,
+	g *rbacGuards,
+) {
 	// Message history is tenant-wide and not attributable to a KB, so it is
 	// a full-access surface for API keys by default. The narrow
 	// exceptions are explicit capabilities:
@@ -568,7 +575,28 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 		historyMessages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		chatMessages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
 		chatMessages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
+		// Rating one's own session's answers is a chat-scoped capability;
+		// session ownership is enforced by the feedback service.
+		chatMessages.PUT("/:session_id/:id/feedback", g.Viewer(), feedbackHandler.UpsertMessageFeedback)
 	}
+}
+
+// RegisterKnowledgeBaseFeedbackRoutes exposes the per-chunk feedback
+// statistics, weight-change audit and admin reset of one knowledge base.
+// Like the activity feed above, these are owner/admin management surfaces
+// and intentionally stay JWT-only.
+func RegisterKnowledgeBaseFeedbackRoutes(
+	r *gin.RouterGroup, feedbackHandler *handler.MessageFeedbackHandler, g *rbacGuards,
+) {
+	if feedbackHandler == nil {
+		return
+	}
+	r.GET("/knowledge-bases/:id/feedback/stats",
+		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListChunkFeedbackStats)
+	r.GET("/knowledge-bases/:id/feedback/weight-logs",
+		g.OwnedKBOrAdmin(), g.KBAccessRead("id"), feedbackHandler.ListChunkWeightLogs)
+	r.DELETE("/knowledge-bases/:id/feedback",
+		g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), feedbackHandler.ResetKnowledgeBaseFeedback)
 }
 
 // RegisterSessionRoutes 注册路由。

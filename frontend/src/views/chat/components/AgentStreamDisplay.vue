@@ -315,6 +315,9 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <FeedbackButtons v-if="session?.id && sessionId" :session-id="sessionId" :message-id="String(session.id)"
+                  :model-value="(session.user_feedback as '' | 'like' | 'dislike') || ''"
+                  @update:model-value="(v: '' | 'like' | 'dislike') => (session.user_feedback = v)" />
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -490,6 +493,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import FeedbackButtons from './FeedbackButtons.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -785,6 +789,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  user_feedback?: '' | 'like' | 'dislike';
   [key: string]: unknown;
 }
 

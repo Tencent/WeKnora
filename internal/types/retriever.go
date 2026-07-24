@@ -96,6 +96,14 @@ type IndexWithScore struct {
 	MatchType MatchType
 	// IsEnabled
 	IsEnabled bool
+	// FeedbackFactor is the feedback-derived recall weight multiplied into
+	// Score before candidate truncation (0 or 1 when not adjusted). Carried
+	// explicitly so downstream stages can recover the unweighted score
+	// without lossy division.
+	FeedbackFactor float64
+	// OriginalScore is the pre-feedback-adjustment score (0 when Score was
+	// never adjusted).
+	OriginalScore float64
 }
 
 // GetScore returns the score for ScoreComparable interface
