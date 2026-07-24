@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -93,6 +95,44 @@ func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions
 func (m *mockChat) GetModelName() string { return "mock-model" }
 func (m *mockChat) GetModelID() string   { return "mock-id" }
 
+type sourceHandleProbeTool struct {
+	agenttools.BaseTool
+	mu    sync.Mutex
+	calls []json.RawMessage
+}
+
+func newSourceHandleProbeTool(name string) *sourceHandleProbeTool {
+	return &sourceHandleProbeTool{
+		BaseTool: agenttools.NewBaseTool(
+			name,
+			"Captures tool arguments for source-handle tests.",
+			json.RawMessage(`{"type":"object"}`),
+		),
+	}
+}
+
+func (t *sourceHandleProbeTool) Execute(_ context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, append(json.RawMessage(nil), args...))
+	return &types.ToolResult{Success: true, Output: "probe executed"}, nil
+}
+
+func (t *sourceHandleProbeTool) callCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.calls)
+}
+
+func (t *sourceHandleProbeTool) lastCall() json.RawMessage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.calls) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), t.calls[len(t.calls)-1]...)
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -114,7 +154,9 @@ func withCitationsEnabled(enabled bool) testEngineOption {
 func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	model := &mockChat{}
 	enabledEngine := newTestEngine(t, model)
-	require.Contains(t, enabledEngine.buildSystemPrompt(context.Background()), "Source citations are enabled")
+	enabledPrompt := enabledEngine.buildSystemPrompt(context.Background())
+	require.Contains(t, enabledPrompt, "Source citations are enabled")
+	require.Contains(t, enabledPrompt, "Use only a cN/dN/bN/wN handle that appeared verbatim")
 
 	disabledEngine := newTestEngine(t, model, withCitationsEnabled(false))
 	prompt := disabledEngine.buildSystemPrompt(context.Background())
@@ -154,6 +196,154 @@ func emptyMessages() []chat.Message {
 
 func emptyTools() []chat.Tool {
 	return nil
+}
+
+func TestExecuteLoopRejectsUnknownSourceHandleBeforeToolExecution(t *testing.T) {
+	for _, alias := range []string{"d0", "d4"} {
+		t.Run(alias, func(t *testing.T) {
+			probe := newSourceHandleProbeTool(agenttools.ToolListKnowledgeChunks)
+			toolRegistry := agenttools.NewToolRegistry()
+			toolRegistry.RegisterTool(probe)
+
+			model := &mockChat{responses: []mockResponse{
+				{chunks: []types.StreamResponse{{
+					ResponseType: types.ResponseTypeToolCall,
+					ToolCalls: []types.LLMToolCall{{
+						ID:   "call-unknown-source",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      probe.Name(),
+							Arguments: `{"knowledge_id":"` + alias + `"}`,
+						},
+					}},
+					Done:         true,
+					FinishReason: "tool_calls",
+				}}},
+				{chunks: []types.StreamResponse{{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "I will search again using a listed source.",
+					Done:         true,
+					FinishReason: "stop",
+				}}},
+			}}
+			engine := newTestEngine(t, model)
+			engine.toolRegistry = toolRegistry
+
+			state := &types.AgentState{}
+			_, err := engine.executeLoop(
+				context.Background(),
+				state,
+				"read the requested document",
+				emptyMessages(),
+				engine.buildToolsForLLM(),
+				"sess-1",
+				"msg-1",
+			)
+			require.NoError(t, err)
+			require.NotEmpty(t, state.RoundSteps)
+			require.Len(t, state.RoundSteps[0].ToolCalls, 1)
+
+			result := state.RoundSteps[0].ToolCalls[0].Result
+			require.NotNil(t, result)
+			assert.False(t, result.Success)
+			assert.Contains(t, result.Error, `unknown or incompatible source handle "`+alias+`"`)
+			assert.Zero(t, probe.callCount(), "an unknown request-local alias must not reach the underlying tool")
+		})
+	}
+}
+
+func TestRunToolCallResolvesDocumentHandlesAtExecutionBoundary(t *testing.T) {
+	tests := []struct {
+		name      string
+		toolName  string
+		arguments string
+		expected  string
+	}{
+		{
+			name:      "list knowledge chunks",
+			toolName:  agenttools.ToolListKnowledgeChunks,
+			arguments: `{"knowledge_id":"d1"}`,
+			expected:  `{"knowledge_id":"knowledge-uuid-1"}`,
+		},
+		{
+			name:      "get document info",
+			toolName:  agenttools.ToolGetDocumentInfo,
+			arguments: `{"knowledge_ids":["d1"]}`,
+			expected:  `{"knowledge_ids":["knowledge-uuid-1"]}`,
+		},
+		{
+			name:      "direct UUID remains unchanged",
+			toolName:  agenttools.ToolListKnowledgeChunks,
+			arguments: `{"knowledge_id":"knowledge-uuid-1"}`,
+			expected:  `{"knowledge_id":"knowledge-uuid-1"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := newSourceHandleProbeTool(tt.toolName)
+			toolRegistry := agenttools.NewToolRegistry()
+			toolRegistry.RegisterTool(probe)
+
+			engine := newTestEngine(t, &mockChat{})
+			engine.toolRegistry = toolRegistry
+			engine.sourceRefs.RegisterDocument("knowledge-uuid-1")
+
+			toolCall := engine.runToolCall(
+				context.Background(),
+				types.LLMToolCall{
+					ID:   "call-known-source",
+					Type: "function",
+					Function: types.FunctionCall{
+						Name:      probe.Name(),
+						Arguments: tt.arguments,
+					},
+				},
+				0,
+				0,
+				1,
+				"sess-1",
+				"msg-1",
+			)
+
+			require.NotNil(t, toolCall.Result)
+			assert.True(t, toolCall.Result.Success)
+			assert.Equal(t, 1, probe.callCount())
+			require.JSONEq(t, tt.expected, string(probe.lastCall()))
+		})
+	}
+}
+
+func TestRunToolCallResolvesSourceHandleAfterJSONRepair(t *testing.T) {
+	probe := newSourceHandleProbeTool(agenttools.ToolListKnowledgeChunks)
+	toolRegistry := agenttools.NewToolRegistry()
+	toolRegistry.RegisterTool(probe)
+
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = toolRegistry
+	engine.sourceRefs.RegisterDocument("knowledge-uuid-1")
+
+	toolCall := engine.runToolCall(
+		context.Background(),
+		types.LLMToolCall{
+			ID:   "call-repaired-source",
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      probe.Name(),
+				Arguments: `{"knowledge_id":"d1",}`,
+			},
+		},
+		0,
+		0,
+		1,
+		"sess-1",
+		"msg-1",
+	)
+
+	require.NotNil(t, toolCall.Result)
+	assert.True(t, toolCall.Result.Success)
+	assert.Equal(t, 1, probe.callCount())
+	require.JSONEq(t, `{"knowledge_id":"knowledge-uuid-1"}`, string(probe.lastCall()))
 }
 
 // ---------------------------------------------------------------------------

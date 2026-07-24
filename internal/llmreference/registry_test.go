@@ -87,6 +87,43 @@ func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
 	)
 }
 
+func TestRegistryReportsOnlyUnresolvedAliasValuedToolArguments(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterDocument("knowledge-uuid-1")
+
+	unresolved := registry.UnresolvedToolAliases(`{
+  "knowledge_id": " D1 ",
+  "knowledge_ids": ["d0"],
+  "knowledge_base_ids": ["b9"],
+  "nested": {"chunk_id": "c8", "content": "see c8"},
+  "query": "d4"
+}`)
+
+	require.Equal(t, []string{"b9", "c8", "d0"}, unresolved)
+}
+
+func TestRegistryRejectsWrongKindAliasesWithoutChangingDirectIDs(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterDocument("knowledge-uuid-1")
+	registry.RegisterKnowledgeBase("knowledge-base-uuid-1")
+
+	directID := []types.LLMToolCall{{
+		Function: types.FunctionCall{Arguments: `{"knowledge_id":"knowledge-uuid-1","knowledge_base_id":"b1"}`},
+	}}
+	registry.DecodeToolCalls(directID)
+	require.JSONEq(t,
+		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_id":"knowledge-base-uuid-1"}`,
+		directID[0].Function.Arguments,
+	)
+
+	wrongKind := []types.LLMToolCall{{
+		Function: types.FunctionCall{Arguments: `{"knowledge_id":"b1"}`},
+	}}
+	registry.DecodeToolCalls(wrongKind)
+	require.JSONEq(t, `{"knowledge_id":"b1"}`, wrongKind[0].Function.Arguments)
+	require.Equal(t, []string{"b1"}, registry.UnresolvedToolAliases(wrongKind[0].Function.Arguments))
+}
+
 func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 	registry := NewRegistry()
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})

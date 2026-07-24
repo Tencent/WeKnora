@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,6 +306,11 @@ func (e *AgentEngine) runToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	iteration, round int, sessionID, assistantMessageID string,
 ) types.ToolCall {
+	// Think normally decodes request-local references before tool execution.
+	// Do it again at the dispatch boundary so a provider-specific streaming
+	// path cannot let dN/bN/cN/wN aliases leak into a database-facing tool.
+	e.decodeToolCallReferences(&tc)
+
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
 	toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%s)]",
@@ -331,6 +337,36 @@ func (e *AgentEngine) runToolCall(
 		}
 		logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
 		tc.Function.Arguments = repaired
+		e.decodeToolCallReferences(&tc)
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			logger.Errorf(ctx, "%s Failed to parse repaired arguments after decoding references: %v", toolTag, err)
+			return types.ToolCall{
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Args:             map[string]any{"_raw": argsStr},
+				ProviderMetadata: tc.ProviderMetadata,
+				Result: &types.ToolResult{
+					Success: false,
+					Error: fmt.Sprintf(
+						"Failed to parse tool arguments: %v", err,
+					) + "\n\n[Analyze the error above and try a different approach.]",
+				},
+			}
+		}
+	}
+	if aliases := e.sourceRefs.UnresolvedToolAliases(tc.Function.Arguments); len(aliases) > 0 {
+		errMsg := unresolvedSourceHandleError(aliases)
+		logger.Warnf(ctx, "%s Rejected %s", toolTag, errMsg)
+		return types.ToolCall{
+			ID:               tc.ID,
+			Name:             tc.Function.Name,
+			Args:             args,
+			ProviderMetadata: tc.ProviderMetadata,
+			Result: &types.ToolResult{
+				Success: false,
+				Error:   errMsg,
+			},
+		}
 	}
 
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
@@ -473,4 +509,34 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	return toolCall
+}
+
+func (e *AgentEngine) decodeToolCallReferences(tc *types.LLMToolCall) {
+	if tc == nil {
+		return
+	}
+	decodedCalls := []types.LLMToolCall{*tc}
+	if e.resourceRefs != nil {
+		e.resourceRefs.DecodeToolCalls(decodedCalls)
+	}
+	if e.sourceRefs != nil {
+		e.sourceRefs.DecodeToolCalls(decodedCalls)
+	}
+	*tc = decodedCalls[0]
+}
+
+func unresolvedSourceHandleError(aliases []string) string {
+	quoted := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		quoted = append(quoted, fmt.Sprintf("%q", alias))
+	}
+	label := "unknown or incompatible source handle"
+	if len(quoted) > 1 {
+		label += "s"
+	}
+	return fmt.Sprintf(
+		"%s %s: source handles are request-local. Use only a cN/dN/bN/wN value that appeared in the current runtime context or a tool result; do not guess a handle or reuse one from a previous turn.",
+		label,
+		strings.Join(quoted, ", "),
+	)
 }

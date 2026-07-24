@@ -23,6 +23,7 @@ const sourceAliasProtocolPrompt = `
 ## Source handling protocol (system-owned)
 Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, dN a document, and bN a knowledge base.
 - Use dN and bN only as tool arguments when a tool requests a document or knowledge base.
+- Use only a cN/dN/bN/wN handle that appeared verbatim in the current runtime context or a tool result. Never guess a handle or reuse one from a previous turn.
 - Never reveal raw chunk IDs, knowledge IDs, knowledge-base IDs, or private source handles in user-visible output. This does not change separate instructions to preserve retrieved Markdown image URLs.`
 
 const citationEnabledProtocolPrompt = `
@@ -258,6 +259,54 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 	}
 }
 
+// UnresolvedToolAliases returns the request-local source handles in ID-bearing
+// tool arguments that cannot be resolved for that argument's expected source
+// kind. Callers can reject these before invoking an underlying tool, which
+// keeps a model-hallucinated or wrong-kind handle from degrading into a
+// misleading database "not found" error.
+func (r *Registry) UnresolvedToolAliases(raw string) []string {
+	if r == nil || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	unresolved := make([]string, 0)
+	r.collectUnresolvedToolAliases("", value, seen, &unresolved)
+	sort.Strings(unresolved)
+	return unresolved
+}
+
+func (r *Registry) collectUnresolvedToolAliases(key string, value interface{}, seen map[string]struct{}, unresolved *[]string) {
+	switch typed := value.(type) {
+	case string:
+		kind, ok := sourceAliasKindForKey(key)
+		if !ok {
+			return
+		}
+		alias := strings.ToLower(strings.TrimSpace(typed))
+		if !shortSourceAliasRE.MatchString(alias) || r.realForAliasOfKind(alias, kind) != "" {
+			return
+		}
+		if _, duplicate := seen[alias]; duplicate {
+			return
+		}
+		seen[alias] = struct{}{}
+		*unresolved = append(*unresolved, alias)
+	case []interface{}:
+		for _, item := range typed {
+			r.collectUnresolvedToolAliases(key, item, seen, unresolved)
+		}
+	case map[string]interface{}:
+		for childKey, item := range typed {
+			r.collectUnresolvedToolAliases(childKey, item, seen, unresolved)
+		}
+	}
+}
+
 // EncodeMessages compacts known real identifiers in assistant tool-call replay.
 func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 	if r == nil || len(messages) == 0 {
@@ -300,7 +349,42 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 	return out
 }
 
-var shortSourceAliasRE = regexp.MustCompile(`(?i)^[cdbw][1-9][0-9]*$`)
+var shortSourceAliasRE = regexp.MustCompile(`(?i)^[cdbw][0-9]+$`)
+
+type sourceAliasKind byte
+
+const (
+	sourceAliasChunk         sourceAliasKind = 'c'
+	sourceAliasDocument      sourceAliasKind = 'd'
+	sourceAliasKnowledgeBase sourceAliasKind = 'b'
+	sourceAliasWeb           sourceAliasKind = 'w'
+)
+
+// sourceAliasKindByKey is shared by registration, decoding, and validation so
+// an alias can only be used for the kind of identifier its JSON field expects.
+var sourceAliasKindByKey = map[string]sourceAliasKind{
+	"chunk_id": sourceAliasChunk, "faq_id": sourceAliasChunk,
+	"chunk_ids": sourceAliasChunk, "faq_ids": sourceAliasChunk,
+	"knowledge_id": sourceAliasDocument, "knowledge_ids": sourceAliasDocument,
+	"suspected_knowledge_ids": sourceAliasDocument, "source_refs": sourceAliasDocument,
+	"knowledge_base": sourceAliasKnowledgeBase, "knowledge_base_id": sourceAliasKnowledgeBase,
+	"knowledge_base_ids": sourceAliasKnowledgeBase, "kb_id": sourceAliasKnowledgeBase,
+	"kb_ids": sourceAliasKnowledgeBase,
+	"url":    sourceAliasWeb, "urls": sourceAliasWeb,
+}
+
+func sourceAliasKindForKey(key string) (sourceAliasKind, bool) {
+	kind, ok := sourceAliasKindByKey[strings.ToLower(key)]
+	return kind, ok
+}
+
+func sourceAliasKindForAlias(alias string) (sourceAliasKind, bool) {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if !shortSourceAliasRE.MatchString(alias) {
+		return 0, false
+	}
+	return sourceAliasKind(alias[0]), true
+}
 
 func (r *Registry) registerToolArguments(raw string) {
 	if r == nil || strings.TrimSpace(raw) == "" {
@@ -320,14 +404,18 @@ func (r *Registry) registerToolArgumentValue(key string, value interface{}) {
 		if value == "" || shortSourceAliasRE.MatchString(value) {
 			return
 		}
-		switch strings.ToLower(key) {
-		case "chunk_id", "faq_id", "chunk_ids", "faq_ids":
+		kind, ok := sourceAliasKindForKey(key)
+		if !ok {
+			return
+		}
+		switch kind {
+		case sourceAliasChunk:
 			r.RegisterChunk(ChunkReference{ChunkID: value})
-		case "knowledge_id", "knowledge_ids", "suspected_knowledge_ids", "source_refs":
+		case sourceAliasDocument:
 			r.RegisterDocument(value)
-		case "knowledge_base", "knowledge_base_id", "knowledge_base_ids", "kb_id", "kb_ids":
+		case sourceAliasKnowledgeBase:
 			r.RegisterKnowledgeBase(value)
-		case "url", "urls":
+		case sourceAliasWeb:
 			if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 				r.RegisterWeb(value, "")
 			}
@@ -428,17 +516,6 @@ func (r *Registry) decodeJSON(raw string, encode bool) string {
 	return string(encoded)
 }
 
-// decodableKeys mirrors the ID-bearing keys recognized by
-// registerToolArgumentValue. Alias -> real substitution on decode is restricted
-// to these keys so that free-text values (e.g. a grep/search query that happens
-// to equal "d1") are never rewritten into internal identifiers.
-var decodableKeys = map[string]struct{}{
-	"chunk_id": {}, "faq_id": {}, "chunk_ids": {}, "faq_ids": {},
-	"knowledge_id": {}, "knowledge_ids": {}, "suspected_knowledge_ids": {}, "source_refs": {},
-	"knowledge_base": {}, "knowledge_base_id": {}, "knowledge_base_ids": {}, "kb_id": {}, "kb_ids": {},
-	"url": {}, "urls": {},
-}
-
 func (r *Registry) walkJSON(key string, value interface{}, encode bool) interface{} {
 	switch typed := value.(type) {
 	case string:
@@ -450,15 +527,14 @@ func (r *Registry) walkJSON(key string, value interface{}, encode bool) interfac
 			}
 			return typed
 		}
-		// Decode only ID-bearing keys, and only when the value is alias-shaped,
-		// so ordinary strings that coincidentally equal an alias are preserved.
-		if _, ok := decodableKeys[strings.ToLower(key)]; !ok {
+		// Decode only ID-bearing keys, and only when the value is an alias of
+		// the kind that key expects, so ordinary strings and wrong-kind aliases
+		// are preserved for the dispatch boundary to diagnose.
+		kind, ok := sourceAliasKindForKey(key)
+		if !ok {
 			return typed
 		}
-		if !shortSourceAliasRE.MatchString(strings.TrimSpace(typed)) {
-			return typed
-		}
-		if real := r.realForAlias(typed); real != "" {
+		if real := r.realForAliasOfKind(typed, kind); real != "" {
 			return real
 		}
 		return typed
@@ -492,20 +568,27 @@ func (r *Registry) aliasForRealValue(real string) string {
 	return ""
 }
 
-func (r *Registry) realForAlias(alias string) string {
+func (r *Registry) realForAliasOfKind(alias string, expected sourceAliasKind) string {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	kind, ok := sourceAliasKindForAlias(alias)
+	if !ok || kind != expected {
+		return ""
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if ref := r.chunkByAlias[alias]; ref != nil {
-		return ref.ChunkID
-	}
-	if real := r.aliasToDoc[alias]; real != "" {
-		return real
-	}
-	if real := r.aliasToKB[alias]; real != "" {
-		return real
-	}
-	if ref := r.webByAlias[alias]; ref != nil {
-		return ref.URL
+	switch expected {
+	case sourceAliasChunk:
+		if ref := r.chunkByAlias[alias]; ref != nil {
+			return ref.ChunkID
+		}
+	case sourceAliasDocument:
+		return r.aliasToDoc[alias]
+	case sourceAliasKnowledgeBase:
+		return r.aliasToKB[alias]
+	case sourceAliasWeb:
+		if ref := r.webByAlias[alias]; ref != nil {
+			return ref.URL
+		}
 	}
 	return ""
 }
