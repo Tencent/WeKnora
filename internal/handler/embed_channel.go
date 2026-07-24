@@ -382,13 +382,15 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"questions": []types.SuggestedQuestion{}}})
 		return
 	}
-	limit := 6
+	// limit == 0 signals "unspecified" so the channel agent's starter count
+	// applies. A provided value is honored up to the embed cap.
+	limit := 0
 	if raw := c.Query("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			limit = n
-		}
-		if limit > 12 {
-			limit = 12
+			if limit > 12 {
+				limit = 12
+			}
 		}
 	}
 	questions, err := h.embedSvc.SuggestedQuestions(c.Request.Context(), ch, limit)

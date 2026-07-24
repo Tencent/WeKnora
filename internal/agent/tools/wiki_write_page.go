@@ -92,10 +92,43 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "title, summary, content, and page_type are required for write action"}, nil
 	}
 
+	// Validate + normalize the slug up front. The model routinely emits
+	// malformed slugs (stray characters, mangled UUIDs); persisting them
+	// verbatim creates unreachable pages and dead cross-links.
+	normalizedSlug, slugErr := normalizeAndValidateWikiSlug(params.Slug)
+	if slugErr != nil {
+		return &types.ToolResult{Success: false, Error: slugErr.Error()}, nil
+	}
+	params.Slug = normalizedSlug
+
 	// Try to get the existing page
 	existingPage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, params.Slug)
 	if err != nil && !errors.Is(err, repository.ErrWikiPageNotFound) {
 		return &types.ToolResult{Success: false, Error: "Failed to check existing page: " + err.Error()}, nil
+	}
+
+	// Summary pages are system-owned: they are generated deterministically
+	// from a source document and keyed by its knowledge ID
+	// (summary/<knowledgeID>). Letting the agent CREATE one with an
+	// arbitrary/hand-typed slug is precisely how mangled-UUID ghost summary
+	// pages (e.g. summary/…b171c…) get into the KB. Allow updating an
+	// existing summary page, but never fabricating a new one.
+	if existingPage == nil &&
+		(isSummaryNamespace(params.Slug) || strings.EqualFold(params.PageType, types.WikiPageTypeSummary)) {
+		return &types.ToolResult{
+			Success: false,
+			Error: "summary pages are generated automatically from source documents and cannot be created manually. " +
+				"Use page_type 'synthesis'/'comparison'/'entity'/'concept' for authored pages, " +
+				"or target an existing summary page to update it.",
+		}, nil
+	}
+
+	// Auto-repair dead [[slug]] references in the body before persisting.
+	// This rewrites LLM-mangled links (most importantly UUID-based summary
+	// slugs) back to their real target when a confident match exists, and
+	// leaves everything else untouched. Best-effort — never block the write.
+	if repaired, changed, rerr := t.wikiPageService.RepairContentLinks(ctx, kbID, params.Slug, params.Content); rerr == nil && changed {
+		params.Content = repaired
 	}
 
 	resolvedRefs := resolveSourceRefs(ctx, t.knowledgeService, params.SourceRefs)
@@ -163,4 +196,38 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 			"summary":      params.Summary,
 		},
 	}, nil
+}
+
+// normalizeAndValidateWikiSlug lowercases + trims a model-supplied slug and
+// rejects malformed ones. A valid slug contains only lowercase ASCII letters,
+// digits, '-', '/', or CJK characters, has no leading/trailing/duplicate '/',
+// and is non-empty. Keeping this strict stops the agent from persisting
+// unreachable pages built from stray characters or garbled identifiers.
+func normalizeAndValidateWikiSlug(raw string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	s = strings.ReplaceAll(s, " ", "-")
+	if s == "" {
+		return "", errors.New("slug is required and must be non-empty")
+	}
+	if strings.Contains(s, "//") || strings.HasPrefix(s, "/") || strings.HasSuffix(s, "/") {
+		return "", fmt.Errorf("invalid slug %q: '/' separators are malformed", raw)
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '/':
+		case r >= 0x4E00 && r <= 0x9FFF: // keep CJK characters
+		default:
+			return "", fmt.Errorf(
+				"invalid slug %q: character %q is not allowed (use lowercase letters, digits, '-', '/', or CJK)",
+				raw, string(r),
+			)
+		}
+	}
+	return s, nil
+}
+
+// isSummaryNamespace reports whether a slug lives in the system-owned summary
+// namespace (summary/…).
+func isSummaryNamespace(slug string) bool {
+	return strings.HasPrefix(slug, types.WikiPageTypeSummary+"/")
 }

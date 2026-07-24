@@ -785,7 +785,8 @@ Output only the scores, no explanations or additional text.`,
 		// Each score line is ~15 tokens, add buffer for safety
 		maxTokens := len(batch)*20 + 100
 
-		response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
+		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
 		})

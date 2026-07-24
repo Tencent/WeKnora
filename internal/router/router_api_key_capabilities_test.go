@@ -62,6 +62,7 @@ func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 		{http.MethodPut, "/api/v1/system/admin/settings/:key", types.APIKeyCapabilitySystemSettingsManage},
 		{http.MethodGet, "/api/v1/system/admin/runtime/queues", types.APIKeyCapabilitySystemRuntimeRead},
 		{http.MethodPost, "/api/v1/system/admin/runtime/queues/:queue/tasks/:task_id/actions/:action", types.APIKeyCapabilitySystemRuntimeManage},
+		{http.MethodDelete, "/api/v1/system/admin/runtime/queues/:queue/archived", types.APIKeyCapabilitySystemRuntimeManage},
 	}
 	for _, tc := range cases {
 		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
@@ -307,6 +308,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/hybrid-search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
+		{http.MethodGet, "/api/v1/knowledge/:id/download"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},

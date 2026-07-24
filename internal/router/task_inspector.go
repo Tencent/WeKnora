@@ -187,9 +187,9 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 // into. Read-only: it calls Inspector.GetQueueInfo per queue and maps
 // the result onto types.QueueStat, attaching static pool/weight metadata
 // from the central queue registry. A queue that has never received a task yields
-// ErrQueueNotFound from asynq; we still surface it as a zeroed row so the
-// dashboard shows the complete lane set even before a queue receives its
-// first task.
+// either ErrQueueNotFound or an internal NOT_FOUND error from asynq; we still
+// surface it as a zeroed row so the dashboard shows the complete lane set even
+// before a queue receives its first task.
 func (a *asynqTaskInspector) QueueStats(
 	ctx context.Context,
 ) ([]types.QueueStat, bool, error) {
@@ -207,7 +207,7 @@ func (a *asynqTaskInspector) QueueStats(
 		}
 		info, err := a.inspector.GetQueueInfo(queue)
 		if err != nil {
-			if !errors.Is(err, asynq.ErrQueueNotFound) {
+			if !isAsynqQueueNotFound(err) {
 				logger.Warnf(ctx, "[TaskInspector] queue info queue=%s: %v", queue, err)
 			}
 			// Zeroed row: queue not created yet (or transient error).
@@ -680,6 +680,20 @@ func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, 
 		return false, nil
 	}
 	return true, a.inspector.DeleteTask(queue, taskID)
+}
+
+// PurgeArchivedRuntimeTasks clears the whole archived (dead-letter) set for one
+// queue. asynq's DeleteAllArchivedTasks scopes strictly to the archived list,
+// so pending/active/scheduled/retry work is never at risk.
+func (a *asynqTaskInspector) PurgeArchivedRuntimeTasks(ctx context.Context, queue string) (int, bool, error) {
+	if a == nil || a.inspector == nil {
+		return 0, false, nil
+	}
+	deleted, err := a.inspector.DeleteAllArchivedTasks(queue)
+	if err != nil {
+		return 0, true, err
+	}
+	return deleted, true, nil
 }
 
 func (a *asynqTaskInspector) WorkerServerStats(

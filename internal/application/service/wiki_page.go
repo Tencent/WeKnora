@@ -918,6 +918,151 @@ func normalizeSlug(slug string) string {
 	return slug
 }
 
+// slugNamespace returns the prefix of a slug up to (but excluding) the first
+// '/', e.g. "summary/abc" -> "summary". Slugs without a '/' map to "".
+func slugNamespace(slug string) string {
+	if i := strings.IndexByte(slug, '/'); i >= 0 {
+		return slug[:i]
+	}
+	return ""
+}
+
+// rewriteDeadWikiLinks walks every [[slug]] / [[slug|display]] occurrence in
+// content and lets `resolve` decide, per link, whether to rewrite the slug.
+// `resolve` receives the normalized slug and its display text and returns the
+// replacement slug plus true to rewrite, or ("", false) to leave the link
+// untouched. Display text is preserved verbatim. This is a pure helper — the
+// resolution policy lives entirely in the callback.
+func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
+	changed := false
+	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
+		inner := match[2 : len(match)-2]
+		rawSlug := inner
+		display := ""
+		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
+			rawSlug = parts[0]
+			display = strings.TrimSpace(parts[1])
+		}
+		norm := normalizeSlug(rawSlug)
+		if norm == "" {
+			return match
+		}
+		newSlug, ok := resolve(norm, display)
+		if !ok || newSlug == "" || newSlug == norm {
+			return match
+		}
+		changed = true
+		if display != "" {
+			return "[[" + newSlug + "|" + display + "]]"
+		}
+		return "[[" + newSlug + "]]"
+	})
+	return out, changed
+}
+
+// RepairContentLinks rewrites [[slug]] / [[slug|display]] references in
+// `content` whose target does not exist in the KB but is almost certainly a
+// mangled form of a real page. The canonical case: an LLM re-typed a summary
+// page's UUID-based slug and inserted/dropped a hex digit
+// (summary/…06fb5d5b5b5e → summary/…06fb14d5b14b14e), producing a link that
+// 404s and can never be recovered by exact lookup.
+//
+// Unlike stripDeadWikiLinks (the ingest cleanup pass), this method is
+// REWRITE-ONLY: a dead link is corrected only when a confident live candidate
+// exists; otherwise it is left completely untouched. It NEVER strips a link to
+// plain text, so it is safe on any write path — including writes whose targets
+// legitimately do not exist yet (those simply stay as-is until they do).
+//
+// The candidate pool for each dead link is scoped to live slugs that share the
+// same namespace prefix (a dead `summary/<uuid>` only resolves against live
+// `summary/*` slugs). Scoping keeps the bigram-similarity lever safe: distinct
+// high-entropy UUIDs in one namespace don't collide, while a one-character
+// mangle stays comfortably above threshold against its true source.
+//
+// Returns the possibly-updated content and whether any rewrite happened.
+// Errors are only returned for hard repo failures; callers may treat repair as
+// best-effort and ignore them.
+func (s *wikiPageService) RepairContentLinks(
+	ctx context.Context, kbID, selfSlug, content string,
+) (string, bool, error) {
+	if strings.TrimSpace(content) == "" {
+		return content, false, nil
+	}
+	outLinks := s.parseOutLinks(content)
+	if len(outLinks) == 0 {
+		return content, false, nil
+	}
+
+	existMap, err := s.repo.ExistsSlugs(ctx, kbID, outLinks)
+	if err != nil {
+		return content, false, err
+	}
+	deadPrefixes := make(map[string]struct{})
+	for _, l := range outLinks {
+		if l == selfSlug || existMap[l] {
+			continue
+		}
+		deadPrefixes[slugNamespace(l)] = struct{}{}
+	}
+	if len(deadPrefixes) == 0 {
+		return content, false, nil
+	}
+
+	allSlugs, err := s.repo.ListAllSlugs(ctx, kbID)
+	if err != nil {
+		return content, false, err
+	}
+	liveByPrefix := make(map[string]map[string]struct{})
+	var candidateSlugs []string
+	for _, sl := range allSlugs {
+		ns := slugNamespace(sl)
+		if _, want := deadPrefixes[ns]; !want {
+			continue
+		}
+		set, ok := liveByPrefix[ns]
+		if !ok {
+			set = make(map[string]struct{})
+			liveByPrefix[ns] = set
+		}
+		set[sl] = struct{}{}
+		candidateSlugs = append(candidateSlugs, sl)
+	}
+	if len(candidateSlugs) == 0 {
+		return content, false, nil
+	}
+
+	// Build a title -> slug reverse lookup for candidate pages so the
+	// display-text lever (the safest, most precise one) can fire. Bounded to
+	// the relevant namespaces so this stays cheap even on large KBs.
+	titleToSlug := make(map[string]string)
+	if lites, lerr := s.repo.ListBySlugs(ctx, kbID, candidateSlugs); lerr == nil {
+		for _, lp := range lites {
+			if lp != nil && lp.Title != "" {
+				titleToSlug[lp.Title] = lp.Slug
+			}
+		}
+	}
+
+	resolveCache := make(map[string]string)
+	newContent, changed := rewriteDeadWikiLinks(content, func(norm, display string) (string, bool) {
+		if norm == selfSlug || existMap[norm] {
+			return "", false
+		}
+		key := norm + "\x00" + display
+		if cached, ok := resolveCache[key]; ok {
+			return cached, cached != ""
+		}
+		resolved, ok := resolveDeadSlug(norm, display, liveByPrefix[slugNamespace(norm)], titleToSlug)
+		if !ok || resolved == norm {
+			resolveCache[key] = ""
+			return "", false
+		}
+		resolveCache[key] = resolved
+		return resolved, true
+	})
+	return newContent, changed, nil
+}
+
 // updateInLinks adds the source slug to the in_links of target pages
 func (s *wikiPageService) updateInLinks(ctx context.Context, kbID string, sourceSlug string, targets types.StringArray) {
 	for _, targetSlug := range targets {

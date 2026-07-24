@@ -119,7 +119,8 @@ If NO, leave the sql field empty.
 
 Return your response in the specified JSON format.`, chatManage.Query, knowledge.ID, schema.Description())
 
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	modelCtx := types.WithLLMCallMetadata(ctx, "data_analysis_plan", "")
+	response, err := chatModel.Chat(modelCtx, []chat.Message{
 		{Role: "user", Content: analysisPrompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.1,

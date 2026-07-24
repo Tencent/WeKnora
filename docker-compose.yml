@@ -291,7 +291,9 @@ services:
       # overrides don't clobber it. (postgres is intentionally NOT listed: it
       # is not a user-registerable vector store, and whitelisting the app's own
       # DB host would skip the 5432 port block.)
-      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
+      # doris-be: Stream Load follows FE→BE redirects that must receive Basic
+      # credentials on whitelisted BE hosts.
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,doris-be}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # File size limit (in MB)

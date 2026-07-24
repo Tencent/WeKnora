@@ -131,6 +131,10 @@ const (
 	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
 	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
 	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
+	// AuditActionSystemQueueArchivedPurged fires when an operator clears every
+	// archived (finally-failed) task in one queue in a single action. The
+	// detail payload records the queue and how many records were removed.
+	AuditActionSystemQueueArchivedPurged AuditAction = "system.queue_archived_purged"
 
 	// Knowledge-base activity actions. These rows use scope_type=knowledge_base
 	// and scope_id=<kb id>; TargetType/TargetID identify the concrete child

@@ -70,6 +70,61 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
 }
 
+// TestStreamLLMSummarySlugSurvivesDocumentCompaction is the regression guard for
+// the mangled `summary/<uuid>` → `summary/d1` bug. A wiki summary-page slug
+// embeds a document's UUID, and sourceRefs.EncodeMessages compacts that same
+// UUID into a citation alias (d1) via a blind substring replace. resourceRefs
+// must alias the slug to a res:// token BEFORE citation compaction runs;
+// otherwise the model is shown a mangled slug it then copies into a wiki tool
+// call that 404s. See the EncodeMessages ordering in streamLLMToEventBus.
+func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
+	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	const summarySlug = "summary/" + knowledgeID
+
+	// The model copies the protected token it saw back into a wiki_read call.
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      "reading the summary",
+			ToolCalls: []types.LLMToolCall{{
+				Type: "function",
+				Function: types.FunctionCall{
+					Name:      "wiki_read_page",
+					Arguments: `{"slugs":["res://0001"]}`,
+				},
+			}},
+			Done:         true,
+			FinishReason: "tool_calls",
+		},
+	}}}}
+
+	engine := newTestEngine(t, model)
+	// The document UUID is registered as citation alias d1, exactly as the RAG
+	// context (<document id="d1">…) would have registered it upstream.
+	require.Equal(t, "d1", engine.sourceRefs.RegisterDocument(knowledgeID))
+
+	toolMsg := chat.Message{
+		Role:    "tool",
+		Content: `<link>[[` + summarySlug + `|Weknora 试错记录.md - Summary]]</link>`,
+	}
+	result, err := engine.streamLLMToEventBus(context.Background(),
+		[]chat.Message{toolMsg}, nil, nil)
+	require.NoError(t, err)
+
+	// What the model actually saw must NOT contain the mangled slug; the UUID
+	// must have been aliased to a res:// token before citation compaction ran.
+	require.Len(t, model.calls, 1)
+	sent := model.calls[0][0].Content
+	require.NotContains(t, sent, "summary/d1",
+		"summary slug was clobbered by document-id compaction (encode ordering regressed)")
+	require.Contains(t, sent, "res://", "summary slug must be protected as a res:// token")
+
+	// The model's tool call echoing the token must decode back to the real slug.
+	require.Len(t, result.ToolCalls, 1)
+	require.Contains(t, result.ToolCalls[0].Function.Arguments, summarySlug)
+	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
+}
+
 func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
 		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},

@@ -384,7 +384,8 @@ Web page content:
 		},
 	}
 
-	response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	modelCtx := types.WithLLMCallMetadata(ctx, "web_fetch_summary", "")
+	response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   1024,
 	})

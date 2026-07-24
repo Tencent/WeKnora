@@ -113,6 +113,18 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	return chatMessages
 }
 
+func withPromptCacheMetadata(
+	ctx context.Context,
+	chatModel chat.Chat,
+	messages []chat.Message,
+	opts *chat.ChatOptions,
+	purpose string,
+) context.Context {
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	_ = chatModel // model identity is already captured by the usage sink
+	return types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
+}
+
 // AppendHistoryMessages appends prior Q&A rounds in chronological order.
 // History is already filtered and truncated upstream by the load_history plugin.
 func AppendHistoryMessages(messages []chat.Message, history []*types.History) []chat.Message {

@@ -322,9 +322,8 @@ func (s *embedChannelService) SuggestedQuestions(
 	if ch == nil || !ch.ShowSuggestedQuestions {
 		return nil, nil
 	}
-	if limit <= 0 {
-		limit = 6
-	}
+	// A non-positive limit is forwarded as "unspecified" so GetSuggestedQuestions
+	// falls back to the agent's configured starter count rather than a fixed 6.
 	kbIDs := s.resolveKnowledgeBaseIDs(ctx, ch)
 	return s.agentService.GetSuggestedQuestions(ctx, ch.AgentID, kbIDs, nil, nil, limit)
 }
