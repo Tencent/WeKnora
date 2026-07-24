@@ -7,6 +7,61 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestDedupMergeRejectReason(t *testing.T) {
+	cases := []struct {
+		name        string
+		src, dst    string
+		candidates  map[string]bool
+		wantAllowed bool
+	}{
+		{
+			name:        "allowed: dst is a candidate for this item, same type prefix",
+			src:         "entity/acme-corp",
+			dst:         "entity/acme-corporation",
+			candidates:  map[string]bool{"entity/acme-corporation": true},
+			wantAllowed: true,
+		},
+		{
+			name:        "rejected: dst similar to a DIFFERENT item (union hallucination)",
+			src:         "entity/tencent-open",
+			dst:         "entity/hiring-agent",
+			candidates:  map[string]bool{"entity/tencent-ur": true}, // hiring-agent not here
+			wantAllowed: false,
+		},
+		{
+			name:        "rejected: dst is not a candidate at all (pure hallucination)",
+			src:         "entity/hy3-preview",
+			dst:         "entity/llm-cli-tool",
+			candidates:  nil,
+			wantAllowed: false,
+		},
+		{
+			name:        "rejected: type mismatch even when dst is a candidate",
+			src:         "entity/foo",
+			dst:         "concept/foo",
+			candidates:  map[string]bool{"concept/foo": true},
+			wantAllowed: false,
+		},
+		{
+			name:        "rejected: missing type prefix",
+			src:         "foo",
+			dst:         "entity/foo",
+			candidates:  map[string]bool{"entity/foo": true},
+			wantAllowed: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := dedupMergeRejectReason(tc.src, tc.dst, tc.candidates)
+			gotAllowed := reason == ""
+			if gotAllowed != tc.wantAllowed {
+				t.Fatalf("dedupMergeRejectReason(%q, %q) allowed=%v (reason=%q), want allowed=%v",
+					tc.src, tc.dst, gotAllowed, reason, tc.wantAllowed)
+			}
+		})
+	}
+}
+
 // helper: build a minimal entity/concept WikiPage.
 func makePage(slug, title, typ string, aliases ...string) *types.WikiPage {
 	return &types.WikiPage{

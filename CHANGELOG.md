@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-07-24
+
+### New Features
+
+- **NEW**: **Yunzhijia (云之家) IM Integration** — a new instant-messaging platform integration for Yunzhijia, including WebSocket message handling, request signing, image-message ingestion with SSRF-checked downloads, and markdown-formatted replies by default. Add the channel under **Settings → IM Integration** and fill in the credentials.
+- **NEW**: **Volcengine Rerank Provider** — Volcengine is now a first-class rerank provider, with request batching that transparently splits payloads exceeding the API's per-request document limit. vLLM rerankers no longer send `truncate_prompt_tokens` by default for broader compatibility.
+- **NEW**: **Zhipu AI Web Search Provider** — Zhipu AI added as a configurable web search provider alongside the existing options.
+- **NEW**: **Platform-Scoped API Keys** — control-plane automation now has dedicated platform API keys with capability-based access to tenant management, system settings, runtime queues, and audit logs, plus an admin UI for key lifecycle and system-wide audit-log viewing (migration `000071_platform_api_keys`).
+- **NEW**: **Knowledge Base Activity Audit Trail** — a scoped, per-KB activity audit trail records knowledge operations (including FAQ imports) with a dedicated activity settings view and localized audit-log detail drawer (migration `000073_kb_activity_scope`).
+- **NEW**: **FAQ Management Enhancements** — richer FAQ workflows: entry filtering and tagging, export support, and import result tracking with clearer UI feedback and activity logging.
+- **NEW**: **Langfuse OTLP/OTel Tracing** — Langfuse tracing migrated from the legacy ingestion batch API to the OpenTelemetry Go SDK emitting OTLP/HTTP (`/api/public/otel/v1/traces`), the Langfuse v3+ standard. Adds W3C `traceparent` cross-service propagation so upstream trace IDs are inherited, and merges finish metadata with auto-exported root spans.
+- **NEW**: **Chat Header Actions & Markdown Export** — a new chat header with docked state and references-panel support, session header actions, and one-click Markdown export of a conversation. Wiki tool results now surface in the references drawer, and model reasoning renders inline in the agent timeline.
+- **NEW**: **Prompt-Cache Observability** — prompt-cache hit/usage observability with cache-friendly wiki prompts to improve LLM cost and latency.
+- **NEW**: **Session Channel Governance** — IM / embed / API-key channel sessions are gated behind admin scope, with a dedicated admin API session bucket, strict owner scoping for API-key sessions, and a stabilized sidebar source filter. Archived queue tasks can now be bulk-purged.
+
+### Improvements
+
+- **IMPROVED**: **Removed Neo4j conversation memory** — the Neo4j-based episodic memory pipeline, its API fields, settings UI, and embed toggles were dropped, so chat no longer depends on Neo4j graph storage. This simplifies deployment and reduces the required infrastructure footprint.
+- **IMPROVED**: **Shared SSRF-safe HTTP transport** — model clients, embedders, the Doris Stream Load client, and datasource connectors now reuse a single SSRF-safe HTTP transport, consolidating outbound-request protection.
+- **IMPROVED**: **Resilient Feishu large-wiki sync** — Feishu wiki synchronization now retries, resumes streaming, and surfaces failure reasons for large spaces.
+- **IMPROVED**: **Organization & shared-space UI** — polished organization space UI, share-to-space panels, shared-space settings, and join-preview UI, with disambiguated shared-space terminology and tightened invite search.
+- **IMPROVED**: **Compose & config alignment** — docker-compose env vars aligned with code defaults (including a Helm GraphRAG fix, #2164), PDF render parallelism follows the CPU-aware code default, and BSD `netcat` compatibility in the dev script (#2205).
+- **IMPROVED**: **Chat layout** — conversation content area widened from 800px to 960px.
+
+### Bug Fixes
+
+- **FIXED**: Wiki summary slugs are preserved during citation compaction, and slug integrity is hardened across ingest and agent write paths (with sqlite alias support).
+- **FIXED**: IM Q&A could not read its session (#session lookup); DingTalk/IM session reads now resolve correctly.
+- **FIXED**: API keys can no longer be assigned the owner role; scoped keys can access file-serve and ingest-batch routes as intended.
+- **FIXED**: MCP OAuth token refresh and authorization polling are now coordinated to avoid races (migration `000074_mcp_oauth_refresh_lease`).
+- **FIXED**: API-key expiry timestamps normalized to UTC (#2137, migration `000072_auth_timestamp_tz`).
+- **FIXED**: Async knowledge deletion no longer leaves visible/zombie rows (#2192); KB deletion queue cleanup is detached from the request context and dequeues work for deleted knowledge bases.
+- **FIXED**: Source file download restricted to Editor role and above; shared knowledge base document preview path corrected.
+- **FIXED**: Hybrid search query text is validated; top-k retrieval ordering stabilized.
+- **FIXED**: Embedded chunk images copied into the exports namespace; parent/clone chunk image URLs rewritten via a global pass.
+- **FIXED**: Optimistic organization state corrected after review and detail loads; state synchronized after writes and pending join-request counts refreshed after review.
+- **FIXED**: Suggested-questions limit parameter honored; model debug upload limit aligned with the global `MAX_FILE_SIZE`.
+- **FIXED**: Frontend robustness — custom theme tokens kept in production builds, complete TDesign styles loaded, TDesign textarea autosize crash prevented in the org settings popup, and `crypto.randomUUID` fallback for older browsers / HTTP mode.
+- **FIXED**: nginx base image pinned by digest for old-host compatibility; graph and multimodal processing traces corrected; task-inspector lazy-queue "not found" errors handled.
+
+### Infrastructure & Build
+
+- **BUILD**: Migrations `000071_platform_api_keys`, `000072_auth_timestamp_tz`, `000073_kb_activity_scope`, `000074_mcp_oauth_refresh_lease`.
+- **BUILD**: `tenant_api_keys` table structure updated and legacy migration files removed; Langfuse tracing client replaced by an OTel exporter.
+- **BUILD**: Swagger / API docs regenerated for platform API keys, activity audit trail, web-search providers, and the removed memory feature.
+
 ## [0.7.0] - 2026-07-17
 
 ### New Features
