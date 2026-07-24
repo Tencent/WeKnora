@@ -3022,7 +3022,6 @@ watch(() => entries.value.map(e => ({
   display: flex;
   justify-content: center;
   padding-top: 2px;
->>>>>>> origin/main
 }
 </style>
 <style scoped lang="less">
