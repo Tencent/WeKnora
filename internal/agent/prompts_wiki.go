@@ -453,21 +453,23 @@ const WikiLogEntryTemplate = `## [{{.Date}}] {{.Operation}} | {{.Title}}
 
 // WikiDeduplicationPrompt asks the LLM to identify duplicate entities/concepts
 // between newly extracted items and existing wiki pages.
-const WikiDeduplicationPrompt = `You are a strict deduplication system. Given a list of newly extracted items and a list of existing wiki pages, determine which new items refer to the **exact same** real-world entity or concept as an existing page.
+const WikiDeduplicationPrompt = `You are a strict deduplication system. You are given a list of newly extracted items. Each item carries its OWN short list of existing wiki pages that are surface-similar to it (its <candidates>). For each item, decide whether it refers to the **exact same** real-world entity or concept as ONE of its own candidates.
 
-<new_items>
-{{.NewItems}}
-</new_items>
-
-<existing_pages>
-{{.ExistingPages}}
-</existing_pages>
+<items>
+{{.Candidates}}
+</items>
 
 <instructions>
+### How to read the input
+Each <item> is a newly extracted entity/concept. The <candidates> nested inside it are the ONLY existing pages you may merge that item into — they were pre-selected as similar to that specific item. A page listed under one item tells you NOTHING about any other item.
+
+### Hard constraints — a merge is only valid when ALL hold:
+- The target slug is one of the candidate <page> slugs listed **inside that same item**. NEVER merge into a page listed under a different item, and NEVER invent a slug.
+- The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
+
 ### Merge criteria — ALL must be true:
-1. The new item and the existing page refer to the **same real-world thing** (same person, same organization, same specific concept).
+1. The new item and the candidate page refer to the **same real-world thing** (same person, same organization, same specific concept).
 2. The match is a **name variation**: abbreviation ↔ full name, translation, or minor spelling difference.
-3. The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
 
 ### Examples of CORRECT merges:
 - "Acme Corp" → "Acme Corporation" (same company, abbreviation)

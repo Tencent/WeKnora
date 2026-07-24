@@ -86,28 +86,32 @@ show_help() {
 }
 
 # 加载 .env 与可选的 .env.local（后者覆盖前者）
-# 读取 .env 时去掉行尾的 \r，兼容 Windows 风格(CRLF)换行符，
+# 读取时去掉行尾 \r，兼容 Windows 风格(CRLF)换行符，
 # 否则 bash source 会把残留的 \r 当成命令导致 "...: $'\r': command not found"。
-_clean_env_file() {
-    sed -e 's/\r$//' "$1"
+# 注意：不能用 source <(sed ...)——macOS 自带 Bash 3.2 对 process substitution
+# 的 source 不会把变量导入当前 shell；必须落到可 seek 的临时文件再 source。
+_source_env_file() {
+    local src="$1"
+    local tmp
+    tmp="$(mktemp)" || return 1
+    sed -e 's/\r$//' "$src" > "$tmp"
+    set -a
+    # shellcheck source=/dev/null
+    source "$tmp"
+    set +a
+    rm -f "$tmp"
 }
 
 load_env_files() {
     if [ -f ".env" ]; then
-        set -a
-        # shellcheck source=/dev/null
-        source <(_clean_env_file .env)
-        set +a
+        _source_env_file .env || return 1
     else
         return 1
     fi
 
     if [ -f ".env.local" ]; then
         log_info "加载 .env.local 覆盖配置..."
-        set -a
-        # shellcheck source=/dev/null
-        source <(_clean_env_file .env.local)
-        set +a
+        _source_env_file .env.local || return 1
     fi
     return 0
 }

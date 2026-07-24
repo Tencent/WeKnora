@@ -536,10 +536,45 @@ func (r *Registry) CompactKnownText(text string) string {
 	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].real) > len(pairs[j].real) })
 	for _, item := range pairs {
 		if item.real != "" {
-			text = strings.ReplaceAll(text, item.real, item.alias)
+			text = replaceIDExceptWikiSummarySlug(text, item.real, item.alias)
 		}
 	}
 	return text
+}
+
+// wikiSummarySlugPrefix guards wiki summary-page slugs (summary/<knowledgeID>)
+// from citation compaction. A summary slug embeds a document's knowledge ID
+// verbatim, so a blind ReplaceAll of that ID into its citation alias (d1) would
+// mangle the slug into summary/d1 — an unrecoverable dead link the model then
+// copies into wiki tool calls. Only the slug-embedded occurrence is preserved;
+// the same document ID elsewhere in the text still compacts normally.
+const wikiSummarySlugPrefix = "summary/"
+
+// replaceIDExceptWikiSummarySlug replaces every occurrence of real with alias,
+// except one that is immediately preceded by "summary/" (i.e. it is the
+// identifier segment of a wiki summary-page slug). Go's regexp package has no
+// lookbehind, so the scan is done manually.
+func replaceIDExceptWikiSummarySlug(text, real, alias string) string {
+	if real == "" || !strings.Contains(text, real) {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	for {
+		i := strings.Index(text, real)
+		if i < 0 {
+			b.WriteString(text)
+			break
+		}
+		b.WriteString(text[:i])
+		if strings.HasSuffix(text[:i], wikiSummarySlugPrefix) {
+			b.WriteString(real) // part of a summary slug — keep intact
+		} else {
+			b.WriteString(alias)
+		}
+		text = text[i+len(real):]
+	}
+	return b.String()
 }
 
 var (

@@ -540,9 +540,14 @@ func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
 		return
 	}
 
+	// Wrap in `data` to match the ApiResponse<{invite_code}> contract both the
+	// web frontend and the Go SDK expect; a flat top-level field is silently
+	// dropped by those clients (they read data.invite_code).
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"invite_code": code,
+		"success": true,
+		"data": gin.H{
+			"invite_code": code,
+		},
 	})
 }
 
@@ -1827,18 +1832,18 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 
 // SearchTenantsForInvite searches candidate tenants for inviting to organization.
 //
-// Plan 3 (#1303) makes the tenant the unit of membership. This endpoint replaces
-// the older per-user search: it accepts a free-text query, looks up matching users
-// (by username/email), groups them by their TenantID, resolves the tenant's
-// canonical name, filters out tenants already in the org, and returns one row
-// per candidate tenant with one representative user attached for display.
+// Plan 3 (#1303) makes the tenant the unit of membership. Because a single user
+// may belong to multiple workspaces, matching by username/email is ambiguous
+// (which workspace did the admin mean?), so this endpoint matches strictly by
+// tenant (workspace) name: it resolves matching tenants, filters out tenants
+// already in the org, and returns one row per candidate tenant.
 //
 // @Summary      搜索可邀请的空间
-// @Description  搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户
+// @Description  按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
 // @Tags         组织管理
 // @Produce      json
 // @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（空间名、用户名或邮箱）"
+// @Param        q      query  string  true   "搜索关键词（空间名）"
 // @Param        limit  query  int     false  "返回数量限制" default(10)
 // @Success      200    {object}  map[string]interface{}
 // @Failure      403    {object}  apperrors.AppError
@@ -1880,50 +1885,24 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		existingTenantIDs[m.TenantID] = true
 	}
 
-	// 1) Match users by query and group by TenantID. We over-fetch so the
-	//    de-duplication after filtering "already a member" tenants still
-	//    leaves us with enough candidates to fill `limit`.
-	//    User PII (email/username) is intentionally omitted from results:
-	//    org admins only need tenant identity to send an invite.
-	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
+	// Match tenants by name only. A single user may belong to multiple
+	// workspaces, so resolving a query to "the user's tenant" is ambiguous;
+	// the membership unit is the tenant, so we invite by workspace name.
+	// SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
+	// given the soft cap of 50 above.
+	tenantsByName, _, err := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to search users: %v", err)
+		logger.Errorf(ctx, "Failed to search tenants: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
 		return
 	}
 
-	// 2) Direct tenant-name match (admins may want to invite by tenant name).
-	//    SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
-	//    given the soft cap of 50 above.
-	tenantsByName, _, _ := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
-
-	// Insertion-ordered map: first match wins, so the first user that
-	// brought a tenant in becomes the representative.
+	// Insertion-ordered map: first match wins, preserving search ordering.
 	type entry struct {
 		idx       int // preserve search ordering
 		candidate types.TenantInviteCandidate
 	}
 	seen := make(map[uint64]*entry)
-	addUser := func(u *types.User) {
-		if u == nil || u.TenantID == 0 {
-			return
-		}
-		if existingTenantIDs[u.TenantID] {
-			return
-		}
-		if _, ok := seen[u.TenantID]; ok {
-			return
-		}
-		seen[u.TenantID] = &entry{
-			idx: len(seen),
-			candidate: types.TenantInviteCandidate{
-				TenantID: u.TenantID,
-			},
-		}
-	}
-	for _, u := range users {
-		addUser(u)
-	}
 	addTenantByID := func(tid uint64) {
 		if tid == 0 || existingTenantIDs[tid] {
 			return

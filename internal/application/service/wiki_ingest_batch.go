@@ -2003,9 +2003,27 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 	if len(additions) > 0 || len(retracts) > 0 {
 		titles := batchCtx.SlugTitleMany(ctx, []string(page.OutLinks))
+
+		// aliaser escapes high-entropy slugs behind short reference tokens
+		// (ref-1, ref-2, …) for the editor LLM, then translates them back to
+		// real slugs after generation (see dealiasContent below).
+		aliaser := newSlugAliaser()
+
+		// Escape every out-link slug behind a reference token so the editor
+		// never has to retype a real slug — this is where UUID-based summary
+		// slugs (summary/<uuid>) got mangled into 404-ing links. Both the
+		// <valid_wiki_links> listing AND the [[...]] refs already present in
+		// <existing_page_content> are aliased with the SAME token map, so the
+		// model sees one consistent, copy-safe identifier space; we translate
+		// the tokens back to real slugs after generation.
+		known := make(map[string]struct{}, len(page.OutLinks))
+		for _, outSlug := range page.OutLinks {
+			known[outSlug] = struct{}{}
+			aliaser.token(outSlug) // pre-assign for stable ordering
+		}
 		for _, outSlug := range page.OutLinks {
 			if title := titles[outSlug]; title != "" {
-				fmt.Fprintf(&relatedSlugs, "- %s (%s)\n", outSlug, title)
+				fmt.Fprintf(&relatedSlugs, "- %s (%s)\n", aliaser.token(outSlug), title)
 			}
 		}
 
@@ -2013,6 +2031,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// [c003]. They are internal ingest metadata; keep the editor context
 		// clean so a subsequent update cannot copy them into rewritten prose.
 		existingContent := stripWikiInlineChunkCitations(page.Content)
+		existingContent = aliaser.aliasContent(existingContent, known)
 		if !exists || existingContent == "" {
 			existingContent = "(New page)"
 		}
@@ -2060,6 +2079,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		})
 
 		if err == nil && updatedContent != "" {
+			// Translate reference tokens (ref-N) the model copied from the
+			// aliased context back to their real slugs BEFORE the content is
+			// parsed/stored, so out_links reflect real pages again.
+			updatedContent = aliaser.dealiasContent(updatedContent)
 			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
 			if updatedBody != "" {
 				page.Content = updatedBody

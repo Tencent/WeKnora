@@ -563,7 +563,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
 // @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
-// @Param        limit               query     int     false  "返回数量上限（默认6）"
+// @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
@@ -608,7 +608,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	limit := 6
+	// limit == 0 signals "unspecified" so the service falls back to the agent's
+	// configured starter count. A provided value is passed through unchanged and
+	// bounded by the service's safety cap.
+	limit := 0
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed

@@ -1899,6 +1899,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border-radius: 6px !important;
   color: var(--td-text-color-secondary);
   cursor: pointer;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {

@@ -32,6 +32,30 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	)
 }
 
+func TestCompactKnownTextPreservesWikiSummarySlug(t *testing.T) {
+	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	const kbID = "250368ff-f5a2-4e9e-868a-07bc9b857c44"
+
+	registry := NewRegistry()
+	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
+	require.Equal(t, "b1", registry.RegisterKnowledgeBase(kbID))
+
+	// A wiki_search result: the summary slug embeds the document UUID, and the
+	// same UUID also appears as a standalone <knowledge_id> label.
+	in := "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
+		"<link>[[summary/" + knowledgeID + "|Doc - Summary]]</link>\n" +
+		"<knowledge_id>" + knowledgeID + "</knowledge_id>"
+
+	got := registry.CompactKnownText(in)
+
+	// The slug-embedded UUID must survive verbatim — no summary/d1 mangling.
+	require.Contains(t, got, "[[summary/"+knowledgeID+"|Doc - Summary]]")
+	require.NotContains(t, got, "summary/d1")
+	// The standalone label and the KB id still compact normally.
+	require.Contains(t, got, "<knowledge_id>d1</knowledge_id>")
+	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
+}
+
 func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 	registry := NewRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
