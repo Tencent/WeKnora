@@ -1596,7 +1596,7 @@ export default {
     enableDescription: "开启后将自动从文本中提取实体和关系",
     tagsLabel: "关系类型",
     tagsDescription: "定义要提取的关系类型标签，多个标签用逗号分隔",
-    tagsPlaceholder: "输入关系类型，如：工作于、同事、朋友等",
+    tagsPlaceholder: "输入关系类型，如：工作，同事，朋友",
     generateRandomTags: "生成随机标签",
     sampleTextLabel: "示例文本",
     sampleTextDescription: "用于测试实体关系提取的示例文本",
