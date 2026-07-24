@@ -124,7 +124,7 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name: ToolShellExec,
-	description: `Run a shell command inside the current session's isolated Cube sandbox.
+	description: `Run a shell command inside the current session's isolated remote sandbox.
 
 ## Usage
 - Use freely to explore and operate inside the sandbox: inspect files, search
@@ -183,7 +183,7 @@ var shellExecTool = BaseTool{
 - Obviously destructive patterns (` + "`rm -rf /`" + `, fork bombs, ` + "`mkfs`" + `, ` + "`shutdown`" + `)
   are refused up-front. Cleaning up your own scratch dir (e.g.
   ` + "`rm -rf /workspace/tmp`" + `) is fine.
-- Only available when the sandbox backend is Cube. On Docker / Local
+- Only available when the sandbox backend is Remote SandBox. On Docker / Local
   deployments this tool is not registered.`,
 	schema: utils.GenerateSchema[ShellExecInput](),
 }
@@ -243,7 +243,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if t.executor == nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "shell_exec is not available in this deployment (Cube sandbox required)",
+			Error:   "shell_exec is not available in this deployment (remote sandbox required)",
 		}, nil
 	}
 

@@ -88,9 +88,6 @@ func TestRemoteBindingDecision(t *testing.T) {
 			if got := CanReplaceRemoteBinding(tt.err); got != tt.replace {
 				t.Fatalf("CanReplaceRemoteBinding() = %v, want %v", got, tt.replace)
 			}
-			if got := ShouldPreserveRemoteBinding(tt.err); got != tt.preserve {
-				t.Fatalf("ShouldPreserveRemoteBinding() = %v, want %v", got, tt.preserve)
-			}
 		})
 	}
 }

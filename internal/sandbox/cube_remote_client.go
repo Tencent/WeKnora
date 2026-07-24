@@ -1,11 +1,9 @@
 // Package sandbox: Cube adapter for the provider-neutral RemoteSandboxClient.
 //
-// CubeRemoteClient is the Cube backend behind the single sandbox abstraction:
-// callers speak RemoteSandboxClient; this file translates each call into the
-// Cube SDK / envd transport that already lives in cube_client.go. Cube SDK
-// types, HTTP status codes and Cube-specific workarounds never leak past this
-// file — every return value is either a neutral DTO or a RemoteError with a
-// stable Kind.
+// CubeRemoteClient implements RemoteSandboxClient on top of the Cube SDK and
+// envd transport. Callers speak RemoteSandboxClient; Cube-specific types,
+// HTTP status codes, and workarounds never leak past this file — every return
+// value is either a neutral DTO or a RemoteError with a stable Kind.
 package sandbox
 
 import (
@@ -13,30 +11,23 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	cubesandbox "github.com/tencentcloud/CubeSandbox/sdk/go"
 )
-
-// cubeCreateRequest carries the subset of RemoteCreateRequest that
-// cubeClient.createRemoteSandbox needs. It lives here so the adapter can shape
-// the SDK call while cubeClient stays free of RemoteSandboxClient types.
-type cubeCreateRequest struct {
-	TemplateID string
-	Timeout    *time.Duration
-	OnTimeout  RemoteTimeoutAction
-	AutoResume bool
-	Metadata   map[string]string
-	EnvVars    map[string]string
-}
 
 // CubeRemoteClient implements RemoteSandboxClient on top of the Cube SDK and
 // envd transport. It is the only Cube backend the manager and lifecycle
 // coordinator see.
 type CubeRemoteClient struct {
-	transport *cubeClient
+	config        *Config
+	client        *cubesandbox.Client
+	sandboxDomain string
+	httpTimeout   time.Duration
 }
 
 // NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient from the
@@ -46,29 +37,78 @@ func NewCubeRemoteClient(config *Config) (*CubeRemoteClient, error) {
 	if config == nil {
 		return nil, errors.New("cube remote client config is required")
 	}
-	return &CubeRemoteClient{transport: newCubeClient(config)}, nil
+	httpTimeout := config.CubeHTTPTimeout
+	if httpTimeout <= 0 {
+		httpTimeout = DefaultCubeHTTPTimeout
+	}
+	sdkCfg := cubesandbox.Config{
+		APIURL:     config.CubeAPIURL,
+		APIKey:     config.CubeAPIKey,
+		TemplateID: config.CubeTemplate,
+		// ProxyNodeIP: ,
+		// ProxyPortHTTP: ,
+		// ProxyScheme: ,
+		SandboxDomain:  config.CubeSandboxDomain,
+		Timeout:        config.CubeHTTPTimeout,
+		RequestTimeout: config.CubeHTTPTimeout,
+	}
+
+	// Break the CubeProxy URL into (host, port, scheme). The SDK then dials
+	// <ProxyNodeIP>:<ProxyPortHTTP> while preserving the virtual sandbox
+	// hostname in the request's Host header.
+	// var envdAddr string
+	if proxyHost, proxyPort, proxyScheme, ok := parseProxyURL(config.CubeProxyURL); ok {
+		sdkCfg.ProxyNodeIP = proxyHost
+		sdkCfg.ProxyPortHTTP = proxyPort
+		sdkCfg.ProxyScheme = proxyScheme
+		// envdAddr = net.JoinHostPort(proxyHost, strconv.Itoa(proxyPort))
+	}
+
+	ttl := config.CubeSandboxTTL
+	if ttl <= 0 {
+		ttl = DefaultCubeSandboxTTL
+	}
+
+	// Inject a single HTTP client that both routes control/data-plane traffic
+	// and patches the SDK's connect request. This CubeAPI build (v0.5.11)
+	// rejects the SDK's empty "/sandboxes/{id}/connect" body with HTTP 422
+	// ("missing field `timeout`"); the rewriter fills the mandatory field in.
+	// sdkHTTP := newCubeSDKHTTPClient(envdAddr, config.CubeSandboxDomain, ttl, httpTimeout)
+
+	return &CubeRemoteClient{
+		config: config,
+		client: cubesandbox.NewClient(
+			sdkCfg,
+			// cubesandbox.WithHTTPClient(sdkHTTP),
+		),
+		sandboxDomain: config.CubeSandboxDomain,
+		httpTimeout:   httpTimeout,
+	}, nil
 }
 
-// cubeRemoteHandle is the RemoteSandboxHandle Cube returns. It wraps a
-// *SandboxInfo so subsequent envd calls can reuse the connected SDK sandbox.
+// cubeRemoteHandle is the RemoteSandboxHandle Cube returns. It wraps the SDK's
+// *cubesandbox.Sandbox directly; all envd calls (WriteFile / RunCommand / …)
+// dispatch through sb. Metadata is cached at creation time so Metadata()
+// can return it without a network round-trip.
 type cubeRemoteHandle struct {
-	info *SandboxInfo
+	sb       *cubesandbox.Sandbox
+	metadata map[string]string
 }
 
 func (h *cubeRemoteHandle) ID() string {
-	if h == nil || h.info == nil {
+	if h == nil || h.sb == nil {
 		return ""
 	}
-	return h.info.ID
+	return h.sb.SandboxID
 }
 
 func (h *cubeRemoteHandle) Provider() RemoteProvider { return SandboxTypeCube }
 
 func (h *cubeRemoteHandle) Metadata() map[string]string {
-	if h == nil || h.info == nil {
+	if h == nil {
 		return nil
 	}
-	return cloneMetadata(h.info.Metadata)
+	return cloneMetadata(h.metadata)
 }
 
 // --- RemoteSandboxClient ------------------------------------------------------
@@ -77,16 +117,18 @@ func (c *CubeRemoteClient) Provider() RemoteProvider { return SandboxTypeCube }
 
 func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
-		SupportsReconnect:      true,
-		SupportsMetadata:       true,
-		SupportsListSandboxes:  true,
-		SupportsPauseResume:    true,
-		SupportsTimeoutRefresh: true,
+		SupportsReconnect:             true,
+		SupportsMetadata:              true,
+		SupportsListSandboxes:         true,
+		SupportsPauseResume:           true,
+		SupportsTimeoutRefresh:        true,
+		SupportsFilesystemEnumeration: true,
 	}
 }
 
 func (c *CubeRemoteClient) Health(ctx context.Context) error {
-	if err := c.transport.Health(ctx); err != nil {
+	if _, err := c.client.Health(ctx); err != nil {
+		logger.Errorf(ctx, "cube remote client health check failed: %v", err)
 		return normalizeCubeError("Health", err)
 	}
 	return nil
@@ -104,6 +146,7 @@ func (c *CubeRemoteClient) Create(
 		return nil, cubeInvalidRequest("Create", err.Error(), err)
 	}
 	action := request.Timeout.Action
+	autoResume := request.Timeout.AutoResume
 	if action == "" {
 		action = RemoteOnTimeoutKill
 	}
@@ -121,28 +164,65 @@ func (c *CubeRemoteClient) Create(
 			nil,
 		)
 	}
-
-	info, err := c.transport.createRemoteSandbox(ctx, cubeCreateRequest{
-		TemplateID: request.TemplateID,
-		Timeout:    timeout,
-		OnTimeout:  action,
-		AutoResume: request.Timeout.AutoResume,
-		Metadata:   cloneMetadata(request.Metadata),
-		EnvVars:    cloneMetadata(request.EnvVars),
-	})
+	// Cube honours two independent switches for outbound reachability and
+	// both must be on for "curl https://example.com" to work from inside
+	// the VM:
+	//
+	//   * AllowInternetAccess (top-level, cluster egress switch): when
+	//     nil the SDK omits the field and the server falls back to the
+	//     template's default. Setting it explicitly makes the intent
+	//     obvious to anyone reading a captured payload and keeps
+	//     behaviour identical when the template default flips.
+	//   * Network.AllowPublicTraffic (per-sandbox routing switch): tells
+	//     CubeProxy to attach the public-egress interface to this MicroVM.
+	//     Without it the VM has no outbound route regardless of the
+	//     cluster-level allow.
+	//
+	// Callers can override either switch via cubeCreateRequest.Network.
+	// The permissive (both on) defaults preserve the pre-refactor
+	// behaviour for callers that leave the policy unset.
+	//
+	// See docs/guide/network-policy.md ("示例 7: 混合 L3 allow 和 L7 rules").
+	network := request.Network
+	if network.AllowInternetAccess == nil {
+		defaultOn := true
+		network.AllowInternetAccess = &defaultOn
+	}
+	if network.AllowPublicTraffic == nil {
+		defaultOn := true
+		network.AllowPublicTraffic = &defaultOn
+	}
+	opts := cubesandbox.CreateOptions{
+		TemplateID:          request.TemplateID,
+		Timeout:             timeout,
+		EnvVars:             cloneMetadata(request.EnvVars),
+		Metadata:            cloneMetadata(request.Metadata),
+		AllowInternetAccess: network.AllowInternetAccess,
+		Network: cubesandbox.NetworkOptions{
+			AllowPublicTraffic: network.AllowPublicTraffic,
+			AllowOut:           append([]string(nil), network.AllowOut...),
+			DenyOut:            append([]string(nil), network.DenyOut...),
+		},
+	}
+	if action != "" {
+		opts.Extra = map[string]any{
+			"lifecycle": map[string]any{
+				"onTimeout":  string(action),
+				"autoResume": autoResume,
+			},
+		}
+	}
+	sb, err := c.client.Create(ctx, opts)
 	if err != nil {
 		return nil, normalizeCubeError("Create", err)
 	}
-	if info == nil || strings.TrimSpace(info.ID) == "" {
-		return nil, NewRemoteError(
-			SandboxTypeCube, "Create", RemoteErrorKindInternal,
-			"cube returned an empty sandbox handle", nil,
-		)
+	if sb == nil || sb.SandboxID == "" {
+		return nil, errors.New("cube api: create sandbox: empty sandboxID")
 	}
-	if info.Metadata == nil {
-		info.Metadata = cloneMetadata(request.Metadata)
-	}
-	return &cubeRemoteHandle{info: info}, nil
+	return &cubeRemoteHandle{
+		sb:       sb,
+		metadata: cloneMetadata(request.Metadata),
+	}, nil
 }
 
 func (c *CubeRemoteClient) Connect(
@@ -152,17 +232,17 @@ func (c *CubeRemoteClient) Connect(
 	if strings.TrimSpace(sandboxID) == "" {
 		return nil, cubeInvalidRequest("Connect", "sandbox ID is required", nil)
 	}
-	info, err := c.transport.connectSandbox(ctx, sandboxID)
+	sb, err := c.client.Connect(ctx, sandboxID)
 	if err != nil {
 		return nil, normalizeCubeError("Connect", err)
 	}
-	if info == nil || info.ID == "" {
+	if sb == nil || sb.SandboxID == "" {
 		return nil, NewRemoteError(
 			SandboxTypeCube, "Connect", RemoteErrorKindInternal,
 			"cube returned an empty sandbox handle", nil,
 		)
 	}
-	return &cubeRemoteHandle{info: info}, nil
+	return &cubeRemoteHandle{sb: sb}, nil
 }
 
 func (c *CubeRemoteClient) Get(
@@ -172,31 +252,41 @@ func (c *CubeRemoteClient) Get(
 	if strings.TrimSpace(sandboxID) == "" {
 		return nil, cubeInvalidRequest("Get", "sandbox ID is required", nil)
 	}
-	summary, err := c.transport.GetSandbox(ctx, sandboxID)
+	sb, err := c.client.Connect(ctx, sandboxID)
 	if err != nil {
 		return nil, normalizeCubeError("Get", err)
 	}
-	if summary == nil {
+	info, err := sb.GetInfo(ctx)
+	if err != nil {
+		if isSDKNotFound(err) {
+			return nil, NewRemoteError(
+				SandboxTypeCube, "Get", RemoteErrorKindNotFound,
+				"sandbox not found", nil,
+			)
+		}
+		return nil, normalizeCubeError("Get", err)
+	}
+	if info == nil {
 		return nil, NewRemoteError(
 			SandboxTypeCube, "Get", RemoteErrorKindNotFound,
 			"sandbox not found", nil,
 		)
 	}
-	return cubeRemoteSummary(*summary), nil
+	return cubeRemoteSummary(*info), nil
 }
 
 func (c *CubeRemoteClient) List(
 	ctx context.Context,
 	filter RemoteListFilter,
 ) ([]RemoteSandboxSummary, error) {
-	summaries, err := c.transport.ListSandboxes(ctx)
+	sandboxInfos, err := c.client.List(ctx)
 	if err != nil {
 		return nil, normalizeCubeError("List", err)
 	}
-	result := make([]RemoteSandboxSummary, 0, len(summaries))
-	for _, summary := range summaries {
+	result := make([]RemoteSandboxSummary, 0, len(sandboxInfos))
+	for _, summary := range sandboxInfos {
 		converted := cubeRemoteSummary(summary)
-		if !cubeMetadataMatches(converted.Metadata, filter.Metadata) ||
+		if !metadataMatches(converted.Metadata, filter.Metadata) ||
 			!cubeStateMatches(converted.State, filter.States) {
 			continue
 		}
@@ -209,7 +299,11 @@ func (c *CubeRemoteClient) Delete(ctx context.Context, sandboxID string) error {
 	if strings.TrimSpace(sandboxID) == "" {
 		return cubeInvalidRequest("Delete", "sandbox ID is required", nil)
 	}
-	if err := c.transport.deleteSandbox(ctx, sandboxID); err != nil {
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return normalizeCubeError("Delete", err)
+	}
+	if err := sb.Kill(ctx); err != nil {
 		return normalizeCubeError("Delete", err)
 	}
 	return nil
@@ -220,7 +314,7 @@ func (c *CubeRemoteClient) Exec(
 	handle RemoteSandboxHandle,
 	request RemoteExecRequest,
 ) (*RemoteExecResult, error) {
-	info, err := cubeHandleInfo("Exec", handle)
+	sb, err := cubeHandleSandbox("Exec", handle)
 	if err != nil {
 		return nil, err
 	}
@@ -243,50 +337,50 @@ func (c *CubeRemoteClient) Exec(
 	}
 	defer cancel()
 
-	startedAt := time.Now()
-	var commandResult *CommandResult
-	if request.Shell {
-		line := request.Command
-		if request.Stdin != "" {
-			line = wrapWithStdin(line, request.Stdin)
-		}
-		commandResult, err = c.transport.RunShell(
-			execCtx, info, line,
-			cloneMetadata(request.Env), request.WorkDir,
-		)
-	} else {
-		commandResult, err = c.transport.RunCommand(
-			execCtx, info, request.Command,
-			append([]string(nil), request.Args...),
-			request.Stdin, cloneMetadata(request.Env), request.WorkDir,
-		)
+	line := request.Command
+	if !request.Shell {
+		line = buildShellLine(request.Command, request.Args)
 	}
-	duration := time.Since(startedAt)
-	result := cubeRemoteExecResult(commandResult, duration)
+	if request.Stdin != "" {
+		line = wrapWithStdin(line, request.Stdin)
+	}
+	envs := cloneMetadata(request.Env)
+	if envs == nil {
+		envs = map[string]string{}
+	}
 
-	if err != nil {
-		// Execution timeout keeps the application contract: return a
-		// Killed=true, ExitCode=-1 result with nil error. Only the outer
-		// request.Timeout counts as an execution timeout; a canceled caller
-		// or provider transport failure is a transport error.
+	startedAt := time.Now()
+	sdkResult, execErr := sb.Commands().Run(execCtx, line, cubesandbox.CommandOptions{
+		Timeout: request.Timeout,
+		Envs:    envs,
+		Cwd:     request.WorkDir,
+		User:    "root",
+	})
+	duration := time.Since(startedAt)
+
+	if execErr != nil {
 		if request.Timeout > 0 &&
 			errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-			if result == nil {
-				result = &RemoteExecResult{Duration: duration}
-			}
-			result.Killed = true
-			result.ExitCode = -1
-			return result, nil
+			return &RemoteExecResult{
+				Duration: duration,
+				Killed:   true,
+				ExitCode: -1,
+			}, nil
 		}
-		return result, normalizeCubeError("Exec", err)
+		return nil, normalizeCubeError("Exec", execErr)
 	}
-	if result == nil {
+	if sdkResult == nil {
 		return nil, NewRemoteError(
 			SandboxTypeCube, "Exec", RemoteErrorKindInternal,
 			"cube returned an empty command result", nil,
 		)
 	}
-	return result, nil
+	return &RemoteExecResult{
+		Stdout:   sdkResult.Stdout,
+		Stderr:   sdkResult.Stderr,
+		ExitCode: sdkResult.ExitCode,
+		Duration: duration,
+	}, nil
 }
 
 func (c *CubeRemoteClient) WriteFile(
@@ -295,11 +389,11 @@ func (c *CubeRemoteClient) WriteFile(
 	path string,
 	content []byte,
 ) error {
-	info, err := cubeHandleInfo("WriteFile", handle)
+	sb, err := cubeHandleSandbox("WriteFile", handle)
 	if err != nil {
 		return err
 	}
-	if err := c.transport.WriteFile(ctx, info, path, content); err != nil {
+	if err := sb.Files().Write(ctx, path, content); err != nil {
 		return normalizeCubeError("WriteFile", err)
 	}
 	return nil
@@ -310,15 +404,15 @@ func (c *CubeRemoteClient) ReadFile(
 	handle RemoteSandboxHandle,
 	path string,
 ) ([]byte, error) {
-	info, err := cubeHandleInfo("ReadFile", handle)
+	sb, err := cubeHandleSandbox("ReadFile", handle)
 	if err != nil {
 		return nil, err
 	}
-	content, err := c.transport.ReadFile(ctx, info, path)
+	content, err := sb.Files().Read(ctx, path)
 	if err != nil {
 		return nil, normalizeCubeError("ReadFile", err)
 	}
-	return content, nil
+	return []byte(content), nil
 }
 
 func (c *CubeRemoteClient) ListDir(
@@ -326,25 +420,47 @@ func (c *CubeRemoteClient) ListDir(
 	handle RemoteSandboxHandle,
 	path string,
 ) ([]RemoteDirEntry, error) {
-	info, err := cubeHandleInfo("ListDir", handle)
+	sb, err := cubeHandleSandbox("ListDir", handle)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := c.transport.ListDir(ctx, info, path)
+	if path == "" {
+		path = "/"
+	}
+	entries, err := sb.Files().List(ctx, path)
 	if err != nil {
 		return nil, normalizeCubeError("ListDir", err)
 	}
 	result := make([]RemoteDirEntry, 0, len(entries))
-	for _, entry := range entries {
+	for _, e := range entries {
 		result = append(result, RemoteDirEntry{
-			Name:    entry.Name,
-			Path:    entry.Path,
-			Type:    cubeRemoteEntryType(entry.Type),
-			Size:    entry.Size,
-			ModTime: cubeModTime(entry.ModifiedAt),
+			Name:    e.Name,
+			Path:    e.Path,
+			Type:    cubeRemoteEntryType(normaliseFileType(e.Type)),
+			Size:    e.Size,
+			ModTime: cubeModTime(e.ModifiedTime),
 		})
 	}
 	return result, nil
+}
+
+// normaliseFileType maps envd's proto enum strings ("FILE_TYPE_FILE",
+// "FILE_TYPE_DIRECTORY", …) onto the short lowercase names WeKnora already
+// stores.
+func normaliseFileType(t string) string {
+	switch strings.ToUpper(t) {
+	case "FILE_TYPE_FILE", "FILE":
+		return "file"
+	case "FILE_TYPE_DIRECTORY", "DIRECTORY":
+		return "directory"
+	case "FILE_TYPE_SYMLINK", "SYMLINK":
+		return "symlink"
+	default:
+		if t == "" {
+			return ""
+		}
+		return strings.ToLower(t)
+	}
 }
 
 func (c *CubeRemoteClient) MakeDir(
@@ -352,11 +468,11 @@ func (c *CubeRemoteClient) MakeDir(
 	handle RemoteSandboxHandle,
 	path string,
 ) error {
-	info, err := cubeHandleInfo("MakeDir", handle)
+	sb, err := cubeHandleSandbox("MakeDir", handle)
 	if err != nil {
 		return err
 	}
-	if err := c.transport.MakeDir(ctx, info, path); err != nil {
+	if _, err := sb.Files().MakeDir(ctx, path); err != nil {
 		return normalizeCubeError("MakeDir", err)
 	}
 	return nil
@@ -367,11 +483,11 @@ func (c *CubeRemoteClient) Remove(
 	handle RemoteSandboxHandle,
 	path string,
 ) error {
-	info, err := cubeHandleInfo("Remove", handle)
+	sb, err := cubeHandleSandbox("Remove", handle)
 	if err != nil {
 		return err
 	}
-	if err := c.transport.Remove(ctx, info, path); err != nil {
+	if err := sb.Files().Remove(ctx, path); err != nil {
 		return normalizeCubeError("Remove", err)
 	}
 	return nil
@@ -382,12 +498,18 @@ func (c *CubeRemoteClient) Stat(
 	handle RemoteSandboxHandle,
 	path string,
 ) (*RemoteStatEntry, error) {
-	info, err := cubeHandleInfo("Stat", handle)
+	sb, err := cubeHandleSandbox("Stat", handle)
 	if err != nil {
 		return nil, err
 	}
-	entry, err := c.transport.Stat(ctx, info, path)
+	entry, err := sb.Files().Stat(ctx, path)
 	if err != nil {
+		if isSDKNotFound(err) {
+			return nil, NewRemoteError(
+				SandboxTypeCube, "Stat", RemoteErrorKindNotFound,
+				"path not found", nil,
+			)
+		}
 		return nil, normalizeCubeError("Stat", err)
 	}
 	if entry == nil {
@@ -398,13 +520,31 @@ func (c *CubeRemoteClient) Stat(
 	}
 	return &RemoteStatEntry{
 		Path:    entry.Path,
-		Type:    cubeRemoteEntryType(entry.Type),
+		Type:    cubeRemoteEntryType(normaliseFileType(entry.Type)),
 		Size:    entry.Size,
-		ModTime: cubeModTime(entry.ModifiedAt),
+		ModTime: cubeModTime(entry.ModifiedTime),
 	}, nil
 }
 
 // --- helpers -----------------------------------------------------------------
+
+// isSDKNotFound spots the SDK's "resource missing" errors without having to
+// import its internal error types. Both explicit NotFoundError values and
+// textual "not found" mentions in wrapped errors are recognised.
+func isSDKNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfe *cubesandbox.NotFoundError
+	if errors.As(err, &nfe) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "no such file") ||
+		strings.Contains(lower, "sandbox_not_found") ||
+		strings.Contains(lower, "http 404")
+}
 
 func cubeTimeout(policy RemoteTimeoutPolicy) (*time.Duration, error) {
 	switch policy.Mode {
@@ -421,27 +561,121 @@ func cubeTimeout(policy RemoteTimeoutPolicy) (*time.Duration, error) {
 	}
 }
 
-func cubeHandleInfo(op string, handle RemoteSandboxHandle) (*SandboxInfo, error) {
+// cubeHandleSandbox extracts the SDK *cubesandbox.Sandbox from an opaque
+// RemoteSandboxHandle. Returns an error when the handle is nil, not Cube,
+// or has an empty sandbox ID.
+func cubeHandleSandbox(op string, handle RemoteSandboxHandle) (*cubesandbox.Sandbox, error) {
 	cubeHandle, ok := handle.(*cubeRemoteHandle)
-	if !ok || cubeHandle == nil || cubeHandle.info == nil ||
-		strings.TrimSpace(cubeHandle.info.ID) == "" {
+	if !ok || cubeHandle == nil || cubeHandle.sb == nil ||
+		strings.TrimSpace(cubeHandle.sb.SandboxID) == "" {
 		return nil, cubeInvalidRequest(op, "handle was not issued by Cube", nil)
 	}
-	return cubeHandle.info, nil
+	return cubeHandle.sb, nil
 }
 
-func cubeRemoteSummary(summary SandboxSummary) *RemoteSandboxSummary {
-	return &RemoteSandboxSummary{
-		ID:         summary.SandboxID,
-		TemplateID: summary.TemplateID,
-		State:      normalizeCubeState(summary.State),
-		RawState:   summary.State,
-		Metadata:   cloneMetadata(summary.Metadata),
-		StartedAt:  summary.StartedAt,
-		EndAt:      summary.EndAt,
+// cubeRemoteSummary converts the SDK's SandboxInfo (from List / GetInfo) into
+// the provider-neutral RemoteSandboxSummary DTO.
+func cubeRemoteSummary(info cubesandbox.SandboxInfo) *RemoteSandboxSummary {
+	out := &RemoteSandboxSummary{
+		ID:         info.SandboxID,
+		TemplateID: info.TemplateID,
+		State:      normalizeCubeState(info.State),
+		RawState:   info.State,
+		Metadata:   cloneMetadata(info.Metadata),
+		StartedAt:  info.StartedAt,
 	}
+	if info.EndAt != nil {
+		out.EndAt = *info.EndAt
+	}
+	return out
 }
 
+// parseProxyURL turns "http://127.0.0.1:80" into ("127.0.0.1", 80, "http").
+// A missing port defaults to 80/443 depending on the scheme; an unparseable
+// URL returns ok=false so callers can fall back to the SDK's defaults.
+func parseProxyURL(raw string) (host string, port int, scheme string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", 0, "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "", 0, "", false
+	}
+	scheme = strings.ToLower(parsed.Scheme)
+	if scheme == "" {
+		scheme = "http"
+	}
+	h, p, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		h = parsed.Host
+		if scheme == "https" {
+			p = "443"
+		} else {
+			p = "80"
+		}
+	}
+	portInt, err := strconv.Atoi(p)
+	if err != nil || portInt <= 0 {
+		return "", 0, "", false
+	}
+	return h, portInt, scheme, true
+}
+
+// buildShellLine turns argv into a single shell-safe command line. It matches
+// the semantics of the old hand-rolled path, which relied on envd's bash to
+// resolve `python3` (or similar) against $PATH inside the sandbox image.
+func buildShellLine(cmd string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, shellQuote(cmd))
+	for _, a := range args {
+		parts = append(parts, shellQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// wrapWithStdin funnels a caller-supplied stdin payload into the child
+// process by prepending a heredoc. This keeps the SDK's Commands.Run contract
+// (which does not take an explicit stdin argument) usable in the rare case
+// callers actually need to pipe data.
+func wrapWithStdin(line, stdin string) string {
+	// Use a heredoc delimiter unlikely to appear in caller data.
+	const delim = "WEKNORA_STDIN_EOF"
+	// Escape lines containing the delimiter defensively.
+	safe := strings.ReplaceAll(stdin, delim, "")
+	return "cat <<'" + delim + "' | " + line + "\n" + safe + "\n" + delim
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded quotes. Suitable
+// for building a /bin/bash -c line where every argv element should be treated
+// as literal text.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	// Only bare tokens (alnum, dash, underscore, slash, dot, comma, colon,
+	// equals, plus) can be passed unquoted; everything else gets single
+	// quotes.
+	if isShellSafe(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func isShellSafe(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '/' || r == '.' || r == ',' ||
+			r == ':' || r == '=' || r == '+':
+		default:
+			return false
+		}
+	}
+	return true
+}
 func normalizeCubeState(state string) RemoteSandboxState {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "running", "available":
@@ -454,19 +688,6 @@ func normalizeCubeState(state string) RemoteSandboxState {
 		return RemoteStateTerminal
 	default:
 		return RemoteStateUnknown
-	}
-}
-
-func cubeRemoteExecResult(result *CommandResult, duration time.Duration) *RemoteExecResult {
-	if result == nil {
-		return nil
-	}
-	return &RemoteExecResult{
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-		Duration: duration,
-		Killed:   result.Killed,
 	}
 }
 
@@ -489,15 +710,6 @@ func cubeModTime(value string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-func cubeMetadataMatches(candidate, required map[string]string) bool {
-	for key, value := range required {
-		if candidate[key] != value {
-			return false
-		}
-	}
-	return true
 }
 
 func cubeStateMatches(candidate RemoteSandboxState, allowed []RemoteSandboxState) bool {
@@ -547,7 +759,7 @@ func normalizeCubeError(op string, err error) error {
 		case errors.As(err, &pathNotFound):
 			kind = RemoteErrorKindNotFound
 		case errors.As(err, &apiErr):
-			kind = cubeHTTPErrorKind(op, apiErr.StatusCode)
+			kind = httpErrorKind(op, apiErr.StatusCode)
 		case errors.As(err, &netErr) && netErr.Timeout():
 			kind = RemoteErrorKindTimeout
 		case errors.As(err, &netErr):
@@ -555,33 +767,6 @@ func normalizeCubeError(op string, err error) error {
 		}
 	}
 	return NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
-}
-
-func cubeHTTPErrorKind(op string, status int) RemoteErrorKind {
-	switch status {
-	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		return RemoteErrorKindInvalidRequest
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return RemoteErrorKindAuthentication
-	case http.StatusNotFound:
-		if op == "Create" {
-			return RemoteErrorKindInvalidRequest
-		}
-		return RemoteErrorKindNotFound
-	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		return RemoteErrorKindTimeout
-	case http.StatusConflict:
-		return RemoteErrorKindConflict
-	case http.StatusGone:
-		return RemoteErrorKindTerminal
-	case http.StatusTooManyRequests, http.StatusInsufficientStorage:
-		return RemoteErrorKindCapacity
-	default:
-		if status >= 500 {
-			return RemoteErrorKindUnavailable
-		}
-		return RemoteErrorKindInternal
-	}
 }
 
 var (

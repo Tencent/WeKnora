@@ -128,17 +128,31 @@ Sandbox 相关配置通过环境变量设置：
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `WEKNORA_SANDBOX_MODE` | sandbox 模式: `docker`, `local`, `disabled` | `disabled` |
+| `WEKNORA_SANDBOX_MODE` | sandbox 模式：`docker` / `local` / `cube` / `e2b` / `disabled` | `disabled` |
 | `WEKNORA_SANDBOX_TIMEOUT` | 脚本执行超时（秒） | `60` |
-| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像 | `wechatopenai/weknora-sandbox:latest` |
+| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像（docker 模式） | `wechatopenai/weknora-sandbox:latest` |
+| `WEKNORA_SANDBOX_BINDING_STORE` | 会话→沙箱绑定存储：`auto` / `redis` / `memory`（cube / e2b 生效） | `auto` |
+| `WEKNORA_SANDBOX_SINGLE_PROCESS` | `1` 表示单机部署，允许使用 memory binding | 空 |
+| `WEKNORA_SANDBOX_REDIS_NAMESPACE` | Redis key 命名空间（未设置时复用 `WEKNORA_REDIS_NAMESPACE`） | `weknora` |
+| `WEKNORA_SANDBOX_CUBE_*` | Cube 后端专用配置，见 `.env.example` | — |
+| `WEKNORA_SANDBOX_E2B_*` | E2B 后端专用配置，见 `.env.example`（`WEKNORA_SANDBOX_E2B_API_KEY` 必填） | — |
 
 ### Sandbox 模式
 
-| 模式 | 说明 |
-|------|------|
-| `docker` | 使用 Docker 容器隔离（推荐） |
-| `local` | 本地进程执行（基础安全限制） |
-| `disabled` | 禁用脚本执行 |
+| 模式 | 状态 | 说明 |
+|------|------|------|
+| `docker` | 稳定 | 使用 Docker 容器隔离（推荐用于本地/单机部署） |
+| `local` | 基础 | 本地进程执行（仅基础白名单，无 MicroVM 隔离） |
+| `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
+| `e2b` | 实验性 | E2B 云端 MicroVM；SDK 尚未支持 `Connect(id)` 与 List/Stat/MakeDir/Remove，进程重启后会重建会话沙箱、会话文件工具会静默不注册 |
+| `disabled` | — | 禁用脚本执行 |
+
+### 会话级 sandbox 部署要点
+
+- **多机部署（生产推荐）**：`WEKNORA_SANDBOX_BINDING_STORE=auto` 或 `redis`，同时确保 `REDIS_ADDR` 可用。多副本共享同一 session 的沙箱绑定，通过 Redis SET NX + 可续租分布式锁串行化 create / recover / delete。Redis 不可达时进程直接拒绝启动。
+- **单机部署**：设置 `WEKNORA_SANDBOX_SINGLE_PROCESS=1`。此时 `auto` 会退回到进程内内存 binding；显式设 `WEKNORA_SANDBOX_BINDING_STORE=memory` 也可。进程重启会丢失 session→sandbox 映射，remote 侧沙箱由 provider TTL 自动回收。
+- **切换 provider**：不同 provider 的 sandbox ID 不通用。切换 `WEKNORA_SANDBOX_MODE` 后，旧 session 的 binding 会因 provider 不匹配被 CAS 替换成新 provider 的新沙箱；旧 provider 侧的沙箱交由自身 TTL 回收，WeKnora 不做跨 provider 删除。
+- **网络策略**：`cube` 与 `e2b` 默认开启公网出口和 public traffic。任务 8 之后可以在 create 时通过 provider-neutral `RemoteNetworkPolicy` 精细化配置（`AllowInternetAccess` / `AllowPublicTraffic` / `AllowOut` / `DenyOut`）；两个 adapter 都实现了同一契约。
 
 ## Agent 工具
 

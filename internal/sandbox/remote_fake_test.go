@@ -55,9 +55,10 @@ func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
 	return &fakeRemoteClient{
 		provider: provider,
 		capabilities: RemoteSandboxCapabilities{
-			SupportsReconnect:     true,
-			SupportsMetadata:      true,
-			SupportsListSandboxes: true,
+			SupportsReconnect:             true,
+			SupportsMetadata:              true,
+			SupportsListSandboxes:         true,
+			SupportsFilesystemEnumeration: true,
 		},
 		sandboxes:   make(map[string]*fakeRemoteRecord),
 		connectErrs: make(map[string]error),
@@ -292,14 +293,7 @@ func (c *fakeRemoteClient) addSandbox(
 	}
 }
 
-func (c *fakeRemoteClient) setState(id string, state RemoteSandboxState) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if record := c.sandboxes[id]; record != nil {
-		record.state = state
-		record.rawState = string(state)
-	}
-}
+
 
 func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int) {
 	c.mu.Lock()

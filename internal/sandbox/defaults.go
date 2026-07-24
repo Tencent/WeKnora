@@ -21,19 +21,32 @@ func applyCubeDefaults(cfg *Config) {
 	if cfg.CubeSandboxDomain == "" {
 		cfg.CubeSandboxDomain = DefaultCubeSandboxDomain
 	}
-	if cfg.CubeEnvdPort <= 0 {
-		cfg.CubeEnvdPort = DefaultCubeEnvdPort
-	}
 	if cfg.CubeTemplate == "" {
 		cfg.CubeTemplate = DefaultCubeTemplate
 	}
 	if cfg.CubeSandboxTTL <= 0 {
 		cfg.CubeSandboxTTL = DefaultCubeSandboxTTL
 	}
-	if cfg.CubeIdleTTL <= 0 {
-		cfg.CubeIdleTTL = DefaultCubeIdleTTL
-	}
 	if cfg.CubeHTTPTimeout <= 0 {
 		cfg.CubeHTTPTimeout = DefaultCubeHTTPTimeout
+	}
+}
+
+// applyE2BDefaults mutates cfg in-place so downstream code can rely on the
+// E2B-specific timeout fields being non-zero.
+//
+// Unlike Cube, there is no repository-wide default E2B template ID — an
+// empty E2BTemplate causes SessionBoundManager construction to fail so
+// operators get a clear misconfiguration message instead of a silent
+// fallback.
+func applyE2BDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.E2BSandboxTTL <= 0 {
+		cfg.E2BSandboxTTL = DefaultE2BSandboxTTL
+	}
+	if cfg.E2BHTTPTimeout <= 0 {
+		cfg.E2BHTTPTimeout = DefaultE2BHTTPTimeout
 	}
 }

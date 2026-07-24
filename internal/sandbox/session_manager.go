@@ -5,7 +5,7 @@
 // treats the authoritative session→sandbox binding as external state that
 // lives in SessionSandboxBindingStore (Redis in production, memory in tests
 // and single-process deployments). This makes the manager provider-neutral
-// (Cube today, E2B tomorrow) and multi-instance safe: two WeKnora processes
+// (Cube , E2B) and multi-instance safe: two WeKnora processes
 // concurrently servicing the same session never allocate duplicate sandboxes,
 // and a restart never loses the session's remote resource.
 //
@@ -95,6 +95,10 @@ type SessionBoundManagerConfig struct {
 // operation flows through these three dependencies; the manager never keeps
 // authoritative session→sandbox state locally.
 //
+// Provider identity comes from deps.Client.Provider() — not Config.Type —
+// so test harnesses and custom wiring that inject a different client backend
+// always project the correct template, TTL, and health timeout.
+//
 // When the client's Health probe fails and config.FallbackEnabled is true,
 // the manager transparently falls back to LocalSandbox for ephemeral Execute
 // calls. Session-scoped capabilities remain refused in that mode.
@@ -106,7 +110,6 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 	if err := ValidateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("invalid sandbox config: %w", err)
 	}
-	applyCubeDefaults(cfg)
 	if deps.Client == nil {
 		return nil, errors.New("session bound manager requires a RemoteSandboxClient")
 	}
@@ -117,7 +120,36 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		return nil, errors.New("session bound manager requires a SessionExistenceChecker")
 	}
 
-	createRequest := buildSessionCreateRequest(cfg)
+	provider := deps.Client.Provider()
+	if !isRemoteProvider(provider) {
+		return nil, fmt.Errorf("sandbox: unsupported remote provider %q", provider)
+	}
+
+	// Apply the provider-specific defaults so downstream code reads only
+	// non-zero Config fields for this provider.
+	switch provider {
+	case SandboxTypeCube:
+		applyCubeDefaults(cfg)
+	case SandboxTypeE2B:
+		applyE2BDefaults(cfg)
+	}
+
+	// Build the provider-specific neutral create request using the
+	// provider's own template and TTL fields.
+	createRequest, err := buildSessionCreateRequest(provider, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("session bound manager: %w", err)
+	}
+	// An empty template for the selected provider means the deployment is
+	// misconfigured. Fail early so operators get a clear message instead of
+	// a remote API error at the first sandbox allocation.
+	if strings.TrimSpace(createRequest.TemplateID) == "" {
+		return nil, fmt.Errorf(
+			"sandbox: %s template ID is required but not configured",
+			provider,
+		)
+	}
+
 	lifecycle, err := newRemoteSessionLifecycle(
 		deps.Client,
 		deps.Store,
@@ -137,17 +169,21 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		checker:    deps.Checker,
 		lifecycle:  lifecycle,
 		ephemeral:  NewRemoteSandbox(deps.Client, createRequest),
-		activeType: deps.Client.Provider(),
+		activeType: provider,
 	}
 
-	probeCtx, cancel := context.WithTimeout(context.Background(), effectiveHTTPTimeout(cfg))
+	// Health probe uses the provider's own HTTP timeout.
+	probeCtx, cancel := context.WithTimeout(
+		context.Background(),
+		effectiveHTTPTimeout(provider, cfg),
+	)
 	defer cancel()
 	if err := deps.Client.Health(probeCtx); err != nil {
 		if !cfg.FallbackEnabled {
 			return nil, fmt.Errorf("remote sandbox provider unavailable: %w", err)
 		}
 		log.Printf("[sandbox] remote provider %s unhealthy (%v); falling back to local sandbox",
-			deps.Client.Provider(), err)
+			provider, err)
 		m.fallback = NewLocalSandbox(cfg)
 		m.activeType = m.fallback.Type()
 	}
@@ -423,9 +459,13 @@ func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
 }
 
 // SessionFileStore advertises the session-scoped filesystem capability while
-// a real remote backend is active. Returns nil after Local fallback engages.
+// a real remote backend is active and the provider implements the enumeration
+// operations (ListDir / Stat / MakeDir / Remove).
 func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
 	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	if !m.client.Capabilities().SupportsFilesystemEnumeration {
 		return nil
 	}
 	return m
@@ -602,26 +642,69 @@ func cleanSessionInputPath(filePath string) (string, error) {
 // buildSessionCreateRequest projects Config into a provider-neutral remote
 // create request. The metadata block is populated per-session by the
 // lifecycle coordinator; env vars propagate as-is.
-func buildSessionCreateRequest(cfg *Config) RemoteCreateRequest {
-	ttl := cfg.CubeSandboxTTL
-	if ttl <= 0 {
-		ttl = DefaultCubeSandboxTTL
-	}
-	return RemoteCreateRequest{
-		TemplateID: cfg.CubeTemplate,
-		Timeout: RemoteTimeoutPolicy{
-			Mode:   RemoteTimeoutExplicit,
-			Value:  ttl,
-			Action: RemoteOnTimeoutKill,
-		},
+//
+// The provider parameter (derived from RemoteSandboxClient.Provider()) is the
+// authoritative source of identity — it selects the correct Config fields so
+// Cube and E2B never read each other's templates or TTLs.
+func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCreateRequest, error) {
+	switch provider {
+	case SandboxTypeCube:
+		ttl := cfg.CubeSandboxTTL
+		if ttl <= 0 {
+			ttl = DefaultCubeSandboxTTL
+		}
+		return RemoteCreateRequest{
+			TemplateID: cfg.CubeTemplate,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:       RemoteTimeoutExplicit,
+				Value:      ttl,
+				Action:     RemoteOnTimeoutPause,
+				AutoResume: true,
+			},
+		}, nil
+
+	case SandboxTypeE2B:
+		ttl := cfg.E2BSandboxTTL
+		if ttl <= 0 {
+			ttl = DefaultE2BSandboxTTL
+		}
+		return RemoteCreateRequest{
+			TemplateID: cfg.E2BTemplate,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:       RemoteTimeoutExplicit,
+				Value:      ttl,
+				Action:     RemoteOnTimeoutPause,
+				AutoResume: true,
+			},
+		}, nil
+
+	default:
+		return RemoteCreateRequest{}, fmt.Errorf(
+			"sandbox: unsupported remote provider %q for session create request",
+			provider,
+		)
 	}
 }
 
-func effectiveHTTPTimeout(cfg *Config) time.Duration {
-	if cfg.CubeHTTPTimeout > 0 {
-		return cfg.CubeHTTPTimeout
+// effectiveHTTPTimeout returns the HTTP timeout for health probes and API
+// calls against the provider's control plane. The provider parameter is
+// authoritative: Cube and E2B each read their own timeout field and fall back
+// to their own package-level default.
+func effectiveHTTPTimeout(provider RemoteProvider, cfg *Config) time.Duration {
+	switch provider {
+	case SandboxTypeCube:
+		if cfg.CubeHTTPTimeout > 0 {
+			return cfg.CubeHTTPTimeout
+		}
+		return DefaultCubeHTTPTimeout
+	case SandboxTypeE2B:
+		if cfg.E2BHTTPTimeout > 0 {
+			return cfg.E2BHTTPTimeout
+		}
+		return DefaultE2BHTTPTimeout
+	default:
+		return DefaultCubeHTTPTimeout
 	}
-	return DefaultCubeHTTPTimeout
 }
 
 var (

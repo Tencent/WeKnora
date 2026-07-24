@@ -44,20 +44,21 @@ const (
 	// DefaultCubeSandboxDomain is the sandbox routing domain configured on
 	// CubeProxy (matches CUBE_API_SANDBOX_DOMAIN in the Cube deployment).
 	DefaultCubeSandboxDomain = "cube.app"
-	// DefaultCubeEnvdPort is the port on which envd listens inside every sandbox.
-	DefaultCubeEnvdPort = 49983
 	// DefaultCubeTemplate is the default template ID used to spawn Cube sandboxes.
 	DefaultCubeTemplate = "tpl-2b7911a5c3bb419a8745957a"
 	// DefaultCubeSandboxTTL is the Cube-side sandbox lifetime hint (in seconds)
 	// requested at creation; the sandbox is torn down by CubeMaster if the
 	// client goes silent for longer than this value.
 	DefaultCubeSandboxTTL = 30 * time.Minute
-	// DefaultCubeIdleTTL is the idle duration after which a session-bound sandbox
-	// is paused; sandboxes idle for 3x this duration are killed entirely.
-	DefaultCubeIdleTTL = 30 * time.Minute
 	// DefaultCubeHTTPTimeout bounds a single HTTP call to the CubeAPI
 	// (excluding user script execution which has its own per-call timeout).
 	DefaultCubeHTTPTimeout = 30 * time.Second
+
+	// DefaultE2BSandboxTTL matches the E2B SDK's built-in default so an
+	// unset E2BSandboxTTL still yields a valid sandbox lifetime.
+	DefaultE2BSandboxTTL = 5 * time.Minute
+	// DefaultE2BHTTPTimeout bounds a single HTTP call to the E2B API.
+	DefaultE2BHTTPTimeout = 30 * time.Second
 )
 
 // Common errors
@@ -71,7 +72,6 @@ var (
 	ErrDangerousCommand  = errors.New("script contains dangerous command")
 	ErrArgInjection      = errors.New("argument injection detected")
 	ErrStdinInjection    = errors.New("stdin injection detected")
-	ErrCubeUnavailable   = errors.New("cube sandbox api is not reachable")
 )
 
 // Sandbox defines the interface for isolated script execution
@@ -122,10 +122,6 @@ type ExecuteConfig struct {
 	// Env is additional environment variables
 	Env map[string]string
 
-	// AllowedCmds is a whitelist of commands that can be executed
-	// If empty, a default safe list is used
-	AllowedCmds []string
-
 	// AllowNetwork enables network access (Docker only)
 	AllowNetwork bool
 
@@ -148,7 +144,7 @@ type ExecuteConfig struct {
 	ScriptContent string
 
 	// SessionID scopes the execution to a per-session persistent sandbox.
-	// Currently only honoured by the Cube backend; Docker/Local backends ignore it.
+	// Currently only honoured by remote backends; Docker/Local backends ignore it.
 	// When empty, Cube falls back to an ephemeral (one-shot) sandbox that is
 	// created and torn down inside the single Execute call.
 	SessionID string
@@ -178,14 +174,6 @@ type ExecuteResult struct {
 // IsSuccess returns true if the script executed successfully
 func (r *ExecuteResult) IsSuccess() bool {
 	return r.ExitCode == 0 && !r.Killed && r.Error == ""
-}
-
-// GetOutput returns the combined stdout and stderr, preferring stdout
-func (r *ExecuteResult) GetOutput() string {
-	if r.Stdout != "" {
-		return r.Stdout
-	}
-	return r.Stderr
 }
 
 // Config holds sandbox manager configuration
@@ -228,9 +216,6 @@ type Config struct {
 	// on to route requests into the correct MicroVM.
 	CubeSandboxDomain string
 
-	// CubeEnvdPort is the internal port envd listens on. Defaults to 49983.
-	CubeEnvdPort int
-
 	// CubeAPIKey is the API key sent via X-API-Key. Leave empty when the Cube
 	// deployment does not enforce authentication.
 	CubeAPIKey string
@@ -243,12 +228,31 @@ type Config struct {
 	// touching it for longer than this duration.
 	CubeSandboxTTL time.Duration
 
-	// CubeIdleTTL controls how long a session-bound sandbox may remain idle
-	// before it is paused (and later killed). Zero disables idle reaping.
-	CubeIdleTTL time.Duration
-
 	// CubeHTTPTimeout bounds each HTTP call to CubeAPI. Zero uses the default.
 	CubeHTTPTimeout time.Duration
+
+	// E2BAPIKey is the E2B API key sent via X-API-Key. Only used when
+	// Type == SandboxTypeE2B.
+	E2BAPIKey string
+
+	// E2BAPIURL is the E2B control-plane endpoint. Empty defaults to
+	// https://api.e2b.app.
+	E2BAPIURL string
+
+	// E2BSandboxDomain is the domain envd traffic is routed through, e.g.
+	// "e2b.app". Empty defaults to the SDK's built-in.
+	E2BSandboxDomain string
+
+	// E2BTemplate is the E2B template ID used at sandbox creation.
+	E2BTemplate string
+
+	// E2BSandboxTTL is the E2B-side idle timeout hint. Zero uses the SDK
+	// default (300 s).
+	E2BSandboxTTL time.Duration
+
+	// E2BHTTPTimeout bounds each HTTP call to the E2B API. Zero uses the
+	// default.
+	E2BHTTPTimeout time.Duration
 }
 
 // DefaultConfig returns a default sandbox configuration
@@ -264,10 +268,8 @@ func DefaultConfig() *Config {
 		CubeAPIURL:        DefaultCubeAPIURL,
 		CubeProxyURL:      DefaultCubeProxyURL,
 		CubeSandboxDomain: DefaultCubeSandboxDomain,
-		CubeEnvdPort:      DefaultCubeEnvdPort,
 		CubeTemplate:      DefaultCubeTemplate,
 		CubeSandboxTTL:    DefaultCubeSandboxTTL,
-		CubeIdleTTL:       DefaultCubeIdleTTL,
 		CubeHTTPTimeout:   DefaultCubeHTTPTimeout,
 	}
 }
@@ -305,7 +307,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeCube, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeCube, SandboxTypeE2B, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")
