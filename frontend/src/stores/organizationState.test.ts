@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyOrganizationResourceDelta,
-  upsertById
+  upsertById,
+  mergeById,
+  reviewMemberCountDelta
 } from './organizationState.ts'
 
 test('upsert adds a newly joined organization to the front', () => {
@@ -53,4 +55,37 @@ test('resource counts never become negative when a share is removed', () => {
 
   assert.equal(result.organizations[0].agent_share_count, 0)
   assert.equal(result.resourceCounts?.agents.by_organization['space-1'], 0)
+})
+
+test('merge keeps list-only aggregate fields when a detail payload omits them', () => {
+  const result = mergeById(
+    [{ id: 'space-1', name: 'Old name', share_count: 5, agent_share_count: 2 }],
+    { id: 'space-1', name: 'New name' }
+  )
+
+  assert.deepEqual(result, [
+    { id: 'space-1', name: 'New name', share_count: 5, agent_share_count: 2 }
+  ])
+})
+
+test('merge inserts a brand-new organization at the front', () => {
+  const result = mergeById(
+    [{ id: 'existing', name: 'Existing' }],
+    { id: 'new', name: 'New' }
+  )
+
+  assert.deepEqual(result.map(organization => organization.id), ['new', 'existing'])
+})
+
+test('approving a new join request adds one member', () => {
+  assert.equal(reviewMemberCountDelta(true, 'join'), 1)
+})
+
+test('approving a role upgrade does not change member_count', () => {
+  assert.equal(reviewMemberCountDelta(true, 'upgrade'), 0)
+})
+
+test('rejecting any request does not change member_count', () => {
+  assert.equal(reviewMemberCountDelta(false, 'join'), 0)
+  assert.equal(reviewMemberCountDelta(false, 'upgrade'), 0)
 })

@@ -1447,7 +1447,8 @@ const handleApproveRequest = async (req: JoinRequestResponse, assignRole: 'viewe
     const res = await orgStore.reviewOrganizationJoinRequest(
       props.orgId,
       req.id,
-      { approved: true, role: assignRole }
+      { approved: true, role: assignRole },
+      { requestType: req.request_type }
     )
     if (res.success) {
       MessagePlugin.success(t('organization.settings.approveSuccess'))
@@ -1472,7 +1473,8 @@ const handleRejectRequest = async (req: JoinRequestResponse) => {
     const res = await orgStore.reviewOrganizationJoinRequest(
       props.orgId,
       req.id,
-      { approved: false }
+      { approved: false },
+      { requestType: req.request_type }
     )
     if (res.success) {
       MessagePlugin.success(t('organization.settings.rejectSuccess'))
@@ -1871,6 +1873,11 @@ watch(() => props.visible, (newVal) => {
       inviteCode.value = ''
       inviteCodeExpiresAt.value = null
     } else if (props.orgId) {
+      // 清空上一个组织的详情上下文，避免在 fetchOrgDetail 返回前短暂显示旧组织信息
+      if (orgStore.currentOrganization?.id !== props.orgId) {
+        orgStore.clearCurrentOrganizationContext()
+        sharedKnowledgeBases.value = []
+      }
       fetchOrgDetail()
       fetchMembers()
       fetchSharedKBs()

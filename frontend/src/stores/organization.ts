@@ -44,7 +44,12 @@ import {
   requestRoleUpgrade as requestRoleUpgradeApi
 } from '@/api/organization'
 import { createVersionedRequestCoordinator } from './versionedRequest'
-import { applyOrganizationResourceDelta, upsertById } from './organizationState'
+import {
+  applyOrganizationResourceDelta,
+  upsertById,
+  mergeById,
+  reviewMemberCountDelta
+} from './organizationState'
 
 export const useOrganizationStore = defineStore('organization', () => {
   // State
@@ -146,6 +151,19 @@ export const useOrganizationStore = defineStore('organization', () => {
     if (currentOrganization.value?.id === organization.id) {
       currentOrganization.value = organization
     }
+  }
+
+  /**
+   * Merge a detail payload (which may omit list-only aggregate fields) onto the
+   * existing card instead of replacing it, so badges like share_count survive.
+   */
+  function mergeOrganizationDetail(organization: Organization) {
+    organizationsRequest.invalidate()
+    organizationsLoadedAt = 0
+    const next = mergeById(organizations.value, organization)
+    organizations.value = next
+    currentOrganization.value =
+      next.find(org => org.id === organization.id) ?? organization
   }
 
   function adjustOrganizationResourceCount(
@@ -685,13 +703,16 @@ export const useOrganizationStore = defineStore('organization', () => {
   async function reviewOrganizationJoinRequest(
     organizationId: string,
     requestId: string,
-    request: ReviewJoinRequestRequest
+    request: ReviewJoinRequestRequest,
+    options?: { requestType?: 'join' | 'upgrade' }
   ): Promise<ApiResponse<void>> {
     const response = await reviewJoinRequestApi(organizationId, requestId, request)
     if (response.success) {
       const organization = organizations.value.find(org => org.id === organizationId)
       patchOrganization(organizationId, {
-        member_count: (organization?.member_count ?? 0) + (request.approved ? 1 : 0),
+        member_count:
+          (organization?.member_count ?? 0) +
+          reviewMemberCountDelta(request.approved, options?.requestType),
         pending_join_request_count: Math.max(
           0,
           (organization?.pending_join_request_count ?? 0) - 1
@@ -719,7 +740,7 @@ export const useOrganizationStore = defineStore('organization', () => {
    */
   function setCurrentOrganization(org: Organization | null) {
     if (org) {
-      upsertOrganization(org)
+      mergeOrganizationDetail(org)
       void fetchOrganizations({ force: true })
     } else {
       currentOrganization.value = null
