@@ -27,11 +27,12 @@ func TestCubeRemoteClientProviderAndCapabilities(t *testing.T) {
 
 	require.Equal(t, SandboxTypeCube, client.Provider())
 	require.Equal(t, RemoteSandboxCapabilities{
-		SupportsReconnect:      true,
-		SupportsMetadata:       true,
-		SupportsListSandboxes:  true,
-		SupportsPauseResume:    true,
-		SupportsTimeoutRefresh: true,
+		SupportsReconnect:             true,
+		SupportsMetadata:              true,
+		SupportsListSandboxes:         true,
+		SupportsPauseResume:           true,
+		SupportsTimeoutRefresh:        true,
+		SupportsFilesystemEnumeration: true,
 	}, client.Capabilities())
 }
 
@@ -66,6 +67,35 @@ func TestCubeRemoteClientCreateWritesLifecyclePayload(t *testing.T) {
 		"onTimeout":  "pause",
 		"autoResume": true,
 	}, body["lifecycle"])
+}
+
+func TestCubeRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
+	mock := newCubeMockServer(t)
+	client, err := NewCubeRemoteClient(testConfig(t, mock))
+	require.NoError(t, err)
+	deny := false
+	privateSandbox := false
+
+	_, err = client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+		Network: RemoteNetworkPolicy{
+			AllowInternetAccess: &deny,
+			AllowPublicTraffic:  &privateSandbox,
+			AllowOut:            []string{"*.example.com"},
+			DenyOut:             []string{"0.0.0.0/0"},
+		},
+	})
+	require.NoError(t, err)
+
+	mock.mu.Lock()
+	body := mock.createBody
+	mock.mu.Unlock()
+	require.Equal(t, false, body["allowInternetAccess"])
+	networkPayload, ok := body["network"].(map[string]any)
+	require.True(t, ok, "network payload missing: %#v", body["network"])
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
+	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
+	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
 }
 
 func TestCubeRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
