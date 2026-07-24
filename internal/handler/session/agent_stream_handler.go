@@ -625,6 +625,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			artifacts, err := h.artifactCollector.Collect(
 				h.ctx,
 				h.sessionID,
+				h.assistantMessageID,
 				h.tenantID,
 				skills.ArtifactOutputDir(),
 			)

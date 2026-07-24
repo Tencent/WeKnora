@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // -----------------------------------------------------------------------------
@@ -107,12 +108,67 @@ func (f *fakeFileService) CopyFile(_ context.Context, _ string, _ uint64, _ stri
 	panic("CopyFile should not be called by ArtifactCollector")
 }
 
+// resourceRefFileService is a fileService whose SaveBytes returns a valid
+// resource:// reference, so the collector's binding path is exercised.
+type resourceRefFileService struct {
+	fakeFileService
+	handle string
+}
+
+func (f *resourceRefFileService) SaveBytes(_ context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
+	if f.saved == nil {
+		f.saved = map[string][]byte{}
+	}
+	f.seq++
+	ref := types.BuildResourcePath(f.handle)
+	f.saved[ref] = append([]byte(nil), data...)
+	f.tenantIDs = append(f.tenantIDs, tenantID)
+	return ref, nil
+}
+
+// bindCall records one Bind invocation for assertions.
+type bindCall struct {
+	ref       string
+	ownerType string
+	ownerID   string
+	relation  string
+}
+
+// fakeCatalog captures Bind calls; every other ResourceCatalog method is a
+// no-op stub because the collector only ever calls Bind.
+type fakeCatalog struct {
+	binds   []bindCall
+	bindErr error
+}
+
+func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
+	return "", nil
+}
+func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) { return nil, nil }
+func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
+	return v, nil, nil
+}
+func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation string) error {
+	c.binds = append(c.binds, bindCall{ref, ownerType, ownerID, relation})
+	return c.bindErr
+}
+func (c *fakeCatalog) MarkDeleted(context.Context, string) error { return nil }
+func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
+	return "", nil
+}
+func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
+	return nil, nil
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
 func newTestCollector(src *fakeSandboxSource, store *fakeStore, fs *fakeFileService, max int64) *ArtifactCollector {
-	return NewArtifactCollector(src, fs, store, ArtifactCollectorConfig{MaxFileBytes: max})
+	// catalog is nil here: these tests use a fakeFileService that returns raw
+	// "fake://" paths, so no resource binding is attempted. Binding behaviour
+	// is covered separately in TestArtifactCollector_BindsResourceToMessage.
+	return NewArtifactCollector(src, fs, store, nil, ArtifactCollectorConfig{MaxFileBytes: max})
 }
 
 func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
@@ -133,7 +189,7 @@ func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -179,7 +235,7 @@ func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -214,7 +270,7 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -243,7 +299,7 @@ func TestArtifactCollector_SkipsOversize(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, &fakeStore{}, fs, 100)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -272,7 +328,7 @@ func TestArtifactCollector_SkipsOversizeAfterRead(t *testing.T) {
 	fs := &fakeFileService{}
 	c := newTestCollector(src, &fakeStore{}, fs, 100)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -285,7 +341,7 @@ func TestArtifactCollector_EmptyWhenNoEntries(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -300,7 +356,7 @@ func TestArtifactCollector_EmptyWhenNoSessionID(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -316,7 +372,7 @@ func TestArtifactCollector_ListErrorDegrades(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{listErr: stderrors.New("envd timeout")}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v (should degrade gracefully)", err)
 	}
@@ -346,7 +402,7 @@ func TestArtifactCollector_UploadFailureIsPerFile(t *testing.T) {
 	fs := &fakeFileService{saveErr: stderrors.New("s3 dead")}
 	c := newTestCollector(src, &fakeStore{}, fs, 1<<20)
 
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v (want best-effort)", err)
 	}
@@ -372,7 +428,7 @@ func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 		},
 	}
 	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
-	got, err := c.Collect(ctx, "sess-1", 42, "/workspace/output")
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -381,6 +437,65 @@ func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 	}
 	if !strings.HasSuffix(got[0].SourcePath, "a.txt") {
 		t.Fatalf("wrong file kept: %+v", got[0])
+	}
+}
+
+func TestArtifactCollector_BindsResourceToMessage(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	// 22-char handle so BuildResourcePath yields a valid resource:// ref.
+	fs := &resourceRefFileService{handle: "abcdefghijklmnopqrstuv"}
+	cat := &fakeCatalog{}
+	c := NewArtifactCollector(src, fs, &fakeStore{}, cat, ArtifactCollectorConfig{MaxFileBytes: 1 << 20})
+
+	got, err := c.Collect(ctx, "sess-1", "msg-42", 7, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1", len(got))
+	}
+	if len(cat.binds) != 1 {
+		t.Fatalf("Bind calls = %d, want 1 (%+v)", len(cat.binds), cat.binds)
+	}
+	b := cat.binds[0]
+	if b.ownerType != "message" || b.ownerID != "msg-42" || b.relation != "artifact" {
+		t.Fatalf("unexpected binding: %+v", b)
+	}
+	if _, ok := types.ParseResourcePath(b.ref); !ok {
+		t.Fatalf("binding ref is not a resource reference: %q", b.ref)
+	}
+}
+
+func TestArtifactCollector_BindFailureDoesNotDropArtifact(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+			},
+		},
+		contents: map[string][]byte{"/workspace/output/a.txt": []byte("a")},
+	}
+	fs := &resourceRefFileService{handle: "abcdefghijklmnopqrstuv"}
+	cat := &fakeCatalog{bindErr: stderrors.New("db down")}
+	c := NewArtifactCollector(src, fs, &fakeStore{}, cat, ArtifactCollectorConfig{MaxFileBytes: 1 << 20})
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 7, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1 (bind failure must not drop the artifact)", len(got))
 	}
 }
 

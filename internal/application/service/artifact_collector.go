@@ -69,6 +69,16 @@ type ArtifactCollectorConfig struct {
 // sandbox client learns to stream to disk.
 const defaultMaxArtifactFileBytes int64 = 50 * 1024 * 1024
 
+// Resource binding coordinates for collected artifacts. The owner is the
+// assistant message that produced the file (mirrors how knowledge uploads
+// bind to "knowledge" and chat attachments bind to "temporary_document"),
+// so the resource registry can enumerate / garbage-collect artifacts by
+// their owning message instead of only via the messages.artifacts JSONB.
+const (
+	artifactBindingOwnerType = "message"
+	artifactBindingRelation  = "artifact"
+)
+
 // ArtifactCollector implements the "drain sandbox artifacts on turn
 // completion" step described in
 // docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md §4.
@@ -76,21 +86,29 @@ type ArtifactCollector struct {
 	source      SandboxArtifactSource
 	fileService interfaces.FileService
 	store       SessionArtifactStore
-	config      ArtifactCollectorConfig
+	// catalog binds each persisted artifact resource to its owning message.
+	// Optional: nil when the deployment runs without a resource registry, in
+	// which case artifacts are still saved and downloadable — they just are
+	// not tracked as owned resources.
+	catalog interfaces.ResourceCatalog
+	config  ArtifactCollectorConfig
 }
 
 // NewArtifactCollector wires up an ArtifactCollector. Callers keep a single
-// instance per process; the collector holds no per-turn state.
+// instance per process; the collector holds no per-turn state. catalog may be
+// nil (resource registry disabled); binding is then skipped.
 func NewArtifactCollector(
 	source SandboxArtifactSource,
 	fileService interfaces.FileService,
 	store SessionArtifactStore,
+	catalog interfaces.ResourceCatalog,
 	config ArtifactCollectorConfig,
 ) *ArtifactCollector {
 	return &ArtifactCollector{
 		source:      source,
 		fileService: fileService,
 		store:       store,
+		catalog:     catalog,
 		config:      newBoundedConfig(config),
 	}
 }
@@ -106,6 +124,7 @@ func NewArtifactCollectorFromSandboxManager(
 	sandboxMgr sandbox.Manager,
 	fileService interfaces.FileService,
 	repo interfaces.MessageRepository,
+	catalog interfaces.ResourceCatalog,
 ) *ArtifactCollector {
 	if sandboxMgr == nil || fileService == nil {
 		return nil
@@ -118,6 +137,7 @@ func NewArtifactCollectorFromSandboxManager(
 		source,
 		fileService,
 		NewMessageRepoArtifactStore(repo),
+		catalog,
 		ArtifactCollectorConfig{},
 	)
 }
@@ -146,6 +166,7 @@ func newBoundedConfig(cfg ArtifactCollectorConfig) ArtifactCollectorConfig {
 func (c *ArtifactCollector) Collect(
 	ctx context.Context,
 	sessionID string,
+	messageID string,
 	tenantID uint64,
 	outputDir string,
 ) (types.MessageArtifacts, error) {
@@ -196,7 +217,7 @@ func (c *ArtifactCollector) Collect(
 
 	artifacts := make(types.MessageArtifacts, 0, len(entries))
 	for _, entry := range entries {
-		art, ok := c.maybePersist(ctx, sessionID, tenantID, entry, known)
+		art, ok := c.maybePersist(ctx, sessionID, messageID, tenantID, entry, known)
 		if !ok {
 			continue
 		}
@@ -238,6 +259,7 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 func (c *ArtifactCollector) maybePersist(
 	ctx context.Context,
 	sessionID string,
+	messageID string,
 	tenantID uint64,
 	entry sandbox.RemoteDirEntry,
 	known map[string]struct{},
@@ -289,6 +311,8 @@ func (c *ArtifactCollector) maybePersist(
 		return types.MessageArtifact{}, false
 	}
 
+	c.bindArtifactResource(ctx, storagePath, messageID)
+
 	return types.MessageArtifact{
 		URL:        storagePath,
 		FileName:   entry.Name,
@@ -298,6 +322,29 @@ func (c *ArtifactCollector) maybePersist(
 		ModTime:    modTime,
 		CreatedAt:  time.Now().UTC(),
 	}, true
+}
+
+// bindArtifactResource records that the freshly-persisted artifact resource
+// is owned by its assistant message. Best-effort: a binding failure never
+// discards the artifact, because the file is already stored and remains
+// downloadable through the /artifacts endpoint regardless of the binding.
+//
+// The binding is only attempted when (a) the catalog is wired in, (b) we have
+// a message ID to own the resource, and (c) SaveBytes actually returned a
+// resource:// reference — i.e. the file service is resource-catalog-backed.
+// Raw provider paths (no catalog decorator) are left unbound rather than
+// generating spurious "invalid resource reference" errors.
+func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messageID string) {
+	if c.catalog == nil || messageID == "" {
+		return
+	}
+	if _, ok := types.ParseResourcePath(ref); !ok {
+		return
+	}
+	if err := c.catalog.Bind(ctx, ref, artifactBindingOwnerType, messageID, artifactBindingRelation); err != nil {
+		logger.Warnf(ctx, "[ArtifactCollector] bind artifact resource failed: message=%s ref=%s err=%v",
+			messageID, ref, err)
+	}
 }
 
 // artifactKey is the string form of the (source_path, mtime) tuple used to
