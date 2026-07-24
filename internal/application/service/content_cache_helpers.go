@@ -20,11 +20,13 @@ func chatModelCacheKey(model chat.Chat) string {
 	if model == nil {
 		return "unknown"
 	}
-	if id := model.GetModelID(); id != "" {
-		return id
-	}
-	if name := model.GetModelName(); name != "" {
-		return name
-	}
-	return fmt.Sprintf("%T", model)
+	return contentcache.TextHash(stableJSONHash(struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}{
+		Type: fmt.Sprintf("%T", model),
+		ID:   model.GetModelID(),
+		Name: model.GetModelName(),
+	}))
 }

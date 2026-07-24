@@ -79,10 +79,15 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		slugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+		for _, slug := range slugs {
 			fmt.Fprintf(&sb, "- %s\n", slug)
 		}
 		prevSlugsText = sb.String()
@@ -98,6 +103,8 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"PreviousSlugs":       prevSlugsText,
 		"Granularity":         string(granularity),
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+		"CustomInstructions":  batchCtx.ExtractionInstructions,
+		"InstructionScope":    "wiki_extraction",
 	}, "candidate-slugs", "wiki-candidate-slugs-v1")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)

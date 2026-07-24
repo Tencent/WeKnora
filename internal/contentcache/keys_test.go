@@ -10,6 +10,7 @@ func TestStableChunkIDIsContentAddressedWithinKnowledge(t *testing.T) {
 		KnowledgeID:   "knowledge-1",
 		ChunkType:     "text",
 		Seq:           7,
+		Occurrence:    1,
 		Content:       "  hello\r\nworld  ",
 		ContextHeader: "# Intro",
 	}
@@ -19,6 +20,7 @@ func TestStableChunkIDIsContentAddressedWithinKnowledge(t *testing.T) {
 		KnowledgeID:   "knowledge-1",
 		ChunkType:     "text",
 		Seq:           7,
+		Occurrence:    1,
 		Content:       "hello\nworld",
 		ContextHeader: "# Intro",
 	})
@@ -34,11 +36,28 @@ func TestStableChunkIDIsContentAddressedWithinKnowledge(t *testing.T) {
 	}
 }
 
-func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
+func TestStableChunkIDIgnoresSourceSequence(t *testing.T) {
 	base := ChunkIDInput{
 		KnowledgeID: "knowledge-1",
 		ChunkType:   "text",
 		Seq:         1,
+		Occurrence:  1,
+		Content:     "same text",
+		ParentID:    "parent-a",
+	}
+	moved := base
+	moved.Seq = 99
+	if StableChunkID(base) != StableChunkID(moved) {
+		t.Fatal("StableChunkID must survive unrelated insertions/reordering")
+	}
+}
+
+func TestStableChunkIDDifferentiatesContentTypeOccurrenceAndParent(t *testing.T) {
+	base := ChunkIDInput{
+		KnowledgeID: "knowledge-1",
+		ChunkType:   "text",
+		Seq:         1,
+		Occurrence:  1,
 		Content:     "same text",
 		ParentID:    "parent-a",
 	}
@@ -49,6 +68,7 @@ func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
 			KnowledgeID: "knowledge-1",
 			ChunkType:   "text",
 			Seq:         1,
+			Occurrence:  1,
 			Content:     "different text",
 			ParentID:    "parent-a",
 		},
@@ -56,13 +76,15 @@ func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
 			KnowledgeID: "knowledge-1",
 			ChunkType:   "parent_text",
 			Seq:         1,
+			Occurrence:  1,
 			Content:     "same text",
 			ParentID:    "parent-a",
 		},
-		"sequence": {
+		"occurrence": {
 			KnowledgeID: "knowledge-1",
 			ChunkType:   "text",
-			Seq:         2,
+			Seq:         1,
+			Occurrence:  2,
 			Content:     "same text",
 			ParentID:    "parent-a",
 		},
@@ -70,6 +92,7 @@ func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
 			KnowledgeID: "knowledge-1",
 			ChunkType:   "text",
 			Seq:         1,
+			Occurrence:  1,
 			Content:     "same text",
 			ParentID:    "parent-b",
 		},
@@ -81,6 +104,24 @@ func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
 				t.Fatalf("StableChunkID did not change when %s changed", name)
 			}
 		})
+	}
+}
+
+func TestChunkIdentityKeyUsesStructuredFields(t *testing.T) {
+	a := ChunkIdentityKey(ChunkIDInput{
+		KnowledgeID:   "k",
+		ChunkType:     "text",
+		ContextHeader: "a\x00b",
+		Content:       "c",
+	})
+	b := ChunkIdentityKey(ChunkIDInput{
+		KnowledgeID:   "k",
+		ChunkType:     "text",
+		ContextHeader: "a",
+		Content:       "b\x00c",
+	})
+	if a == b {
+		t.Fatal("ChunkIdentityKey must not collide when fields contain separators")
 	}
 }
 

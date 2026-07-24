@@ -48,8 +48,12 @@ func TestLogout_CurrentProfile(t *testing.T) {
 	}
 	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
-	assert.Empty(t, cfg.CurrentProfile, "current_profile should clear when removed")
-	assert.NotContains(t, cfg.Profiles, "prod")
+	assert.Equal(t, "prod", cfg.CurrentProfile, "active profile stays selected — logout clears creds, not the profile")
+	require.Contains(t, cfg.Profiles, "prod", "profile stays registered after logout")
+	assert.Empty(t, cfg.Profiles["prod"].APIKeyRef, "credential ref cleared")
+	assert.Empty(t, cfg.Profiles["prod"].TokenRef, "credential ref cleared")
+	assert.Empty(t, cfg.Profiles["prod"].RefreshRef, "credential ref cleared")
+	assert.Equal(t, "https://prod", cfg.Profiles["prod"].Host, "host preserved for re-login")
 	assert.Contains(t, cfg.Profiles, "staging", "non-target profile untouched")
 
 	// Secrets gone for the removed profile, kept for the survivor.
@@ -81,7 +85,8 @@ func TestLogout_ActiveProfileViaOverride(t *testing.T) {
 	}
 	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
-	assert.NotContains(t, cfg.Profiles, "staging", "active profile (staging) is the target")
+	require.Contains(t, cfg.Profiles, "staging", "target profile stays registered (creds cleared, not removed)")
+	assert.Empty(t, cfg.Profiles["staging"].APIKeyRef, "target's credential ref cleared")
 	assert.Contains(t, cfg.Profiles, "prod", "non-target profile untouched")
 }
 
@@ -98,8 +103,14 @@ func TestLogout_All(t *testing.T) {
 	}
 	require.NoError(t, runLogout(&LogoutOptions{All: true, Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
-	assert.Empty(t, cfg.Profiles)
-	assert.Empty(t, cfg.CurrentProfile)
+	// --all clears every profile's credentials but keeps the profiles registered.
+	require.NotEmpty(t, cfg.Profiles, "profiles stay registered after logout --all")
+	for name, p := range cfg.Profiles {
+		assert.Empty(t, p.APIKeyRef, "%s api-key ref cleared", name)
+		assert.Empty(t, p.TokenRef, "%s token ref cleared", name)
+		assert.Empty(t, p.RefreshRef, "%s refresh ref cleared", name)
+	}
+	assert.Equal(t, "prod", cfg.CurrentProfile, "active selection is preserved; logout clears creds, not the profile")
 }
 
 func TestLogout_NoProfiles(t *testing.T) {

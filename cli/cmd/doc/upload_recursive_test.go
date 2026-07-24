@@ -109,9 +109,12 @@ func TestUploadRecursive_PartialFailure_Exits1(t *testing.T) {
 
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
-	// CodeServerError preserves the 500 classification of the underlying
-	// SDK error - the recursive wrapper just aggregates.
-	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
+	// Any per-file failure aggregates to operation.failed (exit 1), matching the
+	// batch-delete contract — a partial failure (even a permanent one like a
+	// duplicate, which classifies as server.error per-file) must not surface as
+	// a retryable exit 7 an agent would loop on. Per-file codes live in the
+	// batch envelope.
+	assert.Equal(t, cmdutil.CodeOperationFailed, typed.Code)
 
 	got := out.String()
 	assert.Contains(t, got, "OK") // ok.pdf still succeeded
@@ -267,5 +270,5 @@ func TestUploadRecursive_JSON_BatchEnvelope(t *testing.T) {
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.True(t, typed.Silent, "JSON-path partial failure must be Silent")
-	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
+	assert.Equal(t, cmdutil.CodeOperationFailed, typed.Code)
 }

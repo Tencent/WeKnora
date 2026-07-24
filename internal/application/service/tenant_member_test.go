@@ -268,6 +268,22 @@ func TestTenantMemberService_AddMember_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestTenantMemberService_AddMember_APIKeyCannotAssignOwner(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleOwner, nil)
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner assignment must not create a membership, got %d rows", len(repo.rows))
+	}
+}
+
 func TestTenantMemberService_AddMember_RejectsDuplicate(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
@@ -323,6 +339,30 @@ func TestTenantMemberService_UpdateRole_BlocksDemotingLastOwner(t *testing.T) {
 	err := svc.UpdateRole(ctx, "owner", 1, types.TenantRoleAdmin)
 	if !errors.Is(err, ErrLastOwner) {
 		t.Fatalf("want ErrLastOwner when demoting last owner, got %v", err)
+	}
+}
+
+func TestTenantMemberService_UpdateRole_APIKeyCannotPromoteOwner(t *testing.T) {
+	svc, _ := newServiceWithRepo()
+	humanCtx := context.Background()
+	if _, err := svc.AddMember(humanCtx, "u1", 1, types.TenantRoleAdmin, nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	apiKeyCtx := types.WithTenantAPIKeyScope(humanCtx, types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	err := svc.UpdateRole(apiKeyCtx, "u1", 1, types.TenantRoleOwner)
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	member, getErr := svc.GetMembership(humanCtx, "u1", 1)
+	if getErr != nil {
+		t.Fatalf("get membership: %v", getErr)
+	}
+	if member == nil || member.Role != types.TenantRoleAdmin {
+		t.Fatalf("API key promotion must leave role unchanged, got %+v", member)
 	}
 }
 

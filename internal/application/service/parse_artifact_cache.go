@@ -22,6 +22,9 @@ const (
 type parseArtifactConfig struct {
 	ParserEngine string            `json:"parser_engine"`
 	FileType     string            `json:"file_type"`
+	TenantID     uint64            `json:"tenant_id"`
+	FileName     string            `json:"file_name"`
+	Title        string            `json:"title"`
 	Overrides    map[string]string `json:"overrides,omitempty"`
 }
 
@@ -54,9 +57,13 @@ func (s *knowledgeService) getCachedParseArtifact(ctx context.Context, key strin
 	}
 	defer reader.Close()
 
-	raw, err := io.ReadAll(reader)
+	raw, err := io.ReadAll(io.LimitReader(reader, parseArtifactCacheMaxBytes+1))
 	if err != nil {
 		logger.Warnf(ctx, "[convert] parse artifact cache inflate failed for %s: %v", key, err)
+		return nil, false
+	}
+	if len(raw) > parseArtifactCacheMaxBytes {
+		logger.Warnf(ctx, "[convert] parse artifact cache inflated value too large for %s", key)
 		return nil, false
 	}
 
@@ -70,6 +77,9 @@ func (s *knowledgeService) getCachedParseArtifact(ctx context.Context, key strin
 	}
 	if cached.Result.Metadata == nil {
 		cached.Result.Metadata = map[string]string{}
+	}
+	if !isCacheableParseArtifact(cached.Result) {
+		return nil, false
 	}
 	return cached.Result, true
 }

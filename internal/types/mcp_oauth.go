@@ -85,8 +85,13 @@ type MCPOAuthToken struct {
 	RefreshToken  string    `json:"-"             gorm:"type:text"`
 	TokenType     string    `json:"token_type"    gorm:"type:varchar(32)"`
 	ExpiresAt     time.Time `json:"expires_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// RefreshLeaseID / RefreshLeaseUntil coordinate refresh-token rotation
+	// across application instances. They are operational fields only and are
+	// never exposed through the API.
+	RefreshLeaseID    string     `json:"-" gorm:"type:varchar(36)"`
+	RefreshLeaseUntil *time.Time `json:"-"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // TableName pins the table name (see MCPOAuthClient.TableName); the default

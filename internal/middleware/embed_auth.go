@@ -150,7 +150,7 @@ func EmbedAuth(
 
 		tenant, err := tenantSvc.GetTenantByID(c.Request.Context(), ch.TenantID)
 		if err != nil || tenant == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant unavailable"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace unavailable"})
 			c.Abort()
 			return
 		}

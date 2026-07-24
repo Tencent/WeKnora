@@ -1,12 +1,14 @@
 package dto
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestModelResponse_OmitsSecrets(t *testing.T) {
@@ -22,7 +24,7 @@ func TestModelResponse_OmitsSecrets(t *testing.T) {
 			Provider:  "openai",
 		},
 	}
-	body, err := json.Marshal(NewModelResponse(m))
+	body, err := json.Marshal(NewModelResponse(adminContext(), m))
 	assert.NoError(t, err)
 	s := string(body)
 	assert.NotContains(t, s, "sk-real-api-key-do-not-leak")
@@ -55,7 +57,7 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 			ExtraConfig:    map[string]string{"region": "cn-hangzhou"},
 		},
 	}
-	resp := NewModelResponse(m)
+	resp := NewModelResponse(adminContext(), m)
 	assert.Empty(t, resp.Parameters.BaseURL,
 		"builtin must not leak per-tenant base URL")
 	assert.Empty(t, resp.Parameters.AppID,
@@ -70,7 +72,51 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 	assert.False(t, strings.Contains(string(body), "tenant-private.example.com"))
 }
 
+func TestModelResponse_SystemAdminCanManageBuiltinConfig(t *testing.T) {
+	ctx := context.WithValue(viewerContext(), types.SystemAdminContextKey, true)
+	m := &types.Model{
+		ID:        "builtin-1",
+		IsBuiltin: true,
+		Parameters: types.ModelParameters{
+			BaseURL:       "https://global-provider.example.com",
+			APIKey:        "should-never-be-returned",
+			AppSecret:     "also-never-returned",
+			AppID:         "global-app-id",
+			ExtraConfig:   map[string]string{"region": "ap-guangzhou"},
+			CustomHeaders: map[string]string{"X-Route": "global"},
+		},
+	}
+
+	resp := NewModelResponse(ctx, m)
+	assert.Equal(t, "https://global-provider.example.com", resp.Parameters.BaseURL)
+	assert.Equal(t, "global-app-id", resp.Parameters.AppID)
+	assert.Equal(t, map[string]string{"region": "ap-guangzhou"}, resp.Parameters.ExtraConfig)
+	assert.Equal(t, map[string]string{"X-Route": "global"}, resp.Parameters.CustomHeaders)
+	assert.True(t, resp.Credentials["api_key"].Configured)
+	assert.True(t, resp.Credentials["app_secret"].Configured)
+
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "should-never-be-returned")
+	assert.NotContains(t, string(body), "also-never-returned")
+}
+
+func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
+	m := &types.Model{
+		ID: "m-2",
+		Parameters: types.ModelParameters{
+			BaseURL:       "https://tenant-private.example.com",
+			CustomHeaders: map[string]string{"Authorization": "Bearer secret"},
+			ExtraConfig:   map[string]string{"region": "cn-hangzhou"},
+		},
+	}
+	resp := NewModelResponse(viewerContext(), m)
+	assert.Empty(t, resp.Parameters.BaseURL)
+	assert.Nil(t, resp.Parameters.CustomHeaders)
+	assert.Nil(t, resp.Parameters.ExtraConfig)
+}
+
 func TestModelResponse_NilSafe(t *testing.T) {
-	assert.Nil(t, NewModelResponse(nil))
-	assert.Equal(t, []*ModelResponse{}, NewModelResponses(nil))
+	assert.Nil(t, NewModelResponse(adminContext(), nil))
+	assert.Equal(t, []*ModelResponse{}, NewModelResponses(adminContext(), nil))
 }

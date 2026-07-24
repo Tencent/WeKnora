@@ -3,6 +3,7 @@ package contentcache
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -17,9 +18,13 @@ var chunkNamespace = uuid.MustParse("9f2d9e51-6b8a-4f7e-a424-a7f87a5f9d91")
 
 // ChunkIDInput is the stable identity of a stored chunk.
 type ChunkIDInput struct {
-	KnowledgeID   string
-	ChunkType     string
+	KnowledgeID string
+	ChunkType   string
+	// Seq is retained for callers that still carry source order, but it is not
+	// part of the content identity. Occurrence differentiates repeated equal
+	// chunks without making unrelated insertions change existing IDs.
 	Seq           int
+	Occurrence    int
 	Content       string
 	ContextHeader string
 	ParentID      string
@@ -50,17 +55,40 @@ func ImageHash(imageBytes []byte) string {
 
 // StableChunkID returns a UUID-shaped deterministic chunk ID.
 func StableChunkID(input ChunkIDInput) string {
-	payload := strings.Join([]string{
-		keyVersion,
-		input.KnowledgeID,
-		string(input.ChunkType),
-		fmt.Sprintf("%d", input.Seq),
-		NormalizeText(input.ContextHeader),
-		NormalizeText(input.Content),
-		input.ParentID,
-		input.ImageURL,
-	}, "\x00")
+	payload, _ := json.Marshal(struct {
+		Version    string `json:"version"`
+		Identity   string `json:"identity"`
+		Occurrence int    `json:"occurrence"`
+	}{
+		Version:    keyVersion,
+		Identity:   ChunkIdentityKey(input),
+		Occurrence: input.Occurrence,
+	})
 	return uuid.NewSHA1(chunkNamespace, []byte(payload)).String()
+}
+
+// ChunkIdentityKey returns the order-independent identity shared by repeated
+// equal chunks. Callers increment Occurrence per identity before calling
+// StableChunkID.
+func ChunkIdentityKey(input ChunkIDInput) string {
+	payload, _ := json.Marshal(struct {
+		Version       string `json:"version"`
+		KnowledgeID   string `json:"knowledge_id"`
+		ChunkType     string `json:"chunk_type"`
+		Content       string `json:"content"`
+		ContextHeader string `json:"context_header"`
+		ParentID      string `json:"parent_id"`
+		ImageURL      string `json:"image_url"`
+	}{
+		Version:       keyVersion,
+		KnowledgeID:   strings.TrimSpace(input.KnowledgeID),
+		ChunkType:     strings.TrimSpace(string(input.ChunkType)),
+		Content:       NormalizeText(input.Content),
+		ContextHeader: NormalizeText(input.ContextHeader),
+		ParentID:      strings.TrimSpace(input.ParentID),
+		ImageURL:      strings.TrimSpace(input.ImageURL),
+	})
+	return sha256Hex(payload)
 }
 
 // ChunkContentHash captures every text input that affects a chunk's semantic

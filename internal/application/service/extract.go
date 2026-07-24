@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/contentcache"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -114,7 +115,8 @@ func NewChunkExtractTask(
 	if err != nil {
 		return false, err
 	}
-	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.Queue(types.QueueGraph), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeChunkExtract, payload,
+		asynq.Queue(types.QueueGraph), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
@@ -144,7 +146,8 @@ func NewDataTableSummaryTask(
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(types.TypeDataTableSummary, payload, asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeDataTableSummary, payload,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue data table summary task: %v", err)
@@ -320,8 +323,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description: s.template.Description,
-		Tags:        extractCfg.Tags,
+		Description: types.AppendCustomPromptInstructions(
+			s.template.Description, extractCfg.CustomInstructions, "graph_extraction"),
+		Tags: extractCfg.Tags,
 		Examples: []types.GraphData{
 			{
 				Text:     extractCfg.Text,
@@ -423,6 +427,8 @@ type DataTableSummaryService struct {
 	retrieveEngine       interfaces.RetrieveEngineRegistry
 	ownership            retriever.TenantStoreOwnership
 	sqlDB                *sql.DB
+	storageResolver      interfaces.StorageBackendResolver
+	redisClient          *redis.Client
 }
 
 // NewDataTableSummaryService creates a new DataTableSummaryService
@@ -436,6 +442,8 @@ func NewDataTableSummaryService(
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	sqlDB *sql.DB,
+	storageResolver interfaces.StorageBackendResolver,
+	redisClient *redis.Client,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
 		modelService:         modelService,
@@ -447,6 +455,8 @@ func NewDataTableSummaryService(
 		retrieveEngine:       retrieveEngine,
 		ownership:            ownership,
 		sqlDB:                sqlDB,
+		storageResolver:      storageResolver,
+		redisClient:          redisClient,
 	}
 }
 
@@ -491,6 +501,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 // extractionResources 封装提取过程所需的所有资源
 type extractionResources struct {
 	knowledge      *types.Knowledge
+	knowledgeBase  *types.KnowledgeBase
 	tenant         *types.Tenant
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
@@ -514,7 +525,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 
-	// 获取租户信息
+	// 获取空间信息
 	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
@@ -534,6 +545,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		logger.Errorf(ctx, "failed to get embedding model: %v", err)
 		return nil, err
 	}
+	embeddingModel = cachedEmbeddingModel(s.redisClient, embeddingModel)
 
 	// Load the KB to discover its VectorStoreID binding so the factory can
 	// route to the bound store (or fall back to tenant engines if unbound).
@@ -561,6 +573,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 
 	return &extractionResources{
 		knowledge:      knowledge,
+		knowledgeBase:  kb,
 		tenant:         tenantInfo,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
@@ -574,24 +587,29 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	if resources == nil || resources.knowledge == nil {
 		return s.fileService
 	}
-	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
+	if resources.tenant == nil {
 		return s.fileService
 	}
 
 	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
-	if provider == "" {
+	if provider == "" && resources.tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
-	}
-	if provider == "" {
-		return s.fileService
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
-		provider,
-		resources.tenant.StorageEngineConfig,
-		baseDir,
-	)
+	backendID, _, _ := types.ParseStorageBackendPath(resources.knowledge.FilePath)
+	if backendID == "" && resources.knowledgeBase != nil && resources.knowledgeBase.StorageBackendID != nil {
+		backendID = strings.TrimSpace(*resources.knowledgeBase.StorageBackendID)
+	}
+
+	// New-model workspaces resolve via DefaultStorageBackendID even when no
+	// legacy StorageEngineConfig / provider is present, so gate on the resolver
+	// and a usable backendID/provider rather than requiring a non-empty provider.
+	if s.storageResolver == nil || (backendID == "" && provider == "") {
+		return s.fileService
+	}
+
+	resolvedSvc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, resources.tenant, backendID, provider, baseDir)
 	if err != nil {
 		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
 		return s.fileService
@@ -606,7 +624,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 创建DuckDB会话并加载数据
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
 	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
-	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, fileSvc, s.sqlDB, sessionID)
+	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, fileSvc, s.sqlDB, sessionID, s.storageResolver)
 	defer duckdbTool.Cleanup(ctx)
 
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
@@ -639,14 +657,24 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	sampleDesc := s.buildSampleDataDescription(sampleResult, 10)
 
 	// 使用AI生成表格摘要和列描述
-	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName, schemaDesc, sampleDesc)
+	customInstructions := ""
+	if resources.knowledgeBase != nil {
+		var processOverrides *types.KnowledgeProcessOverrides
+		if resources.knowledge != nil {
+			processOverrides, _ = resources.knowledge.ProcessOverrides()
+		}
+		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
+	}
+	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
+		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
 		return nil, err
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
-	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName, schemaDesc, sampleDesc)
+	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
+		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
 		return nil, err
@@ -665,11 +693,16 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID: nextStableChunkID(nil, contentcache.ChunkIDInput{
+			KnowledgeID: resources.knowledge.ID,
+			ChunkType:   types.ChunkTypeTableSummary,
+			Content:     tableDescription,
+		}),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
 		Content:         tableDescription,
+		ContentHash:     contentcache.ChunkContentHash(tableDescription, ""),
 		ChunkIndex:      0,
 		IsEnabled:       true,
 		ChunkType:       types.ChunkTypeTableSummary,
@@ -679,11 +712,17 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID: nextStableChunkID(nil, contentcache.ChunkIDInput{
+			KnowledgeID: resources.knowledge.ID,
+			ChunkType:   types.ChunkTypeTableColumn,
+			Content:     columnDescription,
+			ParentID:    summaryChunk.ID,
+		}),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
 		Content:         columnDescription,
+		ContentHash:     contentcache.ChunkContentHash(columnDescription, ""),
 		ChunkIndex:      1,
 		IsEnabled:       true,
 		ChunkType:       types.ChunkTypeTableColumn,
@@ -721,11 +760,12 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	}
 
 	// 保存到数据库
-	if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
+	stats, err := upsertStableChunks(ctx, s.chunkService.GetRepository(), chunks[0].TenantID, chunks)
+	if err != nil {
 		logger.Errorf(ctx, "failed to create chunks: %v", err)
 		return err
 	}
-	logger.Infof(ctx, "Created %d chunks for data table", len(chunks))
+	logger.Infof(ctx, "Saved data table chunks: created=%d updated=%d reused=%d", stats.Created, stats.Updated, stats.Reused)
 
 	// 批量索引
 	if err := engine.BatchIndex(ctx, embedder, indexInfoList); err != nil {
@@ -789,45 +829,99 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 }
 
 // generateTableDescription generates a summary description for the entire table
-func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
+func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat,
+	tableName, schemaDesc, sampleDesc, customInstructions string,
+) (string, error) {
 	prompt := fmt.Sprintf(tableDescriptionPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
+	}
+	opts := &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   512,
 		Thinking:    &thinking,
-	})
+	}
+	key := postprocessLLMCacheKey("table-summary", chatModel, messages, opts, "table-summary-v1")
+	if cached, ok := s.getCachedTableLLMText(ctx, key); ok {
+		return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, cached), nil
+	}
+	response, err := chatModel.Chat(ctx, messages, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate table description: %w", err)
 	}
+	s.setCachedTableLLMText(ctx, key, response.Content)
 
 	return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, response.Content), nil
 }
 
 // generateColumnDescriptions generates descriptions for each column in batch
-func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
+func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat,
+	tableName, schemaDesc, sampleDesc, customInstructions string,
+) (string, error) {
 	// Build batch prompt for all columns
 	prompt := fmt.Sprintf(columnDescriptionsPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
 	// Call LLM once for all columns
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
+	}
+	opts := &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   2048,
 		Thinking:    &thinking,
-	})
+	}
+	key := postprocessLLMCacheKey("table-columns", chatModel, messages, opts, "table-columns-v1")
+	if cached, ok := s.getCachedTableLLMText(ctx, key); ok {
+		return fmt.Sprintf("# Table Column Information\n\nTable name: %s\n\n%s", tableName, cached), nil
+	}
+	response, err := chatModel.Chat(ctx, messages, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
 	}
+	s.setCachedTableLLMText(ctx, key, response.Content)
 
 	return fmt.Sprintf("# Table Column Information\n\nTable name: %s\n\n%s", tableName, response.Content), nil
+}
+
+func (s *DataTableSummaryService) getCachedTableLLMText(ctx context.Context, key string) (string, bool) {
+	if s.redisClient == nil {
+		return "", false
+	}
+	data, err := s.redisClient.Get(ctx, key).Bytes()
+	if err == redis.Nil || err != nil {
+		return "", false
+	}
+	var cached cachedPostprocessLLMText
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return "", false
+	}
+	if cached.CachedAt <= 0 || strings.TrimSpace(cached.Text) == "" {
+		return "", false
+	}
+	return cached.Text, true
+}
+
+func (s *DataTableSummaryService) setCachedTableLLMText(ctx context.Context, key, text string) {
+	if s.redisClient == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	data, err := json.Marshal(cachedPostprocessLLMText{
+		Text:     text,
+		CachedAt: time.Now().Unix(),
+	})
+	if err != nil {
+		return
+	}
+	if err := s.redisClient.Set(ctx, key, data, postprocessLLMCacheTTL).Err(); err != nil {
+		logger.Warnf(ctx, "table LLM cache write failed for %s: %v", key, err)
+	}
 }
 
 // buildSampleDataDescription builds a formatted sample data description

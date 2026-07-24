@@ -104,10 +104,11 @@ Supported LLM backends:
 
 Neo4j is enabled for GraphRAG feature.
 
-To use GraphRAG, set ENABLE_GRAPH_RAG=true in the app:
+To use GraphRAG, enable Neo4j. NEO4J_ENABLE is the sole graph switch and is
+injected automatically when neo4j.enabled=true (no need to set ENABLE_GRAPH_RAG,
+which is deprecated and no longer read by the app):
 
   helm upgrade {{ .Release.Name }} ./helm \
-    --set app.env.ENABLE_GRAPH_RAG=true \
     --set neo4j.enabled=true \
     --set neo4j.password=<your-secure-password>
 

@@ -108,8 +108,9 @@ func buildResponseToolCalls(tcs []types.LLMToolCall) []logger.LLMToolCallInfo {
 }
 
 func usageString(u types.TokenUsage) string {
-	return fmt.Sprintf("Prompt: %d, Completion: %d, Total: %d",
-		u.PromptTokens, u.CompletionTokens, u.TotalTokens)
+	return fmt.Sprintf("Prompt: %d, Completion: %d, Total: %d, CacheRead: %d, CacheWrite: %d, CacheMiss: %d, CacheStatus: %s",
+		u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CacheReadTokens,
+		u.CacheWriteTokens, u.CacheMissTokens, u.CacheStatus)
 }
 
 // logLLMDebugCall logs a complete non-stream LLM chat call.

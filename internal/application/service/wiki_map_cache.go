@@ -41,6 +41,9 @@ func (s *wikiIngestService) generateWikiMapWithTemplate(
 	if err != nil {
 		return "", false, err
 	}
+	if layer != "summary" && !json.Valid([]byte(cleanLLMJSON(text))) {
+		return text, false, nil
+	}
 	s.setCachedWikiMapText(ctx, key, text)
 	return text, false, nil
 }
@@ -73,6 +76,9 @@ func (s *wikiIngestService) getCachedWikiMapText(ctx context.Context, key string
 	var cached cachedWikiMapText
 	if err := json.Unmarshal(data, &cached); err != nil {
 		logger.Warnf(ctx, "wiki map cache decode failed for %s: %v", key, err)
+		return "", false
+	}
+	if cached.CachedAt <= 0 || cached.Text == "" {
 		return "", false
 	}
 	return cached.Text, true

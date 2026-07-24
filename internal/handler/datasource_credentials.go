@@ -38,7 +38,7 @@ func (h *DataSourceCredentialsHandler) ownDataSource(c *gin.Context) (*types.Dat
 	ctx := c.Request.Context()
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return nil, false
 	}
 	id := c.Param("id")

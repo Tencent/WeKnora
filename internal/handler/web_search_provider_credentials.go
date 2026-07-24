@@ -41,7 +41,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	id := c.Param("id")
@@ -83,7 +83,7 @@ func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	id := c.Param("id")

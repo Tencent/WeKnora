@@ -172,7 +172,7 @@ type KBShareRepository interface {
 type AgentShareService interface {
 	ShareAgent(ctx context.Context, agentID string, orgID string, userID string, tenantID uint64, permission types.OrgMemberRole) (*types.AgentShare, error)
 	RemoveShare(ctx context.Context, shareID string, userID string, tenantID uint64) error
-	ListSharesByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error)
+	ListSharesByAgent(ctx context.Context, agentID string, tenantID uint64) ([]*types.AgentShare, error)
 	ListSharesByOrganization(ctx context.Context, orgID string) ([]*types.AgentShare, error)
 	ListSharedAgents(ctx context.Context, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.SharedAgentInfo, error)
 	ListSharedAgentsInOrganization(ctx context.Context, orgID string, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.OrganizationSharedAgentItem, error)

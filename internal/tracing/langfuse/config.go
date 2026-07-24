@@ -1,9 +1,13 @@
-// Package langfuse implements a lightweight client for the Langfuse ingestion
-// API (https://langfuse.com/docs/api). It lets WeKnora record LLM traces,
-// generations and token usage in Langfuse without pulling in a heavy SDK.
+// Package langfuse implements WeKnora's Langfuse/LiteFuse LLM tracing client on
+// top of the OpenTelemetry Go SDK. It records chat/embedding/rerank/VLM/ASR
+// generations plus the surrounding agent/HTTP/asynq spans as OTLP/HTTP spans
+// to a Langfuse v3+ or LiteFuse backend (POST /api/public/otel/v1/traces).
 //
-// The integration is fully opt-in: when disabled (the default), all public
-// entry points are cheap no-ops, so callers can wire them unconditionally.
+// The integration is fully opt-in: when disabled (the default), every public
+// entry point is a cheap no-op, so callers can wire them unconditionally. A
+// W3C traceparent propagated from upstream callers (e.g. sop3) is inherited so
+// WeKnora's trace shares the upstream trace id — correlating runs across
+// services in the LiteFuse UI.
 package langfuse
 
 import (
@@ -12,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // Config holds the runtime configuration for the Langfuse client.
@@ -45,6 +51,13 @@ type Config struct {
 	SampleRate float64
 	// Debug enables verbose logging of batch send errors.
 	Debug bool
+
+	// testExporter, when non-nil, replaces the real OTLP exporter. Tests use
+	// it to inject an in-memory span exporter (tracetest.InMemoryExporter) so
+	// they can assert on exported spans deterministically without an HTTP
+	// server. Init registers it with a SimpleSpanProcessor (synchronous
+	// export on span End) when set. Unexported — production never sets it.
+	testExporter sdktrace.SpanExporter
 }
 
 // LoadConfigFromEnv builds a Config by reading the LANGFUSE_* environment

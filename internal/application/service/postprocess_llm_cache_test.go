@@ -6,11 +6,17 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 type postprocessCacheTestChat struct {
 	modelID string
+}
+
+type postprocessCacheOtherChat struct {
+	postprocessCacheTestChat
 }
 
 func (m postprocessCacheTestChat) Chat(
@@ -32,6 +38,13 @@ func (m postprocessCacheTestChat) ChatStream(
 func (m postprocessCacheTestChat) GetModelName() string { return "test-model" }
 func (m postprocessCacheTestChat) GetModelID() string   { return m.modelID }
 
+func (m postprocessCacheOtherChat) GetModelName() string {
+	return m.postprocessCacheTestChat.GetModelName()
+}
+func (m postprocessCacheOtherChat) GetModelID() string {
+	return m.postprocessCacheTestChat.GetModelID()
+}
+
 func TestPostprocessLLMCacheKeyIncludesLayerModelPromptAndOptions(t *testing.T) {
 	thinking := false
 	messages := []chat.Message{{Role: "user", Content: "summarize this"}}
@@ -46,6 +59,35 @@ func TestPostprocessLLMCacheKeyIncludesLayerModelPromptAndOptions(t *testing.T) 
 	require.NotEqual(t, base, postprocessLLMCacheKey("summary", model, []chat.Message{{Role: "user", Content: "different"}}, opts, "summary-v1"))
 	require.NotEqual(t, base, postprocessLLMCacheKey("summary", model, messages, &chat.ChatOptions{Temperature: 0.7, MaxTokens: 512, Thinking: &thinking}, "summary-v1"))
 	require.NotEqual(t, base, postprocessLLMCacheKey("summary", model, messages, opts, "summary-v2"))
+}
+
+func TestChatModelCacheKeyIncludesConcreteModelType(t *testing.T) {
+	base := chatModelCacheKey(postprocessCacheTestChat{modelID: "same-id"})
+	other := chatModelCacheKey(postprocessCacheOtherChat{postprocessCacheTestChat{modelID: "same-id"}})
+	require.NotEqual(t, base, other)
+}
+
+func TestPostprocessLLMCacheRejectsCorruptOrEmptyValues(t *testing.T) {
+	ctx := context.Background()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	svc := &knowledgeService{redisClient: rdb}
+
+	require.NoError(t, rdb.Set(ctx, "missing-ts", `{"text":"cached"}`, 0).Err())
+	_, ok := svc.getCachedPostprocessLLMText(ctx, "missing-ts")
+	require.False(t, ok)
+
+	require.NoError(t, rdb.Set(ctx, "blank", `{"text":"   ","cached_at":1}`, 0).Err())
+	_, ok = svc.getCachedPostprocessLLMText(ctx, "blank")
+	require.False(t, ok)
+
+	require.NoError(t, rdb.Set(ctx, "valid", `{"text":"cached","cached_at":1}`, 0).Err())
+	got, ok := svc.getCachedPostprocessLLMText(ctx, "valid")
+	require.True(t, ok)
+	require.Equal(t, "cached", got)
 }
 
 func TestParseGeneratedQuestionsMatchesExistingFiltering(t *testing.T) {

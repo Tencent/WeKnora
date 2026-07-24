@@ -1,7 +1,7 @@
 // Package doc — dryrun_validation_test.go asserts that --dry-run on
-// doc subcommands rejects identically to the live path (industry standard:
-// gh / kubectl / lark all validate before previewing). Before the surrounding
-// fix, validation lived in runX() and was reached only after HandleDryRun
+// doc subcommands rejects identically to the live path (validation must run
+// before previewing). Before the surrounding fix, validation lived in runX()
+// and was reached only after HandleDryRun
 // short-circuited, so --dry-run silently emitted plan envelopes for inputs
 // the live path would reject — agents got false-positive previews.
 package doc

@@ -15,8 +15,7 @@ import (
 // "no mutation flag supplied" invocation the live path rejects. Before the
 // fix the validation lived in runEdit() (the live-only callee) and was
 // reached only after HandleDryRun early-exited, so --dry-run silently
-// emitted a no-op plan envelope. Industry standard (gh / kubectl / lark)
-// validates before previewing.
+// emitted a no-op plan envelope. Validation must run before previewing.
 func TestKBEdit_DryRun_RejectsNoMutationFlag(t *testing.T) {
 	iostreams.SetForTest(t)
 	f := kbDryRunFactory(t)

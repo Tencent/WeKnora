@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -21,6 +22,31 @@ func setupStableChunkSyncRepo(t *testing.T) interfaces.ChunkRepository {
 	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}))
 	return repository.NewChunkRepository(db)
 }
+
+type testVectorDeleter struct {
+	ids           []string
+	dimension     int
+	knowledgeType string
+	err           error
+}
+
+func (d *testVectorDeleter) DeleteByChunkIDList(
+	_ context.Context,
+	ids []string,
+	dimension int,
+	knowledgeType string,
+) error {
+	d.ids = append([]string(nil), ids...)
+	d.dimension = dimension
+	d.knowledgeType = knowledgeType
+	return d.err
+}
+
+type testDimensionProvider struct {
+	dimension int
+}
+
+func (p testDimensionProvider) GetDimensions() int { return p.dimension }
 
 func stableSyncTestChunk(id, content string) *types.Chunk {
 	return &types.Chunk{
@@ -96,4 +122,49 @@ func TestUpsertStableChunksHardDeletesSoftDeletedIDBeforeCreate(t *testing.T) {
 	got, err := repo.GetChunkByID(ctx, 1, "chunk-soft-deleted")
 	require.NoError(t, err)
 	require.Equal(t, "recreated content", got.Content)
+}
+
+func TestSyncReparseBaseChunksDefersStaleDeletionUntilVectorCleanupCanRun(t *testing.T) {
+	ctx := context.Background()
+	repo := setupStableChunkSyncRepo(t)
+
+	stale := stableSyncTestChunk("stale-text", "old content")
+	stale.ChunkType = types.ChunkTypeText
+	keptExtra := stableSyncTestChunk("kept-image-ocr", "ocr")
+	keptExtra.ParentChunkID = "desired-parent"
+	desiredParent := stableSyncTestChunk("desired-parent", "parent")
+	desiredParent.ChunkType = types.ChunkTypeParentText
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{stale, keptExtra}))
+
+	svc := &knowledgeService{chunkRepo: repo}
+	stats, err := svc.syncReparseBaseChunks(ctx, 1, "knowledge-1", []*types.Chunk{desiredParent})
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Created)
+	require.Equal(t, 1, stats.Deleted)
+	require.Equal(t, []string{"stale-text"}, stats.StaleIDs)
+	require.Equal(t, 1, stats.ExtraKept)
+
+	_, err = repo.GetChunkByID(ctx, 1, "stale-text")
+	require.NoError(t, err, "stale DB chunk must survive until vector deletion succeeds")
+
+	require.NoError(t, svc.deleteReparseStaleChunks(ctx, 1, stats.StaleIDs))
+	_, err = repo.GetChunkByID(ctx, 1, "stale-text")
+	require.Error(t, err)
+
+	gotKept, err := repo.GetChunkByID(ctx, 1, "kept-image-ocr")
+	require.NoError(t, err)
+	require.Equal(t, "desired-parent", gotKept.ParentChunkID)
+}
+
+func TestDeleteReparseStaleVectorsPropagatesFailureBeforeDBCleanup(t *testing.T) {
+	ctx := context.Background()
+	errBoom := errors.New("vector store unavailable")
+	deleter := &testVectorDeleter{err: errBoom}
+
+	err := deleteReparseStaleVectors(ctx, deleter, testDimensionProvider{dimension: 1536}, []string{"stale-1"}, types.KnowledgeBaseTypeDocument)
+	require.ErrorIs(t, err, errBoom)
+	require.Equal(t, []string{"stale-1"}, deleter.ids)
+	require.Equal(t, 1536, deleter.dimension)
+	require.Equal(t, types.KnowledgeBaseTypeDocument, deleter.knowledgeType)
 }

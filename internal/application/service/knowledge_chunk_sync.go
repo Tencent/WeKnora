@@ -15,6 +15,7 @@ type chunkSyncStats struct {
 	Reused    int
 	Deleted   int
 	ExtraKept int
+	StaleIDs  []string
 }
 
 // syncReparseBaseChunks keeps stable content-addressed chunks in place across
@@ -85,13 +86,43 @@ func (s *knowledgeService) syncReparseBaseChunks(
 		stats.Updated++
 	}
 	if len(staleIDs) > 0 {
-		if err := s.chunkRepo.HardDeleteChunks(ctx, tenantID, staleIDs); err != nil {
-			return stats, err
-		}
 		stats.Deleted = len(staleIDs)
+		stats.StaleIDs = staleIDs
 	}
 
 	return stats, nil
+}
+
+func (s *knowledgeService) deleteReparseStaleChunks(
+	ctx context.Context,
+	tenantID uint64,
+	staleIDs []string,
+) error {
+	if len(staleIDs) == 0 {
+		return nil
+	}
+	return s.chunkRepo.HardDeleteChunks(ctx, tenantID, staleIDs)
+}
+
+type staleVectorDeleter interface {
+	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int, knowledgeType string) error
+}
+
+type vectorDimensionProvider interface {
+	GetDimensions() int
+}
+
+func deleteReparseStaleVectors(
+	ctx context.Context,
+	deleter staleVectorDeleter,
+	embeddingModel vectorDimensionProvider,
+	staleIDs []string,
+	knowledgeType string,
+) error {
+	if len(staleIDs) == 0 || deleter == nil || embeddingModel == nil {
+		return nil
+	}
+	return deleter.DeleteByChunkIDList(ctx, staleIDs, embeddingModel.GetDimensions(), knowledgeType)
 }
 
 func (s *knowledgeService) upsertStableChunk(

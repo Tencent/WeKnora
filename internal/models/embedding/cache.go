@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/contentcache"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 const embeddingCacheTTL = 30 * 24 * time.Hour
@@ -21,6 +24,7 @@ type EmbeddingCache interface {
 type cachedEmbedder struct {
 	inner Embedder
 	cache EmbeddingCache
+	group singleflight.Group
 }
 
 // NewCachedEmbedder wraps an Embedder with content-addressed embedding reuse.
@@ -32,50 +36,105 @@ func NewCachedEmbedder(inner Embedder, cache EmbeddingCache) Embedder {
 }
 
 func (e *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	key := e.cacheKey(text)
-	if vec, ok := e.cache.GetEmbedding(ctx, key); ok {
+	normalizedText := contentcache.NormalizeText(text)
+	key := e.cacheKey(normalizedText)
+	if vec, ok := e.cachedVector(ctx, key); ok {
 		return vec, nil
 	}
-	vec, err := e.inner.Embed(ctx, text)
+	value, err, _ := e.group.Do(key, func() (any, error) {
+		if vec, ok := e.cachedVector(ctx, key); ok {
+			return vec, nil
+		}
+		vec, err := e.inner.Embed(ctx, normalizedText)
+		if err != nil {
+			return nil, err
+		}
+		if validEmbeddingVector(vec, e.inner.GetDimensions()) {
+			e.cache.SetEmbedding(ctx, key, vec)
+		}
+		return vec, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	e.cache.SetEmbedding(ctx, key, vec)
-	return vec, nil
+	return value.([]float32), nil
 }
 
 func (e *cachedEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.batchEmbed(ctx, texts, false)
+}
+
+func (e *cachedEmbedder) batchEmbed(ctx context.Context, texts []string, usePool bool) ([][]float32, error) {
 	results := make([][]float32, len(texts))
 	missTexts := make([]string, 0, len(texts))
 	missKeys := make([]string, 0, len(texts))
 	positionsByKey := map[string][]int{}
 
 	for i, text := range texts {
-		key := e.cacheKey(text)
-		if vec, ok := e.cache.GetEmbedding(ctx, key); ok {
+		normalizedText := contentcache.NormalizeText(text)
+		key := e.cacheKey(normalizedText)
+		if vec, ok := e.cachedVector(ctx, key); ok {
 			results[i] = vec
 			continue
 		}
 		positionsByKey[key] = append(positionsByKey[key], i)
 		if len(positionsByKey[key]) == 1 {
 			missKeys = append(missKeys, key)
-			missTexts = append(missTexts, text)
+			missTexts = append(missTexts, normalizedText)
 		}
 	}
 
 	if len(missTexts) == 0 {
 		return results, nil
 	}
-	missVectors, err := e.inner.BatchEmbed(ctx, missTexts)
+	value, err, _ := e.group.Do(batchGroupKey(usePool, missKeys), func() (any, error) {
+		vectorsByKey := make(map[string][]float32, len(missKeys))
+		actualMissTexts := make([]string, 0, len(missTexts))
+		actualMissKeys := make([]string, 0, len(missKeys))
+		for i, key := range missKeys {
+			if vec, ok := e.cachedVector(ctx, key); ok {
+				vectorsByKey[key] = vec
+				continue
+			}
+			actualMissKeys = append(actualMissKeys, key)
+			actualMissTexts = append(actualMissTexts, missTexts[i])
+		}
+		if len(actualMissTexts) == 0 {
+			return vectorsByKey, nil
+		}
+
+		var missVectors [][]float32
+		var err error
+		if usePool {
+			missVectors, err = e.inner.BatchEmbedWithPool(ctx, e.inner, actualMissTexts)
+		} else {
+			missVectors, err = e.inner.BatchEmbed(ctx, actualMissTexts)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(missVectors) != len(actualMissTexts) {
+			return nil, fmt.Errorf("embedding cache: expected %d vectors, got %d", len(actualMissTexts), len(missVectors))
+		}
+		for i, key := range actualMissKeys {
+			vec := missVectors[i]
+			if !validEmbeddingVector(vec, e.inner.GetDimensions()) {
+				return nil, fmt.Errorf("embedding cache: invalid vector for key %s", key)
+			}
+			e.cache.SetEmbedding(ctx, key, vec)
+			vectorsByKey[key] = vec
+		}
+		return vectorsByKey, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(missVectors) != len(missTexts) {
-		return nil, fmt.Errorf("embedding cache: expected %d vectors, got %d", len(missTexts), len(missVectors))
-	}
-	for i, key := range missKeys {
-		vec := missVectors[i]
-		e.cache.SetEmbedding(ctx, key, vec)
+	vectorsByKey := value.(map[string][]float32)
+	for _, key := range missKeys {
+		vec, ok := vectorsByKey[key]
+		if !ok {
+			return nil, fmt.Errorf("embedding cache: missing vector for key %s", key)
+		}
 		for _, pos := range positionsByKey[key] {
 			results[pos] = vec
 		}
@@ -96,15 +155,44 @@ func (e *cachedEmbedder) GetModelID() string {
 }
 
 func (e *cachedEmbedder) BatchEmbedWithPool(ctx context.Context, _ Embedder, texts []string) ([][]float32, error) {
-	return e.BatchEmbed(ctx, texts)
+	return e.batchEmbed(ctx, texts, true)
 }
 
-func (e *cachedEmbedder) cacheKey(text string) string {
-	modelID := e.inner.GetModelID()
-	if modelID == "" {
-		modelID = e.inner.GetModelName()
+func (e *cachedEmbedder) cacheKey(normalizedText string) string {
+	modelID := contentcache.TextHash(fmt.Sprintf("%T\x00%s\x00%s\x00%d",
+		e.inner, e.inner.GetModelID(), e.inner.GetModelName(), e.inner.GetDimensions()))
+	return contentcache.EmbeddingKey(contentcache.TextHash(normalizedText), modelID, e.inner.GetDimensions())
+}
+
+func (e *cachedEmbedder) cachedVector(ctx context.Context, key string) ([]float32, bool) {
+	vec, ok := e.cache.GetEmbedding(ctx, key)
+	if !ok || !validEmbeddingVector(vec, e.inner.GetDimensions()) {
+		return nil, false
 	}
-	return contentcache.EmbeddingKey(contentcache.TextHash(text), modelID, e.inner.GetDimensions())
+	return vec, true
+}
+
+func validEmbeddingVector(vec []float32, dimensions int) bool {
+	if len(vec) == 0 {
+		return false
+	}
+	if dimensions > 0 && len(vec) != dimensions {
+		return false
+	}
+	for _, v := range vec {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return false
+		}
+	}
+	return true
+}
+
+func batchGroupKey(usePool bool, keys []string) string {
+	mode := "batch"
+	if usePool {
+		mode = "pool"
+	}
+	return "embedding-" + mode + "\x00" + strings.Join(keys, "\x00")
 }
 
 type redisEmbeddingCache struct {
@@ -132,6 +220,9 @@ func (c *redisEmbeddingCache) GetEmbedding(ctx context.Context, key string) ([]f
 	}
 	var cached cachedEmbeddingVector
 	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, false
+	}
+	if cached.CachedAt <= 0 || !validEmbeddingVector(cached.Vector, 0) {
 		return nil, false
 	}
 	return cached.Vector, true

@@ -22,8 +22,9 @@ type AgentToolEvent struct {
 // AgentAccumulator buffers an AgentQAStream callback sequence. Distinct
 // from Accumulator (KnowledgeQAStream) because the agent event model is
 // wider - events include thinking / reflection / tool_call / tool_result
-// / answer / references / error, with a flat `Done bool` on each frame
-// rather than the ResponseType=complete sentinel KnowledgeQAStream emits.
+// / answer / references / error / complete. Done is scoped to an individual
+// event stream (thinking, reflection, answer, etc.); only response_type=complete
+// terminates the whole agent stream.
 //
 // Zero value is ready to use. Not safe for concurrent Append calls - the
 // SDK callback contract is sequential on a single goroutine.
@@ -80,7 +81,10 @@ func (a *AgentAccumulator) Append(r *sdk.AgentStreamResponse) {
 	if r.KnowledgeReferences != nil {
 		a.References = r.KnowledgeReferences
 	}
-	if r.Done {
+	// Thinking / reflection / answer streams each emit their own Done=true
+	// marker before later events arrive. Only the explicit complete frame is
+	// terminal for the whole agent run.
+	if r.ResponseType == sdk.AgentResponseTypeComplete {
 		a.done = true
 	}
 }

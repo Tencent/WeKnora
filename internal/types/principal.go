@@ -9,6 +9,7 @@ import (
 const (
 	PrincipalWebUser         = "web_user"
 	PrincipalAPITenant       = "api_tenant"
+	PrincipalAPIPlatform     = "api_platform"
 	PrincipalAPIExternalUser = "api_external_user"
 	PrincipalIMUser          = "im_user"
 	PrincipalEmbedChannel    = "embed_channel"
@@ -19,6 +20,11 @@ const (
 // EmbedVisitorHeader is sent by the embed widget to identify a browser visitor
 // across chat sessions within the same channel.
 const EmbedVisitorHeader = "X-Embed-Visitor"
+
+// SessionOwnerAPITenantKeyPrefix prefixes sessions.user_id for rows created by a
+// tenant API key. The full owner id is "api_tenant_key:<tenantID>:<keyID>", so a
+// LIKE '<prefix>%' selects every API-key session in the tenant.
+const SessionOwnerAPITenantKeyPrefix = "api_tenant_key:"
 
 // Principal represents the terminal caller for per-subject isolation features.
 // It is intentionally separate from UserID: many principals, such as IM users
@@ -154,12 +160,19 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 
 // SessionOwnerIDFromContext returns the sessions.user_id scope for the current
 // caller. API external users and embed chat sessions use principal-derived IDs;
-// MCP OAuth token storage uses MCPOAuthPrincipalFromContext (visitor-level for embed).
+// tenant API keys are isolated per key id; MCP OAuth token storage uses
+// MCPOAuthPrincipalFromContext (visitor-level for embed).
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
 		case PrincipalAPIExternalUser, PrincipalEmbedSession:
 			return p.StorageID()
+		case PrincipalAPITenant:
+			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
+				if tenantID, ok := TenantIDFromContext(ctx); ok && tenantID > 0 {
+					return fmt.Sprintf("%s%d:%d", SessionOwnerAPITenantKeyPrefix, tenantID, scope.KeyID)
+				}
+			}
 		}
 	}
 	userID, _ := UserIDFromContext(ctx)

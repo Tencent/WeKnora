@@ -25,6 +25,29 @@ export interface DataSource {
   latest_sync_log?: SyncLog
 }
 
+/**
+ * One user-facing failure sample. The backend sends a stable i18n `code`
+ * (+ interpolation `params`) so the UI localises it to the viewer's language;
+ * `message` is a fallback when no i18n key exists (old logs decode into it).
+ */
+export interface SyncItemError {
+  title?: string
+  code?: string
+  params?: Record<string, string>
+  message?: string
+}
+
+export interface SyncResultDetail {
+  total?: number
+  created?: number
+  updated?: number
+  deleted?: number
+  skipped?: number
+  failed?: number
+  /** Per-item failure samples (capped); localised in the sync-log drawer. */
+  errors?: SyncItemError[]
+}
+
 export interface SyncLog {
   id: string
   data_source_id: string
@@ -38,6 +61,7 @@ export interface SyncLog {
   items_skipped: number
   items_failed: number
   error_message: string
+  result?: SyncResultDetail
 }
 
 export interface ConnectorMeta {

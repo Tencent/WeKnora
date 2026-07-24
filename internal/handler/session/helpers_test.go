@@ -44,3 +44,11 @@ func TestMergeTagScopesFromRequestIDs_AmbiguousKBIgnored(t *testing.T) {
 	scopes := mergeTagScopesFromRequestIDs(nil, []string{"tag-9"}, []string{"kb-1", "kb-2"})
 	assert.Empty(t, scopes)
 }
+
+func TestValidateUnscopedTagIDs(t *testing.T) {
+	assert.NoError(t, validateUnscopedTagIDs(nil, nil))
+	assert.NoError(t, validateUnscopedTagIDs(nil, []string{"kb-1", "kb-2"}))
+	assert.NoError(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1"}))
+	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1", "kb-2"}))
+	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, nil))
+}

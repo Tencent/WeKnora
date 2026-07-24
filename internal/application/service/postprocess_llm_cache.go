@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/contentcache"
@@ -48,11 +49,14 @@ func (s *knowledgeService) getCachedPostprocessLLMText(ctx context.Context, key 
 		logger.Warnf(ctx, "postprocess LLM cache decode failed for %s: %v", key, err)
 		return "", false
 	}
+	if cached.CachedAt <= 0 || strings.TrimSpace(cached.Text) == "" {
+		return "", false
+	}
 	return cached.Text, true
 }
 
 func (s *knowledgeService) setCachedPostprocessLLMText(ctx context.Context, key, text string) {
-	if s.redisClient == nil {
+	if s.redisClient == nil || strings.TrimSpace(text) == "" {
 		return
 	}
 	data, err := json.Marshal(cachedPostprocessLLMText{
