@@ -1,3 +1,5 @@
+//go:build mysql_integration
+
 // Package repository contains integration tests that exercise dialect-specific
 // SQL branches against a real MySQL 8.0 database.
 //
