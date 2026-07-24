@@ -145,6 +145,24 @@ export function deleteModel(id: string): Promise<void> {
   });
 }
 
+// 设置默认模型
+export function setDefaultModel(id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    put(`/api/v1/models/${id}/default`, {})
+      .then((response: any) => {
+        if (response.success) {
+          resolve();
+        } else {
+          reject(new Error(response.message || t('error.model.setDefaultFailed')));
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to set default model:', error);
+        reject(error);
+      });
+  });
+}
+
 export interface ModelDebugOptions {
   system_prompt?: string
   temperature?: number

@@ -806,6 +806,8 @@ func RegisterModelRoutes(
 		models.GET("/:id", g.Viewer(), handler.GetModel)
 		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
 		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
+		// 设置默认模型 — Admin+
+		models.PUT("/:id/default", g.Admin(), handler.SetDefaultModel)
 		// 删除模型 — Admin+
 		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+

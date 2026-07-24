@@ -3120,6 +3120,7 @@ export default {
       getFailed: "获取模型失败",
       updateFailed: "更新模型失败",
       deleteFailed: "删除模型失败",
+      setDefaultFailed: "设置默认模型失败",
     },
     tenant: {
       listFailed: "获取空间列表失败",
@@ -4853,6 +4854,7 @@ export default {
       addModel: "添加模型",
       debugModel: "模型测试",
       setDefault: "设为默认",
+      unsetDefault: "取消默认",
     },
     source: {
       remote: "Remote",
@@ -4897,8 +4899,9 @@ export default {
       saveFailed: "保存模型失败",
       deleted: "模型已删除",
       deleteFailed: "删除模型失败",
-      setDefault: "已设为默认模型",
+      defaultSet: "已设为默认模型",
       setDefaultFailed: "设置默认模型失败",
+      unsetDefaultHint: "选择其他模型设为默认即可取消当前默认",
       builtinCannotEdit: "内置模型不能编辑",
       builtinCannotDelete: "内置模型不能删除",
       builtinCannotCopy: "内置模型不能复制",
@@ -4913,6 +4916,7 @@ export default {
       viewGuide: "查看内置模型管理指南",
     },
     builtinTag: "内置",
+    defaultTag: "默认",
     confirmDelete: "确定删除模型「{name}」吗？",
     debug: {
       title: "模型测试",

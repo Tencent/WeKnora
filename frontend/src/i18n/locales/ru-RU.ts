@@ -2794,7 +2794,8 @@ export default {
       createFailed: 'Не удалось создать модель',
       getFailed: 'Не удалось получить модель',
       updateFailed: 'Не удалось обновить модель',
-      deleteFailed: 'Не удалось удалить модель'
+      deleteFailed: 'Не удалось удалить модель',
+      setDefaultFailed: 'Не удалось установить модель по умолчанию',
     },
     tenant: {
       listFailed: 'Не удалось получить список пространств',
@@ -4470,7 +4471,8 @@ export default {
     actions: {
       addModel: 'Добавить модель',
       debugModel: 'Тест модели',
-      setDefault: 'Сделать по умолчанию'
+      setDefault: 'Сделать по умолчанию',
+      unsetDefault: 'Отменить по умолчанию',
     },
     chat: {
       title: 'Модели диалога',
@@ -4515,8 +4517,9 @@ export default {
       saveFailed: 'Не удалось сохранить модель',
       deleted: 'Модель удалена',
       deleteFailed: 'Не удалось удалить модель',
-      setDefault: 'Установлено по умолчанию',
+      defaultSet: 'Установлено по умолчанию',
       setDefaultFailed: 'Не удалось установить по умолчанию',
+      unsetDefaultHint: 'Установите другую модель по умолчанию, чтобы отменить текущую',
       builtinCannotEdit: 'Встроенные модели нельзя редактировать',
       builtinCannotDelete: 'Встроенные модели нельзя удалить',
       builtinCannotCopy: 'Встроенные модели нельзя копировать',

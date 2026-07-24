@@ -630,6 +630,56 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	return sttModel, nil
 }
 
+// SetDefaultModel sets a model as the default for its type
+// Only one model per type can be the default within a tenant
+func (s *modelService) SetDefaultModel(ctx context.Context, id string) error {
+	logger.Info(ctx, "Start setting default model")
+	logger.Infof(ctx, "Model ID: %s", id)
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	// Get the model to determine its type
+	model, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id": id,
+		})
+		return err
+	}
+	if model == nil {
+		return ErrModelNotFound
+	}
+
+	// Built-in models can be set as default by both tenant admins and system admins
+	if model.IsBuiltin && !types.IsSystemAdminFromContext(ctx) {
+		// Tenant admins can set built-in models as their tenant's default
+		logger.Infof(ctx, "Tenant admin setting builtin model as default: %s", id)
+	}
+
+	// Clear any existing default for this model type in this tenant
+	if err := s.repo.ClearDefaultByType(ctx, uint(tenantID), model.Type, id); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   id,
+			"model_type": model.Type,
+			"tenant_id":  tenantID,
+		})
+		return err
+	}
+
+	// Set this model as default
+	model.IsDefault = true
+	if err := s.repo.Update(ctx, model); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   id,
+			"model_name": model.Name,
+		})
+		return err
+	}
+
+	logger.Infof(ctx, "Model set as default successfully: %s (type: %s)", id, model.Type)
+	return nil
+}
+
 func formatModelInUseMessage(kbCount, agentCount int64) string {
 	switch {
 	case kbCount > 0 && agentCount > 0:

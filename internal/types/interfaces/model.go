@@ -44,6 +44,8 @@ type ModelService interface {
 	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	// SetDefaultModel sets a model as the default for its type
+	SetDefaultModel(ctx context.Context, id string) error
 }
 
 // ModelRepository defines the model repository interface

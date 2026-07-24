@@ -694,6 +694,53 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	})
 }
 
+// SetDefaultModel godoc
+// @Summary      设置默认模型
+// @Description  将指定模型设置为其类型的默认模型
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "模型ID"
+// @Success      200  {object}  map[string]interface{}  "设置成功"
+// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/default [put]
+func (h *ModelHandler) SetDefaultModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start setting default model")
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Model ID is empty")
+		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+
+	logger.Infof(ctx, "Setting model as default, ID: %s", id)
+	if err := h.service.SetDefaultModel(ctx, id); err != nil {
+		if err == service.ErrModelNotFound {
+			logger.Warnf(ctx, "Model not found, ID: %s", id)
+			c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Model set as default successfully, ID: %s", id)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Model set as default",
+	})
+}
+
 // ModelProviderDTO 模型厂商信息 DTO
 type ModelProviderDTO struct {
 	Value       string            `json:"value"`       // provider 标识符

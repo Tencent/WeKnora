@@ -4815,6 +4815,7 @@ export default {
       addModel: "모델 추가",
       debugModel: "모델 테스트",
       setDefault: "기본값으로 설정",
+      unsetDefault: "기본값 해제",
     },
     source: {
       remote: "Remote",

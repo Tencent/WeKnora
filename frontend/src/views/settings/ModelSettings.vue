@@ -66,6 +66,9 @@
           <div class="model-card__body">
             <div class="model-card__header">
               <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
+              <span v-if="model.isDefault" class="model-card__default-badge">
+                {{ $t('modelSettings.defaultTag') }}
+              </span>
               <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
@@ -147,7 +150,7 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, setDefaultModel, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()
@@ -204,11 +207,20 @@ function convertToLegacyFormat(model: ModelConfig) {
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
     credentials: model.credentials,
+    isDefault: model.is_default || false,
   }
 }
 
-// 平铺 + 过滤
-const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
+// 平铺 + 过滤 + 排序（默认模型优先）
+const allLegacyModels = computed(() => {
+  const models = allModels.value.map(convertToLegacyFormat)
+  // 按默认状态排序：默认模型排在前面
+  return models.sort((a, b) => {
+    if (a.isDefault && !b.isDefault) return -1
+    if (!a.isDefault && b.isDefault) return 1
+    return 0
+  })
+})
 const filteredModels = computed(() => {
   if (activeTypeFilter.value === 'all') return allLegacyModels.value
   return allLegacyModels.value.filter(m => m._modelType === activeTypeFilter.value)
@@ -531,6 +543,19 @@ const getModelOptions = (type: ModelType, model: any) => {
     value: `copy-${type}-${model.id}`
   })
 
+  // 添加设置/取消默认选项
+  if (model.isDefault) {
+    options.push({
+      content: t('modelSettings.actions.unsetDefault'),
+      value: `unset-default-${type}-${model.id}`
+    })
+  } else {
+    options.push({
+      content: t('modelSettings.actions.setDefault'),
+      value: `set-default-${type}-${model.id}`
+    })
+  }
+
   return options
 }
 
@@ -542,6 +567,10 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
+  } else if (value.indexOf('set-default-') === 0) {
+    setDefaultModelAction(model.id)
+  } else if (value.indexOf('unset-default-') === 0) {
+    unsetDefaultModelAction(model.id)
   }
 }
 
@@ -586,6 +615,23 @@ const copyModel = async (_type: ModelType, modelId: string) => {
     console.error('复制模型失败:', error)
     MessagePlugin.error(error.message || t('modelSettings.toasts.copyFailed'))
   }
+}
+
+// 设置默认模型
+const setDefaultModelAction = async (modelId: string) => {
+  try {
+    await setDefaultModel(modelId)
+    MessagePlugin.success(t('modelSettings.toasts.defaultSet'))
+    await loadModels()
+  } catch (error: any) {
+    console.error('设置默认模型失败:', error)
+    MessagePlugin.error(error.message || t('modelSettings.toasts.setDefaultFailed'))
+  }
+}
+
+// 取消默认模型（通过将另一个模型设为默认来实现）
+const unsetDefaultModelAction = async (modelId: string) => {
+  MessagePlugin.info(t('modelSettings.toasts.unsetDefaultHint'))
 }
 
 // 获取后端模型类型
@@ -909,6 +955,31 @@ onMounted(() => {
 .model-card:hover .model-card__lock {
   opacity: 1;
   color: var(--td-text-color-secondary);
+}
+
+/*
+  Default badge indicator. Shows "默认" text for the default model.
+  Uses a subtle badge style to indicate this is the preferred choice.
+*/
+.model-card__default-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  height: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+  border-radius: 3px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.model-card:hover .model-card__default-badge {
+  color: var(--td-brand-color-hover);
+  background: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
 }
 
 .model-card__subtitle {
