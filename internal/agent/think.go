@@ -39,8 +39,17 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
-	messages = e.sourceRefs.EncodeMessages(messages)
+	// Order matters. resourceRefs must alias durable resource handles FIRST,
+	// because wiki summary-page slugs (summary/<knowledgeID>) embed a document's
+	// UUID and sourceRefs.EncodeMessages compacts that same UUID into a document
+	// citation alias (d1, d2, …) via a blind substring replace. Running
+	// sourceRefs first mangled `[[summary/<uuid>|Title]]` into `[[summary/d1]]`
+	// — an unrecoverable dead link the model then copied into wiki tool calls.
+	// Encoding resourceRefs first turns the slug into a res:// token so the UUID
+	// is gone before citation compaction runs; the two alias spaces (res://NNNN
+	// vs d/c/b/w-N) are disjoint, so decode order is unaffected.
 	messages = e.resourceRefs.EncodeMessages(messages)
+	messages = e.sourceRefs.EncodeMessages(messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
