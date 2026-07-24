@@ -42,6 +42,12 @@ func setupFeedbackTestDB(t *testing.T) *gorm.DB {
 			title VARCHAR(255),
 			deleted_at DATETIME
 		)`).Error)
+	require.NoError(t, db.Exec(
+		`CREATE TABLE tenants (
+			id INTEGER PRIMARY KEY,
+			retrieval_config TEXT,
+			deleted_at DATETIME
+		)`).Error)
 	return db
 }
 
@@ -58,6 +64,11 @@ func newFeedbackFixture(t *testing.T, chunkCount int) *feedbackFixture {
 	t.Helper()
 	db := setupFeedbackTestDB(t)
 	repo := NewMessageFeedbackRepository(db)
+
+	// Owner tenant 1 with no stored retrieval config → weight computation
+	// uses all-defaults (penalty factor 0.9, min samples 3, etc.).
+	require.NoError(t, db.Exec(
+		"INSERT INTO tenants (id, retrieval_config) VALUES (1, NULL)").Error)
 
 	kbID := uuid.New().String()
 	require.NoError(t, db.Exec(
@@ -107,12 +118,6 @@ func (f *feedbackFixture) refs(messageID string) []types.MessageChunkReference {
 	return refs
 }
 
-func (f *feedbackFixture) policies() map[string]types.FeedbackKBPolicy {
-	return map[string]types.FeedbackKBPolicy{
-		f.kbID: {OwnerTenantID: 1, Config: &types.RetrievalConfig{}},
-	}
-}
-
 func (f *feedbackFixture) upsert(t *testing.T, userID, rating string, reasons []string) string {
 	t.Helper()
 	fb := &types.MessageFeedback{
@@ -123,7 +128,7 @@ func (f *feedbackFixture) upsert(t *testing.T, userID, rating string, reasons []
 		Rating:    rating,
 		Reasons:   reasons,
 	}
-	old, err := f.repo.UpsertFeedback(context.Background(), fb, f.refs(f.messageID), f.policies())
+	old, err := f.repo.UpsertFeedback(context.Background(), fb, f.refs(f.messageID))
 	require.NoError(t, err)
 	return old
 }
@@ -345,8 +350,12 @@ func TestRecomputeFeedbackWeightsAppliesNewConfigAndLogs(t *testing.T) {
 		f.upsert(t, user, types.FeedbackRatingDislike, nil)
 	}
 	newCfg := &types.RetrievalConfig{FeedbackPenaltyFactor: 0.5}
+	// The in-transaction stale check re-reads the tenant's stored config, so
+	// it must match the config being applied (and its fingerprint).
+	require.NoError(t, f.db.Exec("UPDATE tenants SET retrieval_config = ? WHERE id = 1",
+		types.RetrievalConfigFingerprint(newCfg)).Error)
 	changed, err := f.repo.RecomputeFeedbackWeights(context.Background(), 1,
-		map[string]*types.RetrievalConfig{"": newCfg}, nil)
+		map[string]*types.RetrievalConfig{"": newCfg}, types.RetrievalConfigFingerprint(newCfg))
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), changed)
 
@@ -366,9 +375,11 @@ func TestRecomputeFeedbackWeightsAbortsWhenStale(t *testing.T) {
 		f.upsert(t, user, types.FeedbackRatingDislike, nil)
 	}
 	newCfg := &types.RetrievalConfig{FeedbackPenaltyFactor: 0.5}
+	// The tenant's stored config (empty here) differs from the fingerprint we
+	// pass, simulating a newer save landing mid-recompute → must abort.
 	_, err := f.repo.RecomputeFeedbackWeights(context.Background(), 1,
 		map[string]*types.RetrievalConfig{"": newCfg},
-		func(ctx context.Context) (bool, error) { return true, nil })
+		types.RetrievalConfigFingerprint(newCfg))
 	require.ErrorIs(t, err, types.ErrFeedbackRecomputeStale)
 
 	chunk := f.chunk(t, f.chunkIDs[0])

@@ -35,6 +35,41 @@ func TestValidateFeedbackRankingConfigOrdering(t *testing.T) {
 	}
 }
 
+func TestValidateFeedbackRankingConfigRejectsNegatives(t *testing.T) {
+	// Raw negatives must be rejected, not silently coerced to defaults by the
+	// effective getters (F6).
+	for _, cfg := range []*types.RetrievalConfig{
+		{FeedbackBoostThreshold: -1},
+		{FeedbackPenaltyThreshold: -0.5},
+		{FeedbackNeedsOptimizationThreshold: -0.1},
+		{FeedbackBoostFactor: -2},
+		{FeedbackPenaltyFactor: -1},
+	} {
+		if err := validateFeedbackRankingConfig(cfg); err == nil {
+			t.Errorf("expected error for negative config %+v", cfg)
+		}
+	}
+}
+
+func TestFeedbackWeightParamsChanged(t *testing.T) {
+	base := &types.RetrievalConfig{}
+	// Unrelated field change (rerank top-K) must NOT trigger recompute.
+	if feedbackWeightParamsChanged(base, &types.RetrievalConfig{RerankTopK: 20}) {
+		t.Error("unrelated retrieval field must not flag feedback recompute")
+	}
+	// Toggling ranking on/off must NOT trigger recompute (weights unchanged).
+	if feedbackWeightParamsChanged(base, &types.RetrievalConfig{FeedbackRankingEnabled: true}) {
+		t.Error("enabling ranking must not flag feedback recompute")
+	}
+	// A weight-deriving param change MUST trigger recompute.
+	if !feedbackWeightParamsChanged(base, &types.RetrievalConfig{FeedbackPenaltyFactor: 0.5}) {
+		t.Error("penalty factor change must flag feedback recompute")
+	}
+	if !feedbackWeightParamsChanged(base, &types.RetrievalConfig{FeedbackMinSamples: 10}) {
+		t.Error("min samples change must flag feedback recompute")
+	}
+}
+
 func TestValidateFeedbackRankingConfigFactors(t *testing.T) {
 	cfg := &types.RetrievalConfig{FeedbackBoostFactor: 0.9}
 	if err := validateFeedbackRankingConfig(cfg); err == nil {

@@ -28,15 +28,15 @@ type MessageFeedbackRepository interface {
 	ListChunkRefsByMessage(ctx context.Context, messageID string) ([]types.MessageChunkReference, error)
 	// UpsertFeedback applies a rating mutation in one transaction: it locks
 	// the message row (postgres), re-reads each involved KB's feedback epoch
-	// under its row lock, writes/deletes the feedback row and adjusts chunk
-	// counters, stored positive rates, recall weights and weight logs.
-	// rating == "none" deletes the row. Returns the previous rating ("" when
+	// and owner tenant under its row lock, reads the owner tenants' retrieval
+	// configs through the transaction, writes/deletes the feedback row and
+	// adjusts chunk counters, stored positive rates, recall weights and weight
+	// logs. rating == "none" deletes the row. Returns the previous rating ("" when
 	// none existed).
 	UpsertFeedback(
 		ctx context.Context,
 		feedback *types.MessageFeedback,
 		refs []types.MessageChunkReference,
-		kbPolicies map[string]types.FeedbackKBPolicy,
 	) (oldRating string, err error)
 	GetByMessageAndUser(ctx context.Context, messageID, userID string) (*types.MessageFeedback, error)
 	// ListRatingsByMessageIDs returns messageID -> rating for one user.
@@ -64,14 +64,15 @@ type MessageFeedbackRepository interface {
 	ListChunkWeights(ctx context.Context, chunkIDs []string) (map[string]float64, error)
 	// RecomputeFeedbackWeights re-derives weights/flags of all rated chunks
 	// of a tenant from their stored counters using the given per-KB configs,
-	// logging changes with trigger=config. confirmStale is consulted right
-	// before committing; returning true aborts the transaction so a slow
-	// recomputation cannot overwrite the effects of a newer config save.
+	// logging changes with trigger=config. expectedFingerprint is compared
+	// against the tenant's current config (re-read through the transaction)
+	// right before committing; a mismatch aborts with ErrFeedbackRecomputeStale
+	// so a slow recomputation cannot overwrite the effects of a newer config save.
 	RecomputeFeedbackWeights(
 		ctx context.Context,
 		tenantID uint64,
 		cfgByKB map[string]*types.RetrievalConfig,
-		confirmStale func(ctx context.Context) (bool, error),
+		expectedFingerprint string,
 	) (int64, error)
 }
 

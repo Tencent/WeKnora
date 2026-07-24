@@ -1715,6 +1715,10 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		return
 	}
 
+	// Capture the weight-deriving feedback params before overwriting so the
+	// (potentially large) recompute only runs when they actually changed.
+	recomputeNeeded := feedbackWeightParamsChanged(tenant.RetrievalConfig, &cfg)
+
 	tenant.RetrievalConfig = &cfg
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
@@ -1728,9 +1732,10 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	}
 
 	// Refresh stored feedback weights asynchronously so the new thresholds
-	// reach chunks that would otherwise wait for their next rating. The
+	// reach chunks that would otherwise wait for their next rating. Skipped
+	// when only unrelated retrieval fields (top-K, rerank, RRF) changed. The
 	// recompute aborts itself if the config changes again mid-flight.
-	if h.feedbackService != nil {
+	if h.feedbackService != nil && recomputeNeeded {
 		bgCtx := context.WithoutCancel(ctx)
 		tenantID := updatedTenant.ID
 		go func() {
@@ -1747,11 +1752,41 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	})
 }
 
-// validateFeedbackRankingConfig checks the feedback ranking knobs. Validation
-// runs on effective values (zero means "use default") so partially-filled
-// requests stay coherent: 0 <= needsOptimization <= penalty <= boost <= 1,
-// boost factor >= 1, penalty factor in (0, 1], min samples >= 1.
+// feedbackWeightParamsChanged reports whether any of the effective feedback
+// parameters that derive a chunk's stored recall weight differ between two
+// configs. FeedbackRankingEnabled is deliberately excluded: toggling it only
+// changes whether weights are applied at retrieval, not the stored weights.
+func feedbackWeightParamsChanged(oldCfg, newCfg *types.RetrievalConfig) bool {
+	return oldCfg.GetEffectiveFeedbackBoostThreshold() != newCfg.GetEffectiveFeedbackBoostThreshold() ||
+		oldCfg.GetEffectiveFeedbackPenaltyThreshold() != newCfg.GetEffectiveFeedbackPenaltyThreshold() ||
+		oldCfg.GetEffectiveFeedbackBoostFactor() != newCfg.GetEffectiveFeedbackBoostFactor() ||
+		oldCfg.GetEffectiveFeedbackPenaltyFactor() != newCfg.GetEffectiveFeedbackPenaltyFactor() ||
+		oldCfg.GetEffectiveFeedbackMinSamples() != newCfg.GetEffectiveFeedbackMinSamples() ||
+		oldCfg.GetEffectiveFeedbackNeedsOptimizationThreshold() != newCfg.GetEffectiveFeedbackNeedsOptimizationThreshold()
+}
+
+// validateFeedbackRankingConfig checks the feedback ranking knobs. Raw
+// negative values are rejected first (they would otherwise be silently
+// replaced by defaults via the effective getters and persisted). Relationship
+// checks then run on effective values (zero means "use default") so
+// partially-filled requests stay coherent: 0 <= needsOptimization <= penalty
+// <= boost <= 1, boost factor >= 1, penalty factor in (0, 1], min samples >= 1.
 func validateFeedbackRankingConfig(cfg *types.RetrievalConfig) error {
+	for _, f := range []struct {
+		name string
+		val  float64
+	}{
+		{"feedback_boost_threshold", cfg.FeedbackBoostThreshold},
+		{"feedback_penalty_threshold", cfg.FeedbackPenaltyThreshold},
+		{"feedback_needs_optimization_threshold", cfg.FeedbackNeedsOptimizationThreshold},
+		{"feedback_boost_factor", cfg.FeedbackBoostFactor},
+		{"feedback_penalty_factor", cfg.FeedbackPenaltyFactor},
+	} {
+		if f.val < 0 {
+			return errors.NewBadRequestError(f.name + " must not be negative")
+		}
+	}
+
 	boost := cfg.GetEffectiveFeedbackBoostThreshold()
 	penalty := cfg.GetEffectiveFeedbackPenaltyThreshold()
 	needsOpt := cfg.GetEffectiveFeedbackNeedsOptimizationThreshold()

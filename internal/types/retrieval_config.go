@@ -182,18 +182,40 @@ func (c *RetrievalConfig) GetEffectiveFeedbackNeedsOptimizationThreshold() float
 	return c.FeedbackNeedsOptimizationThreshold
 }
 
+// RetrievalConfigFingerprint returns a stable serialization of a retrieval
+// config, used to detect concurrent config changes during an async feedback
+// weight recomputation. A nil config fingerprints to the empty string.
+func RetrievalConfigFingerprint(c *RetrievalConfig) string {
+	if c == nil {
+		return ""
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // Value implements the driver.Valuer interface for database serialization
 func (c RetrievalConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface for database deserialization
+// Scan implements the sql.Scanner interface for database deserialization.
+// The JSONB column comes back as []byte on PostgreSQL but as string on
+// SQLite (Lite mode), so both forms are handled — otherwise a tenant's
+// retrieval config would silently deserialize to all-defaults on SQLite.
 func (c *RetrievalConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
 		return nil
 	}
 	return json.Unmarshal(b, c)

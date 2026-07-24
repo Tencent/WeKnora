@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -85,10 +84,6 @@ func (s *messageFeedbackService) UpsertFeedback(
 	if err != nil {
 		return nil, err
 	}
-	kbPolicies, err := s.buildKBPolicies(ctx, refs)
-	if err != nil {
-		return nil, err
-	}
 
 	feedback := &types.MessageFeedback{
 		TenantID:  tenantID,
@@ -99,7 +94,11 @@ func (s *messageFeedbackService) UpsertFeedback(
 		Reasons:   cleanReasons,
 		Comment:   comment,
 	}
-	if _, err := s.feedbackRepo.UpsertFeedback(ctx, feedback, refs, kbPolicies); err != nil {
+	// The repository reads each involved KB's owner tenant and that tenant's
+	// retrieval config inside its transaction, so no per-KB policy is threaded
+	// from here — this closes the window where a config saved between now and
+	// the transaction commit would be applied from a stale snapshot.
+	if _, err := s.feedbackRepo.UpsertFeedback(ctx, feedback, refs); err != nil {
 		logger.Errorf(ctx, "Failed to upsert feedback for message %s: %v", messageID, err)
 		return nil, err
 	}
@@ -154,50 +153,6 @@ func (s *messageFeedbackService) resolveMessageChunkRefs(
 	return s.feedbackRepo.ListChunkRefsByMessage(ctx, msg.ID)
 }
 
-// buildKBPolicies loads the owner tenant and its retrieval config for each
-// involved knowledge base. The feedback epoch is deliberately re-read inside
-// the repository transaction, not here.
-func (s *messageFeedbackService) buildKBPolicies(
-	ctx context.Context, refs []types.MessageChunkReference,
-) (map[string]types.FeedbackKBPolicy, error) {
-	policies := make(map[string]types.FeedbackKBPolicy)
-	if len(refs) == 0 {
-		return policies, nil
-	}
-	kbIDSet := make(map[string]bool)
-	for _, ref := range refs {
-		if ref.KnowledgeBaseID != "" {
-			kbIDSet[ref.KnowledgeBaseID] = true
-		}
-	}
-	kbIDs := make([]string, 0, len(kbIDSet))
-	for id := range kbIDSet {
-		kbIDs = append(kbIDs, id)
-	}
-	kbs, err := s.kbRepo.GetKnowledgeBaseByIDs(ctx, kbIDs)
-	if err != nil {
-		return nil, err
-	}
-	configByTenant := make(map[uint64]*types.RetrievalConfig)
-	for _, kb := range kbs {
-		cfg, ok := configByTenant[kb.TenantID]
-		if !ok {
-			tenant, err := s.tenantRepo.GetTenantByID(ctx, kb.TenantID)
-			if err != nil {
-				logger.Warnf(ctx, "Failed to load tenant %d for feedback policy, using defaults: %v", kb.TenantID, err)
-			} else {
-				cfg = tenant.RetrievalConfig
-			}
-			configByTenant[kb.TenantID] = cfg
-		}
-		policies[kb.ID] = types.FeedbackKBPolicy{
-			OwnerTenantID: kb.TenantID,
-			Config:        cfg,
-		}
-	}
-	return policies, nil
-}
-
 // AttachUserFeedback stamps Message.UserFeedback for the current caller on
 // loaded assistant messages. Never fatal.
 func (s *messageFeedbackService) AttachUserFeedback(ctx context.Context, messages []*types.Message) {
@@ -242,37 +197,69 @@ func (s *messageFeedbackService) RecordMessageReferences(ctx context.Context, ms
 
 // extractChunkRefs converts a message's stored knowledge references into
 // reference rows, skipping web search results and deduplicating chunk ids.
+// The merge pipeline folds adjacent/overlapping chunks into one passage and
+// records the folded-in chunk ids under SubChunkID; attribution must credit
+// every constituent chunk, so the union of ID and SubChunkID is persisted
+// (all sharing the passage's knowledge base).
 func extractChunkRefs(msg *types.Message) []types.MessageChunkReference {
-	seen := make(map[string]bool, len(msg.KnowledgeReferences))
+	seen := make(map[string]bool)
 	refs := make([]types.MessageChunkReference, 0, len(msg.KnowledgeReferences))
+	add := func(chunkID, kbID string) {
+		if chunkID == "" || kbID == "" || seen[chunkID] {
+			return
+		}
+		seen[chunkID] = true
+		refs = append(refs, types.MessageChunkReference{
+			MessageID:       msg.ID,
+			SessionID:       msg.SessionID,
+			ChunkID:         chunkID,
+			KnowledgeBaseID: kbID,
+		})
+	}
 	for _, sr := range msg.KnowledgeReferences {
-		if sr == nil || sr.ID == "" || sr.KnowledgeBaseID == "" {
+		if sr == nil || sr.KnowledgeBaseID == "" {
 			continue
 		}
 		if sr.ChunkType == "web_search" || sr.KnowledgeSource == "web_search" {
 			continue
 		}
-		if seen[sr.ID] {
-			continue
+		add(sr.ID, sr.KnowledgeBaseID)
+		for _, subID := range sr.SubChunkID {
+			add(subID, sr.KnowledgeBaseID)
 		}
-		seen[sr.ID] = true
-		refs = append(refs, types.MessageChunkReference{
-			MessageID:       msg.ID,
-			SessionID:       msg.SessionID,
-			ChunkID:         sr.ID,
-			KnowledgeBaseID: sr.KnowledgeBaseID,
-		})
 	}
 	return refs
+}
+
+// requireOwnedKB loads a KB and enforces that the caller's active tenant owns
+// it (system admins bypass). Feedback statistics, logs and reset are
+// owner-only management surfaces: they expose and mutate the owner tenant's
+// aggregate quality signals (including end-user dislike comments), so shared
+// viewers / shared-agent users / shared editors — who pass the KBAccess guards
+// on cross-tenant KBs — must not reach them. A cross-tenant caller gets a 404
+// rather than a 403 to avoid confirming the KB's existence.
+func (s *messageFeedbackService) requireOwnedKB(ctx context.Context, kbID string) (*types.KnowledgeBase, error) {
+	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, werrors.NewNotFoundError("knowledge base not found")
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return kb, nil
+	}
+	callerTenant, ok := types.TenantIDFromContext(ctx)
+	if !ok || callerTenant != kb.TenantID {
+		return nil, werrors.NewNotFoundError("knowledge base not found")
+	}
+	return kb, nil
 }
 
 // ListChunkStats returns the paged per-chunk feedback statistics of one KB.
 func (s *messageFeedbackService) ListChunkStats(
 	ctx context.Context, kbID string, query *interfaces.ChunkFeedbackStatsQuery,
 ) (*types.PageResult, error) {
-	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
+	kb, err := s.requireOwnedKB(ctx, kbID)
 	if err != nil {
-		return nil, werrors.NewNotFoundError("knowledge base not found")
+		return nil, err
 	}
 	if query == nil {
 		query = &interfaces.ChunkFeedbackStatsQuery{}
@@ -291,9 +278,9 @@ func (s *messageFeedbackService) ListChunkStats(
 func (s *messageFeedbackService) ListWeightLogs(
 	ctx context.Context, kbID string, chunkID string, p *types.Pagination,
 ) (*types.PageResult, error) {
-	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
+	kb, err := s.requireOwnedKB(ctx, kbID)
 	if err != nil {
-		return nil, werrors.NewNotFoundError("knowledge base not found")
+		return nil, err
 	}
 	if p == nil {
 		p = &types.Pagination{}
@@ -308,9 +295,9 @@ func (s *messageFeedbackService) ListWeightLogs(
 // ResetKnowledgeBaseFeedback advances the KB feedback epoch and restores
 // neutral chunk feedback state.
 func (s *messageFeedbackService) ResetKnowledgeBaseFeedback(ctx context.Context, kbID string) (int64, error) {
-	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
+	kb, err := s.requireOwnedKB(ctx, kbID)
 	if err != nil {
-		return 0, werrors.NewNotFoundError("knowledge base not found")
+		return 0, err
 	}
 	reset, err := s.feedbackRepo.ResetKnowledgeBaseFeedback(ctx, kb.TenantID, kb.ID)
 	if err != nil {
@@ -332,18 +319,11 @@ func (s *messageFeedbackService) RecomputeTenantFeedbackWeights(
 	if err != nil {
 		return 0, err
 	}
-	fingerprint := retrievalConfigFingerprint(tenant.RetrievalConfig)
-	confirmStale := func(ctx context.Context) (bool, error) {
-		current, err := s.tenantRepo.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			return false, err
-		}
-		return retrievalConfigFingerprint(current.RetrievalConfig) != fingerprint, nil
-	}
+	fingerprint := types.RetrievalConfigFingerprint(tenant.RetrievalConfig)
 	changed, err := s.feedbackRepo.RecomputeFeedbackWeights(
 		ctx, tenantID,
 		map[string]*types.RetrievalConfig{"": tenant.RetrievalConfig},
-		confirmStale,
+		fingerprint,
 	)
 	if err != nil {
 		if errors.Is(err, types.ErrFeedbackRecomputeStale) {
@@ -354,15 +334,4 @@ func (s *messageFeedbackService) RecomputeTenantFeedbackWeights(
 	}
 	logger.Infof(ctx, "Recomputed feedback weights for tenant %d, %d chunks changed", tenantID, changed)
 	return changed, nil
-}
-
-func retrievalConfigFingerprint(cfg *types.RetrievalConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }

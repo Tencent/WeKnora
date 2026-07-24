@@ -24,7 +24,8 @@
           </t-select>
           <div class="feedback-toolbar__spacer" />
           <t-popconfirm :content="$t('kbFeedback.resetConfirm')" theme="danger" @confirm="handleReset">
-            <t-button size="small" theme="danger" variant="outline" :loading="resetting">
+            <t-button size="small" theme="danger" variant="outline" :loading="resetting"
+              :disabled="statsLoading">
               {{ $t('kbFeedback.resetAction') }}
             </t-button>
           </t-popconfirm>
@@ -139,6 +140,11 @@ const statsSort = ref<{ sortBy: string; descending: boolean }>({ sortBy: 'dislik
 const needsOptOnly = ref(false);
 const rateFilter = ref<'all' | 'low' | 'high'>('all');
 const resetting = ref(false);
+// Generation guards: the KB can switch (route param reuse) while a request is
+// in flight, so every load stamps a token + its target KB and a late response
+// is dropped unless it is still the newest request for the current KB.
+let statsLoadToken = 0;
+let logsLoadToken = 0;
 
 const statsColumns = computed(() => [
   { colKey: 'content_preview', title: t('kbFeedback.colChunk'), width: 220 },
@@ -162,9 +168,11 @@ const statsPagination = computed(() => ({
 
 const loadStats = async () => {
   if (!props.kbId) return;
+  const token = ++statsLoadToken;
+  const kbAtRequest = props.kbId;
   statsLoading.value = true;
   try {
-    const res: any = await getChunkFeedbackStats(props.kbId, {
+    const res: any = await getChunkFeedbackStats(kbAtRequest, {
       page: statsPage.value,
       page_size: statsPageSize.value,
       sort_by: statsSort.value.sortBy as any,
@@ -173,13 +181,15 @@ const loadStats = async () => {
       max_rate: rateFilter.value === 'low' ? 0.5 : undefined,
       needs_optimization: needsOptOnly.value || undefined,
     });
+    if (token !== statsLoadToken || props.kbId !== kbAtRequest) return;
     stats.value = res?.data?.data || [];
     statsTotal.value = res?.data?.total || 0;
   } catch (err) {
+    if (token !== statsLoadToken || props.kbId !== kbAtRequest) return;
     console.error('Failed to load chunk feedback stats:', err);
     MessagePlugin.error(t('kbFeedback.loadFailed'));
   } finally {
-    statsLoading.value = false;
+    if (token === statsLoadToken) statsLoading.value = false;
   }
 };
 
@@ -249,19 +259,23 @@ const logsPagination = computed(() => ({
 
 const loadLogs = async () => {
   if (!props.kbId) return;
+  const token = ++logsLoadToken;
+  const kbAtRequest = props.kbId;
   logsLoading.value = true;
   try {
-    const res: any = await getChunkWeightLogs(props.kbId, {
+    const res: any = await getChunkWeightLogs(kbAtRequest, {
       page: logsPage.value,
       page_size: logsPageSize.value,
     });
+    if (token !== logsLoadToken || props.kbId !== kbAtRequest) return;
     logs.value = res?.data?.data || [];
     logsTotal.value = res?.data?.total || 0;
   } catch (err) {
+    if (token !== logsLoadToken || props.kbId !== kbAtRequest) return;
     console.error('Failed to load chunk weight logs:', err);
     MessagePlugin.error(t('kbFeedback.loadFailed'));
   } finally {
-    logsLoading.value = false;
+    if (token === logsLoadToken) logsLoading.value = false;
   }
 };
 
@@ -284,11 +298,39 @@ const triggerTheme = (trigger: string) => {
   return 'default';
 };
 
+// Clears both tabs' data and pagination. Bumping the load tokens invalidates
+// any in-flight response so it cannot repopulate the cleared view.
+const resetViewState = () => {
+  statsLoadToken++;
+  logsLoadToken++;
+  stats.value = [];
+  statsTotal.value = 0;
+  statsPage.value = 1;
+  logs.value = [];
+  logsTotal.value = 0;
+  logsPage.value = 1;
+};
+
 watch(
   () => props.visible,
   (visible) => {
     if (visible) {
       reloadStats();
+      if (activeTab.value === 'logs') loadLogs();
+    }
+  },
+);
+
+// The KnowledgeBase route component is reused across KB switches, so the drawer
+// can stay mounted while props.kbId changes. Drop stale data immediately and
+// reload for the new KB, otherwise reset would target a KB the user no longer
+// sees (F5).
+watch(
+  () => props.kbId,
+  () => {
+    resetViewState();
+    if (props.visible) {
+      loadStats();
       if (activeTab.value === 'logs') loadLogs();
     }
   },

@@ -67,7 +67,6 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 	ctx context.Context,
 	feedback *types.MessageFeedback,
 	refs []types.MessageChunkReference,
-	kbPolicies map[string]types.FeedbackKBPolicy,
 ) (string, error) {
 	isPG := r.isPostgres()
 	oldRating := ""
@@ -88,7 +87,21 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 
 		chunksByKB := groupChunkIDsByKB(refs)
 		kbIDs := sortedKeys(chunksByKB)
-		resetByKB, err := lockAndReadFeedbackEpochs(tx, isPG, kbIDs)
+		kbMeta, err := lockAndReadKBFeedbackMeta(tx, isPG, kbIDs)
+		if err != nil {
+			return err
+		}
+		// Read the owner tenants' retrieval configs inside the transaction so
+		// weight computation always uses the latest committed config. Reading
+		// via tx reuses this transaction's connection (no extra connection to
+		// deadlock on SQLite) and closes the window where a config saved
+		// between request start and commit could be applied with a stale
+		// snapshot.
+		ownerTenantIDs := make([]uint64, 0, len(kbMeta))
+		for _, meta := range kbMeta {
+			ownerTenantIDs = append(ownerTenantIDs, meta.ownerTenantID)
+		}
+		configByTenant, err := readRetrievalConfigsByTenant(tx, ownerTenantIDs)
 		if err != nil {
 			return err
 		}
@@ -118,8 +131,9 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 
 		for _, kbID := range kbIDs {
 			chunkIDs := chunksByKB[kbID]
+			meta := kbMeta[kbID]
 			oldEffective := oldRating
-			if found && staleForEpoch(existing.UpdatedAt, resetByKB[kbID]) {
+			if found && staleForEpoch(existing.UpdatedAt, meta.resetAt) {
 				oldEffective = ""
 			}
 			dLike, dDislike := types.FeedbackCounterDeltas(oldEffective, newRating)
@@ -132,9 +146,9 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 			if err := applyCounterDelta(tx, chunkIDs, "dislike_count", dDislike); err != nil {
 				return err
 			}
-			policy := kbPolicies[kbID]
 			if err := refreshChunkWeights(
-				tx, chunkIDs, policy.Config, types.FeedbackWeightTriggerFeedback, feedback.ID,
+				tx, chunkIDs, configByTenant[meta.ownerTenantID],
+				types.FeedbackWeightTriggerFeedback, feedback.ID,
 			); err != nil {
 				return err
 			}
@@ -204,19 +218,27 @@ func (r *messageFeedbackRepository) writeFeedbackRow(
 	return nil
 }
 
-// lockAndReadFeedbackEpochs re-reads each involved KB's feedback_reset_at
-// inside the transaction, under FOR UPDATE on postgres, in sorted key order.
-// An admin reset updates the same rows, so whichever side commits first is
-// fully visible to the other.
-func lockAndReadFeedbackEpochs(
+// kbFeedbackMeta is the per-KB context a feedback transaction reads under the
+// KB row lock: the feedback epoch and the owner tenant whose retrieval config
+// governs weight computation.
+type kbFeedbackMeta struct {
+	resetAt       *time.Time
+	ownerTenantID uint64
+}
+
+// lockAndReadKBFeedbackMeta re-reads each involved KB's feedback_reset_at and
+// owner tenant inside the transaction, under FOR UPDATE on postgres, in sorted
+// key order. An admin reset updates the same rows, so whichever side commits
+// first is fully visible to the other.
+func lockAndReadKBFeedbackMeta(
 	tx *gorm.DB, isPG bool, kbIDs []string,
-) (map[string]*time.Time, error) {
-	resetByKB := make(map[string]*time.Time, len(kbIDs))
+) (map[string]kbFeedbackMeta, error) {
+	metaByKB := make(map[string]kbFeedbackMeta, len(kbIDs))
 	if len(kbIDs) == 0 {
-		return resetByKB, nil
+		return metaByKB, nil
 	}
 	q := tx.Model(&types.KnowledgeBase{}).
-		Select("id", "feedback_reset_at").
+		Select("id", "tenant_id", "feedback_reset_at").
 		Where("id IN ?", kbIDs).
 		Order("id ASC")
 	if isPG {
@@ -227,9 +249,32 @@ func lockAndReadFeedbackEpochs(
 		return nil, err
 	}
 	for _, row := range rows {
-		resetByKB[row.ID] = row.FeedbackResetAt
+		metaByKB[row.ID] = kbFeedbackMeta{resetAt: row.FeedbackResetAt, ownerTenantID: row.TenantID}
 	}
-	return resetByKB, nil
+	return metaByKB, nil
+}
+
+// readRetrievalConfigsByTenant loads the retrieval configs of the given
+// tenants using the current transaction. Tenants without a stored config map
+// to nil, which ComputeRecallWeight treats as all-default.
+func readRetrievalConfigsByTenant(
+	tx *gorm.DB, tenantIDs []uint64,
+) (map[uint64]*types.RetrievalConfig, error) {
+	configByTenant := make(map[uint64]*types.RetrievalConfig, len(tenantIDs))
+	if len(tenantIDs) == 0 {
+		return configByTenant, nil
+	}
+	var tenants []types.Tenant
+	if err := tx.Model(&types.Tenant{}).
+		Select("id", "retrieval_config").
+		Where("id IN ?", tenantIDs).
+		Find(&tenants).Error; err != nil {
+		return nil, err
+	}
+	for i := range tenants {
+		configByTenant[tenants[i].ID] = tenants[i].RetrievalConfig
+	}
+	return configByTenant, nil
 }
 
 // staleForEpoch reports whether a rating last updated at updatedAt predates
@@ -688,13 +733,17 @@ func (r *messageFeedbackRepository) ListChunkWeights(
 }
 
 // RecomputeFeedbackWeights re-derives all rated chunks of a tenant after a
-// retrieval config change. confirmStale runs right before commit so a slow
-// recomputation aborts instead of overwriting a newer config's results.
+// retrieval config change. expectedFingerprint is the fingerprint of the
+// config being applied; just before commit the tenant's current config is
+// re-read *through the transaction* and compared, so a slow recomputation of
+// an older config save aborts instead of overwriting a newer one. The re-read
+// deliberately uses tx (not a fresh connection) — on SQLite the transaction
+// holds the single pooled connection, so opening another would deadlock.
 func (r *messageFeedbackRepository) RecomputeFeedbackWeights(
 	ctx context.Context,
 	tenantID uint64,
 	cfgByKB map[string]*types.RetrievalConfig,
-	confirmStale func(ctx context.Context) (bool, error),
+	expectedFingerprint string,
 ) (int64, error) {
 	isPG := r.isPostgres()
 	var changed int64
@@ -762,14 +811,17 @@ func (r *messageFeedbackRepository) RecomputeFeedbackWeights(
 				return err
 			}
 		}
-		if confirmStale != nil {
-			stale, err := confirmStale(ctx)
-			if err != nil {
-				return err
-			}
-			if stale {
-				return types.ErrFeedbackRecomputeStale
-			}
+		// Abort if the tenant's config changed while we were recomputing, so a
+		// newer save's recomputation is not overwritten by this stale one.
+		var current types.Tenant
+		if err := tx.Model(&types.Tenant{}).
+			Select("id", "retrieval_config").
+			Where("id = ?", tenantID).
+			First(&current).Error; err != nil {
+			return err
+		}
+		if types.RetrievalConfigFingerprint(current.RetrievalConfig) != expectedFingerprint {
+			return types.ErrFeedbackRecomputeStale
 		}
 		return nil
 	})

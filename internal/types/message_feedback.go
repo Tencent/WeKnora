@@ -125,16 +125,6 @@ func (ChunkWeightLog) TableName() string {
 	return "chunk_weight_logs"
 }
 
-// FeedbackKBPolicy carries the per-knowledge-base context a feedback
-// transaction needs: the owner tenant and that tenant's retrieval config.
-// The feedback epoch (knowledge_bases.feedback_reset_at) is deliberately
-// NOT carried here — it must be re-read inside the transaction under the
-// KB row lock, because a concurrent admin reset may advance it.
-type FeedbackKBPolicy struct {
-	OwnerTenantID uint64
-	Config        *RetrievalConfig
-}
-
 // ChunkFeedbackStat is one row of the per-chunk feedback statistics surface.
 type ChunkFeedbackStat struct {
 	ChunkID           string         `json:"chunk_id"`

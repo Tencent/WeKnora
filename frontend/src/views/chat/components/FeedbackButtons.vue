@@ -1,12 +1,12 @@
 <template>
     <t-button size="small" variant="outline" shape="round" class="feedback-btn"
         :class="{ 'feedback-btn--active': modelValue === 'like' }" :title="t('chat.feedback.like')"
-        @click.stop="handleLike">
+        :disabled="submitting" @click.stop="handleLike">
         <t-icon :name="modelValue === 'like' ? 'thumb-up-filled' : 'thumb-up'" />
     </t-button>
     <t-button size="small" variant="outline" shape="round" class="feedback-btn"
         :class="{ 'feedback-btn--active feedback-btn--dislike': modelValue === 'dislike' }"
-        :title="t('chat.feedback.dislike')" @click.stop="handleDislike">
+        :title="t('chat.feedback.dislike')" :disabled="submitting" @click.stop="handleDislike">
         <t-icon :name="modelValue === 'dislike' ? 'thumb-down-filled' : 'thumb-down'" />
     </t-button>
 
@@ -52,8 +52,13 @@ const selectedReasons = ref<string[]>([]);
 const comment = ref('');
 const submitting = ref(false);
 
-// Optimistic update: flip the UI immediately, roll back on failure.
+// Optimistic update: flip the UI immediately, roll back on failure. A single
+// `submitting` gate serializes every mutation (like / dislike / cancel) so the
+// persisted rating cannot diverge from the UI when clicks arrive faster than
+// the network settles.
 const submit = async (rating: FeedbackRating, reasons?: string[], commentText?: string) => {
+    if (submitting.value) return false;
+    submitting.value = true;
     const previous = props.modelValue;
     const next = rating === 'none' ? '' : rating;
     emit('update:modelValue', next);
@@ -70,18 +75,18 @@ const submit = async (rating: FeedbackRating, reasons?: string[], commentText?: 
         emit('update:modelValue', previous);
         MessagePlugin.error(t('chat.feedback.failed'));
         return false;
+    } finally {
+        submitting.value = false;
     }
 };
 
 const handleLike = () => {
-    if (props.modelValue === 'like') {
-        submit('none');
-        return;
-    }
-    submit('like');
+    if (submitting.value) return;
+    submit(props.modelValue === 'like' ? 'none' : 'like');
 };
 
 const handleDislike = () => {
+    if (submitting.value) return;
     if (props.modelValue === 'dislike') {
         submit('none');
         return;
@@ -92,9 +97,7 @@ const handleDislike = () => {
 };
 
 const submitDislike = async () => {
-    submitting.value = true;
     const ok = await submit('dislike', selectedReasons.value, comment.value.trim());
-    submitting.value = false;
     if (ok) {
         dialogVisible.value = false;
     }
