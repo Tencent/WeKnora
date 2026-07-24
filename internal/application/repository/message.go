@@ -401,6 +401,27 @@ func updateAttributedChunkFeedbackCounts(tx *gorm.DB, sessionID, messageID, oldT
 		return nil
 	}
 
+	// Read old like/dislike counts BEFORE the delta update, so the weight log
+	// can record the true pre-feedback values rather than the post-delta ones.
+	type chunkCount struct {
+		ID           string `gorm:"column:id"`
+		LikeCount    int64  `gorm:"column:feedback_like_count"`
+		DislikeCount int64  `gorm:"column:feedback_dislike_count"`
+	}
+	var oldCounts []chunkCount
+	if err := tx.Model(&types.Chunk{}).
+		Select("id", "feedback_like_count", "feedback_dislike_count").
+		Where("id IN ?", chunkIDs).
+		Find(&oldCounts).Error; err != nil {
+		return err
+	}
+	oldLikeMap := make(map[string]int64, len(oldCounts))
+	oldDislikeMap := make(map[string]int64, len(oldCounts))
+	for _, c := range oldCounts {
+		oldLikeMap[c.ID] = c.LikeCount
+		oldDislikeMap[c.ID] = c.DislikeCount
+	}
+
 	updates := map[string]interface{}{}
 	if likeDelta != 0 {
 		updates["feedback_like_count"] = nonNegativeCounterExpr(tx, "feedback_like_count", likeDelta)
@@ -415,17 +436,24 @@ func updateAttributedChunkFeedbackCounts(tx *gorm.DB, sessionID, messageID, oldT
 		return err
 	}
 
-	return refreshChunkFeedbackQuality(tx, chunkIDs)
+	return refreshChunkFeedbackQuality(tx, chunkIDs, oldLikeMap, oldDislikeMap)
 }
 
-func refreshChunkFeedbackQuality(tx *gorm.DB, chunkIDs []string) error {
+func refreshChunkFeedbackQuality(tx *gorm.DB, chunkIDs []string, oldLikeMap, oldDislikeMap map[string]int64) error {
 	var chunks []types.Chunk
-	if err := tx.Select("id", "feedback_like_count", "feedback_dislike_count").
+	if err := tx.Select("id", "feedback_like_count", "feedback_dislike_count",
+		"feedback_positive_rate", "recall_weight", "quality_status").
 		Where("id IN ?", chunkIDs).
 		Find(&chunks).Error; err != nil {
 		return err
 	}
 	for _, chunk := range chunks {
+		oldRecallWeight := chunk.RecallWeight
+		oldQualityStatus := chunk.QualityStatus
+		oldPositiveRate := chunk.FeedbackPositiveRate
+		oldLikeCount := oldLikeMap[chunk.ID]
+		oldDislikeCount := oldDislikeMap[chunk.ID]
+
 		positiveRate, recallWeight, qualityStatus := types.CalculateChunkFeedbackQuality(
 			chunk.FeedbackLikeCount,
 			chunk.FeedbackDislikeCount,
@@ -434,9 +462,28 @@ func refreshChunkFeedbackQuality(tx *gorm.DB, chunkIDs []string) error {
 			Where("id = ?", chunk.ID).
 			Updates(map[string]interface{}{
 				"feedback_positive_rate": positiveRate,
-				"recall_weight":           recallWeight,
-				"quality_status":          qualityStatus,
+				"recall_weight":          recallWeight,
+				"quality_status":         qualityStatus,
 			}).Error; err != nil {
+			return err
+		}
+
+		// Record weight change log
+		log := &types.ChunkWeightLog{
+			ChunkID:          chunk.ID,
+			OldRecallWeight:  oldRecallWeight,
+			NewRecallWeight:  recallWeight,
+			OldQualityStatus: oldQualityStatus,
+			NewQualityStatus: qualityStatus,
+			OldPositiveRate:  oldPositiveRate,
+			NewPositiveRate:  positiveRate,
+			OldLikeCount:     oldLikeCount,
+			NewLikeCount:     chunk.FeedbackLikeCount,
+			OldDislikeCount:  oldDislikeCount,
+			NewDislikeCount:  chunk.FeedbackDislikeCount,
+			TriggeredBy:      "feedback",
+		}
+		if err := tx.Create(log).Error; err != nil {
 			return err
 		}
 	}

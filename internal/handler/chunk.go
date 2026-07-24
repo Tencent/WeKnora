@@ -87,6 +87,40 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	})
 }
 
+// ListChunkWeightLogs godoc
+// @Summary      获取分块权重变更历史
+// @Description  获取指定分块的权重调整日志，按时间倒序排列
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "分块ID"
+// @Success      200  {object}  map[string]interface{}  "权重变更日志列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/by-id/{id}/weight-logs [get]
+func (h *ChunkHandler) ListChunkWeightLogs(c *gin.Context) {
+	ctx := c.Request.Context()
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+
+	logs, err := h.service.ListChunkWeightLogs(ctx, chunkID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": chunkID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    logs,
+	})
+}
+
 // ListKnowledgeChunks godoc
 // @Summary      获取知识分块列表
 // @Description  获取指定知识下的所有分块列表，支持分页

@@ -116,6 +116,11 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 	return chunk, nil
 }
 
+// ListChunkWeightLogs retrieves weight adjustment history for a chunk.
+func (s *chunkService) ListChunkWeightLogs(ctx context.Context, chunkID string) ([]*types.ChunkWeightLog, error) {
+	return s.chunkRepository.ListChunkWeightLogs(ctx, chunkID, 50)
+}
+
 // ListChunksByKnowledgeID lists all chunks for a knowledge ID
 // This method retrieves all chunks belonging to a specific knowledge document
 // Parameters:

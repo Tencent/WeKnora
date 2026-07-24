@@ -116,6 +116,9 @@ type ChunkRepository interface {
 	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.
 	// Returns up to `limit` chunks sorted by updated_at descending.
 	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
+
+	// ListChunkWeightLogs lists weight adjustment history for a chunk.
+	ListChunkWeightLogs(ctx context.Context, chunkID string, limit int) ([]*types.ChunkWeightLog, error)
 }
 
 // ChunkService defines the interface for chunk service operations
@@ -162,4 +165,7 @@ type ChunkService interface {
 	// DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
 	// This updates the chunk metadata and removes the corresponding vector index
 	DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error
+
+	// ListChunkWeightLogs lists weight adjustment history for a chunk.
+	ListChunkWeightLogs(ctx context.Context, chunkID string) ([]*types.ChunkWeightLog, error)
 }

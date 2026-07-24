@@ -114,6 +114,22 @@ func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) 
 	return chunks, nil
 }
 
+// ListChunkWeightLogs retrieves weight adjustment history for a chunk, ordered by newest first.
+func (r *chunkRepository) ListChunkWeightLogs(ctx context.Context, chunkID string, limit int) ([]*types.ChunkWeightLog, error) {
+	var logs []*types.ChunkWeightLog
+	q := r.db.WithContext(ctx).Where("chunk_id = ?", chunkID).Order("created_at DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	if logs == nil {
+		return []*types.ChunkWeightLog{}, nil
+	}
+	return logs, nil
+}
+
 // ListChunksBySeqID retrieves multiple chunks by their seq_ids
 func (r *chunkRepository) ListChunksBySeqID(
 	ctx context.Context, tenantID uint64, seqIDs []int64,

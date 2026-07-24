@@ -260,6 +260,24 @@ type ChunkFeedbackStatsFilter struct {
 	MinFeedbackCount int64
 }
 
+// ChunkWeightLog records each weight adjustment triggered by feedback changes.
+type ChunkWeightLog struct {
+	ID               uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ChunkID          string    `json:"chunk_id" gorm:"type:varchar(36);index;not null"`
+	OldRecallWeight  float64   `json:"old_recall_weight" gorm:"default:1"`
+	NewRecallWeight  float64   `json:"new_recall_weight" gorm:"default:1"`
+	OldQualityStatus string    `json:"old_quality_status" gorm:"type:varchar(32);default:'normal'"`
+	NewQualityStatus string    `json:"new_quality_status" gorm:"type:varchar(32);default:'normal'"`
+	OldPositiveRate  float64   `json:"old_positive_rate" gorm:"default:0"`
+	NewPositiveRate  float64   `json:"new_positive_rate" gorm:"default:0"`
+	OldLikeCount     int64     `json:"old_like_count" gorm:"default:0"`
+	NewLikeCount     int64     `json:"new_like_count" gorm:"default:0"`
+	OldDislikeCount  int64     `json:"old_dislike_count" gorm:"default:0"`
+	NewDislikeCount  int64     `json:"new_dislike_count" gorm:"default:0"`
+	TriggeredBy      string    `json:"triggered_by" gorm:"type:varchar(64);default:'feedback'"`
+	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
 // EmbeddingContent returns the chunk content with ContextHeader prepended
 // when set. Use this where the embedding model needs section context that
 // isn't part of the literal Content. Surrounding whitespace on Content is

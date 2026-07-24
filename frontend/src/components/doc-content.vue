@@ -29,6 +29,8 @@ import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import DocumentPreview from "@/components/document-preview.vue";
 import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
+import ChunkDetail from "@/views/chat/components/tool-results/ChunkDetail.vue";
+import type { ChunkDetailData } from "@/types/tool-results";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -376,6 +378,28 @@ const feedbackStatsEnabled = ref(true);
 const lowQualityOnly = ref(false);
 const lowQualityRate = ref(0.6);
 const minFeedbackCount = ref(1);
+const chunkDetailVisible = ref(false);
+const selectedChunkForDetails = ref<any>(null);
+
+const openChunkDetails = (chunk: any) => {
+  selectedChunkForDetails.value = chunk;
+  chunkDetailVisible.value = true;
+};
+
+const chunkDetailData = (chunk: any): ChunkDetailData => ({
+  display_type: "chunk_detail",
+  chunk_id: chunk.id,
+  content: chunk.content,
+  chunk_index: chunk.chunk_index,
+  knowledge_id: chunk.knowledge_id,
+  content_length: chunk.content?.length || chunk.char_count || 0,
+  recall_weight: chunk.recall_weight,
+  quality_status: chunk.quality_status,
+  feedback_positive_rate: chunk.feedback_positive_rate,
+  feedback_like_count: chunk.feedback_like_count,
+  feedback_dislike_count: chunk.feedback_dislike_count,
+  dislike_reasons: getFeedbackStats(chunk).dislike_reasons,
+});
 
 const chunkFeedbackQuery = computed(() => ({
   feedback_stats: feedbackStatsEnabled.value,
@@ -1709,13 +1733,14 @@ const handleDetailsScroll = () => {
                     >
                       {{ $t("knowledgeBase.childChunk") }}
                     </t-tag>
-                    <t-tag size="small" variant="light" theme="success">
-                      赞 {{ getFeedbackStats(chunk.original).like_count || 0 }}
-                    </t-tag>
-                    <t-tag size="small" variant="light" theme="danger">
-                      踩
-                      {{ getFeedbackStats(chunk.original).dislike_count || 0 }}
-                    </t-tag>
+                    <t-button
+                      size="small"
+                      variant="light"
+                      theme="default"
+                      @click="openChunkDetails(chunk.original)"
+                    >
+                      分块详情
+                    </t-button>
                     <t-tag
                       size="small"
                       variant="light"
@@ -1723,23 +1748,6 @@ const handleDetailsScroll = () => {
                     >
                       好评率 {{ formatPositiveRate(chunk.original) }}
                     </t-tag>
-                    <t-tag size="small" variant="light" theme="default">
-                      关联问答会话数
-                      {{ getFeedbackStats(chunk.original).session_count || 0 }}
-                    </t-tag>
-                    <t-tooltip
-                      :content="getFeedbackReasonSummary(chunk.original)"
-                      placement="top"
-                    >
-                      <t-tag
-                        size="small"
-                        variant="light"
-                        theme="warning"
-                        class="reason-stat-tag"
-                      >
-                        点踩原因
-                      </t-tag>
-                    </t-tooltip>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                 </div>
@@ -1842,6 +1850,21 @@ const handleDetailsScroll = () => {
         </section>
       </div>
     </t-drawer>
+
+    <!-- 分块详情对话框 -->
+    <t-dialog
+      v-model:visible="chunkDetailVisible"
+      header="分块详情"
+      width="640px"
+      :footer="false"
+      attach="body"
+      @close="selectedChunkForDetails = null"
+    >
+      <ChunkDetail
+        v-if="selectedChunkForDetails"
+        :data="chunkDetailData(selectedChunkForDetails)"
+      />
+    </t-dialog>
   </div>
 </template>
 <style scoped lang="less">
