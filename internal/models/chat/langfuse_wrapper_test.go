@@ -43,3 +43,16 @@ func TestBuildLangfuseMessagesReasoningContent(t *testing.T) {
 		t.Fatalf("reasoning_content = %v; want chain of thought", msgs[0]["reasoning_content"])
 	}
 }
+
+func TestConvertUsageIncludesPromptCacheCounters(t *testing.T) {
+	got := convertUsage(&types.TokenUsage{
+		PromptTokens: 1000, CompletionTokens: 50, TotalTokens: 1050,
+		CacheReadTokens: 800, CacheWriteTokens: 100, CacheMissTokens: 200,
+	})
+	if got == nil {
+		t.Fatal("convertUsage returned nil")
+	}
+	if got.CacheRead != 800 || got.CacheWrite != 100 || got.CacheMiss != 200 {
+		t.Fatalf("cache usage = read:%d write:%d miss:%d", got.CacheRead, got.CacheWrite, got.CacheMiss)
+	}
+}

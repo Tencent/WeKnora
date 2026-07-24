@@ -829,7 +829,8 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		"language": types.LanguageNameFromContext(ctx),
 	})
 	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
+	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
+	summary, err := summaryModel.Chat(modelCtx, []chat.Message{
 		{
 			Role:    "system",
 			Content: summaryPrompt,
@@ -1928,7 +1929,8 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
+	response, err := chatModel.Chat(modelCtx, []chat.Message{
 		{
 			Role:    "user",
 			Content: prompt,

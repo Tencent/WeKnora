@@ -60,6 +60,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	resourceRefs := llmresource.NewRegistry()
 	chatMessages = sourceRefs.EncodeMessages(chatMessages)
 	chatMessages = resourceRefs.EncodeMessages(chatMessages)
+	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
 	pipelineInfo(ctx, "Stream", "messages_ready", map[string]interface{}{
 		"message_count": len(chatMessages),
 		"system_prompt": chatMessages[0].Content,

@@ -197,6 +197,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
+import { fileSizeVerification } from '@/utils'
 import { modelSupportsThinking } from '@/utils/thinkingControl'
 
 const props = defineProps<{
@@ -389,7 +390,14 @@ const selectModelType = (type: DebugModelType) => {
 
 const onNativeFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement
-  file.value = target.files?.[0] || null
+  const selectedFile = target.files?.[0] || null
+  if (selectedFile && fileSizeVerification(selectedFile)) {
+    target.value = ''
+    file.value = null
+    resetResult()
+    return
+  }
+  file.value = selectedFile
   resetResult()
 }
 

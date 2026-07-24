@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -334,16 +337,25 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 type templateCaptureChatModel struct {
 	prompt   string
 	response string
+	messages []chat.Message
+	options  chat.ChatOptions
+	purpose  string
+	prefix   string
 }
 
 func (m *templateCaptureChatModel) Chat(
-	_ context.Context,
+	ctx context.Context,
 	messages []chat.Message,
-	_ *chat.ChatOptions,
+	opts *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
 	if len(messages) > 0 {
 		m.prompt = messages[0].Content
 	}
+	m.messages = append([]chat.Message(nil), messages...)
+	if opts != nil {
+		m.options = *opts
+	}
+	m.purpose, m.prefix = types.LLMCallMetadataFromContext(ctx)
 	return &types.ChatResponse{Content: m.response}, nil
 }
 
@@ -357,6 +369,118 @@ func (m *templateCaptureChatModel) ChatStream(
 
 func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
 func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }
+
+func TestGenerateWikiPageModifyUsesCacheableMessageLayout(t *testing.T) {
+	model := &templateCaptureChatModel{response: "SUMMARY: page\n# Alpha"}
+	service := &wikiIngestService{}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	_, err := service.generateWithTemplate(ctx, model, agent.WikiPageModifyUserPrompt, map[string]string{
+		"HasAdditions":         "1",
+		"SharedSourceContexts": "<document><context>shared source summary</context></document>\n",
+		"PageSlug":             "concept/alpha",
+		"PageTitle":            "Alpha",
+		"PageType":             "concept",
+		"ExistingContent":      "(New page)",
+		"NewContent":           "page-specific evidence",
+		"AvailableSlugs":       "concept/beta (Beta)",
+		"Language":             "English",
+		"InstructionScope":     "wiki_content",
+	})
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if len(model.messages) != 2 || model.messages[0].Role != "system" || model.messages[1].Role != "user" {
+		t.Fatalf("unexpected message layout: %#v", model.messages)
+	}
+	if !strings.Contains(model.messages[0].Content, "SOURCE GROUNDING & MERGE RULES") {
+		t.Fatalf("system prompt missing stable rules: %q", model.messages[0].Content)
+	}
+	if !strings.HasPrefix(model.messages[1].Content, "<shared_source_contexts>") {
+		t.Fatalf("shared source context must lead user message: %q", model.messages[1].Content)
+	}
+	if model.purpose != "wiki_page_modify" || model.prefix == "" {
+		t.Fatalf("missing cache metadata: purpose=%q prefix=%q", model.purpose, model.prefix)
+	}
+}
+
+func TestAwaitWikiPromptWarmupBlocksFollowersUntilLeaderCompletes(t *testing.T) {
+	service := &wikiIngestService{}
+	release, err := service.awaitWikiPromptWarmup(context.Background(), "same-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	followerDone := make(chan error, 1)
+	go func() {
+		_, followErr := service.awaitWikiPromptWarmup(context.Background(), "same-prefix")
+		followerDone <- followErr
+	}()
+	select {
+	case <-followerDone:
+		t.Fatal("follower passed warmup gate before leader completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	release()
+	select {
+	case followErr := <-followerDone:
+		if followErr != nil {
+			t.Fatal(followErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower did not resume after leader completed")
+	}
+}
+
+type blockingTemplateChatModel struct {
+	calls   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (m *blockingTemplateChatModel) Chat(
+	context.Context,
+	[]chat.Message,
+	*chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	m.calls.Add(1)
+	m.once.Do(func() { close(m.started) })
+	<-m.release
+	return &types.ChatResponse{Content: "shared result"}, nil
+}
+
+func (m *blockingTemplateChatModel) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+	return nil, nil
+}
+
+func (m *blockingTemplateChatModel) GetModelName() string { return "blocking" }
+func (m *blockingTemplateChatModel) GetModelID() string   { return "blocking" }
+
+func TestGenerateWithTemplateCoalescesIdenticalConcurrentRequests(t *testing.T) {
+	model := &blockingTemplateChatModel{started: make(chan struct{}), release: make(chan struct{})}
+	service := &wikiIngestService{}
+	result := make(chan error, 2)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	call := func() {
+		_, err := service.generateWithTemplate(ctx, model, "same {{.Value}}", map[string]string{"Value": "input"})
+		result <- err
+	}
+	go call()
+	<-model.started
+	go call()
+	time.Sleep(20 * time.Millisecond)
+	if got := model.calls.Load(); got != 1 {
+		t.Fatalf("identical requests reached provider %d times before release", got)
+	}
+	close(model.release)
+	for range 2 {
+		if err := <-result; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := model.calls.Load(); got != 1 {
+		t.Fatalf("identical requests reached provider %d times, want 1", got)
+	}
+}
 
 func TestWikiIngestCleanupContextDetachedFromCancelledParent(t *testing.T) {
 	parent := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))

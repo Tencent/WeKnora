@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrWikiIngestConcurrent is returned by the wiki ingest handler in Lite mode
@@ -344,6 +345,17 @@ type wikiIngestService struct {
 	// wiki:finalize:active:<kbID> lock, keeping two finalize runs for the
 	// same KB from overlapping when there is no Redis.
 	liteFinalizeLocks sync.Map
+	// llmRequests coalesces byte-identical concurrent prompts within this
+	// process. Keys include tenant and model to preserve isolation.
+	llmRequests singleflight.Group
+	// promptWarmups serializes only the first request for a reusable Wiki page
+	// prefix. Other prefixes and already-warmed cohorts stay parallel.
+	promptWarmups sync.Map
+}
+
+type wikiPromptWarmup struct {
+	done chan struct{}
+	once sync.Once
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -1399,7 +1411,7 @@ var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\|\s]+)(?:\|([^\]]+))?\]\]`)
 // Background: WikiSummaryPrompt instructs the LLM to embed wiki links
 // for every extracted slug it knows about, but slug extraction happens
 // during map (parallel with summary generation) and the actual page
-// creation happens later in reduce. When reduce's WikiPageModifyPrompt
+// creation happens later in reduce. When reduce's WikiPageModifyUserPrompt
 // fails on an entity/concept slug the page never gets written — and
 // the already-persisted summary is left holding a `[[entity/foo|name]]`
 // link that 404s.
@@ -2379,42 +2391,163 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	}
 
 	prompt := buf.String()
-	prompt = types.AppendCustomPromptInstructions(prompt, data["CustomInstructions"], data["InstructionScope"])
-	thinking := false
-
-	var lastErr error
-	for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
-		response, err := chatModel.Chat(ctx, []chat.Message{
+	purpose := wikiPromptPurpose(promptTpl)
+	messages := []chat.Message{{Role: "user", Content: prompt}}
+	if promptTpl == agent.WikiPageModifyUserPrompt {
+		systemPrompt := types.AppendCustomPromptInstructions(
+			agent.WikiPageModifySystemPrompt,
+			maskedData["CustomInstructions"],
+			maskedData["InstructionScope"],
+		)
+		messages = []chat.Message{
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
-			Temperature: 0.3,
-			Thinking:    &thinking,
-		})
-		if err == nil {
-			return unmaskImageURLs(response.Content, urlMap), nil
 		}
-		lastErr = err
-
-		// Abort immediately on non-retryable errors (4xx except 408/429,
-		// parse/marshal failures, tool-side bugs, etc.). Retrying a
-		// hard "invalid arguments" error just wastes the model's budget.
-		if !isTransientLLMError(ctx, err) {
-			return "", fmt.Errorf("LLM call failed: %w", err)
-		}
-		if attempt == wikiLLMMaxAttempts {
-			break
-		}
-
-		backoff := wikiLLMBackoffBase << (attempt - 1)
-		logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
-			attempt, wikiLLMMaxAttempts, backoff, err)
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
-		case <-time.After(backoff):
+	} else {
+		messages[0].Content = types.AppendCustomPromptInstructions(
+			prompt, maskedData["CustomInstructions"], maskedData["InstructionScope"],
+		)
+	}
+	thinking := false
+	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking}
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	warmupKey := ""
+	if promptTpl == agent.WikiPageModifyUserPrompt {
+		prefixFingerprint = chat.FingerprintPromptPrefix(
+			messages[0].Content, maskedData["SharedSourceContexts"],
+		)
+		if tenantID, ok := types.TenantIDFromContext(ctx); ok {
+			warmupKey = chat.BuildPromptCacheKey(
+				tenantID, chatModel.GetModelID(), purpose, prefixFingerprint,
+			)
 		}
 	}
-	return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+	ctx = types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
+
+	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
+	requestJSON, _ := json.Marshal(struct {
+		Messages []chat.Message    `json:"messages"`
+		Options  *chat.ChatOptions `json:"options"`
+	}{Messages: messages, Options: opts})
+	requestKey := chat.BuildPromptCacheKey(
+		tenantID, chatModel.GetModelID(), "wiki_exact_request",
+		chat.FingerprintPromptPrefix(string(requestJSON)),
+	)
+
+	execute := func() (interface{}, error) {
+		releaseWarmup := func() {}
+		if tenantScoped && promptTpl == agent.WikiPageModifyUserPrompt && strings.TrimSpace(maskedData["SharedSourceContexts"]) != "" {
+			var warmupErr error
+			releaseWarmup, warmupErr = s.awaitWikiPromptWarmup(ctx, warmupKey)
+			if warmupErr != nil {
+				return "", warmupErr
+			}
+		}
+		defer releaseWarmup()
+
+		var lastErr error
+		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+			response, callErr := chatModel.Chat(ctx, messages, opts)
+			if callErr == nil && response != nil {
+				return response.Content, nil
+			}
+			if callErr == nil {
+				callErr = errors.New("LLM returned nil response")
+			}
+			lastErr = callErr
+
+			if !isTransientLLMError(ctx, callErr) {
+				return "", fmt.Errorf("LLM call failed: %w", callErr)
+			}
+			if attempt == wikiLLMMaxAttempts {
+				break
+			}
+
+			backoff := wikiLLMBackoffBase << (attempt - 1)
+			logger.Warnf(ctx, "wiki ingest: LLM call failed (attempt %d/%d), retrying in %s: %v",
+				attempt, wikiLLMMaxAttempts, backoff, callErr)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", fmt.Errorf("LLM call aborted during backoff: %w", ctx.Err())
+			case <-timer.C:
+			}
+		}
+		return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+	}
+
+	// Missing tenant context is unexpected for production Wiki work. Fail safe
+	// by skipping cross-call coalescing instead of putting unrelated requests
+	// into a synthetic tenant-0 bucket.
+	if !tenantScoped {
+		value, executeErr := execute()
+		if executeErr != nil {
+			return "", executeErr
+		}
+		content, _ := value.(string)
+		return unmaskImageURLs(content, urlMap), nil
+	}
+	resultCh := s.llmRequests.DoChan(requestKey, execute)
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		content, _ := result.Val.(string)
+		return unmaskImageURLs(content, urlMap), nil
+	}
+}
+
+func wikiPromptPurpose(promptTpl string) string {
+	switch promptTpl {
+	case agent.WikiPageModifyUserPrompt:
+		return "wiki_page_modify"
+	case agent.WikiChunkCitationPrompt:
+		return "wiki_chunk_citation"
+	case agent.WikiCandidateSlugPrompt:
+		return "wiki_candidate_slug"
+	case agent.WikiSummaryPrompt:
+		return "wiki_summary"
+	case agent.WikiKnowledgeExtractPrompt:
+		return "wiki_knowledge_extract"
+	case agent.WikiTaxonomyPlanPrompt:
+		return "wiki_taxonomy_plan"
+	case agent.WikiDeduplicationPrompt:
+		return "wiki_deduplication"
+	case agent.WikiIndexIntroPrompt, agent.WikiIndexIntroUpdatePrompt:
+		return "wiki_index_intro"
+	default:
+		return "wiki_generation"
+	}
+}
+
+func (s *wikiIngestService) awaitWikiPromptWarmup(ctx context.Context, key string) (func(), error) {
+	if key == "" {
+		return func() {}, nil
+	}
+	candidate := &wikiPromptWarmup{done: make(chan struct{})}
+	actual, loaded := s.promptWarmups.LoadOrStore(key, candidate)
+	entry := actual.(*wikiPromptWarmup)
+	if !loaded {
+		return func() {
+			entry.once.Do(func() { close(entry.done) })
+			// Keep the local warmed marker long enough to cover the parallel
+			// reduce burst without turning it into a persistent application cache.
+			time.AfterFunc(4*time.Minute, func() {
+				s.promptWarmups.CompareAndDelete(key, entry)
+			})
+		}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-entry.done:
+		return func() {}, nil
+	}
 }
 
 // isTransientLLMError reports whether an error from the chat provider

@@ -8,10 +8,13 @@ import (
 // underlying model, in Langfuse's canonical schema. Set as the value of the
 // langfuse.observation.usage_details span attribute (JSON-serialized).
 type TokenUsage struct {
-	Input  int    `json:"input,omitempty"`
-	Output int    `json:"output,omitempty"`
-	Total  int    `json:"total,omitempty"`
-	Unit   string `json:"unit,omitempty"`
+	Input      int    `json:"input,omitempty"`
+	Output     int    `json:"output,omitempty"`
+	Total      int    `json:"total,omitempty"`
+	CacheRead  int    `json:"cache_read_input_tokens,omitempty"`
+	CacheWrite int    `json:"cache_creation_input_tokens,omitempty"`
+	CacheMiss  int    `json:"cache_miss_input_tokens,omitempty"`
+	Unit       string `json:"unit,omitempty"`
 }
 
 // Langfuse / OpenTelemetry semantic-convention attribute keys mirrored from

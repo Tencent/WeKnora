@@ -315,13 +315,36 @@ If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": 
 
 Now apply the instructions above to the chunks and output ONLY the JSON.`
 
-// WikiPageModifyPrompt updates an existing wiki page with new additions and removes stale/deleted information in a single pass.
-const WikiPageModifyPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process a set of NEW information to add, AND/OR a set of deleted documents whose exclusive contributions must be REMOVED.
+// WikiPageModifySystemPrompt contains only rules shared by every page update.
+// Keeping page identity and source data out of this message gives providers a
+// long byte-stable prefix to cache across a reduce batch.
+const WikiPageModifySystemPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process NEW information to add and/or deleted documents whose exclusive contributions must be removed.
 
 ### SOURCE GROUNDING & MERGE RULES (CRITICAL):
 1. **No Inline Chunk IDs:** Chunk aliases such as [c003] are internal processing metadata. NEVER output them in the page body or summary, and remove any legacy inline chunk aliases from existing content while editing. Source associations are stored separately by the system.
 2. **Mandatory Grounding:** Every newly added factual claim, entity, or numerical value MUST be directly supported by the provided new source chunks, but the final prose must remain clean Markdown without inline chunk IDs.
 3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the new chunks clearly and directly supersede or contradict existing content, update the main text to reflect the newer supported information AND add a brief "Contradictions / Updates" section summarizing the change. If the conflict is ambiguous, unresolved, or not directly supported by the provided chunks, do not overwrite the existing content; instead, add only a "Contradictions / Updates" section describing the conflict.
+4. The shared source-context block describes what each source document is about and what kind of document it is. Use it only to calibrate scope, attribution, and tone. Never copy source-context wording into the page as factual evidence.
+5. Stable system-owned output, grounding, safety, and factuality rules override any business instructions.
+
+### EDITING AND OUTPUT RULES:
+1. You are a COMPILER, not a creative writer. Stay close to the verbatim source wording. You may lightly reorder, deduplicate, and join related sentences, but must not rephrase for style, expand short statements, or invent transitions.
+2. Do not over-structure. Introduce a section heading only if the source or existing page uses it. Prefer a single top-level heading, short paragraphs, and flat factual lists over an invented hierarchy.
+3. Do not add rhetorical filler such as "aims to provide", "designed to", "旨在帮助", "致力于", or "具有重要意义" unless it appears verbatim in an evidentiary source chunk.
+4. Keep self-reported claims scoped and attributed. Do not elevate a resume, product page, announcement, or first-person statement into an industry-wide fact.
+5. Preserve existing information that remains valid and on-topic. Maintain the existing page's structure and formatting style where possible.
+6. Keep a [[slug|name]] link only when its slug is present in the supplied valid-link list. Never invent a slug and never link a page to itself.
+7. Images may be included only from supplied new information. Treat each Markdown image URL as an opaque token and reproduce it exactly without altering, shortening, or normalizing it.
+8. The first output line must be "SUMMARY: {one sentence, 15-40 words}", followed immediately by clean Markdown page content.
+
+Output the SUMMARY line first, followed by the updated Markdown content, with no other preamble.`
+
+// WikiPageModifyUserPrompt contains the per-batch and per-page data. The document-
+// level source context deliberately comes first: all pages generated from one
+// source then share the longest possible prefix before page metadata diverges.
+const WikiPageModifyUserPrompt = `{{if .HasAdditions}}<shared_source_contexts>
+{{.SharedSourceContexts}}</shared_source_contexts>
+{{end}}
 
 <page_metadata>
   <slug>{{.PageSlug}}</slug>
@@ -341,7 +364,7 @@ This wiki page is specifically about **{{.PageTitle}}** (a {{.PageType}}). Every
 {{.NewContent}}
 </new_information>
 
-The <new_information> block above is assembled from VERBATIM source chunks that were already cited as directly supporting this page. An optional <source_context> block inside each document is a document-level summary that tells you BOTH what the document is about AND what KIND of document it is (e.g. a resume, an announcement, a product page, a schedule) — use it to calibrate tone, stay on-topic, and avoid over-promotion. Do NOT quote the source_context text into the page; it is framing only.
+The <new_information> block above is assembled from VERBATIM source chunks already cited as directly supporting this page. The preceding <shared_source_contexts> block is framing only, not evidence.
 {{end}}
 
 {{if .HasRetractions}}
@@ -367,19 +390,14 @@ The <new_information> block above is assembled from VERBATIM source chunks that 
 3. ADD and MERGE the facts from <new_information> into the page. You are a COMPILER, not a writer:
    - **CRITICAL CONFLICT CHECK**: First verify that the <new_information> is actually about **{{.PageTitle}}** (as declared in <page_metadata>). If a piece of new info clearly belongs to a DIFFERENT but related thing (e.g., this page is about "Hunyuan Model" but the new info is about "Qwen3"; or this page is about "居民身份证" but the new info is about "工作居住证"), you MUST REJECT that part of the new information and DO NOT add it.
    - If it is genuinely about {{.PageTitle}} and contradicts old content, prefer the newer information.
-   - **Stay close to source wording.** The chunks are verbatim. Reuse the source's own sentences; you MAY lightly reorder, deduplicate, and join related sentences, but do NOT rephrase for style, do NOT expand short statements into longer ones, and do NOT invent transitional sentences.
-   - **Do NOT over-structure.** Only introduce a section heading (##, ###) if the source itself uses that heading OR the page already has one from existing content. For a new page with flat source text, a single "# {{.PageTitle}}" heading plus 1-2 short paragraphs and a flat bullet list of facts is PREFERRED over inventing a hierarchy of subsections.
-   - **Do NOT add rhetorical filler.** Phrases like "旨在帮助…", "该平台致力于…", "具有重要意义", "designed to…", "aims to provide…" MUST NOT appear unless they are literally present in the source chunks.
-   - **Scope discipline.** The source_context tells you whether the document is self-reported (e.g. a resume) or third-party authoritative. If the source is self-reported, do NOT elevate claims into industry-wide statements — stay descriptive and attribute when useful ("根据简历所述…" / "as described by…" is acceptable when the source is first-person).
 {{end}}
 4. Preserve existing information that is still valid and still about {{.PageTitle}}.
 5. Keep [[slug|name]] wiki-link references ONLY if the slug appears in the <valid_wiki_links> list above. Remove any [[slug|name]] whose slug is NOT in that list. Do NOT invent new wiki-link slugs. The page's own slug ({{.PageSlug}}) MUST NOT appear as a [[...]] link inside its own content.
 6. Maintain the existing page structure and formatting style. Use "# {{.PageTitle}}" as the top-level heading if the page does not already have one. Do NOT introduce new heading levels beyond what the source or existing page justifies.
-7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 {{if .HasRetractions}}
-8. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
+7. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
 {{end}}
-9. Write in {{.Language}}.
+8. Write in {{.Language}}.
 </instructions>
 
 Output the SUMMARY line first, then the updated Markdown content. Do not include any other preamble.`
