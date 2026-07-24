@@ -252,6 +252,10 @@ type Message struct {
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
+	// UserFeedback is the current caller's rating on this assistant message
+	// ("like" / "dislike" / ""). Computed per-caller when loading messages,
+	// never persisted on the row itself.
+	UserFeedback string `json:"user_feedback,omitempty" gorm:"-"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

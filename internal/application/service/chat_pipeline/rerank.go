@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -197,10 +198,16 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		}
 		sr := candidatesToRerank[rr.Index]
 		base := sr.Score
-		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
+		// The retrieval stage may have multiplied a feedback recall weight
+		// into the score. Feed the unweighted score into the composite and
+		// re-apply the factor once afterwards — otherwise the factor would
+		// count twice (inside the base component and again on the product),
+		// and rerank-success vs rerank-fallback paths would diverge.
+		factor, rawBase := feedbackAdjustment(sr, base)
+		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", rawBase)
 		modelScore := rr.RelevanceScore
 		sr.Metadata["model_score"] = fmt.Sprintf("%.4f", modelScore)
-		sr.Score = compositeScore(sr, modelScore, base)
+		sr.Score = compositeScore(sr, modelScore, rawBase)
 
 		// Apply FAQ score boost if enabled
 		if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1.0 &&
@@ -214,6 +221,18 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"original_score": fmt.Sprintf("%.4f", originalScore),
 				"boosted_score":  fmt.Sprintf("%.4f", sr.Score),
 				"boost_factor":   chatManage.FAQScoreBoost,
+			})
+		}
+
+		if factor != 1 {
+			preAdjust := sr.Score
+			sr.Score = math.Min(sr.Score*factor, 1.0)
+			sr.Metadata["feedback_adjusted"] = "true"
+			pipelineInfo(ctx, "Rerank", "feedback_adjust", map[string]interface{}{
+				"chunk_id":       sr.ID,
+				"original_score": fmt.Sprintf("%.4f", preAdjust),
+				"adjusted_score": fmt.Sprintf("%.4f", sr.Score),
+				"factor":         factor,
 			})
 		}
 
@@ -457,6 +476,27 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 		composite = 1
 	}
 	return composite
+}
+
+// feedbackAdjustment reads the feedback recall weight stamped on a search
+// result at retrieval time ("feedback_factor" / "feedback_original_score",
+// see knowledgebase_search_feedback.go). It returns the factor to re-apply
+// after the composite and the unweighted base score to feed into it. factor
+// is 1 when no adjustment was applied.
+func feedbackAdjustment(sr *types.SearchResult, weightedBase float64) (factor, rawBase float64) {
+	factor = 1
+	rawBase = weightedBase
+	f, err := strconv.ParseFloat(sr.Metadata["feedback_factor"], 64)
+	if err != nil || f <= 0 || f == 1 {
+		return factor, rawBase
+	}
+	factor = f
+	if orig, oerr := strconv.ParseFloat(sr.Metadata["feedback_original_score"], 64); oerr == nil {
+		rawBase = orig
+	} else {
+		rawBase = weightedBase / f
+	}
+	return factor, rawBase
 }
 
 // applyMMR applies the MMR algorithm to the search results with pre-computed token sets

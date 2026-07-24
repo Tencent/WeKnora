@@ -248,6 +248,11 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
+	// Apply feedback recall weights BEFORE the MatchCount truncation so a
+	// penalized chunk can actually drop out of (and a boosted one climb
+	// into) the final candidate set, not just reorder inside it.
+	s.applyFeedbackWeights(ctx, retrievalCfg, deduplicatedChunks)
+
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}

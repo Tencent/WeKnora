@@ -44,6 +44,7 @@ import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
+import KbFeedbackStatsDrawer from './components/KbFeedbackStatsDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
@@ -768,6 +769,8 @@ const clearTagFilter = () => {
   tagFilterCleared.value = true;
   handleTagFilterChange([]);
 };
+
+const feedbackStatsDrawerVisible = ref(false);
 
 const openTagManageDrawer = () => {
   tagFilterPanelVisible.value = false;
@@ -2031,6 +2034,12 @@ async function createNewSession(value: string): Promise<void> {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
+              <t-tooltip v-if="canManage && !isFAQ" :content="$t('kbFeedback.entryTooltip')" placement="top">
+                <button type="button" class="kb-settings-button" :disabled="!kbId"
+                  @click="feedbackStatsDrawerVisible = true">
+                  <t-icon name="thumb-up" size="16px" />
+                </button>
+              </t-tooltip>
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2346,6 +2355,11 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId"
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
+  />
+
+  <KbFeedbackStatsDrawer
+    v-model:visible="feedbackStatsDrawerVisible"
+    :kb-id="kbId || ''"
   />
 </template>
 <style>

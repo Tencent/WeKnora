@@ -9,6 +9,16 @@ export interface RetrievalConfig {
   rerank_top_k: number
   rerank_threshold: number
   rerank_model_id: string
+  // Feedback-based ranking: chunk recall weights derived from answer
+  // like/dislike feedback. Weights are always maintained server-side;
+  // the switch only controls whether they are applied at retrieval time.
+  feedback_ranking_enabled?: boolean
+  feedback_boost_threshold?: number
+  feedback_penalty_threshold?: number
+  feedback_boost_factor?: number
+  feedback_penalty_factor?: number
+  feedback_min_samples?: number
+  feedback_needs_optimization_threshold?: number
 }
 
 // Get tenant retrieval config via KV API

@@ -124,6 +124,10 @@ type KnowledgeBase struct {
 	// PinnedAt records when the current caller pinned this knowledge
 	// base; nil when they have not.
 	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"               gorm:"-"`
+	// FeedbackResetAt is the feedback epoch marker: answer ratings updated
+	// before this instant no longer count toward chunk feedback stats after
+	// an admin reset. Nil means no reset has happened.
+	FeedbackResetAt *time.Time `yaml:"-" json:"feedback_reset_at,omitempty" gorm:"column:feedback_reset_at"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base

@@ -18,7 +18,7 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 
 	RegisterSessionRoutes(v1, &sessionhandler.Handler{}, &handler.MessageSuggestionHandler{}, g)
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
-	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
+	RegisterMessageRoutes(v1, &handler.MessageHandler{}, &handler.MessageFeedbackHandler{}, g)
 
 	cases := []struct {
 		method string
@@ -119,7 +119,7 @@ func TestMessageHistoryRoutesDeclareMessageHistoryCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
+	RegisterMessageRoutes(v1, &handler.MessageHandler{}, &handler.MessageFeedbackHandler{}, g)
 
 	cases := []struct {
 		method string
