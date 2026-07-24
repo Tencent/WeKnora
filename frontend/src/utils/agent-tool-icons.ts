@@ -12,7 +12,7 @@ export function getAgentToolIconName(
     }
     return 'data-search'
   }
-  if (toolName === 'wiki_search') {
+  if (toolName === 'wiki_navigate' || toolName === 'wiki_search') {
     return 'search'
   }
   if (toolName === 'grep_chunks') {

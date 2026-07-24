@@ -64,6 +64,7 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 
 	// ---- Wiki (operates on wiki pages; doesn't consume arbitrary file IDs) ----
+	"wiki_navigate":        {AllOf: []KBCapability{CapWiki}},
 	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_page":       {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_source_doc": {AllOf: []KBCapability{CapWiki}},

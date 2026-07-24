@@ -27,6 +27,7 @@ const (
 	ToolWikiReplaceText   = "wiki_replace_text"
 	ToolWikiRenamePage    = "wiki_rename_page"
 	ToolWikiDeletePage    = "wiki_delete_page"
+	ToolWikiNavigate      = "wiki_navigate"
 	ToolWikiSearch        = "wiki_search"
 	ToolWikiReadSourceDoc = "wiki_read_source_doc"
 	ToolWikiFlagIssue     = "wiki_flag_issue"
@@ -57,6 +58,7 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
 		{Name: ToolReadSkill, Label: "读取技能", Description: "按需读取技能内容以学习专业能力"},
 		{Name: ToolExecuteSkillScript, Label: "执行技能脚本", Description: "在沙箱环境中执行技能脚本"},
+		{Name: ToolWikiNavigate, Label: "浏览Wiki", Description: "从Wiki索引和链接关系中发现候选页面"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
 		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},

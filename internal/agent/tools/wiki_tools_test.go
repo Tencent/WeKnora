@@ -55,6 +55,7 @@ func TestTruncateForSummary(t *testing.T) {
 func TestWikiToolConstants(t *testing.T) {
 	// Verify all wiki tool constants are defined and unique
 	names := []string{
+		ToolWikiNavigate,
 		ToolWikiReadPage,
 		ToolWikiSearch,
 	}
@@ -79,6 +80,7 @@ func TestWikiToolConstants(t *testing.T) {
 func TestWikiToolsInAvailableDefinitions(t *testing.T) {
 	defs := AvailableToolDefinitions()
 	wikiTools := map[string]bool{
+		ToolWikiNavigate: false,
 		ToolWikiReadPage: false,
 		ToolWikiSearch:   false,
 	}

@@ -6101,6 +6101,8 @@ export default {
       requiresRagKb: "（需要关联启用向量/关键词索引的知识库）",
       requiresWikiKb: "（需要关联启用 Wiki 能力的知识库）",
       // Wiki 读取类
+      wikiNavigate: "浏览 Wiki",
+      wikiNavigateDesc: "从 Wiki 索引、分类和链接关系中发现候选页面",
       wikiSearch: "搜索 Wiki",
       wikiSearchDesc: "在 Wiki 知识库中按关键词/语义搜索页面",
       wikiReadPage: "阅读 Wiki 页面",

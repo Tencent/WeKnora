@@ -5945,6 +5945,8 @@ export default {
       requiresRagKb: '(requires a KB with vector/keyword indexing enabled)',
       requiresWikiKb: '(requires a Wiki-enabled knowledge base)',
       // Wiki read tools
+      wikiNavigate: 'Navigate Wiki',
+      wikiNavigateDesc: 'Browse Wiki indexes, categories, and links to find candidate pages',
       wikiSearch: 'Search Wiki',
       wikiSearchDesc: 'Keyword / semantic search over Wiki pages',
       wikiReadPage: 'Read Wiki Page',

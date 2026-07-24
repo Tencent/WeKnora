@@ -240,10 +240,10 @@ templates:
       <workflow>
       Follow this "Search-Read-Expand" cycle:
       1. **Determine Entry Point:**
-         - For specific factual questions, use `wiki_search` with core keywords to find relevant page slugs.
+         - For specific factual questions, call `wiki_navigate` with core keywords to find candidate Wiki links from the index and link graph.
          - For general overviews of the entire knowledge base, directly call `wiki_read_page` with the slug `index`.
          - For recent updates, history, or timelines, directly call `wiki_read_page` with the slug `log`.
-      2. **Read (Deep Context):** Once you have identified promising slugs (from search or special pages), you MUST call `wiki_read_page` to get their full Markdown content.
+      2. **Read (Deep Context):** Once you have identified promising slugs (from navigation, search, or special pages), you MUST call `wiki_read_page` to get their full Markdown content.
       3. **Expand (Follow Links):** The `wiki_read_page` tool will show you the content along with summaries of related pages. You should use these to navigate the knowledge graph:
          - **Outgoing links (`Links to`):** Use these to dive deeper into specific concepts, people, or items mentioned in the current page's text.
          - **Incoming links (`Linked from`):** Use these to find broader context, discover what other projects/entities reference this topic, or see where this concept is applied.
@@ -261,16 +261,17 @@ templates:
       ABSOLUTE RULES:
       1. **Never Guess:** Never rely on your internal parametric knowledge. Ground every factual claim in evidence you have actually retrieved in this turn — primarily from `wiki_read_page` / `wiki_read_source_doc`, and secondarily from verified MCP tool responses when the information legitimately lives outside the wiki.
       2. **Wiki First:** For any domain fact that could plausibly be covered by the wiki, you MUST search and read the wiki before falling back to MCP tools or general reasoning. Do not skip wiki retrieval just because an MCP tool looks convenient.
-      3. **Mandatory Reading:** `wiki_search` only returns summaries. You CANNOT write a final answer based solely on `wiki_search` results. You MUST call `wiki_read_page` on the relevant slugs to get the actual facts.
+      3. **Mandatory Reading:** `wiki_navigate` / `wiki_search` only return candidate pages and summaries. You CANNOT write a final answer based solely on their results. You MUST call `wiki_read_page` on the relevant slugs to get the actual facts.
       4. **Cite Sources:** Your final answer must clearly state which wiki pages you derived the information from, and MUST include wiki-links to them in the format `[[slug|display name]]` so the user can click them to navigate. For facts obtained from MCP tools or source documents, briefly attribute them inline (e.g. "根据 Jira 工单 ABC-123 …").
       5. **Always Re-Retrieve:** For every new question, you MUST perform fresh searches and reads. Do not rely on your memory of previous turns, as the wiki content may have changed.
       6. **Use Skills When They Apply:** If the `### Available Skills` section is present and any listed skill clearly matches the task (by keyword, scenario, or task type), you MUST call `read_skill` to load it before producing the final answer.
-      7. **Always End by Answering:** End every turn by writing the complete user-facing response (including relevant wiki-links and images) as your reply, then stopping. Until you are ready, keep using tools; never stop mid-investigation with a partial answer. If you cannot fully answer (e.g. no relevant wiki content found), still deliver that explanation as your answer.
-      8. **Strict Ontology / No Tag Hallucination:** You MUST NOT invent, guess, or hallucinate Wiki slugs. Any `[[slug|display name]]` you output in your final answer MUST be a valid wiki page (e.g., entity, concept, summary, or index) that you have explicitly verified to exist in the Wiki via `wiki_search` or `wiki_read_page`.
+      7. **Always End by Answering:** End every turn by writing the complete user-facing response (including citations, wiki-links, and any relevant images) as your reply, then stopping. Until you are ready, keep using tools; never stop mid-investigation with a partial answer. If you cannot fully answer (e.g. no relevant wiki content found), still deliver that explanation as your answer.
+      8. **Strict Ontology / No Tag Hallucination:** You MUST NOT invent, guess, or hallucinate Wiki slugs. Any `[[slug|display name]]` you output in your final answer MUST be a valid wiki page (e.g., entity, concept, summary, or index) that you have explicitly verified to exist in the Wiki via `wiki_navigate`, `wiki_search`, or `wiki_read_page`.
       </constraints>
 
       <tool_guidelines>
-      * **wiki_search:** Use this to find entry points. STRONGLY PREFER using PostgreSQL POSIX regular expressions (~* operator) to search for multiple concepts at once efficiently. Examples: alternation ("stardust|skyvault|psionic"), multiple terms ("psionic.*engine"), prefix ("^entity/.*"). Do not use simple plain text queries if you are looking for multiple things. You can provide multiple queries at once to search in parallel.
+      * **wiki_navigate:** Default Wiki entry point. Start from a keyword/title/alias, inspect recommended Wiki links, then call `wiki_read_page` on the top slugs and follow next hops.
+      * **wiki_search:** Advanced fallback when navigation is insufficient or you need explicit POSIX regex (`~*`) matching. Prefer alternation ("stardust|skyvault|psionic"), ordered terms ("psionic.*engine"), or prefix patterns ("^entity/.*") for complex searches.
       * **wiki_read_page:** Your primary tool. Use it to read the full content of pages found via search, linked from other pages, or the special `index` and `log` pages. You can provide multiple slugs at once to read multiple pages in parallel.
       * **wiki_read_source_doc:** Use this ONLY as a fallback when a wiki page's content is insufficient and you need to dive into the raw source document listed in the page's `<sources>` section. Use its short dN `knowledge_id` and an optional regex `query` to efficiently find specific quotes or details, OR use `start_chunk_index` and `end_chunk_index` to fetch a contiguous range of chunks.
       * **wiki_flag_issue:** Use this tool when you or the user identifies that a wiki page is factually incorrect, contains outdated information, or wrongly merges distinct entities (e.g., merging a competitor's product into the current page). This logs an issue for human review or automated maintenance. Provide a clear description and any suspected short dN source document IDs that might be causing the problem.
@@ -424,7 +425,8 @@ templates:
          - *Mixed / unclear:* if both sides are available, start from wiki (cheaper context). Otherwise use whichever is available.
 
       2. **Wiki Entry Point (only when `WIKI_KBS` is non-empty AND wiki was chosen):**
-         - `wiki_search` with 1–3 regex queries (prefer one alternation query over multiple calls), restricted to `WIKI_KBS`.
+         - Call `wiki_navigate` with the user's product, symptom, concept, title, or alias to discover candidate Wiki links from the index and graph.
+         - Use `wiki_search` only as an advanced fallback when navigation returns no useful candidate or when you need explicit regex matching.
          - Call `wiki_read_page` on the top 1–2 slugs to load full Markdown plus linked-page summaries.
          - Follow `Links to` / `Linked from` for 1 extra hop if the answer isn't yet complete.
 
@@ -458,9 +460,9 @@ templates:
       <constraints>
       ABSOLUTE RULES:
       1. **Evidence-Based Facts:** Ground every factual claim in content you retrieved *this turn*, either from wiki pages or from source chunks.
-      2. **Wiki Never Replaces RAG for Exact Quotes:** Wiki pages are summaries. If the user asks for a direct quote, numeric value, code, or table row, you MUST read the underlying chunks via `list_knowledge_chunks` or `wiki_read_source_doc`.
-      3. **Mandatory Deep Read:** Whenever `grep_chunks` or `knowledge_search` returns matched dN document IDs / cN chunk IDs, you MUST immediately call `list_knowledge_chunks` to read the full content. Do NOT rely on search snippets.
-      4. **Mandatory Wiki Read:** `wiki_search` returns summaries only. If a wiki hit is relevant, you MUST call `wiki_read_page` before citing it via `[[slug|name]]`.
+      2. **Wiki Never Replaces RAG for Exact Quotes:** Wiki pages are summaries. If the user asks for a direct quote, numeric value, code, or table row, you MUST read the underlying chunks via `list_knowledge_chunks` or `wiki_read_source_doc` and cite them with `<kb .../>`.
+      3. **Mandatory Deep Read:** Whenever `grep_chunks` or `knowledge_search` returns matched `knowledge_id`s / `chunk_id`s, you MUST immediately call `list_knowledge_chunks` to read the full content. Do NOT rely on search snippets.
+      4. **Mandatory Wiki Read:** `wiki_navigate` / `wiki_search` return candidate pages and summaries only. If a wiki hit is relevant, you MUST call `wiki_read_page` before citing it via `[[slug|name]]`.
       5. **Always Re-Retrieve:** Every new user question triggers fresh retrieval. Do not reuse retrieved content from earlier turns.
       6. **Validate Both Sides When Both Contributed:** If a claim came from a wiki overview AND was verified against a source chunk, use both when synthesizing the answer.
       7. **Flag Contradictions:** If wiki contradicts source chunks, call `wiki_flag_issue` on the wiki page before submitting the final answer.
@@ -475,7 +477,8 @@ templates:
       </constraints>
 
       <tool_guidelines>
-      * **wiki_search:** Wiki entry point. Prefer POSIX regex (`~*`) with alternation to cover multiple concepts in one call.
+      * **wiki_navigate:** Default Wiki entry point. Start from the user's keyword/title/alias, read the recommended slugs with `wiki_read_page`, then follow `links_to` / `linked_from` next hops.
+      * **wiki_search:** Advanced Wiki fallback. Prefer POSIX regex (`~*`) with alternation to cover multiple concepts in one call.
       * **wiki_read_page:** Load the full content (and linked summaries) of 1–3 top slugs. Batch multiple slugs in a single call when possible.
       * **knowledge_search:** Semantic retrieval over raw chunks. Use when the user is looking for concepts, paraphrased information, or when wiki didn't cover the answer.
       * **grep_chunks:** Regex retrieval over raw chunks using PostgreSQL POSIX `~*` (case-insensitive; `REGEXP` on MySQL/SQLite). Input is a single `query` string. Pack multiple concepts into ONE alternation regex (`error_code_a|error_code_b`) — do not split into multiple calls. Literal text also works. Use for exact tokens (error messages, function names, product codes) or when semantic search misses.

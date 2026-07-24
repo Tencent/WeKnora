@@ -84,6 +84,7 @@ agent_type_presets:
       # explicit reflection or planning across long wiki navigation chains;
       # not on by default.
       allowed_tools:
+        - "wiki_navigate"
         - "wiki_search"
         - "wiki_read_page"
         - "wiki_read_source_doc"
@@ -115,6 +116,7 @@ agent_type_presets:
       # user wants explicit self-reflection or a visible step-by-step plan for
       # multi-hop hybrid searches.
       allowed_tools:
+        - "wiki_navigate"
         - "wiki_search"
         - "wiki_read_page"
         - "knowledge_search"

@@ -556,6 +556,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
   get_related_documents: 'agentStream.tools.getRelatedDocuments',
   get_document_content: 'agentStream.tools.getDocumentContent',
+  wiki_navigate: 'agentEditor.tools.wikiNavigate',
   wiki_search: 'agentEditor.tools.wikiSearch',
   wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
@@ -2470,7 +2471,7 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'attachment_parsing') {
       return t('agentStream.toolStatus.attachmentParsing');
     }
-    if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
+    if (event.tool_name === 'wiki_navigate' || event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
     const localizedName = getLocalizedToolName(event.tool_name);
@@ -2478,7 +2479,7 @@ const getToolTitle = (event: any): string => {
   }
 
   const toolName = event.tool_name;
-  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_search';
+  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_navigate' || toolName === 'wiki_search';
   const isWebSearchTool = toolName === 'web_search';
   const isGrepTool = toolName === 'grep_chunks';
 
@@ -2594,7 +2595,7 @@ const getToolDescription = (event: any): string => {
 
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return success ? t('agentStream.toolStatus.searchKb') : t('agentStream.toolStatus.searchKbFailed');
-  } else if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+  } else if (toolName === 'wiki_navigate' || toolName === 'wiki_search' || toolName === 'wiki_read_page') {
     const localizedName = getLocalizedToolName(toolName);
     return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else if (toolName === 'web_search') {

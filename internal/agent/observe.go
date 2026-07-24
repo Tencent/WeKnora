@@ -545,6 +545,7 @@ var kbToolNames = map[string]bool{
 	agenttools.ToolListKnowledgeChunks: true,
 	agenttools.ToolQueryKnowledgeGraph: true,
 	agenttools.ToolGetDocumentInfo:     true,
+	agenttools.ToolWikiNavigate:        true,
 	agenttools.ToolWikiSearch:          true,
 	agenttools.ToolWikiReadPage:        true,
 	agenttools.ToolWikiReadSourceDoc:   true,
