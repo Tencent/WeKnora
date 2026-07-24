@@ -39,6 +39,13 @@ type WikiPageService interface {
 	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
 	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
 
+	// RepairContentLinks rewrites dead [[slug]] references in content to their
+	// most likely live target (rewrite-only — never strips). Used by the agent
+	// write path to auto-correct LLM-mangled slugs (especially UUID-based
+	// summary slugs) before persistence. Returns the possibly-updated content
+	// and whether any rewrite happened. Best-effort: callers may ignore errors.
+	RepairContentLinks(ctx context.Context, kbID, selfSlug, content string) (string, bool, error)
+
 	// GetPageByID retrieves a wiki page by its unique ID.
 	GetPageByID(ctx context.Context, id string) (*types.WikiPage, error)
 
