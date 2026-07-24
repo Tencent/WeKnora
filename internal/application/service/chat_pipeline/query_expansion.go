@@ -3,10 +3,11 @@ package chatpipeline
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
-	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -187,14 +188,22 @@ var stopwords = map[string]struct{}{
 var questionWords = regexp.MustCompile(`^(什么是|什么|如何|怎么|怎样|为什么|为何|哪个|哪些|谁|何时|何地|请问|请告诉我|帮我|我想知道|我想了解)`)
 
 func extractKeywords(text string) []string {
-	words := tokenize(text)
-	keywords := make([]string, 0, len(words))
-	for _, w := range words {
+	tokenSet := searchutil.TokenizeSimple(text)
+	if len(tokenSet) == 0 {
+		return nil
+	}
+	keywords := make([]string, 0, len(tokenSet))
+	for w := range tokenSet {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
 		lower := strings.ToLower(w)
-		if _, isStop := stopwords[lower]; !isStop && len(w) > 1 {
-			keywords = append(keywords, w)
+		if _, isStop := stopwords[lower]; !isStop {
+			keywords = append(keywords, lower)
 		}
 	}
+	sort.Strings(keywords)
 	return keywords
 }
 
@@ -227,33 +236,4 @@ func splitByDelimiters(text string) []string {
 
 func removeQuestionWords(text string) string {
 	return strings.TrimSpace(questionWords.ReplaceAllString(text, ""))
-}
-
-func tokenize(text string) []string {
-	var tokens []string
-	var current strings.Builder
-
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			current.WriteRune(r)
-		} else if unicode.Is(unicode.Han, r) {
-			// Flush current token
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-			// Chinese character as single token
-			tokens = append(tokens, string(r))
-		} else {
-			// Delimiter
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-		}
-	}
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
-	return tokens
 }
