@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/textproto"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -615,9 +616,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
-	if _, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID); err != nil {
+	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
+	if kbErr != nil {
 		logger.Warnf(ctx, "knowledge base not found (likely deleted), cancelling sync: kb=%s ds=%s err=%v",
-			ds.KnowledgeBaseID, payload.DataSourceID, err)
+			ds.KnowledgeBaseID, payload.DataSourceID, kbErr)
 		syncLog.Status = types.SyncLogStatusCanceled
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = "knowledge base has been deleted"
@@ -658,6 +660,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
+	// Surface the KB's multimodal/VLM state to the connector so it only extracts
+	// embedded images for OCR when the KB can actually ingest them (never persisted).
+	config.MultimodalEnabled = kb.IsMultimodalEnabled()
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -860,12 +865,23 @@ func (s *DataSourceService) applyFetchedItem(
 
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
 	if err != nil {
-		// Duplicate file/URL is not a failure — count as skipped
 		var dupErr *types.DuplicateKnowledgeError
-		if errors.As(err, &dupErr) {
+		switch {
+		case errors.As(err, &dupErr):
+			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
 			result.Skipped++
-		} else {
+		case item.Metadata["embedded_image"] == "true":
+			// An image extracted from a document for OCR is a best-effort
+			// enrichment, not the document itself. If the KB cannot ingest it
+			// (VLM/object-storage not configured for images, or a transient error),
+			// skip it rather than failing the whole sync: the doc body already
+			// synced, and the image stays in SubtreeKeep for a later retry once the
+			// KB is configured.
+			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
+				item.Title, item.ExternalID, err)
+			result.Skipped++
+		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
@@ -1181,7 +1197,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
 		}
-		_, err = s.knowledgeService.CreateKnowledgeFromFile(
+		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
 			ctx,
 			ds.KnowledgeBaseID,
 			fh,
@@ -1191,13 +1207,23 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs,        // auto-tag from data source
 			channel,
 			nil,
-		)
-		return isUpdate, err
+		); err != nil {
+			var dupErr *types.DuplicateKnowledgeError
+			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
+				// Identical content is already present in the KB under THIS node's
+				// own external_id, so the parent effectively exists — reconcile the
+				// subtree so children removed from the doc do not linger.
+				s.sweepStaleSubtree(ctx, ds, item)
+			}
+			return isUpdate, err
+		}
+		s.sweepStaleSubtree(ctx, ds, item)
+		return isUpdate, nil
 	}
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
 	if item.URL != "" {
-		_, err := s.knowledgeService.CreateKnowledgeFromURL(
+		if _, err := s.knowledgeService.CreateKnowledgeFromURL(
 			ctx,
 			ds.KnowledgeBaseID,
 			item.URL,
@@ -1208,11 +1234,87 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			tagIDs, // auto-tag from data source
 			channel,
 			nil,
-		)
-		return isUpdate, err
+		); err != nil {
+			var dupErr *types.DuplicateKnowledgeError
+			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
+				// Identical content is already present in the KB under THIS node's
+				// own external_id, so the parent effectively exists — reconcile the
+				// subtree so children removed from the doc do not linger.
+				s.sweepStaleSubtree(ctx, ds, item)
+			}
+			return isUpdate, err
+		}
+		s.sweepStaleSubtree(ctx, ds, item)
+		return isUpdate, nil
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// dupIsSameNode reports whether a duplicate-content error means the parent still
+// exists in the KB *under this item's own external_id* — i.e. a content-dedup hit
+// against this same node, so reconciling its subtree is safe. Deduplication keys
+// on file_hash alone (CheckKnowledgeExists), so an updated node whose rebuilt body
+// happens to hash-collide with a DIFFERENT knowledge item (another node, or a
+// manually-uploaded file with no external_id) would otherwise sweep this node's
+// children even though its own parent row was just deleted for the update and
+// never recreated — deleting those children with no parent to replace them. In
+// that case the matched row's external_id differs (or is absent), so we skip the
+// sweep and leave the children intact.
+func dupIsSameNode(dupErr *types.DuplicateKnowledgeError, item *types.FetchedItem) bool {
+	return dupErr != nil && dupErr.Knowledge != nil &&
+		dupErr.Knowledge.GetMetadata()["external_id"] == item.ExternalID
+}
+
+// sweepStaleSubtree deletes STALE sub-items of item — knowledge whose external_id
+// is prefixed with "<item.ExternalID>#" (e.g. attachment children of a docx node)
+// that is NOT listed in item.SubtreeKeep, i.e. no longer present in the source.
+//
+// It runs only AFTER the parent item exists in the KB (freshly (re)created, or
+// confirmed present via a duplicate-hash error), so a genuinely failed parent
+// write never destroys existing children. Children still present in the source
+// are preserved via SubtreeKeep even when they could not be re-ingested this
+// cycle (e.g. a transient attachment download failure), so a still-present
+// attachment never loses its previously-synced good copy. The "<id>#" prefix
+// never matches the parent's own "<id>" external_id, so the parent is never
+// self-swept.
+func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.DataSource, item *types.FetchedItem) {
+	if !item.ReplacesSubtree || item.ExternalID == "" {
+		return
+	}
+	repo := s.knowledgeService.GetRepository()
+	children, err := repo.FindByMetadataKeyPrefix(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", types.SubtreeChildPrefix(item.ExternalID))
+	if err != nil {
+		logger.Warnf(ctx, "failed to list subtree of external_id=%s: %v", item.ExternalID, err)
+		return
+	}
+	if len(children) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(children))
+	for _, child := range children {
+		// A child still present in the source is preserved even if it could not be
+		// re-ingested this sync; only children that vanished from the source are
+		// stale and swept. Every child here was selected by the external_id-prefix
+		// query, so its external_id is guaranteed present and readable (a malformed
+		// row could not have matched the SQL predicate), and GetMetadata resolves
+		// it identically to the keep-set entries the connector built. SubtreeKeep
+		// holds one entry per still-present sub-item of this node (a small set), so
+		// a linear scan is cheaper than materializing a lookup map.
+		if slices.Contains(item.SubtreeKeep, child.GetMetadata()["external_id"]) {
+			continue
+		}
+		ids = append(ids, child.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	// Batch the deletion so a node whose attachment set shrank from N pays one
+	// round of the delete fan-out rather than N sequential ones.
+	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
+		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
+			len(ids), item.ExternalID, derr)
+	}
 }
 
 // bytesToFileHeader wraps a []byte into a *multipart.FileHeader so it can be
