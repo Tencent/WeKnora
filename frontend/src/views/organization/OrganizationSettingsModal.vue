@@ -974,19 +974,13 @@ const addMemberRoleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
 ])
 
-// 空间搜索结果选项。主标签展示空间名，括号里附带代表用户名（不再展示
-// 邮箱、不带"代表："前缀，避免冗长和译文别扭）；空间名缺失时回退到
-// 代表用户名 / 空间 ID。
+// 空间搜索结果选项。成员单位是空间，只按空间名搜索，因此直接展示空间名；
+// 空间名缺失时回退到空间 ID。
 const tenantSearchOptions = computed(() =>
-  tenantSearchResults.value.map((c) => {
-    const tenantLabel = c.tenant_name || c.representative_username || `tenant#${c.tenant_id}`
-    const showsTenantName = !!c.tenant_name
-    const label =
-      showsTenantName && c.representative_username
-        ? `${tenantLabel}（${c.representative_username}）`
-        : tenantLabel
-    return { label, value: c.tenant_id }
-  })
+  tenantSearchResults.value.map((c) => ({
+    label: c.tenant_name || `tenant#${c.tenant_id}`,
+    value: c.tenant_id,
+  }))
 )
 
 const modalTitle = computed(() => {
@@ -1610,7 +1604,7 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索空间（按空间名 / 用户名 / 邮箱模糊匹配，按 tenant_id 去重）
+// 添加成员：搜索空间（仅按空间名模糊匹配，按 tenant_id 去重）
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
 const handleTenantSearch = (query: string) => {
   if (tenantSearchTimer) {
