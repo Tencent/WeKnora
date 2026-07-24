@@ -22,7 +22,11 @@
 
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
-        <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
+        <p class="builtin-hint-text">
+          {{ $t(authStore.isSystemAdmin
+            ? 'modelSettings.builtinModels.descriptionAdmin'
+            : 'modelSettings.builtinModels.description') }}
+        </p>
         <a class="doc-link" href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md" target="_blank"
           rel="noopener noreferrer">
           {{ $t('modelSettings.builtinModels.viewGuide') }}
@@ -64,7 +68,7 @@
               <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
               <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                 :aria-label="$t('modelSettings.builtinTag')">
-                <t-icon name="lock-on" />
+                <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
               </span>
               <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
                 <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
@@ -75,6 +79,7 @@
                   </t-button>
                 </t-dropdown>
                 <t-popconfirm
+                  v-if="canDeleteModel(model)"
                   :content="$t('modelSettings.confirmDelete', { name: modelDisplayName(model) })"
                   :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
                   :cancel-btn="{ content: $t('common.cancel') }"
@@ -188,6 +193,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    maxConcurrency: model.parameters.max_concurrency,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
@@ -309,11 +315,18 @@ const openAddDialog = () => {
   showDialog.value = true
 }
 
-// 可点击打开编辑抽屉：管理员 + 非内置模型
-const isModelCardClickable = (model: any) =>
-  authStore.hasRole('admin') && !model.isBuiltin
+// Tenant Admin+ manages tenant models; only SystemAdmin manages shared
+// built-in models. The backend repeats this distinction authoritatively.
+const canEditModel = (model: any) =>
+  model.isBuiltin ? authStore.isSystemAdmin : authStore.hasRole('admin')
 
-const canManageModel = (model: any) =>
+const isModelCardClickable = (model: any) => canEditModel(model)
+
+const canManageModel = (model: any) => canEditModel(model)
+
+// Built-in lifecycle remains deployment-managed (YAML / SQL). The UI only
+// exposes configuration and credential editing to SystemAdmin.
+const canDeleteModel = (model: any) =>
   authStore.hasRole('admin') && !model.isBuiltin
 
 const onModelCardClick = (event: Event, type: ModelType, model: any) => {
@@ -330,11 +343,11 @@ const onModelCardClick = (event: Event, type: ModelType, model: any) => {
 
 // 编辑模型
 const editModel = (type: ModelType, model: any) => {
-  if (model.isBuiltin) {
+  if (model.isBuiltin && !authStore.isSystemAdmin) {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
     return
   }
-  if (!authStore.hasRole('admin')) {
+  if (!model.isBuiltin && !authStore.hasRole('admin')) {
     return
   }
   currentModelType.value = type
@@ -443,7 +456,12 @@ const handleModelSave = async (modelData: any) => {
           supports_vision: true
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
-        } : {})
+        } : {}),
+        // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
+        ...(['chat', 'embedding', 'vllm'].includes(saveType)
+          && Number(modelData.maxConcurrency) > 0
+          ? { max_concurrency: Number(modelData.maxConcurrency) }
+          : {})
       }
     }
 
@@ -486,6 +504,12 @@ const getModelOptions = (type: ModelType, model: any) => {
   const options: any[] = []
 
   if (model.isBuiltin) {
+    if (authStore.isSystemAdmin) {
+      options.push({
+        content: t('common.edit'),
+        value: `edit-${type}-${model.id}`
+      })
+    }
     return options
   }
 

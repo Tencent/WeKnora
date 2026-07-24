@@ -284,7 +284,7 @@ func NewWikiReadPageTool(
 			ToolWikiReadPage,
 			`Read one or more wiki pages by their slugs. Returns the full markdown content, metadata, and links.
 Use this to read specific wiki pages when you know their slug (e.g. "entity/acme-corp", "concept/rag").
-When the same slug exists in multiple knowledge bases, all matching pages are returned (each tagged with its knowledge_base_id). Pass "knowledge_base_id" to limit to a specific KB.`,
+When the same slug exists in multiple knowledge bases, all matching pages are returned (each tagged with its short bN knowledge_base_id). Pass that bN value in "knowledge_base_id" to limit to a specific KB.`,
 			json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -295,7 +295,7 @@ When the same slug exists in multiple knowledge bases, all matching pages are re
     },
     "knowledge_base_id": {
       "type": "string",
-      "description": "Optional: specific knowledge base ID. If omitted, reads the slug from every wiki KB in scope (all matches returned)."
+      "description": "Optional: specific short bN knowledge base ID. If omitted, reads the slug from every wiki KB in scope (all matches returned)."
     }
   },
   "required": ["slugs"]
@@ -576,7 +576,7 @@ func NewWikiSearchTool(
 			ToolWikiSearch,
 			`Search wiki pages using PostgreSQL POSIX regular expressions (~* operator, case-insensitive).
 STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
-Returns matching pages with titles, slugs, and summaries (each tagged with its knowledge_base_id).
+Returns matching pages with titles, slugs, and summaries (each tagged with its short bN knowledge_base_id).
 Examples:
 - Alternation (RECOMMENDED): "stardust|skyvault" (matches either word)
 - Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
@@ -598,7 +598,7 @@ Use this to find relevant wiki pages when you don't know the exact slug.`,
     },
     "knowledge_base_id": {
       "type": "string",
-      "description": "Optional: restrict search to a single knowledge base ID in scope."
+      "description": "Optional: restrict search to a single short bN knowledge base ID in scope."
     }
   },
   "required": ["queries"]

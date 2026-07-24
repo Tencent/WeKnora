@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// UserPreferences holds per-user UI/feature preferences persisted server-side
+// UserPreferences holds per-user preferences persisted server-side
 // so they sync across devices/browsers. Fields are pointers so we can
 // distinguish "client didn't send this key" (leave existing value alone)
 // from "client explicitly set false" — the partial-update merge in
@@ -22,16 +22,11 @@ import (
 //
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
-	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
-	// nil  = preference never set (treat as feature default = false)
-	// *false / *true = user explicitly set the toggle.
-	EnableMemory *bool `json:"enable_memory,omitempty"`
-
-	// LastActiveTenantID remembers the last tenant the user actively
+	// LastActiveTenantID remembers the last workspace the user actively
 	// switched into, so a fresh login (new device, cleared browser, new
 	// refresh token) lands them back in that workspace instead of always
-	// bouncing to their home tenant. Login / RefreshToken validate that
-	// the tenant still exists and the user still has an active membership
+	// bouncing to their home workspace. Login / RefreshToken validate that
+	// the workspace still exists and the user still has an active membership
 	// (or CanAccessAllTenants) before honouring this preference; an
 	// invalid pointer is best-effort cleared and the user falls back to
 	// home.
@@ -40,7 +35,7 @@ type UserPreferences struct {
 	// *0   = "clear preference" sentinel for the partial-update endpoint
 	//        (UpdateUserPreferences turns this into nil). Otherwise treat
 	//        a stored *0 the same as nil.
-	// *N   = preferred tenant id.
+	// *N   = preferred workspace id.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id,omitempty"`
 }
 
@@ -87,15 +82,15 @@ type User struct {
 	PasswordHash string `json:"-"          gorm:"type:varchar(255);not null"`
 	// Avatar URL of the user
 	Avatar string `json:"avatar"     gorm:"type:varchar(500)"`
-	// Tenant ID that the user belongs to
+	// Workspace ID that the user belongs to
 	TenantID uint64 `json:"tenant_id"  gorm:"index"`
 	// Whether the user is active
 	IsActive bool `json:"is_active"  gorm:"default:true"`
-	// Whether the user can access all tenants (cross-tenant access)
+	// Whether the user can access all workspaces (cross-workspace access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
-	// Whether the user is a system administrator (independent of tenant roles)
+	// Whether the user is a system administrator (independent of workspace roles)
 	IsSystemAdmin bool `json:"is_system_admin" gorm:"default:false;index"`
-	// Per-user UI/feature preferences (memory toggle, future knobs).
+	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
 	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
@@ -185,6 +180,27 @@ type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
+
+	// TenantProvisioning is server-controlled registration context. It is
+	// deliberately excluded from JSON so a public caller cannot choose its
+	// own tenancy semantics. Empty preserves the historical behaviour and is
+	// treated as create_personal by UserService.Register.
+	TenantProvisioning TenantProvisioningMode `json:"-"`
+}
+
+// TenantProvisioningMode controls what UserService.Register does after it
+// has validated the identity fields. Joining an existing tenant is
+// orchestrated by the invitation handler because the invitation token is the
+// authority for the target tenant and role.
+type TenantProvisioningMode string
+
+const (
+	TenantProvisioningCreatePersonal TenantProvisioningMode = "create_personal"
+	TenantProvisioningTenantless     TenantProvisioningMode = "tenantless"
+)
+
+func (m TenantProvisioningMode) IsValid() bool {
+	return m == TenantProvisioningCreatePersonal || m == TenantProvisioningTenantless
 }
 
 // LoginResponse represents a login response
@@ -192,14 +208,14 @@ type LoginResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
 	User    *User  `json:"user,omitempty"`
-	// ActiveTenant is the tenant whose ID is encoded in the issued JWT;
+	// ActiveTenant is the workspace whose ID is encoded in the issued JWT;
 	// future requests are scoped to it until the client calls /auth/switch-tenant.
-	// Defaults to the user's home tenant on a fresh login.
+	// Defaults to the user's home workspace on a fresh login.
 	ActiveTenant *Tenant `json:"active_tenant,omitempty"`
-	// Memberships lists every tenant the user can authenticate into,
+	// Memberships lists every workspace the user can authenticate into,
 	// along with their role in each. Always populated (length 1 for users
-	// who only belong to their home tenant) so frontends can render a
-	// tenant switcher without a follow-up request. Serialised without
+	// who only belong to their home workspace) so frontends can render a
+	// workspace switcher without a follow-up request. Serialised without
 	// omitempty so the field is always present as a JSON array (possibly
 	// empty) — the "always populated" contract relies on the server side
 	// guaranteeing a non-nil slice.

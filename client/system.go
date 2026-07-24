@@ -34,6 +34,7 @@ type ParserEngine struct {
 // StorageEngineStatusItem describes one storage engine's availability
 type StorageEngineStatusItem struct {
 	Name        string `json:"name"`
+	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`
 	Description string `json:"description"`
 }
@@ -41,6 +42,7 @@ type StorageEngineStatusItem struct {
 // StorageEngineStatusResponse is the response for storage engine status
 type StorageEngineStatusResponse struct {
 	Engines           []StorageEngineStatusItem `json:"engines"`
+	AllowedProviders  []string                  `json:"allowed_providers"`
 	MinioEnvAvailable bool                      `json:"minio_env_available"`
 }
 

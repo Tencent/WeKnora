@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -24,16 +25,22 @@ type mockResponse struct {
 type mockChat struct {
 	mu        sync.Mutex
 	responses []mockResponse
+	calls     [][]chat.Message
 	callCount int
 }
 
-func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *mockChat) ChatStream(
+	_ context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.callCount >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected ChatStream call #%d (only %d responses prepared)", m.callCount, len(m.responses))
 	}
 	resp := m.responses[m.callCount]
+	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
 	m.callCount++
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
@@ -42,6 +49,96 @@ func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, _ *chat.ChatO
 	}
 	close(ch)
 	return ch, nil
+}
+
+func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "![image](res://0"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "001)", Done: true},
+	}}}}
+	engine := newTestEngine(t, model)
+	result, err := engine.streamLLMToEventBus(
+		context.Background(),
+		[]chat.Message{{Role: "tool", Content: "source=" + ref}},
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "![image]("+ref+")", result.Content)
+	require.Len(t, model.calls, 1)
+	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
+}
+
+// TestStreamLLMSummarySlugSurvivesDocumentCompaction is the regression guard for
+// the mangled `summary/<uuid>` → `summary/d1` bug. A wiki summary-page slug
+// embeds a document's UUID, and sourceRefs.EncodeMessages compacts that same
+// UUID into a citation alias (d1) via a blind substring replace. resourceRefs
+// must alias the slug to a res:// token BEFORE citation compaction runs;
+// otherwise the model is shown a mangled slug it then copies into a wiki tool
+// call that 404s. See the EncodeMessages ordering in streamLLMToEventBus.
+func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
+	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	const summarySlug = "summary/" + knowledgeID
+
+	// The model copies the protected token it saw back into a wiki_read call.
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      "reading the summary",
+			ToolCalls: []types.LLMToolCall{{
+				Type: "function",
+				Function: types.FunctionCall{
+					Name:      "wiki_read_page",
+					Arguments: `{"slugs":["res://0001"]}`,
+				},
+			}},
+			Done:         true,
+			FinishReason: "tool_calls",
+		},
+	}}}}
+
+	engine := newTestEngine(t, model)
+	// The document UUID is registered as citation alias d1, exactly as the RAG
+	// context (<document id="d1">…) would have registered it upstream.
+	require.Equal(t, "d1", engine.sourceRefs.RegisterDocument(knowledgeID))
+
+	toolMsg := chat.Message{
+		Role:    "tool",
+		Content: `<link>[[` + summarySlug + `|Weknora 试错记录.md - Summary]]</link>`,
+	}
+	result, err := engine.streamLLMToEventBus(context.Background(),
+		[]chat.Message{toolMsg}, nil, nil)
+	require.NoError(t, err)
+
+	// What the model actually saw must NOT contain the mangled slug; the UUID
+	// must have been aliased to a res:// token before citation compaction ran.
+	require.Len(t, model.calls, 1)
+	sent := model.calls[0][0].Content
+	require.NotContains(t, sent, "summary/d1",
+		"summary slug was clobbered by document-id compaction (encode ordering regressed)")
+	require.Contains(t, sent, "res://", "summary slug must be protected as a res:// token")
+
+	// The model's tool call echoing the token must decode back to the real slug.
+	require.Len(t, result.ToolCalls, 1)
+	require.Contains(t, result.ToolCalls[0].Function.Arguments, summarySlug)
+	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
+}
+
+func TestStreamLLMChunkReferenceExpandsBeforeEmission(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: `answer <ref id="`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `c1"/>`, Done: true},
+	}}}}
+	engine := newTestEngine(t, model)
+	engine.sourceRefs.RegisterChunk(llmreference.ChunkReference{
+		ChunkID:         "chunk-1",
+		KnowledgeBaseID: "kb-1",
+		DocumentTitle:   "Doc",
+	})
+	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, `answer <kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`, result.Content)
 }
 
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -61,6 +158,23 @@ func withMaxIterations(n int) testEngineOption {
 	return func(cfg *types.AgentConfig) {
 		cfg.MaxIterations = n
 	}
+}
+
+func withCitationsEnabled(enabled bool) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.CitationEnabled = &enabled
+	}
+}
+
+func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
+	model := &mockChat{}
+	enabledEngine := newTestEngine(t, model)
+	require.Contains(t, enabledEngine.buildSystemPrompt(context.Background()), "Source citations are enabled")
+
+	disabledEngine := newTestEngine(t, model, withCitationsEnabled(false))
+	prompt := disabledEngine.buildSystemPrompt(context.Background())
+	require.Contains(t, prompt, "Source citations are disabled")
+	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
@@ -270,8 +384,10 @@ func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
-					Done: true, FinishReason: "stop"},
+				{
+					ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
+					Done: true, FinishReason: "stop",
+				},
 			}},
 		},
 	}

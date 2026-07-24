@@ -38,7 +38,6 @@
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
         <Settings />
-        <IntegrationsModal />
         <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
         <GlobalCommandPalette />
         <!-- 全局右上角"待处理邀请"铃铛。固定定位，z-index 低于抽屉，业务页面
@@ -56,7 +55,6 @@ import { MenuIcon } from 'tdesign-icons-vue-next'
 import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
-import IntegrationsModal from '@/views/integrations/IntegrationsModal.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'

@@ -72,6 +72,25 @@ func (r *sessionRepository) GetByID(ctx context.Context, tenantID uint64, id str
 	return &session, nil
 }
 
+// GetIMPlatform returns the IM platform bound to a session, or "" when none.
+// It intentionally ignores soft-deleted mappings' visibility rules used by
+// QueryPaged: any mapping (active or cleared) marks the session as IM-origin.
+func (r *sessionRepository) GetIMPlatform(
+	ctx context.Context, tenantID uint64, sessionID string,
+) (string, error) {
+	var platform string
+	err := r.db.WithContext(ctx).
+		Table("im_channel_sessions AS ics").
+		Joins("JOIN sessions AS s ON s.id = ics.session_id").
+		Where("ics.session_id = ? AND s.tenant_id = ?", sessionID, tenantID).
+		Limit(1).
+		Pluck("ics.platform", &platform).Error
+	if err != nil {
+		return "", err
+	}
+	return platform, nil
+}
+
 // GetByTenantID retrieves all sessions for a tenant
 func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
 	var sessions []*types.Session
@@ -169,11 +188,21 @@ func (r *sessionRepository) QueryPaged(
 		switch lower {
 		case "":
 			return db
+		case types.SessionSourceAPI:
+			// Tenant-wide view of API-key sessions. Their owner id is
+			// "api_tenant_key:<tenantID>:<keyID>", so a prefix match selects
+			// every key's sessions. The service layer already enforced Admin+
+			// and cleared the per-user scope for this source.
+			return db.Where("s.user_id LIKE ?", types.SessionOwnerAPITenantKeyPrefix+"%")
 		case "web":
-			// User web chats only — exclude embed-widget sessions (same IM-null row).
+			// User web chats only — exclude embed-widget sessions (same IM-null
+			// row) and tenant API-key sessions (surfaced only in the admin-only
+			// "api" bucket). The user_id NULL check keeps legacy tenant-level web
+			// rows visible, since "col NOT LIKE ?" is unknown (not true) for NULL.
 			return db.Where(
-				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?)",
-				embedPrefix+"%",
+				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) "+
+					"AND (s.user_id IS NULL OR s.user_id NOT LIKE ?)",
+				embedPrefix+"%", types.SessionOwnerAPITenantKeyPrefix+"%",
 			)
 		case "embed":
 			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")

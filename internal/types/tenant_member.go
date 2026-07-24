@@ -17,7 +17,7 @@ type TenantRole string
 
 const (
 	// TenantRoleOwner has full control over the tenant, including tenant
-	// deletion, ownership transfer, and rotating the tenant API key.
+	// deletion, ownership transfer, and managing tenant API keys.
 	TenantRoleOwner TenantRole = "owner"
 	// TenantRoleAdmin manages users, integrations, and tenant-scoped
 	// configuration such as model providers, vector stores, MCP services

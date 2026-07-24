@@ -99,6 +99,11 @@ func TestFindIncompleteStorageURL(t *testing.T) {
 			5,
 		},
 		{
+			"partial scoped URL at end",
+			"text storage://backend-a/co",
+			5,
+		},
+		{
 			"no storage URL",
 			"just plain text http://example.com",
 			-1,
@@ -289,6 +294,11 @@ func TestHoldbackCutoff(t *testing.T) {
 		{
 			"bare truncated provider URL without markdown wrapper",
 			"prefix minio://wizard-test/10000/exp",
+			7,
+		},
+		{
+			"bare truncated scoped URL without markdown wrapper",
+			"prefix storage://backend-a/cos://bucket/10000/exp",
 			7,
 		},
 	}

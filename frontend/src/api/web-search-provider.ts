@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng'
+  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -29,11 +29,26 @@ export interface WebSearchProviderTypeInfo {
   id: string
   name: string
   requires_api_key: boolean
+  // Keyless-by-default providers that still accept an optional key (e.g. Keenable).
+  supports_optional_api_key?: boolean
   requires_engine_id?: boolean
   requires_base_url?: boolean
   supports_proxy?: boolean
   description?: string
   docs_url?: string
+  config_fields?: WebSearchProviderConfigField[]
+}
+
+export interface WebSearchProviderConfigField {
+  key: string
+  label: string
+  label_key?: string
+  type: 'select'
+  required?: boolean
+  default?: string
+  description?: string
+  description_key?: string
+  options?: Array<{ label: string; label_key?: string; value: string }>
 }
 
 // Create a new web search provider

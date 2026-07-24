@@ -139,7 +139,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams(6));
+        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             sqCardsRevealed.value = false;
             sqRenderKey.value++;
@@ -256,7 +256,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex-flow: column;
     align-items: center;
     width: 100%;
-    max-width: 800px;
+    max-width: 960px;
     gap: 24px;
 
     :deep(.answers-input) {
@@ -305,7 +305,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .suggested-questions-container {
-    max-width: 800px;
+    max-width: 960px;
     margin: 0;
     padding: 0 16px;
     transition: height 0.35s @suggested-ease;

@@ -241,6 +241,11 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
 
 		// Rollout window: enforcement off -> log the would-be check and
 		// pass through. We still resolve the KB (best-effort) so the
@@ -399,7 +404,7 @@ func resolveSharedAgentAccess(
 			return nil
 		}
 		if kb.TenantID != agent.TenantID {
-			logger.Warnf(ctx, "[kb_access] shared agent tenant mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
+			logger.Warnf(ctx, "[kb_access] shared agent workspace mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
 				kb.ID, kb.TenantID, agent.TenantID)
 			return nil
 		}

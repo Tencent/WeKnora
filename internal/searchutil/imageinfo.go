@@ -260,10 +260,15 @@ func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
 	return content
 }
 
-// EnrichContentWithImageInfoForChat is like EnrichContentWithImageInfo but only
-// wraps Markdown images that have a matching image_info entry. This avoids
-// turning every parent thumbnail into an <image> block when only a few pages
-// were retrieved, and skips appending orphan image_info extras.
+// EnrichContentWithImageInfoForChat enriches matching Markdown images with
+// caption / OCR text while keeping the image itself as Markdown. Chat context is
+// deliberately answer-ready: if a model copies a relevant image from its
+// context, the copied content should still render instead of leaking the
+// internal <image> XML protocol into the answer.
+//
+// Only images with a matching image_info entry are enriched. This avoids adding
+// every parent thumbnail when only a few pages were retrieved, and skips orphan
+// image_info extras.
 func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) string {
 	var imageInfos []types.ImageInfo
 	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
@@ -283,27 +288,75 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 		}
 	}
 
-	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
+	content = MarkdownImageRegex.ReplaceAllStringFunc(content, func(markdownImage string) string {
+		match := MarkdownImageRegex.FindStringSubmatch(markdownImage)
 		if len(match) < 3 {
-			continue
+			return markdownImage
 		}
 		imgURL := match[2]
 		imgInfo, found := imageInfoMap[imgURL]
 		if !found || imgInfo == nil {
-			continue
+			return markdownImage
 		}
-		inner := BuildImageInfoXML(imgInfo)
-		if inner == "" {
-			continue
+		metadata := buildImageInfoMarkdownMetadata(imgInfo)
+		if metadata == "" {
+			return markdownImage
 		}
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
-		b.WriteString(inner)
-		b.WriteString("</image>")
-		content = strings.Replace(content, match[0], b.String(), 1)
-	}
+		return markdownImage + "\n\n" + metadata
+	})
 	return content
+}
+
+// buildImageInfoMarkdownMetadata keeps image-derived text explicit for the LLM
+// without introducing a second, user-visible markup protocol. Blockquotes keep
+// multiline OCR attached to its image and remain harmless if copied verbatim.
+func buildImageInfoMarkdownMetadata(img *types.ImageInfo) string {
+	if img == nil {
+		return ""
+	}
+
+	var lines []string
+	if caption := strings.TrimSpace(img.Caption); caption != "" {
+		lines = append(lines, "**Image caption:** "+caption)
+	}
+	if ocr := strings.TrimSpace(img.OCRText); ocr != "" {
+		lines = append(lines, "**Image text (OCR):** "+ocr)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return "> " + strings.ReplaceAll(strings.Join(lines, "\n\n"), "\n", "\n> ")
+}
+
+// BuildImageInfoMarkdownWithURL formats one image as answer-ready Markdown for
+// LLM-facing chat/tool context. The URL is intentionally preserved verbatim;
+// resource and provider URLs are opaque handles resolved by the frontend.
+func BuildImageInfoMarkdownWithURL(url string, img *types.ImageInfo) string {
+	if img == nil {
+		return ""
+	}
+	url = strings.TrimSpace(url)
+	metadata := buildImageInfoMarkdownMetadata(img)
+	if url == "" {
+		return metadata
+	}
+
+	alt := strings.Join(strings.Fields(img.Caption), " ")
+	if alt == "" {
+		alt = "image"
+	}
+	alt = strings.NewReplacer(
+		`\`, `\\`,
+		`[`, `\[`,
+		`]`, `\]`,
+	).Replace(alt)
+
+	image := fmt.Sprintf("![%s](%s)", alt, url)
+	if metadata == "" {
+		return image
+	}
+	return image + "\n\n" + metadata
 }
 
 // BuildImageInfoXML returns XML-tagged caption / ocr for one image.

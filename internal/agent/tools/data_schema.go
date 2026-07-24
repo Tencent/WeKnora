@@ -17,7 +17,7 @@ var dataSchemaTool = BaseTool{
 }
 
 type DataSchemaInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
+	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
 }
 
 type DataSchemaTool struct {
@@ -72,7 +72,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		input.KnowledgeID,
 		page,
 		chunkTypes,
-		"", // tagID
+		nil, // tagIDs
 		"", // keyword
 		"", // searchField
 		"", // sortOrder
