@@ -5085,7 +5085,6 @@ export default {
     description: "공유 공간 설명",
     descriptionPlaceholder: "공유 공간 설명을 입력하세요(선택사항).",
     noDescription: "아직 설명이 없습니다",
-    members: "회원",
     memberCount: "회원 수",
     owner: "소유자",
     inviteCode: "초대코드",
