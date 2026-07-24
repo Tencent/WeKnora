@@ -25,6 +25,8 @@ import (
 // ErrInvalidTenantID represents an error for invalid tenant ID
 var ErrInvalidTenantID = errors.New("invalid tenant ID")
 
+const kbTaskCleanupTimeout = 5 * time.Second
+
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
 	repo            interfaces.KnowledgeBaseRepository
@@ -40,6 +42,8 @@ type knowledgeBaseService struct {
 	storageResolver interfaces.StorageBackendResolver
 	graphEngine     interfaces.RetrieveGraphRepository
 	asynqClient     interfaces.TaskEnqueuer
+	taskInspector   interfaces.TaskInspector
+	taskPendingRepo interfaces.TaskPendingOpsRepository
 	dsRepo          interfaces.DataSourceRepository
 	syncLogRepo     interfaces.SyncLogRepository
 	dsScheduler     *datasource.Scheduler
@@ -60,6 +64,8 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	storageResolver interfaces.StorageBackendResolver,
 	graphEngine interfaces.RetrieveGraphRepository,
 	asynqClient interfaces.TaskEnqueuer,
+	taskInspector interfaces.TaskInspector,
+	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	dsRepo interfaces.DataSourceRepository,
 	syncLogRepo interfaces.SyncLogRepository,
 	dsScheduler *datasource.Scheduler,
@@ -79,6 +85,8 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		storageResolver: storageResolver,
 		graphEngine:     graphEngine,
 		asynqClient:     asynqClient,
+		taskInspector:   taskInspector,
+		taskPendingRepo: taskPendingRepo,
 		dsRepo:          dsRepo,
 		syncLogRepo:     syncLogRepo,
 		dsScheduler:     dsScheduler,
@@ -720,6 +728,20 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	recordKBActivity(ctx, s.audit, tenantID, id, types.AuditActionKBDeleted,
 		"knowledge_base", id, types.AuditOutcomeSuccess, map[string]any{"name": deletedName})
 
+	// Stop both ephemeral queue work and durable wiki operations that target
+	// the now-deleted KB. ProcessKBDelete repeats this with document IDs and
+	// performs one final scrub after heavy cleanup to close enqueue races.
+	//
+	// Run detached with a bounded timeout so a disconnecting API client cannot
+	// truncate this best-effort scrub mid-scan, matching ProcessKBDelete's
+	// cleanup semantics. The KB row is already soft-deleted, so the async
+	// delete task remains the durable backstop even if this pass is cut short.
+	kbCleanupCtx, cancelKBCleanup := context.WithTimeout(
+		context.WithoutCancel(ctx), kbTaskCleanupTimeout,
+	)
+	s.cleanupTasksForKnowledgeBase(kbCleanupCtx, id, nil, nil)
+	cancelKBCleanup()
+
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
 	if s.shareRepo != nil {
 		if delErr := s.shareRepo.DeleteByKnowledgeBaseID(ctx, id); delErr != nil {
@@ -729,12 +751,20 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 	// Step 1c: Stop and soft-delete all data sources bound to this KB so cron
 	// schedules and in-flight sync logs do not keep running against a deleted KB.
-	s.deleteDataSourcesForKnowledgeBase(ctx, id)
+	dataSourceIDs := s.deleteDataSourcesForKnowledgeBase(ctx, id)
+	if len(dataSourceIDs) > 0 {
+		dsCancelCtx, cancelDSCancel := context.WithTimeout(
+			context.WithoutCancel(ctx), kbTaskCleanupTimeout,
+		)
+		s.cancelTasksForKnowledgeBase(dsCancelCtx, id, nil, dataSourceIDs)
+		cancelDSCancel()
+	}
 
 	// Step 2: Enqueue async task for heavy cleanup operations
 	payload := types.KBDeletePayload{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  id,
+		DataSourceIDs:    dataSourceIDs,
 		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
 		VectorStoreID:    vectorStoreIDSnapshot, // snapshot taken before soft-delete
 	}
@@ -772,9 +802,18 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 
 	tenantID := payload.TenantID
 	kbID := payload.KnowledgeBaseID
+	var knowledgeIDs []string
 
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	defer func() {
+		// Workers may enqueue downstream work while the delete task performs
+		// heavy storage cleanup. A detached, bounded final scrub runs on every
+		// return path, including retryable failures and cancellation.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
+		defer cancel()
+		s.cleanupTasksForKnowledgeBase(cleanupCtx, kbID, knowledgeIDs, payload.DataSourceIDs)
+	}()
 
 	logger.Infof(ctx, "Processing KB delete task for knowledge base: %s", kbID)
 
@@ -788,14 +827,18 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		return err
 	}
 	logger.Infof(ctx, "Found %d knowledge entries to delete", len(knowledgeList))
+	knowledgeIDs = make([]string, 0, len(knowledgeList))
+	for _, knowledge := range knowledgeList {
+		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+	}
+
+	// Repeat the best-effort queue scrub with document IDs. Some batch tasks
+	// only carry knowledge_id(s), and active work from the first pass may have
+	// enqueued another downstream task before cancellation reached it.
+	s.cleanupTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, payload.DataSourceIDs)
 
 	// Step 2: Delete all knowledge entries and their resources
 	if len(knowledgeList) > 0 {
-		knowledgeIDs := make([]string, 0, len(knowledgeList))
-		for _, knowledge := range knowledgeList {
-			knowledgeIDs = append(knowledgeIDs, knowledge.ID)
-		}
-
 		logger.Infof(ctx, "Deleting all knowledge entries and their resources")
 
 		// Delete embeddings from vector store.
@@ -911,23 +954,68 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	return nil
 }
 
+// cancelTasksForKnowledgeBase removes queue work for a deleted KB when the
+// configured task backend supports knowledge-base-wide inspection. Queue
+// cleanup is an optimization: the soft-deleted database row remains the
+// durable source of truth, so backend failures must not fail KB deletion.
+func (s *knowledgeBaseService) cancelTasksForKnowledgeBase(
+	ctx context.Context,
+	kbID string,
+	knowledgeIDs []string,
+	dataSourceIDs []string,
+) {
+	canceller, ok := s.taskInspector.(interfaces.KnowledgeBaseTaskCanceller)
+	if !ok || kbID == "" {
+		return
+	}
+	if _, _, err := canceller.CancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, dataSourceIDs); err != nil {
+		logger.Warnf(ctx, "Failed to cancel queued tasks for deleted KB %s: %v", kbID, err)
+	}
+}
+
+// cleanupTasksForKnowledgeBase removes both asynq records and durable wiki
+// operations. The latter must be cleared as well or startup recovery can
+// recreate Redis triggers for a KB that no longer exists.
+func (s *knowledgeBaseService) cleanupTasksForKnowledgeBase(
+	ctx context.Context,
+	kbID string,
+	knowledgeIDs []string,
+	dataSourceIDs []string,
+) {
+	if kbID == "" {
+		return
+	}
+	cleaner, ok := s.taskPendingRepo.(interfaces.TaskPendingOpsScopeCleaner)
+	if ok {
+		// Clear durable work before scanning Redis. A large or degraded queue
+		// must not consume the caller's entire deadline and starve the database
+		// fence that prevents startup recovery from reviving this KB.
+		if err := cleaner.DeleteByScope(ctx, types.TaskScopeKnowledgeBase, kbID); err != nil {
+			logger.Warnf(ctx, "Failed to clear durable tasks for deleted KB %s: %v", kbID, err)
+		}
+	}
+	s.cancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, dataSourceIDs)
+}
+
 // deleteDataSourcesForKnowledgeBase mirrors DataSourceService.DeleteDataSource for
 // every data source attached to the KB. Errors on individual sources are logged
 // but do not fail KB deletion — the KB record is already soft-deleted.
-func (s *knowledgeBaseService) deleteDataSourcesForKnowledgeBase(ctx context.Context, kbID string) {
+func (s *knowledgeBaseService) deleteDataSourcesForKnowledgeBase(ctx context.Context, kbID string) []string {
 	if s.dsRepo == nil {
-		return
+		return nil
 	}
 
 	dataSources, err := s.dsRepo.FindByKnowledgeBase(ctx, kbID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list data sources for deleted KB %s: %v", kbID, err)
-		return
+		return nil
 	}
+	dataSourceIDs := make([]string, 0, len(dataSources))
 	for _, ds := range dataSources {
 		if ds == nil || ds.ID == "" {
 			continue
 		}
+		dataSourceIDs = append(dataSourceIDs, ds.ID)
 		if err := s.dsRepo.Delete(ctx, ds.ID); err != nil {
 			logger.Warnf(ctx, "Failed to delete data source %s for KB %s: %v", ds.ID, kbID, err)
 			continue
@@ -942,6 +1030,7 @@ func (s *knowledgeBaseService) deleteDataSourcesForKnowledgeBase(ctx context.Con
 		}
 		logger.Infof(ctx, "Data source deleted with knowledge base: ds=%s kb=%s", ds.ID, kbID)
 	}
+	return dataSourceIDs
 }
 
 // SetEmbeddingModel sets the embedding model for a knowledge base

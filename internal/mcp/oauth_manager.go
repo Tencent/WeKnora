@@ -69,7 +69,7 @@ func (m *OAuthManager) newHandler(
 }
 
 // StartAuthorization performs discovery + (one-time) dynamic client
-// registration, then returns the authorization URL the browser should visit.
+// registration, then returns the authorization URL and an opaque attempt ID.
 // redirectURI is the backend callback URL registered with the auth server;
 // frontendRedirect is where the callback bounces the browser when finished.
 func (m *OAuthManager) StartAuthorization(
@@ -78,29 +78,29 @@ func (m *OAuthManager) StartAuthorization(
 	tenantID uint64,
 	principal types.Principal,
 	redirectURI, frontendRedirect string,
-) (string, error) {
+) (authorizationURL, attemptID string, err error) {
 	if !service.AuthConfig.IsOAuth() {
-		return "", fmt.Errorf("MCP service %s does not use OAuth", service.ID)
+		return "", "", fmt.Errorf("MCP service %s does not use OAuth", service.ID)
 	}
 	principal = principal.Normalize()
 	if !principal.Valid() {
-		return "", fmt.Errorf("principal context is required to authorize OAuth MCP service %s", service.ID)
+		return "", "", fmt.Errorf("principal context is required to authorize OAuth MCP service %s", service.ID)
 	}
 
 	h, err := m.newHandler(ctx, service, tenantID, principal, redirectURI)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// Register a client dynamically if we don't have one yet for this service.
 	existing, _ := m.repo.GetClient(ctx, tenantID, service.ID)
 	if existing == nil {
 		if err := h.RegisterClient(ctx, clientRegistrationName); err != nil {
-			return "", fmt.Errorf("dynamic client registration failed: %w", err)
+			return "", "", fmt.Errorf("dynamic client registration failed: %w", err)
 		}
 		clientID := h.GetClientID()
 		if clientID == "" {
-			return "", fmt.Errorf("dynamic client registration returned an empty client_id")
+			return "", "", fmt.Errorf("dynamic client registration returned an empty client_id")
 		}
 		if err := m.repo.SaveClient(ctx, &types.MCPOAuthClient{
 			TenantID:    tenantID,
@@ -114,17 +114,17 @@ func (m *OAuthManager) StartAuthorization(
 
 	verifier, err := transport.GenerateCodeVerifier()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate PKCE verifier: %w", err)
+		return "", "", fmt.Errorf("failed to generate PKCE verifier: %w", err)
 	}
 	challenge := transport.GenerateCodeChallenge(verifier)
 	state, err := transport.GenerateState()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate state: %w", err)
+		return "", "", fmt.Errorf("failed to generate state: %w", err)
 	}
 
 	authURL, err := h.GetAuthorizationURL(ctx, state, challenge)
 	if err != nil {
-		return "", fmt.Errorf("failed to build authorization URL: %w", err)
+		return "", "", fmt.Errorf("failed to build authorization URL: %w", err)
 	}
 
 	if err := m.states.Put(ctx, state, OAuthState{
@@ -137,10 +137,10 @@ func (m *OAuthManager) StartAuthorization(
 		RedirectURI:      redirectURI,
 		FrontendRedirect: frontendRedirect,
 	}); err != nil {
-		return "", fmt.Errorf("failed to persist authorization state: %w", err)
+		return "", "", fmt.Errorf("failed to persist authorization state: %w", err)
 	}
 
-	return authURL, nil
+	return authURL, state, nil
 }
 
 // StartAuthorizationForService loads the MCP service by ID and starts the
@@ -160,67 +160,109 @@ func (m *OAuthManager) StartAuthorizationForService(
 	if service == nil {
 		return "", fmt.Errorf("MCP service not found")
 	}
-	return m.StartAuthorization(ctx, service, tenantID, principal, redirectURI, frontendRedirect)
+	authURL, _, err := m.StartAuthorization(ctx, service, tenantID, principal, redirectURI, frontendRedirect)
+	return authURL, err
 }
 
 // CompleteAuthorization handles the provider callback: it validates state,
 // exchanges the code for tokens (PKCE), and persists the per-user token.
-// Returns the frontend redirect URL recorded at StartAuthorization time.
+// Returns the frontend redirect URL and service ID recorded at
+// StartAuthorization time so the caller can recycle any cached transport that
+// still carries the previous OAuth client registration.
 func (m *OAuthManager) CompleteAuthorization(
 	ctx context.Context, state, code string,
-) (frontendRedirect string, err error) {
+) (frontendRedirect, serviceID string, err error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthCallbackTimeout)
 	defer cancel()
 
 	st, err := m.states.Take(ctx, state)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	frontendRedirect = st.FrontendRedirect
+	serviceID = st.ServiceID
 	principal := st.Principal.Normalize()
 	if !principal.Valid() && st.UserID != "" {
 		principal = types.Principal{Type: types.PrincipalWebUser, ID: st.UserID}.Normalize()
 	}
 	if !principal.Valid() {
-		return frontendRedirect, fmt.Errorf("principal context is missing from OAuth state")
+		return frontendRedirect, serviceID, fmt.Errorf("principal context is missing from OAuth state")
 	}
 
 	service, err := m.serviceRepo.GetByID(ctx, st.TenantID, st.ServiceID)
 	if err != nil {
-		return frontendRedirect, fmt.Errorf("failed to load MCP service: %w", err)
+		return frontendRedirect, serviceID, fmt.Errorf("failed to load MCP service: %w", err)
 	}
 	if service == nil {
-		return frontendRedirect, fmt.Errorf("MCP service not found")
+		return frontendRedirect, serviceID, fmt.Errorf("MCP service not found")
 	}
 
 	h, err := m.newHandler(ctx, service, st.TenantID, principal, st.RedirectURI)
 	if err != nil {
-		return frontendRedirect, err
+		return frontendRedirect, serviceID, err
 	}
 	// Re-prime the expected state so the library's CSRF check passes after
 	// reconstructing the handler in this separate request.
 	h.SetExpectedState(state)
 
 	if err := h.ProcessAuthorizationResponse(ctx, code, state, st.CodeVerifier); err != nil {
-		return frontendRedirect, fmt.Errorf("token exchange failed: %w", err)
+		return frontendRedirect, serviceID, fmt.Errorf("token exchange failed: %w", err)
+	}
+	if err := m.states.CompleteAttempt(ctx, state); err != nil {
+		return frontendRedirect, serviceID, fmt.Errorf("failed to record authorization completion: %w", err)
 	}
 	// ProcessAuthorizationResponse persists the token via the TokenStore.
 	logger.GetLogger(ctx).Infof(
 		"MCP OAuth authorized: service=%s principal=%s", st.ServiceID, principal.StorageID(),
 	)
-	return frontendRedirect, nil
+	return frontendRedirect, serviceID, nil
 }
 
-// IsAuthorized reports whether the given principal has a stored (non-empty) token
-// for the service.
-func (m *OAuthManager) IsAuthorized(
-	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
+// IsAuthorizationAttemptComplete reports whether this exact authorization
+// attempt completed for the requested principal and service. A pre-existing
+// token must never satisfy a newly opened OAuth popup.
+func (m *OAuthManager) IsAuthorizationAttemptComplete(
+	ctx context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, attemptID string,
 ) (bool, error) {
-	tok, err := m.repo.GetTokenForPrincipal(ctx, tenantID, principal, serviceID)
+	attempt, err := m.states.Attempt(ctx, attemptID)
 	if err != nil {
 		return false, err
 	}
-	return tok != nil && tok.AccessToken != "", nil
+	principal = principal.Normalize()
+	attemptPrincipal := attempt.Principal.Normalize()
+	if attempt.TenantID != tenantID || attempt.ServiceID != serviceID ||
+		attemptPrincipal.Type != principal.Type || attemptPrincipal.ID != principal.ID {
+		return false, fmt.Errorf("oauth authorization attempt does not match the current principal or service")
+	}
+	return attempt.Completed, nil
+}
+
+// AuthorizationStatus reports whether the stored access token is usable now,
+// or is expired but still has a refresh token that runtime use can rotate.
+func (m *OAuthManager) AuthorizationStatus(
+	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
+) (OAuthAuthorizationStatus, error) {
+	tok, err := m.repo.GetTokenForPrincipal(ctx, tenantID, principal, serviceID)
+	if err != nil {
+		return OAuthAuthorizationStatus{}, err
+	}
+	return tokenStatus(tok, time.Now()), nil
+}
+
+// IsAuthorized reports whether the given principal has an access token that is
+// usable now. An expired row is not authorization success merely because its
+// encrypted token columns remain non-empty.
+func (m *OAuthManager) IsAuthorized(
+	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
+) (bool, error) {
+	status, err := m.AuthorizationStatus(ctx, tenantID, principal, serviceID)
+	if err != nil {
+		return false, err
+	}
+	return status.Authorized, nil
 }
 
 // Revoke removes the principal's stored token for the service.

@@ -396,6 +396,7 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
+	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means

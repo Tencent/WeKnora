@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -280,6 +281,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
+		exitStatus = "kb_deleted"
+		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+			return fmt.Errorf("wiki ingest: clear deleted KB queue: %w", cleanupErr)
+		}
+		return nil
+	}
 	if err != nil {
 		exitStatus = "get_kb_failed"
 		return fmt.Errorf("wiki ingest: get KB: %w", err)
@@ -1006,6 +1014,12 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
+		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+			return fmt.Errorf("wiki finalize: clear deleted KB queue: %w", cleanupErr)
+		}
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("wiki finalize: get KB: %w", err)
 	}
@@ -1561,7 +1575,7 @@ func (s *wikiIngestService) mapOneDocument(
 	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
 	//      body as the old-version signal) AND the normal addition. The
 	//      reduce stage sees HasAdditions=1 + HasRetractions=1 and the
-	//      WikiPageModifyPrompt correctly tells the editor model to
+	//      WikiPageModifyUserPrompt correctly tells the editor model to
 	//      remove the old K section and add the new K section in one
 	//      pass — giving us replace-not-append semantics that "append
 	//      new K on top of old K" would otherwise violate.
@@ -1768,7 +1782,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 //   - changed:          whether the wiki page was created or updated
 //   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
 //   - additionFailed:   true iff the slug had entity/concept additions queued
-//     AND the WikiPageModifyPrompt LLM call failed, so no page exists/was
+//     AND the WikiPageModifyUserPrompt LLM call failed, so no page exists/was
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
@@ -1939,6 +1953,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
 	var newContentBuilder strings.Builder
+	var sharedSourceContexts strings.Builder
 	var docTitles []string
 	var language string
 
@@ -2000,6 +2015,11 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// knowledge ID, so the <new_information> block can quote the chunks
 		// verbatim instead of relying on the short Details paraphrase.
 		chunkContentByID := s.resolveCitedChunks(ctx, tenantID, additions)
+		// A document summary is shared by every page derived from that document.
+		// Render a deterministic, de-duplicated block before any page-specific
+		// metadata so provider prefix caches can reuse it across parallel reduce
+		// calls.
+		sourceContextByRef := make(map[string]string)
 
 		for _, add := range additions {
 			cited := collectCitedChunkContent(add.SourceChunks, chunkContentByID)
@@ -2011,21 +2031,27 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// source documents, and calibrating tone (self-reported vs
 			// third-party authoritative) benefits from the richer context.
 			sourceCtx := strings.TrimSpace(add.DocSummary)
-			sourceCtxBlock := ""
 			if sourceCtx != "" {
-				sourceCtxBlock = fmt.Sprintf("<source_context>\n%s\n</source_context>\n", sourceCtx)
+				contextKey := add.SourceRef
+				if contextKey == "" {
+					contextKey = add.KnowledgeID + "\x00" + add.DocTitle
+				}
+				sourceContextByRef[contextKey] = fmt.Sprintf(
+					"<document>\n<title>%s</title>\n<context>\n%s\n</context>\n</document>\n",
+					add.DocTitle, sourceCtx,
+				)
 			}
 			if cited != "" {
 				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n%s<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, sourceCtxBlock, add.Item.Name, add.Item.Description, cited)
+					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					add.DocTitle, add.Item.Name, add.Item.Description, cited)
 			} else {
 				// Fallback: no citations available (legacy path, citation pass
 				// failed, or bad chunk IDs were filtered out) — stick with
 				// the short Details summary so the page still gets real text.
 				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n%s<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, sourceCtxBlock, add.Item.Name, add.Item.Description, add.Item.Details)
+					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					add.DocTitle, add.Item.Name, add.Item.Description, add.Item.Details)
 			}
 			docTitles = appendUnique(docTitles, add.DocTitle)
 
@@ -2040,6 +2066,15 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			if page.PageType == "" {
 				page.PageType = add.Type
 			}
+		}
+
+		contextKeys := make([]string, 0, len(sourceContextByRef))
+		for key := range sourceContextByRef {
+			contextKeys = append(contextKeys, key)
+		}
+		sort.Strings(contextKeys)
+		for _, key := range contextKeys {
+			sharedSourceContexts.WriteString(sourceContextByRef[key])
 		}
 	}
 
@@ -2083,7 +2118,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		pageAliases := strings.Join(page.Aliases, ", ")
 
 		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
+		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,
@@ -2091,6 +2126,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"PageType":                pageType,
 			"PageAliases":             pageAliases,
 			"ExistingContent":         existingContent,
+			"SharedSourceContexts":    sharedSourceContexts.String(),
 			"NewContent":              newContentBuilder.String(),
 			"DeletedContent":          deletedContent.String(),
 			"RemainingSourcesContent": remainingSourcesContent.String(),

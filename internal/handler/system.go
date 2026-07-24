@@ -2066,6 +2066,43 @@ func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
 	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
 }
 
+// PurgeArchivedRuntimeTasks clears every archived (finally-failed) task in one
+// queue. It only touches the archived dead-letter set — live pending/active/
+// scheduled/retry tasks are untouched — and mirrors single-record delete
+// semantics by leaving business state as-is (archived tasks already had their
+// document status flipped to "failed" on their last retry).
+// @Summary      Purge all archived tasks in a queue
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Success      200 {object} map[string]interface{}
+// @Router       /system/admin/runtime/queues/{queue}/archived [delete]
+func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue"})
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	deleted, available, err := inspector.PurgeArchivedRuntimeTasks(c.Request.Context(), queue)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "purge archived queue tasks queue=%s: %v", queue, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Archived tasks could not be purged"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueArchivedPurged, queue, "",
+		map[string]string{"deleted": strconv.Itoa(deleted)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": deleted})
+}
+
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	rows, err := h.systemSettingSvc.List(ctx)

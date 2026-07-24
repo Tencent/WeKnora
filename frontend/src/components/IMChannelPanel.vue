@@ -477,23 +477,40 @@
 
             <!-- Yunzhijia credentials -->
             <template v-if="formData.platform === 'yunzhijia'">
-              <div class="platform-link-hint">
-                <a href="https://open.yunzhijia.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
-                  {{ $t('agentEditor.im.yunzhijiaConsole') }}
-                  <t-icon name="link" class="link-icon" />
-                </a>
-                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-              </div>
               <div class="form-item">
                 <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSendMsgUrl') }}</label>
                 <t-input v-model="formData.credentials.send_msg_url"
                   placeholder="https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=0&yzjtoken=..." />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaSendMsgUrlHint') }}
+                  <a href="https://www.yunzhijia.com/opendocs/docs.html#/guide/im/robot" target="_blank"
+                    rel="noopener noreferrer" class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaRobotDoc') }}
+                  </a>
+                </p>
               </div>
               <div class="form-item">
                 <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
                 <t-input v-model="formData.credentials.secret" type="password"
                   :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
                 <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppId') }}</label>
+                <t-input v-model="formData.credentials.app_id"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppIdPlaceholder')" />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaAppCredentialHint') }}
+                  <a href="https://www.yunzhijia.com/developers/" target="_blank" rel="noopener noreferrer"
+                    class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaImageDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppSecret') }}</label>
+                <t-input v-model="formData.credentials.app_secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppSecretPlaceholder')" />
               </div>
               <div class="form-item">
                 <label class="form-label">{{ $t('agentEditor.im.yunzhijiaTimeout') }}</label>
@@ -813,6 +830,16 @@ function onPlatformChange(val: string | number | boolean) {
   }
 }
 
+function normalizeYunzhijiaCredentials() {
+  if (formData.value.platform !== 'yunzhijia') return;
+  if (!formData.value.credentials.allowed_webhook_host_suffix) {
+    formData.value.credentials.allowed_webhook_host_suffix = 'yunzhijia.com';
+  }
+  if (!formData.value.credentials.timeout_seconds) {
+    formData.value.credentials.timeout_seconds = 10;
+  }
+}
+
 async function startWeChatBinding() {
   stopWeChatPolling();
   wechatLoading.value = true;
@@ -972,6 +999,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
   };
+  normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
@@ -1005,11 +1033,14 @@ async function handleSave() {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
     }
-    if (formData.value.platform === 'yunzhijia' &&
-      (!String(formData.value.credentials.send_msg_url || '').trim() ||
-        !String(formData.value.credentials.allowed_webhook_host_suffix || '').trim())) {
-      MessagePlugin.warning(t('agentEditor.im.yunzhijiaRequiredCredentials'));
-      return;
+    if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
+      normalizeYunzhijiaCredentials();
+      if (!String(formData.value.credentials.send_msg_url || '').trim()) {
+        MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
     }
 
     if (editingChannel.value) {
@@ -1246,6 +1277,11 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
+
+  .doc-link {
+    margin-left: 4px;
+    color: var(--td-brand-color);
+  }
 }
 
 .option-chips {
@@ -1338,6 +1374,7 @@ onUnmounted(() => {
 .platform-link-hint {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 12px;
   line-height: 1.4;

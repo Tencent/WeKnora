@@ -183,6 +183,29 @@ func IsBackgroundTask(ctx context.Context) bool {
 	return v
 }
 
+// WithLLMCallMetadata annotates a provider call for cache observability. The
+// fingerprint must be a hash, never raw prompt content.
+func WithLLMCallMetadata(ctx context.Context, purpose, prefixFingerprint string) context.Context {
+	if strings.TrimSpace(purpose) != "" {
+		ctx = context.WithValue(ctx, LLMCallPurposeContextKey, strings.TrimSpace(purpose))
+	}
+	if strings.TrimSpace(prefixFingerprint) != "" {
+		ctx = context.WithValue(ctx, LLMPromptPrefixFingerprintContextKey, strings.TrimSpace(prefixFingerprint))
+	}
+	return ctx
+}
+
+// LLMCallMetadataFromContext returns the cache-observability labels attached
+// by the orchestration layer.
+func LLMCallMetadataFromContext(ctx context.Context) (purpose, prefixFingerprint string) {
+	if ctx == nil {
+		return "", ""
+	}
+	purpose, _ = ctx.Value(LLMCallPurposeContextKey).(string)
+	prefixFingerprint, _ = ctx.Value(LLMPromptPrefixFingerprintContextKey).(string)
+	return purpose, prefixFingerprint
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {

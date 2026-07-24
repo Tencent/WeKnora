@@ -1276,7 +1276,10 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	// Keep a handler-level Editor check in addition to the route guard. The
+	// original file is more sensitive than parsed-content reads and must not
+	// be downloadable through a read-only organization share.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return

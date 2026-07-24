@@ -140,3 +140,51 @@ func (r *mcpOAuthRepository) DeleteTokenForPrincipal(
 		).
 		Delete(&types.MCPOAuthToken{}).Error
 }
+
+func (r *mcpOAuthRepository) TryAcquireTokenRefreshLease(
+	ctx context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, leaseID string,
+	leaseUntil time.Time,
+) (bool, error) {
+	principal = principal.Normalize()
+	if !principal.Valid() || leaseID == "" {
+		return false, nil
+	}
+	now := time.Now()
+	result := r.db.WithContext(ctx).
+		Model(&types.MCPOAuthToken{}).
+		Where(
+			"tenant_id = ? AND principal_type = ? AND principal_id = ? AND service_id = ?",
+			tenantID, principal.Type, principal.ID, serviceID,
+		).
+		Where("refresh_lease_until IS NULL OR refresh_lease_until < ?", now).
+		Updates(map[string]interface{}{
+			"refresh_lease_id":    leaseID,
+			"refresh_lease_until": leaseUntil,
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *mcpOAuthRepository) ReleaseTokenRefreshLease(
+	ctx context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, leaseID string,
+) error {
+	principal = principal.Normalize()
+	if !principal.Valid() || leaseID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.MCPOAuthToken{}).
+		Where(
+			"tenant_id = ? AND principal_type = ? AND principal_id = ? AND service_id = ? AND refresh_lease_id = ?",
+			tenantID, principal.Type, principal.ID, serviceID, leaseID,
+		).
+		Updates(map[string]interface{}{
+			"refresh_lease_id":    "",
+			"refresh_lease_until": nil,
+		}).Error
+}

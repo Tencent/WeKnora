@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -88,6 +90,10 @@ func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {
 
 	inv, _, err := h.invitationService.CreateShareLink(ctx, tenantID, req.Role, invitedBy, req.Message)
 	if err != nil {
+		if errors.Is(err, service.ErrAPIKeyCannotAssignOwner) {
+			c.Error(apperrors.NewForbiddenError(err.Error()))
+			return
+		}
 		logger.Errorf(ctx, "CreateShareLink failed: tenant=%d err=%v", tenantID, err)
 		c.Error(apperrors.NewInternalServerError("failed to create share link").WithDetails(err.Error()))
 		return
