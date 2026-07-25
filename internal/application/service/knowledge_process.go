@@ -3138,6 +3138,7 @@ func (s *knowledgeService) convert(
 		uploadOverrides = processOverrides.ParserEngineOverrides
 	}
 	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
+	applyParserRuleOverrides(mergedOverrides, eff.ChunkingConfig, fileType)
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {

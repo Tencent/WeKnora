@@ -3,11 +3,29 @@ package service
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+const xlsxFirstRowAsHeaderOverride = "xlsx_first_row_as_header"
+
+func applyParserRuleOverrides(
+	overrides map[string]string,
+	config types.ChunkingConfig,
+	fileType string,
+) {
+	if fileType != "xlsx" {
+		return
+	}
+	rule := config.ResolveParserEngineRule(fileType)
+	if rule == nil || rule.XLSXFirstRowAsHeader == nil {
+		return
+	}
+	overrides[xlsxFirstRowAsHeaderOverride] = strconv.FormatBool(*rule.XLSXFirstRowAsHeader)
+}
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {

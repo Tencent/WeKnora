@@ -5051,6 +5051,7 @@ export default {
       fileTypeWord: 'Документы Word',
       fileTypePpt: 'Презентации',
       fileTypeExcel: 'Таблицы Excel',
+      xlsxFirstRowAsHeader: 'Использовать первую строку как контекст столбцов',
       fileTypeEbook: 'Электронные книги',
       fileTypeWebArchive: 'Веб-архивы',
       fileTypeCsv: 'Файлы CSV',

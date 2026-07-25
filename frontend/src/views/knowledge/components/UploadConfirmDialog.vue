@@ -279,7 +279,11 @@ interface ChunkingUIConfig {
   chunkSize: number
   chunkOverlap: number
   separators: string[]
-  parserEngineRules?: Array<{ file_types: string[]; engine: string }>
+  parserEngineRules?: Array<{
+    file_types: string[]
+    engine: string
+    xlsx_first_row_as_header?: boolean
+  }>
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
@@ -884,7 +888,11 @@ const removeFile = (index: number) => {
   localFiles.value = localFiles.value.filter((_, i) => i !== index)
 }
 
-const handleParserEngineRulesUpdate = (rules: Array<{ file_types: string[]; engine: string }>) => {
+const handleParserEngineRulesUpdate = (rules: Array<{
+  file_types: string[]
+  engine: string
+  xlsx_first_row_as_header?: boolean
+}>) => {
   uiState.value.chunkingConfig.parserEngineRules = rules
 }
 

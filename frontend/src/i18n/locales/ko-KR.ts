@@ -5609,6 +5609,7 @@ export default {
       fileTypeWord: 'Word 문서',
       fileTypePpt: '프레젠테이션',
       fileTypeExcel: 'Excel 스프레드시트',
+      xlsxFirstRowAsHeader: '첫 행을 각 행의 열 컨텍스트로 사용',
       fileTypeEbook: '전자책',
       fileTypeWebArchive: '웹 아카이브',
       fileTypeCsv: 'CSV 파일',
