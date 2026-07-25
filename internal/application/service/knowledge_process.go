@@ -2074,7 +2074,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			return nil, err
 		}
 
-		if _, err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		if _, err := s.enqueueManualProcessing(ctx, existing, meta.Content, true, reparseAttempt); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
 			existing.ParseStatus = "failed"
 			existing.ErrorMessage = "Failed to enqueue processing task"
@@ -2670,15 +2670,16 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 
-	// Allocate a fresh span-tracking attempt for this manual (re)index.
-	// Without it attemptFromCtx stays 0, so processChunks drops all stage
-	// spans and KnowledgePostProcess falls back to LatestAttempt — piling
-	// this run's summary/wiki subspans onto the previous attempt's trace.
-	attempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-		attempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+	// ReparseKnowledge allocates the attempt before enqueueing so the UI can
+	// show pending stages immediately. Initial create/update tasks carry 0 and
+	// allocate here for backward compatibility.
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
+			attempt = n
+		} else if err != nil {
+			logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+		}
 	}
 	ctx = withAttempt(ctx, attempt)
 
@@ -2688,10 +2689,14 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_id": payload.KnowledgeID,
 			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.failManualProcessingAttempt(
+				ctx,
+				knowledge,
+				attempt,
+				"manual_cleanup_failed",
+				"failed to cleanup old resources",
+				err,
+			)
 			return nil
 		}
 	}
@@ -2699,6 +2704,31 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
 	s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
 	return nil
+}
+
+func (s *knowledgeService) failManualProcessingAttempt(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	attempt int,
+	errorCode string,
+	message string,
+	err error,
+) {
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = fmt.Sprintf("%s: %v", message, err)
+	knowledge.UpdatedAt = time.Now()
+	if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+		logger.Warnf(ctx, "failed to persist manual processing failure: %v", updateErr)
+	}
+	s.tracker().FinalizeAttempt(
+		ctx,
+		knowledge.ID,
+		attempt,
+		types.SpanStatusFailed,
+		nil,
+		errorCode,
+		knowledge.ErrorMessage,
+	)
 }
 
 // ProcessDocument handles Asynq document processing tasks

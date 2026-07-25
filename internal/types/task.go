@@ -459,6 +459,10 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	// Attempt joins a user-initiated reparse to the root span allocated by
+	// ReparseKnowledge. Initial create/update tasks leave it unset and let
+	// the worker allocate a fresh attempt.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
