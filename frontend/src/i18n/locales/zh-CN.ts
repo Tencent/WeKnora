@@ -5188,7 +5188,7 @@ export default {
       invalidTitle: "无效邀请",
       invalidCode: "邀请码无效或已过期",
       previewFailed: "预览失败，请稍后重试",
-      members: "成员",
+
       knowledgeBases: "知识库",
       agents: "智能体",
       alreadyMember: "您已经是该共享空间的成员",

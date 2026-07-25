@@ -5725,7 +5725,7 @@ export default {
     description: 'Описание общего пространства',
     descriptionPlaceholder: 'Введите описание общего пространства (необязательно)',
     noDescription: 'No description',
-    members: 'members',
+
     memberCount: 'Member count',
     owner: 'Creator',
     inviteCode: 'Invite Code',

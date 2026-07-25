@@ -5082,7 +5082,7 @@ export default {
     description: 'Shared Space Description',
     descriptionPlaceholder: 'Enter shared space description (optional)',
     noDescription: 'No description',
-    members: 'members',
+
     memberCount: 'Member count',
     owner: 'Creator',
     inviteCode: 'Invite Code',
