@@ -331,6 +331,10 @@ type wikiIngestService struct {
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	// wikiMapCache freezes the per-document map (entity/concept/summary
+	// SlugUpdates) keyed by content hash, so a rebuild over unchanged
+	// content skips the LLM extraction passes. nil in Lite mode.
+	wikiMapCache *wikiMapCache
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -385,6 +389,7 @@ func NewWikiIngestService(
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
+		wikiMapCache:   newWikiMapCache(redisClient),
 		spanTracker:    spanTracker,
 	}
 	return svc

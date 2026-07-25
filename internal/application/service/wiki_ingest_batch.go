@@ -1198,6 +1198,9 @@ func (s *wikiIngestService) mapOneDocument(
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
 	lang := types.LanguageLocaleName(op.Language)
+	// mapCacheKey is populated (on a cache miss) so we can persist the
+	// content-derived map after the LLM pass; empty means "do not store".
+	var mapCacheKey string
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +
@@ -1249,6 +1252,72 @@ func (s *wikiIngestService) mapOneDocument(
 		)
 		s.tracker().SkipSpan(ctx, wikiSpan, "insufficient_text_content")
 		return nil, nil, nil
+	}
+
+	// --- Per-document map cache (issue #1679, 4th suggestion) ------------
+	// Skip the LLM extraction / summary / citation passes when an identical
+	// document (same content + extraction config) was mapped before. Only the
+	// content-derived updates are cached; the retract/retractStale lifecycle
+	// updates are recomputed against the CURRENT wiki state below.
+	if s.wikiMapCache != nil {
+		mapCacheKey = wikiMapCacheKey(
+			payload.TenantID,
+			knowledgeID,
+			chatModel.GetModelID(),
+			lang,
+			wikiMapContentHash(content),
+			wikiMapInstructionsHash(batchCtx.ContentInstructions, batchCtx.ExtractionInstructions),
+			batchCtx.ExtractionGranularity,
+		)
+		if cached, ok := s.wikiMapCache.Get(ctx, mapCacheKey); ok && cached != nil {
+			oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+			// Recompute the lifecycle (retract / retractStale) updates against
+			// current wiki state — these are NOT part of the cached content map.
+			newSlugSet := make(map[string]bool, len(cached.Pages))
+			for _, ns := range cached.Pages {
+				newSlugSet[ns.Slug] = true
+			}
+			priorContribution := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
+			var lifecycle []SlugUpdate
+			for oldSlug := range oldPageSlugs {
+				if newSlugSet[oldSlug] {
+					// Skip summary slugs — overwritten wholesale by the summary
+					// update, retract would be ignored downstream.
+					if strings.HasPrefix(oldSlug, "summary/") {
+						continue
+					}
+					lifecycle = append(lifecycle, SlugUpdate{
+						Slug:              oldSlug,
+						Type:              "retract",
+						RetractDocContent: priorContribution,
+						DocTitle:          cached.DocTitle,
+						KnowledgeID:       knowledgeID,
+						Language:          lang,
+					})
+					continue
+				}
+				lifecycle = append(lifecycle, SlugUpdate{
+					Slug:              oldSlug,
+					Type:              "retractStale",
+					RetractDocContent: content,
+					DocTitle:          cached.DocTitle,
+					KnowledgeID:       knowledgeID,
+					Language:          lang,
+				})
+			}
+			updates := append(append([]SlugUpdate{}, cached.Updates...), lifecycle...)
+			logger.Infof(ctx,
+				"wiki ingest: per-doc map cache HIT for %s — skipped LLM extraction (cached=%d lifecycle=%d)",
+				knowledgeID, len(cached.Updates), len(lifecycle))
+			return &docIngestResult{
+				KnowledgeID: knowledgeID,
+				DocTitle:    cached.DocTitle,
+				Summary:     cached.Summary,
+				Pages:       cached.Pages,
+				MapStats:    cached.MapStats,
+				WikiSpan:    wikiSpan,
+			}, updates, nil
+		}
 	}
 
 	docTitle := knowledgeID
@@ -1621,6 +1690,26 @@ func (s *wikiIngestService) mapOneDocument(
 		"pass0_fallback":   pass0Failed,
 		"classify_batches": batchCount,
 		"summary_preview":  previewText(docSummaryLine, 160),
+	}
+
+	// Persist the content-derived portion of the map (everything except the
+	// lifecycle retract/retractStale updates, which are recomputed each run)
+	// so a future rebuild over unchanged content skips the LLM passes.
+	if s.wikiMapCache != nil && mapCacheKey != "" {
+		contentMap := make([]SlugUpdate, 0, len(updates))
+		for _, u := range updates {
+			if u.Type == "retract" || u.Type == "retractStale" {
+				continue
+			}
+			contentMap = append(contentMap, u)
+		}
+		s.wikiMapCache.Set(ctx, mapCacheKey, &wikiMapCacheEntry{
+			Updates:  contentMap,
+			DocTitle: docTitle,
+			Summary:  docSummaryLine,
+			Pages:    extractedPages,
+			MapStats: mapStats,
+		})
 	}
 
 	return &docIngestResult{
