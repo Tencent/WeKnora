@@ -124,7 +124,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Knowledge Base Types | FAQ / Document / Wiki with folder import, URL import, multi-tag management, and online entry |
 | Per-Upload Process Config | Override parser, chunking, multimodal (VLM / ASR), graph extraction, and question generation per upload batch via upload-confirm dialog or `process_config` API; reparse with new settings |
 | Batch Reparse | Re-queue parsing for multiple documents at once with optional per-batch `process_config` |
-| Data Source Import | Auto-sync from Feishu / Notion / Yuque / RSS feeds (more data sources coming soon); incremental and full sync |
+| Data Source Import | Auto-sync from Feishu / Notion / Yuque / DingTalk Docs / RSS feeds (more data sources coming soon); incremental and full sync |
 | Document Formats | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / Images / CSV / Excel / PPT / JSON |
 | Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / HNSW-accelerated pgvector (1024-dim) / multi-dimensional indexing |
 | Batch Selection | Marquee drag-select multiple documents in the KB list for batch operations |
