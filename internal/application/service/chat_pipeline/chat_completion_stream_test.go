@@ -44,6 +44,21 @@ func (b *syncEventBus) finalAnswerContents() []string {
 	return out
 }
 
+func (b *syncEventBus) thoughtContents() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, evt := range b.events {
+		if evt.Type != types.EventType(event.EventAgentThought) {
+			continue
+		}
+		if data, ok := evt.Data.(event.AgentThoughtData); ok && data.Content != "" {
+			out = append(out, data.Content)
+		}
+	}
+	return out
+}
+
 // openStreamChat returns a buffered channel preloaded with chunks and never
 // closes it, so the stream plugin blocks on the channel until ctx is cancelled
 // — deterministically exercising the ctx.Done() branch.
@@ -68,6 +83,28 @@ func (m *openStreamChat) ChatStream(
 func (m *openStreamChat) GetModelName() string { return "mock" }
 func (m *openStreamChat) GetModelID() string   { return "mock" }
 
+type closedStreamChat struct {
+	chunks []types.StreamResponse
+}
+
+func (m *closedStreamChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+	return nil, nil
+}
+
+func (m *closedStreamChat) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	ch := make(chan types.StreamResponse, len(m.chunks))
+	for _, c := range m.chunks {
+		ch <- c
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (m *closedStreamChat) GetModelName() string { return "mock" }
+func (m *closedStreamChat) GetModelID() string   { return "mock" }
+
 // stubModelService only needs GetChatModel; the rest is unused for this test.
 type stubModelService struct {
 	interfaces.ModelService
@@ -76,6 +113,32 @@ type stubModelService struct {
 
 func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return s.model, nil
+}
+
+func TestStreamRoutesInlineThinkTagsFromAnswerChunks(t *testing.T) {
+	bus := &syncEventBus{}
+	model := &closedStreamChat{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "<thi"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "nk>hidden"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "</think>visible", Done: true},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-think"
+	chatManage.UserContent = "question"
+	chatManage.EventBus = bus
+
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
+
+	require.Eventually(t, func() bool {
+		return len(bus.finalAnswerContents()) > 0
+	}, 2*time.Second, 5*time.Millisecond)
+
+	require.Contains(t, bus.thoughtContents(), "hidden")
+	require.NotContains(t, bus.finalAnswerContents(), "<thi")
+	require.NotContains(t, bus.finalAnswerContents(), "nk>hidden")
+	require.Contains(t, bus.finalAnswerContents(), "visible")
 }
 
 // TestStreamFlushesHeldAliasOnCancel verifies that when the request is cancelled
