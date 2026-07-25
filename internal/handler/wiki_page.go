@@ -847,6 +847,35 @@ func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Links rebuilt successfully"})
 }
 
+// RebuildWiki godoc
+// @Summary      Rebuild wiki
+// @Description  Trigger wiki generation for all completed documents in a knowledge base. This is useful for knowledge bases managed through the REST API where wiki content may not have been automatically generated, or when wiki content needs to be regenerated without re-uploading documents.
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Success      200  {object}  map[string]interface{}  "enqueued count"
+// @Failure      400  {object}  map[string]string
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/rebuild [post]
+func (h *WikiPageHandler) RebuildWiki(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	count, err := h.wikiService.RebuildWiki(c.Request.Context(), kbID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  fmt.Sprintf("Wiki rebuild triggered for %d documents", count),
+		"enqueued": count,
+	})
+}
+
 // Lint godoc
 // @Summary      Run wiki lint
 // @Description  Perform a comprehensive health check on the wiki

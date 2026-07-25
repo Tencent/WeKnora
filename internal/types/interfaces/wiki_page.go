@@ -223,6 +223,10 @@ type WikiPageService interface {
 
 	// UpdateIssueStatus updates the status of an issue (e.g. pending -> resolved/ignored).
 	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+
+	// RebuildWiki triggers wiki ingestion for all completed documents in the
+	// given knowledge base. Returns the number of documents enqueued.
+	RebuildWiki(ctx context.Context, kbID string) (int, error)
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.

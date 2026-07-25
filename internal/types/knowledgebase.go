@@ -636,6 +636,15 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
 		kb.IndexingStrategy.GraphEnabled = true
 	}
+	// Reverse sync: when IndexingStrategy marks graph as enabled but ExtractConfig
+	// was left nil (common with API-created KBs that only set indexing_strategy),
+	// ensure ExtractConfig exists so IsGraphEnabled() returns true.
+	if kb.IndexingStrategy.GraphEnabled && (kb.ExtractConfig == nil || !kb.ExtractConfig.Enabled) {
+		if kb.ExtractConfig == nil {
+			kb.ExtractConfig = &ExtractConfig{}
+		}
+		kb.ExtractConfig.Enabled = true
+	}
 }
 
 // KBCapabilities describes the functional features a knowledge base exposes.

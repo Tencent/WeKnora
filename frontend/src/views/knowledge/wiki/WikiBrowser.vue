@@ -177,6 +177,13 @@
                 stats.pending_issues
             }) }}</span>
           </div>
+          <t-button v-if="props.canEdit" size="small" variant="outline" class="wiki-rebuild-btn"
+            :loading="rebuildingWiki" :disabled="rebuildCooldown" @click="triggerRebuildWiki">
+            <template #icon><t-icon name="refresh" /></template>
+            {{ rebuildCooldown
+              ? $t('knowledgeEditor.wikiBrowser.rebuildWikiCooldown')
+              : $t('knowledgeEditor.wikiBrowser.rebuildWiki') }}
+          </t-button>
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
             @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
@@ -719,6 +726,7 @@ import {
   searchWikiPages,
   listWikiIssues,
   updateWikiIssueStatus,
+  rebuildWiki,
   type WikiPage,
   type WikiFolderNode,
   type WikiGraphData,
@@ -3291,6 +3299,70 @@ function triggerAutoFix() {
   startFixSession(prompt)
 }
 
+const REBUILD_COOLDOWN_MS = 30_000 // matches backend wikiIngestDelay debounce window
+const REBUILD_COOLDOWN_KEY = 'wiki_rebuild_cooldown'
+
+const rebuildingWiki = ref(false)
+const rebuildCooldown = ref(false)
+let rebuildCooldownTimer: ReturnType<typeof setTimeout> | null = null
+
+// Restore cooldown state after page refresh via sessionStorage so a
+// refresh-and-click can't bypass the debounce window.
+function readRebuildCooldown(): boolean {
+  try {
+    const ts = sessionStorage.getItem(REBUILD_COOLDOWN_KEY)
+    if (ts && Date.now() - parseInt(ts, 10) < REBUILD_COOLDOWN_MS) {
+      return true
+    }
+  } catch { /* noop */ }
+  return false
+}
+
+function setRebuildCooldown() {
+  rebuildCooldown.value = true
+  if (rebuildCooldownTimer) clearTimeout(rebuildCooldownTimer)
+  rebuildCooldownTimer = setTimeout(() => {
+    rebuildCooldown.value = false
+    rebuildCooldownTimer = null
+    try { sessionStorage.removeItem(REBUILD_COOLDOWN_KEY) } catch { /* noop */ }
+  }, REBUILD_COOLDOWN_MS)
+  try { sessionStorage.setItem(REBUILD_COOLDOWN_KEY, String(Date.now())) } catch { /* noop */ }
+}
+
+// Init from storage
+if (readRebuildCooldown()) {
+  rebuildCooldown.value = true
+  const elapsed = Date.now() - parseInt(sessionStorage.getItem(REBUILD_COOLDOWN_KEY)!, 10)
+  const remaining = REBUILD_COOLDOWN_MS - elapsed
+  if (rebuildCooldownTimer) clearTimeout(rebuildCooldownTimer)
+  rebuildCooldownTimer = setTimeout(() => {
+    rebuildCooldown.value = false
+    rebuildCooldownTimer = null
+    try { sessionStorage.removeItem(REBUILD_COOLDOWN_KEY) } catch { /* noop */ }
+  }, remaining)
+}
+
+async function triggerRebuildWiki() {
+  if (rebuildingWiki.value || rebuildCooldown.value) return
+  rebuildingWiki.value = true
+  try {
+    const res: any = await rebuildWiki(props.knowledgeBaseId)
+    const data = res?.data || res
+    const enqueued = data?.enqueued ?? 0
+    MessagePlugin.success(
+      t('knowledgeEditor.wikiBrowser.rebuildWikiSuccess', { count: enqueued })
+    )
+    loadStats()
+    rebuildingWiki.value = false
+    setRebuildCooldown()
+  } catch (e: any) {
+    MessagePlugin.error(
+      e?.message || t('knowledgeEditor.wikiBrowser.rebuildWikiFailed')
+    )
+    rebuildingWiki.value = false
+  }
+}
+
 async function doSearch() {
   if (!searchQuery.value.trim()) {
     searchResults.value = null
@@ -4477,6 +4549,10 @@ onUnmounted(() => {
   if (statsTimer) {
     clearInterval(statsTimer)
   }
+  if (rebuildCooldownTimer) {
+    clearTimeout(rebuildCooldownTimer)
+    rebuildCooldownTimer = null
+  }
   if (graphHoverLeaveTimer) {
     clearTimeout(graphHoverLeaveTimer)
     graphHoverLeaveTimer = null
@@ -4557,6 +4633,11 @@ onUnmounted(() => {
     line-height: 1.2;
     font-weight: 500;
   }
+}
+
+.wiki-rebuild-btn {
+  width: 100%;
+  margin-bottom: 2px;
 }
 
 .wiki-page-list {

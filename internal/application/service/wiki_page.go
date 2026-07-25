@@ -44,6 +44,8 @@ type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
 	chunkRepo       interfaces.ChunkRepository
 	kbService       interfaces.KnowledgeBaseService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	task            interfaces.TaskEnqueuer
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 	redisClient     *redis.Client
 }
@@ -53,6 +55,8 @@ func NewWikiPageService(
 	repo interfaces.WikiPageRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	task interfaces.TaskEnqueuer,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 ) interfaces.WikiPageService {
@@ -60,6 +64,8 @@ func NewWikiPageService(
 		repo:            repo,
 		chunkRepo:       chunkRepo,
 		kbService:       kbService,
+		knowledgeRepo:   knowledgeRepo,
+		task:            task,
 		taskPendingRepo: taskPendingRepo,
 		redisClient:     redisClient,
 	}
@@ -793,6 +799,43 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 	}
 
 	return nil
+}
+
+// RebuildWiki enqueues wiki ingestion for every completed document in a
+// knowledge base, effectively triggering a full wiki rebuild. This is useful
+// for knowledge bases managed entirely through the REST API, or when wiki
+// content needs to be regenerated without re-uploading documents.
+//
+// Only documents with a completed parse_status are enqueued; in-progress,
+// failed, and cancelled documents are skipped.
+func (s *wikiPageService) RebuildWiki(ctx context.Context, kbID string) (int, error) {
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+	if err != nil {
+		return 0, fmt.Errorf("wiki rebuild: get KB: %w", err)
+	}
+	if !kb.IsWikiEnabled() {
+		return 0, fmt.Errorf("wiki rebuild: wiki is not enabled for KB %s", kbID)
+	}
+
+	// List all knowledge documents in this KB, scoped to the caller's tenant.
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	allKnowledge, err := s.knowledgeRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	if err != nil {
+		return 0, fmt.Errorf("wiki rebuild: list knowledge: %w", err)
+	}
+
+	enqueued := 0
+	for _, k := range allKnowledge {
+		if k.ParseStatus != types.ParseStatusCompleted {
+			continue
+		}
+		EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, kbID, k.ID)
+		enqueued++
+	}
+
+	logger.Infof(ctx, "wiki rebuild: enqueued %d documents for KB %s (total %d)",
+		enqueued, kbID, len(allKnowledge))
+	return enqueued, nil
 }
 
 // ListAllPages retrieves all wiki pages without pagination.
