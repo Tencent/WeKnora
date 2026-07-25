@@ -22,16 +22,18 @@ const (
 	WebSearchProviderTypeOllama     WebSearchProviderType = "ollama"
 	WebSearchProviderTypeBaidu      WebSearchProviderType = "baidu"
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
+	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
+	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
 )
 
-// WebSearchProviderEntity represents a configured web search provider instance for a tenant.
+// WebSearchProviderEntity represents a configured web search provider instance for a workspace.
 // This is a CRUD entity stored in the database, similar to the Model entity.
-// Each tenant can create multiple provider configurations (e.g., "Production Bing", "Test Google").
+// Each workspace can create multiple provider configurations (e.g., "Production Bing", "Test Google").
 // Agents reference these by ID.
 type WebSearchProviderEntity struct {
 	// Unique identifier (UUID, auto-generated)
 	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID for scoping
+	// Workspace ID for scoping
 	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
 	// User-friendly name, e.g., "Production Bing Search"
 	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
@@ -41,7 +43,7 @@ type WebSearchProviderEntity struct {
 	Description string `yaml:"description" json:"description" gorm:"type:text"`
 	// Provider-specific parameters (API key, engine ID, etc.) stored as encrypted JSON
 	Parameters WebSearchProviderParameters `yaml:"parameters" json:"parameters" gorm:"type:json"`
-	// Whether this is the default provider for the tenant
+	// Whether this is the default provider for the workspace
 	IsDefault bool `yaml:"is_default" json:"is_default" gorm:"default:false"`
 	// Timestamps
 	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
@@ -127,6 +129,9 @@ type WebSearchProviderTypeInfo struct {
 	Name string `json:"name"`
 	// Whether the provider requires an API key
 	RequiresAPIKey bool `json:"requires_api_key"`
+	// Whether the provider accepts an optional API key (keyless by default, but a
+	// key unlocks higher limits — e.g. Keenable). Mutually exclusive with RequiresAPIKey.
+	SupportsOptionalAPIKey bool `json:"supports_optional_api_key,omitempty"`
 	// Whether the provider requires an engine ID (e.g., Google CSE)
 	RequiresEngineID bool `json:"requires_engine_id"`
 	// Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)
@@ -137,6 +142,29 @@ type WebSearchProviderTypeInfo struct {
 	Description string `json:"description"`
 	// URL to the provider's official website or documentation for obtaining credentials
 	DocsURL string `json:"docs_url,omitempty"`
+	// Provider-specific non-secret configuration rendered dynamically by the frontend.
+	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+}
+
+// WebSearchProviderConfigField describes a non-secret provider-specific form field.
+// Values are persisted in WebSearchProviderParameters.ExtraConfig.
+type WebSearchProviderConfigField struct {
+	Key            string                               `json:"key"`
+	Label          string                               `json:"label"`
+	LabelKey       string                               `json:"label_key,omitempty"`
+	Type           string                               `json:"type"`
+	Required       bool                                 `json:"required,omitempty"`
+	Default        string                               `json:"default,omitempty"`
+	Description    string                               `json:"description,omitempty"`
+	DescriptionKey string                               `json:"description_key,omitempty"`
+	Options        []WebSearchProviderConfigFieldOption `json:"options,omitempty"`
+}
+
+// WebSearchProviderConfigFieldOption describes a selectable config field value.
+type WebSearchProviderConfigFieldOption struct {
+	Label    string `json:"label"`
+	LabelKey string `json:"label_key,omitempty"`
+	Value    string `json:"value"`
 }
 
 // GetWebSearchProviderTypes returns metadata for all supported provider types.
@@ -197,6 +225,55 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			RequiresAPIKey: true,
 			Description:    "Baidu AI Search (requires API key from Baidu Cloud)",
 			DocsURL:        "https://cloud.baidu.com/doc/AppBuilder/s/qlvEcai0p",
+		},
+		{
+			ID:                     "keenable",
+			Name:                   "Keenable",
+			RequiresAPIKey:         false,
+			SupportsOptionalAPIKey: true,
+			SupportsProxy:          true,
+			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
+			DocsURL:                "https://keenable.ai/",
+		},
+		{
+			ID:             "zhipu",
+			Name:           "Zhipu AI",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Zhipu AI Web Search API (requires API key)",
+			DocsURL:        "https://docs.bigmodel.cn/cn/guide/tools/web-search",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:            "search_engine",
+					Label:          "Search engine",
+					LabelKey:       "webSearchSettings.configFields.searchEngine",
+					Type:           "select",
+					Required:       true,
+					Default:        "search_std",
+					Description:    "Select the Zhipu search engine and per-request price tier.",
+					DescriptionKey: "webSearchSettings.configFields.searchEngineDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Standard · ¥0.01/request", LabelKey: "webSearchSettings.configFields.searchStd", Value: "search_std"},
+						{Label: "Pro · ¥0.03/request", LabelKey: "webSearchSettings.configFields.searchPro", Value: "search_pro"},
+						{Label: "Sogou · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchSogou", Value: "search_pro_sogou"},
+						{Label: "Quark · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchQuark", Value: "search_pro_quark"},
+					},
+				},
+				{
+					Key:            "content_size",
+					Label:          "Content size",
+					LabelKey:       "webSearchSettings.configFields.contentSize",
+					Type:           "select",
+					Required:       true,
+					Default:        "medium",
+					Description:    "Medium returns concise summaries; high returns more context.",
+					DescriptionKey: "webSearchSettings.configFields.contentSizeDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
+						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
+					},
+				},
+			},
 		},
 	}
 }

@@ -40,7 +40,10 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 		return err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return err
+	}
 	return client.Ping(ctx)
 }
 
@@ -71,7 +74,10 @@ func (c *Connector) ListResources(
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
 	pages, err := client.SearchPages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("search notion pages: %w", err)
@@ -131,7 +137,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
 	visited := c.excludedSetFromListResources(ctx, config, resourceIDs)
 	var allItems []types.FetchedItem
 
@@ -167,7 +176,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, fmt.Errorf("no resource IDs configured")
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Parse previous cursor
 	var prevCursor notionCursor

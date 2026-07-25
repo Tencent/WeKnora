@@ -3,26 +3,42 @@ import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
 
+// GET /initialization/config/:kbId exposes credential presence, not values.
+export interface ModelCredentialStatus {
+    apiKey?: boolean;
+}
+
+export interface COSCredentialStatus {
+    secretId?: boolean;
+    secretKey?: boolean;
+}
+
 // 初始化配置数据类型
 export interface InitializationConfig {
     llm: {
         source: string;
         modelName: string;
         baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
+        credentials?: ModelCredentialStatus;
     };
     embedding: {
         source: string;
         modelName: string;
         baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
         dimension?: number; // 添加embedding维度字段
+        credentials?: ModelCredentialStatus;
     };
     rerank: {
         modelName: string;
         baseUrl: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
         enabled: boolean;
+        credentials?: ModelCredentialStatus;
     };
     multimodal: {
         enabled: boolean;
@@ -30,16 +46,21 @@ export interface InitializationConfig {
         vlm?: {
             modelName: string;
             baseUrl: string;
+            /** @deprecated Use credentials.apiKey from GET responses */
             apiKey?: string;
             interfaceType?: string; // "ollama" or "openai"
+            credentials?: ModelCredentialStatus;
         };
         cos?: {
-            secretId: string;
-            secretKey: string;
             region: string;
             bucketName: string;
             appId: string;
             pathPrefix?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretId?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretKey?: string;
+            credentials?: COSCredentialStatus;
         };
         minio?: {
             bucketName: string;
@@ -88,6 +109,8 @@ export interface KBModelConfigRequest {
     vlm_config?: {
         enabled: boolean
         model_id?: string
+        description_language?: string
+        custom_instructions?: string
     }
     asr_config?: {
         enabled: boolean
@@ -113,11 +136,13 @@ export interface KBModelConfigRequest {
         tokenLimit?: number
         // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
+        tableMetadataInstructions?: string
     }
     multimodal: {
         enabled: boolean
     }
     /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
+    storageBackendId?: string
     storageProvider?: string
     nodeExtract: {
         enabled: boolean
@@ -125,10 +150,12 @@ export interface KBModelConfigRequest {
         tags: string[]
         nodes: Node[]
         relations: Relation[]
+        customInstructions?: string
     }
     questionGeneration?: {
         enabled: boolean
         questionCount: number
+        customInstructions?: string
     }
 }
 
@@ -438,7 +465,7 @@ export function testMultimodalFunction(testData: {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 跨租户访问请求头：直接附，避免 short-circuit "selectedTenantId
+        // 跨空间访问请求头：直接附，避免 short-circuit "selectedTenantId
         // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
         // 与 utils/request.ts、api/chat/streame.ts 行为一致。
         const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');

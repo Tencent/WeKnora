@@ -417,7 +417,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	// still has a reasonable score, keep it as a safety net. Skip fallback entirely
 	// when the best score is too low — forcing irrelevant results is worse than
 	// returning nothing and letting the caller handle the empty-result case.
-	const fallbackMinScore = 0.15
+	fallbackMinScore := rerankFallbackMinScore(chatManage.SearchTargets)
 	if len(rankFilter) == 0 && len(rerankResp) > 0 && rerankResp[0].RelevanceScore >= fallbackMinScore {
 		rankFilter = rerankResp[:1]
 		pipelineInfo(ctx, "Rerank", "fallback_top1", map[string]interface{}{
@@ -434,6 +434,16 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	}
 
 	return rankFilter, nil
+}
+
+func rerankFallbackMinScore(searchTargets types.SearchTargets) float64 {
+	if searchTargets.HasRecallThresholdOverride() {
+		// The user explicitly constrained this turn to a tag/document scope.
+		// Preserve its best candidate instead of letting a global rerank
+		// threshold erase the entire authoritative scope.
+		return 0
+	}
+	return 0.15
 }
 
 // ensureMetadata ensures the metadata is not nil

@@ -28,6 +28,9 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    // 后台任务（入库/富化）对该模型的并发上限，按模型 ID 全副本共享。
+    // 0 或不填表示沿用全局默认（model.max_concurrency）；仅对 chat/embedding/vllm 生效。
+    max_concurrency?: number;
     app_id?: string;
     // Secret fields (api_key, app_secret) are never returned by the server in
     // this shape — they live behind the /credentials subresource. They are
@@ -38,8 +41,8 @@ export interface ModelConfig {
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
-  // Per-field configured? metadata from the main response. Absent for
-  // builtin models.
+  // Per-field configured? metadata from the main response. For builtin
+  // models it is returned only to system administrators.
   credentials?: Record<ModelCredentialField, { configured: boolean }>;
   created_at?: string;
   updated_at?: string;

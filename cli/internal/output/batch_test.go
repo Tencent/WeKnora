@@ -74,6 +74,53 @@ func TestWriteBatchEnvelope_EmptyItems_EmitsEmptyArray(t *testing.T) {
 	}
 }
 
+// TestWriteBatchEnvelope_StatusTriState verifies the additive tri-state
+// envelope.status: "success" (all ok), "partial" (mixed), "error" (all fail).
+func TestWriteBatchEnvelope_StatusTriState(t *testing.T) {
+	cases := []struct {
+		name   string
+		items  []output.BatchItem
+		status string
+	}{
+		{
+			name: "all_success",
+			items: []output.BatchItem{
+				{ID: "a", OK: true}, {ID: "b", OK: true},
+			},
+			status: "success",
+		},
+		{
+			name: "partial",
+			items: []output.BatchItem{
+				{ID: "a", OK: true},
+				{ID: "b", OK: false, Error: &output.ErrDetail{Type: "resource.not_found", Message: "missing"}},
+			},
+			status: "partial",
+		},
+		{
+			name: "all_fail",
+			items: []output.BatchItem{
+				{ID: "a", OK: false, Error: &output.ErrDetail{Type: "auth.forbidden", Message: "no perm"}},
+				{ID: "b", OK: false, Error: &output.ErrDetail{Type: "resource.not_found", Message: "missing"}},
+			},
+			status: "error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := output.WriteBatchEnvelope(&buf, tc.items, false, ""); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got := buf.String()
+			want := `"status":"` + tc.status + `"`
+			if !strings.Contains(got, want) {
+				t.Errorf("expected %s; got %q", want, got)
+			}
+		})
+	}
+}
+
 func TestWriteBatchEnvelope_AllFail(t *testing.T) {
 	items := []output.BatchItem{
 		{ID: "id1", OK: false, Error: &output.ErrDetail{Type: "auth.forbidden", Message: "no perm"}},

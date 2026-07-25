@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	sdk "github.com/Tencent/WeKnora/client"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -33,6 +34,12 @@ func TestClassifyHTTPError(t *testing.T) {
 			assert.Equal(t, tc.want, ClassifyHTTPError(tc.err))
 		})
 	}
+}
+
+func TestClassifySDKError_SSEStreamTerminal(t *testing.T) {
+	err := sdk.NewSSEStreamError("boom")
+	assert.Equal(t, CodeServerError, ClassifySDKError(err))
+	assert.Equal(t, CodeNetworkError, ClassifyHTTPError(err))
 }
 
 func TestClassifyHTTPError_500NotFoundRescue(t *testing.T) {

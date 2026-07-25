@@ -5,31 +5,72 @@ import (
 	"encoding/json"
 )
 
+// PromptCacheStatus distinguishes a real cache miss from providers that do not
+// expose prompt-cache accounting. Treating both as zero makes fleet-level hit
+// rate dashboards misleading.
+type PromptCacheStatus string
+
+const (
+	PromptCacheStatusUnsupported PromptCacheStatus = "unsupported"
+	PromptCacheStatusUnreported  PromptCacheStatus = "unreported"
+	PromptCacheStatusMiss        PromptCacheStatus = "miss"
+	PromptCacheStatusHit         PromptCacheStatus = "hit"
+)
+
 // TokenUsage holds token consumption statistics returned by the model API.
 type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-	// CachedTokens is the subset of PromptTokens that hit a provider-side
-	// prompt cache. Populated from `usage.prompt_tokens_details.cached_tokens`
-	// in OpenAI-compatible responses.
-	//
-	// Whether this field is non-zero depends on the provider's caching mode:
-	//
-	//   - Implicit caching (OpenAI, Azure OpenAI, DeepSeek, …) — automatic.
-	//     The field populates whenever the prompt prefix matches a previous
-	//     request within the provider's cache TTL. No client-side opt-in.
-	//
-	//   - Explicit caching (Qwen on Aliyun, Anthropic Claude, …) — opt-in
-	//     required. The caller must attach `cache_control: {"type":
-	//     "ephemeral"}` to the relevant message or content block to make
-	//     the provider create and read the cache. Until that opt-in is
-	//     applied, CachedTokens stays zero even when the prompt prefix is
-	//     otherwise byte-stable.
-	//
-	// Omitted from JSON when zero so payloads stay quiet for providers
-	// that never populate it.
-	CachedTokens int `json:"cached_tokens,omitempty"`
+	// CachedTokens is the legacy alias for CacheReadTokens. It remains on the
+	// wire for compatibility with existing API consumers.
+	CachedTokens     int               `json:"cached_tokens,omitempty"`
+	CacheReadTokens  int               `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int               `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens  int               `json:"cache_miss_tokens,omitempty"`
+	CacheReported    bool              `json:"cache_reported"`
+	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
+}
+
+// SetPromptCacheUsage normalizes provider-specific cache counters into the
+// shared usage model. promptTokens remains the provider's total input-token
+// count; read/write/miss are descriptive subsets and must not be added to it.
+func (u *TokenUsage) SetPromptCacheUsage(read, write, miss int, reported bool) {
+	if u == nil {
+		return
+	}
+	if read < 0 {
+		read = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if miss < 0 {
+		miss = 0
+	}
+	u.CachedTokens = read
+	u.CacheReadTokens = read
+	u.CacheWriteTokens = write
+	u.CacheMissTokens = miss
+	u.CacheReported = reported
+	switch {
+	case !reported:
+		u.CacheStatus = PromptCacheStatusUnreported
+	case read > 0:
+		u.CacheStatus = PromptCacheStatusHit
+	default:
+		u.CacheStatus = PromptCacheStatusMiss
+	}
+}
+
+// MarkPromptCacheUnsupported marks a provider/model path that cannot report
+// provider-side prompt-cache usage.
+func (u *TokenUsage) MarkPromptCacheUnsupported() {
+	if u == nil {
+		return
+	}
+	u.SetPromptCacheUsage(0, 0, 0, false)
+	u.CacheStatus = PromptCacheStatusUnsupported
 }
 
 // LLMToolCall represents a function/tool call from the LLM

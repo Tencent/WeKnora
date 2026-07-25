@@ -156,22 +156,6 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		return nil
 	})
 
-	// Delete the physical file and extracted images if they exist
-	wg.Go(func() error {
-		if knowledge.FilePath != "" {
-			if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
-			}
-		}
-		deleteExtractedImages(ctx, kbFileSvc, imageURLs)
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		tenantInfo.StorageUsed -= knowledge.StorageSize
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
-		}
-		return nil
-	})
-
 	// Delete the knowledge graph
 	wg.Go(func() error {
 		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
@@ -188,8 +172,35 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
 	}
-	// Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
+	// Delete the knowledge row FIRST, then drop its physical file. Physical
+	// cleanup is deliberately deferred until the row is gone: if any of the
+	// index/chunk/graph cleanups above failed we already returned early with the
+	// row (and its file) intact, so the queued retry — or a user-triggered
+	// reparse — can still read the original file. Deleting the file before the
+	// row could leave a "file missing but row present" zombie that can neither be
+	// reparsed nor cleanly re-deleted (issue #2192). Orphaning a file after the
+	// row is gone is the tolerable failure mode instead.
+	if err := s.repo.DeleteKnowledge(ctx, tenantID, id); err != nil {
+		return err
+	}
+
+	// Best-effort physical cleanup. Errors here only leak storage; they must not
+	// fail the delete now that the row is already gone.
+	if knowledge.FilePath != "" {
+		if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
+		}
+	}
+	deleteExtractedImages(ctx, kbFileSvc, imageURLs)
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantInfo.StorageUsed -= knowledge.StorageSize
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+	}
+	recordKBActivity(ctx, s.audit, tenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeDeleted,
+		"knowledge", knowledge.ID, types.AuditOutcomeSuccess,
+		map[string]any{"title": knowledge.Title, "type": knowledge.Type})
+	return nil
 }
 
 // cleanupWikiOnKnowledgeDelete handles wiki pages when a source document is deleted.
@@ -264,9 +275,13 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 
 	var deletedSlugs []string
 	var retractSlugs []string
+	var affectedFolderIDs []string
 	for _, page := range pages {
 		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
 			continue
+		}
+		if page.FolderID != "" {
+			affectedFolderIDs = append(affectedFolderIDs, page.FolderID)
 		}
 
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
@@ -310,6 +325,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		DocSummary:      docSummary,
 		Language:        lang,
 		PageSlugs:       allAffectedSlugs,
+		FolderIDs:       uniqueWikiFolderIDs(affectedFolderIDs),
 	})
 	logger.Infof(ctx, "wiki cleanup: enqueued retract task for knowledge %s (%d known slugs: %v)",
 		knowledgeID, len(allAffectedSlugs), allAffectedSlugs)
@@ -379,7 +395,7 @@ func (s *knowledgeService) scrubWikiPendingIngest(ctx context.Context, kbID, kno
 // actual swap happens asynchronously inside mapOneDocument (see its
 // oldPageSlugs handling) — that's where we have both the old page set and
 // the freshly extracted candidate slugs, which is exactly the information
-// the WikiPageModifyPrompt needs to do a correct replace-not-append.
+// the WikiPageModifyUserPrompt needs to do a correct replace-not-append.
 //
 // So the only thing worth doing synchronously at reparse time is keeping
 // the Redis pending list clean so the re-ingest enqueued by
@@ -557,34 +573,6 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// 5. Delete the physical file and extracted images if they exist
-	wg.Go(func() error {
-		storageAdjust := int64(0)
-		for _, knowledge := range knowledgeList {
-			if knowledge.FilePath != "" {
-				fSvc := kbFileServices[knowledge.KnowledgeBaseID]
-				if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-					logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
-				}
-			}
-			storageAdjust -= knowledge.StorageSize
-		}
-		// Delete extracted images per KB
-		for kbID, urls := range kbImageURLs {
-			fSvc := kbFileServices[kbID]
-			if fSvc == nil {
-				logger.Warnf(ctx, "No file service for KB %s, skipping %d image deletions", kbID, len(urls))
-				continue
-			}
-			deleteExtractedImages(ctx, fSvc, urls)
-		}
-		tenantInfo.StorageUsed += storageAdjust
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
-		}
-		return nil
-	})
-
 	// Delete the knowledge graph
 	wg.Go(func() error {
 		namespaces := []types.NameSpace{}
@@ -609,8 +597,59 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
 		}
 	}
-	// 6. Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids)
+	// 6. Delete the knowledge rows FIRST, then drop their physical files. See
+	// DeleteKnowledge for the rationale: deferring file removal until the rows are
+	// gone avoids "file missing but row present" zombies that break reparse /
+	// re-delete when an earlier cleanup step failed (issue #2192). A failure below
+	// only orphans storage.
+	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
+		return err
+	}
+
+	storageAdjust := int64(0)
+	for _, knowledge := range knowledgeList {
+		if knowledge.FilePath != "" {
+			fSvc := kbFileServices[knowledge.KnowledgeBaseID]
+			if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
+			}
+		}
+		storageAdjust -= knowledge.StorageSize
+	}
+	// Delete extracted images per KB
+	for kbID, urls := range kbImageURLs {
+		fSvc := kbFileServices[kbID]
+		if fSvc == nil {
+			logger.Warnf(ctx, "No file service for KB %s, skipping %d image deletions", kbID, len(urls))
+			continue
+		}
+		deleteExtractedImages(ctx, fSvc, urls)
+	}
+	tenantInfo.StorageUsed += storageAdjust
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+	}
+	byKB := make(map[string][]*types.Knowledge)
+	for i := range knowledgeList {
+		knowledge := knowledgeList[i]
+		byKB[knowledge.KnowledgeBaseID] = append(byKB[knowledge.KnowledgeBaseID], knowledge)
+	}
+	for kbID, knowledges := range byKB {
+		knowledgeIDs := make([]string, 0, len(knowledges))
+		titles := make([]string, 0, len(knowledges))
+		for _, knowledge := range knowledges {
+			knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+			titles = append(titles, knowledge.Title)
+		}
+		details := map[string]any{"count": len(knowledgeIDs)}
+		if len(knowledgeIDs) <= 20 {
+			details["knowledge_ids"] = knowledgeIDs
+		}
+		kbActivityAppendSampleTitles(details, titles...)
+		recordKBActivity(ctx, s.audit, tenantInfo.ID, kbID, types.AuditActionKnowledgeBatchDeleted,
+			"knowledge", "", types.AuditOutcomeSuccess, details)
+	}
+	return nil
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
@@ -707,6 +746,9 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 		logger.Errorf(ctx, "Failed to unmarshal knowledge list delete payload: %v", err)
 		return err
 	}
+	ctx = payload.Initiator.Apply(ctx)
+	taskID, _ := asynq.GetTaskID(ctx)
+	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 

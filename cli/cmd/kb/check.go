@@ -17,13 +17,17 @@ import (
 // aggregated by paging the doc list. Verb split with `kb status`:
 // status reads existing state cheaply, check actively verifies.
 type CheckResult struct {
-	ID              string `json:"id"`
-	Reachable       bool   `json:"reachable"`
-	KnowledgeCount  int64  `json:"knowledge_count,omitempty"`
-	ChunkCount      int64  `json:"chunk_count,omitempty"`
-	IsProcessing    bool   `json:"is_processing,omitempty"`
-	ProcessingCount int64  `json:"processing_count,omitempty"`
-	FailedCount     int64  `json:"failed_count"` // always populated (no omitempty)
+	ID        string `json:"id"`
+	Reachable bool   `json:"reachable"`
+	// RetrievalReady is false when no embedding model is bound — the KB can never
+	// index/retrieve regardless of failed_count. Always emitted (no omitempty) so
+	// an unconfigured KB is not reported as silently healthy.
+	RetrievalReady  bool  `json:"retrieval_ready"`
+	KnowledgeCount  int64 `json:"knowledge_count,omitempty"`
+	ChunkCount      int64 `json:"chunk_count,omitempty"`
+	IsProcessing    bool  `json:"is_processing,omitempty"`
+	ProcessingCount int64 `json:"processing_count,omitempty"`
+	FailedCount     int64 `json:"failed_count"` // always populated (no omitempty)
 }
 
 // CheckService is the narrow SDK surface needed for kb check.
@@ -33,7 +37,7 @@ type CheckService interface {
 }
 
 var kbCheckFields = []string{
-	"id", "reachable", "knowledge_count", "chunk_count",
+	"id", "reachable", "retrieval_ready", "knowledge_count", "chunk_count",
 	"is_processing", "processing_count", "failed_count",
 }
 
@@ -76,7 +80,7 @@ verification including failed-doc aggregation.`,
 		UsedFor:       "verify a knowledge base end-to-end: status plus failed-doc aggregation",
 		RequiredFlags: []string{"<kb-id> (positional)"},
 		Examples:      []string{"weknora kb check kb_abc"},
-		Output:        "envelope.data is {id, reachable, failed_count, ...}; deeper than `kb status`",
+		Output:        "envelope.data is {id, reachable, retrieval_ready, failed_count, ...}; retrieval_ready=false means no embedding model is bound (run `kb config set`); deeper than `kb status`",
 	})
 	return cmd
 }
@@ -92,6 +96,7 @@ func runCheck(ctx context.Context, svc CheckService, id string) (*CheckResult, e
 	res := &CheckResult{
 		ID:              kb.ID,
 		Reachable:       true,
+		RetrievalReady:  kb.EmbeddingModelID != "",
 		KnowledgeCount:  kb.KnowledgeCount,
 		ChunkCount:      kb.ChunkCount,
 		IsProcessing:    kb.IsProcessing,
@@ -144,6 +149,7 @@ func writeCheckText(w io.Writer, res *CheckResult) error {
 	if !res.Reachable {
 		return nil
 	}
+	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
 	fmt.Fprintf(w, "Chunks:       %d\n", res.ChunkCount)
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)

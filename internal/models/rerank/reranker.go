@@ -154,6 +154,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		reranker, err = NewWeKnoraCloudReranker(config)
 	case provider.ProviderLKEAP:
 		reranker, err = NewLKEAPReranker(config)
+	case provider.ProviderVolcengine:
+		reranker, err = NewVolcengineReranker(config)
 	default:
 		reranker, err = NewOpenAIReranker(config)
 	}

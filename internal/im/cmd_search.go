@@ -84,7 +84,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 		}
 	}
 
-	results, err := c.sessionService.SearchKnowledge(ctx, kbIDs, nil, query)
+	results, err := c.sessionService.SearchKnowledge(ctx, kbIDs, nil, nil, query)
 	if err != nil {
 		return nil, fmt.Errorf("search knowledge: %w", err)
 	}

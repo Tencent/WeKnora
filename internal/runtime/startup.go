@@ -89,6 +89,8 @@ var startupEnvVars = []envVarSpec{
 	// Cache / queue
 	{name: "REDIS_ADDR"},
 	{name: "REDIS_PASSWORD", sensitive: true},
+	{name: "REDIS_USE_TLS"},
+	{name: "REDIS_TLS_SERVER_NAME"},
 	// Object storage
 	{name: "STORAGE_TYPE"},
 	{name: "MINIO_ENDPOINT"},
@@ -136,6 +138,10 @@ func LogStartupEnv(ctx context.Context) {
 		logger.Warnf(ctx,
 			"[startup-env] SYSTEM_AES_KEY is set but %d bytes long; AES-256 requires exactly 32 bytes — encryption is DISABLED",
 			len(k))
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("REDIS_TLS_INSECURE_SKIP_VERIFY")), "true") {
+		logger.Warn(ctx,
+			"[startup-env] REDIS_TLS_INSECURE_SKIP_VERIFY=true — Redis TLS certificate verification is DISABLED; do not use in production")
 	}
 }
 

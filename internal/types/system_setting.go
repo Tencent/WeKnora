@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// SystemSetting is a platform-wide (NOT tenant-scoped) tunable that
+// SystemSetting is a platform-wide (NOT workspace-scoped) tunable that
 // SystemAdmins can edit at runtime via the management UI without
 // restarting the service. Persisted in the system_settings table
 // (migration 000053).

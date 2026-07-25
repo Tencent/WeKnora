@@ -43,3 +43,67 @@ func TestEveryLeafCommandHasAgentHelp(t *testing.T) {
 			missing, len(missing))
 	}
 }
+
+// renderAgentHelp runs a leaf's help under WEKNORA_AGENT_HELP=1 and decodes the
+// machine blob (used_for / output / examples) an agent would read.
+func renderAgentHelp(t *testing.T, c *cobra.Command) struct {
+	UsedFor  string   `json:"used_for"`
+	Output   string   `json:"output"`
+	Examples []string `json:"examples"`
+} {
+	t.Helper()
+	var buf bytes.Buffer
+	c.SetOut(&buf)
+	c.Help()
+	var ah struct {
+		UsedFor  string   `json:"used_for"`
+		Output   string   `json:"output"`
+		Examples []string `json:"examples"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &ah); err != nil {
+		t.Fatalf("%s: agent-help is not JSON: %v", c.CommandPath(), err)
+	}
+	return ah
+}
+
+// TestEveryLeafCommandDeclaresOutput enforces that every leaf command tells an
+// agent what its stdout carries. Even side-effect commands describe their
+// envelope (e.g. deletes emit {id, deleted:true}); an empty Output is a contract
+// gap, not a valid state. Sibling drift guard to the agent-help test above.
+func TestEveryLeafCommandDeclaresOutput(t *testing.T) {
+	t.Setenv("WEKNORA_AGENT_HELP", "1")
+	root := NewRootCmd(cmdutil.New())
+
+	var missing []string
+	eachLeafCommand(root, func(c *cobra.Command) {
+		if renderAgentHelp(t, c).Output == "" {
+			missing = append(missing, c.CommandPath())
+		}
+	})
+
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("leaf commands missing agent-help Output (declare AgentHelp.Output):\n  %v\n(%d commands)",
+			missing, len(missing))
+	}
+}
+
+// TestEveryLeafCommandHasExample enforces that every leaf ships at least one
+// runnable example — agents learn invocation shape from examples, not prose.
+func TestEveryLeafCommandHasExample(t *testing.T) {
+	t.Setenv("WEKNORA_AGENT_HELP", "1")
+	root := NewRootCmd(cmdutil.New())
+
+	var missing []string
+	eachLeafCommand(root, func(c *cobra.Command) {
+		if len(renderAgentHelp(t, c).Examples) == 0 {
+			missing = append(missing, c.CommandPath())
+		}
+	})
+
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("leaf commands missing agent-help Examples (declare AgentHelp.Examples):\n  %v\n(%d commands)",
+			missing, len(missing))
+	}
+}

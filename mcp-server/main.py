@@ -68,8 +68,9 @@ def parse_arguments():
   python main.py --verbose          # 启用详细日志
   
 环境变量:
-  WEKNORA_BASE_URL    WeKnora API 基础 URL (默认: http://localhost:8080/api/v1)
-  WEKNORA_API_KEY     WeKnora API 密钥
+  WEKNORA_BASE_URL       WeKnora API 基础 URL (默认: http://localhost:8080/api/v1)
+  WEKNORA_API_KEY        WeKnora API 密钥
+  MCP_SERVER_AUTH_TOKEN  SSE/HTTP 传输必填，客户端通过 Authorization: Bearer 传递
         """,
     )
 
@@ -91,8 +92,8 @@ def parse_arguments():
     )
     parser.add_argument(
         "--host",
-        default=os.getenv("MCP_HOST", "0.0.0.0"),
-        help="Bind host for network transports (default: 0.0.0.0)",
+        default=os.getenv("MCP_HOST", "127.0.0.1"),
+        help="Bind host for network transports (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",

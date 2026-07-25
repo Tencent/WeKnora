@@ -9,6 +9,8 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
+	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -37,6 +39,19 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
+	// Order matters. resourceRefs must alias durable resource handles FIRST,
+	// because wiki summary-page slugs (summary/<knowledgeID>) embed a document's
+	// UUID and sourceRefs.EncodeMessages compacts that same UUID into a document
+	// citation alias (d1, d2, …) via a blind substring replace. Running
+	// sourceRefs first mangled `[[summary/<uuid>|Title]]` into `[[summary/d1]]`
+	// — an unrecoverable dead link the model then copied into wiki tool calls.
+	// Encoding resourceRefs first turns the slug into a res:// token so the UUID
+	// is gone before citation compaction runs; the two alias spaces (res://NNNN
+	// vs d/c/b/w-N) are disjoint, so decode order is unaffected.
+	messages = e.resourceRefs.EncodeMessages(messages)
+	messages = e.sourceRefs.EncodeMessages(messages)
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
@@ -47,6 +62,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
+	answerDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
+	thinkingDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
+	answerRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
+	thinkingRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
 
 	for chunk := range stream {
 		chunkCount++
@@ -62,6 +81,13 @@ func (e *AgentEngine) streamLLMToEventBus(
 			result.StreamError = chunk.Content
 			continue
 		}
+		if chunk.ResponseType == types.ResponseTypeThinking {
+			chunk.Content = thinkingRefExpander.Feed(thinkingDecoder.Feed(chunk.Content))
+		} else {
+			chunk.Content = answerRefExpander.Feed(answerDecoder.Feed(chunk.Content))
+		}
+		e.resourceRefs.DecodeToolCalls(chunk.ToolCalls)
+		e.sourceRefs.DecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -89,6 +115,19 @@ func (e *AgentEngine) streamLLMToEventBus(
 		if emitFunc != nil {
 			emitFunc(&chunk, result.Content)
 		}
+	}
+	result.Content += answerRefExpander.Feed(answerDecoder.Flush())
+	result.Content += answerRefExpander.Flush()
+	result.ReasoningContent += thinkingRefExpander.Feed(thinkingDecoder.Flush())
+	result.ReasoningContent += thinkingRefExpander.Flush()
+	// Some providers stream tool-call argument fragments but expose the
+	// accumulated call in the final chunk. Decode once more after assembly so
+	// aliases split across provider chunks cannot leak into tool execution.
+	e.resourceRefs.DecodeToolCalls(result.ToolCalls)
+	e.sourceRefs.DecodeToolCalls(result.ToolCalls)
+	if orphans := e.resourceRefs.OrphanAliases(result.Content); len(orphans) > 0 {
+		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource alias(es): %v",
+			len(orphans), orphans)
 	}
 
 	// Stream diagnostic summary: helps identify non-streaming patterns
@@ -437,9 +476,9 @@ func (e *AgentEngine) callLLMWithRetry(
 			round, response.FinishReason, len(response.Content))
 		// Early signal for natural-stop path: this round will be analyzed as a
 		// likely final answer (no tool call branch).
-		if response.FinishReason == "stop" {
-			logger.Infof(ctx, "[Agent][Round-%d] Natural-stop candidate detected (finish=stop, tool_calls=0, content=%d chars)",
-				round, len(response.Content))
+		if isNaturalStopFinishReason(response.FinishReason) {
+			logger.Infof(ctx, "[Agent][Round-%d] Natural-stop candidate detected (finish=%s, tool_calls=0, content=%d chars)",
+				round, response.FinishReason, len(response.Content))
 		}
 	}
 	if response.Content != "" {

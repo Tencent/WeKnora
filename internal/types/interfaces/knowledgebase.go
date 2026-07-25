@@ -116,6 +116,11 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	CopyKnowledgeBase(ctx context.Context, src string, dst string) (*types.KnowledgeBase, *types.KnowledgeBase, error)
 
+	// DuplicateKnowledgeBase creates a new settings-only knowledge base duplicate.
+	// It does not copy knowledge entries, chunks, FAQ rows, wiki pages, indexes,
+	// data sources, shares, pins, or task state. A new UUID is always generated.
+	DuplicateKnowledgeBase(ctx context.Context, src string) (*types.KnowledgeBase, error)
+
 	// GetRepository gets the knowledge base repository
 	// Parameters:
 	//   - ctx: Context with authentication and request information

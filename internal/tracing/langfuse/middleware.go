@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // GinMiddleware returns a Gin handler that opens a Langfuse trace for each
@@ -25,6 +26,13 @@ func GinMiddleware() gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
+		// Extract a W3C traceparent from the incoming request so the WeKnora
+		// trace inherits the upstream caller's trace id. This is what lets a
+		// sop3 pipeline run (identified by its W3C trace_id) and the WeKnora
+		// agent-chat call it triggers land under the same trace in LiteFuse.
+		// When no traceparent is present (human UI calls, other clients) the
+		// root span starts a fresh trace as before.
+		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(c.Request.Header))
 		userID := extractUserID(ctx)
 		sessionID := extractSessionID(c)
 
@@ -49,11 +57,9 @@ func GinMiddleware() gin.HandlerFunc {
 		c.Next()
 
 		trace.Finish(map[string]interface{}{
-			"status": c.Writer.Status(),
-		}, map[string]interface{}{
-			"http.status_code": c.Writer.Status(),
-			"response.size":    c.Writer.Size(),
-		})
+			"status":        c.Writer.Status(),
+			"response.size": c.Writer.Size(),
+		}, nil)
 	}
 }
 

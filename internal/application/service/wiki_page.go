@@ -21,6 +21,24 @@ import (
 // wikiLinkRegex matches [[wiki-link]] syntax in markdown content
 var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
+// wikiInlineChunkCitationRegex matches internal short aliases emitted by the
+// wiki ingest prompt while it classifies supporting chunks. The stable source
+// relationship lives in WikiPage.ChunkRefs, so these aliases have no meaning
+// to readers and must not leak into generated Markdown.
+var wikiInlineChunkCitationRegex = regexp.MustCompile(`[ \t]*\[c\d{3,}(?:\s*[,;]\s*c\d{3,})*\]`)
+
+func stripWikiInlineChunkCitations(content string) string {
+	return wikiInlineChunkCitationRegex.ReplaceAllString(content, "")
+}
+
+func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
+	if page == nil {
+		return
+	}
+	page.Content = stripWikiInlineChunkCitations(page.Content)
+	page.Summary = stripWikiInlineChunkCitations(page.Summary)
+}
+
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
@@ -64,6 +82,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Version == 0 {
 		page.Version = 1
 	}
+	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
@@ -101,6 +120,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
+	stripWikiPageInlineChunkCitations(page)
 
 	oldOutLinks := existing.OutLinks
 
@@ -183,7 +203,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 	oldOutLinks := existing.OutLinks
 
-	existing.Content = page.Content
+	existing.Content = stripWikiInlineChunkCitations(page.Content)
 	existing.OutLinks = s.parseOutLinks(existing.Content)
 	existing.UpdatedAt = time.Now()
 
@@ -199,12 +219,22 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 // GetPageBySlug retrieves a wiki page by its slug
 func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error) {
-	return s.repo.GetBySlug(ctx, kbID, slug)
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	stripWikiPageInlineChunkCitations(page)
+	return page, nil
 }
 
 // GetPageByID retrieves a wiki page by its ID
 func (s *wikiPageService) GetPageByID(ctx context.Context, id string) (*types.WikiPage, error) {
-	return s.repo.GetByID(ctx, id)
+	page, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	stripWikiPageInlineChunkCitations(page)
+	return page, nil
 }
 
 // ListPages lists wiki pages with optional filtering and pagination
@@ -214,6 +244,7 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 		return nil, err
 	}
 	for _, page := range pages {
+		stripWikiPageInlineChunkCitations(page)
 		normalizeWikiHierarchy(page)
 	}
 
@@ -887,6 +918,151 @@ func normalizeSlug(slug string) string {
 	return slug
 }
 
+// slugNamespace returns the prefix of a slug up to (but excluding) the first
+// '/', e.g. "summary/abc" -> "summary". Slugs without a '/' map to "".
+func slugNamespace(slug string) string {
+	if i := strings.IndexByte(slug, '/'); i >= 0 {
+		return slug[:i]
+	}
+	return ""
+}
+
+// rewriteDeadWikiLinks walks every [[slug]] / [[slug|display]] occurrence in
+// content and lets `resolve` decide, per link, whether to rewrite the slug.
+// `resolve` receives the normalized slug and its display text and returns the
+// replacement slug plus true to rewrite, or ("", false) to leave the link
+// untouched. Display text is preserved verbatim. This is a pure helper — the
+// resolution policy lives entirely in the callback.
+func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
+	changed := false
+	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
+		inner := match[2 : len(match)-2]
+		rawSlug := inner
+		display := ""
+		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
+			rawSlug = parts[0]
+			display = strings.TrimSpace(parts[1])
+		}
+		norm := normalizeSlug(rawSlug)
+		if norm == "" {
+			return match
+		}
+		newSlug, ok := resolve(norm, display)
+		if !ok || newSlug == "" || newSlug == norm {
+			return match
+		}
+		changed = true
+		if display != "" {
+			return "[[" + newSlug + "|" + display + "]]"
+		}
+		return "[[" + newSlug + "]]"
+	})
+	return out, changed
+}
+
+// RepairContentLinks rewrites [[slug]] / [[slug|display]] references in
+// `content` whose target does not exist in the KB but is almost certainly a
+// mangled form of a real page. The canonical case: an LLM re-typed a summary
+// page's UUID-based slug and inserted/dropped a hex digit
+// (summary/…06fb5d5b5b5e → summary/…06fb14d5b14b14e), producing a link that
+// 404s and can never be recovered by exact lookup.
+//
+// Unlike stripDeadWikiLinks (the ingest cleanup pass), this method is
+// REWRITE-ONLY: a dead link is corrected only when a confident live candidate
+// exists; otherwise it is left completely untouched. It NEVER strips a link to
+// plain text, so it is safe on any write path — including writes whose targets
+// legitimately do not exist yet (those simply stay as-is until they do).
+//
+// The candidate pool for each dead link is scoped to live slugs that share the
+// same namespace prefix (a dead `summary/<uuid>` only resolves against live
+// `summary/*` slugs). Scoping keeps the bigram-similarity lever safe: distinct
+// high-entropy UUIDs in one namespace don't collide, while a one-character
+// mangle stays comfortably above threshold against its true source.
+//
+// Returns the possibly-updated content and whether any rewrite happened.
+// Errors are only returned for hard repo failures; callers may treat repair as
+// best-effort and ignore them.
+func (s *wikiPageService) RepairContentLinks(
+	ctx context.Context, kbID, selfSlug, content string,
+) (string, bool, error) {
+	if strings.TrimSpace(content) == "" {
+		return content, false, nil
+	}
+	outLinks := s.parseOutLinks(content)
+	if len(outLinks) == 0 {
+		return content, false, nil
+	}
+
+	existMap, err := s.repo.ExistsSlugs(ctx, kbID, outLinks)
+	if err != nil {
+		return content, false, err
+	}
+	deadPrefixes := make(map[string]struct{})
+	for _, l := range outLinks {
+		if l == selfSlug || existMap[l] {
+			continue
+		}
+		deadPrefixes[slugNamespace(l)] = struct{}{}
+	}
+	if len(deadPrefixes) == 0 {
+		return content, false, nil
+	}
+
+	allSlugs, err := s.repo.ListAllSlugs(ctx, kbID)
+	if err != nil {
+		return content, false, err
+	}
+	liveByPrefix := make(map[string]map[string]struct{})
+	var candidateSlugs []string
+	for _, sl := range allSlugs {
+		ns := slugNamespace(sl)
+		if _, want := deadPrefixes[ns]; !want {
+			continue
+		}
+		set, ok := liveByPrefix[ns]
+		if !ok {
+			set = make(map[string]struct{})
+			liveByPrefix[ns] = set
+		}
+		set[sl] = struct{}{}
+		candidateSlugs = append(candidateSlugs, sl)
+	}
+	if len(candidateSlugs) == 0 {
+		return content, false, nil
+	}
+
+	// Build a title -> slug reverse lookup for candidate pages so the
+	// display-text lever (the safest, most precise one) can fire. Bounded to
+	// the relevant namespaces so this stays cheap even on large KBs.
+	titleToSlug := make(map[string]string)
+	if lites, lerr := s.repo.ListBySlugs(ctx, kbID, candidateSlugs); lerr == nil {
+		for _, lp := range lites {
+			if lp != nil && lp.Title != "" {
+				titleToSlug[lp.Title] = lp.Slug
+			}
+		}
+	}
+
+	resolveCache := make(map[string]string)
+	newContent, changed := rewriteDeadWikiLinks(content, func(norm, display string) (string, bool) {
+		if norm == selfSlug || existMap[norm] {
+			return "", false
+		}
+		key := norm + "\x00" + display
+		if cached, ok := resolveCache[key]; ok {
+			return cached, cached != ""
+		}
+		resolved, ok := resolveDeadSlug(norm, display, liveByPrefix[slugNamespace(norm)], titleToSlug)
+		if !ok || resolved == norm {
+			resolveCache[key] = ""
+			return "", false
+		}
+		resolveCache[key] = resolved
+		return resolved, true
+	})
+	return newContent, changed, nil
+}
+
 // updateInLinks adds the source slug to the in_links of target pages
 func (s *wikiPageService) updateInLinks(ctx context.Context, kbID string, sourceSlug string, targets types.StringArray) {
 	for _, targetSlug := range targets {
@@ -1429,16 +1605,95 @@ func (s *wikiPageService) DeleteFolder(ctx context.Context, kbID string, id stri
 		return err
 	}
 	if len(children) > 0 {
-		return errors.New("folder is not empty: it still has sub-folders")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{id})
 	if err != nil {
 		return err
 	}
 	if len(pages) > 0 {
-		return errors.New("folder is not empty: it still contains pages")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	return s.repo.DeleteFolder(ctx, kbID, id)
+}
+
+// PruneEmptyFolderChains removes folders that became empty after retracting a
+// document, followed by any ancestors made empty by those removals. It only
+// considers the supplied folder chains, so intentionally-empty folders
+// elsewhere in the wiki are preserved. Callers must wait for the KB's ingest
+// queue to drain before invoking this method: taxonomy planning creates a
+// folder before reduce writes the page that will reference it.
+func (s *wikiPageService) PruneEmptyFolderChains(
+	ctx context.Context, kbID string, folderIDs []string,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	all, err := s.repo.ListAllFolders(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*types.WikiFolder, len(all))
+	for _, folder := range all {
+		if folder != nil {
+			byID[folder.ID] = folder
+		}
+	}
+
+	candidates := make(map[string]*types.WikiFolder)
+	for _, id := range folderIDs {
+		seen := make(map[string]struct{})
+		for id != types.WikiFolderRootID {
+			if _, cycle := seen[id]; cycle {
+				break
+			}
+			seen[id] = struct{}{}
+			folder := byID[id]
+			if folder == nil {
+				break
+			}
+			candidates[id] = folder
+			id = folder.ParentID
+		}
+	}
+
+	ordered := make([]*types.WikiFolder, 0, len(candidates))
+	for _, folder := range candidates {
+		ordered = append(ordered, folder)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Depth == ordered[j].Depth {
+			return ordered[i].Path > ordered[j].Path
+		}
+		return ordered[i].Depth > ordered[j].Depth
+	})
+
+	deleted := make([]string, 0, len(ordered))
+	for _, folder := range ordered {
+		children, err := s.repo.ListChildFolders(ctx, kbID, folder.ID)
+		if err != nil {
+			return deleted, err
+		}
+		if len(children) > 0 {
+			continue
+		}
+		pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{folder.ID})
+		if err != nil {
+			return deleted, err
+		}
+		if len(pages) > 0 {
+			continue
+		}
+		if err := s.repo.DeleteFolder(ctx, kbID, folder.ID); err != nil {
+			if errors.Is(err, repository.ErrWikiFolderNotFound) ||
+				errors.Is(err, repository.ErrWikiFolderNotEmpty) {
+				continue
+			}
+			return deleted, err
+		}
+		deleted = append(deleted, folder.ID)
+	}
+	return deleted, nil
 }
 
 // InjectCrossLinks scans affected pages and injects [[wiki-links]] for mentions

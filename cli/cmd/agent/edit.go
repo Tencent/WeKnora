@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -22,6 +21,10 @@ import (
 type EditService interface {
 	GetAgent(ctx context.Context, id string) (*sdk.Agent, error)
 	UpdateAgent(ctx context.Context, id string, req *sdk.UpdateAgentRequest) (*sdk.Agent, error)
+	// ListModels backs --model / --rerank-model id-or-name resolution so a
+	// bogus name fails fast instead of clobbering config.model_id with an
+	// unresolvable string (which never resolves at run time).
+	ListModels(ctx context.Context) ([]sdk.Model, error)
 }
 
 // EditOptions captures the surgical flag state. Both string fields and
@@ -64,7 +67,7 @@ type editFlagSet struct {
 	configFileSet      bool
 }
 
-const agentEditLong = `Edit a custom agent's fields surgically.
+const agentEditLong = `Update a custom agent's fields surgically.
 
 At least one update flag is required; flags you omit preserve the current
 server-side value via fetch-then-update. Pass --description "" to clear
@@ -89,20 +92,20 @@ with input.confirmation_required. Surface the prompt to the user and only
 retry with -y after explicit approval. Other failure codes: resource.not_found
 (agent id or KB id), auth.forbidden, input.invalid_argument (no flags, bad file).`
 
-const agentEditExample = `  weknora agent edit ag_abc --name "Renamed" -y
-  weknora agent edit ag_abc --description "" -y              # clear description
-  weknora agent edit ag_abc --add-kb kb_new --remove-kb kb_old -y
-  weknora agent edit ag_abc --system-prompt-file ./prompt.md -y
-  weknora agent edit ag_abc --config-file ./tuned.yaml --temperature 0.9 -y`
+const agentEditExample = `  weknora agent update ag_abc --name "Renamed" -y
+  weknora agent update ag_abc --description "" -y              # clear description
+  weknora agent update ag_abc --add-kb kb_new --remove-kb kb_old -y
+  weknora agent update ag_abc --system-prompt-file ./prompt.md -y
+  weknora agent update ag_abc --config-file ./tuned.yaml --temperature 0.9 -y`
 
-// NewCmdEdit builds `weknora agent edit <agent-id>`.
+// NewCmdEdit builds `weknora agent update <agent-id>`.
 func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	opts := &EditOptions{}
 	var systemPromptFile, configFile string
 
 	cmd := &cobra.Command{
-		Use:     "edit <agent-id>",
-		Short:   "Edit a custom agent's configuration",
+		Use:     "update <agent-id>",
+		Short:   "Update a custom agent's configuration",
 		Long:    agentEditLong,
 		Example: agentEditExample,
 		Args:    cobra.ExactArgs(1),
@@ -125,6 +128,12 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			if opts.flags.temperatureSet && (opts.Temperature < 0.0 || opts.Temperature > 2.0) {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 					fmt.Sprintf("--temperature must be in 0.0..2.0, got %g", opts.Temperature))
+			}
+
+			// Reject an unknown --agent-mode / --kb-selection-mode up front
+			// (typed exit 5) rather than letting the server fail the update.
+			if err := validateAgentModeFlags(&opts.AgentMode, &opts.KBSelectionMode); err != nil {
+				return err
 			}
 
 			if systemPromptFile != "" {
@@ -156,7 +165,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			if !editHasAnyFlag(opts) {
 				return &cmdutil.Error{
 					Code:    cmdutil.CodeInputInvalidArgument,
-					Message: "agent edit requires at least one flag",
+					Message: "agent update requires at least one flag",
 					Hint:    "pass at least one update flag (e.g., --name, --add-kb, --description) or --config-file",
 				}
 			}
@@ -200,7 +209,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 					}
 				}
 				if handled, err := cmdutil.HandleDryRun(cmd, true, cmdutil.DryRunPlan{
-					Action: "agent.edit",
+					Action: "agent.update",
 					Args:   planArgs,
 				}); handled {
 					return err
@@ -208,13 +217,31 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			}
 			yes, _ := cmd.Flags().GetBool("yes")
 			// Build the retry command from the flags the user actually passed.
-			retryCmd := buildAgentEditRetryCmd(cmd, opts.AgentID)
-			if err := cmdutil.ConfirmDestructive(f.Prompter(), yes, fopts.WantsJSON(), "edit", "agent", opts.AgentID, "agent.edit", retryCmd); err != nil {
+			// --add-kb/--remove-kb/--system-prompt-file/--config-file are excluded
+			// (multi-value / file-based — a precise single argv is impractical).
+			retryCmd := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", opts.AgentID},
+				"name", "description", "model", "system-prompt", "agent-mode",
+				"rerank-model", "temperature", "kb-selection-mode", "format")
+			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "agent", opts.AgentID, "agent.update", retryCmd); err != nil {
 				return err
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
+			}
+			// Resolve --add-kb values (id or name) to canonical ids, matching
+			// the --kb id-or-name policy and agent create --attach-kb. Avoids
+			// silently attaching an unresolvable name as a kb_id.
+			if len(opts.AddKBs) > 0 {
+				resolved := make([]string, 0, len(opts.AddKBs))
+				for _, raw := range opts.AddKBs {
+					id, rerr := cmdutil.ResolveKBFlag(cmd.Context(), cli, raw)
+					if rerr != nil {
+						return rerr
+					}
+					resolved = append(resolved, id)
+				}
+				opts.AddKBs = resolved
 			}
 			return runEdit(cmd.Context(), opts, fopts, cli)
 		},
@@ -227,68 +254,36 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
 	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
 	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
-	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: quick-answer | smart-reasoning")
+	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
 	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
 	cmd.Flags().StringSliceVar(&opts.AddKBs, "add-kb", nil, "Attach knowledge base id (repeatable, idempotent)")
 	cmd.Flags().StringSliceVar(&opts.RemoveKBs, "remove-kb", nil, "Detach knowledge base id (repeatable, idempotent)")
-	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: all | selected | none")
+	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
 
 	// Full-replace
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
-	cmdutil.SetRisk(cmd, "agent.edit")
+	cmdutil.SetWriteRisk(cmd, "agent.update")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "surgically edit a custom agent's configuration",
-		RequiredFlags: []string{"<agent-id> (positional)", "at least one edit flag (--name, --add-kb, etc.)"},
+		UsedFor:       "surgically update a custom agent's configuration",
+		RequiredFlags: []string{"<agent-id> (positional)", "at least one update flag (--name, --add-kb, etc.)"},
 		Examples: []string{
-			"weknora agent edit ag_abc --name \"Renamed\"",
-			"weknora agent edit ag_abc --add-kb kb_new --remove-kb kb_old",
-			"weknora agent edit ag_abc --config-file ./tuned.yaml",
+			"weknora agent update ag_abc --name \"Renamed\"",
+			"weknora agent update ag_abc --add-kb kb_new --remove-kb kb_old",
+			"weknora agent update ag_abc --config-file ./tuned.yaml",
 		},
+		Output: "envelope.data is the updated Agent object (id, name, config) after the update is applied",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
-			"agent edit overwrites config; fetch-then-update protects unmentioned fields, but bad input still saved.",
+			"agent update overwrites config; fetch-then-update protects unmentioned fields, but bad input still saved.",
 		},
 	})
 	return cmd
 }
 
-// buildAgentEditRetryCmd constructs a directly-executable retry argv from the
-// flags the user actually set so agents can surface a precise re-run command.
-func buildAgentEditRetryCmd(cmd *cobra.Command, id string) string {
-	var parts []string
-	parts = append(parts, "weknora", "agent", "edit", id)
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		switch f.Name {
-		case "name":
-			parts = append(parts, "--name", f.Value.String())
-		case "description":
-			parts = append(parts, "--description", f.Value.String())
-		case "model":
-			parts = append(parts, "--model", f.Value.String())
-		case "system-prompt":
-			parts = append(parts, "--system-prompt", f.Value.String())
-		case "agent-mode":
-			parts = append(parts, "--agent-mode", f.Value.String())
-		case "rerank-model":
-			parts = append(parts, "--rerank-model", f.Value.String())
-		case "temperature":
-			parts = append(parts, "--temperature", f.Value.String())
-		case "kb-selection-mode":
-			parts = append(parts, "--kb-selection-mode", f.Value.String())
-		case "format":
-			parts = append(parts, "--format", f.Value.String())
-			// --add-kb, --remove-kb, --system-prompt-file, --config-file are excluded
-			// because they are multi-value or file-based; a precise argv is impractical.
-			// The user must reconstruct those manually.
-		}
-	})
-	parts = append(parts, "-y")
-	return strings.Join(parts, " ")
-}
 
 // editHasAnyFlag reports whether opts carries at least one surgical update
 // signal. Required-flag validation lives in runEdit (not PreRunE) so unit
@@ -304,7 +299,7 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 	if !editHasAnyFlag(opts) {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "agent edit requires at least one flag",
+			Message: "agent update requires at least one flag",
 			Hint:    "pass at least one update flag (e.g., --name, --add-kb, --description) or --config-file",
 		}
 	}
@@ -336,6 +331,20 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file read: %v", err))
 		}
 		opts.SystemPrompt = strings.TrimSpace(string(body))
+	}
+
+	// Resolve --model / --rerank-model (id or name) and validate they exist,
+	// mirroring agent create. Without this a bogus name is stored verbatim as
+	// config.model_id and the agent silently never resolves at run time.
+	if opts.flags.modelSet {
+		if opts.Model, err = cmdutil.ResolveModelRef(ctx, svc, opts.Model, "KnowledgeQA"); err != nil {
+			return err
+		}
+	}
+	if opts.flags.rerankModelSet {
+		if opts.RerankModel, err = cmdutil.ResolveModelRef(ctx, svc, opts.RerankModel, "Rerank"); err != nil {
+			return err
+		}
 	}
 
 	// Compute KB list from current + add/remove with a stderr warning when
@@ -373,7 +382,7 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 
 	updated, err := svc.UpdateAgent(ctx, opts.AgentID, req)
 	if err != nil {
-		return cmdutil.WrapHTTP(err, "edit agent %s", opts.AgentID)
+		return cmdutil.WrapHTTP(err, "update agent %s", opts.AgentID)
 	}
 	return emitAgent(fopts, updated)
 }

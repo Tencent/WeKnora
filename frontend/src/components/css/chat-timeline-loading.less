@@ -1,28 +1,3 @@
-@keyframes chatTimelineTypingBounce {
-
-  0%,
-  60%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  30% {
-    transform: translate3d(0, -5px, 0);
-  }
-}
-
-@keyframes chatTimelineLoadingFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 // A light sweep across in-progress text (the "光影" / shimmer effect). The base
 // is the muted secondary color and a brighter band slides across, signalling
 // "this step is still running" without the layout cost of a spinner.
@@ -75,54 +50,5 @@
     background-image: none;
     -webkit-text-fill-color: var(--td-text-color-secondary);
     color: var(--td-text-color-secondary);
-  }
-}
-
-.streaming-loading-node {
-  .tree-child-content {
-    position: relative;
-  }
-
-  .loading-indicator {
-    display: flex;
-    align-items: center;
-    min-height: 24px;
-    padding: 0;
-    margin: 0;
-    position: relative;
-    animation: chatTimelineLoadingFadeIn 0.3s ease-out;
-  }
-
-  .loading-typing {
-    position: absolute;
-    left: -42px;
-    top: 9px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--td-text-color-placeholder);
-      animation: chatTimelineTypingBounce 1.4s ease-in-out infinite;
-      // Composite each dot on its own layer so the bounce runs off the main
-      // thread and does not smear/ghost while the answer relayouts every token.
-      will-change: transform;
-      backface-visibility: hidden;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-    }
   }
 }

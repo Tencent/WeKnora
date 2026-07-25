@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
+import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { MessagePlugin } from 'tdesign-vue-next';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
@@ -16,10 +17,13 @@ const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
 const { t } = useI18n();
 
 const props = defineProps<{
-  knowledgeId: string;
+  knowledgeId?: string;
+  sessionId?: string;
+  attachmentId?: string;
   fileType: string;
   fileName: string;
   active: boolean;
+  fillHeight?: boolean;
 }>();
 
 const loading = ref(false);
@@ -248,11 +252,27 @@ function onImageLoad(e: Event) {
   imageNaturalHeight.value = img.naturalHeight;
 }
 
+function getPreviewSourceKey(): string {
+  if (props.knowledgeId) return `knowledge:${props.knowledgeId}`;
+  if (props.sessionId && props.attachmentId) return `attachment:${props.sessionId}:${props.attachmentId}`;
+  return '';
+}
+
+async function fetchPreviewBlob(): Promise<Blob> {
+  if (props.knowledgeId) {
+    return previewKnowledgeFile(props.knowledgeId);
+  }
+  if (props.sessionId && props.attachmentId) {
+    return previewTemporaryAttachment(props.sessionId, props.attachmentId);
+  }
+  throw new Error('Missing preview source');
+}
+
 async function loadPreview() {
-  const id = props.knowledgeId;
+  const sourceKey = getPreviewSourceKey();
   const ft = props.fileType;
-  if (!id || !ft) return;
-  if (loadedForId === id) return;
+  if (!sourceKey || !ft) return;
+  if (loadedForId === sourceKey) return;
 
   cleanup();
   loading.value = true;
@@ -265,9 +285,9 @@ async function loadPreview() {
   }
 
   try {
-    const rawBlob = await previewKnowledgeFile(id);
+    const rawBlob = await fetchPreviewBlob();
     const blob = ensureBlobType(rawBlob, ft);
-    loadedForId = id;
+    loadedForId = sourceKey;
 
     loading.value = false;
     await nextTick();
@@ -333,9 +353,9 @@ function cleanup() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId],
+  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId],
   ([active]) => {
-    if (active && props.knowledgeId) {
+    if (active && getPreviewSourceKey()) {
       loadPreview();
     }
   },
@@ -349,7 +369,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="document-preview" :class="{ 'is-fullscreen': isFullscreen }">
+  <div class="document-preview" :class="{ 'is-fullscreen': isFullscreen, 'fill-height': fillHeight }">
     <!-- Toolbar -->
     <div class="preview-toolbar" v-if="!loading && !error && previewType !== 'unsupported'">
       <t-space size="small">
@@ -474,6 +494,60 @@ onUnmounted(() => {
 .document-preview {
   min-height: 200px;
   position: relative;
+
+  &.fill-height {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+
+    .preview-pdf,
+    .preview-pptx,
+    .preview-docx,
+    .preview-image,
+    .preview-excel,
+    .preview-markdown,
+    .preview-text,
+    .preview-audio,
+    .preview-loading,
+    .preview-error,
+    .preview-unsupported {
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+    }
+
+    .preview-pdf {
+      height: auto;
+      min-height: 0;
+    }
+
+    .preview-pptx {
+      overflow: auto;
+    }
+
+    .preview-docx {
+      display: flex;
+      flex-direction: column;
+
+      .docx-container {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        height: auto;
+      }
+    }
+
+    .preview-image .image-wrapper img {
+      max-height: 100%;
+    }
+
+    .preview-excel .excel-container,
+    .preview-markdown,
+    .preview-text .code-preview {
+      max-height: none;
+    }
+  }
 }
 
 .is-fullscreen {

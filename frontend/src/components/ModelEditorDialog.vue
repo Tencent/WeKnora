@@ -235,7 +235,7 @@
 
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label">{{
-              isLkeapRerank ? $t('model.editor.lkeap.secretIdLabel') : $t('model.editor.apiKeyOptional')
+              isSignedRerank ? signedRerankAccessKeyLabel : $t('model.editor.apiKeyOptional')
             }}</label>
             <!--
               Edit mode: credentials live behind the /credentials subresource
@@ -251,7 +251,7 @@
             <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
               :meta="credentialMeta" />
             <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
-              :placeholder="isLkeapRerank ? $t('model.editor.lkeap.secretIdPlaceholder') : apiKeyPlaceholder"
+              :placeholder="isSignedRerank ? signedRerankAccessKeyPlaceholder : apiKeyPlaceholder"
               class="api-key-input" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
               <template #suffix-icon>
@@ -263,14 +263,14 @@
                 />
               </template>
             </t-input>
-            <p v-if="isLkeapRerank" class="form-desc">{{ $t('model.editor.lkeap.rerankCredentialHint') }}</p>
+            <p v-if="isSignedRerank" class="form-desc">{{ signedRerankCredentialHint }}</p>
           </div>
 
-          <!-- LKEAP Rerank 创建模式：SecretKey（编辑模式由 CredentialResource 管理） -->
-          <div v-if="isLkeapRerank && !isEdit" class="form-item">
-            <label class="form-label required">{{ $t('model.editor.lkeap.secretKeyLabel') }}</label>
+          <!-- AK/SK Rerank 创建模式：SecretKey（编辑模式由 CredentialResource 管理） -->
+          <div v-if="isSignedRerank && !isEdit" class="form-item">
+            <label class="form-label required">{{ signedRerankSecretKeyLabel }}</label>
             <t-input v-model="formData.appSecret" type="password"
-              :placeholder="$t('model.editor.lkeap.secretKeyPlaceholder')" autocomplete="off" spellcheck="false">
+              :placeholder="signedRerankSecretKeyPlaceholder" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
           </div>
@@ -313,7 +313,7 @@
       </template>
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
-      <section v-if="activeModelType === 'embedding' || activeModelType === 'chat'" class="setting-drawer__section">
+      <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
         <!-- Embedding 专用：维度 -->
@@ -376,6 +376,18 @@
           </t-select>
           <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
         </div>
+
+        <!--
+          Background concurrency cap for this model. Only chat / embedding / vllm
+          are gated by the governor (see internal/models/limiter), so we surface
+          it just for those three. 0 = fall back to the global default.
+        -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
+          <t-input v-model.number="formData.maxConcurrency" type="number" :min="0" :max="4096"
+            :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
+          <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -425,6 +437,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
+  maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -534,6 +548,16 @@ const fallbackProviderOptions = computed(() => [
       embedding: 'https://openrouter.ai/api/v1'
     },
     description: t('model.editor.providers.openrouter.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
+    value: 'requesty',
+    label: t('model.editor.providers.requesty.label'),
+    defaultUrls: {
+      chat: 'https://router.requesty.ai/v1',
+      embedding: 'https://router.requesty.ai/v1'
+    },
+    description: t('model.editor.providers.requesty.description'),
     modelTypes: ['chat', 'embedding']
   },
   {
@@ -702,21 +726,52 @@ const modelTypeIcon = computed(() => {
 const isLkeapRerank = computed(
   () => activeModelType.value === 'rerank' && formData.value.provider === 'lkeap',
 )
+const isVolcengineRerank = computed(
+  () => activeModelType.value === 'rerank' && formData.value.provider === 'volcengine',
+)
+const isSignedRerank = computed(
+  () => isLkeapRerank.value || isVolcengineRerank.value,
+)
+const signedRerankAccessKeyLabel = computed(() => (
+  isVolcengineRerank.value
+    ? t('model.editor.volcengine.accessKeyLabel')
+    : t('model.editor.lkeap.secretIdLabel')
+))
+const signedRerankAccessKeyPlaceholder = computed(() => (
+  isVolcengineRerank.value
+    ? t('model.editor.volcengine.accessKeyPlaceholder')
+    : t('model.editor.lkeap.secretIdPlaceholder')
+))
+const signedRerankSecretKeyLabel = computed(() => (
+  isVolcengineRerank.value
+    ? t('model.editor.volcengine.secretKeyLabel')
+    : t('model.editor.lkeap.secretKeyLabel')
+))
+const signedRerankSecretKeyPlaceholder = computed(() => (
+  isVolcengineRerank.value
+    ? t('model.editor.volcengine.secretKeyPlaceholder')
+    : t('model.editor.lkeap.secretKeyPlaceholder')
+))
+const signedRerankCredentialHint = computed(() => (
+  isVolcengineRerank.value
+    ? t('model.editor.volcengine.rerankCredentialHint')
+    : t('model.editor.lkeap.rerankCredentialHint')
+))
 
 // Credential resource binding for the shared <CredentialResource> component.
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
   const fields: CredentialFieldDef<ModelCredentialField>[] = [
     {
       key: 'api_key',
-      label: (isLkeapRerank.value
-        ? t('model.editor.lkeap.secretIdLabel')
+      label: (isSignedRerank.value
+        ? signedRerankAccessKeyLabel.value
         : t('model.editor.apiKeyOptional')) as string,
     },
   ]
   if (formData.value.provider === 'weknoracloud') {
     fields.push({ key: 'app_secret', label: 'App Secret' })
-  } else if (isLkeapRerank.value) {
-    fields.push({ key: 'app_secret', label: t('model.editor.lkeap.secretKeyLabel') as string })
+  } else if (isSignedRerank.value) {
+    fields.push({ key: 'app_secret', label: signedRerankSecretKeyLabel.value as string })
   }
   return fields
 })
@@ -819,6 +874,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+  maxConcurrency: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1059,6 +1115,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',
@@ -1086,6 +1143,9 @@ const handleProviderChange = (value: string) => {
     }
     if (value === 'lkeap' && activeModelType.value === 'rerank' && !formData.value.modelName?.trim()) {
       formData.value.modelName = 'lke-reranker-base'
+    }
+    if (value === 'volcengine' && activeModelType.value === 'rerank' && !formData.value.modelName?.trim()) {
+      formData.value.modelName = 'doubao-seed-rerank'
     }
     // 重置校验状态
     remoteChecked.value = false
@@ -1348,11 +1408,15 @@ const checkRemoteAPI = async () => {
         break
 
       case 'rerank': {
-        const lkeapExtra = isLkeapRerank.value
+        const signedRerankExtra = isSignedRerank.value
           ? {
-              extraConfig: {
-                region: (formData.value.lkeapRegion || 'ap-guangzhou').trim(),
-              },
+              ...(isLkeapRerank.value
+                ? {
+                    extraConfig: {
+                      region: (formData.value.lkeapRegion || 'ap-guangzhou').trim(),
+                    },
+                  }
+                : {}),
               ...(formData.value.appSecret?.trim()
                 ? { appSecret: formData.value.appSecret.trim() }
                 : {}),
@@ -1365,7 +1429,7 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
-          ...lkeapExtra,
+          ...signedRerankExtra,
         })
         break
       }

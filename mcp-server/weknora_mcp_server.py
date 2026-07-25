@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import sys
 from typing import Any, Dict
 
 import urllib3
@@ -21,6 +23,7 @@ import requests
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from requests.exceptions import RequestException
+from upload_paths import resolve_upload_file_path, set_active_transport
 
 # Set up logging configuration for the MCP server
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +38,63 @@ try:
 except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
+
+
+def network_transport_auth_token() -> str:
+    """Shared secret clients must present for SSE/HTTP transports."""
+    return os.getenv("MCP_SERVER_AUTH_TOKEN", "").strip()
+
+
+def require_network_transport_auth(transport: str) -> str:
+    """SSE/HTTP must not start without a configured auth token."""
+    token = network_transport_auth_token()
+    if transport in ("sse", "http") and not token:
+        logger.error(
+            "MCP_SERVER_AUTH_TOKEN is required for %s transport. "
+            "Set a strong shared secret; clients must send "
+            "Authorization: Bearer <token> or X-MCP-Auth-Token.",
+            transport,
+        )
+        sys.exit(1)
+    return token
+
+
+class MCPAuthMiddleware:
+    """ASGI middleware that gates network MCP transports behind a shared secret."""
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        provided = ""
+        auth = headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            provided = auth[7:].strip()
+        elif "x-mcp-auth-token" in headers:
+            provided = headers["x-mcp-auth-token"]
+
+        if not provided or not secrets.compare_digest(provided, self.token):
+            body = b'{"error":"unauthorized"}'
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [[b"content-type", b"application/json"]],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
 
 
 class WeKnoraClient:
@@ -201,7 +261,8 @@ class WeKnoraClient:
         self, kb_id: str, file_path: str, enable_multimodel: bool = True
     ) -> Dict:
         """Create knowledge from a local file with optional multimodal processing"""
-        with open(file_path, "rb") as f:
+        safe_path = resolve_upload_file_path(file_path)
+        with open(safe_path, "rb") as f:
             files = {"file": f}
             data = {"enable_multimodel": str(enable_multimodel).lower()}
             # Temporarily remove Content-Type header for multipart/form-data request
@@ -395,7 +456,6 @@ class WeKnoraClient:
         query: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
-        enable_memory: bool = False,
     ) -> Dict:
         """Send a message to the RAG pipeline (knowledge-chat) and return the assembled answer.
 
@@ -409,8 +469,6 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
-        if enable_memory:
-            body["enable_memory"] = True
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -422,7 +480,6 @@ class WeKnoraClient:
         agent_id: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
-        enable_memory: bool = False,
     ) -> Dict:
         """Send a message to the agentic pipeline (agent-chat) and return the assembled answer.
 
@@ -437,8 +494,6 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
-        if enable_memory:
-            body["enable_memory"] = True
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -847,7 +902,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "Knowledge base names OR UUIDs to search. Strongly recommended for RAG — without them the answer falls back to LLM knowledge only. E.g. ['my-knowledge-base'] or ['a1b2c3d4-...']. Use list_knowledge_bases to find them.",
                     },
                     "web_search_enabled": {"type": "boolean", "description": "Enable web search alongside KB retrieval.", "default": False},
-                    "enable_memory": {"type": "boolean", "description": "Enable cross-session memory.", "default": False},
                 },
                 "required": ["session_id", "query"],
             },
@@ -879,7 +933,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "Names or UUIDs of knowledge bases to search. REQUIRED when the agent's kb_selection_mode is 'none' or 'selected' with no built-in KBs. Use list_knowledge_bases to find them.",
                     },
                     "web_search_enabled": {"type": "boolean", "description": "Enable web search.", "default": False},
-                    "enable_memory": {"type": "boolean", "description": "Enable cross-session memory.", "default": False},
                 },
                 "required": ["session_id", "query", "agent_id"],
             },
@@ -1159,7 +1212,6 @@ async def handle_call_tool(
                 args["query"],
                 knowledge_base_ids=kb_ids,
                 web_search_enabled=args.get("web_search_enabled", False),
-                enable_memory=args.get("enable_memory", False),
             )
             # get_running_loop() is the correct API inside async functions (get_event_loop() is deprecated)
             result = await asyncio.get_running_loop().run_in_executor(None, fn)
@@ -1210,7 +1262,6 @@ async def handle_call_tool(
                 agent_id,
                 knowledge_base_ids=kb_ids,
                 web_search_enabled=args.get("web_search_enabled", False),
-                enable_memory=args.get("enable_memory", False),
             )
             result = await asyncio.get_running_loop().run_in_executor(None, fn)
 
@@ -1277,12 +1328,15 @@ def _init_options() -> InitializationOptions:
 
 async def run_stdio():
     """Run the MCP server using stdio transport"""
+    set_active_transport("stdio")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, _init_options())
 
 
 async def run_sse(host: str, port: int):
     """Run the MCP server using SSE transport (legacy MCP clients)"""
+    set_active_transport("sse")
+    auth_token = require_network_transport_auth("sse")
     try:
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
@@ -1307,6 +1361,7 @@ async def run_sse(host: str, port: int):
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )
+    starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
 
     logger.info("Starting SSE MCP server on %s:%d", host, port)
     logger.info("SSE endpoint:  http://%s:%d/sse", host, port)
@@ -1317,6 +1372,8 @@ async def run_sse(host: str, port: int):
 
 async def run_http(host: str, port: int):
     """Run the MCP server using Streamable HTTP transport (MCP 2025-03-26 spec)"""
+    set_active_transport("http")
+    auth_token = require_network_transport_auth("http")
     try:
         from contextlib import asynccontextmanager
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -1344,6 +1401,7 @@ async def run_http(host: str, port: int):
         routes=[Mount("/", app=session_manager.handle_request)],
         lifespan=lifespan,
     )
+    starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
 
     logger.info("Starting Streamable HTTP MCP server on %s:%d", host, port)
     logger.info("MCP endpoint:  http://%s:%d/mcp", host, port)
@@ -1373,8 +1431,8 @@ def main():
     )
     parser.add_argument(
         "--host",
-        default=os.getenv("MCP_HOST", "0.0.0.0"),
-        help="Bind host for network transports (default: 0.0.0.0)",
+        default=os.getenv("MCP_HOST", "127.0.0.1"),
+        help="Bind host for network transports (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",

@@ -215,3 +215,88 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
+	t.Helper()
+	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
+	chunk.TagID = tagID
+	chunk.Flags = types.ChunkFlagRecommended
+	require.NoError(t, chunk.SetFAQMetadata(&types.FAQChunkMetadata{StandardQuestion: question}))
+	return chunk
+}
+
+func makeSuggestedDocumentChunk(t *testing.T, kbID, knowledgeID, question string) *types.Chunk {
+	t.Helper()
+	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	require.NoError(t, chunk.SetDocumentMetadata(&types.DocumentChunkMetadata{
+		GeneratedQuestions: []types.GeneratedQuestion{{ID: uuid.NewString(), Question: question}},
+	}))
+	return chunk
+}
+
+func TestListRecommendedFAQChunks_FiltersByTagWithoutWideningToParentKB(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	selectedTag := uuid.NewString()
+	otherTag := uuid.NewString()
+	selected := makeSuggestedFAQChunk(t, "kb-1", "faq-knowledge", selectedTag, "selected question")
+	other := makeSuggestedFAQChunk(t, "kb-1", "faq-knowledge", otherTag, "other question")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{selected, other}))
+
+	got, err := repo.ListRecommendedFAQChunks(ctx, 1, nil, nil, []string{selectedTag}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, selected.ID, got[0].ID)
+}
+
+func TestListRecommendedFAQChunks_UnionsOnlyExplicitScopes(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	selectedTag := uuid.NewString()
+	tagged := makeSuggestedFAQChunk(t, "kb-tag", "faq-tag", selectedTag, "tagged question")
+	explicitKB := makeSuggestedFAQChunk(t, "kb-explicit", "faq-explicit", uuid.NewString(), "explicit KB question")
+	unselected := makeSuggestedFAQChunk(t, "kb-other", "faq-other", uuid.NewString(), "unselected question")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{tagged, explicitKB, unselected}))
+
+	got, err := repo.ListRecommendedFAQChunks(ctx, 1, []string{"kb-explicit"}, nil, []string{selectedTag}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.ElementsMatch(t, []string{tagged.ID, explicitKB.ID}, []string{got[0].ID, got[1].ID})
+}
+
+func TestListRecentDocumentChunksWithQuestions_KnowledgeScopeDoesNotIncludeSiblingDocuments(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	selected := makeSuggestedDocumentChunk(t, "kb-1", "doc-selected", "selected document question")
+	sibling := makeSuggestedDocumentChunk(t, "kb-1", "doc-sibling", "sibling document question")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{selected, sibling}))
+
+	got, err := repo.ListRecentDocumentChunksWithQuestions(ctx, 1, nil, []string{"doc-selected"}, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, selected.ID, got[0].ID)
+}
+
+func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	fromExplicitKB := makeSuggestedDocumentChunk(t, "kb-explicit", "doc-1", "explicit KB question")
+	fromExplicitDocument := makeSuggestedDocumentChunk(t, "kb-other", "doc-selected", "selected document question")
+	unselected := makeSuggestedDocumentChunk(t, "kb-other", "doc-other", "unselected question")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{fromExplicitKB, fromExplicitDocument, unselected}))
+
+	got, err := repo.ListRecentDocumentChunksWithQuestions(
+		ctx, 1, []string{"kb-explicit"}, []string{"doc-selected"}, 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
+}
