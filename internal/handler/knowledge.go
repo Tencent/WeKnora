@@ -1012,6 +1012,42 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	})
 }
 
+// GetKnowledgeBuildProgress godoc
+// @Summary      获取知识库构建进度
+// @Description  按解析状态聚合知识库内的全部知识，返回已结束、进行中、成功、失败和已取消数量
+// @Tags         知识管理
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "知识库构建进度"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/build-progress [get]
+func (h *KnowledgeHandler) GetKnowledgeBuildProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	progress, err := h.kgService.GetKnowledgeBuildProgress(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"kb_id": secutils.SanitizeForLog(kbID),
+		})
+		c.Error(errors.NewInternalServerError("failed to get knowledge build progress"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
+	})
+}
+
 // DeleteKnowledge godoc
 // @Summary      删除知识
 // @Description  根据ID异步删除知识条目。请求会被入队到与批量删除相同的异步管道（asynq）；
@@ -2381,6 +2417,143 @@ func sliceContains(ss []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type batchCancelKnowledgeParseRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids" binding:"required"`
+}
+
+type batchCancelSkippedKnowledge struct {
+	ID          string `json:"id"`
+	ParseStatus string `json:"parse_status"`
+}
+
+func partitionBatchCancelKnowledge(
+	knowledgeList []*types.Knowledge,
+) ([]string, []batchCancelSkippedKnowledge) {
+	cancellable := make([]string, 0, len(knowledgeList))
+	skipped := make([]batchCancelSkippedKnowledge, 0)
+	for _, knowledge := range knowledgeList {
+		switch knowledge.ParseStatus {
+		case types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFinalizing,
+			types.ParseStatusCancelled:
+			cancellable = append(cancellable, knowledge.ID)
+		default:
+			skipped = append(skipped, batchCancelSkippedKnowledge{
+				ID:          knowledge.ID,
+				ParseStatus: knowledge.ParseStatus,
+			})
+		}
+	}
+	return cancellable, skipped
+}
+
+// BatchCancelKnowledgeParse godoc
+// @Summary      批量取消知识解析
+// @Description  批量停止同一知识库下处于等待、解析或收尾阶段的知识；已结束的知识会被跳过
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      batchCancelKnowledgeParseRequest  true  "批量取消解析请求"
+// @Success      200      {object}  map[string]interface{}           "批量取消结果"
+// @Failure      400      {object}  errors.AppError                  "请求参数错误"
+// @Failure      403      {object}  errors.AppError                  "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-cancel-parse [post]
+func (h *KnowledgeHandler) BatchCancelKnowledgeParse(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req batchCancelKnowledgeParseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid batch cancel request parameters"))
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch cancel"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to cancel knowledge parsing in this kb"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge batch for cancellation: %v", err)
+		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		return
+	}
+	if len(knowledgeList) != len(ids) {
+		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		return
+	}
+	for _, knowledge := range knowledgeList {
+		if knowledge.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+	}
+
+	cancellable, skipped := partitionBatchCancelKnowledge(knowledgeList)
+	cancelledIDs := make([]string, 0, len(cancellable))
+	failedIDs := make([]string, 0)
+	for _, id := range cancellable {
+		if _, err := h.kgService.CancelKnowledgeParse(ctx, id); err != nil {
+			logger.Errorf(ctx, "failed to cancel knowledge parse, knowledge_id: %s, err: %v",
+				secutils.SanitizeForLog(id), err)
+			failedIDs = append(failedIDs, id)
+			continue
+		}
+		cancelledIDs = append(cancelledIDs, id)
+	}
+	if len(cancelledIDs) == 0 && len(failedIDs) > 0 {
+		c.Error(errors.NewInternalServerError("failed to cancel knowledge parsing"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Batch cancel parse completed",
+		"data": gin.H{
+			"cancelled_count": len(cancelledIDs),
+			"cancelled_ids":   cancelledIDs,
+			"skipped_count":   len(skipped),
+			"skipped":         skipped,
+			"failed_count":    len(failedIDs),
+			"failed_ids":      failedIDs,
+		},
+	})
 }
 
 type batchReparseKnowledgeRequest struct {

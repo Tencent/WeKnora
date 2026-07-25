@@ -186,6 +186,37 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	return knowledges, total, nil
 }
 
+// CountKnowledgeByParseStatus returns parse-status totals for the whole
+// knowledge base. Deleting rows are omitted because they are already hidden
+// from the default document list and should not hold build progress below 100%.
+func (r *knowledgeRepository) CountKnowledgeByParseStatus(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) (map[string]int64, error) {
+	type statusCount struct {
+		ParseStatus string
+		Count       int64
+	}
+
+	var rows []statusCount
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("parse_status, COUNT(*) AS count").
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("parse_status <> ?", types.ParseStatusDeleting).
+		Group("parse_status").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		counts[row.ParseStatus] = row.Count
+	}
+	return counts, nil
+}
+
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error

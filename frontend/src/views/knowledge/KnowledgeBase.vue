@@ -31,16 +31,20 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
+  batchCancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
+  getKnowledgeBuildProgress,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  type KnowledgeBuildProgress,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import KnowledgeBuildProgressPanel from './components/KnowledgeBuildProgress.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -57,6 +61,7 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import { summarizeBatchSelection } from './batchSelection';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -420,6 +425,25 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchCancelling = ref(false);
+const emptyBuildProgress = (): KnowledgeBuildProgress => ({
+  total: 0,
+  settled: 0,
+  in_flight: 0,
+  pending: 0,
+  processing: 0,
+  finalizing: 0,
+  completed: 0,
+  failed: 0,
+  cancelled: 0,
+  draft: 0,
+  other: 0,
+  percentage: 0,
+});
+const buildProgress = ref<KnowledgeBuildProgress>(emptyBuildProgress());
+const batchSelectionSummary = computed(() =>
+  summarizeBatchSelection(cardList.value || [], selectedIds.value),
+);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -459,13 +483,19 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
 };
 
 const confirmBatchReparse = async () => {
-  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
+  if (batchReparsing.value || batchDeleting.value || batchCancelling.value || selectedIds.value.size === 0) return;
   const allIds = Array.from(selectedIds.value);
   const ids = allIds.filter((id) => {
     const item = cardList.value.find((c) => c.id === id);
-    return !item || !isParseInFlight(item.parse_status);
+    return !!item &&
+      !isParseInFlight(item.parse_status) &&
+      item.parse_status !== 'draft' &&
+      item.parse_status !== 'deleting';
   });
-  const skipped = allIds.length - ids.length;
+  const skipped = allIds.filter((id) => {
+    const item = cardList.value.find((c) => c.id === id);
+    return !!item && isParseInFlight(item.parse_status);
+  }).length;
   if (ids.length === 0) {
     MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
     return;
@@ -661,11 +691,29 @@ const getTagName = (tagId?: string | number) => {
   return tagMap.value[key]?.name || '';
 };
 
+const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
+
+const loadBuildProgress = async (kbIdValue: string) => {
+  if (!kbIdValue || isFAQ.value) {
+    buildProgress.value = emptyBuildProgress();
+    return;
+  }
+  try {
+    const res: any = await getKnowledgeBuildProgress(kbIdValue);
+    if (!isCurrentKb(kbIdValue)) return;
+    buildProgress.value = { ...emptyBuildProgress(), ...(res?.data || {}) };
+  } catch (error) {
+    if (!isCurrentKb(kbIdValue)) return;
+    console.error('Failed to load knowledge build progress', error);
+  }
+};
+
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
+  void loadBuildProgress(kbIdValue);
   return getKnowled(
     {
       page: 1,
@@ -679,8 +727,6 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
     }
   });
 };
-
-const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
 
 const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
@@ -820,6 +866,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
+    buildProgress.value = emptyBuildProgress();
     return;
   }
   kbLoading.value = true;
@@ -838,6 +885,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     } else {
       cardList.value = [];
       total.value = 0;
+      buildProgress.value = emptyBuildProgress();
     }
     loadTags(targetKbId, true);
   } catch (error) {
@@ -847,6 +895,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
+    buildProgress.value = emptyBuildProgress();
   } finally {
     if (isCurrentKb(targetKbId)) {
       kbLoading.value = false;
@@ -899,6 +948,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
+    buildProgress.value = emptyBuildProgress();
     return;
   }
   if (newKbId === oldKbId && kbInfo.value) return;
@@ -907,6 +957,9 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
+    buildProgress.value = emptyBuildProgress();
+    selectedIds.value.clear();
+    lastSelectedIndex = -1;
     docListLoading.value = true;
     resetPage();
     tagSearchQuery.value = '';
@@ -1156,6 +1209,9 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       }
       if (shouldRefreshWikiStatus) {
         void fetchWikiStatusOnce();
+      }
+      if (hasChanges) {
+        void loadBuildProgress(kbId.value);
       }
       // If there are no changes, the watch won't trigger, so we must manually poll again
       // Even if there are changes, we can manually poll again just to be safe.
@@ -1828,8 +1884,52 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
   openCardDetails(item);
 };
 
+const confirmBatchCancelParse = async () => {
+  if (batchCancelling.value || batchDeleting.value || batchReparsing.value) return;
+  const ids = (cardList.value || [])
+    .filter((item: KnowledgeCard) =>
+      selectedIds.value.has(item.id) && isParseInFlight(item.parse_status),
+    )
+    .map((item: KnowledgeCard) => item.id);
+  if (ids.length === 0) return;
+
+  batchCancelling.value = true;
+  try {
+    const res: any = await batchCancelKnowledgeParse(kbId.value, ids);
+    if (!res?.success) {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchCancelParseFailed'));
+      return;
+    }
+
+    const result = res?.data || {};
+    const cancelledIDs = new Set<string>(result.cancelled_ids || []);
+    for (const card of cardList.value || []) {
+      if (!cancelledIDs.has(card.id)) continue;
+      card.parse_status = 'cancelled';
+      card.error_message = t('knowledgeBase.cancelParseSubmitted');
+      delete traceAvailableById[card.id];
+    }
+
+    const cancelledCount = Number(result.cancelled_count || 0);
+    const notCancelledCount = Number(result.skipped_count || 0) + Number(result.failed_count || 0);
+    if (cancelledCount > 0) {
+      MessagePlugin.success(t('knowledgeBase.batchCancelParseSuccess', { count: cancelledCount }));
+    }
+    if (notCancelledCount > 0) {
+      MessagePlugin.warning(t('knowledgeBase.batchCancelParseSkipped', { count: notCancelledCount }));
+    }
+    clearSelection();
+    batchMode.value = false;
+    await loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.batchCancelParseFailed'));
+  } finally {
+    batchCancelling.value = false;
+  }
+};
+
 const confirmBatchDelete = async () => {
-  if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
+  if (batchDeleting.value || batchReparsing.value || batchCancelling.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
   const deletedIdSet = new Set(ids);
   batchDeleting.value = true;
@@ -2229,6 +2329,7 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </div>
               </div>
+              <KnowledgeBuildProgressPanel :progress="buildProgress" />
               <div class="doc-scroll-container"
                 :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2304,9 +2405,21 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                <DocumentBatchBar :count="batchSelectionSummary.total"
+                  :in-flight-count="batchSelectionSummary.inFlight"
+                  :rebuildable-count="batchSelectionSummary.rebuildable"
+                  :completed-count="batchSelectionSummary.completed"
+                  :failed-count="batchSelectionSummary.failed"
+                  :cancelled-count="batchSelectionSummary.cancelled"
+                  :draft-count="batchSelectionSummary.draft"
+                  :delete-loading="batchDeleting"
+                  :reparse-loading="batchReparsing"
+                  :cancel-parse-loading="batchCancelling"
+                  :visible="batchMode || selectedIds.size > 0"
+                  @cancel="handleBatchCancel"
+                  @cancel-parse="confirmBatchCancelParse"
+                  @delete="confirmBatchDelete"
+                  @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>

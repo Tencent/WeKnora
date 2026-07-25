@@ -5405,6 +5405,18 @@ definitions:
       success:
         type: boolean
     type: object
+  internal_handler.batchCancelKnowledgeParseRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      kb_id:
+        type: string
+    required:
+    - ids
+    - kb_id
+    type: object
   internal_handler.batchReparseKnowledgeRequest:
     properties:
       ids:
@@ -8912,6 +8924,33 @@ paths:
       summary: 获取知识列表
       tags:
       - 知识管理
+  /knowledge-bases/{id}/knowledge/build-progress:
+    get:
+      description: 按解析状态聚合知识库内的全部知识，返回已结束、进行中、成功、失败和已取消数量
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 知识库构建进度
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识库构建进度
+      tags:
+      - 知识管理
   /knowledge-bases/{id}/knowledge/file:
     post:
       consumes:
@@ -9739,6 +9778,40 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 批量获取知识
+      tags:
+      - 知识管理
+  /knowledge/batch-cancel-parse:
+    post:
+      consumes:
+      - application/json
+      description: 批量停止同一知识库下处于等待、解析或收尾阶段的知识；已结束的知识会被跳过
+      parameters:
+      - description: 批量取消解析请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.batchCancelKnowledgeParseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 批量取消结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量取消知识解析
       tags:
       - 知识管理
   /knowledge/batch-delete:

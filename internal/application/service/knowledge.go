@@ -562,6 +562,56 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+// GetKnowledgeBuildProgress returns parse-state totals for the whole knowledge
+// base, independent of the document list's current filters and page.
+func (s *knowledgeService) GetKnowledgeBuildProgress(
+	ctx context.Context,
+	kbID string,
+) (*types.KnowledgeBuildProgress, error) {
+	counts, err := s.repo.CountKnowledgeByParseStatus(
+		ctx,
+		ctx.Value(types.TenantIDContextKey).(uint64),
+		kbID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return buildKnowledgeProgress(counts), nil
+}
+
+func buildKnowledgeProgress(counts map[string]int64) *types.KnowledgeBuildProgress {
+	progress := &types.KnowledgeBuildProgress{
+		Pending:    counts[types.ParseStatusPending],
+		Processing: counts[types.ParseStatusProcessing],
+		Finalizing: counts[types.ParseStatusFinalizing],
+		Completed:  counts[types.ParseStatusCompleted],
+		Failed:     counts[types.ParseStatusFailed],
+		Cancelled:  counts[types.ParseStatusCancelled],
+		Draft:      counts[types.ManualKnowledgeStatusDraft],
+	}
+
+	for status, count := range counts {
+		progress.Total += count
+		switch status {
+		case types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFinalizing,
+			types.ParseStatusCompleted,
+			types.ParseStatusFailed,
+			types.ParseStatusCancelled,
+			types.ManualKnowledgeStatusDraft:
+		default:
+			progress.Other += count
+		}
+	}
+	progress.InFlight = progress.Pending + progress.Processing + progress.Finalizing
+	progress.Settled = progress.Total - progress.InFlight
+	if progress.Total > 0 {
+		progress.Percentage = int(progress.Settled * 100 / progress.Total)
+	}
+	return progress
+}
+
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
 	// Get knowledge record

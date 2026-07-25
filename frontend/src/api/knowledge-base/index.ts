@@ -277,6 +277,25 @@ export function listKnowledgeFiles(
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
 
+export type KnowledgeBuildProgress = {
+  total: number;
+  settled: number;
+  in_flight: number;
+  pending: number;
+  processing: number;
+  finalizing: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  draft: number;
+  other: number;
+  percentage: number;
+};
+
+export function getKnowledgeBuildProgress(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/build-progress`);
+}
+
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
@@ -297,6 +316,10 @@ export function reparseKnowledge(id: string, data?: { process_config?: Knowledge
 
 export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
+}
+
+export function batchCancelKnowledgeParse(kbId: string, ids: string[]) {
+  return post(`/api/v1/knowledge/batch-cancel-parse`, { kb_id: kbId, ids });
 }
 
 export function getKnowledgeSpans(id: string, attempt?: number) {

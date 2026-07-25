@@ -106,6 +106,23 @@ type KnowledgeListFilter struct {
 	UpdatedTo time.Time
 }
 
+// KnowledgeBuildProgress summarizes parse states for every visible knowledge
+// item in one knowledge base. Deleting rows are excluded by the repository.
+type KnowledgeBuildProgress struct {
+	Total      int64 `json:"total"`
+	Settled    int64 `json:"settled"`
+	InFlight   int64 `json:"in_flight"`
+	Pending    int64 `json:"pending"`
+	Processing int64 `json:"processing"`
+	Finalizing int64 `json:"finalizing"`
+	Completed  int64 `json:"completed"`
+	Failed     int64 `json:"failed"`
+	Cancelled  int64 `json:"cancelled"`
+	Draft      int64 `json:"draft"`
+	Other      int64 `json:"other"`
+	Percentage int   `json:"percentage"`
+}
+
 // Knowledge represents a knowledge entity in the system.
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.

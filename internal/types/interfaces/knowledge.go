@@ -84,6 +84,8 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	// GetKnowledgeBuildProgress returns parse-status totals for a knowledge base.
+	GetKnowledgeBuildProgress(ctx context.Context, kbID string) (*types.KnowledgeBuildProgress, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
 	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
@@ -219,6 +221,9 @@ type KnowledgeRepository interface {
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
+	// CountKnowledgeByParseStatus returns non-deleting knowledge counts grouped
+	// by parse_status for a single tenant and knowledge base.
+	CountKnowledgeByParseStatus(ctx context.Context, tenantID uint64, kbID string) (map[string]int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
