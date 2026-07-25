@@ -62,7 +62,7 @@
             :options="rateOptions"
             :placeholder="$t('knowledgeEditor.feedback.maxRate')"
             style="width: 200px"
-            @change="loadLowQualityChunks"
+            @change="handleFilterChange"
           />
           <t-pagination
             v-model:current="currentPage"
@@ -77,6 +77,7 @@
           :columns="columns"
           row-key="chunk_id"
           :pagination="false"
+          :loading="listLoading"
           stripe
         >
           <template #content="{ row }">
@@ -101,9 +102,23 @@
             <t-button size="small" variant="text" @click="viewChunkStats(row.chunk_id)">
               {{ $t('knowledgeEditor.feedback.viewDetails') }}
             </t-button>
-            <t-button size="small" variant="text" @click="resetChunkFeedbackHandler(row.chunk_id)">
-              {{ $t('knowledgeEditor.feedback.reset') }}
-            </t-button>
+            <t-popconfirm
+              theme="warning"
+              :content="$t('knowledgeEditor.feedback.resetConfirm')"
+              :confirm-btn="{ content: $t('knowledgeEditor.feedback.reset'), theme: 'danger' }"
+              :cancel-btn="{ content: $t('common.cancel') }"
+              @confirm="resetChunkFeedbackHandler(row.chunk_id)"
+            >
+              <t-button
+                size="small"
+                variant="text"
+                theme="danger"
+                :loading="resettingChunkId === row.chunk_id"
+                :disabled="!!resettingChunkId"
+              >
+                {{ $t('knowledgeEditor.feedback.reset') }}
+              </t-button>
+            </t-popconfirm>
           </template>
         </t-table>
       </div>
@@ -138,11 +153,11 @@
 
         <div v-if="chunkStats.dislike_reason_stats?.length" class="dislike-reasons">
           <h4>{{ $t('knowledgeEditor.feedback.dislikeReasons') }}</h4>
-          <t-tag-group>
+          <div class="tag-list">
             <t-tag v-for="item in chunkStats.dislike_reason_stats" :key="item.reason" theme="danger">
               {{ formatReasonLabel(item.reason) }} × {{ item.count }}
             </t-tag>
-          </t-tag-group>
+          </div>
         </div>
 
         <div class="weight-logs">
@@ -159,6 +174,9 @@
             </template>
             <template #trigger="{ row }">
               {{ getWeightLogTriggerLabel(row.trigger_type) }}
+            </template>
+            <template #operator="{ row }">
+              {{ row.operator || '-' }}
             </template>
             <template #weightChange="{ row }">
               <span :class="{ 'weight-boosted': row.new_weight > row.old_weight, 'weight-penalized': row.new_weight < row.old_weight }">
@@ -192,10 +210,12 @@ import {
 
 interface Props {
   embedded?: boolean
+  kbId?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   embedded: false,
+  kbId: '',
 })
 const { t } = useI18n()
 
@@ -208,7 +228,10 @@ const weightLogs = ref<WeightLogItem[]>([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const totalCount = ref(0)
-const filterMaxRate = ref(0.5)
+const filterMaxRate = ref(1.01)
+const listLoading = ref(false)
+const resettingChunkId = ref('')
+let listRequestSeq = 0
 
 const stats = ref<{
   totalChunks: number
@@ -219,33 +242,35 @@ const stats = ref<{
 
 // 筛选选项
 const rateOptions = [
-  { label: '<= 30%', value: 0.3 },
-  { label: '<= 50%', value: 0.5 },
-  { label: '<= 70%', value: 0.7 },
+  { label: t('knowledgeEditor.feedback.allRatedChunks'), value: 1.01 },
+  { label: '< 30%', value: 0.3 },
+  { label: '< 50%', value: 0.5 },
+  { label: '< 70%', value: 0.7 },
 ]
 
 // 表格列
 const columns = [
-  { colKey: 'content', header: t('knowledgeEditor.feedback.columns.content'), width: '30%' },
-  { colKey: 'like_count', header: t('knowledgeEditor.feedback.columns.likeCount'), width: '10%' },
-  { colKey: 'dislike_count', header: t('knowledgeEditor.feedback.columns.dislikeCount'), width: '10%' },
-  { colKey: 'positiveRate', header: t('knowledgeEditor.feedback.columns.positiveRate'), width: '15%' },
-  { colKey: 'recallWeight', header: t('knowledgeEditor.feedback.columns.recallWeight'), width: '10%' },
-  { colKey: 'qualityStatus', header: t('knowledgeEditor.feedback.columns.qualityStatus'), width: '15%' },
-  { colKey: 'operations', header: t('knowledgeEditor.feedback.columns.operations'), width: '10%' },
+  { colKey: 'content', title: t('knowledgeEditor.feedback.columns.content'), width: '30%' },
+  { colKey: 'like_count', title: t('knowledgeEditor.feedback.columns.likeCount'), width: '10%' },
+  { colKey: 'dislike_count', title: t('knowledgeEditor.feedback.columns.dislikeCount'), width: '10%' },
+  { colKey: 'positiveRate', title: t('knowledgeEditor.feedback.columns.positiveRate'), width: '15%' },
+  { colKey: 'recallWeight', title: t('knowledgeEditor.feedback.columns.recallWeight'), width: '10%' },
+  { colKey: 'qualityStatus', title: t('knowledgeEditor.feedback.columns.qualityStatus'), width: '15%' },
+  { colKey: 'operations', title: t('knowledgeEditor.feedback.columns.operations'), width: '10%' },
 ]
 
 const weightLogColumns = [
-  { colKey: 'action', header: t('knowledgeEditor.feedback.columns.action'), width: '24%' },
-  { colKey: 'trigger', header: t('knowledgeEditor.feedback.columns.trigger'), width: '26%' },
-  { colKey: 'weightChange', header: t('knowledgeEditor.feedback.columns.weightChange'), width: '25%' },
-  { colKey: 'createdAt', header: t('knowledgeEditor.feedback.columns.createdAt'), width: '25%' },
+  { colKey: 'action', title: t('knowledgeEditor.feedback.columns.action'), width: '18%' },
+  { colKey: 'trigger', title: t('knowledgeEditor.feedback.columns.trigger'), width: '18%' },
+  { colKey: 'operator', title: t('knowledgeEditor.feedback.columns.operator'), width: '18%' },
+  { colKey: 'weightChange', title: t('knowledgeEditor.feedback.columns.weightChange'), width: '23%' },
+  { colKey: 'createdAt', title: t('knowledgeEditor.feedback.columns.createdAt'), width: '23%' },
 ]
 
 // 加载统计数据
 const loadStats = async () => {
   try {
-    const res = await getFeedbackOverview()
+    const res = await getFeedbackOverview({ knowledge_base_id: props.kbId || undefined })
     if (res.data) {
       stats.value = {
         totalChunks: res.data.total_chunks,
@@ -261,22 +286,35 @@ const loadStats = async () => {
 
 // 加载低质量片段
 const loadLowQualityChunks = async () => {
+  const seq = ++listRequestSeq
+  listLoading.value = true
   try {
     const parsedMaxRate = Number(filterMaxRate.value)
-    const maxRate = Number.isFinite(parsedMaxRate) && parsedMaxRate > 0 ? parsedMaxRate : 0.5
+    const maxRate = Number.isFinite(parsedMaxRate) && parsedMaxRate > 0 ? parsedMaxRate : 1.01
     const res = await listLowQualityChunks({
       max_rate: maxRate,
       limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value,
+      knowledge_base_id: props.kbId || undefined,
     })
+    if (seq !== listRequestSeq) return
     if (res.data) {
       lowQualityChunks.value = res.data
       totalCount.value = res.total ?? res.data.length
     }
   } catch (error) {
-    console.error('加载低质量片段失败:', error)
+    console.error('load feedback chunks failed:', error)
     MessagePlugin.error(t('knowledgeEditor.feedback.messages.loadFailed'))
+  } finally {
+    if (seq === listRequestSeq) {
+      listLoading.value = false
+    }
   }
+}
+
+const handleFilterChange = () => {
+  currentPage.value = 1
+  loadLowQualityChunks()
 }
 
 const openLowQualityDialog = () => {
@@ -306,13 +344,15 @@ const viewChunkStats = async (chunkId: string) => {
 // 重置片段反馈
 const resetChunkFeedbackHandler = async (chunkId: string) => {
   try {
+    resettingChunkId.value = chunkId
     await resetChunkFeedback(chunkId)
     MessagePlugin.success(t('knowledgeEditor.feedback.messages.resetSuccess'))
-    loadLowQualityChunks()
-    loadStats()
+    await Promise.all([loadLowQualityChunks(), loadStats()])
   } catch (error) {
-    console.error('重置失败:', error)
+    console.error('reset chunk feedback failed:', error)
     MessagePlugin.error(t('knowledgeEditor.feedback.messages.resetFailed'))
+  } finally {
+    resettingChunkId.value = ''
   }
 }
 
@@ -441,6 +481,12 @@ onMounted(() => {
         font-size: 14px;
         font-weight: 500;
       }
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
   }
 }

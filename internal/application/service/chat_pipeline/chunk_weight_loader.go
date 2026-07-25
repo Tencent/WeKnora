@@ -8,13 +8,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// ChunkWeightLoader 片段权重加载插件
-// 在 CHUNK_RERANK 之后、INTO_CHAT_MESSAGE 之前加载片段的召回权重到搜索结果中
+// ChunkWeightLoader loads persisted recall weights before rerank/filter stages.
 type ChunkWeightLoader struct {
 	chunkRepo interfaces.ChunkRepository
 }
 
-// NewChunkWeightLoader 创建片段权重加载插件
 func NewChunkWeightLoader(
 	eventManager *EventManager,
 	chunkRepo interfaces.ChunkRepository,
@@ -26,27 +24,17 @@ func NewChunkWeightLoader(
 	return loader
 }
 
-// ActivationEvents 返回此插件监听的事件类型
-// 在重排序之后加载，以便权重可以立即被应用
 func (p *ChunkWeightLoader) ActivationEvents() []types.EventType {
 	return []types.EventType{types.CHUNK_RERANK}
 }
 
-// OnEvent 处理 CHUNK_RERANK 事件后，加载片段权重
 func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	// 首先执行后续插件
-	if err := next(); err != nil {
-		return err
-	}
-
-	// 加载片段权重
 	if len(chatManage.SearchResult) == 0 {
-		return nil
+		return next()
 	}
 
-	// 提取 chunk IDs
 	chunkIDs := make([]string, 0, len(chatManage.SearchResult))
 	for _, result := range chatManage.SearchResult {
 		if result.ID != "" {
@@ -54,27 +42,24 @@ func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 		}
 	}
 
-	// 批量获取片段信息（包含权重）
-	chunks, err := p.chunkRepo.ListChunksByID(ctx, chatManage.TenantID, chunkIDs)
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to load chunk weights: %v", err)
-		return nil
+		return next()
 	}
 
-	// 构建 chunk ID -> recall_weight 的映射
-	weightMap := make(map[string]float64)
+	weightMap := make(map[string]float64, len(chunks))
 	for _, chunk := range chunks {
 		weightMap[chunk.ID] = chunk.RecallWeight
 	}
 
-	// 应用权重到搜索结果
 	loaded := 0
 	for _, result := range chatManage.SearchResult {
 		if weight, ok := weightMap[result.ID]; ok {
 			result.RecallWeight = weight
 			loaded++
 		} else {
-			result.RecallWeight = 1.0 // 默认权重
+			result.RecallWeight = 1.0
 		}
 	}
 
@@ -86,5 +71,5 @@ func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 		})
 	}
 
-	return nil
+	return next()
 }

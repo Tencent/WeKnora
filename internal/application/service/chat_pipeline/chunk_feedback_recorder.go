@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -54,23 +55,13 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// 提取片段 ID 列表
-	chunkIDs := types.CollectSearchResultChunkIDs(results)
-	if len(chunkIDs) == 0 {
+	refs := feedbackReferenceRefs(chatManage, results)
+	if len(refs) == 0 {
 		pipelineInfo(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"reason":     "no_valid_chunk_ids",
 		})
 		return next()
-	}
-
-	refs := make([]*types.QAReplyChunkRef, len(chunkIDs))
-	for i, chunkID := range chunkIDs {
-		refs[i] = &types.QAReplyChunkRef{
-			MessageID: chatManage.MessageID,
-			ChunkID:   chunkID,
-			TenantID:  chatManage.TenantID,
-		}
 	}
 
 	if err := p.qaRefRepo.CreateBatch(ctx, refs); err != nil {
@@ -85,10 +76,48 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 		"session_id":  chatManage.SessionID,
 		"message_id":  chatManage.MessageID,
 		"result_set":  resultSet,
-		"chunk_count": len(chunkIDs),
+		"chunk_count": len(refs),
 	})
 
 	return next()
+}
+
+func feedbackReferenceRefs(chatManage *types.ChatManage, results []*types.SearchResult) []*types.QAReplyChunkRef {
+	if chatManage == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	refs := make([]*types.QAReplyChunkRef, 0, len(results))
+	add := func(chunkID string, chunkTenantID uint64) {
+		if chunkID == "" {
+			return
+		}
+		if chunkTenantID == 0 {
+			chunkTenantID = chatManage.TenantID
+		}
+		key := fmt.Sprintf("%d:%s", chunkTenantID, chunkID)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, &types.QAReplyChunkRef{
+			MessageID:     chatManage.MessageID,
+			ChunkID:       chunkID,
+			TenantID:      chatManage.TenantID,
+			ChunkTenantID: chunkTenantID,
+		})
+	}
+	for _, result := range results {
+		if !types.IsFeedbackTrackableSearchResult(result) {
+			continue
+		}
+		chunkTenantID := chatManage.SearchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
+		add(result.ID, chunkTenantID)
+		for _, subID := range result.SubChunkID {
+			add(subID, chunkTenantID)
+		}
+	}
+	return refs
 }
 
 func feedbackReferenceResults(chatManage *types.ChatManage) ([]*types.SearchResult, string) {

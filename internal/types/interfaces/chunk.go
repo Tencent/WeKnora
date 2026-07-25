@@ -114,12 +114,12 @@ type ChunkRepository interface {
 	UpdateChunkFeedbackStats(ctx context.Context, tenantID uint64, chunkID string, likeCount, dislikeCount int, positiveRate float64, recallWeight float64, qualityStatus types.ChunkQualityStatus) error
 	// UpdateChunkLastFeedbackAt updates the last feedback timestamp for a tenant-scoped chunk.
 	UpdateChunkLastFeedbackAt(ctx context.Context, tenantID uint64, chunkID string) error
-	// ListLowQualityChunks lists chunks with positive rate lower than or equal to maxRate.
-	ListLowQualityChunks(ctx context.Context, tenantID uint64, maxRate float64, limit, offset int) ([]*types.Chunk, error)
-	// CountLowQualityChunks counts chunks with positive rate lower than or equal to maxRate.
-	CountLowQualityChunks(ctx context.Context, tenantID uint64, maxRate float64) (int64, error)
+	// ListLowQualityChunks lists chunks with positive rate lower than maxRate.
+	ListLowQualityChunks(ctx context.Context, tenantID uint64, knowledgeBaseID string, maxRate float64, limit, offset int) ([]*types.Chunk, error)
+	// CountLowQualityChunks counts chunks with positive rate lower than maxRate.
+	CountLowQualityChunks(ctx context.Context, tenantID uint64, knowledgeBaseID string, maxRate float64) (int64, error)
 	// GetChunkFeedbackOverview returns tenant-scoped aggregate feedback stats.
-	GetChunkFeedbackOverview(ctx context.Context, tenantID uint64, highThreshold, lowThreshold float64) (*types.ChunkFeedbackOverviewResponse, error)
+	GetChunkFeedbackOverview(ctx context.Context, tenantID uint64, knowledgeBaseID string, highThreshold, lowThreshold float64) (*types.ChunkFeedbackOverviewResponse, error)
 	// ResetChunkFeedback resets feedback counters and weight fields for a tenant-scoped chunk.
 	ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string) error
 }

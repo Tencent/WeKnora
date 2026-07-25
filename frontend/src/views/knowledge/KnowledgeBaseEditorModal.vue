@@ -366,7 +366,7 @@
                 </div>
 
                 <div v-if="mode === 'edit' && kbId && currentSection === 'feedback'" class="section">
-                  <ChunkFeedbackSettings />
+                  <ChunkFeedbackSettings :kb-id="kbId" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
@@ -549,7 +549,9 @@ const navItems = computed(() => {
     )
     if (props.mode === 'edit' && props.kbId) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
-      items.push({ key: 'feedback', icon: 'chart-pie', label: t('knowledgeEditor.feedback.title') })
+      if (authStore.hasRole('admin')) {
+        items.push({ key: 'feedback', icon: 'chart-pie', label: t('knowledgeEditor.feedback.title') })
+      }
     }
   }
   if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {

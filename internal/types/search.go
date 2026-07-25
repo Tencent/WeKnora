@@ -169,12 +169,27 @@ func CollectSearchResultChunkIDs(results []*SearchResult) []string {
 		if result == nil {
 			continue
 		}
+		if !IsFeedbackTrackableSearchResult(result) {
+			continue
+		}
 		add(result.ID)
 		for _, subID := range result.SubChunkID {
 			add(subID)
 		}
 	}
 	return ids
+}
+
+func IsFeedbackTrackableSearchResult(result *SearchResult) bool {
+	if result == nil {
+		return false
+	}
+	switch result.MatchType {
+	case MatchTypeWebSearch, MatchTypeDataAnalysis, MatchTypeHistory:
+		return false
+	default:
+		return true
+	}
 }
 
 // SearchParams represents the search parameters

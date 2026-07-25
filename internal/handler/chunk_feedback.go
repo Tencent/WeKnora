@@ -42,6 +42,18 @@ func handleFeedbackServiceError(c *gin.Context, err error) {
 	c.Error(errors.NewInternalServerError(err.Error()))
 }
 
+func feedbackScopeUserID(c *gin.Context) string {
+	if userID := types.SessionOwnerIDFromContext(c.Request.Context()); userID != "" {
+		return userID
+	}
+	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
+		if userID, ok := uid.(string); ok {
+			return userID
+		}
+	}
+	return ""
+}
+
 // SubmitFeedback godoc
 // @Summary 提交问答反馈
 // @Description 用户对问答回复提交点赞/点踩反馈
@@ -67,10 +79,7 @@ func (h *ChunkFeedbackHandler) SubmitFeedback(c *gin.Context) {
 	}
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID := ""
-	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
-		userID = uid.(string)
-	}
+	userID := feedbackScopeUserID(c)
 
 	if err := h.feedbackService.SubmitFeedback(c.Request.Context(), tenantID, userID, &req); err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to submit feedback: %v", err)
@@ -100,10 +109,7 @@ func (h *ChunkFeedbackHandler) GetUserFeedback(c *gin.Context) {
 		return
 	}
 
-	userID := ""
-	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
-		userID = uid.(string)
-	}
+	userID := feedbackScopeUserID(c)
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	feedback, err := h.feedbackService.GetUserFeedback(c.Request.Context(), tenantID, messageID, userID)
@@ -136,10 +142,7 @@ func (h *ChunkFeedbackHandler) CancelFeedback(c *gin.Context) {
 	}
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	userID := ""
-	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
-		userID = uid.(string)
-	}
+	userID := feedbackScopeUserID(c)
 
 	if err := h.feedbackService.CancelFeedback(c.Request.Context(), tenantID, userID, messageID); err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to cancel feedback: %v", err)
@@ -203,18 +206,28 @@ func (h *ChunkFeedbackHandler) ListLowQualityChunks(c *gin.Context) {
 	if err != nil || maxRate <= 0 {
 		maxRate = 0.5
 	}
+	if maxRate > 1.01 {
+		maxRate = 1.01
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+	knowledgeBaseID := c.Query("knowledge_base_id")
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	chunks, err := h.feedbackService.ListLowQualityChunks(c.Request.Context(), tenantID, maxRate, limit, offset)
+	chunks, err := h.feedbackService.ListLowQualityChunks(c.Request.Context(), tenantID, knowledgeBaseID, maxRate, limit, offset)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to list low quality chunks: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	total, err := h.feedbackService.CountLowQualityChunks(c.Request.Context(), tenantID, maxRate)
+	total, err := h.feedbackService.CountLowQualityChunks(c.Request.Context(), tenantID, knowledgeBaseID, maxRate)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to count low quality chunks: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -239,7 +252,8 @@ func (h *ChunkFeedbackHandler) ListLowQualityChunks(c *gin.Context) {
 // @Router /chunks/feedback-overview [get]
 func (h *ChunkFeedbackHandler) GetFeedbackOverview(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	overview, err := h.feedbackService.GetFeedbackOverview(c.Request.Context(), tenantID)
+	knowledgeBaseID := c.Query("knowledge_base_id")
+	overview, err := h.feedbackService.GetFeedbackOverview(c.Request.Context(), tenantID, knowledgeBaseID)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to get feedback overview: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -309,6 +323,9 @@ func (h *ChunkFeedbackHandler) GetChunkWeightLogs(c *gin.Context) {
 	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	logs, err := h.feedbackService.GetWeightLogs(c.Request.Context(), tenantID, chunkID, limit)

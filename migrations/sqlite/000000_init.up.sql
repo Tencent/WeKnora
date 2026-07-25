@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     description TEXT,
     tenant_id INTEGER NOT NULL,
     type VARCHAR(32) NOT NULL DEFAULT 'document',
-    chunking_config TEXT NOT NULL DEFAULT '{"chunk_size": 512, "chunk_overlap": 50, "split_markers": ["\n\n", "\n", "。"], "keep_separator": true}',
+    chunking_config TEXT NOT NULL DEFAULT '{"chunk_size": 512, "chunk_overlap": 50, "split_markers": ["\n\n", "\n", "�?], "keep_separator": true}',
     image_processing_config TEXT NOT NULL DEFAULT '{"enable_multimodal": false, "model_id": ""}',
     embedding_model_id VARCHAR(64) NOT NULL,
     summary_model_id VARCHAR(64) NOT NULL,
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     max_rounds INTEGER NOT NULL DEFAULT 5,
     enable_rewrite BOOLEAN NOT NULL DEFAULT 1,
     fallback_strategy VARCHAR(255) NOT NULL DEFAULT 'fixed',
-    fallback_response TEXT NOT NULL DEFAULT '很抱歉，我暂时无法回答这个问题。',
+    fallback_response TEXT NOT NULL DEFAULT '很抱歉，我暂时无法回答这个问题�?,
     keyword_threshold FLOAT NOT NULL DEFAULT 0.5,
     vector_threshold FLOAT NOT NULL DEFAULT 0.5,
     rerank_model_id VARCHAR(64),
@@ -174,9 +174,7 @@ CREATE TABLE IF NOT EXISTS messages (
     knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    like_count INTEGER NOT NULL DEFAULT 0,
-    dislike_count INTEGER NOT NULL DEFAULT 0
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
@@ -208,14 +206,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     seq_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    like_count INTEGER NOT NULL DEFAULT 0,
-    dislike_count INTEGER NOT NULL DEFAULT 0,
-    positive_rate REAL NOT NULL DEFAULT 0.0,
-    recall_weight REAL NOT NULL DEFAULT 1.0,
-    quality_status VARCHAR(50) NOT NULL DEFAULT 'normal',
-    dislike_reasons TEXT DEFAULT '[]',
-    last_feedback_at DATETIME
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
@@ -226,62 +217,6 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
-CREATE INDEX IF NOT EXISTS idx_chunks_quality_status ON chunks(quality_status);
-CREATE INDEX IF NOT EXISTS idx_chunks_positive_rate ON chunks(positive_rate);
-CREATE INDEX IF NOT EXISTS idx_chunks_recall_weight ON chunks(recall_weight);
-CREATE INDEX IF NOT EXISTS idx_chunks_last_feedback_at ON chunks(last_feedback_at);
-
-CREATE TABLE IF NOT EXISTS qa_reply_chunk_refs (
-    id VARCHAR(36) PRIMARY KEY,
-    message_id VARCHAR(36) NOT NULL,
-    chunk_id VARCHAR(36) NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tenant_id, message_id, chunk_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_message_id ON qa_reply_chunk_refs(message_id);
-CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_chunk_id ON qa_reply_chunk_refs(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_tenant_id ON qa_reply_chunk_refs(tenant_id);
-
-CREATE TABLE IF NOT EXISTS chunk_feedbacks (
-    id VARCHAR(36) PRIMARY KEY,
-    message_id VARCHAR(36) NOT NULL,
-    session_id VARCHAR(36) NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    user_id VARCHAR(36),
-    is_positive BOOLEAN NOT NULL DEFAULT 1,
-    dislike_reason VARCHAR(255),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tenant_id, message_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_message_id ON chunk_feedbacks(message_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_session_id ON chunk_feedbacks(session_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_tenant_id ON chunk_feedbacks(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_user_id ON chunk_feedbacks(user_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_created_at ON chunk_feedbacks(created_at);
-
-CREATE TABLE IF NOT EXISTS chunk_weight_logs (
-    id VARCHAR(36) PRIMARY KEY,
-    chunk_id VARCHAR(36) NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    action VARCHAR(50) NOT NULL,
-    old_weight REAL NOT NULL DEFAULT 1.0,
-    new_weight REAL NOT NULL DEFAULT 1.0,
-    trigger_type VARCHAR(50) NOT NULL,
-    trigger_detail VARCHAR(500),
-    operator VARCHAR(36),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_chunk_id ON chunk_weight_logs(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_tenant_id ON chunk_weight_logs(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_action ON chunk_weight_logs(action);
-CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_trigger_type ON chunk_weight_logs(trigger_type);
-CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_created_at ON chunk_weight_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_messages_feedback ON messages(like_count, dislike_count);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
@@ -343,7 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at)
 -- tenant_members carries the per-(user, tenant) TenantRole used by the
 -- tenant-level RBAC introduced in #1303. SQLite does not support partial
 -- indexes the same way Postgres does, so we use a plain unique index on
--- (user_id, tenant_id) — soft-deleted rows are filtered by the GORM scope.
+-- (user_id, tenant_id) �?soft-deleted rows are filtered by the GORM scope.
 CREATE TABLE IF NOT EXISTS tenant_members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id VARCHAR(36) NOT NULL,
@@ -391,7 +326,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
     ON audit_logs(created_at);
 
--- user_resource_favorites — sqlite mirror of migration 000047. Same
+-- user_resource_favorites �?sqlite mirror of migration 000047. Same
 -- composite PK (user_id, tenant_id, resource_type, resource_id) so the
 -- GORM model and FirstOrCreate idempotency carry over.
 CREATE TABLE IF NOT EXISTS user_resource_favorites (
@@ -407,7 +342,7 @@ CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_user_tenant_type_created_
 CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_tenant_id
     ON user_resource_favorites(tenant_id);
 
--- user_kb_pins — sqlite mirror of migration 000050. Per-(user, tenant)
+-- user_kb_pins �?sqlite mirror of migration 000050. Per-(user, tenant)
 -- pinned knowledge bases; replaces the tenant-wide knowledge_bases.is_pinned
 -- column for ordering purposes. The legacy column on knowledge_bases is
 -- still defined above for back-compat with existing rows but is no longer
@@ -422,7 +357,7 @@ CREATE TABLE IF NOT EXISTS user_kb_pins (
 CREATE INDEX IF NOT EXISTS idx_user_kb_pins_user_tenant_pinned_at
     ON user_kb_pins(tenant_id, user_id, pinned_at DESC);
 
--- tenant_invitations — sqlite mirror of migration 000048. SQLite supports
+-- tenant_invitations �?sqlite mirror of migration 000048. SQLite supports
 -- partial unique indexes too, so the same "one pending per (tenant,
 -- invitee)" guard can be applied verbatim.
 CREATE TABLE IF NOT EXISTS tenant_invitations (

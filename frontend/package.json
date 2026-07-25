@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
-    "test": "node --test"
+    "test": "node --experimental-strip-types --test"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",

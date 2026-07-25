@@ -14,11 +14,17 @@ func TestChunkFeedbackRecorderRecordsMessageChunkRefs(t *testing.T) {
 		PipelineRequest: types.PipelineRequest{
 			SessionID: "session-1",
 			TenantID:  7,
+			SearchTargets: types.SearchTargets{
+				{KnowledgeBaseID: "kb-owned", TenantID: 7},
+				{KnowledgeBaseID: "kb-shared", TenantID: 99},
+			},
 		},
 		PipelineState: types.PipelineState{
 			MergeResult: []*types.SearchResult{
-				{ID: "chunk-a", SubChunkID: []string{"chunk-b", "chunk-c"}},
-				{ID: "chunk-b"},
+				{ID: "chunk-a", KnowledgeBaseID: "kb-owned", MatchType: types.MatchTypeEmbedding, SubChunkID: []string{"chunk-b", "chunk-c"}},
+				{ID: "chunk-b", KnowledgeBaseID: "kb-owned", MatchType: types.MatchTypeKeywords},
+				{ID: "shared-chunk", KnowledgeBaseID: "kb-shared", MatchType: types.MatchTypeEmbedding},
+				{ID: "web-result", KnowledgeBaseID: "kb-owned", MatchType: types.MatchTypeWebSearch},
 			},
 		},
 		PipelineContext: types.PipelineContext{
@@ -31,13 +37,21 @@ func TestChunkFeedbackRecorderRecordsMessageChunkRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OnEvent() error = %v", err)
 	}
-	want := []string{"chunk-a", "chunk-b", "chunk-c"}
+	want := []struct {
+		chunkID       string
+		chunkTenantID uint64
+	}{
+		{"chunk-a", 7},
+		{"chunk-b", 7},
+		{"chunk-c", 7},
+		{"shared-chunk", 99},
+	}
 	if len(repo.refs) != len(want) {
-		t.Fatalf("saved refs = %#v, want chunk IDs %v", repo.refs, want)
+		t.Fatalf("saved refs = %#v, want %#v", repo.refs, want)
 	}
 	for i, ref := range repo.refs {
-		if ref.MessageID != "message-1" || ref.TenantID != 7 || ref.ChunkID != want[i] {
-			t.Fatalf("ref[%d] = %#v, want message=message-1 tenant=7 chunk=%s", i, ref, want[i])
+		if ref.MessageID != "message-1" || ref.TenantID != 7 || ref.ChunkID != want[i].chunkID || ref.ChunkTenantID != want[i].chunkTenantID {
+			t.Fatalf("ref[%d] = %#v, want message=message-1 session-tenant=7 chunk=%s chunk-tenant=%d", i, ref, want[i].chunkID, want[i].chunkTenantID)
 		}
 	}
 }
@@ -64,7 +78,19 @@ func (r *recordingQARefRepo) GetByChunkID(ctx context.Context, tenantID uint64, 
 	return nil, nil
 }
 
+func (r *recordingQARefRepo) CreateResetTombstones(ctx context.Context, refs []*types.QAReplyChunkRef, operator string) error {
+	return nil
+}
+
+func (r *recordingQARefRepo) GetResetTombstonesByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRefTombstone, error) {
+	return nil, nil
+}
+
 func (r *recordingQARefRepo) DeleteByMessageID(ctx context.Context, tenantID uint64, messageID string) error {
+	return nil
+}
+
+func (r *recordingQARefRepo) DeleteByChunkID(ctx context.Context, chunkTenantID uint64, chunkID string) error {
 	return nil
 }
 

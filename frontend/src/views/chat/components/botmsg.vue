@@ -102,6 +102,45 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
+        <div v-if="session.isAgentMode && showFeedbackActions" class="answer-toolbar agent-feedback-toolbar">
+            <div class="feedback-actions">
+                <t-tooltip :content="$t('chunkFeedback.like')" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'is-active': currentFeedback === true }"
+                        @click.stop="handleFeedback(true)">
+                        <template #icon>
+                            <t-icon name="thumb-up" />
+                        </template>
+                    </t-button>
+                </t-tooltip>
+                <t-tooltip :content="$t('chunkFeedback.dislike')" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'is-active': currentFeedback === false }"
+                        @click.stop="handleDislike">
+                        <template #icon>
+                            <t-icon name="thumb-down" />
+                        </template>
+                    </t-button>
+                </t-tooltip>
+            </div>
+        </div>
+        <t-dialog v-if="session.isAgentMode" v-model:visible="dislikeDialogVisible" :header="$t('chunkFeedback.dislikeReasonTitle')" :footer="false" width="400px">
+            <div class="dislike-reasons">
+                <t-radio-group v-model="selectedReason">
+                    <t-radio value="inaccurate">{{ $t('chunkFeedback.dislikeReasons.inaccurate') }}</t-radio>
+                    <t-radio value="incomplete">{{ $t('chunkFeedback.dislikeReasons.incomplete') }}</t-radio>
+                    <t-radio value="unclear">{{ $t('chunkFeedback.dislikeReasons.unclear') }}</t-radio>
+                    <t-radio value="irrelevant">{{ $t('chunkFeedback.dislikeReasons.unrelated') }}</t-radio>
+                    <t-radio value="other">{{ $t('chunkFeedback.dislikeReasons.other') }}</t-radio>
+                </t-radio-group>
+                <t-input v-if="selectedReason === 'other'" v-model="customReason"
+                    :placeholder="$t('chunkFeedback.dislikeReasonPlaceholder')" style="margin-top: 12px" />
+                <div style="margin-top: 16px; text-align: right;">
+                    <t-button theme="primary" @click="submitDislike">{{ $t('chunkFeedback.submitReason') }}</t-button>
+                    <t-button style="margin-left: 8px" @click="dislikeDialogVisible = false">{{ $t('chunkFeedback.cancel') }}</t-button>
+                </div>
+            </div>
+        </t-dialog>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -205,6 +244,7 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const showFeedbackActions = computed(() => Boolean(props.session?.id && props.session?.is_completed));
 
 const preview = (url) => {
     nextTick(() => {

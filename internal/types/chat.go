@@ -139,8 +139,13 @@ func (c *References) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
 		return nil
 	}
 	return json.Unmarshal(b, c)

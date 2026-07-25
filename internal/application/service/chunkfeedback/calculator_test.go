@@ -122,6 +122,33 @@ func TestRecallWeightClampsToConfiguredBounds(t *testing.T) {
 	}
 }
 
+func TestRecalculateUsesExactPositiveRateForThresholds(t *testing.T) {
+	config := testConfig()
+
+	almostHigh := Recalculate(State{LikeCount: 159, DislikeCount: 41}, config)
+	if almostHigh.PositiveRate != 0.795 {
+		t.Fatalf("PositiveRate = %v, want 0.795", almostHigh.PositiveRate)
+	}
+	if almostHigh.RecallWeight != 1.0 {
+		t.Fatalf("RecallWeight at 79.5%% = %v, want neutral 1.0", almostHigh.RecallWeight)
+	}
+
+	atHigh := Recalculate(State{LikeCount: 160, DislikeCount: 40}, config)
+	if atHigh.RecallWeight != config.WeightBoostFactor {
+		t.Fatalf("RecallWeight at 80%% = %v, want %v", atHigh.RecallWeight, config.WeightBoostFactor)
+	}
+
+	justBelowLow := Recalculate(State{LikeCount: 99, DislikeCount: 101}, config)
+	if justBelowLow.RecallWeight != config.WeightPenaltyFactor {
+		t.Fatalf("RecallWeight below 50%% = %v, want %v", justBelowLow.RecallWeight, config.WeightPenaltyFactor)
+	}
+
+	atLow := Recalculate(State{LikeCount: 100, DislikeCount: 100}, config)
+	if atLow.RecallWeight != 1.0 {
+		t.Fatalf("RecallWeight at 50%% = %v, want neutral 1.0", atLow.RecallWeight)
+	}
+}
+
 func testConfig() Config {
 	return Config{
 		HighQualityThreshold: 0.8,

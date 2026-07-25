@@ -20,13 +20,41 @@ func NewQAReplyChunkRefRepository(db *gorm.DB) interfaces.QAReplyChunkRefReposit
 	return &qaReplyChunkRefRepository{db: db}
 }
 
+type chunkFeedbackUnitOfWork struct {
+	db *gorm.DB
+}
+
+func NewChunkFeedbackUnitOfWork(db *gorm.DB) interfaces.ChunkFeedbackUnitOfWork {
+	return &chunkFeedbackUnitOfWork{db: db}
+}
+
+func (u *chunkFeedbackUnitOfWork) Do(ctx context.Context, fn func(ctx context.Context, repos interfaces.ChunkFeedbackRepositories) error) error {
+	return u.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(ctx, interfaces.ChunkFeedbackRepositories{
+			QARefRepo:     &qaReplyChunkRefRepository{db: tx},
+			FeedbackRepo:  &chunkFeedbackRepository{db: tx},
+			MessageRepo:   &messageRepository{db: tx},
+			ChunkRepo:     &chunkRepository{db: tx},
+			WeightLogRepo: &chunkWeightLogRepository{db: tx},
+		})
+	})
+}
+
 func (r *qaReplyChunkRefRepository) Create(ctx context.Context, ref *types.QAReplyChunkRef) error {
+	if ref.ChunkTenantID == 0 {
+		ref.ChunkTenantID = ref.TenantID
+	}
 	return r.db.WithContext(ctx).Create(ref).Error
 }
 
 func (r *qaReplyChunkRefRepository) CreateBatch(ctx context.Context, refs []*types.QAReplyChunkRef) error {
 	if len(refs) == 0 {
 		return nil
+	}
+	for _, ref := range refs {
+		if ref != nil && ref.ChunkTenantID == 0 {
+			ref.ChunkTenantID = ref.TenantID
+		}
 	}
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
@@ -44,9 +72,46 @@ func (r *qaReplyChunkRefRepository) GetByMessageID(ctx context.Context, tenantID
 func (r *qaReplyChunkRefRepository) GetByChunkID(ctx context.Context, tenantID uint64, chunkID string) ([]*types.QAReplyChunkRef, error) {
 	var refs []*types.QAReplyChunkRef
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Where("chunk_tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
 		Find(&refs).Error
 	return refs, err
+}
+
+func (r *qaReplyChunkRefRepository) CreateResetTombstones(ctx context.Context, refs []*types.QAReplyChunkRef, operator string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	tombstones := make([]*types.QAReplyChunkRefTombstone, 0, len(refs))
+	for _, ref := range refs {
+		if ref == nil {
+			continue
+		}
+		chunkTenantID := ref.ChunkTenantID
+		if chunkTenantID == 0 {
+			chunkTenantID = ref.TenantID
+		}
+		tombstones = append(tombstones, &types.QAReplyChunkRefTombstone{
+			MessageID:     ref.MessageID,
+			ChunkID:       ref.ChunkID,
+			TenantID:      ref.TenantID,
+			ChunkTenantID: chunkTenantID,
+			Operator:      operator,
+		})
+	}
+	if len(tombstones) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(tombstones, 100).Error
+}
+
+func (r *qaReplyChunkRefRepository) GetResetTombstonesByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRefTombstone, error) {
+	var tombstones []*types.QAReplyChunkRefTombstone
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND message_id = ?", tenantID, messageID).
+		Find(&tombstones).Error
+	return tombstones, err
 }
 
 func (r *qaReplyChunkRefRepository) DeleteByMessageID(ctx context.Context, tenantID uint64, messageID string) error {
@@ -55,11 +120,17 @@ func (r *qaReplyChunkRefRepository) DeleteByMessageID(ctx context.Context, tenan
 		Delete(&types.QAReplyChunkRef{}).Error
 }
 
+func (r *qaReplyChunkRefRepository) DeleteByChunkID(ctx context.Context, chunkTenantID uint64, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Where("chunk_tenant_id = ? AND chunk_id = ?", chunkTenantID, chunkID).
+		Delete(&types.QAReplyChunkRef{}).Error
+}
+
 func (r *qaReplyChunkRefRepository) CountByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&types.QAReplyChunkRef{}).
-		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Where("chunk_tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
 		Count(&count).Error
 	return count, err
 }
@@ -70,7 +141,7 @@ func (r *qaReplyChunkRefRepository) CountSessionsByChunkID(ctx context.Context, 
 		Table("qa_reply_chunk_refs qrcr").
 		Joins("JOIN messages m ON m.id = qrcr.message_id AND m.deleted_at IS NULL").
 		Joins("JOIN sessions s ON s.id = m.session_id AND s.tenant_id = qrcr.tenant_id AND s.deleted_at IS NULL").
-		Where("qrcr.tenant_id = ? AND qrcr.chunk_id = ?", tenantID, chunkID).
+		Where("qrcr.chunk_tenant_id = ? AND qrcr.chunk_id = ?", tenantID, chunkID).
 		Distinct("s.id").
 		Count(&count).Error
 	return count, err
@@ -95,44 +166,72 @@ func (r *chunkFeedbackRepository) Update(ctx context.Context, feedback *types.Ch
 }
 
 func (r *chunkFeedbackRepository) Upsert(ctx context.Context, messageID, sessionID, userID string, tenantID uint64, isPositive bool, dislikeReason string) (*types.ChunkFeedback, error) {
-	var feedback types.ChunkFeedback
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND message_id = ? AND user_id = ?", tenantID, messageID, userID).
-		First(&feedback).Error
+	feedback, err := r.findFeedbackForUpdate(ctx, tenantID, messageID, userID)
 	if err == nil {
-		// 记录之前的评价状态
-		wasPositive := feedback.IsPositive
-		// 更新现有记录
-		feedback.IsPositive = isPositive
-		feedback.DislikeReason = dislikeReason
-		feedback.UpdatedAt = time.Now()
-		if err := r.db.WithContext(ctx).Save(&feedback).Error; err != nil {
-			return nil, err
-		}
-		// 返回是否从点赞变为点踩（或相反）
-		feedback.WasCreated = false
-		feedback.PreviousIsPositive = wasPositive
-		feedback.IsChanged = wasPositive != isPositive
-		return &feedback, nil
+		return r.updateExistingFeedback(ctx, feedback, isPositive, dislikeReason)
 	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// 创建新记录
-		feedback = types.ChunkFeedback{
-			MessageID:     messageID,
-			SessionID:     sessionID,
-			TenantID:      tenantID,
-			UserID:        userID,
-			IsPositive:    isPositive,
-			DislikeReason: dislikeReason,
-		}
-		if err := r.db.WithContext(ctx).Create(&feedback).Error; err != nil {
-			return nil, err
-		}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	feedback = &types.ChunkFeedback{
+		MessageID:     messageID,
+		SessionID:     sessionID,
+		TenantID:      tenantID,
+		UserID:        userID,
+		IsPositive:    isPositive,
+		DislikeReason: dislikeReason,
+	}
+	tx := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "tenant_id"},
+				{Name: "message_id"},
+				{Name: "user_id"},
+			},
+			DoNothing: true,
+		}).
+		Create(feedback)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if tx.RowsAffected > 0 {
 		feedback.WasCreated = true
 		feedback.IsChanged = true
-		return &feedback, nil
+		return feedback, nil
 	}
-	return nil, err
+
+	feedback, err = r.findFeedbackForUpdate(ctx, tenantID, messageID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return r.updateExistingFeedback(ctx, feedback, isPositive, dislikeReason)
+}
+
+func (r *chunkFeedbackRepository) findFeedbackForUpdate(ctx context.Context, tenantID uint64, messageID, userID string) (*types.ChunkFeedback, error) {
+	var feedback types.ChunkFeedback
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("tenant_id = ? AND message_id = ? AND user_id = ?", tenantID, messageID, userID).
+		First(&feedback).Error
+	if err != nil {
+		return nil, err
+	}
+	return &feedback, nil
+}
+
+func (r *chunkFeedbackRepository) updateExistingFeedback(ctx context.Context, feedback *types.ChunkFeedback, isPositive bool, dislikeReason string) (*types.ChunkFeedback, error) {
+	wasPositive := feedback.IsPositive
+	feedback.IsPositive = isPositive
+	feedback.DislikeReason = dislikeReason
+	feedback.UpdatedAt = time.Now()
+	if err := r.db.WithContext(ctx).Save(feedback).Error; err != nil {
+		return nil, err
+	}
+	feedback.WasCreated = false
+	feedback.PreviousIsPositive = wasPositive
+	feedback.IsChanged = wasPositive != isPositive
+	return feedback, nil
 }
 
 func (r *chunkFeedbackRepository) GetByMessageID(ctx context.Context, tenantID uint64, messageID string) (*types.ChunkFeedback, error) {
@@ -178,7 +277,7 @@ func (r *chunkFeedbackRepository) GetDislikeReasonsByChunkIDs(ctx context.Contex
 		Table("chunk_feedbacks cf").
 		Select("qrcr.chunk_id as chunk_id, cf.dislike_reason as reason").
 		Joins("JOIN qa_reply_chunk_refs qrcr ON cf.tenant_id = qrcr.tenant_id AND cf.message_id = qrcr.message_id").
-		Where("qrcr.tenant_id = ? AND cf.tenant_id = ? AND qrcr.chunk_id IN ? AND cf.is_positive = ? AND cf.dislike_reason IS NOT NULL AND cf.dislike_reason != ''", tenantID, tenantID, chunkIDs, false).
+		Where("qrcr.chunk_tenant_id = ? AND qrcr.chunk_id IN ? AND cf.is_positive = ? AND cf.dislike_reason IS NOT NULL AND cf.dislike_reason != ''", tenantID, chunkIDs, false).
 		Find(&results).Error
 	if err != nil {
 		return nil, err

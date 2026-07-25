@@ -226,6 +226,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"boost_factor":   chatManage.FAQScoreBoost,
 			})
 		}
+		applyRecallWeightToRerankScore(sr)
 
 		reranked = append(reranked, sr)
 	}
@@ -238,6 +239,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Metadata["model_score"] = fmt.Sprintf("%.4f", modelScore)
 		// Assign high model score for direct load items
 		sr.Score = compositeScore(sr, modelScore, base)
+		applyRecallWeightToRerankScore(sr)
 		reranked = append(reranked, sr)
 	}
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
@@ -471,6 +473,18 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 		composite = 1
 	}
 	return composite
+}
+
+func applyRecallWeightToRerankScore(sr *types.SearchResult) {
+	if sr == nil || sr.RecallWeight == 0 || sr.RecallWeight == 1.0 {
+		return
+	}
+	originalScore := sr.Score
+	sr.Score *= sr.RecallWeight
+	sr.Metadata = ensureMetadata(sr.Metadata)
+	sr.Metadata["recall_weight"] = fmt.Sprintf("%.2f", sr.RecallWeight)
+	sr.Metadata["recall_weight_original_score"] = fmt.Sprintf("%.4f", originalScore)
+	sr.Metadata["recall_weighted_score"] = fmt.Sprintf("%.4f", sr.Score)
 }
 
 // applyMMR applies the MMR algorithm to the search results with pre-computed token sets

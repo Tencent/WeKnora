@@ -1,7 +1,5 @@
 package chunkfeedback
 
-import "math"
-
 const (
 	StatusNormal  = "normal"
 	StatusPending = "pending_optimization"
@@ -59,7 +57,7 @@ func CancelVote(state State, wasPositive bool, config Config) State {
 func Recalculate(state State, config Config) State {
 	total := state.LikeCount + state.DislikeCount
 	if total > 0 {
-		state.PositiveRate = math.Round(float64(state.LikeCount)*100/float64(total)) / 100
+		state.PositiveRate = float64(state.LikeCount) / float64(total)
 	} else {
 		state.PositiveRate = 0
 	}

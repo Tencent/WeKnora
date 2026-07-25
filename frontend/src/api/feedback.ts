@@ -71,6 +71,7 @@ export interface ListLowQualityChunksRequest {
   max_rate?: number
   limit?: number
   offset?: number
+  knowledge_base_id?: string
 }
 
 // 提交问答反馈
@@ -100,8 +101,8 @@ export function listLowQualityChunks(params?: ListLowQualityChunksRequest) {
   return get<{ success: boolean; data: ChunkQualityStats[]; total: number }>('/api/v1/chunks/low-quality', { params })
 }
 
-export function getFeedbackOverview() {
-  return get<{ success: boolean; data: ChunkFeedbackOverview }>('/api/v1/chunks/feedback-overview')
+export function getFeedbackOverview(params?: { knowledge_base_id?: string }) {
+  return get<{ success: boolean; data: ChunkFeedbackOverview }>('/api/v1/chunks/feedback-overview', { params })
 }
 
 // 重置片段反馈（管理员）

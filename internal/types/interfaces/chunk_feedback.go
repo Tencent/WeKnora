@@ -12,7 +12,10 @@ type QAReplyChunkRefRepository interface {
 	CreateBatch(ctx context.Context, refs []*types.QAReplyChunkRef) error
 	GetByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRef, error)
 	GetByChunkID(ctx context.Context, tenantID uint64, chunkID string) ([]*types.QAReplyChunkRef, error)
+	CreateResetTombstones(ctx context.Context, refs []*types.QAReplyChunkRef, operator string) error
+	GetResetTombstonesByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRefTombstone, error)
 	DeleteByMessageID(ctx context.Context, tenantID uint64, messageID string) error
+	DeleteByChunkID(ctx context.Context, chunkTenantID uint64, chunkID string) error
 	CountByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error)
 	CountSessionsByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error)
 }
@@ -33,4 +36,18 @@ type ChunkWeightLogRepository interface {
 	Create(ctx context.Context, log *types.ChunkWeightLog) error
 	GetByChunkID(ctx context.Context, tenantID uint64, chunkID string, limit int) ([]*types.ChunkWeightLog, error)
 	CountByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error)
+}
+
+// ChunkFeedbackRepositories is the repository set used by a single feedback transaction.
+type ChunkFeedbackRepositories struct {
+	QARefRepo     QAReplyChunkRefRepository
+	FeedbackRepo  ChunkFeedbackRepository
+	MessageRepo   MessageRepository
+	ChunkRepo     ChunkRepository
+	WeightLogRepo ChunkWeightLogRepository
+}
+
+// ChunkFeedbackUnitOfWork runs feedback mutations in a single database transaction.
+type ChunkFeedbackUnitOfWork interface {
+	Do(ctx context.Context, fn func(ctx context.Context, repos ChunkFeedbackRepositories) error) error
 }

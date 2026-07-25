@@ -41,15 +41,36 @@ const (
 // QAReplyChunkRef 问答回复与知识库片段关联关系
 // 用于记录 AI 生成回复时引用了哪些知识库片段
 type QAReplyChunkRef struct {
-	ID        string    `json:"id" gorm:"type:varchar(36);primaryKey"`
-	MessageID string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:1"`
-	ChunkID   string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:2;index"`
-	TenantID  uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_msg_chunk,priority:3;index"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	MessageID     string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:1"`
+	ChunkID       string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:2;index"`
+	TenantID      uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_msg_chunk,priority:3;index"`
+	ChunkTenantID uint64    `json:"chunk_tenant_id" gorm:"uniqueIndex:idx_msg_chunk,priority:4;index;not null;default:0"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // BeforeCreate 创建前自动生成 UUID
 func (r *QAReplyChunkRef) BeforeCreate(tx *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// QAReplyChunkRefTombstone records reply-chunk links intentionally removed by an admin reset.
+// It prevents old message references from being backfilled and counted again after reset.
+type QAReplyChunkRefTombstone struct {
+	ID            string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	MessageID     string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk_tombstone,priority:1;index"`
+	ChunkID       string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk_tombstone,priority:2;index"`
+	TenantID      uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_msg_chunk_tombstone,priority:3;index"`
+	ChunkTenantID uint64    `json:"chunk_tenant_id" gorm:"uniqueIndex:idx_msg_chunk_tombstone,priority:4;index;not null;default:0"`
+	Operator      string    `json:"operator,omitempty" gorm:"type:varchar(36)"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// BeforeCreate 创建前自动生成 UUID
+func (r *QAReplyChunkRefTombstone) BeforeCreate(tx *gorm.DB) error {
 	if r.ID == "" {
 		r.ID = uuid.New().String()
 	}
@@ -62,7 +83,7 @@ type ChunkFeedback struct {
 	MessageID     string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_tenant_message_user,priority:2;not null"`
 	SessionID     string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
 	TenantID      uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_tenant_message_user,priority:1;index;not null"`
-	UserID        string    `json:"user_id" gorm:"type:varchar(36);uniqueIndex:idx_tenant_message_user,priority:3;index"`
+	UserID        string    `json:"user_id" gorm:"type:varchar(512);uniqueIndex:idx_tenant_message_user,priority:3;index"`
 	IsPositive    bool      `json:"is_positive" gorm:"not null;default:true"` // true=点赞, false=点踩
 	DislikeReason string    `json:"dislike_reason,omitempty" gorm:"type:varchar(255)"`
 	CreatedAt     time.Time `json:"created_at"`
