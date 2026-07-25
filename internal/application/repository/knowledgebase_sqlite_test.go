@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 );
 `
 
+const knowledgeFoldersTestDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36),
+    name VARCHAR(255) NOT NULL,
+    path VARCHAR(4096) NOT NULL,
+    depth INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+`
+
 // setupKBTestDB creates an in-memory SQLite database containing the
 // knowledge_bases table with the vector_store_id column included, so that
 // tests can exercise the GORM behavior of the VectorStoreID field.
@@ -307,4 +322,102 @@ func TestCountByVectorStoreID(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+}
+
+func TestDeleteKnowledgeBaseSoftDeletesFolders(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(knowledgeFoldersTestDDL).Error)
+	repo := &knowledgeBaseRepository{db: db}
+
+	targetKB := makeKB(nil)
+	otherKB := makeKB(nil)
+	require.NoError(t, db.Create(targetKB).Error)
+	require.NoError(t, db.Create(otherKB).Error)
+
+	require.NoError(t, db.Create([]types.KnowledgeFolder{
+		{
+			ID:              "target-root",
+			TenantID:        targetKB.TenantID,
+			KnowledgeBaseID: targetKB.ID,
+			Name:            "Target root",
+			Path:            "/target-root",
+			Depth:           1,
+		},
+		{
+			ID:              "target-child",
+			TenantID:        targetKB.TenantID,
+			KnowledgeBaseID: targetKB.ID,
+			ParentID:        kbStrPtr("target-root"),
+			Name:            "Target child",
+			Path:            "/target-root/target-child",
+			Depth:           2,
+		},
+		{
+			ID:              "other-root",
+			TenantID:        otherKB.TenantID,
+			KnowledgeBaseID: otherKB.ID,
+			Name:            "Other root",
+			Path:            "/other-root",
+			Depth:           1,
+		},
+	}).Error)
+
+	require.NoError(t, repo.DeleteKnowledgeBase(t.Context(), targetKB.ID))
+
+	var activeTargetFolders int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).
+		Where("knowledge_base_id = ?", targetKB.ID).
+		Count(&activeTargetFolders).Error)
+	assert.Zero(t, activeTargetFolders)
+
+	var deletedTargetFolders int64
+	require.NoError(t, db.Unscoped().Model(&types.KnowledgeFolder{}).
+		Where("knowledge_base_id = ? AND deleted_at IS NOT NULL", targetKB.ID).
+		Count(&deletedTargetFolders).Error)
+	assert.Equal(t, int64(2), deletedTargetFolders)
+
+	var activeOtherFolders int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).
+		Where("knowledge_base_id = ?", otherKB.ID).
+		Count(&activeOtherFolders).Error)
+	assert.Equal(t, int64(1), activeOtherFolders)
+}
+
+func TestDeleteKnowledgeBaseRollsBackFolderDeletion(t *testing.T) {
+	db := setupKBTestDB(t)
+	require.NoError(t, db.Exec(knowledgeFoldersTestDDL).Error)
+	repo := &knowledgeBaseRepository{db: db}
+
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+	require.NoError(t, db.Create(&types.KnowledgeFolder{
+		ID:              "rollback-root",
+		TenantID:        kb.TenantID,
+		KnowledgeBaseID: kb.ID,
+		Name:            "Rollback root",
+		Path:            "/rollback-root",
+		Depth:           1,
+	}).Error)
+	require.NoError(t, db.Exec(`
+CREATE TRIGGER fail_kb_soft_delete
+BEFORE UPDATE OF deleted_at ON knowledge_bases
+WHEN NEW.deleted_at IS NOT NULL
+BEGIN
+    SELECT RAISE(FAIL, 'forced knowledge base delete failure');
+END;
+`).Error)
+
+	require.Error(t, repo.DeleteKnowledgeBase(t.Context(), kb.ID))
+
+	var activeKBs int64
+	require.NoError(t, db.Model(&types.KnowledgeBase{}).
+		Where("id = ?", kb.ID).
+		Count(&activeKBs).Error)
+	assert.Equal(t, int64(1), activeKBs)
+
+	var activeFolders int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).
+		Where("knowledge_base_id = ?", kb.ID).
+		Count(&activeFolders).Error)
+	assert.Equal(t, int64(1), activeFolders)
 }
