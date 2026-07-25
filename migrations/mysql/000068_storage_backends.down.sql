@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000068_storage_backends.up.sql is intentionally unsupported.

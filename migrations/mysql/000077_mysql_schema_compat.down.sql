@@ -1,0 +1,2 @@
+-- This compatibility migration deliberately retains the base-table defaults
+-- and personal-pin table expected by current application code.

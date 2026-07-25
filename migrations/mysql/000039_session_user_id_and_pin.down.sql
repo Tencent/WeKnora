@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000039_session_user_id_and_pin.up.sql is intentionally unsupported.

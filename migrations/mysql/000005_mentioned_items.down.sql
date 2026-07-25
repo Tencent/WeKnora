@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000005_mentioned_items.up.sql is intentionally unsupported.

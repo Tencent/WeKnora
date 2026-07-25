@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000020_add_message_knowledge_id.up.sql is intentionally unsupported.

@@ -1,0 +1,4 @@
+-- MySQL 8 translation of 000061_wiki_page_hierarchy.
+-- 000037 already creates the hierarchy fields and indexes because the
+-- PostgreSQL source's CREATE TABLE definition contains the merged schema.
+-- PostgreSQL's IF NOT EXISTS clauses make 000061 a no-op on a fresh chain.

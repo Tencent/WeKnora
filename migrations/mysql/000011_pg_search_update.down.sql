@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000011_pg_search_update.up.sql is intentionally unsupported.

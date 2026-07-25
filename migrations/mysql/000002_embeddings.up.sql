@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000002_embeddings.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

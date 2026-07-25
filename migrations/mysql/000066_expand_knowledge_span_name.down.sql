@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000066_expand_knowledge_span_name.up.sql is intentionally unsupported.

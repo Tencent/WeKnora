@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000033_add_video_info_to_chunks.up.sql is intentionally unsupported.

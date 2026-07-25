@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000031_add_asr_config.up.sql is intentionally unsupported.

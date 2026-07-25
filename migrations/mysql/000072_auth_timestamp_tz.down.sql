@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000072_auth_timestamp_tz.up.sql is intentionally unsupported.

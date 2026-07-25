@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000017_mcp_builtin.up.sql is intentionally unsupported.

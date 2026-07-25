@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000021_im_channel.up.sql is intentionally unsupported.

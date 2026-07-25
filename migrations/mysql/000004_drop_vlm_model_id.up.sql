@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000004_drop_vlm_model_id.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

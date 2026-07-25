@@ -1,0 +1,2 @@
+-- AUTO_INCREMENT is the MySQL equivalent of the sequence owned by 000010;
+-- this repair has no independent reversible schema change.

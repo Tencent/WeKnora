@@ -1,0 +1,2 @@
+-- MySQL TIMESTAMP values are stored in UTC. No schema change is required for
+-- PostgreSQL's timestamptz promotion in 000072.

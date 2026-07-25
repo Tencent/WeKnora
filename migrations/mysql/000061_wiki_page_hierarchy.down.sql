@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000061_wiki_page_hierarchy.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000035_add_credentials.up.sql is intentionally unsupported.

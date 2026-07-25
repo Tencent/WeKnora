@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000050_user_kb_pins.up.sql is intentionally unsupported.

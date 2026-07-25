@@ -65,6 +65,7 @@ show_help() {
     echo "  help       显示此帮助信息"
     echo ""
     echo "可选 Profile（用于 start 命令）:"
+    echo "  --mysql       启动 MySQL 数据库"
     echo "  --minio       启动 MinIO 对象存储"
     echo "  --qdrant      启动 Qdrant 向量数据库"
     echo "  --neo4j       启动 Neo4j 图数据库"
@@ -76,6 +77,7 @@ show_help() {
     echo ""
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
+    echo "  $0 start --mysql            # 启动基础服务 + MySQL"
     echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
     echo "  $0 start --dex             # 启动基础服务 + Dex"
     echo "  $0 start --odl-hybrid       # 启动基础服务 + OpenDataLoader hybrid"
@@ -209,7 +211,7 @@ start_services() {
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
     # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
-    # 其余可选服务通过 --minio / --qdrant / --neo4j / --dex / --full 按需开启。
+    # 其余可选服务通过 --mysql / --minio / --qdrant / --neo4j / --dex / --full 按需开启。
     PROFILES="--profile langfuse"
     ENABLED_SERVICES="langfuse"
     while [ $# -gt 0 ]; do
@@ -217,6 +219,10 @@ start_services() {
             --minio)
                 PROFILES="$PROFILES --profile minio"
                 ENABLED_SERVICES="$ENABLED_SERVICES minio"
+                ;;
+            --mysql)
+                PROFILES="$PROFILES --profile mysql"
+                ENABLED_SERVICES="$ENABLED_SERVICES mysql"
                 ;;
             --qdrant)
                 PROFILES="$PROFILES --profile qdrant"
@@ -245,7 +251,7 @@ start_services() {
                 ;;
             --full)
                 PROFILES="--profile full"
-                ENABLED_SERVICES="minio qdrant neo4j dex"
+                ENABLED_SERVICES="minio qdrant neo4j dex mysql"
                 break
                 ;;
             *)
@@ -280,6 +286,9 @@ start_services() {
         # 根据启用的 profile 显示额外服务
         if [[ "$ENABLED_SERVICES" == *"minio"* ]]; then
             echo "  - MinIO:         localhost:9000 (Console: localhost:9001)"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"mysql"* ]]; then
+            echo "  - MySQL:         localhost:${MYSQL_PORT:-3306}"
         fi
         if [[ "$ENABLED_SERVICES" == *"qdrant"* ]]; then
             echo "  - Qdrant:        localhost:6333 (gRPC: localhost:6334)"

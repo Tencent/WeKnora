@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000032_vector_stores.up.sql is intentionally unsupported.

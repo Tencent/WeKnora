@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000011_pg_search_update.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

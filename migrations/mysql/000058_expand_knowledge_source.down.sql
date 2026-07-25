@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000058_expand_knowledge_source.up.sql is intentionally unsupported.

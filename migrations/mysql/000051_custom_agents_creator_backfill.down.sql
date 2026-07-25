@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000051_custom_agents_creator_backfill.up.sql is intentionally unsupported.

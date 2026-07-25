@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000002_embeddings.up.sql is intentionally unsupported.

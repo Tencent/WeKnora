@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000042_mcp_tool_approval.up.sql is intentionally unsupported.

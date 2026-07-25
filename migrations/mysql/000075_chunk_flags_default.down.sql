@@ -1,0 +1,2 @@
+-- The column is originally introduced by 000003, so this compatibility
+-- migration has no independent reversible schema change.

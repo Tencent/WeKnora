@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000038_im_session_agent_id.up.sql is intentionally unsupported.

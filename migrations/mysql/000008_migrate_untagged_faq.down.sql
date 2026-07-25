@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000008_migrate_untagged_faq.up.sql is intentionally unsupported.

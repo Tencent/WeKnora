@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000049_user_preferences.up.sql is intentionally unsupported.

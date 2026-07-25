@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000041_task_queue_and_wiki_indexes.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000003_chunk_flags.up.sql is intentionally unsupported.

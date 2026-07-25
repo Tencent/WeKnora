@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000008_migrate_untagged_faq.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

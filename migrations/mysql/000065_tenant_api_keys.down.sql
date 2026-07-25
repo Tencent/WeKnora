@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000065_tenant_api_keys.up.sql is intentionally unsupported.

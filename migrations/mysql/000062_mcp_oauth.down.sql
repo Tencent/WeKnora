@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000062_mcp_oauth.up.sql is intentionally unsupported.

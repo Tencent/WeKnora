@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000053_system_admin_and_settings.up.sql is intentionally unsupported.
