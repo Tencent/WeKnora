@@ -348,8 +348,12 @@ func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fal
 		}
 		handle := r.RegisterWeb(rawURL, stringValue(row, "title"))
 		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", handle, escapeAttr(stringValue(row, "title")))
+		b.WriteString("    <evidence type=\"search_summary\" verified=\"false\" />\n")
 		if snippet := stringValue(row, "snippet"); snippet != "" {
 			fmt.Fprintf(&b, "    <match>%s</match>\n", escapeText(snippet))
+		}
+		if content := stringValue(row, "content"); content != "" && content != stringValue(row, "snippet") {
+			fmt.Fprintf(&b, "    <content>%s</content>\n", escapeText(content))
 		}
 		if published := stringValue(row, "published_at"); published != "" {
 			fmt.Fprintf(&b, "    <published>%s</published>\n", escapeText(published))
@@ -370,7 +374,7 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 	}
 	var b strings.Builder
 	b.WriteString("<retrieval type=\"web\" mode=\"fetch\">\n")
-	count := 0
+	count, successCount, failedCount := 0, 0, 0
 	for _, row := range rows {
 		rawURL := stringValue(row, "url")
 		if rawURL == "" {
@@ -378,16 +382,39 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 		}
 		title := stringValue(row, "title")
 		handle := r.RegisterWeb(rawURL, title)
-		fmt.Fprintf(&b, "  <page id=\"%s\"", handle)
+		status := stringValue(row, "status")
+		if status == "" {
+			status = "success"
+		}
+		fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", handle, escapeAttr(status))
 		if title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}
-		b.WriteString(" view=\"full\">\n")
-		if summary := stringValue(row, "summary"); summary != "" {
-			fmt.Fprintf(&b, "    <summary>%s</summary>\n", escapeText(summary))
-		}
-		if content := stringValue(row, "raw_content"); content != "" {
-			fmt.Fprintf(&b, "    <content>%s</content>\n", escapeText(content))
+		if status == "success" {
+			b.WriteString(" view=\"full\">\n")
+			successCount++
+			if summary := stringValue(row, "summary"); summary != "" {
+				fmt.Fprintf(&b, "    <summary>%s</summary>\n", escapeText(summary))
+			}
+			if summaryStatus := stringValue(row, "summary_status"); summaryStatus == "failed" {
+				fmt.Fprintf(&b, "    <summary_error code=\"%s\">%s</summary_error>\n",
+					escapeAttr(stringValue(row, "summary_error_code")), escapeText(stringValue(row, "summary_error_message")))
+			}
+			if content := stringValue(row, "raw_content"); content != "" {
+				fmt.Fprintf(&b, "    <content>%s</content>\n", escapeText(content))
+			}
+		} else {
+			fmt.Fprintf(&b, " retryable=\"%t\"", boolValue(row, "retryable"))
+			if errorCode := stringValue(row, "error_code"); errorCode != "" {
+				fmt.Fprintf(&b, " error_code=\"%s\"", escapeAttr(errorCode))
+			}
+			b.WriteString(">\n")
+			if errorMessage := stringValue(row, "error_message"); errorMessage != "" {
+				fmt.Fprintf(&b, "    <error>%s</error>\n", escapeText(errorMessage))
+			}
+			if status == "failed" {
+				failedCount++
+			}
 		}
 		b.WriteString("  </page>\n")
 		count++
@@ -395,6 +422,16 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 	b.WriteString("</retrieval>")
 	if count == 0 {
 		return r.CompactKnownText(fallback)
+	}
+	if failedCount > 0 {
+		b.WriteString("\n\n=== Next Steps ===\n")
+		if successCount == 0 {
+			b.WriteString("- All page fetches failed. Stop expanding web searches and answer from existing web_search titles, URLs, and snippets.\n")
+			b.WriteString("- Explicitly state that page content was not verified and treat dynamic facts as uncertain.")
+		} else {
+			b.WriteString("- Use successful page content together with existing search snippets; failed URLs do not invalidate successful evidence.\n")
+			b.WriteString("- Do not retry non-retryable failures. If evidence is sufficient, answer now.")
+		}
 	}
 	return b.String()
 }
