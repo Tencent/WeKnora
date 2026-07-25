@@ -178,11 +178,11 @@
             }) }}</span>
           </div>
           <t-button v-if="props.canEdit" size="small" variant="outline" class="wiki-rebuild-btn"
-            :loading="rebuildingWiki" :disabled="rebuildCooldown" @click="triggerRebuildWiki">
+            :loading="rebuildingWiki"
+            :disabled="!rebuildingWiki && (stats?.pending_tasks ?? 0) > 0"
+            @click="triggerRebuildWiki">
             <template #icon><t-icon name="refresh" /></template>
-            {{ rebuildCooldown
-              ? $t('knowledgeEditor.wikiBrowser.rebuildWikiCooldown')
-              : $t('knowledgeEditor.wikiBrowser.rebuildWiki') }}
+            {{ $t('knowledgeEditor.wikiBrowser.rebuildWiki') }}
           </t-button>
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
             @enter="doSearch" @clear="searchResults = null">
@@ -3299,51 +3299,16 @@ function triggerAutoFix() {
   startFixSession(prompt)
 }
 
-const REBUILD_COOLDOWN_MS = 30_000 // matches backend wikiIngestDelay debounce window
-const REBUILD_COOLDOWN_KEY = 'wiki_rebuild_cooldown'
-
+// Button is disabled while a rebuild API call is in flight, or when the
+// wiki queue already has pending tasks (stats come from getWikiStats which
+// is polled every 5s while the queue is active). This naturally survives
+// page refresh — stats are fetched on mount — and correctly gates on real
+// queue state rather than an arbitrary cooldown timer.
 const rebuildingWiki = ref(false)
-const rebuildCooldown = ref(false)
-let rebuildCooldownTimer: ReturnType<typeof setTimeout> | null = null
-
-// Restore cooldown state after page refresh via sessionStorage so a
-// refresh-and-click can't bypass the debounce window.
-function readRebuildCooldown(): boolean {
-  try {
-    const ts = sessionStorage.getItem(REBUILD_COOLDOWN_KEY)
-    if (ts && Date.now() - parseInt(ts, 10) < REBUILD_COOLDOWN_MS) {
-      return true
-    }
-  } catch { /* noop */ }
-  return false
-}
-
-function setRebuildCooldown() {
-  rebuildCooldown.value = true
-  if (rebuildCooldownTimer) clearTimeout(rebuildCooldownTimer)
-  rebuildCooldownTimer = setTimeout(() => {
-    rebuildCooldown.value = false
-    rebuildCooldownTimer = null
-    try { sessionStorage.removeItem(REBUILD_COOLDOWN_KEY) } catch { /* noop */ }
-  }, REBUILD_COOLDOWN_MS)
-  try { sessionStorage.setItem(REBUILD_COOLDOWN_KEY, String(Date.now())) } catch { /* noop */ }
-}
-
-// Init from storage
-if (readRebuildCooldown()) {
-  rebuildCooldown.value = true
-  const elapsed = Date.now() - parseInt(sessionStorage.getItem(REBUILD_COOLDOWN_KEY)!, 10)
-  const remaining = REBUILD_COOLDOWN_MS - elapsed
-  if (rebuildCooldownTimer) clearTimeout(rebuildCooldownTimer)
-  rebuildCooldownTimer = setTimeout(() => {
-    rebuildCooldown.value = false
-    rebuildCooldownTimer = null
-    try { sessionStorage.removeItem(REBUILD_COOLDOWN_KEY) } catch { /* noop */ }
-  }, remaining)
-}
 
 async function triggerRebuildWiki() {
-  if (rebuildingWiki.value || rebuildCooldown.value) return
+  if (rebuildingWiki.value) return
+  if ((stats.value?.pending_tasks ?? 0) > 0) return
   rebuildingWiki.value = true
   try {
     const res: any = await rebuildWiki(props.knowledgeBaseId)
@@ -3353,8 +3318,6 @@ async function triggerRebuildWiki() {
       t('knowledgeEditor.wikiBrowser.rebuildWikiSuccess', { count: enqueued })
     )
     loadStats()
-    rebuildingWiki.value = false
-    setRebuildCooldown()
   } catch (e: any) {
     MessagePlugin.error(
       e?.message || t('knowledgeEditor.wikiBrowser.rebuildWikiFailed')
@@ -4548,10 +4511,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (statsTimer) {
     clearInterval(statsTimer)
-  }
-  if (rebuildCooldownTimer) {
-    clearTimeout(rebuildCooldownTimer)
-    rebuildCooldownTimer = null
   }
   if (graphHoverLeaveTimer) {
     clearTimeout(graphHoverLeaveTimer)
