@@ -323,3 +323,7 @@ export function updateWikiIssueStatus(kbId: string, issueId: string, status: str
 export function rebuildWikiLinks(kbId: string) {
   return post(`/api/v1/knowledgebase/${kbId}/wiki/rebuild-links`, {});
 }
+
+export function rebuildWiki(kbId: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/rebuild`, {});
+}

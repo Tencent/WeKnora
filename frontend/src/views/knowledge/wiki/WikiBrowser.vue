@@ -177,6 +177,13 @@
                 stats.pending_issues
             }) }}</span>
           </div>
+          <t-button v-if="props.canEdit" size="small" variant="outline" class="wiki-rebuild-btn"
+            :loading="rebuildingWiki"
+            :disabled="!rebuildingWiki && (stats?.pending_tasks ?? 0) > 0"
+            @click="triggerRebuildWiki">
+            <template #icon><t-icon name="refresh" /></template>
+            {{ $t('knowledgeEditor.wikiBrowser.rebuildWiki') }}
+          </t-button>
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
             @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
@@ -719,6 +726,7 @@ import {
   searchWikiPages,
   listWikiIssues,
   updateWikiIssueStatus,
+  rebuildWiki,
   type WikiPage,
   type WikiFolderNode,
   type WikiGraphData,
@@ -3291,6 +3299,33 @@ function triggerAutoFix() {
   startFixSession(prompt)
 }
 
+// Button is disabled while a rebuild API call is in flight, or when the
+// wiki queue already has pending tasks (stats come from getWikiStats which
+// is polled every 5s while the queue is active). This naturally survives
+// page refresh — stats are fetched on mount — and correctly gates on real
+// queue state rather than an arbitrary cooldown timer.
+const rebuildingWiki = ref(false)
+
+async function triggerRebuildWiki() {
+  if (rebuildingWiki.value) return
+  if ((stats.value?.pending_tasks ?? 0) > 0) return
+  rebuildingWiki.value = true
+  try {
+    const res: any = await rebuildWiki(props.knowledgeBaseId)
+    const data = res?.data || res
+    const enqueued = data?.enqueued ?? 0
+    MessagePlugin.success(
+      t('knowledgeEditor.wikiBrowser.rebuildWikiSuccess', { count: enqueued })
+    )
+    loadStats()
+  } catch (e: any) {
+    MessagePlugin.error(
+      e?.message || t('knowledgeEditor.wikiBrowser.rebuildWikiFailed')
+    )
+    rebuildingWiki.value = false
+  }
+}
+
 async function doSearch() {
   if (!searchQuery.value.trim()) {
     searchResults.value = null
@@ -4557,6 +4592,11 @@ onUnmounted(() => {
     line-height: 1.2;
     font-weight: 500;
   }
+}
+
+.wiki-rebuild-btn {
+  width: 100%;
+  margin-bottom: 2px;
 }
 
 .wiki-page-list {
