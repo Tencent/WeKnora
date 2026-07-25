@@ -2550,6 +2550,8 @@ export default {
     uptimeHours: "{n} 小时",
     uptimeMinutes: "{n} 分钟",
     uptimeSeconds: "{n} 秒",
+    databaseDriverLabel: "业务数据库驱动",
+    databaseDriverDescription: "当前已连接并用于业务元数据持久化的关系数据库",
     dbVersionLabel: "数据库版本",
     dbVersionDescription: "当前数据库迁移版本号",
     dbMigrationFailedTag: "迁移失败",

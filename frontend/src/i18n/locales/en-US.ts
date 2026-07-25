@@ -3596,6 +3596,8 @@ export default {
     uptimeHours: '{n}h',
     uptimeMinutes: '{n}m',
     uptimeSeconds: '{n}s',
+    databaseDriverLabel: 'Business Database Driver',
+    databaseDriverDescription: 'Relational database connected for business metadata persistence',
     dbVersionLabel: 'Database Version',
     dbVersionDescription: 'Current database migration version',
     dbMigrationFailedTag: 'Migration failed',

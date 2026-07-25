@@ -34,6 +34,8 @@ export interface SystemInfo {
   vector_store_engine?: string
   graph_database_engine?: string
   minio_enabled?: boolean
+  /** Dialect of the initialized business metadata database. */
+  database_driver?: string
   db_version?: string
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting

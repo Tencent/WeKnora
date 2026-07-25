@@ -112,6 +112,19 @@
         </div>
       </div>
 
+      <!-- Business database driver -->
+      <div v-if="systemInfo?.database_driver" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.databaseDriverLabel') }}</label>
+          <p class="desc">{{ $t('system.databaseDriverDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-tag theme="primary" variant="light" size="medium">
+            {{ formatDatabaseDriver(systemInfo.database_driver) }}
+          </t-tag>
+        </div>
+      </div>
+
       <!-- DB Version -->
       <div v-if="systemInfo?.db_version || systemInfo?.db_migration_error" class="setting-row">
         <div class="setting-info">
@@ -198,6 +211,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
 import { useI18n } from 'vue-i18n'
+import { formatDatabaseDriver } from './databaseDriver'
 
 const { t, locale } = useI18n()
 
@@ -265,6 +279,7 @@ const reportIssueURL = computed(() => {
       `- WeKnora version: ${systemInfo.value?.version || 'unknown'}`,
       `- Commit: ${systemInfo.value?.commit_id || 'unknown'}`,
       `- Frontend version: ${frontendVersion} (${frontendCommit})`,
+      `- Database driver: ${systemInfo.value?.database_driver || 'unknown'}`,
       `- DB version reported: ${systemInfo.value?.db_version || 'unknown'}`,
       '',
       '### Migration error',
