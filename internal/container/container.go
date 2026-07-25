@@ -650,7 +650,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
-			)
+		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -668,6 +668,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
 	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
 		NowFunc: func() time.Time {
@@ -686,7 +687,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// the mismatch at startup is loud and inexpensive.
 	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, mysql or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 

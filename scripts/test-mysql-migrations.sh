@@ -7,6 +7,10 @@
 # therefore safe to use while iterating on dialect-specific migrations.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MIGRATIONS_DIR="$REPO_ROOT/migrations/mysql"
+
 test_container="weknora-migration-test-$RANDOM"
 test_password="weknora-migration-test"
 test_database="weknora_migration_test"
@@ -36,7 +40,7 @@ if ! docker exec -e "MYSQL_PWD=$test_password" "$test_container" mysqladmin ping
     exit 1
 fi
 
-for migration in $(find migrations/mysql -maxdepth 1 -name '*.up.sql' -print | LC_ALL=C sort); do
+for migration in $(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.up.sql' -print | LC_ALL=C sort); do
     echo "Applying $migration"
     docker exec -e "MYSQL_PWD=$test_password" -i "$test_container" mysql -uroot "$test_database" < "$migration"
 done

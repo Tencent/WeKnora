@@ -69,7 +69,10 @@ func (r *systemSettingRepository) List(ctx context.Context) ([]*types.SystemSett
 func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSetting) error {
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: r.keyCol()}},
+			// clause.Column is identifier-aware and escapes reserved words for
+			// the active dialect. Keep the raw name here; keyCol is only for
+			// raw SQL fragments used by Where and Order above.
+			Columns: []clause.Column{{Name: "key"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"value",
 				"value_type",
