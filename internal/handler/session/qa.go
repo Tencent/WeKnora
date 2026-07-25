@@ -1325,6 +1325,10 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
 	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	if err := h.messageFeedbackService.RecordMessageChunkReferences(ctx, assistantMessage); err != nil {
+		logger.Warnf(ctx, "record message chunk references failed: session=%s message=%s err=%v",
+			assistantMessage.SessionID, assistantMessage.ID, err)
+	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

@@ -329,13 +329,45 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
-export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+export interface ChunkFeedbackQuery {
+  page?: number;
+  page_size?: number;
+  min_positive_rate?: number;
+  max_positive_rate?: number;
+  needs_optimization?: boolean;
+  only_with_feedback?: boolean;
+  feedback_sort_by?: 'positive_rate' | 'like_count' | 'dislike_count' | 'recall_weight' | 'last_feedback_at';
+  feedback_sort_order?: 'asc' | 'desc';
+}
+
+export function getKnowledgeDetailsCon(id: string, page: number, params?: Omit<ChunkFeedbackQuery, 'page'>) {
+  const query = new URLSearchParams();
+  query.set('page', String(page));
+  query.set('page_size', String(params?.page_size ?? 25));
+  if (params?.min_positive_rate !== undefined) query.set('min_positive_rate', String(params.min_positive_rate));
+  if (params?.max_positive_rate !== undefined) query.set('max_positive_rate', String(params.max_positive_rate));
+  if (params?.needs_optimization !== undefined) query.set('needs_optimization', String(params.needs_optimization));
+  if (params?.only_with_feedback !== undefined) query.set('only_with_feedback', String(params.only_with_feedback));
+  if (params?.feedback_sort_by) query.set('feedback_sort_by', params.feedback_sort_by);
+  if (params?.feedback_sort_order) query.set('feedback_sort_order', params.feedback_sort_order);
+  return get(`/api/v1/chunks/${id}?${query.toString()}`);
 }
 
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
 export function getChunkByIdOnly(chunkId: string) {
   return get(`/api/v1/chunks/by-id/${chunkId}`);
+}
+
+export function resetChunkFeedback(chunkId: string, data: { reset_weight: boolean }) {
+  return post(`/api/v1/chunks/by-id/${chunkId}/feedback/reset`, data);
+}
+
+export function listChunkFeedbackWeightLogs(chunkId: string, params?: { page?: number; page_size?: number }) {
+  const query = buildQuery({
+    page: params?.page ?? 1,
+    page_size: params?.page_size ?? 10,
+  });
+  return get(`/api/v1/chunks/by-id/${chunkId}/feedback/weight-logs${query}`);
 }
 
 // Delete a single generated question from a chunk by question ID

@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS chunk_feedback_weight_logs;
+DROP TABLE IF EXISTS message_feedbacks;
+DROP TABLE IF EXISTS message_chunk_references;
 DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS tenant_api_keys;
 DROP TABLE IF EXISTS user_kb_pins;

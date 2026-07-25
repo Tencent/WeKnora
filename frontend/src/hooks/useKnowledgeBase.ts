@@ -8,6 +8,7 @@ import {
   getKnowledgeDetails,
   delKnowledgeDetails,
   getKnowledgeDetailsCon,
+  type ChunkFeedbackQuery,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
@@ -36,6 +37,7 @@ export default function (knowledgeBaseId?: string) {
     error_message: "",
     chunkLoading: false,
     chunkLoadError: "",
+    chunkFeedbackQuery: undefined as ChunkFeedbackQuery | undefined,
     tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
@@ -190,6 +192,7 @@ export default function (knowledgeBaseId?: string) {
       parse_status: "",
       error_message: "",
       chunkLoadError: "",
+      chunkFeedbackQuery: undefined,
       tags: item?.tags ? [...item.tags] : [],
     });
     getKnowledgeDetails(item.id)
@@ -216,10 +219,14 @@ export default function (knowledgeBaseId?: string) {
     getfDetails(item.id, 1);
   };
   
-  const getfDetails = (id: string, page: number) => {
+  const getfDetails = (id: string, page: number, feedbackQuery?: ChunkFeedbackQuery) => {
     details.chunkLoading = true;
     details.chunkLoadError = "";
-    getKnowledgeDetailsCon(id, page)
+    if (page === 1) {
+      details.chunkFeedbackQuery = feedbackQuery;
+    }
+    const query = feedbackQuery ?? details.chunkFeedbackQuery;
+    getKnowledgeDetailsCon(id, page, query)
       .then((result: any) => {
         if (result.success && result.data) {
           const { data, total: totalResult } = result;

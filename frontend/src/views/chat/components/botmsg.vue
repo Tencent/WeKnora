@@ -42,6 +42,7 @@
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
                 </t-button>
+                <MessageFeedbackButtons v-if="showFeedbackControls" :session-id="sessionId" :message="session" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
@@ -72,12 +73,13 @@
     </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, nextTick, onUpdated } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
+import MessageFeedbackButtons from './MessageFeedbackButtons.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -164,6 +166,9 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const showFeedbackControls = computed(
+    () => !props.embeddedMode && !!props.sessionId && !!props.session?.id && !!props.session?.is_completed,
+);
 
 const preview = (url) => {
     nextTick(() => {

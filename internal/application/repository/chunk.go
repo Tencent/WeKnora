@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
@@ -163,6 +164,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	feedbackFilter *types.ChunkFeedbackListFilter,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -173,6 +175,20 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if len(tagIDs) > 0 {
 			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if feedbackFilter != nil {
+			if feedbackFilter.OnlyWithFeedback {
+				db = db.Where("(like_count + dislike_count) > 0")
+			}
+			if feedbackFilter.MinPositiveRate != nil {
+				db = db.Where("positive_rate >= ?", *feedbackFilter.MinPositiveRate)
+			}
+			if feedbackFilter.MaxPositiveRate != nil {
+				db = db.Where("positive_rate <= ?", *feedbackFilter.MaxPositiveRate)
+			}
+			if feedbackFilter.NeedsOptimization != nil {
+				db = db.Where("needs_optimization = ?", *feedbackFilter.NeedsOptimization)
+			}
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
@@ -248,6 +264,22 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			orderClause = "chunk_index DESC"
 		}
 	}
+	if feedbackFilter != nil {
+		switch feedbackFilter.SortBy {
+		case "positive_rate":
+			order := "ASC"
+			if feedbackFilter.SortOrder == "desc" {
+				order = "DESC"
+			}
+			orderClause = "CASE WHEN positive_rate IS NULL THEN 1 ELSE 0 END ASC, positive_rate " + order
+		case "like_count", "dislike_count", "recall_weight", "last_feedback_at":
+			order := "DESC"
+			if feedbackFilter.SortOrder == "asc" {
+				order = "ASC"
+			}
+			orderClause = feedbackFilter.SortBy + " " + order
+		}
+	}
 
 	if err := dataQuery.
 		Order(orderClause).
@@ -256,8 +288,140 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 		Find(&chunks).Error; err != nil {
 		return nil, 0, err
 	}
+	if err := r.fillChunkFeedbackSessionCounts(ctx, tenantID, chunks); err != nil {
+		return nil, 0, err
+	}
 
 	return chunks, total, nil
+}
+
+func (r *chunkRepository) fillChunkFeedbackSessionCounts(ctx context.Context, tenantID uint64, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	chunkIDs := make([]string, 0, len(chunks))
+	chunkByID := make(map[string]*types.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		chunkIDs = append(chunkIDs, chunk.ID)
+		chunkByID[chunk.ID] = chunk
+	}
+
+	type sessionCountRow struct {
+		ChunkID string
+		Count   int64
+	}
+	var rows []sessionCountRow
+	if err := r.db.WithContext(ctx).
+		Model(&types.MessageChunkReference{}).
+		Select("chunk_id, COUNT(DISTINCT session_id) AS count").
+		Where("tenant_id = ? AND chunk_id IN ? AND deleted_at IS NULL", tenantID, chunkIDs).
+		Group("chunk_id").
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if chunk := chunkByID[row.ChunkID]; chunk != nil {
+			chunk.FeedbackSessionCount = row.Count
+		}
+	}
+
+	type dislikeReasonRow struct {
+		ChunkID string
+		Reason  string
+		Count   int64
+	}
+	var reasonRows []dislikeReasonRow
+	if err := r.db.WithContext(ctx).
+		Table("message_chunk_references AS refs").
+		Select("refs.chunk_id, feedbacks.reason, COUNT(*) AS count").
+		Joins("JOIN chunks AS chunks ON chunks.tenant_id = refs.tenant_id AND chunks.id = refs.chunk_id AND chunks.deleted_at IS NULL").
+		Joins("JOIN message_feedbacks AS feedbacks ON feedbacks.tenant_id = refs.tenant_id AND feedbacks.session_id = refs.session_id AND feedbacks.message_id = refs.message_id AND feedbacks.deleted_at IS NULL").
+		Where("refs.tenant_id = ? AND refs.chunk_id IN ? AND refs.deleted_at IS NULL AND feedbacks.action = ? AND feedbacks.reason <> ?",
+			tenantID, chunkIDs, types.FeedbackActionDislike, "").
+		Where("(chunks.feedback_reset_at IS NULL OR feedbacks.updated_at > chunks.feedback_reset_at)").
+		Group("refs.chunk_id, feedbacks.reason").
+		Scan(&reasonRows).Error; err != nil {
+		return err
+	}
+	for _, row := range reasonRows {
+		if chunk := chunkByID[row.ChunkID]; chunk != nil {
+			chunk.DislikeReasons = append(chunk.DislikeReasons, types.ChunkDislikeReasonStat{
+				Reason: row.Reason,
+				Count:  row.Count,
+			})
+		}
+	}
+	return nil
+}
+
+func (r *chunkRepository) ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string, resetWeight bool, cfg types.ChunkFeedbackConfig) (*types.Chunk, error) {
+	var updated *types.Chunk
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var chunk types.Chunk
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+			First(&chunk).Error; err != nil {
+			return err
+		}
+
+		oldWeight := chunk.RecallWeight
+		oldRate := chunk.PositiveRate
+		now := time.Now()
+		updates := map[string]interface{}{
+			"like_count":         0,
+			"dislike_count":      0,
+			"positive_rate":      nil,
+			"last_feedback_at":   nil,
+			"feedback_reset_at":  &now,
+			"needs_optimization": false,
+		}
+		newWeight := oldWeight
+		if resetWeight {
+			newWeight = cfg.DefaultRecallWeight
+			updates["recall_weight"] = newWeight
+		}
+
+		if err := tx.Model(&types.Chunk{}).
+			Where("tenant_id = ? AND id = ?", tenantID, chunkID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+
+		log := &types.ChunkFeedbackWeightLog{
+			TenantID:        tenantID,
+			ChunkID:         chunk.ID,
+			KnowledgeID:     chunk.KnowledgeID,
+			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			OldWeight:       oldWeight,
+			NewWeight:       newWeight,
+			OldPositiveRate: oldRate,
+			NewPositiveRate: nil,
+			TriggerSource:   types.ChunkFeedbackSourceAdminReset,
+		}
+		if err := tx.Create(log).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, chunkID).First(&chunk).Error; err != nil {
+			return err
+		}
+		updated = &chunk
+		return nil
+	})
+	return updated, err
+}
+
+func (r *chunkRepository) ListChunkFeedbackWeightLogs(ctx context.Context, tenantID uint64, chunkID string, page *types.Pagination) ([]*types.ChunkFeedbackWeightLog, int64, error) {
+	var logs []*types.ChunkFeedbackWeightLog
+	var total int64
+	query := r.db.WithContext(ctx).Model(&types.ChunkFeedbackWeightLog{}).
+		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := query.Order("created_at DESC").Offset(page.Offset()).Limit(page.Limit()).Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+	return logs, total, nil
 }
 
 func (r *chunkRepository) ListChunkByParentID(

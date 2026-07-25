@@ -48,7 +48,12 @@ type ChunkRepository interface {
 		searchField string,
 		sortOrder string,
 		knowledgeType string,
+		feedbackFilter *types.ChunkFeedbackListFilter,
 	) ([]*types.Chunk, int64, error)
+	// ResetChunkFeedback clears aggregated feedback stats and optionally resets recall weight.
+	ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string, resetWeight bool, cfg types.ChunkFeedbackConfig) (*types.Chunk, error)
+	// ListChunkFeedbackWeightLogs returns weight changes for a chunk.
+	ListChunkFeedbackWeightLogs(ctx context.Context, tenantID uint64, chunkID string, page *types.Pagination) ([]*types.ChunkFeedbackWeightLog, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
@@ -128,7 +133,12 @@ type ChunkService interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
+		feedbackFilter *types.ChunkFeedbackListFilter,
 	) (*types.PageResult, error)
+	// ResetChunkFeedback clears aggregated feedback stats and optionally resets recall weight.
+	ResetChunkFeedback(ctx context.Context, chunkID string, resetWeight bool) (*types.Chunk, error)
+	// ListChunkFeedbackWeightLogs returns weight changes for a chunk.
+	ListChunkFeedbackWeightLogs(ctx context.Context, chunkID string, page *types.Pagination) (*types.PageResult, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// UpdateChunks updates chunks in batch

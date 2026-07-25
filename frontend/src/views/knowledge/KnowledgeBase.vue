@@ -1728,8 +1728,8 @@ const handleScroll = () => {
     }
   }
 };
-const getDoc = (page: number) => {
-  getfDetails(details.id, page)
+const getDoc = (page: number, feedbackQuery?: any) => {
+  getfDetails(details.id, page, feedbackQuery)
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
@@ -2315,6 +2315,7 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        :canManageKB="canManage"
         :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
         @closeDoc="closeDoc" @getDoc="getDoc">
       </DocContent>

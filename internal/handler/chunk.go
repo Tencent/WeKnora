@@ -2,10 +2,12 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -79,6 +81,9 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	if chunk.Content != "" {
 		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
 	}
+	if !h.canManageChunkFeedbackByChunkID(c) {
+		clearChunkFeedbackGovernanceFields(chunk)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -136,10 +141,15 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 			chunkType = append(chunkType, types.ChunkType(qt))
 		}
 	}
+	feedbackFilter, err := parseChunkFeedbackListFilter(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.
-	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
+	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType, feedbackFilter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -152,6 +162,11 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
 		}
 	}
+	if !h.canManageChunkFeedback(c) {
+		for _, chunk := range result.Data.([]*types.Chunk) {
+			clearChunkFeedbackGovernanceFields(chunk)
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
@@ -160,6 +175,80 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+func parseChunkFeedbackListFilter(c *gin.Context) (*types.ChunkFeedbackListFilter, error) {
+	filter := &types.ChunkFeedbackListFilter{
+		SortBy:    c.Query("feedback_sort_by"),
+		SortOrder: c.Query("feedback_sort_order"),
+	}
+	hasFilter := filter.SortBy != "" || filter.SortOrder != ""
+
+	if raw := c.Query("min_positive_rate"); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || value < 0 || value > 1 {
+			return nil, errors.NewBadRequestError("min_positive_rate must be between 0 and 1")
+		}
+		filter.MinPositiveRate = &value
+		hasFilter = true
+	}
+	if raw := c.Query("max_positive_rate"); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || value < 0 || value > 1 {
+			return nil, errors.NewBadRequestError("max_positive_rate must be between 0 and 1")
+		}
+		filter.MaxPositiveRate = &value
+		hasFilter = true
+	}
+	if raw := c.Query("needs_optimization"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, errors.NewBadRequestError("needs_optimization must be a boolean")
+		}
+		filter.NeedsOptimization = &value
+		hasFilter = true
+	}
+	if raw := c.Query("only_with_feedback"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, errors.NewBadRequestError("only_with_feedback must be a boolean")
+		}
+		filter.OnlyWithFeedback = value
+		hasFilter = true
+	}
+	if !hasFilter {
+		return nil, nil
+	}
+	return filter, nil
+}
+
+func (h *ChunkHandler) canManageChunkFeedback(c *gin.Context) bool {
+	if access, ok := middleware.KBAccessFromContext(c); ok && access != nil {
+		return access.Permission.HasPermission(types.OrgRoleAdmin)
+	}
+	return false
+}
+
+func (h *ChunkHandler) canManageChunkFeedbackByChunkID(c *gin.Context) bool {
+	if access, ok := middleware.KBAccessFromContext(c); ok && access != nil {
+		return access.Permission.HasPermission(types.OrgRoleAdmin)
+	}
+	return false
+}
+
+func clearChunkFeedbackGovernanceFields(chunk *types.Chunk) {
+	if chunk == nil {
+		return
+	}
+	chunk.LikeCount = 0
+	chunk.DislikeCount = 0
+	chunk.PositiveRate = nil
+	chunk.RecallWeight = 1
+	chunk.LastFeedbackAt = nil
+	chunk.FeedbackResetAt = nil
+	chunk.NeedsOptimization = false
+	chunk.FeedbackSessionCount = 0
+	chunk.DislikeReasons = nil
 }
 
 // UpdateChunkRequest defines the request structure for updating a chunk
@@ -375,5 +464,110 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Generated question deleted",
+	})
+}
+
+// ResetChunkFeedback godoc
+// @Summary      重置分块反馈统计
+// @Description  清空指定分块的累计点赞、点踩、好评率和待优化标记，可选择同步重置召回权重
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                           true  "分块ID"
+// @Param        request  body      types.ChunkFeedbackResetRequest  true  "重置请求"
+// @Success      200      {object}  map[string]interface{}           "重置后的分块"
+// @Failure      400      {object}  errors.AppError                  "请求参数错误"
+// @Failure      404      {object}  errors.AppError                  "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/by-id/{id}/feedback/reset [post]
+func (h *ChunkHandler) ResetChunkFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start resetting chunk feedback")
+
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		logger.Error(ctx, "Chunk ID is empty")
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+
+	var req types.ChunkFeedbackResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	chunk, err := h.service.ResetChunkFeedback(ctx, chunkID, req.ResetWeight)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if chunk.Content != "" {
+		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    chunk,
+	})
+}
+
+// ListChunkFeedbackWeightLogs godoc
+// @Summary      查询分块权重变更日志
+// @Description  分页查询指定分块因用户反馈或管理员重置触发的召回权重变化
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        id         path   string  true   "分块ID"
+// @Param        page       query  int     false  "页码"  default(1)
+// @Param        page_size  query  int     false  "每页数量"  default(10)
+// @Success      200        {object}  map[string]interface{}  "权重变更日志"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/by-id/{id}/feedback/weight-logs [get]
+func (h *ChunkHandler) ListChunkFeedbackWeightLogs(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start listing chunk feedback weight logs")
+
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		logger.Error(ctx, "Chunk ID is empty")
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+
+	var pagination types.Pagination
+	if err := c.ShouldBindQuery(&pagination); err != nil {
+		logger.Errorf(ctx, "Failed to parse pagination parameters: %s", secutils.SanitizeForLog(err.Error()))
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if pagination.Page < 1 {
+		pagination.Page = 1
+	}
+	if pagination.PageSize < 1 {
+		pagination.PageSize = 10
+	}
+	if pagination.PageSize > 100 {
+		pagination.PageSize = 100
+	}
+
+	result, err := h.service.ListChunkFeedbackWeightLogs(ctx, chunkID, &pagination)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      result.Data,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
 	})
 }

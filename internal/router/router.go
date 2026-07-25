@@ -303,10 +303,12 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 	chunks := g.apiKeyGroup(r.Group("/chunks"), apiKeyIngest(apiKeyFullAccess()))
 	chunkRead := chunks.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
-		// 获取分块列表 — Viewer+ 且对父 KB 有 read 权限（own / shared / via shared agent）
-		chunkRead.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), handler.ListKnowledgeChunks)
+		// 获取分块列表 — Viewer+ 且对父 KB 有 read 权限；反馈治理筛选/排序需 KB owner OR Admin+。
+		chunkRead.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), g.ChunkFeedbackGovernanceFromKnowledgeIDParam(), handler.ListKnowledgeChunks)
 		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+ 且对父 KB 有 read 权限
 		chunkRead.GET("/by-id/:id", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkByIDOnly)
+		// 查看分块权重变更日志 — KB owner OR Admin+，且对父 KB 有 read 权限
+		chunkRead.GET("/by-id/:id/feedback/weight-logs", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), g.OwnedChunkKBOrAdminFromChunkID(), handler.ListChunkFeedbackWeightLogs)
 		// 删除分块 — KB owner OR Admin+，且对父 KB 有 write 权限
 		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunk)
 		// 删除知识下的所有分块 — KB owner OR Admin+，且对父 KB 有 write 权限
@@ -319,6 +321,8 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 		// 「能编辑所有 chunk 的同样规则在这条路由上反而更宽松」的不一致。
 		// 现在通过 KBCreatorLookupFromChunkIDParam 把那一跳补上，统一矩阵。
 		chunks.DELETE("/by-id/:id/questions", g.OwnedChunkKBOrAdminFromChunkID(), g.KBAccessWriteFromChunkIDParam("id"), handler.DeleteGeneratedQuestion)
+		// 重置分块赞踩统计/召回权重 — 与其它 chunk mutation 一致：KB owner OR Admin+。
+		chunks.POST("/by-id/:id/feedback/reset", g.OwnedChunkKBOrAdminFromChunkID(), g.KBAccessWriteFromChunkIDParam("id"), handler.ResetChunkFeedback)
 	}
 }
 
@@ -603,6 +607,8 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
+		sessions.POST("/:session_id/messages/:message_id/feedback", handler.SubmitMessageFeedback)
+		sessions.DELETE("/:id/messages/:message_id/feedback", handler.CancelMessageFeedback)
 		// POST and DELETE share this path but gin maintains a separate radix tree
 		// per HTTP verb, and the existing trees use different wildcard names
 		// (POST uses :session_id, DELETE uses :id). Use whatever matches each

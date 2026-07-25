@@ -162,6 +162,25 @@ type Chunk struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete marker, supports data recovery
 	DeletedAt gorm.DeletedAt `json:"deleted_at"               gorm:"index"`
+	// LikeCount 点赞数
+	LikeCount int64 `json:"like_count" gorm:"default:0"`
+	// DislikeCount 点踩数
+	DislikeCount int64 `json:"dislike_count" gorm:"default:0"`
+	// PositiveRate 好评率 = LikeCount / (LikeCount + DislikeCount)，例如 0.85 表示 85%。
+	PositiveRate *float64 `json:"positive_rate" gorm:"type:decimal(5,4)"`
+	// RecallWeight 召回权重，用于影响检索排序。
+	RecallWeight float64 `json:"recall_weight" gorm:"type:decimal(4,2);default:1.00"`
+	// LastFeedbackAt 最近一次收到反馈的时间
+	LastFeedbackAt *time.Time `json:"last_feedback_at" gorm:"index"`
+	// FeedbackResetAt marks the baseline after an admin reset; older feedback is ignored in aggregates.
+	FeedbackResetAt *time.Time `json:"feedback_reset_at,omitempty" gorm:"index"`
+	// NeedsOptimization marks chunks with very low feedback quality for manual review.
+	NeedsOptimization bool `json:"needs_optimization" gorm:"default:false;index"`
+	// FeedbackSessionCount is computed for admin statistics responses.
+	FeedbackSessionCount int64 `json:"feedback_session_count" gorm:"-"`
+	// DislikeReasons contains aggregated dislike reasons for admin statistics responses.
+	DislikeReasons []ChunkDislikeReasonStat `json:"dislike_reasons,omitempty" gorm:"-"`
+
 	// ContextHeader is an in-memory-only context string (e.g. a Markdown
 	// heading breadcrumb) that the indexing pipeline prepends to Content
 	// when generating embeddings. NOT persisted — populated by the chunker

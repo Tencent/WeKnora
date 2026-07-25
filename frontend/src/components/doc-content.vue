@@ -8,7 +8,14 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import {
+  downKnowledgeDetails,
+  deleteGeneratedQuestion,
+  getChunkByIdOnly,
+  listChunkFeedbackWeightLogs,
+  previewKnowledgeFile,
+  resetChunkFeedback,
+} from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
@@ -28,6 +35,11 @@ const authStore = useAuthStore();
 // 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
 const canDeleteGeneratedQuestion = computed(() => {
   if (props.canEditKB === true) return true;
+  return authStore.hasRole('admin');
+});
+
+const canManageChunkFeedback = computed(() => {
+  if (props.canManageKB === true) return true;
   return authStore.hasRole('admin');
 });
 
@@ -84,7 +96,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canManageKB", "canDownloadKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 const hasTimelineSpans = ref(false);
@@ -319,6 +331,13 @@ let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
+const feedbackOnlyWithFeedback = ref(false);
+const feedbackNeedsOptimizationOnly = ref(false);
+const feedbackSortBy = ref('');
+const feedbackLogDrawerVisible = ref(false);
+const feedbackLogLoading = ref(false);
+const feedbackLogChunk = ref<any>(null);
+const feedbackWeightLogs = ref<any[]>([]);
 
 // 合并后的文档内容（在下方通过 computed 定义）
 
@@ -538,11 +557,65 @@ const processedChunks = computed(() => {
       processedContent: processMarkdown(item.content),
       questions: getGeneratedQuestions(item),
       meta: getChunkMeta(item),
+      feedback: getChunkFeedbackStats(item),
       hasParent: hasParentChunk(item),
       chunkClass: getChunkClass(index)
     };
   });
 });
+
+const currentChunkFeedbackQuery = () => ({
+  only_with_feedback: canManageChunkFeedback.value ? (feedbackOnlyWithFeedback.value || undefined) : undefined,
+  needs_optimization: canManageChunkFeedback.value && feedbackNeedsOptimizationOnly.value ? true : undefined,
+  feedback_sort_by: canManageChunkFeedback.value ? (feedbackSortBy.value || undefined) : undefined,
+  feedback_sort_order: canManageChunkFeedback.value && feedbackSortBy.value
+    ? (feedbackSortBy.value === 'positive_rate' ? 'asc' : 'desc')
+    : undefined,
+});
+
+const reloadChunksWithFeedbackFilter = () => {
+  if (!props.details?.id) return;
+  page = 1;
+  loadingChunks = false;
+  pendingRequestedPage = null;
+  pendingChunksBeforeLoad = 0;
+  emit('getDoc', 1, currentChunkFeedbackQuery());
+};
+
+const feedbackSortOptions = computed(() => [
+  { label: t('knowledgeBase.feedbackSortDefault'), value: '' },
+  { label: t('knowledgeBase.feedbackSortLowPositiveRate'), value: 'positive_rate' },
+  { label: t('knowledgeBase.feedbackSortMostLikes'), value: 'like_count' },
+  { label: t('knowledgeBase.feedbackSortMostDislikes'), value: 'dislike_count' },
+  { label: t('knowledgeBase.feedbackSortRecent'), value: 'last_feedback_at' },
+]);
+
+const formatPositiveRate = (rate: number | null | undefined) => {
+  if (rate === null || rate === undefined) return '-';
+  return `${Math.round(Number(rate) * 100)}%`;
+};
+
+const formatDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
+
+const getChunkFeedbackStats = (item: any) => {
+  const likeCount = Number(item?.like_count || 0);
+  const dislikeCount = Number(item?.dislike_count || 0);
+  return {
+    likeCount,
+    dislikeCount,
+    positiveRate: formatPositiveRate(item?.positive_rate),
+    recallWeight: Number(item?.recall_weight ?? 1).toFixed(2),
+    sessionCount: Number(item?.feedback_session_count || 0),
+    dislikeReasons: Array.isArray(item?.dislike_reasons) ? item.dislike_reasons : [],
+    needsOptimization: Boolean(item?.needs_optimization),
+    hasFeedback: likeCount + dislikeCount > 0,
+  };
+};
 
 const previewSupportedTypes = new Set([
   'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
@@ -894,6 +967,77 @@ const isExpanded = (index: number) => expandedChunks.value.has(index);
 
 // 删除中的状态
 const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(null);
+const resettingFeedbackChunk = ref<string>('');
+
+const handleResetChunkFeedback = async (item: any) => {
+  if (!item?.id) {
+    MessagePlugin.error(t('common.error'));
+    return;
+  }
+
+  const confirmDialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.feedbackResetTitle'),
+    body: t('knowledgeBase.feedbackResetConfirmBody'),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      confirmDialog.hide();
+      resettingFeedbackChunk.value = item.id;
+      try {
+        const result: any = await resetChunkFeedback(item.id, { reset_weight: true });
+        if (result?.success && result?.data) {
+          Object.assign(item, result.data);
+        }
+        MessagePlugin.success(t('knowledgeBase.feedbackResetSuccess'));
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('common.operationFailed'));
+      } finally {
+        resettingFeedbackChunk.value = '';
+      }
+    },
+    onClose: () => {
+      confirmDialog.hide();
+    }
+  });
+};
+
+const openFeedbackWeightLogs = async (item: any) => {
+  if (!item?.id) return;
+  feedbackLogChunk.value = item;
+  feedbackWeightLogs.value = [];
+  feedbackLogDrawerVisible.value = true;
+  await refreshFeedbackWeightLogs(false);
+};
+
+const refreshFeedbackWeightLogs = async (showSuccess = true) => {
+  if (!feedbackLogChunk.value?.id) return;
+  feedbackLogLoading.value = true;
+  try {
+    const result: any = await listChunkFeedbackWeightLogs(feedbackLogChunk.value.id, { page: 1, page_size: 50 });
+    if (result?.success && Array.isArray(result.data)) {
+      feedbackWeightLogs.value = result.data;
+    }
+    if (showSuccess) {
+      MessagePlugin.success(t('knowledgeBase.feedbackWeightLogsRefreshed'));
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  } finally {
+    feedbackLogLoading.value = false;
+  }
+};
+
+const closeFeedbackWeightLogs = () => {
+  feedbackLogDrawerVisible.value = false;
+  feedbackLogLoading.value = false;
+  feedbackLogChunk.value = null;
+  feedbackWeightLogs.value = [];
+};
+
+const formatWeightLogRate = (rate: number | null | undefined) => {
+  if (rate === null || rate === undefined) return '-';
+  return `${Math.round(Number(rate) * 100)}%`;
+};
 
 // 删除生成的问题
 const handleDeleteQuestion = async (item: any, chunkIndex: number, question: GeneratedQuestion) => {
@@ -1048,7 +1192,7 @@ const requestNextChunkPage = () => {
   loadingChunks = true;
   pendingRequestedPage = page;
   pendingChunksBeforeLoad = loaded;
-  emit('getDoc', page);
+  emit('getDoc', page, currentChunkFeedbackQuery());
 };
 
 /** When the list is shorter than the drawer, scroll never fires — prefetch until scrollable or done. */
@@ -1235,6 +1379,17 @@ const handleDetailsScroll = () => {
             </div>
           </div>
 
+          <div v-if="viewMode === 'chunks' && canManageChunkFeedback" class="chunk-feedback-filter-bar">
+            <t-checkbox v-model="feedbackOnlyWithFeedback" @change="reloadChunksWithFeedbackFilter">
+              {{ $t('knowledgeBase.feedbackOnlyWithFeedback') }}
+            </t-checkbox>
+            <t-checkbox v-model="feedbackNeedsOptimizationOnly" @change="reloadChunksWithFeedbackFilter">
+              {{ $t('knowledgeBase.feedbackOnlyNeedsOptimization') }}
+            </t-checkbox>
+            <t-select v-model="feedbackSortBy" size="small" class="chunk-feedback-sort"
+              :options="feedbackSortOptions" @change="reloadChunksWithFeedbackFilter" />
+          </div>
+
           <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
           <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
             <div v-if="audioLoading" class="audio-loading">
@@ -1268,6 +1423,45 @@ const handleDetailsScroll = () => {
                     </t-tag>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
+                </div>
+                <div v-if="canManageChunkFeedback" class="chunk-feedback-bar">
+                  <t-tag size="small" theme="success" variant="light">
+                    {{ $t('knowledgeBase.feedbackLikes') }} {{ chunk.feedback.likeCount }}
+                  </t-tag>
+                  <t-tag size="small" theme="danger" variant="light">
+                    {{ $t('knowledgeBase.feedbackDislikes') }} {{ chunk.feedback.dislikeCount }}
+                  </t-tag>
+                  <t-tag size="small" theme="primary" variant="light">
+                    {{ $t('knowledgeBase.feedbackPositiveRate') }} {{ chunk.feedback.positiveRate }}
+                  </t-tag>
+                  <t-tag size="small" theme="default" variant="light">
+                    {{ $t('knowledgeBase.feedbackRecallWeight') }} {{ chunk.feedback.recallWeight }}
+                  </t-tag>
+                  <t-tag size="small" theme="default" variant="light">
+                    {{ $t('knowledgeBase.feedbackSessionCount') }} {{ chunk.feedback.sessionCount }}
+                  </t-tag>
+                  <t-tooltip v-if="chunk.feedback.dislikeReasons.length" placement="top">
+                    <template #content>
+                      <div v-for="reason in chunk.feedback.dislikeReasons" :key="reason.reason">
+                        {{ reason.reason }}：{{ reason.count }}
+                      </div>
+                    </template>
+                    <t-tag size="small" theme="warning" variant="light">
+                      {{ $t('knowledgeBase.feedbackDislikeReasons') }} {{ chunk.feedback.dislikeReasons.length }}
+                    </t-tag>
+                  </t-tooltip>
+                  <t-tag v-if="chunk.feedback.needsOptimization" size="small" theme="warning" variant="light">
+                    {{ $t('knowledgeBase.feedbackNeedsOptimization') }}
+                  </t-tag>
+                  <t-button v-if="chunk.feedback.hasFeedback" size="small" variant="text"
+                    theme="primary" :loading="resettingFeedbackChunk === chunk.original.id"
+                    @click.stop="handleResetChunkFeedback(chunk.original)">
+                    {{ $t('knowledgeBase.feedbackReset') }}
+                  </t-button>
+                  <t-button size="small" variant="text" theme="default"
+                    @click.stop="openFeedbackWeightLogs(chunk.original)">
+                    {{ $t('knowledgeBase.feedbackWeightLogs') }}
+                  </t-button>
                 </div>
                 <div class="md-content" v-html="chunk.processedContent"></div>
 
@@ -1316,6 +1510,52 @@ const handleDetailsScroll = () => {
         </section>
       </div>
 
+    </t-drawer>
+    <t-drawer
+      v-model:visible="feedbackLogDrawerVisible"
+      :header="$t('knowledgeBase.feedbackWeightLogTitle')"
+      size="520px"
+      attach="body"
+      :zIndex="2300"
+      :footer="false"
+      @close="closeFeedbackWeightLogs"
+    >
+      <div class="feedback-log-drawer">
+        <div v-if="feedbackLogChunk" class="feedback-log-summary">
+          <span>{{ $t('knowledgeBase.feedbackCurrentWeight') }}：{{ Number(feedbackLogChunk.recall_weight ?? 1).toFixed(2) }}</span>
+          <span>{{ $t('knowledgeBase.feedbackPositiveRate') }}：{{ formatPositiveRate(feedbackLogChunk.positive_rate) }}</span>
+        </div>
+        <t-loading v-if="feedbackLogLoading" :text="$t('common.loading')" />
+        <t-empty v-else-if="feedbackWeightLogs.length === 0" :description="$t('knowledgeBase.feedbackNoWeightLogs')" />
+        <div v-else class="feedback-log-list">
+          <div v-for="log in feedbackWeightLogs" :key="log.id" class="feedback-log-item">
+            <div class="feedback-log-item__main">
+              <span class="feedback-log-weight">
+                {{ Number(log.old_weight ?? 1).toFixed(2) }} -> {{ Number(log.new_weight ?? 1).toFixed(2) }}
+              </span>
+              <t-tag size="small" variant="light"
+                :theme="log.trigger_source === 'admin_reset' ? 'warning' : 'primary'">
+                {{ log.trigger_source === 'admin_reset' ? $t('knowledgeBase.feedbackTriggerAdminReset') : $t('knowledgeBase.feedbackTriggerUserFeedback') }}
+              </t-tag>
+            </div>
+            <div class="feedback-log-item__meta">
+              {{ $t('knowledgeBase.feedbackPositiveRate') }} {{ formatWeightLogRate(log.old_positive_rate) }} -> {{ formatWeightLogRate(log.new_positive_rate) }}
+            </div>
+            <div class="feedback-log-item__meta">
+              {{ formatDate(log.created_at) }}
+              <span v-if="log.message_id"> · {{ log.message_id.slice(0, 8) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="feedback-log-actions">
+          <t-button variant="outline" :loading="feedbackLogLoading" @click="refreshFeedbackWeightLogs(true)">
+            {{ $t('knowledgeBase.feedbackRefreshLogs') }}
+          </t-button>
+          <t-button theme="primary" @click="closeFeedbackWeightLogs">
+            {{ $t('common.close') }}
+          </t-button>
+        </div>
+      </div>
     </t-drawer>
   </div>
 </template>
@@ -1746,6 +1986,87 @@ const handleDetailsScroll = () => {
     color: var(--td-text-color-disabled);
     font-size: 11px;
   }
+}
+
+.chunk-feedback-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.chunk-feedback-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.chunk-feedback-sort {
+  width: 150px;
+}
+
+.feedback-log-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feedback-log-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+
+.feedback-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-log-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--td-border-level-1-color);
+}
+
+.feedback-log-item {
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-border);
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+}
+
+.feedback-log-item__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.feedback-log-weight {
+  color: var(--td-text-color-primary);
+  font-weight: 600;
+}
+
+.feedback-log-item__meta {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 // 父 Chunk 上下文样式

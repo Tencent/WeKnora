@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -247,12 +248,53 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	deduplicatedChunks = s.applyChunkRecallWeights(ctx, deduplicatedChunks)
 
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+}
+
+func (s *knowledgeBaseService) applyChunkRecallWeights(ctx context.Context, results []*types.IndexWithScore) []*types.IndexWithScore {
+	if len(results) == 0 {
+		return results
+	}
+	chunkIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.ChunkID == "" {
+			continue
+		}
+		if _, ok := seen[result.ChunkID]; ok {
+			continue
+		}
+		seen[result.ChunkID] = struct{}{}
+		chunkIDs = append(chunkIDs, result.ChunkID)
+	}
+	if len(chunkIDs) == 0 {
+		return results
+	}
+
+	chunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load chunk recall weights: %v", err)
+		return results
+	}
+	weights := make(map[string]float64, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.RecallWeight > 0 {
+			weights[chunk.ID] = chunk.RecallWeight
+		}
+	}
+	for _, result := range results {
+		if weight, ok := weights[result.ChunkID]; ok {
+			result.Score *= weight
+		}
+	}
+	slices.SortFunc(results, sortByScoreDesc)
+	return results
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in

@@ -28,6 +28,7 @@ type messageService struct {
 	kbService      interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
 	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
+	feedbackRepo   interfaces.MessageFeedbackRepository
 	suggestionRepo interfaces.MessageSuggestionRepository
 }
 
@@ -38,6 +39,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	kbService interfaces.KnowledgeBaseService,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
+	feedbackRepo interfaces.MessageFeedbackRepository,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 ) interfaces.MessageService {
 	return &messageService{
@@ -47,6 +49,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		kbService:      kbService,
 		knowService:    knowService,
 		modelService:   modelService,
+		feedbackRepo:   feedbackRepo,
 		suggestionRepo: suggestionRepo,
 	}
 }
@@ -155,6 +158,7 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages successfully", len(messages))
+	s.attachCurrentUserFeedback(ctx, tenantID, sessionID, messages)
 	return messages, nil
 }
 
@@ -188,6 +192,7 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d recent messages successfully", len(messages))
+	s.attachCurrentUserFeedback(ctx, tenantID, sessionID, messages)
 	return messages, nil
 }
 
@@ -222,7 +227,37 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
+	s.attachCurrentUserFeedback(ctx, tenantID, sessionID, messages)
 	return messages, nil
+}
+
+func (s *messageService) attachCurrentUserFeedback(ctx context.Context, tenantID uint64, sessionID string, messages []*types.Message) {
+	if s.feedbackRepo == nil || len(messages) == 0 {
+		return
+	}
+	messageIDs := make([]string, 0, len(messages))
+	messageByID := make(map[string]*types.Message, len(messages))
+	for _, message := range messages {
+		if message == nil || message.Role != "assistant" || message.ID == "" {
+			continue
+		}
+		messageIDs = append(messageIDs, message.ID)
+		messageByID[message.ID] = message
+	}
+	if len(messageIDs) == 0 {
+		return
+	}
+	feedbacks, err := s.feedbackRepo.ListFeedbacksByMessageIDs(ctx, tenantID, sessionID, types.SessionOwnerIDFromContext(ctx), messageIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to attach message feedback state: %v", err)
+		return
+	}
+	for _, feedback := range feedbacks {
+		if message := messageByID[feedback.MessageID]; message != nil {
+			message.FeedbackAction = feedback.Action
+			message.FeedbackReason = feedback.Reason
+		}
+	}
 }
 
 // UpdateMessage updates an existing message's content or metadata
