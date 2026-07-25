@@ -278,7 +278,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	var embeddingModel embedding.Embedder
 	if kb.NeedsEmbeddingModel() {
 		var err error
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		embeddingModel, err = getEmbeddingModelForKB(ctx, s.modelService, kb)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
@@ -1162,7 +1162,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
 		}
 
-		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 			summaryErr = err
@@ -1432,7 +1432,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	resolvedModelID = kb.SummaryModelID
 
 	// Initialize embedding model and retrieval engine
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		exitStatus = "get_embedding_model_failed"
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
@@ -1733,7 +1733,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}
 	resolvedModelID = kb.SummaryModelID
 
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		exitStatus = "get_embedding_model_failed"
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
@@ -2386,7 +2386,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	if err != nil {
 		return err
 	}
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, sourceKB.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, sourceKB)
 	if err != nil {
 		return err
 	}

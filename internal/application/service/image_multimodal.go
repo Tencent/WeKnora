@@ -453,7 +453,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		return
 	}
 
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
 		return

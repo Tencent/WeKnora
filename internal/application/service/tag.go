@@ -434,7 +434,7 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 	}
 
 	// Get embedding model dimensions
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, payload.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForTenant(ctx, s.modelService, payload.EmbeddingModelID, payload.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get embedding model for index cleanup: %v", err)
 		return err

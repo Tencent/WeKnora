@@ -419,7 +419,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 		return fmt.Errorf("failed to create retrieve engine: %w", err)
 	}
 
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"embedding_model_id": kb.EmbeddingModelID,

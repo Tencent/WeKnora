@@ -126,7 +126,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 				return err
 			}
-			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
+			embeddingModel, err := getEmbeddingModelForKnowledge(ctx, s.modelService, knowledge)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 				return err
@@ -525,11 +525,16 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		// Group by EmbeddingModelID and Type
 		type groupKey struct {
 			EmbeddingModelID string
+			TenantID         uint64
 			Type             string
 		}
 		group := map[groupKey][]string{}
 		for _, knowledge := range knowledgeList {
-			key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
+			key := groupKey{
+				EmbeddingModelID: knowledge.EmbeddingModelID,
+				TenantID:         knowledge.TenantID,
+				Type:             knowledge.Type,
+			}
 			group[key] = append(group[key], knowledge.ID)
 		}
 		for key, knowledgeIDs := range group {
@@ -540,7 +545,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 				logger.Infof(ctx, "Skipping vector store cleanup for %d knowledge entries without embedding model", len(knowledgeIDs))
 				continue
 			}
-			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
+			embeddingModel, err := getEmbeddingModelForTenant(ctx, s.modelService, key.EmbeddingModelID, key.TenantID)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge get embedding model failed")
 				return err
@@ -683,7 +688,7 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)
 		} else {
-			embeddingModel, modelErr := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
+			embeddingModel, modelErr := getEmbeddingModelForKnowledge(ctx, s.modelService, knowledge)
 			if modelErr != nil {
 				logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
 				cleanupErr = errors.Join(cleanupErr, modelErr)

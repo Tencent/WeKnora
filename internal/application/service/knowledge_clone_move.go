@@ -428,7 +428,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	if err != nil {
 		return err
 	}
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, dst.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, dstKB)
 	if err != nil {
 		return err
 	}
@@ -741,7 +741,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	}
 
 	// Get embedding model
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, dstKB.EmbeddingModelID)
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, dstKB)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		handleError(progress, err, "Failed to get embedding model")
@@ -1255,7 +1255,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		if err != nil {
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
 		}
-		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
+		embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, sourceKB)
 		if err != nil {
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
