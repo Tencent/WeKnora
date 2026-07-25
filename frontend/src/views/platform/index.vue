@@ -31,6 +31,7 @@ import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -39,6 +40,7 @@ let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
@@ -201,12 +203,24 @@ const handleGlobalDrop = async (event: DragEvent) => {
     droppedFiles.forEach(file => requestMethod(file, uploadInput));
 }
 
+const compactViewportQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 768px)')
+    : null;
+
+const collapseSidebarForCompactViewport = (query: MediaQueryList | MediaQueryListEvent | null) => {
+    if (query?.matches && !uiStore.sidebarCollapsed) {
+        uiStore.collapseSidebar();
+    }
+};
+
 // 组件挂载时添加全局事件监听器
 onMounted(() => {
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
     document.addEventListener('drop', handleGlobalDrop, true);
+    collapseSidebarForCompactViewport(compactViewportQuery);
+    compactViewportQuery?.addEventListener('change', collapseSidebarForCompactViewport);
     if (isWailsDesktop) {
         window.addEventListener('keydown', handleGlobalKeyDown);
         // @ts-ignore
@@ -250,6 +264,7 @@ onUnmounted(() => {
             window.runtime.EventsOff('app:reload')
         }
     }
+    compactViewportQuery?.removeEventListener('change', collapseSidebarForCompactViewport);
     dragCounter = 0;
 });
 </script>
@@ -259,8 +274,9 @@ onUnmounted(() => {
     align-items: stretch;
     width: 100%;
     height: 100%;
-    min-width: 600px;
+    min-width: 0;
     min-height: 0;
+    overflow: hidden;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
 }

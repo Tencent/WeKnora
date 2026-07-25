@@ -248,7 +248,11 @@ const handleKBEditorSuccess = (kbId: string) => {
     display: flex;
     justify-content: center;
     align-items: center;
-    // position: relative;
+    min-width: 0;
+    min-height: 0;
+    padding: 32px clamp(16px, 4vw, 48px);
+    box-sizing: border-box;
+    overflow-y: auto;
 }
 
 .dialogue-answers {
@@ -257,11 +261,14 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     gap: 24px;
+    box-sizing: border-box;
 
     :deep(.answers-input) {
         position: static;
-        transform: translateX(0);
+        transform: none;
+        width: 100%;
     }
 }
 
@@ -308,6 +315,8 @@ const handleKBEditorSuccess = (kbId: string) => {
     max-width: 960px;
     margin: 0;
     padding: 0 16px;
+    width: 100%;
+    box-sizing: border-box;
     transition: height 0.35s @suggested-ease;
 }
 
@@ -363,43 +372,37 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
+@media (max-width: 768px) {
+    .dialogue-wrap {
+        padding: 24px 12px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
+    .dialogue-answers {
+        gap: 16px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
+    .dialogue-title {
+        font-size: 22px;
+        line-height: 1.3;
+        text-align: center;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
+    .suggested-questions-container {
+        padding: 0;
     }
 }
 
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
+@media (max-width: 480px) {
+    .dialogue-wrap {
+        padding: 16px 8px;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
+    .dialogue-answers {
+        gap: 12px;
+    }
+
+    .dialogue-title {
+        font-size: 20px;
     }
 }
 </style>

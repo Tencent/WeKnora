@@ -1031,11 +1031,12 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     align-items: center;
-    max-width: calc(100vw - 260px);
-    min-width: 400px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
-        max-width: calc(100vw - 60px);
+        max-width: 100%;
     }
 
     &.is-embedded {
@@ -1204,6 +1205,7 @@ onBeforeRouteUpdate((to, from, next) => {
     margin: 0 auto;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     box-sizing: border-box;
     position: relative;
 
@@ -1223,9 +1225,11 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     gap: 16px;
     max-width: 960px;
+    min-width: 0;
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    box-sizing: border-box;
 
     /*
       给每条消息加 layout/style containment：
@@ -1297,5 +1301,19 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+
+@media (max-width: 768px) {
+    .chat:not(.is-embedded) {
+        padding: 0 0 12px;
+    }
+
+    .chat:not(.is-embedded) .chat_scroll_box {
+        padding: 8px 12px 0;
+    }
+
+    .input-container:not(.is-embedded) {
+        min-height: 104px;
+    }
 }
 </style>

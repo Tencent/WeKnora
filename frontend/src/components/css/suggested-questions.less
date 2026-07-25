@@ -21,6 +21,7 @@
     margin: 0 auto;
     width: 100%;
     min-height: 0;
+    box-sizing: border-box;
 
     &.has-questions {
         min-height: 64px;
@@ -202,3 +203,28 @@
     color: var(--td-brand-color);
 }
 
+@media (max-width: 768px) {
+    .suggested-questions-container {
+        padding: 8px 12px;
+    }
+
+    .suggested-questions-grid {
+        gap: 8px;
+    }
+
+    .suggested-question-card {
+        padding: 7px 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .suggested-questions-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .suggested-question-card,
+    .suggested-question-card.sq-card-skeleton {
+        width: 100%;
+    }
+}

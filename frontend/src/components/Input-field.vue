@@ -2724,6 +2724,8 @@ const getImgSrc = (url: string) => {
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   display: flex;
   justify-content: center;
 
@@ -2745,6 +2747,8 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 960px;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
@@ -3743,6 +3747,122 @@ const getImgSrc = (url: string) => {
   &:hover {
     color: var(--td-brand-color-active);
     text-decoration: underline;
+  }
+}
+
+@media (max-width: 768px) {
+  .answers-input {
+    padding: 0 12px;
+
+    &.is-embedded {
+      padding: 0;
+    }
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 104px !important;
+    max-height: 160px !important;
+    padding: 12px 12px 50px;
+  }
+
+  .rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
+    padding-top: 12px;
+  }
+
+  .selected-tags-inline {
+    padding: 6px 10px;
+  }
+
+  .mention-chip__name {
+    max-width: 80px;
+  }
+
+  .control-bar {
+    right: 10px;
+    bottom: 8px;
+    left: 10px;
+    gap: 4px;
+    max-height: none;
+    padding-top: 6px;
+    flex-wrap: nowrap;
+  }
+
+  .control-left {
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .agent-mode-btn {
+    max-width: 104px;
+    padding: 0 6px;
+  }
+
+  .agent-mode-text {
+    min-width: 0;
+    margin: 0 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .model-display {
+    flex: 0 1 100px;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .model-selector-trigger {
+    width: 100%;
+    min-width: 72px;
+    max-width: 100px;
+    padding: 2px 6px;
+    gap: 4px;
+    box-sizing: border-box;
+  }
+
+  .control-right {
+    flex-shrink: 0;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .answers-input {
+    padding: 0 8px;
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 96px !important;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .control-bar {
+    right: 8px;
+    left: 8px;
+  }
+
+  .control-left {
+    gap: 2px;
+  }
+
+  .agent-mode-btn {
+    max-width: 88px;
+  }
+
+  .model-display {
+    flex-basis: 80px;
+  }
+
+  .model-selector-trigger {
+    min-width: 64px;
+    max-width: 80px;
   }
 }
 </style>
