@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,6 +130,7 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) {
 	t.Parallel()
 
+	xlsxFirstRowAsHeader := true
 	kb := &types.KnowledgeBase{
 		ChunkingConfig: types.ChunkingConfig{
 			ParserEngineRules: []types.ParserEngineRule{
@@ -139,10 +141,42 @@ func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) 
 	overrides := &types.KnowledgeProcessOverrides{
 		ParserEngineRules: []types.ParserEngineRule{
 			{FileTypes: []string{"pdf"}, Engine: "mineru"},
+			{
+				FileTypes:            []string{"xlsx", "xls"},
+				Engine:               "builtin",
+				XLSXFirstRowAsHeader: &xlsxFirstRowAsHeader,
+			},
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, "mineru", eff.ChunkingConfig.ResolveParserEngine("pdf"))
+	xlsxRule := eff.ChunkingConfig.ResolveParserEngineRule("xlsx")
+	require.NotNil(t, xlsxRule)
+	require.Equal(t, "builtin", xlsxRule.Engine)
+	require.Equal(t, &xlsxFirstRowAsHeader, xlsxRule.XLSXFirstRowAsHeader)
+}
+
+func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{true, false} {
+		enabled := enabled
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			config := types.ChunkingConfig{
+				ParserEngineRules: []types.ParserEngineRule{{
+					FileTypes:            []string{"xlsx", "xls"},
+					Engine:               "builtin",
+					XLSXFirstRowAsHeader: &enabled,
+				}},
+			}
+			overrides := map[string]string{"tenant_option": "preserved"}
+
+			applyParserRuleOverrides(overrides, config, "xlsx")
+
+			require.Equal(t, strconv.FormatBool(enabled), overrides[xlsxFirstRowAsHeaderOverride])
+			require.Equal(t, "preserved", overrides["tenant_option"])
+		})
+	}
 }
 
 func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {

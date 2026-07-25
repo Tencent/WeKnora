@@ -5694,6 +5694,7 @@ export default {
       fileTypeWord: 'Word Documents',
       fileTypePpt: 'Presentations',
       fileTypeExcel: 'Excel Spreadsheets',
+      xlsxFirstRowAsHeader: 'Use the first row as column context for every row',
       fileTypeEbook: 'E-books',
       fileTypeWebArchive: 'Web Archives',
       fileTypeCsv: 'CSV Files',

@@ -121,7 +121,11 @@ export interface KBModelConfigRequest {
         chunkSize: number
         chunkOverlap: number
         separators: string[]
-        parserEngineRules?: { file_types: string[]; engine: string }[]
+        parserEngineRules?: {
+            file_types: string[]
+            engine: string
+            xlsx_first_row_as_header?: boolean
+        }[]
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
