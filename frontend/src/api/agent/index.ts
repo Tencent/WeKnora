@@ -100,6 +100,10 @@ export interface CustomAgentConfig {
   web_search_enabled?: boolean;
   web_search_provider_id?: string;
   web_search_max_results?: number;
+  web_search_max_calls?: number;
+  web_fetch_max_retries?: number;
+  web_fetch_max_urls?: number;
+  web_research_timeout_seconds?: number;
 
   // ===== 多轮对话设置 =====
   multi_turn_enabled?: boolean;     // 是否启用多轮对话

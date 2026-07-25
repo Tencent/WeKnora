@@ -454,6 +454,12 @@ func (e *AgentEngine) runToolCall(
 		},
 	})
 
+	var blockedResult *types.ToolResult
+	allowed := true
+	if len(tc.UnresolvedHandles) == 0 {
+		blockedResult, allowed = e.webResearch.beforeToolCall(tc.Function.Name, args)
+	}
+	toolTimeout := e.webResearch.toolTimeout(tc.Function.Name, defaultToolExecTimeout)
 	principal, _ := types.PrincipalFromContext(ctx)
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
@@ -464,7 +470,7 @@ func (e *AgentEngine) runToolCall(
 		// ApprovalCtx keeps the round-level ctx without the per-tool 60s timeout,
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,
-		ExecTimeout: defaultToolExecTimeout,
+		ExecTimeout: toolTimeout,
 	})
 
 	var result *types.ToolResult
@@ -474,13 +480,18 @@ func (e *AgentEngine) runToolCall(
 		// execution so a hallucinated/stale cN/dN/bN/wN/iN/res:// token can
 		// never reach persistence, an external service, or a routing decision.
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
+	} else if !allowed {
+		result = blockedResult
 	} else {
-		execCtx, toolCancel := context.WithTimeout(toolExecCtx, defaultToolExecTimeout)
+		execCtx, toolCancel := context.WithTimeout(toolExecCtx, toolTimeout)
 		result, err = e.toolRegistry.ExecuteTool(
 			execCtx, tc.Function.Name,
 			json.RawMessage(tc.Function.Arguments),
 		)
 		toolCancel()
+	}
+	if len(tc.UnresolvedHandles) == 0 {
+		e.webResearch.afterToolCall(tc.Function.Name, result)
 	}
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
