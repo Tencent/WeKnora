@@ -462,6 +462,32 @@ function handleGoToOrgSettings(orgId: string) {
     opacity: 0.75;
   }
 }
+
+@media (max-width: 480px) {
+  .share-item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .share-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .share-actions .spacer {
+    display: none;
+  }
+
+  .share-info,
+  .org-option-content {
+    min-width: 0;
+  }
+
+  .org-option-content {
+    width: 100%;
+  }
+}
 </style>
 
 <style lang="less">

@@ -1201,7 +1201,7 @@ onMounted(loadAll)
 
 .engine-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 12px;
   margin-top: 24px;
 }
@@ -1627,6 +1627,40 @@ onMounted(loadAll)
     color: var(--td-error-color);
   }
 }
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .source-options {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .source-option {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+}
 </style>
 
 <!--
@@ -1684,4 +1718,3 @@ onMounted(loadAll)
   color: #CE1126;
 }
 </style>
-

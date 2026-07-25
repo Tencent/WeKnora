@@ -3638,7 +3638,7 @@ watch(() => entries.value.map(e => ({
 
 .faq-skeleton-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 12px;
   width: 100%;
   animation: contentFadeIn 0.32s ease-out;
@@ -5645,5 +5645,98 @@ watch(() => entries.value.map(e => ({
   overflow-wrap: break-word;
   white-space: normal;
   line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+  .faq-manager,
+  .faq-content,
+  .faq-main,
+  .faq-card-area {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .faq-header {
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .faq-skeleton-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .faq-card {
+    padding: 14px;
+  }
+
+  .faq-card-header,
+  .faq-card-footer {
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .faq-import-overlay,
+  .batch-tag-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .faq-import-modal,
+  .batch-tag-modal {
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .faq-import-container,
+  .batch-tag-container {
+    min-width: 0;
+  }
+
+  .faq-import-content,
+  .batch-tag-content {
+    padding-inline: 16px;
+    overflow-x: hidden;
+  }
+
+  .faq-import-footer,
+  .batch-tag-footer {
+    flex-wrap: wrap;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .setting-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-right: 0;
+    justify-content: flex-start;
+  }
+
+  .preview-item {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .faq-card {
+    padding: 12px;
+  }
+
+  .faq-import-content,
+  .batch-tag-content {
+    padding-inline: 12px;
+  }
 }
 </style>

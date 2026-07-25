@@ -703,4 +703,14 @@ watch(searchQuery, (newVal, oldVal) => {
     color: var(--td-text-color-placeholder);
   }
 }
+
+@media (max-width: 480px) {
+  .tag-tile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tag-manage-toolbar {
+    align-items: stretch;
+  }
+}
 </style>

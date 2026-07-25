@@ -602,7 +602,7 @@ export function buildEmbedSnippet(channelId: string, token?: string) {
   // A bare iframe has no token-handoff host, so the snippet must carry the
   // publish token in the URL hash, otherwise the embed page cannot bootstrap.
   const url = escapeHtmlAttr(buildEmbedURL(channelId, token))
-  return `<iframe src="${url}" style="width:400px;height:600px;border:none;border-radius:12px" allow="clipboard-write"></iframe>`
+  return `<iframe src="${url}" style="width:100%;max-width:400px;height:600px;border:none;border-radius:12px" allow="clipboard-write"></iframe>`
 }
 
 export function buildWidgetSnippet(

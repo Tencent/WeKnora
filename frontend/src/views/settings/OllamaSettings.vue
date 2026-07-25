@@ -515,6 +515,36 @@ onMounted(async () => {
   }
 }
 
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    align-items: stretch;
+  }
+
+  .url-control-group {
+    flex-wrap: wrap;
+  }
+
+  .category-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
 .model-card {
   display: flex;
   align-items: center;

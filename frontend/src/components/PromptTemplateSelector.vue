@@ -282,8 +282,8 @@ onMounted(() => {
 }
 
 .template-popup {
-  width: 420px;
-  max-height: 400px;
+  width: min(420px, calc(100vw - 16px));
+  max-height: min(400px, calc(100dvh - 24px));
   overflow: hidden;
   display: flex;
   flex-direction: column;

@@ -20,8 +20,16 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
+    compactViewport: false,
+    mobileSidebarOpen: false
   }),
+
+  getters: {
+    effectiveSidebarCollapsed: (state) => (
+      state.compactViewport ? false : state.sidebarCollapsed
+    )
+  },
 
   actions: {
     openSettings(section?: string, subSection?: string) {
@@ -121,19 +129,39 @@ export const useUIStore = defineStore('ui', {
     },
 
     toggleSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = !this.mobileSidebarOpen
+        return
+      }
       this.sidebarCollapsed = !this.sidebarCollapsed
       localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
     },
 
     collapseSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = false
+        return
+      }
       this.sidebarCollapsed = true
       localStorage.setItem('sidebar_collapsed', 'true')
     },
 
     expandSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = true
+        return
+      }
       this.sidebarCollapsed = false
       localStorage.setItem('sidebar_collapsed', 'false')
+    },
+
+    setCompactViewport(compact: boolean) {
+      this.compactViewport = compact
+      this.mobileSidebarOpen = false
+    },
+
+    closeMobileSidebar() {
+      this.mobileSidebarOpen = false
     }
   }
 })
-

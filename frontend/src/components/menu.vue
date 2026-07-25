@@ -1,7 +1,11 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <div class="aside_box" :class="{
+        'aside_box--collapsed': sidebarCollapsed,
+        'aside_box--mobile': uiStore.compactViewport,
+        'aside_box--mobile-open': uiStore.compactViewport && uiStore.mobileSidebarOpen,
+    }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
-        <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
+        <div class="logo_row" v-if="!sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
@@ -50,16 +54,16 @@
         </t-tooltip>
 
         <!-- 空间选择器：仅在用户可切换空间时显示 -->
-        <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
+        <TenantSelector v-if="canAccessAllTenants && !sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <div v-if="sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
-            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+            <div class="menu_box menu_box--cmdk" v-if="sidebarCollapsed">
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -76,9 +80,9 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
+            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
-                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                <t-tooltip :content="item.title" placement="right" :disabled="!sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
@@ -88,7 +92,7 @@
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
-                            <template v-if="!uiStore.sidebarCollapsed">
+                            <template v-if="!sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
                                 <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0"
                                     class="menu-pending-badge"
@@ -101,7 +105,7 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-if="!sidebarCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -170,7 +174,7 @@
         </div>
 
         <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
-        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+        <div v-if="batchMode && !sidebarCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
                     @change="toggleBatchSelectAll">
@@ -194,6 +198,8 @@
         </div>
 
     </div>
+    <div v-if="uiStore.compactViewport && uiStore.mobileSidebarOpen" class="sidebar-mobile-backdrop"
+        @click="uiStore.closeMobileSidebar" />
 </template>
 
 <script setup lang="ts">
@@ -289,6 +295,7 @@ const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
 const commandPaletteStore = useCommandPaletteStore();
+const sidebarCollapsed = computed(() => uiStore.effectiveSidebarCollapsed);
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -1061,6 +1068,7 @@ const getIcon = (path: string) => {
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
+    uiStore.closeMobileSidebar()
     if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
         const kbId = await getCurrentKbId()
@@ -1884,6 +1892,55 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 .menu_box {
     position: relative;
+}
+
+.sidebar-mobile-backdrop {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .aside_box.aside_box--mobile {
+        position: fixed;
+        z-index: 930;
+        top: var(--app-compact-header-height);
+        bottom: 0;
+        left: 0;
+        height: auto;
+        width: min(86vw, 320px);
+        min-width: min(86vw, 320px);
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+        transform: translateX(-102%);
+        transition: transform 0.22s ease;
+        box-shadow: 12px 0 32px rgba(0, 0, 0, 0.16);
+        overflow: hidden;
+    }
+
+    .aside_box.aside_box--mobile-open {
+        transform: translateX(0);
+    }
+
+    .aside_box--mobile .sidebar-drag-handle {
+        display: none;
+    }
+
+    .aside_box--mobile .menu_item {
+        min-height: 44px;
+    }
+
+    .aside_box--mobile .header-icon-btn,
+    .aside_box--mobile .sidebar-toggle {
+        width: 32px;
+        height: 32px;
+    }
+
+    .sidebar-mobile-backdrop {
+        position: fixed;
+        z-index: 920;
+        inset: var(--app-compact-header-height) 0 0;
+        display: block;
+        background: rgba(0, 0, 0, 0.42);
+        backdrop-filter: blur(2px);
+    }
 }
 </style>
 <style lang="less">

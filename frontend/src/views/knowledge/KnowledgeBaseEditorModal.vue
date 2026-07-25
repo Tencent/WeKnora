@@ -1552,6 +1552,8 @@ watch(
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/assets/responsive-settings-surface.less';
+
 // 复用创建知识库的样式
 .settings-overlay {
   position: fixed;
@@ -2028,4 +2030,6 @@ watch(
     font-weight: 500;
   }
 }
+
+.responsive-settings-surface();
 </style>

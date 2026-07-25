@@ -570,6 +570,8 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/assets/responsive-settings-surface.less';
+
 /* 遮罩层 */
 .settings-overlay {
   position: fixed;
@@ -911,4 +913,6 @@ onUnmounted(() => {
     line-height: 1.6;
   }
 }
+
+.responsive-settings-surface();
 </style>

@@ -1,5 +1,22 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" :class="{ 'main--compact': uiStore.compactViewport }" ref="dropzone">
+        <header v-if="uiStore.compactViewport" class="compact-topbar">
+            <button type="button" class="compact-topbar__button" :aria-label="t('menu.expandSidebar')"
+                @click="uiStore.toggleSidebar">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+                    <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8"
+                        stroke-linecap="round" />
+                </svg>
+            </button>
+            <img class="compact-topbar__logo" src="@/assets/img/weknora.png" alt="WeKnora">
+            <button type="button" class="compact-topbar__button" :aria-label="t('menu.search')"
+                @click="commandPaletteStore.openPalette('')">
+                <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true">
+                    <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.7" />
+                    <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+            </button>
+        </header>
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
@@ -207,10 +224,8 @@ const compactViewportQuery = typeof window !== 'undefined' && typeof window.matc
     ? window.matchMedia('(max-width: 768px)')
     : null;
 
-const collapseSidebarForCompactViewport = (query: MediaQueryList | MediaQueryListEvent | null) => {
-    if (query?.matches && !uiStore.sidebarCollapsed) {
-        uiStore.collapseSidebar();
-    }
+const syncCompactViewport = (query: MediaQueryList | MediaQueryListEvent | null) => {
+    uiStore.setCompactViewport(Boolean(query?.matches));
 };
 
 // 组件挂载时添加全局事件监听器
@@ -219,8 +234,8 @@ onMounted(() => {
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
     document.addEventListener('drop', handleGlobalDrop, true);
-    collapseSidebarForCompactViewport(compactViewportQuery);
-    compactViewportQuery?.addEventListener('change', collapseSidebarForCompactViewport);
+    syncCompactViewport(compactViewportQuery);
+    compactViewportQuery?.addEventListener('change', syncCompactViewport);
     if (isWailsDesktop) {
         window.addEventListener('keydown', handleGlobalKeyDown);
         // @ts-ignore
@@ -238,6 +253,12 @@ onMounted(() => {
 // 监听路由变化，兼容 SPA 内部跳转时的 ?cmdk= 参数
 watch(() => route.query.cmdk, () => {
     maybeOpenCmdkFromRoute()
+})
+
+watch(() => route.fullPath, () => {
+    if (uiStore.compactViewport) {
+        uiStore.closeMobileSidebar()
+    }
 })
 
 function maybeOpenCmdkFromRoute() {
@@ -264,7 +285,8 @@ onUnmounted(() => {
             window.runtime.EventsOff('app:reload')
         }
     }
-    compactViewportQuery?.removeEventListener('change', collapseSidebarForCompactViewport);
+    compactViewportQuery?.removeEventListener('change', syncCompactViewport);
+    uiStore.setCompactViewport(false);
     dragCounter = 0;
 });
 </script>
@@ -291,6 +313,10 @@ onUnmounted(() => {
     overflow: hidden;
 }
 
+.compact-topbar {
+    display: none;
+}
+
 .upload-mask {
     background-color: rgba(255, 255, 255, 0.8);
     position: fixed;
@@ -308,5 +334,62 @@ img {
     -moz-user-drag: none;
     -o-user-drag: none;
     user-drag: none;
+}
+
+@media (max-width: 768px) {
+    .main--compact {
+        position: relative;
+        display: block;
+    }
+
+    .main--compact .platform-route-outlet {
+        width: 100%;
+        height: 100%;
+        padding-top: var(--app-compact-header-height);
+        box-sizing: border-box;
+    }
+
+    .compact-topbar {
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 910;
+        height: var(--app-compact-header-height);
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) 44px;
+        align-items: center;
+        padding: 0 8px;
+        box-sizing: border-box;
+        background: color-mix(in srgb, var(--td-bg-color-container) 94%, transparent);
+        border-bottom: 1px solid var(--td-component-stroke);
+        backdrop-filter: blur(12px);
+    }
+
+    .compact-topbar__button {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--td-text-color-primary);
+        background: transparent;
+    }
+
+    .compact-topbar__button:active {
+        background: var(--td-bg-color-container-active);
+    }
+
+    .compact-topbar__logo {
+        justify-self: center;
+        width: min(132px, 42vw);
+        height: auto;
+        object-fit: contain;
+    }
+
+    html[theme-mode="dark"] .compact-topbar__logo {
+        filter: invert(1) hue-rotate(180deg);
+    }
 }
 </style>

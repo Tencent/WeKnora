@@ -1342,6 +1342,60 @@ const handleClose = () => {
     background: var(--td-bg-color-component);
   }
 }
+
+@media (max-width: 480px) {
+  .custom-headers-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .custom-header-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .custom-header-key,
+  .custom-header-value {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .custom-header-key {
+    grid-column: 1;
+    flex-basis: auto;
+  }
+
+  .custom-header-value {
+    grid-column: 1;
+  }
+
+  .custom-header-remove {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .source-options {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .source-option {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .code-import__actions {
+    justify-content: stretch;
+  }
+
+  .code-import__actions :deep(.t-button) {
+    width: 100%;
+  }
+}
 </style>
 
 <!--

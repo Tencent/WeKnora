@@ -1837,6 +1837,104 @@ onUnmounted(() => {
 }
 
 // 响应式布局
+@media (max-width: 768px) {
+  .org-list-container {
+    margin: 0;
+    flex-direction: column;
+  }
+
+  .org-list-content {
+    padding: 14px 14px 0;
+  }
+
+  .header {
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+
+    h2 {
+      font-size: 21px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .header-actions {
+    gap: 4px;
+  }
+
+  .org-list-main {
+    padding-top: 0;
+  }
+
+  .org-card-wrap {
+    gap: 10px;
+  }
+
+  .org-card {
+    min-width: 0;
+  }
+
+  .card-bottom,
+  .empty-state-actions {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .invite-preview-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .invite-preview-modal {
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .invite-preview-header,
+  .invite-preview-body,
+  .invite-body-inner {
+    padding-inline: 16px;
+  }
+
+  .invite-preview-footer {
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+  }
+
+  .searchable-row {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .searchable-row-meta {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .org-list-content {
+    padding-inline: 10px;
+  }
+
+  .searchable-row {
+    flex-direction: column;
+  }
+
+  .searchable-row-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (min-width: 900px) {
   .org-card-wrap {
     grid-template-columns: repeat(2, 1fr);

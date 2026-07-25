@@ -333,4 +333,34 @@ onMounted(async () => {
   color: var(--td-text-color-placeholder);
   margin: 0;
 }
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-card {
+    padding: 16px;
+  }
+}
 </style>

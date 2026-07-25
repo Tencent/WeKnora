@@ -411,6 +411,7 @@ onMounted(reload)
 
 .api-key-table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -688,5 +689,23 @@ onMounted(reload)
 
 .api-key-capability-item .scope-hint {
   margin: 2px 0 0 24px;
+}
+
+@media (max-width: 768px) {
+  .section-header {
+    margin-bottom: 16px;
+  }
+
+  .security-alert {
+    margin-bottom: 14px;
+  }
+
+  .api-key-table {
+    min-width: 680px;
+  }
+
+  .api-key-capability-popup {
+    width: auto;
+  }
 }
 </style>

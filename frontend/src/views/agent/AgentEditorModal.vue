@@ -4283,6 +4283,8 @@ const handleSave = async () => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/assets/responsive-settings-surface.less';
+
 // 复用创建知识库的样式
 .settings-overlay {
   position: fixed;
@@ -5900,6 +5902,7 @@ const handleSave = async () => {
   background: rgba(0, 180, 42, 0.1);
 }
 
+.responsive-settings-surface();
 </style>
 
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so

@@ -413,6 +413,8 @@ watch(() => props.mode, () => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/assets/responsive-settings-surface.less';
+
 .settings-overlay {
   position: fixed;
   top: 0;
@@ -911,4 +913,6 @@ watch(() => props.mode, () => {
     color: var(--td-brand-color);
   }
 }
+
+.responsive-settings-surface();
 </style>

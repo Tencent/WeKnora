@@ -2809,6 +2809,74 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 // 响应式布局
+@media (max-width: 768px) {
+  .kb-list-container {
+    flex-direction: column;
+  }
+
+  .kb-list-content {
+    padding: 14px 0 0 14px;
+  }
+
+  .header {
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 14px;
+    margin-bottom: 12px;
+
+    h2 {
+      font-size: 21px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .kb-list-main {
+    padding-right: 14px;
+  }
+
+  .kb-card-wrap {
+    gap: 10px;
+  }
+
+  .kb-card {
+    min-width: 0;
+  }
+
+  .card-bottom {
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .warning-banner,
+  .upload-progress-item {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .kb-list-content {
+    padding-left: 10px;
+  }
+
+  .header {
+    padding-right: 10px;
+  }
+
+  .kb-list-main {
+    padding-right: 10px;
+  }
+
+  .feature-badges {
+    flex-wrap: wrap;
+  }
+}
+
 @media (min-width: 900px) {
   .kb-card-wrap {
     grid-template-columns: repeat(2, 1fr);
@@ -3105,5 +3173,22 @@ const handleUploadFinishedEvent = (event: Event) => {
     font-family: var(--app-font-family);
   }
 
+}
+
+@media (max-width: 768px) {
+  .shared-detail-drawer {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .shared-detail-drawer-header,
+  .shared-detail-drawer-body {
+    padding: 16px;
+  }
+
+  .shared-detail-drawer-footer {
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+  }
 }
 </style>

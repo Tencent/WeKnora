@@ -2457,7 +2457,7 @@ watch(
 
   .t-popup__content {
     padding: 14px 16px !important;
-    min-width: 300px;
+    min-width: min(300px, calc(100vw - 24px));
     max-width: min(392px, calc(100vw - 24px));
     border-radius: 12px !important;
     background: var(--td-bg-color-container) !important;

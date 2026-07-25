@@ -15,8 +15,10 @@ const onChange = (value,e) => {
 </script>
 <style lang="less">
 .chat {
-    width: 800px;
+    width: 100%;
+    max-width: 800px;
     font-size: 20px;
-    margin: 0px auto
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 </style>

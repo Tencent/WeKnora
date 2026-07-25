@@ -12,7 +12,7 @@
           <p class="desc">{{ $t('kbSettings.storage.instanceDesc') }}</p>
         </div>
         <div class="setting-control">
-          <t-select v-model="localID" style="width:100%;min-width:260px" :disabled="!!props.hasFiles" @change="handleChange">
+          <t-select v-model="localID" class="storage-select" :disabled="!!props.hasFiles" @change="handleChange">
             <t-option v-for="backend in backends" :key="backend.id" :value="backend.id" :label="backend.name">
               <span class="select-option">
                 <span>{{ backend.name }}</span>
@@ -64,6 +64,82 @@ onMounted(load)
 </script>
 
 <style scoped lang="less">
-.section-header{margin-bottom:20px}.section-header h2{font-size:20px;margin:0 0 6px}.section-description,.desc,.option-hint{color:var(--td-text-color-secondary)}
-.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:12px;margin:8px 0}.change-warning{color:var(--td-warning-color)}.go-settings{font-size:13px;color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
+.section-header {
+  margin-bottom: 20px;
+}
+
+.section-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.section-description,
+.desc,
+.option-hint {
+  color: var(--td-text-color-secondary);
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.setting-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-control {
+  width: 45%;
+  min-width: 300px;
+}
+
+.storage-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-hint {
+  margin: 8px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.change-warning {
+  color: var(--td-warning-color);
+}
+
+.go-settings {
+  color: var(--td-brand-color);
+  font-size: 13px;
+}
+
+.loading-inline {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .select-option {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+}
 </style>

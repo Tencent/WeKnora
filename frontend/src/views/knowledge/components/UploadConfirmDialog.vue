@@ -1370,4 +1370,82 @@ const handleConfirm = () => {
 .modal-leave-to {
   opacity: 0;
 }
+
+@media (max-width: 768px) {
+  .upload-confirm-overlay {
+    align-items: stretch;
+  }
+
+  .upload-confirm-modal {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .upload-confirm-container {
+    flex-direction: column;
+  }
+
+  .files-panel {
+    width: 100%;
+    max-height: 168px;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .files-panel-header {
+    padding: 12px 52px 8px 14px;
+  }
+
+  .files-list {
+    display: flex;
+    gap: 6px;
+    padding: 4px 12px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .file-item {
+    flex: 0 0 min(220px, 72vw);
+    background: var(--td-bg-color-container);
+  }
+
+  .manual-source-panel {
+    padding-inline: 14px;
+  }
+
+  .main-header {
+    padding: 14px 52px 0 16px;
+  }
+
+  .main-body {
+    padding: 14px 16px 18px;
+  }
+
+  .overview-row {
+    grid-template-columns: minmax(86px, auto) minmax(0, 1fr) 18px;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .modal-footer {
+    flex-wrap: wrap;
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 480px) {
+  .files-panel {
+    max-height: 150px;
+  }
+
+  .main-body {
+    padding-inline: 12px;
+  }
+
+  .overview-row {
+    grid-template-columns: minmax(74px, auto) minmax(0, 1fr) 16px;
+    padding-inline: 10px;
+  }
+}
 </style>

@@ -493,7 +493,7 @@ const getWebSearchDisplayText = (item) => {
 
 <style>
 .refer-to-layer {
-    width: 400px;
+    width: min(400px, calc(100vw - 16px));
     max-width: 500px;
 
     .t-popup__content {

@@ -605,4 +605,20 @@ onMounted(async () => {
     line-height: 1.8;
   }
 }
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .setting-control {
+    width: 100%;
+
+    :deep(.t-input) {
+      width: 100% !important;
+    }
+  }
+}
 </style>

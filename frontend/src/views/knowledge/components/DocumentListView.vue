@@ -733,4 +733,61 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   }
 }
 
+@media (max-width: 768px) {
+  .doc-list-header,
+  .doc-list-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto 40px;
+    padding: 0 8px;
+  }
+
+  .doc-list-header {
+    height: 38px;
+  }
+
+  .doc-list-row {
+    min-height: 64px;
+  }
+
+  .cell {
+    padding-inline: 4px;
+  }
+
+  .cell-tag,
+  .cell-source,
+  .cell-size,
+  .cell-time {
+    display: none;
+  }
+
+  .cell-status {
+    justify-content: flex-end;
+  }
+
+  .row-more-btn {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .doc-list-header,
+  .doc-list-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto 36px;
+    padding-inline: 6px;
+  }
+
+  .row-file-icon-wrap {
+    width: 26px;
+    height: 26px;
+  }
+
+  .row-file-name {
+    font-size: 13px;
+  }
+
+  .cell-status :deep(.t-tag) {
+    max-width: 76px;
+    overflow: hidden;
+  }
+}
+
 </style>

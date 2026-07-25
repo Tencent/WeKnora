@@ -322,4 +322,21 @@ watch(
     flex-shrink: 0;
   }
 }
+
+@media (max-width: 480px) {
+  .invitation-card {
+    flex-direction: column;
+  }
+
+  .invitation-card-actions {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .invitation-list {
+    max-height: calc(100dvh - 220px);
+  }
+}
 </style>

@@ -1236,4 +1236,52 @@ onBeforeUnmount(() => {
 .empty-preview {
   color: var(--td-text-color-placeholder);
 }
+
+@media (max-width: 768px) {
+  .manual-editor-footer-meta,
+  .manual-editor-footer-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .manual-editor-footer-actions {
+    justify-content: flex-end;
+  }
+
+  .kb-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .status-row {
+    flex-wrap: wrap;
+  }
+
+  .editor-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .editor-toolbar__format {
+    width: 100%;
+    padding-bottom: 2px;
+  }
+
+  .editor-toolbar__view {
+    width: 100%;
+    padding: 6px 0 0;
+    border-top: 1px solid var(--td-component-stroke);
+    border-left: 0;
+  }
+
+  .toggle-view-btn {
+    width: 100%;
+  }
+
+  .editor-area {
+    height: max(320px, calc(100dvh - 430px));
+    min-height: 320px;
+  }
+}
 </style>

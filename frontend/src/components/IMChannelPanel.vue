@@ -1470,6 +1470,54 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   text-align: center;
 }
+
+@media (max-width: 480px) {
+  .im-steps {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .im-steps::-webkit-scrollbar {
+    display: none;
+  }
+
+  .im-step {
+    flex: 0 0 auto;
+    min-width: 104px;
+  }
+
+  .setting-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setting-info {
+    width: 100%;
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control,
+  .option-chips {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .option-chips {
+    display: flex;
+  }
+
+  .option-chip {
+    flex: 1 1 auto;
+  }
+
+  .qr-container {
+    width: min(200px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+  }
+}
 </style>
 
 <style lang="less">

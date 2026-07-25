@@ -547,4 +547,66 @@ onBeforeUnmount(() => {
     line-height: 1.4;
   }
 }
+
+@media (max-width: 768px) {
+  .list-space-sidebar,
+  .list-space-sidebar.expanded {
+    width: 100% !important;
+    height: 58px;
+    min-height: 58px;
+    flex: 0 0 58px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .resize-handle {
+    display: none;
+  }
+
+  .icon-strip,
+  .expanded-panel {
+    width: 100%;
+    min-width: 0;
+    height: 58px;
+    padding: 6px 10px;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    border-right: 0;
+    scrollbar-width: none;
+  }
+
+  .icon-strip::-webkit-scrollbar,
+  .expanded-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .icon-item-labeled {
+    width: auto;
+    min-width: 58px;
+    height: 44px;
+    padding: 4px 8px;
+    box-sizing: border-box;
+  }
+
+  .icon-strip-divider,
+  .sidebar-divider,
+  .sidebar-section {
+    display: none;
+  }
+
+  .sidebar-item {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
+
+  .sidebar-item .item-count {
+    margin-left: 8px;
+  }
+}
 </style>

@@ -397,7 +397,7 @@ onMounted(load)
 
 .backend-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 12px;
 
   .backend-card--add {
@@ -747,6 +747,20 @@ onMounted(load)
 
   &.unavailable {
     color: var(--td-error-color);
+  }
+}
+
+@media (max-width: 480px) {
+  .source-options {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .source-option {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
   }
 }
 </style>

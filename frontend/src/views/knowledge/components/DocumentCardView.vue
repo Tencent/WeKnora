@@ -1058,4 +1058,31 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     color: var(--td-text-color-secondary);
   }
 }
+
+@media (max-width: 768px) {
+  .doc-card-list {
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+    gap: 10px;
+  }
+
+  .knowledge-card {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .knowledge-card-hover-popover {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .doc-card-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-card {
+    height: auto;
+    min-height: 136px;
+  }
+}
 </style>

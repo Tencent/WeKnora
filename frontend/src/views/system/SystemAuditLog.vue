@@ -896,6 +896,10 @@ onUnmounted(() => {
 }
 
 .audit-table-shell {
+  &:deep(.t-table) {
+    min-width: 720px;
+  }
+
   &:deep(thead th) {
     position: sticky;
     top: 0;
@@ -909,6 +913,32 @@ onUnmounted(() => {
 
   &:deep(.t-table tbody tr:hover > td) {
     background-color: var(--td-bg-color-container-hover);
+  }
+}
+
+@media (max-width: 768px) {
+  .audit-page-header {
+    flex-direction: column;
+  }
+
+  .audit-scroll-area {
+    max-height: calc(100dvh - 250px);
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .audit-detail-field {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .audit-detail-field dt {
+    white-space: normal;
+  }
+
+  .audit-detail-json {
+    padding: 10px;
   }
 }
 </style>

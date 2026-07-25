@@ -224,7 +224,7 @@
 // Grid layout for cards
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 10px;
   margin-top: 8px;
 }
@@ -310,4 +310,3 @@
   overflow-x: auto;
   line-height: 1.5;
 }
-

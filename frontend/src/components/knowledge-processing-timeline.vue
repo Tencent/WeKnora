@@ -3294,4 +3294,89 @@ const processConfigLines = computed<string[]>(() => {
   color: var(--td-text-color-secondary);
   word-break: break-word;
 }
+
+@media (max-width: 768px) {
+  .kp-head {
+    padding: 12px 14px 9px;
+  }
+
+  .kp-head-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .kp-head-doc-title {
+    flex-basis: calc(100% - 96px);
+  }
+
+  .kp-head-actions {
+    margin-left: 0;
+  }
+
+  .kp-ruler,
+  .kp-cell-bar {
+    display: none;
+  }
+
+  .kp-scroll {
+    overflow-x: hidden;
+  }
+
+  .kp-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    height: 38px;
+    padding: 0 14px;
+  }
+
+  .kp-cell-dur {
+    justify-self: end;
+  }
+
+  .kp-detail-open {
+    height: 60%;
+    min-height: 0;
+  }
+
+  .kp-detail-head {
+    align-items: flex-start;
+    padding: 10px 14px 8px;
+  }
+
+  .kp-detail-title {
+    flex-wrap: wrap;
+  }
+
+  .kp-tabs {
+    padding-inline: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .kp-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .kp-tab {
+    flex: 0 0 auto;
+    padding-inline: 10px;
+  }
+
+  .kp-detail-body {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .kp-kv-row,
+  .kp-breakdown-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .kp-breakdown-dur {
+    text-align: left;
+  }
+}
 </style>

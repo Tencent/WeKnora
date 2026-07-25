@@ -1896,6 +1896,8 @@ watch(addMemberPopupVisible, (visible) => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/assets/responsive-settings-surface.less';
+
 @primary-color: var(--td-brand-color);
 @primary-light: var(--td-brand-color-light);
 @primary-lighter: var(--td-component-stroke);
@@ -3160,6 +3162,8 @@ watch(addMemberPopupVisible, (visible) => {
   padding-top: 12px;
   border-top: 1px solid var(--td-component-stroke);
 }
+
+.responsive-settings-surface();
 </style>
 
 <style lang="less">

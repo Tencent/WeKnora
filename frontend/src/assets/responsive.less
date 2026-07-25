@@ -1,0 +1,131 @@
+:root {
+  --app-compact-header-height: 0px;
+  --app-compact-gutter: 16px;
+}
+
+html,
+body,
+#app {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Teleported TDesign surfaces are outside component-scoped styles. */
+.t-dialog,
+.t-drawer,
+.t-popup,
+.t-popup__content,
+.t-form,
+.t-form__item,
+.t-form__controls,
+.t-form__controls-content {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.t-table,
+.t-table__content {
+  max-width: 100%;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --app-compact-gutter: 12px;
+  }
+
+  .t-dialog__position {
+    padding: 16px;
+    box-sizing: border-box;
+  }
+
+  .t-dialog {
+    max-width: calc(100vw - 32px) !important;
+  }
+
+  .t-drawer__content-wrapper {
+    max-width: min(92vw, 720px) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --app-compact-header-height: 52px;
+    --app-compact-gutter: 12px;
+  }
+
+  body {
+    overscroll-behavior: none;
+  }
+
+  .t-dialog__position {
+    padding: 12px;
+    align-items: center;
+  }
+
+  .t-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px);
+    margin: 0 !important;
+  }
+
+  .t-dialog__body {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .t-dialog__footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+
+  .t-drawer__body {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .t-popup__content {
+    max-width: calc(100vw - 16px) !important;
+    overflow-wrap: anywhere;
+  }
+
+  .t-table__content {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .t-form__item {
+    max-width: 100%;
+  }
+
+  .t-select,
+  .t-input,
+  .t-textarea,
+  .t-date-range-picker {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --app-compact-gutter: 8px;
+  }
+
+  .t-dialog__position {
+    padding: 8px;
+  }
+
+  .t-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 16px);
+  }
+}

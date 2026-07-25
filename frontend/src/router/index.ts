@@ -6,6 +6,7 @@ import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
 const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
+const SettingsRoutePlaceholder = { render: () => null }
 
 function shouldTryAutoSetup() {
   return localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true'
@@ -102,7 +103,10 @@ const router = createRouter({
         {
           path: "settings",
           name: "settings",
-          component: () => import("../views/settings/Settings.vue"),
+          // Platform mounts one global Settings surface so every child route
+          // can open it. Keep this route contentless to avoid rendering a
+          // second teleported modal on top of the global instance.
+          component: SettingsRoutePlaceholder,
           meta: { requiresInit: true, requiresAuth: true }
         },
         {

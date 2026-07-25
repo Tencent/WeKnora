@@ -123,4 +123,22 @@ const { t } = useI18n();
   opacity: 0;
   transform: translateY(6px);
 }
+
+@media (max-width: 480px) {
+  .batch-bar-inner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .batch-bar-left,
+  .batch-bar-actions {
+    width: 100%;
+  }
+
+  .batch-bar-actions {
+    justify-content: flex-end;
+    overflow-x: auto;
+  }
+}
 </style>

@@ -756,7 +756,7 @@ onMounted(loadAll)
 // ---- 引擎卡片布局 ----
 .engine-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 12px;
   margin-top: 24px;
 }

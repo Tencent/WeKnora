@@ -2401,6 +2401,69 @@ defineExpose({
 }
 
 // 响应式布局
+@media (max-width: 768px) {
+  .agent-list-container {
+    flex-direction: column;
+  }
+
+  .agent-list-content {
+    padding: 14px 0 0 14px;
+  }
+
+  .header {
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 14px;
+    margin-bottom: 12px;
+
+    h2 {
+      font-size: 21px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .agent-list-main {
+    padding-right: 14px;
+  }
+
+  .agent-card-wrap {
+    gap: 10px;
+  }
+
+  .agent-card {
+    min-width: 0;
+  }
+
+  .card-bottom {
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .agent-list-content {
+    padding-left: 10px;
+  }
+
+  .header {
+    padding-right: 10px;
+  }
+
+  .agent-list-main {
+    padding-right: 10px;
+  }
+
+  .feature-badges {
+    flex-wrap: wrap;
+  }
+}
+
 @media (min-width: 900px) {
   .agent-card-wrap {
     grid-template-columns: repeat(2, 1fr);
@@ -2649,6 +2712,22 @@ defineExpose({
 
   .shared-detail-drawer {
     transform: translateX(100%);
+  }
+}
+
+@media (max-width: 768px) {
+  .shared-detail-drawer {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .shared-detail-drawer-header,
+  .shared-detail-drawer-body {
+    padding: 16px;
+  }
+
+  .shared-detail-drawer-footer {
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
   }
 }
 </style>

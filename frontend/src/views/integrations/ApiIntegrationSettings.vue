@@ -2383,9 +2383,23 @@ onBeforeUnmount(stopPlayground)
   }
 }
 
-@media (max-width: 780px) {
+@media (max-width: 1023px) {
   .row {
     grid-template-columns: 1fr;
+  }
+
+  .api-key-section__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .api-key-table {
+    min-width: 720px;
+  }
+
+  .desktop-api-control,
+  .secret-control {
+    flex-wrap: wrap;
   }
 
   .mode-radio {
@@ -2409,6 +2423,27 @@ onBeforeUnmount(stopPlayground)
   .playground-entry {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 480px) {
+  .desktop-api-control,
+  .secret-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .desktop-bind-public-control {
+    justify-content: flex-start;
+  }
+
+  .snippet-tabs :deep(.t-tabs__nav-scroll) {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .snippet-tabs :deep(.t-tabs__nav-scroll)::-webkit-scrollbar {
+    display: none;
   }
 }
 

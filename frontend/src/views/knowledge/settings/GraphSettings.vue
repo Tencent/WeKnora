@@ -79,13 +79,13 @@
             </t-button>
             <t-select
               v-model="localGraphExtract.tags"
+              class="graph-tags-select"
               multiple
               :placeholder="t('graphSettings.tagsPlaceholder')"
               clearable
               creatable
               filterable
               @change="handleTagsChange"
-              style="flex: 1; min-width: 400px;"
             />
           </div>
           <div v-if="!modelStatus.llm.available" class="control-tip">
@@ -817,6 +817,73 @@ onMounted(async () => {
 
   .setting-row:not(.vertical) .setting-control {
     align-self: flex-start;
+  }
+}
+
+.graph-tags-select {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-right: 0;
+    justify-content: flex-start;
+  }
+
+  .tags-control-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .graph-tags-select,
+  .gen-tags-btn,
+  .gen-text-btn {
+    width: 100%;
+  }
+
+  .relation-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .relation-item .relation-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .relation-arrow {
+    align-self: center;
+    transform: rotate(90deg);
+  }
+}
+
+@media (max-width: 480px) {
+  .node-item {
+    padding: 12px;
+  }
+
+  .node-header {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .node-header .node-name-input {
+    min-width: calc(100% - 40px);
+  }
+
+  .node-attributes {
+    padding-left: 0;
   }
 }
 </style>

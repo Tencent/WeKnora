@@ -3322,43 +3322,107 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 16px 0 4px;
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
+@media (max-width: 1023px) {
+  .knowledge-layout {
+    margin-right: 8px;
+    padding: 20px 20px 0;
+  }
+
   .answers-input {
-    transform: translateX(-329px);
+    width: 100%;
+    max-width: 960px;
+    min-width: 0;
+    transform: none;
   }
 
   :deep(.t-textarea__inner) {
-    width: 654px !important;
+    width: 100% !important;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 }
 
-@media (max-width: 1045px) {
-  .answers-input {
-    transform: translateX(-250px);
+@media (max-width: 768px) {
+  .knowledge-layout {
+    margin: 0;
+    gap: 12px;
+    padding: 14px 12px 0;
   }
 
-  :deep(.t-textarea__inner) {
-    width: 500px !important;
+  .document-header {
+    gap: 8px;
+
+    .document-header-title {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .document-title-row {
+      min-width: 0;
+      gap: 6px;
+    }
+
+    .document-breadcrumb {
+      min-width: 0;
+      max-width: 100%;
+      font-size: 18px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+    }
+
+    .document-breadcrumb::-webkit-scrollbar {
+      display: none;
+    }
+
+    .document-subtitle {
+      font-size: 13px;
+    }
+  }
+
+  .doc-filter-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+
+    &__filters {
+      gap: 8px;
+    }
+
+    .doc-filter-field {
+      width: 132px;
+
+      &--wide {
+        width: min(260px, calc(100vw - 40px));
+      }
+    }
+  }
+
+  .faq-manager-wrapper {
+    margin: 0;
+    padding: 12px 0 0;
+  }
+
+  .doc-batch-bar-anchor {
+    bottom: 8px;
+    padding: 0 8px;
   }
 }
 
-@media (max-width: 750px) {
-  .answers-input {
-    transform: translateX(-182px);
+@media (max-width: 480px) {
+  .knowledge-layout {
+    padding-inline: 8px;
   }
 
-  :deep(.t-textarea__inner) {
-    width: 340px !important;
-  }
-}
+  .doc-filter-bar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'search'
+      'trailing'
+      'filters';
 
-@media (max-width: 600px) {
-  .answers-input {
-    transform: translateX(-164px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 300px !important;
+    &__trailing {
+      justify-content: flex-end;
+    }
   }
 }
 

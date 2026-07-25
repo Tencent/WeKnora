@@ -2311,6 +2311,65 @@ const handleCancel = () => {
     font-size: 13px;
   }
 }
+
+@media (max-width: 480px) {
+  .source-options {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .source-option {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .model-select-row,
+  .dimension-control,
+  .api-test-section {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .refresh-btn,
+  .dimension-check-btn {
+    width: 100%;
+  }
+
+  .custom-headers-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .custom-header-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+
+    .custom-header-key,
+    .custom-header-value {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .custom-header-key {
+      grid-column: 1;
+      flex-basis: auto;
+    }
+
+    .custom-header-value {
+      grid-column: 1;
+    }
+
+    .custom-header-remove {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      align-self: center;
+    }
+  }
+
+}
 </style>
 
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
@@ -2424,6 +2483,13 @@ const handleCancel = () => {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+  }
+}
+
+@media (max-width: 480px) {
+  .thinking-control-select-popup {
+    min-width: 0;
+    width: calc(100vw - 16px);
   }
 }
 </style>

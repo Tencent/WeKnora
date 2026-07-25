@@ -447,4 +447,34 @@ onUnmounted(() => {
     }
   }
 }
+
+@media (max-width: 768px) {
+  .section-header {
+    margin-bottom: 20px;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .setting-info {
+    max-width: none;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+
+    .info-value {
+      max-width: 100%;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+  }
+}
 </style>

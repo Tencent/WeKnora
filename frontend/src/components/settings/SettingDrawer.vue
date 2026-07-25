@@ -401,6 +401,38 @@ const handleCancel = () => {
   gap: 12px;
   flex-shrink: 0;
 }
+
+@media (max-width: 768px) {
+  .setting-drawer__header {
+    align-items: flex-start;
+  }
+
+  .setting-drawer__subtitle {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .setting-drawer__body {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .setting-drawer__footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .setting-drawer__footer-left,
+  .setting-drawer__footer-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .setting-drawer__footer-right {
+    justify-content: flex-end;
+  }
+}
 </style>
 
 <!--
@@ -472,5 +504,27 @@ const handleCancel = () => {
 
 .t-drawer.setting-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+@media (max-width: 768px) {
+  .setting-drawer {
+    .t-drawer__header {
+      padding: 12px 14px;
+    }
+
+    .t-drawer__body {
+      min-width: 0;
+      padding: 14px;
+      overflow-x: hidden;
+    }
+
+    .t-drawer__footer {
+      padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+    }
+  }
+
+  .setting-drawer-resize-handle {
+    display: none;
+  }
 }
 </style>
