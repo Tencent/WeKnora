@@ -3,6 +3,10 @@ DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS chunk_feedback_weight_logs;
+DROP TABLE IF EXISTS message_feedback_attributions;
+DROP TABLE IF EXISTS message_feedbacks;
+DROP TABLE IF EXISTS message_chunk_references;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS chunks;
 
@@ -196,6 +200,11 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    positive_feedback_count BIGINT NOT NULL DEFAULT 0,
+    negative_feedback_count BIGINT NOT NULL DEFAULT 0,
+    positive_feedback_rate DOUBLE NOT NULL DEFAULT 0,
+    recall_weight DOUBLE NOT NULL DEFAULT 1,
+    feedback_status VARCHAR(32) NOT NULL DEFAULT 'normal',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -204,3 +213,86 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX idx_chunks_feedback_status ON chunks(tenant_id, knowledge_base_id, feedback_status);
+CREATE INDEX idx_chunks_feedback_rate ON chunks(tenant_id, knowledge_base_id, positive_feedback_rate);
+
+CREATE TABLE message_chunk_references (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    request_id VARCHAR(36) NOT NULL DEFAULT '',
+    chunk_tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_message_chunk_ref (message_id, chunk_id),
+    KEY idx_message_chunk_refs_message (tenant_id, message_id),
+    KEY idx_message_chunk_refs_chunk (chunk_tenant_id, chunk_id),
+    KEY idx_message_chunk_refs_kb (chunk_tenant_id, knowledge_base_id),
+    KEY idx_message_chunk_refs_session (tenant_id, session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL,
+    rating SMALLINT NOT NULL,
+    reason_code VARCHAR(64) NOT NULL DEFAULT '',
+    reason_detail TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_message_feedback_actor (tenant_id, message_id, actor_id),
+    KEY idx_message_feedbacks_session (tenant_id, session_id, created_at),
+    KEY idx_message_feedbacks_message (tenant_id, message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_feedback_attributions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    feedback_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    rating SMALLINT NOT NULL,
+    reason_code VARCHAR(64) NOT NULL DEFAULT '',
+    reason_detail TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_feedback_chunk (feedback_id, chunk_id),
+    KEY idx_feedback_attributions_chunk (chunk_tenant_id, chunk_id, rating),
+    KEY idx_feedback_attributions_kb (chunk_tenant_id, knowledge_base_id),
+    KEY idx_feedback_attributions_message (tenant_id, message_id),
+    KEY idx_feedback_attributions_reason (chunk_tenant_id, reason_code),
+    CONSTRAINT fk_feedback_attribution_feedback
+        FOREIGN KEY (feedback_id) REFERENCES message_feedbacks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chunk_feedback_weight_logs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    feedback_id VARCHAR(36) NOT NULL DEFAULT '',
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    trigger_source VARCHAR(32) NOT NULL,
+    trigger_action VARCHAR(32) NOT NULL,
+    old_positive_count BIGINT NOT NULL,
+    new_positive_count BIGINT NOT NULL,
+    old_negative_count BIGINT NOT NULL,
+    new_negative_count BIGINT NOT NULL,
+    old_positive_rate DOUBLE NOT NULL,
+    new_positive_rate DOUBLE NOT NULL,
+    old_recall_weight DOUBLE NOT NULL,
+    new_recall_weight DOUBLE NOT NULL,
+    old_status VARCHAR(32) NOT NULL,
+    new_status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_chunk_feedback_weight_logs_chunk (tenant_id, knowledge_base_id, chunk_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

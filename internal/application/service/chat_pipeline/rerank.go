@@ -437,6 +437,11 @@ func safeTopScore(results []rerank.RankResult) float64 {
 
 // compositeScore calculates the composite score for a search result
 func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float64 {
+	recallWeight := sr.RecallWeight
+	if recallWeight <= 0 {
+		recallWeight = 1
+	}
+	rawBaseScore := baseScore / recallWeight
 	sourceWeight := 1.0
 	switch strings.ToLower(sr.KnowledgeSource) {
 	case "web_search":
@@ -448,8 +453,8 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 	if sr.StartAt >= 0 {
 		positionPrior += searchutil.ClampFloat(1.0-float64(sr.StartAt)/float64(sr.EndAt+1), -0.05, 0.05)
 	}
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
+	composite := 0.6*modelScore + 0.3*rawBaseScore + 0.1*sourceWeight
+	composite *= positionPrior * recallWeight
 	if composite < 0 {
 		composite = 0
 	}

@@ -18,7 +18,7 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 
 	RegisterSessionRoutes(v1, &sessionhandler.Handler{}, &handler.MessageSuggestionHandler{}, g)
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
-	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
+	RegisterMessageRoutes(v1, &handler.MessageHandler{}, &handler.MessageFeedbackHandler{}, g)
 
 	cases := []struct {
 		method string
@@ -32,6 +32,8 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/agent-chat/:session_id"},
 		{http.MethodGet, "/api/v1/messages/:session_id/load"},
 		{http.MethodDelete, "/api/v1/messages/:session_id/:id"},
+		{http.MethodPut, "/api/v1/messages/:session_id/:id/feedback"},
+		{http.MethodDelete, "/api/v1/messages/:session_id/:id/feedback"},
 	}
 
 	for _, tc := range cases {
@@ -119,7 +121,7 @@ func TestMessageHistoryRoutesDeclareMessageHistoryCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
+	RegisterMessageRoutes(v1, &handler.MessageHandler{}, nil, g)
 
 	cases := []struct {
 		method string

@@ -379,7 +379,7 @@ func (t *GrepChunksTool) searchChunks(
 
 	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
-			"chunks.knowledge_base_id, chunks.chunk_type, chunks.metadata, chunks.created_at, "+
+			"chunks.knowledge_base_id, chunks.chunk_type, chunks.metadata, chunks.recall_weight, chunks.created_at, "+
 			"knowledges.title as knowledge_title").
 		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
@@ -904,7 +904,7 @@ func (t *GrepChunksTool) scoreChunks(
 				patternCount = 1
 			}
 		}
-		scored[i].MatchScore = score
+		scored[i].MatchScore = math.Min(score*results[i].EffectiveRecallWeight(), 1.0)
 		scored[i].MatchedPatterns = patternCount
 	}
 	_ = ctx

@@ -4,6 +4,72 @@ import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/
 
 export type KnowledgeBaseActivity = AuditLog;
 
+export interface ChunkFeedbackReasonCount {
+  reason_code: string;
+  count: number;
+}
+
+export interface ChunkFeedbackStats {
+  chunk_id: string;
+  knowledge_id: string;
+  knowledge_title: string;
+  chunk_index: number;
+  content: string;
+  positive_count: number;
+  negative_count: number;
+  positive_rate: number;
+  recall_weight: number;
+  feedback_status: 'normal' | 'pending_optimization';
+  related_session_count: number;
+  reason_counts: ChunkFeedbackReasonCount[];
+}
+
+export interface ChunkFeedbackWeightLog {
+  id: number;
+  trigger_source: 'user_feedback' | 'admin_reset';
+  trigger_action: string;
+  old_positive_count: number;
+  new_positive_count: number;
+  old_negative_count: number;
+  new_negative_count: number;
+  old_positive_rate: number;
+  new_positive_rate: number;
+  old_recall_weight: number;
+  new_recall_weight: number;
+  old_status: string;
+  new_status: string;
+  created_at: string;
+}
+
+export async function listChunkFeedbackStats(
+  kbId: string,
+  params: {
+    page?: number;
+    page_size?: number;
+    min_positive_rate?: number;
+    max_positive_rate?: number;
+    status?: string;
+    keyword?: string;
+    sort_by?: string;
+    sort_order?: 'asc' | 'desc';
+  } = {},
+) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  });
+  const qs = query.toString();
+  return get(`/api/v1/knowledge-bases/${kbId}/chunk-feedback${qs ? `?${qs}` : ''}`);
+}
+
+export function listChunkFeedbackWeightLogs(kbId: string, chunkId: string, limit = 50) {
+  return get(`/api/v1/knowledge-bases/${kbId}/chunk-feedback/${chunkId}/logs?limit=${limit}`);
+}
+
+export function resetChunkFeedback(kbId: string, chunkId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/chunk-feedback/${chunkId}/reset`, {});
+}
+
 export interface ListKnowledgeBaseActivityParams {
   after_id?: number;
   limit?: number;

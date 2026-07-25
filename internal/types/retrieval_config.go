@@ -35,6 +35,18 @@ type RetrievalConfig struct {
 	RRFVectorWeight float64 `json:"rrf_vector_weight,omitempty"`
 	// RRFKeywordWeight is the keyword counterpart. Default: 0.3.
 	RRFKeywordWeight float64 `json:"rrf_keyword_weight,omitempty"`
+
+	// FeedbackPositiveThreshold boosts chunks at or above this positive rate.
+	FeedbackPositiveThreshold float64 `json:"feedback_positive_threshold,omitempty"`
+	// FeedbackNegativeThreshold reduces chunks below this positive rate.
+	FeedbackNegativeThreshold float64 `json:"feedback_negative_threshold,omitempty"`
+	// FeedbackOptimizationThreshold marks chunks below this rate for review.
+	FeedbackOptimizationThreshold float64 `json:"feedback_optimization_threshold,omitempty"`
+	// FeedbackBoostWeight and FeedbackReduceWeight are score multipliers.
+	FeedbackBoostWeight  float64 `json:"feedback_boost_weight,omitempty"`
+	FeedbackReduceWeight float64 `json:"feedback_reduce_weight,omitempty"`
+	// FeedbackMinCount avoids changing a chunk before enough evaluations exist.
+	FeedbackMinCount int `json:"feedback_min_count,omitempty"`
 }
 
 // GetEffectiveEmbeddingTopK returns EmbeddingTopK with a fallback default.
@@ -100,6 +112,47 @@ func (c *RetrievalConfig) GetEffectiveRRFWeights() (vector, keyword float64) {
 		k = 0.3
 	}
 	return v, k
+}
+
+func (c *RetrievalConfig) GetEffectiveFeedbackThresholds() (positive, negative, optimize float64) {
+	positive, negative, optimize = 0.8, 0.5, 0.3
+	if !c.hasFeedbackPolicy() {
+		return
+	}
+	return c.FeedbackPositiveThreshold, c.FeedbackNegativeThreshold, c.FeedbackOptimizationThreshold
+}
+
+func (c *RetrievalConfig) GetEffectiveFeedbackWeights() (boost, reduce float64) {
+	boost, reduce = 1.2, 0.8
+	if !c.hasFeedbackPolicy() {
+		return
+	}
+	if c.FeedbackBoostWeight > 0 {
+		boost = c.FeedbackBoostWeight
+	}
+	if c.FeedbackReduceWeight > 0 {
+		reduce = c.FeedbackReduceWeight
+	}
+	return
+}
+
+func (c *RetrievalConfig) GetEffectiveFeedbackMinCount() int {
+	if c == nil || c.FeedbackMinCount <= 0 {
+		return 1
+	}
+	return c.FeedbackMinCount
+}
+
+func (c *RetrievalConfig) hasFeedbackPolicy() bool {
+	if c == nil {
+		return false
+	}
+	return c.FeedbackPositiveThreshold != 0 ||
+		c.FeedbackNegativeThreshold != 0 ||
+		c.FeedbackOptimizationThreshold != 0 ||
+		c.FeedbackBoostWeight != 0 ||
+		c.FeedbackReduceWeight != 0 ||
+		c.FeedbackMinCount != 0
 }
 
 // Value implements the driver.Valuer interface for database serialization

@@ -104,6 +104,68 @@
           @change="handleParamChange"
         />
       </div>
+
+      <div class="setting-divider">
+        <h3>{{ t('chunkFeedback.config.title') }}</h3>
+        <p>{{ t('chunkFeedback.config.description') }}</p>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.positiveThreshold') }}</span>
+          <span class="value-display">{{ formatPercent(localConfig.feedback_positive_threshold) }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_positive_threshold"
+          :min="Math.max(0.5, localConfig.feedback_negative_threshold)" :max="1" :step="0.05"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.negativeThreshold') }}</span>
+          <span class="value-display">{{ formatPercent(localConfig.feedback_negative_threshold) }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_negative_threshold"
+          :min="0.05" :max="localConfig.feedback_positive_threshold" :step="0.05"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.optimizationThreshold') }}</span>
+          <span class="value-display">{{ formatPercent(localConfig.feedback_optimization_threshold) }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_optimization_threshold"
+          :min="0.05" :max="localConfig.feedback_negative_threshold" :step="0.05"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.boostWeight') }}</span>
+          <span class="value-display">×{{ localConfig.feedback_boost_weight.toFixed(2) }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_boost_weight" :min="1" :max="2" :step="0.05"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.reduceWeight') }}</span>
+          <span class="value-display">×{{ localConfig.feedback_reduce_weight.toFixed(2) }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_reduce_weight" :min="0.1" :max="1" :step="0.05"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('chunkFeedback.config.minCount') }}</span>
+          <span class="value-display">{{ localConfig.feedback_min_count }}</span>
+        </div>
+        <t-slider v-model="localConfig.feedback_min_count" :min="1" :max="50" :step="1"
+          :disabled="!canEdit" @change="handleParamChange" />
+      </div>
     </div>
   </div>
 </template>
@@ -134,6 +196,12 @@ const defaultConfig: RetrievalConfig = {
   rerank_top_k: 10,
   rerank_threshold: 0.2,
   rerank_model_id: '',
+  feedback_positive_threshold: 0.8,
+  feedback_negative_threshold: 0.5,
+  feedback_optimization_threshold: 0.3,
+  feedback_boost_weight: 1.2,
+  feedback_reduce_weight: 0.8,
+  feedback_min_count: 1,
 }
 
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
@@ -152,6 +220,12 @@ const loadConfig = async () => {
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
+        feedback_positive_threshold: cfg.feedback_positive_threshold || defaultConfig.feedback_positive_threshold,
+        feedback_negative_threshold: cfg.feedback_negative_threshold || defaultConfig.feedback_negative_threshold,
+        feedback_optimization_threshold: cfg.feedback_optimization_threshold || defaultConfig.feedback_optimization_threshold,
+        feedback_boost_weight: cfg.feedback_boost_weight || defaultConfig.feedback_boost_weight,
+        feedback_reduce_weight: cfg.feedback_reduce_weight || defaultConfig.feedback_reduce_weight,
+        feedback_min_count: cfg.feedback_min_count || defaultConfig.feedback_min_count,
       })
       initialConfig = { ...localConfig }
     }
@@ -193,6 +267,7 @@ const debouncedSave = () => {
 }
 
 const handleParamChange = () => debouncedSave()
+const formatPercent = (value: number) => `${Math.round(value * 100)}%`
 const handleModelChange = (modelId: string) => {
   localConfig.rerank_model_id = modelId
   debouncedSave()
@@ -239,6 +314,24 @@ onMounted(async () => {
 
   &:last-child {
     border-bottom: none;
+  }
+}
+
+.setting-divider {
+  padding: 24px 0 8px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  h3 {
+    margin: 0 0 6px;
+    color: var(--td-text-color-primary);
+    font-size: 16px;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.5;
   }
 }
 

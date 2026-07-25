@@ -154,6 +154,18 @@ type Chunk struct {
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	// PositiveFeedbackCount and NegativeFeedbackCount are materialized from
+	// per-message feedback attributions for fast retrieval and reporting.
+	PositiveFeedbackCount int64 `json:"positive_feedback_count" gorm:"not null;default:0"`
+	NegativeFeedbackCount int64 `json:"negative_feedback_count" gorm:"not null;default:0"`
+	// PositiveFeedbackRate is likes / (likes + dislikes). Unrated chunks keep
+	// zero counts and a neutral recall weight.
+	PositiveFeedbackRate float64 `json:"positive_feedback_rate" gorm:"not null;default:0"`
+	// RecallWeight is a multiplier applied after retrieval and reranking.
+	RecallWeight float64 `json:"recall_weight" gorm:"not null;default:1"`
+	// FeedbackStatus marks chunks whose rating falls below the configured
+	// optimization threshold.
+	FeedbackStatus string `json:"feedback_status" gorm:"type:varchar(32);not null;default:'normal';index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time
@@ -183,6 +195,15 @@ func (c *Chunk) EmbeddingContent() string {
 		return body
 	}
 	return c.ContextHeader + "\n\n" + body
+}
+
+// EffectiveRecallWeight keeps legacy/in-memory chunks neutral when the field
+// was not loaded or predates the feedback migration.
+func (c *Chunk) EffectiveRecallWeight() float64 {
+	if c == nil || c.RecallWeight <= 0 {
+		return 1
+	}
+	return c.RecallWeight
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.
