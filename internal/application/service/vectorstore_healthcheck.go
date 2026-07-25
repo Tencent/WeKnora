@@ -15,7 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
+	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris/MySQL connection tests
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for database/sql
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
@@ -48,6 +48,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.MySQLRetrieverEngineType:
+		return testMySQLConnection(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -313,6 +315,48 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	}
 	if i := strings.Index(version, "Doris-"); i >= 0 {
 		return strings.TrimSpace(version[i+len("Doris-"):]), nil
+	}
+	return version, nil
+}
+
+func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	if config.Addr == "" {
+		return "", errors.NewBadRequestError("failed to create mysql connection: addr is required")
+	}
+
+	database := config.Database
+	if database == "" {
+		database = "information_schema"
+	}
+
+	cfg := mysql.NewConfig()
+	cfg.User = config.Username
+	cfg.Passwd = config.Password
+	cfg.Net = "tcp"
+	cfg.Addr = config.Addr
+	cfg.DBName = database
+	cfg.Timeout = 5 * time.Second
+	cfg.ParseTime = true
+	cfg.Params = map[string]string{"charset": "utf8mb4"}
+
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
+	}
+	defer db.Close()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "MySQL connection test failed: %v", err)
+		return "", errors.NewBadRequestError("failed to connect to mysql: connection refused or authentication failed")
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx, "SELECT VERSION()").Scan(&version); err != nil {
+		logger.Warnf(ctx, "MySQL version detection failed: %v", err)
+		return "", nil
 	}
 	return version, nil
 }

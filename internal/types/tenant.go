@@ -54,6 +54,10 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: OpenSearchRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: OpenSearchRetrieverEngineType},
 	},
+	"mysql": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MySQLRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MySQLRetrieverEngineType},
+	},
 }
 
 // GetRetrieverEngineMapping returns the retriever engine mapping

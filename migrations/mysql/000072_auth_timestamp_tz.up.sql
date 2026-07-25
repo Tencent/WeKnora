@@ -1,0 +1,2 @@
+-- MySQL DATETIME values are read and written by the application with loc=UTC.
+-- PostgreSQL needs a timestamptz promotion here; MySQL keeps the existing DATETIME columns.

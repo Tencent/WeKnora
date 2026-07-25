@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -39,6 +41,7 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
@@ -616,6 +619,43 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "mysql":
+		dbPort := os.Getenv("DB_PORT")
+		if dbPort == "" {
+			dbPort = "3306"
+		}
+		hostPort := net.JoinHostPort(os.Getenv("DB_HOST"), dbPort)
+
+		gormCfg := gomysql.NewConfig()
+		gormCfg.User = os.Getenv("DB_USER")
+		gormCfg.Passwd = os.Getenv("DB_PASSWORD")
+		gormCfg.Net = "tcp"
+		gormCfg.Addr = hostPort
+		gormCfg.DBName = os.Getenv("DB_NAME")
+		gormCfg.ParseTime = true
+		gormCfg.Loc = time.UTC
+		gormCfg.Params = map[string]string{"charset": "utf8mb4"}
+		dialector = gormmysql.Open(gormCfg.FormatDSN())
+
+		migrateQuery := url.Values{}
+		migrateQuery.Set("charset", "utf8mb4")
+		migrateQuery.Set("loc", "UTC")
+		migrateQuery.Set("multiStatements", "true")
+		migrateQuery.Set("parseTime", "true")
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s@tcp(%s)/%s?%s",
+			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+			hostPort,
+			url.PathEscape(os.Getenv("DB_NAME")),
+			migrateQuery.Encode(),
+		)
+
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_HOST"),
+			dbPort,
+			os.Getenv("DB_NAME"),
+		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -650,9 +690,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "mysql" && name != "sqlite" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, mysql, or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
@@ -723,6 +763,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	return db, nil
 }
 
+func buildMySQLRetrieverDSN(host string, port int, username, password, database string) string {
+	cfg := gomysql.NewConfig()
+	cfg.User = username
+	cfg.Passwd = password
+	cfg.Net = "tcp"
+	cfg.Addr = fmt.Sprintf("%s:%d", host, port)
+	cfg.DBName = database
+	cfg.ParseTime = true
+	cfg.Loc = time.Local
+	cfg.InterpolateParams = true
+	cfg.Params = map[string]string{
+		"charset": "utf8mb4",
+	}
+	return cfg.FormatDSN()
+}
+
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
 // knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
 // This runs once after SQL migrations to bind historical KBs to their real storage provider.
@@ -733,9 +789,17 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
+	providerPredicate := "json_extract(storage_provider_config, '$.provider') = ?"
+	if db.Dialector.Name() == "postgres" {
+		providerPredicate = "storage_provider_config->>'provider' = ?"
+	} else if db.Dialector.Name() == "mysql" {
+		providerPredicate = "JSON_UNQUOTE(JSON_EXTRACT(storage_provider_config, '$.provider')) = ?"
+	}
+
 	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND `+providerPredicate,
 		fmt.Sprintf(`{"provider":"%s"}`, storageType),
+		"__pending_env__",
 	)
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
@@ -1042,6 +1106,9 @@ func initRetrieveEngineRegistry(
 	auditSink := newAuditSinkAdapter(auditSvc)
 
 	if slices.Contains(retrieveDriver, "postgres") {
+		if db.Dialector.Name() != "postgres" {
+			return nil, fmt.Errorf("RETRIEVE_DRIVER=postgres requires DB_DRIVER=postgres; configure an external vector store when DB_DRIVER=%s", db.Dialector.Name())
+		}
 		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
 		if err := registry.Register(
 			retriever.NewKVHybridRetrieveEngine(postgresRepo, types.PostgresRetrieverEngineType),
@@ -1052,6 +1119,9 @@ func initRetrieveEngineRegistry(
 		}
 	}
 	if slices.Contains(retrieveDriver, "sqlite") {
+		if db.Dialector.Name() != "sqlite" {
+			return nil, fmt.Errorf("RETRIEVE_DRIVER=sqlite requires DB_DRIVER=sqlite; configure an external vector store when DB_DRIVER=%s", db.Dialector.Name())
+		}
 		sqliteRepo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
 		if err := registry.Register(
 			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType),
@@ -1299,6 +1369,51 @@ func initRetrieveEngineRegistry(
 				log.Errorf("Register doris retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "mysql") {
+		mysqlHost := os.Getenv("MYSQL_HOST")
+		if mysqlHost == "" {
+			mysqlHost = "localhost"
+		}
+		mysqlPort := 3306
+		if portStr := os.Getenv("MYSQL_PORT"); portStr != "" {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				mysqlPort = port
+			}
+		}
+		mysqlUsername := os.Getenv("MYSQL_USERNAME")
+		if mysqlUsername == "" {
+			mysqlUsername = "root"
+		}
+		mysqlPassword := os.Getenv("MYSQL_PASSWORD")
+		mysqlDatabase := os.Getenv("MYSQL_DATABASE")
+		if mysqlDatabase == "" {
+			mysqlDatabase = "weknora"
+		}
+
+		dsn := buildMySQLRetrieverDSN(mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase)
+		mysqlDB, err := sql.Open("mysql", dsn)
+		if err != nil {
+			log.Errorf("Create mysql client failed: %v", err)
+		} else {
+			mysqlDB.SetMaxOpenConns(20)
+			mysqlDB.SetMaxIdleConns(5)
+			mysqlDB.SetConnMaxLifetime(time.Hour)
+
+			mysqlRepository := mysqlRepo.NewMysqlRetrieveEngineRepository(
+				mysqlDB, mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase,
+				&types.IndexConfig{CollectionPrefix: os.Getenv("MYSQL_TABLE_PREFIX")},
+			)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					mysqlRepository, types.MySQLRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register mysql retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register mysql retrieve engine success: %s:%d db=%s", mysqlHost, mysqlPort, mysqlDatabase)
 			}
 		}
 	}

@@ -1,0 +1,1 @@
+-- No-op for MySQL. The matching up migration intentionally leaves DATETIME columns unchanged.

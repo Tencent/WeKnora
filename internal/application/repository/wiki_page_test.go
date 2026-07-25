@@ -286,9 +286,34 @@ func TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived(t *testing.T) 
 	assert.Equal(t, "entity/beta", entries[1].Slug)
 }
 
+// TestSearch_SQLiteUsesDialectCompatibleSearch protects non-PostgreSQL wiki search.
+func TestSearch_SQLiteUsesDialectCompatibleSearch(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	kbID := uuid.New().String()
+
+	titleHit := makeWikiPage(kbID, "entity/title-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "Alpha in title"
+	titleHit.Content = "body"
+	contentHit := makeWikiPage(kbID, "entity/content-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "Beta"
+	contentHit.Content = "Alpha in content"
+	archived := makeWikiPage(kbID, "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "Alpha archived"
+	for _, page := range []*types.WikiPage{contentHit, archived, titleHit} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	got, err := repo.Search(ctx, kbID, "alpha", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, titleHit.ID, got[0].ID)
+	assert.Equal(t, contentHit.ID, got[1].ID)
+}
+
 // TestListByTypeLight_Pagination walks the type list using offsets and
-// asserts the count stays stable regardless of where in the list we
-// are — the index handler uses total to render "showing N of M".
+// asserts the count stays stable regardless of where in the list we are.
 func TestListByTypeLight_Pagination(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)

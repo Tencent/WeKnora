@@ -94,6 +94,7 @@ func TestIsKnownEngineType(t *testing.T) {
 		types.InfinityRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
 		types.DorisRetrieverEngineType,
+		types.MySQLRetrieverEngineType,
 	}
 	for _, k := range known {
 		if !isKnownEngineType(k) {

@@ -48,6 +48,17 @@ serviceAccount:
   automountServiceAccountToken: false
 
 # -----------------------------------------------------------------------------
+# Database
+# -----------------------------------------------------------------------------
+database:
+  # -- Main database driver: postgres or mysql
+  driver: postgres
+  # -- Main database host
+  host: postgres
+  # -- Main database port
+  port: "5432"
+
+# -----------------------------------------------------------------------------
 # App (Backend API Server)
 # -----------------------------------------------------------------------------
 app:

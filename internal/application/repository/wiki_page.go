@@ -31,17 +31,17 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+	if isSQLite(r.db) {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
+	if isMySQL(r.db) {
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
-	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return "(in_links IS NULL OR " + jsonArrayLengthExpr(r.db, "in_links") + " = 0)"
 }
 
 // Create inserts a new wiki page record
@@ -319,12 +319,22 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		like := "%" + escapeLikePattern(req.Query) + "%"
+		if isPostgres(r.db) {
+			// Keep PostgreSQL full-text search while making aliases case-insensitive.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				like,
+			)
+		} else {
+			query = query.Where(
+				"("+caseInsensitiveLikeCondition(r.db, "title")+" OR "+
+					caseInsensitiveLikeCondition(r.db, "content")+" OR "+
+					caseInsensitiveLikeCondition(r.db, jsonTextCastExpr(r.db, "aliases"))+")",
+				like, like, like,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -340,8 +350,10 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+			if isPostgres(r.db) {
 				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
+			} else if isMySQL(r.db) {
+				query = query.Where("CAST(category_path AS CHAR) = ?", string(encoded))
 			} else {
 				query = query.Where("category_path = ?", string(encoded))
 			}
@@ -488,9 +500,9 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+sourceRefsContainsClause(r.db)+" OR "+sourceRefsTextLikeClause(r.db)+")",
 			kbID,
-			string(needle),
+			sourceRefsContainsArg(r.db, sourceKnowledgeID, string(needle)),
 			likePattern,
 		).
 		Find(&pages).Error; err != nil {
@@ -526,9 +538,9 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+sourceRefsContainsClause(r.db)+" OR "+sourceRefsTextLikeClause(r.db)+")",
 			kbID,
-			string(needle),
+			sourceRefsContainsArg(r.db, sourceKnowledgeID, string(needle)),
 			likePattern,
 		).
 		Pluck("slug", &slugs).Error; err != nil {
@@ -827,8 +839,8 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
+		clauses = append(clauses, sourceRefsContainsClause(r.db))
+		args = append(args, sourceRefsContainsArg(r.db, kid, string(needle)))
 
 		prefix, err := json.Marshal(kid + "|")
 		if err != nil {
@@ -838,7 +850,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		clauses = append(clauses, sourceRefsTextLikeClause(r.db))
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {
@@ -1135,8 +1147,28 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+func wikiSearchCondition(db *gorm.DB, column string) string {
+	switch dialectName(db) {
+	case "postgres":
+		return column + " ~* ?"
+	case "mysql":
+		return "REGEXP_LIKE(" + column + ", ?, 'i')"
+	default:
+		return caseInsensitiveLikeCondition(db, column)
+	}
+}
+
+func wikiSearchArg(db *gorm.DB, query string) string {
+	switch dialectName(db) {
+	case "postgres", "mysql":
+		return query
+	default:
+		return "%" + escapeLikePattern(query) + "%"
+	}
+}
+
+// Search performs case-insensitive search on wiki pages within a knowledge base.
+// PostgreSQL and MySQL use their native regex operators; SQLite falls back to LIKE.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -1158,22 +1190,29 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	matchArg := wikiSearchArg(r.db, query)
+
 	// CASE expression is evaluated per-row during SELECT; we order by the
 	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
+	// times with the same search term to avoid coupling to GORM's positional
 	// arg rewriting quirks.
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN " + wikiSearchCondition(r.db, "title") + " THEN 4 " +
+		"WHEN " + wikiSearchCondition(r.db, "slug") + " THEN 3 " +
+		"WHEN " + wikiSearchCondition(r.db, "summary") + " THEN 2 " +
+		"WHEN " + wikiSearchCondition(r.db, "content") + " THEN 1 " +
 		"ELSE 0 END AS match_rank"
+
+	whereExpr := "knowledge_base_id = ? AND (" +
+		wikiSearchCondition(r.db, "title") + " OR " +
+		wikiSearchCondition(r.db, "content") + " OR " +
+		wikiSearchCondition(r.db, "summary") + " OR " +
+		wikiSearchCondition(r.db, "slug") + ")"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, matchArg, matchArg, matchArg, matchArg).
+		Where(whereExpr, kbID, matchArg, matchArg, matchArg, matchArg).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).

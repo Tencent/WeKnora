@@ -1,0 +1,41 @@
+services:
+  app:
+    environment:
+      - DB_DRIVER=${DB_DRIVER:-mysql}
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-mysql}
+    depends_on:
+      redis:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      docreader:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    container_name: WeKnora-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --ngram-token-size=2
+    environment:
+      - MYSQL_DATABASE=${DB_NAME:-WeKnora}
+      - MYSQL_USER=${DB_USER:-weknora}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-weknora123!@#}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root123!@#}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
