@@ -53,6 +53,7 @@ type AgentEngine struct {
 	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
 	resourceRefs         *llmresource.Registry     // request-local aliases for durable resource references
 	sourceRefs           *llmreference.Registry    // request-local chunk/document/web aliases and citations
+	webResearch          *webResearchBudget        // request-local web search/fetch budget and loop guard
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -89,6 +90,7 @@ func NewAgentEngine(
 		tokenEstimator:       tokenEst,
 		resourceRefs:         llmresource.NewRegistry(),
 		sourceRefs:           llmreference.NewRegistry(config.CitationsEnabled()),
+		webResearch:          newWebResearchBudget(config),
 	}
 
 	// Initialize memory consolidator if context window management is configured
@@ -515,6 +517,18 @@ func (e *AgentEngine) runReActIteration(
 		}, retErr)
 	}()
 
+	availableTools := tools
+	if finalize, reason, injectDirective := e.webResearch.finalizationState(); finalize {
+		availableTools = nil
+		if injectDirective {
+			*messagesPtr = append(*messagesPtr, chat.Message{
+				Role:    "user",
+				Content: webResearchFinalizationInstruction(reason),
+			})
+			logger.Infof(ctx, "[Agent][Round-%d] Web research stopped (%s); forcing final answer", round, reason)
+		}
+	}
+
 	// Context window management: estimate current token count using
 	// the API-reported usage from the previous round plus a BPE delta
 	// for newly appended messages (assistant reply + tool results).
@@ -526,18 +540,18 @@ func (e *AgentEngine) runReActIteration(
 	}
 
 	logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
-		round, e.config.MaxIterations, len(*messagesPtr), len(tools), currentTokens)
+		round, e.config.MaxIterations, len(*messagesPtr), len(availableTools), currentTokens)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,
 		"message_count":  len(*messagesPtr),
-		"pending_tools":  len(tools),
+		"pending_tools":  len(availableTools),
 		"max_iterations": e.config.MaxIterations,
 	})
 
 	// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
 	e.lastSentMsgCount = len(*messagesPtr)
-	resp, err := e.callLLMWithRetry(ctx, *messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+	resp, err := e.callLLMWithRetry(ctx, *messagesPtr, availableTools, state, query, state.CurrentRound, sessionID)
 	if err != nil {
 		retErr = err
 		return iterOutcomeNext, err

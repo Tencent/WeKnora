@@ -250,11 +250,112 @@ func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 		},
 	})
 	require.Contains(t, output, `<page id="w1" title="Example">`)
+	require.Contains(t, output, `<evidence type="search_summary" verified="false" />`)
 	require.NotContains(t, output, "https://example.com/a")
 	require.Equal(t,
 		`<web url="https://example.com/a" title="Example" />`,
 		registry.ExpandText(`<ref id="w1"/>`),
 	)
+}
+
+func TestModelOutputWebSearchRetainsContentOnlyEvidence(t *testing.T) {
+	registry := NewRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_search_results",
+			"results": []map[string]interface{}{
+				{
+					"title":   "Content-only provider",
+					"url":     "https://example.com/content",
+					"content": "search evidence from provider content",
+				},
+			},
+		},
+	})
+
+	require.Contains(t, output, `<content>search evidence from provider content</content>`)
+	require.Contains(t, output, `<evidence type="search_summary" verified="false" />`)
+}
+
+func TestModelOutputWebFetchPreservesPartialFailureStatus(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterWeb("https://example.com/verified", "Verified")
+	registry.RegisterWeb("https://example.com/forbidden", "Forbidden")
+
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_fetch_results",
+			"results": []map[string]interface{}{
+				{
+					"url":         "https://example.com/verified",
+					"status":      "success",
+					"raw_content": "verified page content",
+				},
+				{
+					"url":           "https://example.com/forbidden",
+					"status":        "failed",
+					"retryable":     false,
+					"error_code":    "http_403",
+					"error_message": "access denied",
+				},
+			},
+		},
+	})
+
+	require.Contains(t, output, `<page id="w1" status="success" view="full">`)
+	require.Contains(t, output, "verified page content")
+	require.Contains(t, output, `<page id="w2" status="failed" retryable="false" error_code="http_403">`)
+	require.Contains(t, output, `<error>access denied</error>`)
+	require.Contains(t, output, "failed URLs do not invalidate successful evidence")
+	require.NotContains(t, output, "https://example.com")
+}
+
+func TestModelOutputWebFetchAllFailuresIncludeSearchFallback(t *testing.T) {
+	registry := NewRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_fetch_results",
+			"results": []map[string]interface{}{
+				{
+					"url":           "https://example.com/dns",
+					"status":        "failed",
+					"retryable":     true,
+					"error_code":    "dns_failed",
+					"error_message": "DNS lookup failed",
+				},
+			},
+		},
+	})
+
+	require.Contains(t, output, `status="failed" retryable="true" error_code="dns_failed"`)
+	require.Contains(t, output, "Stop expanding web searches")
+	require.Contains(t, output, "page content was not verified")
+}
+
+func TestModelOutputWebFetchKeepsContentWhenSummaryFails(t *testing.T) {
+	registry := NewRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_fetch_results",
+			"results": []map[string]interface{}{
+				{
+					"url":                   "https://example.com/specs",
+					"status":                "success",
+					"summary_status":        "failed",
+					"summary_error_code":    "summary_failed",
+					"summary_error_message": "model unavailable",
+					"raw_content":           "official specifications",
+				},
+			},
+		},
+	})
+
+	require.Contains(t, output, `<summary_error code="summary_failed">model unavailable</summary_error>`)
+	require.Contains(t, output, `<content>official specifications</content>`)
 }
 
 func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
