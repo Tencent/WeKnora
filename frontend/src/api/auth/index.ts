@@ -28,14 +28,13 @@ export interface LoginResponse {
     id: number
     name: string
     description: string
-    api_key: string
     status: string
     business: string
     storage_quota: number
     storage_used: number
     created_at: string
     updated_at: string
-  }
+  } | null
   // active_tenant mirrors `tenant` for endpoints that distinguish home
   // tenant from current tenant (e.g. /auth/register-by-invite). Only
   // one of `tenant` / `active_tenant` is populated by any given endpoint.
@@ -43,14 +42,14 @@ export interface LoginResponse {
     id: number
     name: string
     description?: string
-    api_key?: string
     status?: string
     business?: string
     storage_quota?: number
     storage_used?: number
     created_at?: string
     updated_at?: string
-  }
+  } | null
+  memberships?: MembershipInfo[]
   token?: string
   refresh_token?: string
 }
@@ -88,7 +87,6 @@ export interface RegisterResponse {
     tenant: {
       id: string
       name: string
-      api_key: string
     }
   }
 }
@@ -97,7 +95,6 @@ export interface RegisterResponse {
 // 新加 key 时记得：后端 service.UpdateUserPreferences 也要在 merge 分支里
 // 处理；前端调用方按需读 / 默认值降级。
 export interface UserPreferences {
-  enable_memory?: boolean
   // last_active_tenant_id 持久化「刷新 / 换设备 / 重新登录后回到上次的空间」
   // 偏好；后端在 Login / RefreshToken 时校验 membership 有效后才会沿用，
   // 否则回退到 home 并清掉这个字段。传 0 给 PATCH 表示「清除偏好」。
@@ -140,10 +137,11 @@ export function userInfoFromApi(
   u: any,
   fallbackTenantId?: string | number | null,
 ): UserInfo {
-  const tid =
+  const rawTenantId =
     u?.tenant_id !== undefined && u?.tenant_id !== null && u.tenant_id !== ''
       ? u.tenant_id
       : fallbackTenantId ?? ''
+  const tid = Number(rawTenantId) > 0 ? rawTenantId : ''
   return {
     id: u?.id || '',
     username: u?.username || '',
@@ -158,12 +156,11 @@ export function userInfoFromApi(
   }
 }
 
-// 租户信息接口
+// 空间信息接口
 export interface TenantInfo {
   id: string
   name: string
   description?: string
-  api_key: string
   status?: string
   business?: string
   owner_id: string
@@ -290,7 +287,7 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
 }
 
 /**
- * Lite 版自动初始化（创建默认用户/租户 + 签发令牌）
+ * Lite 版自动初始化（创建默认用户/空间 + 签发令牌）
  */
 export async function autoSetup(): Promise<LoginResponse> {
   try {
@@ -320,10 +317,14 @@ export interface MembershipInfo {
 /**
  * 获取当前用户信息
  */
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }> {
+export interface AuthCapabilities {
+  can_create_tenant: boolean
+}
+
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }
   } catch (error: any) {
     return {
       success: false,
@@ -351,7 +352,7 @@ export async function updateMyPreferences(
 }
 
 /**
- * 获取当前租户信息
+ * 获取当前空间信息
  */
 export async function getCurrentTenant(): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
   try {

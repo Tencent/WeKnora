@@ -39,7 +39,7 @@ events through verbatim:
 - Accumulate `response_type:"answer"` `content` pieces for the final answer.
 - `knowledge_references` carry the grounding chunks (source attribution).
 - **Keep `init.session_id`** to continue the chat (`--session`). The
-  `assistant_message_id` needed for `session stop` / `session continue-stream`
+  `assistant_message_id` needed for `session stop` / `session resume`
   rides on the SDK's `agent_query` frame, not on `init` — scan for it.
 - On failure mid-stream you get `response_type:"error"`; a transport/HTTP error
   surfaces as the normal error envelope on stderr with a typed code.
@@ -49,7 +49,7 @@ events through verbatim:
 - **Stop server-side generation:** `weknora session stop <session-id> --message
   <message-id>`. Ctrl-C only closes your local connection — the server keeps
   generating (and billing) until told to stop.
-- **Re-attach after a dropped connection:** `weknora session continue-stream
+- **Re-attach after a dropped connection:** `weknora session resume
   <session-id> --message <message-id>`. The server replays the event log from
   index 0 then tails new events, so **dedupe by message_id** if you already
   consumed some events. Buffer TTL is ~1h (redis) or process-lifetime (memory).

@@ -78,16 +78,11 @@ func (h *Handler) CancelMessageFeedback(c *gin.Context) {
 	})
 }
 
-func sessionIDParam(c *gin.Context) string {
-	if sessionID := c.Param("session_id"); sessionID != "" {
-		return secutils.SanitizeForLog(sessionID)
-	}
-	return secutils.SanitizeForLog(c.Param("id"))
-}
-
 func messageFeedbackError(err error) *errors.AppError {
 	switch err.Error() {
-	case "invalid feedback action", "feedback can only be submitted for assistant messages":
+	case "invalid feedback action",
+		"feedback can only be submitted for assistant messages",
+		"feedback can only be submitted after the assistant message is completed":
 		return errors.NewBadRequestError(err.Error())
 	default:
 		return errors.NewInternalServerError(err.Error())

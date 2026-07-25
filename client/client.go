@@ -225,13 +225,69 @@ func (c *Client) Raw(ctx context.Context, method, path string, body interface{})
 	return c.doRequest(ctx, method, path, body, nil)
 }
 
+// APIError is a typed non-2xx HTTP response from the WeKnora API. Recover it
+// with errors.As to branch on the HTTP status or the server's structured error
+// code without parsing the Error() string:
+//
+//	var apiErr *client.APIError
+//	if errors.As(err, &apiErr) && apiErr.StatusCode == 404 { ... }
+//
+// Error() intentionally preserves the legacy "HTTP error <status>: <body>"
+// format so existing string-matching consumers keep working unchanged.
+type APIError struct {
+	StatusCode int    // HTTP status (401, 404, 409, 429, 500, …)
+	Body       string // raw response body
+	Code       int    // server's structured error code ({"code":N}); 0 when absent/non-JSON
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, e.Body)
+}
+
+// Server error codes are the values of the {"code":N} field in an error
+// response body, surfaced as APIError.Code. These mirror the generic codes in
+// the server's internal/errors/errors.go so consumers branch on a named
+// constant instead of a magic number. Domain-specific codes (2xxx+) are
+// omitted until a consumer needs to branch on one.
+const (
+	ServerErrBadRequest         = 1000
+	ServerErrUnauthorized       = 1001
+	ServerErrForbidden          = 1002
+	ServerErrNotFound           = 1003
+	ServerErrMethodNotAllowed   = 1004
+	ServerErrConflict           = 1005
+	ServerErrTooManyRequests    = 1006
+	ServerErrInternalServer     = 1007
+	ServerErrServiceUnavailable = 1008
+	ServerErrTimeout            = 1009
+	ServerErrValidation         = 1010
+)
+
+// newAPIError builds an *APIError from a non-2xx response's status and raw body,
+// extracting the server's structured {"code":N} when the body is JSON.
+func newAPIError(status int, body []byte) *APIError {
+	return &APIError{StatusCode: status, Body: string(body), Code: extractServerCode(body)}
+}
+
+// extractServerCode pulls the server's structured error code from a JSON error
+// body ({"code":1003,...}). Returns 0 when the body isn't JSON or carries no code.
+func extractServerCode(body []byte) int {
+	var env struct {
+		Code int `json:"code"`
+	}
+	if json.Unmarshal(body, &env) == nil {
+		return env.Code
+	}
+	return 0
+}
+
 // parseResponse parses an HTTP response
 func parseResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return newAPIError(resp.StatusCode, body)
 	}
 
 	if target == nil {

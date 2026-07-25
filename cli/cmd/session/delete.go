@@ -3,7 +3,6 @@ package sessioncmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -84,7 +83,9 @@ without the user's explicit go-ahead.`,
 			if len(args) == 1 {
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "session", len(args), "session.delete", "weknora session delete "+strings.Join(args, " ")+" -y"); err != nil {
+			batchRetry := append([]string{"weknora", "session", "delete"}, args...)
+			batchRetry = append(batchRetry, "-y")
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "session", len(args), "session.delete", batchRetry); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -115,6 +116,7 @@ without the user's explicit go-ahead.`,
 			"weknora session delete s_a s_b s_c -y",
 			"weknora session delete s_abc -y --format json",
 		},
+		Output: "envelope.data shape depends on the form: a single session id -> {id, deleted:true}; multiple ids -> batch envelope (top-level status success|partial|error, ok=(failures==0), data per-item [{id, ok, error?}], meta.successes/failures — read data[].ok per id).",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
 			"session delete is irreversible; loses the conversation + all messages + tool call history.",
@@ -124,7 +126,7 @@ without the user's explicit go-ahead.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "session", id, "session.delete", "weknora session delete "+id+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "session", id, "session.delete", []string{"weknora", "session", "delete", id, "-y"}); err != nil {
 		return err
 	}
 

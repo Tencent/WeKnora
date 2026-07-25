@@ -77,8 +77,13 @@ func stripImageXMLTags(s string) string {
 	})
 }
 
-// storageSchemeRe matches provider:// URLs used by file storage backends.
-var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)\]>"]+`)
+// storageSchemeRe matches both legacy provider:// URLs and canonical
+// storage://<backend-id>/provider:// URLs.
+var storageSchemeRe = regexp.MustCompile(
+	`\b(?:resource://[0-9A-Za-z_-]+|` +
+		`(?:storage://[0-9A-Za-z_-]+/)?` +
+		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
+)
 
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
@@ -127,7 +132,7 @@ func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileSer
 // incompleteURLSuffixRe matches a provider:// URL that reaches the end of the
 // string — it may continue in the next chunk.
 var incompleteURLSuffixRe = regexp.MustCompile(
-	`\b(?:local|minio|s3|cos|tos|oss)://[^\s)\]>"]*$`,
+	`\b(?:resource|storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
 )
 
 // findIncompleteStorageURL returns the byte offset of a potentially truncated
@@ -197,18 +202,19 @@ func holdbackCutoff(chunk string) int {
 }
 
 // formatIMOutboundAnswer strips thinking/tool blocks and applies IM content cleanup.
-func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
-	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc)
+func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
+	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc, storageResolvers...)
 }
 
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
 //  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
-func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
+func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	resolver := newIMFileServiceResolver(tenant, defaultFileSvc)
+	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...)
+	resolver.ctx = ctx
 	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
@@ -225,20 +231,31 @@ func imLocalStorageBaseDir() string {
 // for the lifetime of one cleanIMContent / outbound message (avoids re-creating SDK clients
 // for every URL in a long answer).
 type imFileServiceResolver struct {
-	tenant     *types.Tenant
-	defaultSvc interfaces.FileService
-	cache      map[string]interfaces.FileService
+	tenant          *types.Tenant
+	defaultSvc      interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	ctx             context.Context
+	cache           map[string]interfaces.FileService
 }
 
-func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService) *imFileServiceResolver {
-	return &imFileServiceResolver{
+func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) *imFileServiceResolver {
+	resolver := &imFileServiceResolver{
 		tenant:     tenant,
 		defaultSvc: defaultSvc,
+		ctx:        context.Background(),
 		cache:      make(map[string]interfaces.FileService),
 	}
+	if len(storageResolvers) > 0 {
+		resolver.storageResolver = storageResolvers[0]
+	}
+	return resolver
 }
 
 func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
+	if _, ok := types.ParseResourcePath(filePath); ok {
+		return r.defaultSvc
+	}
+	backendID, _, _ := types.ParseStorageBackendPath(filePath)
 	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {
 		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
@@ -248,12 +265,21 @@ func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService 
 			return nil
 		}
 	}
-	if svc, ok := r.cache[provider]; ok {
+	cacheKey := backendID + ":" + provider
+	if svc, ok := r.cache[cacheKey]; ok {
 		return svc
+	}
+	if r.storageResolver != nil && r.tenant != nil {
+		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, r.tenant, backendID, provider, imLocalStorageBaseDir())
+		if err == nil {
+			r.cache[cacheKey] = svc
+			return svc
+		}
+		logger.Warnf(r.ctx, "[IM] resolve storage backend failed: backend_id=%s provider=%s err=%v", backendID, provider, err)
 	}
 	svc := buildIMFileServiceForProvider(r.tenant, provider, r.defaultSvc)
 	if svc != nil {
-		r.cache[provider] = svc
+		r.cache[cacheKey] = svc
 	}
 	return svc
 }
@@ -374,7 +400,8 @@ type Service struct {
 
 	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
 	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
-	defaultFileSvc interfaces.FileService
+	defaultFileSvc  interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
@@ -787,6 +814,7 @@ func NewService(
 	oauthManager *mcppkg.OAuthManager,
 	redisClient *redis.Client,
 	appCfg *config.Config,
+	storageResolver interfaces.StorageBackendResolver,
 ) *Service {
 	// Resolve IM configuration with defaults.
 	workers, maxQueue, maxPerUser, globalMaxWorkers, rlWindow, rlMax := resolveIMConfig(appCfg)
@@ -811,6 +839,7 @@ func NewService(
 		modelService:     modelService,
 		streamManager:    streamManager,
 		defaultFileSvc:   defaultFileSvc,
+		storageResolver:  storageResolver,
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
@@ -965,6 +994,12 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 	}
 
 	s.mu.Lock()
+	// Idempotency: another goroutine may have started this channel while
+	// factory was running above (factory is called unlocked). Stop the old
+	// state before overwriting so its adapter / long connection doesn't leak.
+	if existing, ok := s.channels[channel.ID]; ok {
+		s.stopChannelLocked(channel.ID, existing)
+	}
 	s.channels[channel.ID] = &channelState{
 		Channel:      channel,
 		Adapter:      adapter,
@@ -1068,6 +1103,31 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				s.StopChannel(channelID)
 				return
 			}
+			// Still the leader — verify the channel is still active. A
+			// delete/disable is served by whichever instance got the HTTP
+			// request; without this check the leader would keep the long
+			// connection open until process restart. The renew interval
+			// bounds the worst-case lag.
+			ch, err := s.GetChannelByID(channelID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s deleted; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
+			if err != nil {
+				// Transient DB error — don't stop a possibly-healthy channel
+				// on a DB hiccup. Skip this round; the next renewal re-checks.
+				logger.Warnf(context.Background(),
+					"[IM] DB check failed for channel %s during leader renewal: %v (skipping this round)", channelID, err)
+				continue
+			}
+			if !ch.Enabled {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s disabled; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -1088,6 +1148,34 @@ func (s *Service) wsLeaderRetryLoop(channel *IMChannel) {
 				return
 			}
 			if s.tryAcquireWSLeader(channel.ID) {
+				// Re-check the DB before starting: the channel may have been
+				// deleted or disabled on another instance while we waited for
+				// leadership. The in-memory `channel` is a startup snapshot and
+				// won't reflect that, so without this guard we'd resurrect a
+				// stopped channel (and reopen its long connection).
+				fresh, err := s.GetChannelByID(channel.ID)
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Channel was actually deleted — give up for good.
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s deleted while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				if err != nil {
+					// Transient DB error — don't make a destructive decision.
+					// Release the lock for this round and retry on the next tick.
+					s.releaseWSLeader(channel.ID)
+					logger.Warnf(context.Background(),
+						"[IM] DB check failed for channel %s during leader takeover: %v (will retry)", channel.ID, err)
+					continue
+				}
+				if !fresh.Enabled {
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s disabled while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				channel = fresh // use latest config (credentials/mode may have changed)
 				logger.Infof(context.Background(),
 					"[IM] Acquired leadership for channel %s, starting adapter", channel.ID)
 				s.mu.RLock()
@@ -1543,7 +1631,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	reply := &ReplyMessage{
-		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc),
+		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
@@ -2298,7 +2386,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			displaySource = displaySource[:cut]
 		}
 
-		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc)
+		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
 			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
 		}
@@ -2337,7 +2425,7 @@ loop:
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	bufMu.Unlock()
 
-	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc)
+	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc, s.storageResolver)
 	if noVisibleContent || finalDisplay == "" {
 		fallback := "抱歉，我暂时无法回答这个问题。"
 		if finalErr != nil {
@@ -2384,7 +2472,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc), IsFinal: true})
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
@@ -2831,7 +2919,7 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: %v", tenantID, err)
-		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "获取租户信息失败", channel)
+		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "获取空间信息失败", channel)
 		return
 	}
 	kbCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)

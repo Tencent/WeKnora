@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -13,6 +14,10 @@ import (
 const (
 	retrievalProgressTool       = "knowledge_search"
 	queryUnderstandProgressTool = "query_understand"
+
+	retrievalSourceKnowledge = "knowledge"
+	retrievalSourceWeb       = "web"
+	retrievalSourceMixed     = "mixed"
 )
 
 // StageProgress tracks an in-flight pipeline progress tool_call.
@@ -60,6 +65,17 @@ func LastConsolidatedRetrievalStage(eventList []types.EventType, chatManage *typ
 	return last
 }
 
+// ShouldCloseRetrievalProgress reports whether the consolidated retrieval
+// progress window must be closed after a pipeline stage. It returns true when
+// either the planned last retrieval stage completed, or a retrieval stage
+// short-circuited the pipeline with an error — including ErrSearchNothing,
+// which routes into the fallback response. Closing on the error paths prevents
+// the frontend "knowledge_search" spinner from hanging forever when the
+// pipeline early-returns before reaching the last retrieval stage.
+func ShouldCloseRetrievalProgress(stage, lastRetrievalStage types.EventType, stageErr *PluginError) bool {
+	return stage == lastRetrievalStage || stageErr != nil
+}
+
 // BeginRetrievalProgress emits a single pending knowledge_search tool_call.
 func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *StageProgress {
 	if chatManage == nil || chatManage.EventBus == nil {
@@ -67,7 +83,9 @@ func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *
 	}
 
 	toolCallID := uuid.New().String()
-	args := map[string]any{}
+	args := map[string]any{
+		"search_source": retrievalSearchSource(chatManage),
+	}
 	if chatManage.RewriteQuery != "" {
 		args["query"] = chatManage.RewriteQuery
 	} else if chatManage.Query != "" {
@@ -164,7 +182,18 @@ func EndRetrievalProgress(
 		return
 	}
 
-	count := retrievalResultCount(chatManage)
+	count, docCount, webCount := retrievalResultBreakdown(chatManage)
+	searchSource := retrievalSearchSource(chatManage)
+	if count > 0 {
+		switch {
+		case docCount > 0 && webCount > 0:
+			searchSource = retrievalSourceMixed
+		case webCount > 0:
+			searchSource = retrievalSourceWeb
+		default:
+			searchSource = retrievalSourceKnowledge
+		}
+	}
 	success := stageErr == nil || stageErr == ErrSearchNothing
 	output := ""
 	if success {
@@ -191,19 +220,68 @@ func EndRetrievalProgress(
 			Success:    success,
 			Duration:   time.Since(start).Milliseconds(),
 			Data: map[string]interface{}{
-				"count": count,
+				"count":         count,
+				"doc_count":     docCount,
+				"web_count":     webCount,
+				"search_source": searchSource,
 			},
 		},
 	})
 }
 
-func retrievalResultCount(chatManage *types.ChatManage) int {
+func hasKBRetrievalTargets(chatManage *types.ChatManage) bool {
+	if chatManage == nil {
+		return false
+	}
+	return types.HasKnowledgeRetrievalScope(
+		chatManage.SearchTargets,
+		chatManage.KnowledgeBaseIDs,
+		chatManage.KnowledgeIDs,
+	)
+}
+
+func retrievalSearchSource(chatManage *types.ChatManage) string {
+	hasKB := hasKBRetrievalTargets(chatManage)
+	hasWeb := chatManage != nil && chatManage.WebSearchEnabled
+	switch {
+	case hasKB && hasWeb:
+		return retrievalSourceMixed
+	case hasWeb:
+		return retrievalSourceWeb
+	default:
+		return retrievalSourceKnowledge
+	}
+}
+
+func retrievalResults(chatManage *types.ChatManage) []*types.SearchResult {
 	switch {
 	case len(chatManage.MergeResult) > 0:
-		return len(chatManage.MergeResult)
+		return chatManage.MergeResult
 	case len(chatManage.RerankResult) > 0:
-		return len(chatManage.RerankResult)
+		return chatManage.RerankResult
 	default:
-		return len(chatManage.SearchResult)
+		return chatManage.SearchResult
 	}
+}
+
+func retrievalResultBreakdown(chatManage *types.ChatManage) (total, docCount, webCount int) {
+	for _, result := range retrievalResults(chatManage) {
+		if result == nil {
+			continue
+		}
+		total++
+		if isWebSearchResult(result) {
+			webCount++
+		} else {
+			docCount++
+		}
+	}
+	return total, docCount, webCount
+}
+
+func isWebSearchResult(result *types.SearchResult) bool {
+	if strings.EqualFold(result.ChunkType, "web_search") {
+		return true
+	}
+	return strings.EqualFold(result.KnowledgeSource, "web_search")
 }

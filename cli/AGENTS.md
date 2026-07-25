@@ -56,7 +56,7 @@ Errors emit an error envelope on stderr (`--format json`) or prose
     "type": "auth.unauthenticated",
     "message": "fetch current user: HTTP error 401",
     "hint": "run `weknora auth login`",
-    "retry_command": "weknora auth login",
+    "retry_command": "weknora auth login --host https://kb.example.com",
     "retry_after_seconds": 0,
     "risk": {"level": "destructive", "action": "noun.verb"},
     "detail": {}
@@ -77,27 +77,21 @@ token (emitting as a JSON array is planned for v0.8).
 `detail` carries structured per-error context (e.g. `unknown_subcommand`'s
 `available[]` list).
 
-### Buffered JSON and NDJSON streams (chat / session ask)
+### NDJSON event stream (chat / session ask)
 
-`--format json` (the default) buffers the SSE stream and emits one normal
-success envelope whose `data.events` contains answer events by default.
-`--reference` adds `kb_id` / `chunk_id` / `parent_chunk_id` indexes;
-`--verbose` adds reasoning, tool, metadata, and lifecycle events. `--format
-text` renders the same projection live.
-`--format ndjson` is the raw event/debug surface: the CLI injects exactly one
-`init` event at the head and passes all subsequent SDK events through verbatim:
+`--format json` and `--format ndjson` both produce one JSON event per line —
+no envelope wrapping. The CLI injects exactly one event (`init`) at the head;
+all subsequent events pass through verbatim from the SDK:
 
 ```
 {"type":"init","session_id":"...","kb_id":"...","profile":"...","agent_id":"..."}
-{"response_type":"thinking","content":"..."}
-{"response_type":"answer","content":"Hello"}
-{"response_type":"tool_call","tool_calls":[...]}
-{"response_type":"complete","done":true}
+{"type":"thinking","content":"..."}
+{"type":"answer","content":"Hello"}
+{"type":"tool_call","name":"...","input":{}}
+{"type":"complete","done":true}
 ```
 
-MCP `chat` / `session_ask` return the same `events` shape and accept
-`reference` / `verbose` booleans. NDJSON ignores both presentation flags and
-always stays raw.
+For prose rendering, pass `--format text`.
 
 ### `_notice` evolution policy
 
@@ -176,8 +170,8 @@ is or isn't aligned with.
 
 | | |
 |---|---|
-| **WeKnora** | `chat` / `session ask --format ndjson` emit bare `{type:...}` per line; default JSON buffers a bounded answer-event projection into one envelope |
-| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. Each complete line can be decoded and dispatched as it arrives; the buffered envelope is reserved for normal JSON mode. |
+| **WeKnora** | streaming commands (`chat`, `session ask`) emit bare `{type:...}` per line; no envelope |
+| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. A streaming envelope requires unwrap before dispatch — net burden with no benefit. |
 
 ### 5. No `schema_version` field in payload
 
@@ -223,7 +217,7 @@ Key packages:
 - `internal/iostreams/` — global IO singleton + TTY detection + `SetForTest` swap
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
 - `internal/prompt/` — `TTYPrompter` (password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
-- `internal/sse/` — `Projector` for chat / session ask bounded output; `Accumulator` remains for legacy/tests
+- `internal/sse/` — `Accumulator` for chat / session ask SSE streams
 - `internal/mcp/` — curated 10-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
 - `client/` (parent module) — generated SDK
 
@@ -419,6 +413,10 @@ Agents parse the first colon to extract the typed code. The exit code class (see
 | `local.unimplemented` | 1 | no | (planned in a future release) |
 | `local.upload_file_not_found` | 1 | no | verify the path is correct and readable |
 | `local.user_aborted` | 1 | no (user said no) | no action taken; pass `-y/--yes` to skip the confirmation prompt |
+| `internal.error` | 1 | no | catch-all for an untyped error that reached the top (a bug or unmapped dependency error); a recurring one is a classification gap worth reporting |
+| `mcp.readonly_mode` | 1 | no | MCP tool surface is read-only; mutations not exposed in this mode |
+| `mcp.schema_unknown_command` | 1 | no | (no canonical hint) |
+| `mcp.tool_not_allowed` | 1 | no | MCP tool not in the curated allowlist |
 
 <!-- ERROR_REFERENCE_END -->
 
@@ -541,7 +539,7 @@ The three surfaces do not auto-sync: each is wired separately so agents that onl
 
 ## MCP Tool Surface
 
-WeKnora's MCP server exposes a curated 10-tool surface where most tools are read-only but `chat` and `session_ask` create conversation/message records. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
+WeKnora's MCP server exposes a curated read-only tool surface. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
 
 The curated 10 tools (`cli/internal/mcp/tools.go`):
 
@@ -556,7 +554,7 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 | `search_chunks` | hybrid (vector + keyword) retrieval |
 | `chat` | stream a RAG answer; auto-creates a session if absent |
 | `agent_list` | list custom agents |
-| `session_ask` | run a query through a custom agent (`session ask --agent`) |
+| `agent_invoke` | run a query through a custom agent |
 
 Adding a tool is a deliberate API expansion — the AI-agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 

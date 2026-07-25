@@ -34,8 +34,8 @@ func toolErrorResult(err error) *mcpsdk.CallToolResult {
 	if detail.Hint != "" {
 		textLine += "\nhint: " + detail.Hint
 	}
-	if detail.RetryCommand != "" {
-		textLine += "\nretry: " + detail.RetryCommand
+	if len(detail.RetryArgv) != 0 {
+		textLine += "\nretry: " + strings.Join(detail.RetryArgv, " ")
 	}
 	// StructuredContent accepts any; pass *ErrDetail directly (no round-trip).
 	return &mcpsdk.CallToolResult{
@@ -659,14 +659,15 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 		}
 		// `limit` is typed as int by chunkListInput, so the SDK rejects
 		// non-numeric values at schema validation (e.g. "limit":"50")
-		// before this handler runs. Here we only default+clamp the
-		// already-decoded value.
+		// before this handler runs. Default when unset; reject over-max
+		// (rather than silently clamping) so the agent's request is never
+		// quietly changed — matching search_chunks in this same file.
 		limit := in.Limit
 		if limit < 1 {
 			limit = chunkListDefaultLimit
 		}
 		if limit > chunkListMaxLimit {
-			limit = chunkListMaxLimit
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("limit must be in 1..%d", chunkListMaxLimit))), nil, nil
 		}
 		chunks, total, err := svc.ListKnowledgeChunks(ctx, in.DocID, 1, limit)
 		if err != nil {

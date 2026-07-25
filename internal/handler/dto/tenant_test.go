@@ -25,14 +25,15 @@ func TestTenantResponse_ViewerOmitsSecrets(t *testing.T) {
 	assert.NotContains(t, s, "credentials")
 }
 
-func TestTenantResponse_OwnerGetsAPIKeyOnly(t *testing.T) {
+func TestTenantResponse_OwnerOmitsLegacyTenantAPIKey(t *testing.T) {
 	tenant := sampleSecretTenant()
 	body, err := json.Marshal(NewTenantResponse(ownerContext(), tenant))
 	require.NoError(t, err)
 	s := string(body)
-	assert.Contains(t, s, "tenant-api-key-123")
+	assert.NotContains(t, s, `"api_key"`)
 	assert.NotContains(t, s, "legacy-search-secret-999")
 	assert.NotContains(t, s, "parser-secret-123")
+	assert.Contains(t, s, "web_search_config")
 }
 
 func TestTenantResponse_AdminGetsRedactedIntegrationConfigs(t *testing.T) {
@@ -58,9 +59,8 @@ func TestTenantResponsesCrossTenant_RedactsEvenForOwnerContext(t *testing.T) {
 
 func sampleSecretTenant() *types.Tenant {
 	return &types.Tenant{
-		ID:     42,
-		Name:   "tenant",
-		APIKey: "tenant-api-key-123",
+		ID:   42,
+		Name: "tenant",
 		WebSearchConfig: &types.WebSearchConfig{
 			APIKey:   "legacy-search-secret-999",
 			ProxyURL: "http://proxy.internal:8080",

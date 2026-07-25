@@ -226,7 +226,7 @@ func TestChunkRepository_FeedbackStatsFilterDeletedRefsAndAggregateReasons(t *te
 		chunk.KnowledgeID,
 		&types.Pagination{Page: 1, PageSize: 10},
 		[]types.ChunkType{types.ChunkTypeText},
-		"",
+		nil,
 		"",
 		"",
 		"",

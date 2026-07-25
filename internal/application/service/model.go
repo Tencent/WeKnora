@@ -64,7 +64,7 @@ func (s *modelService) decryptAppSecret(encrypted string) string {
 }
 
 // resolveWeKnoraCloudCredentials 为 WeKnoraCloud 厂商模型补全 AppID/AppSecret。
-// 当模型自身参数中未存储凭证时，自动从租户配置中获取（SaveCredentials 保存的凭证）。
+// 当模型自身参数中未存储凭证时，自动从空间配置中获取（SaveCredentials 保存的凭证）。
 func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, params *types.ModelParameters) (appID, appSecret string) {
 	appID = params.AppID
 	appSecret = s.decryptAppSecret(params.AppSecret)
@@ -227,7 +227,8 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	logger.Info(ctx, "Start updating model")
 	logger.Infof(ctx, "Updating model ID: %s, name: %s", model.ID, model.Name)
 
-	// Check if the model is builtin - builtin models cannot be updated
+	// Built-in models are platform-wide. Tenant administrators may view them,
+	// but only a system administrator may change their shared configuration.
 	tenantID := types.MustTenantIDFromContext(ctx)
 	existingModel, err := s.repo.GetByID(ctx, tenantID, model.ID)
 	if err != nil {
@@ -237,8 +238,15 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		return err
 	}
 	if existingModel != nil && existingModel.IsBuiltin {
-		logger.Warnf(ctx, "Attempted to update builtin model: %s", model.ID)
-		return errors.New("builtin models cannot be updated")
+		if !types.IsSystemAdminFromContext(ctx) {
+			logger.Warnf(ctx, "Non-system-admin attempted to update builtin model: %s", model.ID)
+			return apperrors.NewForbiddenError("only system administrators can update builtin models")
+		}
+		// A UI edit is an explicit runtime override. Clear YAML ownership so
+		// the startup reconciler does not silently replace the saved values.
+		model.TenantID = existingModel.TenantID
+		model.IsBuiltin = true
+		model.ManagedBy = ""
 	}
 
 	// Update model in repository
@@ -271,8 +279,9 @@ func (s *modelService) UpdateModelCredentials(
 	if existing == nil {
 		return nil, ErrModelNotFound
 	}
-	if existing.IsBuiltin {
-		return nil, errors.New("builtin models cannot have credentials modified")
+	if existing.IsBuiltin && !types.IsSystemAdminFromContext(ctx) {
+		return nil, apperrors.NewForbiddenError(
+			"only system administrators can modify builtin model credentials")
 	}
 
 	changed := false
@@ -286,6 +295,10 @@ func (s *modelService) UpdateModelCredentials(
 	}
 	if !changed {
 		return existing, nil
+	}
+	if existing.IsBuiltin {
+		// Credential changes are also runtime overrides of YAML-managed data.
+		existing.ManagedBy = ""
 	}
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return nil, err
@@ -304,8 +317,9 @@ func (s *modelService) ClearModelCredential(ctx context.Context, id, field strin
 	if existing == nil {
 		return ErrModelNotFound
 	}
-	if existing.IsBuiltin {
-		return errors.New("builtin models cannot have credentials modified")
+	if existing.IsBuiltin && !types.IsSystemAdminFromContext(ctx) {
+		return apperrors.NewForbiddenError(
+			"only system administrators can modify builtin model credentials")
 	}
 
 	changed := false
@@ -325,6 +339,9 @@ func (s *modelService) ClearModelCredential(ctx context.Context, id, field strin
 	}
 	if !changed {
 		return nil
+	}
+	if existing.IsBuiltin {
+		existing.ManagedBy = ""
 	}
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return err

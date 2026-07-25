@@ -111,6 +111,18 @@ func TestRewriteStorageURLs_MinIOFallbackViaGlobal(t *testing.T) {
 	assert.NotContains(t, out, "](minio://")
 }
 
+func TestRewriteStorageURLs_ScopedPath(t *testing.T) {
+	stub := &stubIMFileService{
+		getFileURL: func(_ context.Context, filePath string) (string, error) {
+			assert.Equal(t, "storage://backend-a/cos://bucket/ap-test/10000/exports/a.png", filePath)
+			return "https://storage.example/a.png", nil
+		},
+	}
+	input := "![img](storage://backend-a/cos://bucket/ap-test/10000/exports/a.png)"
+	output := rewriteStorageURLs(context.Background(), input, newIMFileServiceResolver(&types.Tenant{}, stub))
+	assert.Contains(t, output, "https://storage.example/a.png")
+}
+
 func TestCleanIMContent_MinIOFallbackIntegration(t *testing.T) {
 	stub := &stubIMFileService{
 		getFileURL: func(_ context.Context, _ string) (string, error) {

@@ -38,6 +38,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.openai.com/v1", ProviderOpenAI},
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
+		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
 		{"https://api.deepseek.com/v1", ProviderDeepSeek},
@@ -219,6 +220,38 @@ func TestZhipuProviderValidation(t *testing.T) {
 	})
 }
 
+func TestRequestyProviderValidation(t *testing.T) {
+	p := &RequestyProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "openai/gpt-4o-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "openai/gpt-4o-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderRequesty, info.Name)
+		assert.Equal(t, "Requesty", info.DisplayName)
+		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeEmbedding))
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.True(t, info.RequiresAuth)
+	})
+}
+
 func TestListByModelType(t *testing.T) {
 	t.Run("chat models", func(t *testing.T) {
 		providers := ListByModelType(types.ModelTypeKnowledgeQA)
@@ -233,6 +266,7 @@ func TestListByModelType(t *testing.T) {
 		// Check that Aliyun supports rerank
 		foundAliyun := false
 		foundLKEAP := false
+		foundVolcengine := false
 		for _, p := range providers {
 			if p.Name == ProviderAliyun {
 				foundAliyun = true
@@ -241,9 +275,14 @@ func TestListByModelType(t *testing.T) {
 				foundLKEAP = true
 				assert.Equal(t, LKEAPRerankBaseURL, p.GetDefaultURL(types.ModelTypeRerank))
 			}
+			if p.Name == ProviderVolcengine {
+				foundVolcengine = true
+				assert.Equal(t, VolcengineRerankBaseURL, p.GetDefaultURL(types.ModelTypeRerank))
+			}
 		}
 		assert.True(t, foundAliyun, "Aliyun should support rerank")
 		assert.True(t, foundLKEAP, "LKEAP should support rerank")
+		assert.True(t, foundVolcengine, "Volcengine should support rerank")
 	})
 
 	t.Run("embedding models include openrouter", func(t *testing.T) {

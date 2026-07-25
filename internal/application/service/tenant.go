@@ -2,27 +2,14 @@ package service
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
-	"io"
-	"os"
-	"strings"
 	"time"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
-	werrors "github.com/Tencent/WeKnora/internal/errors"
 )
-
-var apiKeySecret = func() []byte {
-	return []byte(os.Getenv("TENANT_AES_KEY"))
-}
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
 type ListTenantsParams struct {
@@ -34,12 +21,13 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo interfaces.TenantRepository // Repository for tenant data operations
+	repo        interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo interfaces.StorageBackendRepository
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository) interfaces.TenantService {
-	return &tenantService{repo: repo}
+func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
+	return &tenantService{repo: repo, storageRepo: storageRepo}
 }
 
 // CreateTenant creates a new tenant
@@ -47,14 +35,14 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	logger.Info(ctx, "Start creating tenant")
 
 	if tenant.Name == "" {
-		logger.Error(ctx, "Tenant name cannot be empty")
-		return nil, errors.New("tenant name cannot be empty")
+		logger.Error(ctx, "Workspace name cannot be empty")
+		return nil, errors.New("workspace name cannot be empty")
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", tenant.Name)
 
-	// Create tenant with initial values
-	tenant.APIKey = s.generateApiKey(0)
+	// New tenants do not receive an API key by default. Integrations create
+	// keys explicitly through tenant_api_keys.
 	tenant.Status = "active"
 	tenant.CreatedAt = time.Now()
 	tenant.UpdatedAt = time.Now()
@@ -73,37 +61,48 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		})
 		return nil, err
 	}
-
-	logger.Infof(ctx, "Tenant created successfully, ID: %d, generating official API Key", tenant.ID)
-	plaintextAPIKey := s.generateApiKey(tenant.ID)
-	tenant.APIKey = plaintextAPIKey
-
-	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
-	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
-			tenant.APIKey = encrypted
-		}
-	}
-
-	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id":   tenant.ID,
-			"tenant_name": tenant.Name,
-		})
+	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
+		// No related rows exist yet, so rolling the tenant back is safe and
+		// avoids leaving a workspace that cannot bind new knowledge bases.
+		_ = s.repo.DeleteTenant(ctx, tenant.ID)
 		return nil, err
 	}
 
-	// Restore plaintext for the response so callers don't see enc:v1: ciphertext.
-	tenant.APIKey = plaintextAPIKey
-
-	logger.Infof(ctx, "Tenant creation and update completed, ID: %d, name: %s", tenant.ID, tenant.Name)
+	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
+}
+
+func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant *types.Tenant) error {
+	if s.storageRepo == nil || tenant == nil {
+		return nil
+	}
+	provider := ""
+	if tenant.StorageEngineConfig != nil {
+		provider = tenant.StorageEngineConfig.DefaultProvider
+	}
+	backend := types.StorageBackendFromLegacy(tenant.ID, provider, tenant.StorageEngineConfig)
+	if backend == nil {
+		backend = types.StorageBackendFromEnvironment(tenant.ID)
+	}
+	if backend == nil {
+		return errors.New("no supported default storage backend is configured")
+	}
+	backend.LegacyAlias = true
+	if err := s.storageRepo.Create(ctx, backend); err != nil {
+		return err
+	}
+	tenant.DefaultStorageBackendID = &backend.ID
+	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
+		_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+		return err
+	}
+	return nil
 }
 
 // GetTenantByID retrieves a tenant by their ID
 func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -138,7 +137,7 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 // UpdateTenant updates an existing tenant's information
 func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	if tenant.ID == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -149,12 +148,6 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 			"tenant_id": tenant.ID,
 		})
 		return nil, err
-	}
-
-	// Generate new API key if empty
-	if tenant.APIKey == "" {
-		logger.Info(ctx, "API Key is empty, generating new API Key")
-		tenant.APIKey = s.generateApiKey(tenant.ID)
 	}
 
 	tenant.UpdatedAt = time.Now()
@@ -176,7 +169,7 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 	logger.Info(ctx, "Start deleting tenant")
 
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return errors.New("tenant ID cannot be 0")
 	}
 
@@ -205,121 +198,8 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 		return err
 	}
 
-	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
+	logger.Infof(ctx, "Workspace deleted successfully, ID: %d", id)
 	return nil
-}
-
-// UpdateAPIKey updates the API key for a specific tenant
-func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, error) {
-	logger.Info(ctx, "Start updating tenant API Key")
-
-	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
-		return "", errors.New("tenant ID cannot be 0")
-	}
-
-	tenant, err := s.repo.GetTenantByID(ctx, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": id,
-		})
-		return "", err
-	}
-
-	logger.Infof(ctx, "Generating new API Key for tenant, ID: %d", id)
-	plaintextAPIKey := s.generateApiKey(tenant.ID)
-	tenant.APIKey = plaintextAPIKey
-
-	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
-	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
-			tenant.APIKey = encrypted
-		}
-	}
-
-	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": id,
-		})
-		return "", err
-	}
-
-	logger.Infof(ctx, "Tenant API Key updated successfully, ID: %d", id)
-	return plaintextAPIKey, nil
-}
-
-// generateApiKey generates a secure API key for tenant authentication
-func (r *tenantService) generateApiKey(tenantID uint64) string {
-	// 1. Convert tenant_id to bytes
-	idBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(idBytes, uint64(tenantID))
-
-	// 2. Encrypt tenant_id using AES-GCM
-	block, err := aes.NewCipher(apiKeySecret())
-	if err != nil {
-		panic("Failed to create AES cipher: " + err.Error())
-	}
-
-	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(err.Error())
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic("Failed to create GCM cipher: " + err.Error())
-	}
-
-	ciphertext := aesgcm.Seal(nil, nonce, idBytes, nil)
-
-	// 3. Combine nonce and ciphertext, then encode with base64
-	combined := append(nonce, ciphertext...)
-	encoded := base64.RawURLEncoding.EncodeToString(combined)
-
-	// Create final API Key in format: sk-{encrypted_part}
-	return "sk-" + encoded
-}
-
-// ExtractTenantIDFromAPIKey extracts the tenant ID from an API key
-func (r *tenantService) ExtractTenantIDFromAPIKey(apiKey string) (uint64, error) {
-	// 1. Validate format and extract encrypted part
-	parts := strings.SplitN(apiKey, "-", 2)
-	if len(parts) != 2 || parts[0] != "sk" {
-		return 0, errors.New("invalid API key format")
-	}
-
-	// 2. Decode the base64 part
-	encryptedData, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return 0, errors.New("invalid API key encoding")
-	}
-
-	// 3. Separate nonce and ciphertext
-	if len(encryptedData) < 12 {
-		return 0, errors.New("invalid API key length")
-	}
-	nonce, ciphertext := encryptedData[:12], encryptedData[12:]
-
-	// 4. Decrypt
-	block, err := aes.NewCipher(apiKeySecret())
-	if err != nil {
-		return 0, errors.New("decryption error")
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return 0, errors.New("decryption error")
-	}
-
-	plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return 0, errors.New("API key is invalid or has been tampered with")
-	}
-
-	// 5. Convert back to tenant_id
-	tenantID := binary.LittleEndian.Uint64(plaintext)
-
-	return tenantID, nil
 }
 
 // ListAllTenants lists all tenants (for users with cross-tenant access permission)
@@ -478,7 +358,7 @@ func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, ten
 		oldB := oldBuckets[p]
 		if b != oldB { // User is trying to change their bucket name or set a new one
 			if usedByOthers[p] != nil && usedByOthers[p][b] {
-				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他租户使用，为保证数据隔离，请使用其他名称")
+				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他空间使用，为保证数据隔离，请使用其他名称")
 			}
 		}
 	}

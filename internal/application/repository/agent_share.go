@@ -192,18 +192,20 @@ func (r *agentShareRepository) ListSharedAgentsForTenant(ctx context.Context, te
 // source_tenant_id == excludeTenantID. Single query.
 func (r *agentShareRepository) GetShareByAgentIDForTenant(ctx context.Context, tenantID uint64, agentID string, excludeTenantID uint64) (*types.AgentShare, error) {
 	var share types.AgentShare
-	err := r.db.WithContext(ctx).
+	tx := r.db.WithContext(ctx).
 		Joins("JOIN organization_tenant_members otm ON otm.organization_id = agent_shares.organization_id").
 		Where("agent_shares.agent_id = ?", agentID).
 		Where("otm.tenant_id = ?", tenantID).
 		Where("agent_shares.source_tenant_id != ?", excludeTenantID).
 		Where("agent_shares.deleted_at IS NULL").
-		First(&share).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrAgentShareNotFound
-		}
-		return nil, err
+		Order("agent_shares.id").
+		Limit(1).
+		Find(&share)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return nil, ErrAgentShareNotFound
 	}
 	return &share, nil
 }

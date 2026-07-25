@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,

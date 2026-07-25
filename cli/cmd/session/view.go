@@ -70,6 +70,11 @@ Pass --full to also load the chat history (LoadMessages SDK call). Use
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad --limit
+			// returns input.invalid_argument (exit 5), not an auth error (exit 3).
+			if err := validateViewOpts(opts); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -89,7 +94,10 @@ Pass --full to also load the chat history (LoadMessages SDK call). Use
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOptions, svc ViewService, id string) error {
+// validateViewOpts checks the --limit/--full invariants. Called from RunE
+// before the client is built (so a bad value surfaces as exit 5, not an auth
+// error) and at runView's top for direct callers; idempotent.
+func validateViewOpts(opts *ViewOptions) error {
 	if !opts.Full && opts.LimitSet {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -103,6 +111,13 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 				Message: fmt.Sprintf("--limit must be in 1..%d, got %d", maxFullLimit, opts.Limit),
 			}
 		}
+	}
+	return nil
+}
+
+func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOptions, svc ViewService, id string) error {
+	if err := validateViewOpts(opts); err != nil {
+		return err
 	}
 
 	s, err := svc.GetSession(ctx, id)

@@ -31,7 +31,7 @@ type ChunkRepository interface {
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
-	// When tagID is non-empty, results are filtered by tag_id.
+	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
 	//   - FAQ: sorts by updated_at, searchField can be "standard_question", "similar_questions", "answers", or "" for all
 	//   - Document (manual): sorts by chunk_index, keyword searches content only
@@ -43,7 +43,7 @@ type ChunkRepository interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
-		tagID string,
+		tagIDs []string,
 		keyword string,
 		searchField string,
 		sortOrder string,
@@ -61,6 +61,8 @@ type ChunkRepository interface {
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// UpdateChunks updates chunks in batch
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch
@@ -100,13 +102,14 @@ type ChunkRepository interface {
 	// newTagID: if not nil, updates tag_id to this value (empty string means uncategorized)
 	UpdateChunkFieldsByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, isEnabled *bool, setFlags types.ChunkFlags, clearFlags types.ChunkFlags, newTagID *string, excludeIDs []string) ([]string, error)
 	// FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
-	// Returns: chunksToAdd (content_hash in src but not in dst), chunksToDelete (content_hash in dst but not in src)
-	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (chunksToAdd []string, chunksToDelete []string, err error)
+	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (*types.FAQChunkDiffResult, error)
+	// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+	ListFAQChunkStatusByIDs(ctx context.Context, tenantID uint64, ids []string) (map[string]*types.FAQChunkStatus, error)
 
 	// ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
-	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.
+	// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs.
 	// Returns up to `limit` chunks sorted by updated_at descending.
-	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
+	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, tagIDs []string, limit int) ([]*types.Chunk, error)
 
 	// ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
 	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.

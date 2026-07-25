@@ -52,7 +52,7 @@ one wastes turns or returns the wrong shape. Use the decision table.
   connection; the server keeps generating + billing). Stop it server-side:
   `weknora session stop <session-id> --message <message-id>` (session_id from
   `data.session_id`, or from `init` under `--format ndjson`).
-  Re-attach to a stream with `weknora session continue-stream <session-id>
+  Re-attach to a stream with `weknora session resume <session-id>
   --message <message-id>`.
 - `search chunks --limit` defaults to **8** (tuned for an LLM context window);
   the `search docs/kb/sessions` lists default to 30. Tune retrieval with

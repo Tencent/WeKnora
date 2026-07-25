@@ -61,7 +61,7 @@ the caller to thread follow-ups.
 
 AI agents: this is the primary entrypoint for invoking custom agents.
 The 'weknora agent' subtree handles CRUD only (list / view / create /
-edit / delete / status / check).
+update / delete / status / check).
 
 Modes:
   --format json (default):       one JSON envelope with answer events
@@ -98,7 +98,7 @@ both flags for the complete projected stream.`,
 	cmdutil.AddFormatFlag(cmd, sessionAskFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Invoke a custom agent in a session context. Default JSON returns a bounded answer-event projection. --reference adds indexed citations; --verbose adds reasoning, tools, and lifecycle events. --format ndjson streams raw SDK agent events; --format text renders the selected events live.",
-		RequiredFlags: []string{"--agent"},
+		RequiredFlags: []string{"<text> (positional)", "--agent"},
 		Examples: []string{
 			`weknora session ask --agent ag_x "Summarize Q3 sales"`,
 			`weknora session ask --agent ag_x "Summarize Q3 sales" --jq '[.data.events[].content] | join("")'`,

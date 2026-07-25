@@ -52,6 +52,20 @@ func TestEmptyTestResultsError_DuckDuckGo(t *testing.T) {
 	}
 }
 
+func TestEmptyTestResultsError_Keenable(t *testing.T) {
+	err := EmptyTestResultsError(string(types.WebSearchProviderTypeKeenable), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "keenable returned 0 results") {
+		t.Fatalf("unexpected message: %q", msg)
+	}
+	if !strings.Contains(msg, "rate-limited") {
+		t.Fatalf("keenable message should hint at the keyless rate limit: %q", msg)
+	}
+}
+
 func TestEmptyTestResultsError_APIKeyProviders(t *testing.T) {
 	err := EmptyTestResultsError(string(types.WebSearchProviderTypeBing), nil)
 	if err == nil {

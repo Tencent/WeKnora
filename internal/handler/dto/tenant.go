@@ -9,28 +9,26 @@ import (
 )
 
 // TenantResponse is the viewer-safe tenant profile shape. Secret-bearing
-// columns are omitted or redacted unless the caller has Admin+ (Owner for
-// api_key).
+// columns are omitted or redacted unless the caller has Admin+.
 type TenantResponse struct {
-	ID                  uint64                      `json:"id"`
-	Name                string                      `json:"name"`
-	Description         string                      `json:"description"`
-	APIKey              string                      `json:"api_key,omitempty"`
-	Status              string                      `json:"status"`
-	RetrieverEngines    types.RetrieverEngines      `json:"retriever_engines"`
-	Business            string                      `json:"business"`
-	StorageQuota        int64                       `json:"storage_quota"`
-	StorageUsed         int64                       `json:"storage_used"`
-	ContextConfig       *types.ContextConfig        `json:"context_config,omitempty"`
-	WebSearchConfig     *types.WebSearchConfig      `json:"web_search_config,omitempty"`
-	ParserEngineConfig  *types.ParserEngineConfig   `json:"parser_engine_config,omitempty"`
-	Credentials         *types.CredentialsConfig    `json:"credentials,omitempty"`
-	StorageEngineConfig *types.StorageEngineConfig  `json:"storage_engine_config,omitempty"`
-	ChatHistoryConfig   *types.ChatHistoryConfig    `json:"chat_history_config,omitempty"`
-	RetrievalConfig     *types.RetrievalConfig      `json:"retrieval_config,omitempty"`
-	CreatedAt           time.Time                   `json:"created_at"`
-	UpdatedAt           time.Time                   `json:"updated_at"`
-	DeletedAt           gorm.DeletedAt              `json:"deleted_at"`
+	ID                  uint64                     `json:"id"`
+	Name                string                     `json:"name"`
+	Description         string                     `json:"description"`
+	Status              string                     `json:"status"`
+	RetrieverEngines    types.RetrieverEngines     `json:"retriever_engines"`
+	Business            string                     `json:"business"`
+	StorageQuota        int64                      `json:"storage_quota"`
+	StorageUsed         int64                      `json:"storage_used"`
+	ContextConfig       *types.ContextConfig       `json:"context_config,omitempty"`
+	WebSearchConfig     *types.WebSearchConfig     `json:"web_search_config,omitempty"`
+	ParserEngineConfig  *types.ParserEngineConfig  `json:"parser_engine_config,omitempty"`
+	Credentials         *types.CredentialsConfig   `json:"credentials,omitempty"`
+	StorageEngineConfig *types.StorageEngineConfig `json:"storage_engine_config,omitempty"`
+	ChatHistoryConfig   *types.ChatHistoryConfig   `json:"chat_history_config,omitempty"`
+	RetrievalConfig     *types.RetrievalConfig     `json:"retrieval_config,omitempty"`
+	CreatedAt           time.Time                  `json:"created_at"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
+	DeletedAt           gorm.DeletedAt             `json:"deleted_at"`
 }
 
 // NewTenantResponse converts a stored tenant into its HTTP response shape.
@@ -45,8 +43,6 @@ func NewTenantResponseWithRole(tenant *types.Tenant, role types.TenantRole) *Ten
 		return nil
 	}
 	includeSecrets := role.HasPermission(types.TenantRoleAdmin)
-	includeAPIKey := RoleCanViewTenantAPIKey(role)
-
 	resp := &TenantResponse{
 		ID:                tenant.ID,
 		Name:              tenant.Name,
@@ -62,9 +58,6 @@ func NewTenantResponseWithRole(tenant *types.Tenant, role types.TenantRole) *Ten
 		CreatedAt:         tenant.CreatedAt,
 		UpdatedAt:         tenant.UpdatedAt,
 		DeletedAt:         tenant.DeletedAt,
-	}
-	if includeAPIKey {
-		resp.APIKey = tenant.APIKey
 	}
 	if includeSecrets {
 		resp.WebSearchConfig = types.WebSearchConfigForResponse(tenant.WebSearchConfig, true)

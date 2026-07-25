@@ -281,7 +281,7 @@ func (c *Client) KnowledgeQAStream(
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		err := newAPIError(resp.StatusCode, body)
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -370,7 +370,7 @@ func (c *Client) ContinueStream(
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return newAPIError(resp.StatusCode, body)
 	}
 
 	// Use bufio to read SSE data line by line
@@ -449,10 +449,12 @@ func (c *Client) StopSession(ctx context.Context, sessionID string, messageID st
 
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string   `json:"query"`                        // Query content
-	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	Query            string          `json:"query"`                        // Query content
+	KnowledgeBaseID  string          `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string        `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
+	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
+	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
 }
 
 // SearchKnowledgeResponse search results response
@@ -478,7 +480,7 @@ func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRe
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		err := newAPIError(resp.StatusCode, body)
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

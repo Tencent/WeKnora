@@ -40,7 +40,11 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 	for _, id := range ids {
 		select {
 		case <-ctx.Done():
-			outcomes = append(outcomes, BatchOutcome{ID: id, Err: ctx.Err()})
+			// Classify the context signal so the per-item envelope reports
+			// operation.cancelled / operation.timeout (ClassifyContextErr)
+			// instead of the generic internal.error, and an all-aborted batch
+			// exits by that class. Cause preserved so errors.Is still matches.
+			outcomes = append(outcomes, BatchOutcome{ID: id, Err: Wrapf(ClassifyContextErr(ctx.Err()), ctx.Err(), "operation on %s aborted", id)})
 			failed++
 			continue
 		default:
@@ -52,12 +56,18 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 		}
 	}
 	if failed > 0 {
+		// Any failure → operation.failed (exit 1). The aggregate code is
+		// deliberately coarse: the per-item batch envelope already carries each
+		// item's typed error (type + exit_code via ErrorToDetail), which is the
+		// authoritative per-item signal an agent should branch on. Collapsing
+		// "all failed with the same class" into that class was extra machinery
+		// for a convenience the per-item data already provides.
 		return outcomes, &Error{
 			Code:    CodeOperationFailed,
 			Message: fmt.Sprintf("%d/%d operation(s) failed", failed, len(ids)),
 			// Silent suppresses the stderr error envelope because the caller
 			// already emitted the batch envelope to stdout. The exit code
-			// still propagates via Error.Code → ExitCode (falls through to 1).
+			// still propagates via Error.Code → ExitCode.
 			Silent: true,
 		}
 	}
