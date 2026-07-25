@@ -21,14 +21,15 @@ type GenerateTitleRequest struct {
 
 // MentionedItemRequest represents a mentioned item in the request
 type MentionedItemRequest struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
-	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
-	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
-	KBName    string `json:"kb_name"`    // Display name for parent KB
-	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
-	SkillName string `json:"skill_name"` // Preloaded agent skill name
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`                // "kb", "file", "tag", "mcp", "skill"
+	KBType             string `json:"kb_type"`             // "document" or "faq" (only for kb type)
+	KBID               string `json:"kb_id"`               // Parent knowledge base for file/tag mentions
+	KBName             string `json:"kb_name"`             // Display name for parent KB
+	ServiceID          string `json:"service_id"`          // Parent MCP service for MCP tool mentions
+	SkillName          string `json:"skill_name"`          // Preloaded agent skill name
+	IncludeDescendants *bool  `json:"include_descendants"` // Folder scope recursion; nil defaults to true
 }
 
 // ImageAttachment represents an image in a chat request.
@@ -52,6 +53,7 @@ type CreateKnowledgeQARequest struct {
 	MCPServiceIDs         []string                     `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
 	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
+	FolderScopes          []types.FolderScope          `json:"folder_scopes"`                         // Stable folder scopes resolved on every turn
 	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle          bool                         `json:"disable_title"`                         // Whether to disable auto title generation
 	Images                []ImageAttachment            `json:"images"`                                // Attached images for multimodal chat
@@ -75,6 +77,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
+	FolderScopes     []types.FolderScope    `json:"folder_scopes"`                         // Folder scopes resolved on every search
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 }
 

@@ -50,7 +50,7 @@ func TestGetSuggestedQuestions_ExplicitLimitOverridesStarterCount(t *testing.T) 
 		repo: &suggestionLimitAgentRepo{agent: newCuratedStarterAgent(6, items)},
 	}
 
-	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, 10)
+	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, nil, 10)
 	require.NoError(t, err)
 	// Before the fix limit was clamped to Starters.Count (6); now the explicit
 	// request of 10 is honored.
@@ -66,7 +66,7 @@ func TestGetSuggestedQuestions_SmallerLimitStillHonored(t *testing.T) {
 		repo: &suggestionLimitAgentRepo{agent: newCuratedStarterAgent(6, items)},
 	}
 
-	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, 2)
+	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, nil, 2)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 }
@@ -80,7 +80,7 @@ func TestGetSuggestedQuestions_UnspecifiedLimitFallsBackToStarterCount(t *testin
 		repo: &suggestionLimitAgentRepo{agent: newCuratedStarterAgent(4, items)},
 	}
 
-	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, 0)
+	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, nil, 0)
 	require.NoError(t, err)
 	assert.Len(t, got, 4)
 }
@@ -97,7 +97,7 @@ func TestGetSuggestedQuestions_LimitBoundedByMax(t *testing.T) {
 		repo: &suggestionLimitAgentRepo{agent: newCuratedStarterAgent(6, items)},
 	}
 
-	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, 999)
+	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, nil, 999)
 	require.NoError(t, err)
 	assert.Len(t, got, suggestionMaxLimit)
 }

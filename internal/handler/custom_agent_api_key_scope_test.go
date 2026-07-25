@@ -17,8 +17,9 @@ import (
 
 type suggestedQuestionsAgentService struct {
 	interfaces.CustomAgentService
-	err       error
-	tagScopes []types.TagScope
+	err          error
+	tagScopes    []types.TagScope
+	folderScopes []types.FolderScope
 }
 
 func (s *suggestedQuestionsAgentService) GetSuggestedQuestions(
@@ -27,9 +28,11 @@ func (s *suggestedQuestionsAgentService) GetSuggestedQuestions(
 	_ []string,
 	_ []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	_ int,
 ) ([]types.SuggestedQuestion, error) {
 	s.tagScopes = tagScopes
+	s.folderScopes = folderScopes
 	return nil, s.err
 }
 
@@ -88,6 +91,39 @@ func TestGetSuggestedQuestionsRejectsInvalidScopedTags(t *testing.T) {
 		"/agents/agent-1/suggested-questions?tag_scopes="+url.QueryEscape("not-json"),
 		nil,
 	)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
+func TestGetSuggestedQuestionsParsesFolderScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+
+	service := &suggestedQuestionsAgentService{}
+	h := &CustomAgentHandler{service: service}
+	r.GET("/agents/:id/suggested-questions", h.GetSuggestedQuestions)
+
+	rawScopes := `[{"knowledge_base_id":"kb-1","folder_id":"folder-1","include_descendants":true}]`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/agents/agent-1/suggested-questions?folder_scopes="+url.QueryEscape(rawScopes), nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []types.FolderScope{{KnowledgeBaseID: "kb-1", FolderID: "folder-1", IncludeDescendants: true}}, service.folderScopes)
+}
+
+func TestGetSuggestedQuestionsRejectsInvalidFolderScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+
+	h := &CustomAgentHandler{service: &suggestedQuestionsAgentService{}}
+	r.GET("/agents/:id/suggested-questions", h.GetSuggestedQuestions)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/agents/agent-1/suggested-questions?folder_scopes="+url.QueryEscape("not-json"), nil)
 	r.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())

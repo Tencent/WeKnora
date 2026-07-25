@@ -67,3 +67,30 @@ func TestListPaged_ExcludesDeletingByDefault(t *testing.T) {
 	assert.Equal(t, deletingID, rows[0].ID)
 	assert.Equal(t, int64(1), total)
 }
+
+func TestListPaged_RootOnlyExcludesKnowledgeStoredInFolders(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec("ALTER TABLE knowledges ADD COLUMN folder_id VARCHAR(36)").Error)
+
+	const tenantID = uint64(1)
+	kbID := uuid.New().String()
+	rootID := insertKnowledgeInKB(t, db, tenantID, kbID, types.ParseStatusCompleted)
+	folderKnowledgeID := insertKnowledgeInKB(t, db, tenantID, kbID, types.ParseStatusCompleted)
+	require.NoError(t, db.Exec("UPDATE knowledges SET folder_id = ? WHERE id = ?", "folder-1", folderKnowledgeID).Error)
+
+	rootFolderID := ""
+	rows, total, err := repo.ListPagedKnowledgeByKnowledgeBaseID(
+		ctx,
+		tenantID,
+		kbID,
+		&types.Pagination{Page: 1, PageSize: 100},
+		types.KnowledgeListFilter{FolderID: &rootFolderID},
+	)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, rootID, rows[0].ID)
+	assert.Equal(t, int64(1), total)
+}

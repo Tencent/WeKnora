@@ -27,8 +27,10 @@ import (
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	placement ...types.KnowledgePlacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
+	folderID := knowledgePlacementFolderID(placement)
 
 	// Use custom filename if provided, otherwise use original filename
 	fileName := file.Filename
@@ -191,6 +193,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         folderID,
 		Type:             "file",
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
@@ -333,14 +336,16 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	placement ...types.KnowledgePlacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
+	folderID := knowledgePlacementFolderID(placement)
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides, folderID,
 		)
 	}
 
@@ -409,6 +414,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         folderID,
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -560,6 +566,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	tagIDs []string,
 	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -651,6 +658,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         folderID,
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -772,8 +780,10 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	placement ...types.KnowledgePlacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
+	folderID := knowledgePlacementFolderID(placement)
 
 	if payload == nil {
 		return nil, werrors.NewBadRequestError("请求内容不能为空")
@@ -823,6 +833,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         folderID,
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -1313,4 +1324,15 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 
 	newCtx := logger.CloneContext(ctx)
 	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
+}
+
+func knowledgePlacementFolderID(placements []types.KnowledgePlacement) *string {
+	if len(placements) == 0 || placements[0].FolderID == nil {
+		return nil
+	}
+	folderID := strings.TrimSpace(*placements[0].FolderID)
+	if folderID == "" {
+		return nil
+	}
+	return &folderID
 }

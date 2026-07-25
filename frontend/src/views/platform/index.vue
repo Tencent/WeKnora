@@ -23,7 +23,6 @@
 import Menu from '@/components/menu.vue'
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
-import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
@@ -35,7 +34,6 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
-let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
@@ -81,27 +79,53 @@ const isChatDropRoute = () => {
     return CHAT_DROP_ROUTE_NAMES.has(String(route.name || ''));
 }
 
+type DroppedFile = File & { weknoraRelativePath?: string };
+
+const setDroppedFilePath = (file: File, relativePath: string): File => {
+    Object.defineProperty(file, 'weknoraRelativePath', {
+        value: relativePath.replace(/\\/g, '/'),
+        configurable: true,
+    });
+    return file;
+};
+
+const readDirectoryEntries = async (reader: any): Promise<any[]> => {
+    const entries: any[] = [];
+    while (true) {
+        const batch = await new Promise<any[]>((resolve, reject) => reader.readEntries(resolve, reject));
+        if (batch.length === 0) return entries;
+        entries.push(...batch);
+    }
+};
+
+const collectEntryFiles = async (entry: any, parentPath = ''): Promise<File[]> => {
+    if (entry?.isFile && typeof entry.file === 'function') {
+        return new Promise<File[]>((resolve) => {
+            entry.file(
+                (file: File) => resolve([setDroppedFilePath(file, parentPath + file.name)]),
+                () => resolve([]),
+            );
+        });
+    }
+    if (!entry?.isDirectory || typeof entry.createReader !== 'function') return [];
+
+    const directoryPath = parentPath + entry.name + '/';
+    const children = await readDirectoryEntries(entry.createReader());
+    const nestedFiles = await Promise.all(children.map(child => collectEntryFiles(child, directoryPath)));
+    return nestedFiles.flat();
+};
+
 const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
-    const dataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
-    if (dataTransferFiles.length > 0) {
-        return dataTransferFiles;
-    }
-
     const dataTransferItems = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
-    if (dataTransferItems.length === 0) {
-        return [];
+    const entries = dataTransferItems
+        .map(item => (item as any).webkitGetAsEntry?.())
+        .filter(Boolean);
+    if (entries.length > 0) {
+        const files = await Promise.all(entries.map(entry => collectEntryFiles(entry)));
+        return files.flat();
     }
 
-    const files = await Promise.all(dataTransferItems.map(item => new Promise<File | null>((resolve) => {
-        const fileEntry = (item as any).webkitGetAsEntry?.();
-        if (fileEntry?.isFile && typeof fileEntry.file === 'function') {
-            fileEntry.file((file: File) => resolve(file), () => resolve(null));
-            return;
-        }
-        resolve(null);
-    })));
-
-    return files.filter((file): file is File => file instanceof File);
+    return event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
 }
 
 // 检查知识库初始化状态
@@ -198,7 +222,13 @@ const handleGlobalDrop = async (event: DragEvent) => {
         return;
     }
 
-    droppedFiles.forEach(file => requestMethod(file, uploadInput));
+    const currentKbId = getCurrentKbId();
+    if (String(route.name || '') === 'knowledgeBaseDetail' && currentKbId) {
+        event.stopPropagation();
+        window.dispatchEvent(new CustomEvent('weknora:knowledge-file-drop', {
+            detail: { kbId: currentKbId, files: droppedFiles }
+        }));
+    }
 }
 
 // 组件挂载时添加全局事件监听器

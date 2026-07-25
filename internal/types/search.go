@@ -40,6 +40,12 @@ type SearchTarget struct {
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// ScopeFolderIDs preserves the logical folder selection after it has been
+	// resolved to current knowledge IDs.
+	ScopeFolderIDs []string `json:"scope_folder_ids,omitempty"`
+	// ResolvedEmpty marks an explicit folder scope with no current documents.
+	// Such a target counts as a knowledge scope but must never reach retrievers.
+	ResolvedEmpty bool `json:"resolved_empty,omitempty"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
@@ -48,6 +54,19 @@ type SearchTarget struct {
 
 // SearchTargets is a list of search targets, pre-computed at request entry point
 type SearchTargets []*SearchTarget
+
+// Retrievable removes explicit empty scopes before calling retrievers. The
+// original target list is still used to decide that the request is RAG-scoped.
+func (st SearchTargets) Retrievable() SearchTargets {
+	out := make(SearchTargets, 0, len(st))
+	for _, target := range st {
+		if target == nil || target.ResolvedEmpty {
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
+}
 
 // RecallThresholds returns the effective recall thresholds for this target.
 func (st *SearchTarget) RecallThresholds(vectorThreshold, keywordThreshold float64) (float64, float64) {

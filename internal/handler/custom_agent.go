@@ -608,6 +608,14 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
+	var folderScopes []types.FolderScope
+	if raw := strings.TrimSpace(c.Query("folder_scopes")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &folderScopes); err != nil {
+			c.Error(errors.NewBadRequestError("folder_scopes must be valid JSON"))
+			return
+		}
+	}
+
 	// limit == 0 signals "unspecified" so the service falls back to the agent's
 	// configured starter count. A provided value is passed through unchanged and
 	// bounded by the service's safety cap.
@@ -621,7 +629,7 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
 		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, folderScopes, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

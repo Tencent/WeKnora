@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, reactive, computed, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderActionMenu from './FolderActionMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import type { KnowledgeFolder } from '@/api/knowledge-base';
 
 interface Tag {
   id: string;
@@ -37,6 +39,7 @@ interface KnowledgeCard {
 
 const props = defineProps<{
   items: KnowledgeCard[];
+  folders?: KnowledgeFolder[];
   selectedIds: Set<string>;
   batchMode: boolean;
   canEdit: boolean;
@@ -53,6 +56,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  (e: 'open-folder', folder: KnowledgeFolder): void;
+  (e: 'folder-action', action: 'ask' | 'create-child' | 'rename' | 'move' | 'reparse' | 'delete', folder: KnowledgeFolder): void;
   (e: 'open', item: KnowledgeCard): void;
   (e: 'toggle-checkbox', id: string, checked: boolean, ctx?: { e?: Event }): void;
   (e: 'menu-visible-change', visible: boolean, item: KnowledgeCard): void;
@@ -76,6 +81,7 @@ const {
 
 // --- Menu index tracking ---
 const activeMenuIndex = ref(-1);
+const folderMenuVisible = reactive<Record<string, boolean>>({});
 const openMenu = (index: number) => {
   activeMenuIndex.value = index;
 };
@@ -258,10 +264,58 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
   }
   emit('action', action, item);
 };
+
+const handleFolderMenuAction = (
+  action: 'ask' | 'create-child' | 'rename' | 'move' | 'reparse' | 'delete',
+  folder: KnowledgeFolder,
+) => {
+  folderMenuVisible[folder.id] = false;
+  emit('folder-action', action, folder);
+};
 </script>
 
 <template>
   <div class="doc-card-list doc-card-list-animated">
+    <div
+      v-for="folder in folders || []"
+      :key="`folder-${folder.id}`"
+      class="knowledge-card knowledge-folder-card"
+      @click="emit('open-folder', folder)"
+    >
+      <div class="card-content">
+        <div class="card-content-nav">
+          <span class="card-content-title" :title="folder.name">{{ folder.name }}</span>
+          <t-popup
+            v-if="canEdit"
+            v-model="folderMenuVisible[folder.id]"
+            trigger="click"
+            placement="bottom-right"
+            attach="body"
+            destroy-on-close
+          >
+            <div class="more-wrap" @click.stop>
+              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+            </div>
+            <template #content>
+              <FolderActionMenu :folder="folder" @action="handleFolderMenuAction" />
+            </template>
+          </t-popup>
+        </div>
+        <div v-if="folder.description" class="card-content-txt">
+          {{ folder.description }}
+        </div>
+        <div class="folder-card-mark" aria-hidden="true">
+          <t-icon name="folder" class="folder-card-icon" />
+        </div>
+      </div>
+      <div class="card-bottom">
+        <span class="card-time">{{ formatDocTime(folder.updated_at) }}</span>
+        <div class="card-bottom-right">
+          <span class="card-type">{{ t('knowledgeBase.folderItemCount', { count: folder.recursive_knowledge_count }) }}</span>
+        </div>
+      </div>
+    </div>
+
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -803,6 +857,23 @@ const handleAction = (action: 'edit' | 'view-trace' | 'reparse' | 'cancel-parse'
     padding: 0;
     background: transparent;
     letter-spacing: 0.02em;
+  }
+}
+
+.knowledge-folder-card {
+  .folder-card-mark {
+    position: absolute;
+    right: 14px;
+    bottom: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--td-brand-color);
+    pointer-events: none;
+  }
+
+  .folder-card-icon {
+    font-size: 24px;
   }
 }
 

@@ -401,6 +401,26 @@ func AuthorizeTenantAPIKeyKnowledgeTargets(ctx context.Context, kbIDs, knowledge
 	return nil
 }
 
+// AuthorizeTenantAPIKeyFolderScopes verifies that every logical folder scope is
+// bound to a knowledge base allowed by a restricted API key. Folder ownership
+// is validated later by the folder resolver.
+func AuthorizeTenantAPIKeyFolderScopes(ctx context.Context, scopes []FolderScope) error {
+	scope, ok := TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil
+	}
+	kbIDs := make([]string, 0, len(scopes))
+	for _, folderScope := range scopes {
+		if folderScope.KnowledgeBaseID != "" {
+			kbIDs = append(kbIDs, folderScope.KnowledgeBaseID)
+		}
+	}
+	if len(kbIDs) > 0 && !scope.AllowsKnowledgeBases(kbIDs) {
+		return errors.NewForbiddenError("API key scope does not allow one or more folder knowledge bases")
+	}
+	return nil
+}
+
 // AuthorizeTenantAPIKeyOptionalTagIDs rejects tag_ids for KB-restricted keys
 // because tag resolution can pull documents from arbitrary knowledge bases.
 func AuthorizeTenantAPIKeyOptionalTagIDs(ctx context.Context, tagIDs []string) error {

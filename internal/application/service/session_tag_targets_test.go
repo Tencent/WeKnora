@@ -79,6 +79,20 @@ func (s *tagTargetKnowledgeService) ListKnowledgeIDsByTagIDs(
 	return out, nil
 }
 
+type folderTargetService struct {
+	interfaces.KnowledgeFolderService
+	knowledgeIDs map[string][]string
+}
+
+func (s *folderTargetService) ResolveKnowledgeIDs(
+	_ context.Context,
+	_ uint64,
+	scope types.FolderScope,
+) ([]string, error) {
+	key := scope.KnowledgeBaseID + "/" + scope.FolderID
+	return append([]string(nil), s.knowledgeIDs[key]...), nil
+}
+
 func knowledgeBelongsToKB(knowledges []*types.Knowledge, knowledgeID string, kbID string) bool {
 	for _, knowledge := range knowledges {
 		if knowledge.ID == knowledgeID && knowledge.KnowledgeBaseID == kbID {
@@ -97,6 +111,10 @@ func newTagTargetSessionService() *sessionService {
 				"faq-kb": {ID: "faq-kb", TenantID: 100, Type: types.KnowledgeBaseTypeFAQ},
 			},
 		},
+		knowledgeFolderService: &folderTargetService{knowledgeIDs: map[string][]string{
+			"doc-kb/folder-a": {"doc-1", "doc-2"},
+			"doc-kb/empty":    {},
+		}},
 		knowledgeService: &tagTargetKnowledgeService{
 			knowledges: []*types.Knowledge{
 				{ID: "doc-1", TenantID: 100, KnowledgeBaseID: "doc-kb"},
@@ -327,4 +345,57 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database unavailable")
+}
+
+func TestBuildSearchTargets_FolderScopeResolvesCurrentKnowledgeIDs(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		nil,
+		nil,
+		nil,
+		[]types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderID: "folder-a", IncludeDescendants: true}},
+	)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.ElementsMatch(t, []string{"doc-1", "doc-2"}, targets[0].KnowledgeIDs)
+	assert.Equal(t, []string{"folder-a"}, targets[0].ScopeFolderIDs)
+	assert.False(t, targets[0].ResolvedEmpty)
+}
+
+func TestBuildSearchTargets_EmptyFolderNeverBecomesFullKB(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		nil,
+		nil,
+		nil,
+		[]types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderID: "empty", IncludeDescendants: true}},
+	)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.True(t, targets[0].ResolvedEmpty)
+	assert.Empty(t, targets[0].KnowledgeIDs)
+	assert.Empty(t, targets.Retrievable())
+}
+
+func TestBuildSearchTargets_FolderAndTagScopesIntersect(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		nil,
+		nil,
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		[]types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderID: "folder-a", IncludeDescendants: true}},
+	)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.ElementsMatch(t, []string{"doc-1"}, targets[0].KnowledgeIDs)
+	assert.ElementsMatch(t, []string{"tag-a"}, targets[0].ScopeTagIDs)
+	assert.ElementsMatch(t, []string{"folder-a"}, targets[0].ScopeFolderIDs)
 }

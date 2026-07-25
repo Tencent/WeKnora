@@ -36,7 +36,7 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "FolderID"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -165,10 +165,29 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	var total int64
 
 	scope := func(q *gorm.DB) *gorm.DB {
-		return applyKnowledgeListFilter(
-			q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
-			filter,
-		)
+		q = q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
+		if filter.FolderID != nil {
+			folderID := strings.TrimSpace(*filter.FolderID)
+			switch {
+			case folderID == "":
+				q = q.Where("folder_id IS NULL OR folder_id = ''")
+			case filter.IncludeFolderDescendants:
+				q = q.Where(`folder_id IN (
+WITH RECURSIVE folder_tree(id) AS (
+    SELECT id FROM knowledge_folders
+    WHERE tenant_id = ? AND knowledge_base_id = ? AND id = ? AND deleted_at IS NULL
+    UNION ALL
+    SELECT child.id FROM knowledge_folders child
+    JOIN folder_tree parent ON child.parent_folder_id = parent.id
+    WHERE child.tenant_id = ? AND child.knowledge_base_id = ? AND child.deleted_at IS NULL
+)
+SELECT id FROM folder_tree
+)`, tenantID, kbID, folderID, tenantID, kbID)
+			default:
+				q = q.Where("folder_id = ?", folderID)
+			}
+		}
+		return applyKnowledgeListFilter(q, filter)
 	}
 
 	if err := scope(r.db.WithContext(ctx).Model(&types.Knowledge{})).Count(&total).Error; err != nil {

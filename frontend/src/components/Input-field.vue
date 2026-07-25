@@ -505,6 +505,7 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedFolders = computed(() => settingsStore.settings.selectedFolders || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
@@ -629,8 +630,18 @@ const allSelectedItems = computed(() => {
     description: tag.kbName || '',
     isAgentConfigured: false,
   }));
+  const folders = selectedFolders.value.map((folder: any) => ({
+    id: folder.id,
+    name: folder.name,
+    type: 'folder' as const,
+    kbId: folder.kbId,
+    kbName: folder.kbName,
+    includeDescendants: folder.includeDescendants !== false,
+    description: folder.kbName || '',
+    isAgentConfigured: false,
+  }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...folders, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -641,6 +652,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id, item.kbId);
   } else if (item.type === 'mcp') {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -652,6 +665,7 @@ const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
     case 'tag': return 'tag';
+    case 'folder': return 'folder-open';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
     default: return 'folder';
@@ -1268,6 +1282,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       };
     }));
     mentionGroupCounts.value.kb = kbItems.length;
+    mentionGroupCounts.value.folder = kbItems.length > 0 ? kbItems.length : 0;
 
     const tagKeyword = q.trim();
     const tagSources = availableKbs;
@@ -1642,6 +1657,14 @@ const onMentionSelect = (item: any) => {
     settingsStore.addMCPService(item.id);
   } else if (item.type === 'skill') {
     settingsStore.addSkill(item.skillName || item.id);
+  } else if (item.type === 'folder') {
+    settingsStore.addFolder({
+      id: item.id,
+      name: item.name,
+      kbId: item.kbId,
+      kbName: item.kbName,
+      includeDescendants: item.includeDescendants !== false,
+    });
   }
 
   const textarea = getTextareaEl();
@@ -1926,6 +1949,7 @@ const createSession = async (val: string) => {
     kb_id: item.kbId,
     kb_name: item.kbName,
     service_id: item.serviceId,
+    include_descendants: item.type === 'folder' ? item.includeDescendants !== false : undefined,
     skill_name: item.skillName,
   }));
   const imageFiles = uploadedImages.value.map(img => img.file);

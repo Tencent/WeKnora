@@ -169,6 +169,7 @@ watch(
         agentId: settingsStore.selectedAgentId,
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
+        folders: settingsStore.settings.selectedFolders,
         tags: settingsStore.settings.selectedTags,
         mcps: settingsStore.settings.selectedMCPServices,
         skills: settingsStore.settings.selectedSkills,

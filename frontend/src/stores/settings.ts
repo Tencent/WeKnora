@@ -14,6 +14,7 @@ interface Settings {
   agentConfig: AgentConfig;
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
   selectedFiles: string[]; // 当前选中的文件ID列表
+  selectedFolders: Array<{ id: string; name: string; kbId: string; kbName?: string; includeDescendants: boolean }>;
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
@@ -83,6 +84,7 @@ const defaultSettings: Settings = {
   },
   selectedKnowledgeBases: [],  // 默认为空数组
   selectedFiles: [], // 默认为空数组
+  selectedFolders: [],
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
   selectedMCPServices: [],
@@ -356,6 +358,26 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    addFolder(folder: { id: string; name: string; kbId: string; kbName?: string; includeDescendants?: boolean }) {
+      if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+      const next = { ...folder, includeDescendants: folder.includeDescendants !== false };
+      const index = this.settings.selectedFolders.findIndex(item => item.id === folder.id && item.kbId === folder.kbId);
+      if (index >= 0) this.settings.selectedFolders[index] = next;
+      else this.settings.selectedFolders.push(next);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    removeFolder(folderId: string, kbId?: string) {
+      this.settings.selectedFolders = (this.settings.selectedFolders || [])
+        .filter(folder => !(folder.id === folderId && (!kbId || folder.kbId === kbId)));
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolders = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {
       if (!this.settings.selectedTags) this.settings.selectedTags = [];
       if (!this.settings.selectedTags.some(t => t.id === tag.id && t.kbId === tag.kbId)) {
@@ -427,6 +449,14 @@ export const useSettingsStore = defineStore("settings", {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
+      const folders = this.settings.selectedFolders || [];
+      const folderScopes = folders
+        .filter(folder => folder.id && folder.kbId)
+        .map(folder => ({
+          knowledge_base_id: folder.kbId,
+          folder_id: folder.id,
+          include_descendants: folder.includeDescendants !== false,
+        }));
       const tagScopes = Object.entries(tags.reduce<Record<string, string[]>>((scopes, tag) => {
         if (!tag.id || !tag.kbId) return scopes;
         (scopes[tag.kbId] ||= []).push(tag.id);
@@ -442,6 +472,7 @@ export const useSettingsStore = defineStore("settings", {
         knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
         tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
+        folder_scopes: folderScopes.length > 0 ? folderScopes : undefined,
         limit,
       };
     },
@@ -465,6 +496,7 @@ export const useSettingsStore = defineStore("settings", {
       // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
       this.settings.selectedKnowledgeBases = [];
       this.settings.selectedFiles = [];
+      this.settings.selectedFolders = [];
       this.settings.selectedFileKbMap = {};
       this.settings.selectedTags = [];
       this.settings.selectedMCPServices = [];
@@ -530,6 +562,28 @@ export const useSettingsStore = defineStore("settings", {
           // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
           // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
         }
+        if (Array.isArray(state.folder_scopes) || Array.isArray(state.mentioned_items)) {
+          const mentionFolders = (state.mentioned_items || [])
+            .filter(item => item.type === "folder" && item.id && item.kb_id)
+            .map(item => ({
+              id: item.id,
+              name: item.name || item.id,
+              kbId: item.kb_id!,
+              kbName: item.kb_name,
+              includeDescendants: item.include_descendants !== false,
+            }));
+          const names = new Map(mentionFolders.map(folder => [folder.kbId + "/" + folder.id, folder]));
+          this.settings.selectedFolders = (state.folder_scopes || []).map(scope => {
+            const mentioned = names.get(scope.knowledge_base_id + "/" + scope.folder_id);
+            return mentioned || {
+              id: scope.folder_id,
+              name: scope.folder_id,
+              kbId: scope.knowledge_base_id,
+              includeDescendants: scope.include_descendants !== false,
+            };
+          });
+          if (!state.folder_scopes?.length) this.settings.selectedFolders = mentionFolders;
+        }
         if (Array.isArray(state.mentioned_items)) {
           const fromMentions = state.mentioned_items
             .filter(item => item.type === "tag" && item.id && item.kb_id)
@@ -589,6 +643,11 @@ export interface SessionLastRequestStatePayload {
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];
+  folder_scopes?: Array<{
+    knowledge_base_id: string;
+    folder_id: string;
+    include_descendants: boolean;
+  }>;
   mcp_service_ids?: string[];
   skill_names?: string[];
   mentioned_items?: Array<{
@@ -597,6 +656,7 @@ export interface SessionLastRequestStatePayload {
     type: string;
     kb_id?: string;
     kb_name?: string;
+    include_descendants?: boolean;
     skill_name?: string;
   }>;
   web_search_enabled?: boolean;

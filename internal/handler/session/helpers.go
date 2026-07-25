@@ -98,6 +98,52 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
+func folderScopesFromRequest(direct []types.FolderScope, items []MentionedItemRequest) []types.FolderScope {
+	result := make([]types.FolderScope, 0, len(direct)+len(items))
+	indexByKey := make(map[string]int)
+	appendScope := func(scope types.FolderScope) {
+		scope.KnowledgeBaseID = strings.TrimSpace(scope.KnowledgeBaseID)
+		scope.FolderID = strings.TrimSpace(scope.FolderID)
+		if scope.KnowledgeBaseID == "" || scope.FolderID == "" {
+			return
+		}
+		key := scope.KnowledgeBaseID + "\x00" + scope.FolderID
+		if index, ok := indexByKey[key]; ok {
+			result[index].IncludeDescendants = result[index].IncludeDescendants || scope.IncludeDescendants
+			return
+		}
+		indexByKey[key] = len(result)
+		result = append(result, scope)
+	}
+	for _, scope := range direct {
+		appendScope(scope)
+	}
+	for _, item := range items {
+		if item.Type != "folder" {
+			continue
+		}
+		includeDescendants := true
+		if item.IncludeDescendants != nil {
+			includeDescendants = *item.IncludeDescendants
+		}
+		appendScope(types.FolderScope{
+			KnowledgeBaseID:    item.KBID,
+			FolderID:           item.ID,
+			IncludeDescendants: includeDescendants,
+		})
+	}
+	return result
+}
+
+func cloneFolderScopes(scopes []types.FolderScope) []types.FolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.FolderScope, len(scopes))
+	copy(cloned, scopes)
+	return cloned
+}
+
 // orphanTagIDsForScope returns tag IDs from the request that are not already
 // covered by scoped mentions.
 func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {

@@ -23,16 +23,17 @@ type History struct {
 	KnowledgeReferences References // Knowledge references used in the answer
 }
 
-// MentionedItem represents a mentioned knowledge base or file
+// MentionedItem represents a mentioned knowledge base, folder, file, or tool
 type MentionedItem struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
-	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
-	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
-	KBName    string `json:"kb_name"`    // Display name for parent KB
-	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
-	SkillName string `json:"skill_name"` // Preloaded agent skill name
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`                // "kb", "folder", "file", "tag", "mcp", "skill"
+	KBType             string `json:"kb_type"`             // "document" or "faq" (only for kb type)
+	KBID               string `json:"kb_id"`               // Parent knowledge base for file/tag mentions
+	KBName             string `json:"kb_name"`             // Display name for parent KB
+	ServiceID          string `json:"service_id"`          // Parent MCP service for MCP tool mentions
+	SkillName          string `json:"skill_name"`          // Preloaded agent skill name
+	IncludeDescendants bool   `json:"include_descendants"` // Folder scope recursion
 }
 
 // MessageImage represents an image attached to a chat message
@@ -269,6 +270,7 @@ type MessageExecutionContext struct {
 	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
 	TagIDs                []string                  `json:"tag_ids,omitempty"`
 	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
+	FolderScopes          []FolderScope             `json:"folder_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`

@@ -78,12 +78,12 @@ type CustomAgentService interface {
 	// Returns:
 	//   - List of suggested questions
 	//   - Possible errors
-	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, limit int) ([]types.SuggestedQuestion, error)
+	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, folderScopes []types.FolderScope, limit int) ([]types.SuggestedQuestion, error)
 
 	// GetKnowledgeSuggestedQuestions returns only knowledge-derived candidates.
 	// It is independent of whether starter suggestions are enabled and is used
 	// as a source/fallback for contextual follow-up generation.
-	GetKnowledgeSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, limit int) ([]types.SuggestedQuestion, error)
+	GetKnowledgeSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, folderScopes []types.FolderScope, limit int) ([]types.SuggestedQuestion, error)
 }
 
 // CustomAgentRepository defines the custom agent repository interface
