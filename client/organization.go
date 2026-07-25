@@ -128,22 +128,27 @@ type JoinRequestResponse struct {
 
 // SharedKnowledgeBaseInfo represents a shared knowledge base
 type SharedKnowledgeBaseInfo struct {
-	ShareID        string    `json:"share_id"`
-	OrganizationID string    `json:"organization_id"`
-	OrgName        string    `json:"org_name"`
-	Permission     string    `json:"permission"`
-	SourceTenantID uint64    `json:"source_tenant_id"`
-	SharedAt       time.Time `json:"shared_at"`
+	KnowledgeBase  *KnowledgeBase `json:"knowledge_base"`
+	ShareID        string         `json:"share_id"`
+	OrganizationID string         `json:"organization_id"`
+	OrgName        string         `json:"org_name"`
+	Permission     string         `json:"permission"`
+	SourceTenantID uint64         `json:"source_tenant_id"`
+	SharedAt       time.Time      `json:"shared_at"`
 }
 
 // SharedAgentInfo represents a shared agent
 type SharedAgentInfo struct {
-	ShareID        string    `json:"share_id"`
-	OrganizationID string    `json:"organization_id"`
-	OrgName        string    `json:"org_name"`
-	Permission     string    `json:"permission"`
-	SourceTenantID uint64    `json:"source_tenant_id"`
-	SharedAt       time.Time `json:"shared_at"`
+	Agent            *Agent    `json:"agent"`
+	ShareID          string    `json:"share_id"`
+	OrganizationID   string    `json:"organization_id"`
+	OrgName          string    `json:"org_name"`
+	Permission       string    `json:"permission"`
+	SourceTenantID   uint64    `json:"source_tenant_id"`
+	SharedAt         time.Time `json:"shared_at"`
+	SharedByUserID   string    `json:"shared_by_user_id,omitempty"`
+	SharedByUsername string    `json:"shared_by_username,omitempty"`
+	DisabledByMe     bool      `json:"disabled_by_me"`
 }
 
 // UserInfo represents user information for API responses

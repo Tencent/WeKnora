@@ -16,12 +16,18 @@ import (
 )
 
 type fakeKBSearchSvc struct {
-	items []sdk.KnowledgeBase
-	err   error
+	items     []sdk.KnowledgeBase
+	shared    []sdk.SharedKnowledgeBaseInfo
+	err       error
+	sharedErr error
 }
 
 func (f *fakeKBSearchSvc) ListKnowledgeBases(_ context.Context) ([]sdk.KnowledgeBase, error) {
 	return f.items, f.err
+}
+
+func (f *fakeKBSearchSvc) ListSharedKnowledgeBases(_ context.Context) ([]sdk.SharedKnowledgeBaseInfo, error) {
+	return f.shared, f.sharedErr
 }
 
 func TestKBSearch_Substring(t *testing.T) {
@@ -45,6 +51,17 @@ func TestKBSearch_CaseInsensitive(t *testing.T) {
 	}}
 	require.NoError(t, runKBSearch(context.Background(), &KBSearchOptions{Query: "engineering", Limit: 20}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "kb1")
+}
+
+func TestKBSearch_IncludesShared(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	sharedKB := sdk.KnowledgeBase{ID: "kb-shared", Name: "Partner Marketing"}
+	svc := &fakeKBSearchSvc{shared: []sdk.SharedKnowledgeBaseInfo{{
+		KnowledgeBase: &sharedKB, OrgName: "Partners", Permission: "viewer",
+	}}}
+	require.NoError(t, runKBSearch(context.Background(), &KBSearchOptions{Query: "partner", Limit: 20}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	assert.Contains(t, out.String(), "kb-shared")
+	assert.Contains(t, out.String(), "shared:Partners")
 }
 
 func TestKBSearch_MatchesDescription(t *testing.T) {

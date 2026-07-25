@@ -27,7 +27,7 @@ type PinOptions struct {
 // list-ordering preference, surfaced where the user sees it — in `kb list`),
 // so the list is the canonical source.
 type PinService interface {
-	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
+	cmdutil.VisibleKBLister
 	TogglePinKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
@@ -90,14 +90,14 @@ func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions,
 	// Read the current pin state from the list (the canonical per-user pin
 	// source); the single-KB GET doesn't carry it. This makes pin/unpin
 	// idempotent: we toggle only when the state actually needs to change.
-	kbs, err := svc.ListKnowledgeBases(ctx)
+	kbs, err := cmdutil.ListVisibleKnowledgeBases(ctx, svc, true, true)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	var current *sdk.KnowledgeBase
 	for i := range kbs {
 		if kbs[i].ID == id {
-			current = &kbs[i]
+			current = &kbs[i].KnowledgeBase
 			break
 		}
 	}

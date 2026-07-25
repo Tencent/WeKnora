@@ -26,6 +26,9 @@ CLI history before v0.3 is recorded in the project root
   (a directly-executable argv array — no shell-splitting or quoting).
 
 ### Added
+- `kb list` and `agent list` now include shared-space resources by default;
+  `--owned` and `--shared` restrict the source, and shared rows expose space
+  and effective-permission metadata.
 - `chat` / `session ask --reference` includes indexed citations, while
   `--verbose` includes reasoning, tools, and lifecycle events. MCP `chat` /
   `session_ask` expose the same controls through `reference` / `verbose` inputs.
@@ -52,6 +55,8 @@ CLI history before v0.3 is recorded in the project root
   reference payloads.
 
 ### Fixed
+- KB name resolution, `search kb`, project linking, pin-state enrichment, and
+  MCP `kb_list` / `agent_list` now discover shared-space resources consistently.
 - Streaming SDK calls are no longer cut off by the client's default 30-second
   timeout (explicit `WithTimeout` values remain honored), and SSE data lines
   up to 4 MiB are accepted.

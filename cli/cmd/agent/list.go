@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
-	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // agentListFields enumerates the fields surfaced for `--format json` discovery
@@ -22,16 +21,19 @@ import (
 var agentListFields = []string{
 	"id", "name", "description", "avatar",
 	"is_builtin", "tenant_id", "created_by",
+	"is_shared", "organization_id", "org_name", "permission", "source_tenant_id", "shared_at", "disabled_by_me",
 	"created_at", "updated_at",
 }
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	ListAgents(ctx context.Context) ([]sdk.Agent, error)
+	cmdutil.VisibleAgentLister
 }
 
 // ListOptions captures `agent list` filter flag state.
 type ListOptions struct {
+	Owned  bool
+	Shared bool
 	// Limit caps the returned slice client-side. 0 = no cap, 1..10000 = explicit.
 	// The agent list SDK is unpaginated; --all-pages is intentionally not
 	// exposed because it would be a no-op.
@@ -43,7 +45,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List custom agents visible to the active tenant",
+		Short: "List agents visible to the active profile",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -63,12 +65,14 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.Owned, "owned", false, "Only show agents in the current workspace")
+	cmd.Flags().BoolVar(&opts.Shared, "shared", false, "Only show agents received through shared spaces")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmdutil.AddFormatFlag(cmd, agentListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:  "List custom agents visible to the active tenant. The SDK returns all agents in one call (no server-side pagination); meta.count reflects the full tenant set, --limit caps client-side.",
-		Examples: []string{"weknora agent list --format json", "weknora agent list --limit 10 --format json"},
-		Output:   "envelope.data is an array of Agent objects with id, name, is_builtin; meta.total_count is the full tenant set and meta.has_more=true means --limit truncated it (raise --limit to get the rest)",
+		UsedFor:  "List current-workspace and shared-space agents visible to the active profile. Use --owned or --shared to restrict the source.",
+		Examples: []string{"weknora agent list --format json", "weknora agent list --shared --format json"},
+		Output:   "envelope.data is an array of Agent objects; is_shared identifies shared rows and shared rows include org_name, permission, and source_tenant_id",
 	})
 	return cmd
 }
@@ -79,6 +83,10 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 func validateListOpts(opts *ListOptions) error {
 	if opts == nil {
 		return nil
+	}
+	if opts.Owned && opts.Shared {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			"--owned and --shared are mutually exclusive")
 	}
 	if opts.Limit < 1 || opts.Limit > 10000 {
 		return &cmdutil.Error{
@@ -96,12 +104,12 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	if err := validateListOpts(opts); err != nil {
 		return err
 	}
-	items, err := svc.ListAgents(ctx)
+	items, err := cmdutil.ListVisibleAgents(ctx, svc, !opts.Shared, !opts.Owned)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list agents")
 	}
 	if items == nil {
-		items = []sdk.Agent{} // ensure JSON [] not null
+		items = []cmdutil.VisibleAgent{} // ensure JSON [] not null
 	}
 	// Default sort: updated_at desc - most recently-edited agents surface
 	// first. Mirrors kb list / doc list behavior.
@@ -126,20 +134,37 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if len(items) == 0 {
+		if opts.Owned {
+			fmt.Fprintln(iostreams.IO.Out, "(no current-workspace agents)")
+			return nil
+		}
+		if opts.Shared {
+			fmt.Fprintln(iostreams.IO.Out, "(no shared agents)")
+			return nil
+		}
 		fmt.Fprintln(iostreams.IO.Out, "(no agents)")
 		return nil
 	}
 
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tBUILTIN\tUPDATED")
+	fmt.Fprintln(tw, "ID\tNAME\tSOURCE\tACCESS\tBUILTIN\tUPDATED")
 	now := time.Now()
 	for _, a := range items {
 		name := text.Truncate(40, a.Name)
+		source := "owned"
+		access := "-"
+		if a.IsShared {
+			source = "shared"
+			if a.OrgName != "" {
+				source = "shared:" + text.Truncate(24, a.OrgName)
+			}
+			access = a.Permission
+		}
 		builtin := "-"
 		if a.IsBuiltin {
 			builtin = "yes"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.ID, name, builtin, text.FuzzyAgo(now, a.UpdatedAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.ID, name, source, access, builtin, text.FuzzyAgo(now, a.UpdatedAt))
 	}
 	return tw.Flush()
 }

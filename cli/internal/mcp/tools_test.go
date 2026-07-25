@@ -20,36 +20,41 @@ import (
 // Each method records the last call args; per-test setup populates the
 // return values it wants to assert against.
 type fakeSvc struct {
-	listKBs        []sdk.KnowledgeBase
-	listKBsErr     error
-	getKB          *sdk.KnowledgeBase
-	getKBErr       error
-	listDocs       []sdk.Knowledge
-	listDocsTotal  int64
-	listDocsErr    error
-	getDoc         *sdk.Knowledge
-	getDocErr      error
-	openDocName    string
-	openDocBody    io.ReadCloser
-	openDocErr     error
-	hybridResults  []*sdk.SearchResult
-	hybridErr      error
-	createSess     *sdk.Session
-	createSessErr  error
-	kbStreamEvents []*sdk.StreamResponse
-	kbStreamErr    error
-	agents         []sdk.Agent
-	agentsErr      error
-	agent          *sdk.Agent
-	agentErr       error
-	agentEvents    []*sdk.AgentStreamResponse
-	agentStreamErr error
-	chunks         []sdk.Chunk
-	chunksTotal    int64
-	chunksErr      error
+	listKBs          []sdk.KnowledgeBase
+	listKBsErr       error
+	listSharedKBs    []sdk.SharedKnowledgeBaseInfo
+	listSharedKBsErr error
+	getKB            *sdk.KnowledgeBase
+	getKBErr         error
+	listDocs         []sdk.Knowledge
+	listDocsTotal    int64
+	listDocsErr      error
+	getDoc           *sdk.Knowledge
+	getDocErr        error
+	openDocName      string
+	openDocBody      io.ReadCloser
+	openDocErr       error
+	hybridResults    []*sdk.SearchResult
+	hybridErr        error
+	createSess       *sdk.Session
+	createSessErr    error
+	kbStreamEvents   []*sdk.StreamResponse
+	kbStreamErr      error
+	agents           []sdk.Agent
+	agentsErr        error
+	sharedAgents     []sdk.SharedAgentInfo
+	sharedAgentsErr  error
+	agent            *sdk.Agent
+	agentErr         error
+	agentEvents      []*sdk.AgentStreamResponse
+	agentStreamErr   error
+	chunks           []sdk.Chunk
+	chunksTotal      int64
+	chunksErr        error
 	// Captured args:
 	calls struct {
 		listKBs       int
+		listSharedKBs int
 		kbViewID      string
 		docListKBID   string
 		docListFilter sdk.KnowledgeListFilter
@@ -73,6 +78,10 @@ type fakeSvc struct {
 func (f *fakeSvc) ListKnowledgeBases(_ context.Context) ([]sdk.KnowledgeBase, error) {
 	f.calls.listKBs++
 	return f.listKBs, f.listKBsErr
+}
+func (f *fakeSvc) ListSharedKnowledgeBases(_ context.Context) ([]sdk.SharedKnowledgeBaseInfo, error) {
+	f.calls.listSharedKBs++
+	return f.listSharedKBs, f.listSharedKBsErr
 }
 func (f *fakeSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {
 	f.calls.kbViewID = id
@@ -114,6 +123,9 @@ func (f *fakeSvc) KnowledgeQAStream(_ context.Context, sess string, req *sdk.Kno
 func (f *fakeSvc) ListAgents(_ context.Context) ([]sdk.Agent, error) {
 	f.calls.agentListN++
 	return f.agents, f.agentsErr
+}
+func (f *fakeSvc) ListSharedAgents(_ context.Context) ([]sdk.SharedAgentInfo, error) {
+	return f.sharedAgents, f.sharedAgentsErr
 }
 func (f *fakeSvc) GetAgent(_ context.Context, id string) (*sdk.Agent, error) {
 	f.calls.agentViewID = id
@@ -235,11 +247,15 @@ func TestTool_SessionAsk_NotAgentInvoke(t *testing.T) {
 }
 
 func TestTool_KBList(t *testing.T) {
-	svc := &fakeSvc{listKBs: []sdk.KnowledgeBase{{ID: "kb1", Name: "Marketing"}}}
+	sharedKB := sdk.KnowledgeBase{ID: "kb2", Name: "Partner Docs"}
+	svc := &fakeSvc{
+		listKBs:       []sdk.KnowledgeBase{{ID: "kb1", Name: "Marketing"}},
+		listSharedKBs: []sdk.SharedKnowledgeBaseInfo{{KnowledgeBase: &sharedKB, OrgName: "Partners", Permission: "viewer"}},
+	}
 	c, _ := newTestServer(t, svc)
 	var out kbListOutput
 	callTool(t, c, "kb_list", map[string]any{}, &out)
-	if len(out.Items) != 1 || out.Items[0].ID != "kb1" {
+	if len(out.Items) != 2 || out.Items[0].ID != "kb1" || out.Items[1].ID != "kb2" || !out.Items[1].IsShared {
 		t.Errorf("got %+v", out)
 	}
 }
@@ -531,11 +547,15 @@ func TestTool_Chat_ExistingSessionSkipsCreate(t *testing.T) {
 }
 
 func TestTool_AgentList(t *testing.T) {
-	svc := &fakeSvc{agents: []sdk.Agent{{ID: "ag1", Name: "Research"}}}
+	sharedAgent := sdk.Agent{ID: "ag2", Name: "Partner Research"}
+	svc := &fakeSvc{
+		agents:       []sdk.Agent{{ID: "ag1", Name: "Research"}},
+		sharedAgents: []sdk.SharedAgentInfo{{Agent: &sharedAgent, OrgName: "Partners", Permission: "viewer"}},
+	}
 	c, _ := newTestServer(t, svc)
 	var out agentListOutput
 	callTool(t, c, "agent_list", map[string]any{}, &out)
-	if len(out.Items) != 1 || out.Items[0].ID != "ag1" {
+	if len(out.Items) != 2 || out.Items[0].ID != "ag1" || out.Items[1].ID != "ag2" || !out.Items[1].IsShared {
 		t.Errorf("got %+v", out)
 	}
 }

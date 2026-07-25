@@ -207,8 +207,8 @@ func resolveKB(ctx context.Context, opts *Options, f *cmdutil.Factory) (string, 
 // promptForKB lists available knowledge bases on stderr, then asks the user
 // for an id or name. Resolved against the listed set so a typed name is
 // converted to the canonical id.
-func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) (string, string, error) {
-	kbs, err := svc.ListKnowledgeBases(ctx)
+func promptForKB(ctx context.Context, svc cmdutil.VisibleKBLister, f *cmdutil.Factory) (string, string, error) {
+	kbs, err := cmdutil.ListVisibleKnowledgeBases(ctx, svc, true, true)
 	if err != nil {
 		return "", "", cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
@@ -217,7 +217,15 @@ func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) 
 	}
 	fmt.Fprintln(iostreams.IO.Err, "Available knowledge bases:")
 	for _, kb := range kbs {
-		fmt.Fprintf(iostreams.IO.Err, "  %s  %s\n", kb.ID, kb.Name)
+		suffix := ""
+		if kb.IsShared {
+			suffix = "  [shared"
+			if kb.OrgName != "" {
+				suffix += ":" + kb.OrgName
+			}
+			suffix += "]"
+		}
+		fmt.Fprintf(iostreams.IO.Err, "  %s  %s%s\n", kb.ID, kb.Name, suffix)
 	}
 	p := f.Prompter()
 	answer, err := p.Input("Knowledge base id or name", "")

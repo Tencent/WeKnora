@@ -78,7 +78,7 @@ func marshalToString(v any) string {
 // them all; *sdk.Client satisfies the union implicitly.
 
 type knowledgeBaseService interface {
-	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
+	cmdutil.VisibleKBLister
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
@@ -95,7 +95,7 @@ type chatService interface {
 }
 
 type agentService interface {
-	ListAgents(ctx context.Context) ([]sdk.Agent, error)
+	cmdutil.VisibleAgentLister
 	GetAgent(ctx context.Context, agentID string) (*sdk.Agent, error)
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
@@ -147,13 +147,13 @@ func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 type kbListInput struct{}
 
 type kbListOutput struct {
-	Items []sdk.KnowledgeBase `json:"items"`
+	Items []cmdutil.VisibleKnowledgeBase `json:"items"`
 }
 
 func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "kb_list",
-		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, updated_at - useful for selecting a kb_id to pass to other tools.",
+		Description: "List all current-workspace and shared-space knowledge bases visible to the active WeKnora profile. No arguments. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Knowledge Bases",
 			DestructiveHint: bptr(false),
@@ -162,12 +162,12 @@ func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 			OpenWorldHint:   bptr(false),
 		},
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ kbListInput) (*mcpsdk.CallToolResult, any, error) {
-		items, err := svc.ListKnowledgeBases(ctx)
+		items, err := cmdutil.ListVisibleKnowledgeBases(ctx, svc, true, true)
 		if err != nil {
 			return toolErrorResult(cmdutil.WrapHTTP(err, "list knowledge bases")), nil, nil
 		}
 		if items == nil {
-			items = []sdk.KnowledgeBase{}
+			items = []cmdutil.VisibleKnowledgeBase{}
 		}
 		return successResult(kbListOutput{Items: items}), nil, nil
 	})
@@ -520,13 +520,13 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 type agentListInput struct{}
 
 type agentListOutput struct {
-	Items []sdk.Agent `json:"items"`
+	Items []cmdutil.VisibleAgent `json:"items"`
 }
 
 func addAgentList(server *mcpsdk.Server, svc agentService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "agent_list",
-		Description: "List the tenant's custom agents. Returns items[] with id, name, description, is_builtin - use to discover an agent_id before session_ask.",
+		Description: "List current-workspace and shared-space agents visible to the active profile. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id; use an id with session_ask.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Custom Agents",
 			DestructiveHint: bptr(false),
@@ -535,12 +535,12 @@ func addAgentList(server *mcpsdk.Server, svc agentService) {
 			OpenWorldHint:   bptr(false),
 		},
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ agentListInput) (*mcpsdk.CallToolResult, any, error) {
-		items, err := svc.ListAgents(ctx)
+		items, err := cmdutil.ListVisibleAgents(ctx, svc, true, true)
 		if err != nil {
 			return toolErrorResult(cmdutil.WrapHTTP(err, "list agents")), nil, nil
 		}
 		if items == nil {
-			items = []sdk.Agent{}
+			items = []cmdutil.VisibleAgent{}
 		}
 		return successResult(agentListOutput{Items: items}), nil, nil
 	})

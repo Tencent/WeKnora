@@ -32,7 +32,8 @@ one wastes turns or returns the wrong shape. Use the decision table.
 2. **`chat` vs `session ask`.** `chat` = plain KB RAG Q&A. `session ask --agent
    <id>` = invoke a *configured custom agent* (it may scope its own KBs, call
    tools, do web search). If the user set up an agent for this, prefer it
-   (`weknora agent list` to find ids); otherwise `chat`.
+   (`weknora agent list` to find ids, including shared-space agents); otherwise
+   `chat`.
 3. **One-shot vs multi-turn.** Both `chat` and `session ask` return a
    `data.session_id` in default JSON output. Pass `--session <id>` on the next
    call to continue the conversation. In NDJSON mode, read it from `init`.
@@ -42,8 +43,10 @@ one wastes turns or returns the wrong shape. Use the decision table.
 - `chat`, `search chunks`, `search docs` need a KB: pass `--kb <id-or-name>`, or
   set `WEKNORA_KB_ID`, or `weknora link` the directory (resolved in that order).
   If none resolves it's exit 1 (`local.kb_id_required`); a bad name is exit 1
-  (`local.kb_not_found`). Resolve names with `weknora kb list` / `search kb`.
-  (`search kb` / `search sessions` are tenant-wide and take no `--kb`.)
+  (`local.kb_not_found`). Resolve names with `weknora kb list` / `search kb`;
+  both include shared-space KBs. If the same name exists in multiple visible
+  workspaces, pass the UUID shown by `kb list`.
+  (`search kb` / `search sessions` take no `--kb`.)
 - `chat` / `session ask` return one buffered JSON envelope with answer
   events by default. Add `--reference` for indexed citations and `--verbose`
   for execution detail; use `--format ndjson` for raw events or `--format

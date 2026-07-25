@@ -1355,9 +1355,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	}
 
 	// Shared knowledge bases route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
+	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyReadAgents(apiKeyManageAgents(apiKeyChat(apiKeyFullAccess()))), g.Viewer(), orgHandler.ListSharedAgents)
 	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），
 	// 影响整个空间在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个空间做决定 — 必须 Admin+ 才允许调整。

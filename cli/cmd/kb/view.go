@@ -31,7 +31,7 @@ type ViewOptions struct{}
 // doesn't carry per-user pin state — pin is a per-user list concept).
 type ViewService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
-	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
+	cmdutil.VisibleKBLister
 }
 
 // NewCmdView builds `weknora kb view <id>`.
@@ -77,7 +77,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 	// always read false here. Enrich it from the list (the canonical pin
 	// source) so the field is accurate. Best-effort: a list error leaves the
 	// (unstamped) value rather than failing the view.
-	if kbs, lerr := svc.ListKnowledgeBases(ctx); lerr == nil {
+	if kbs, lerr := cmdutil.ListVisibleKnowledgeBases(ctx, svc, true, true); lerr == nil {
 		for i := range kbs {
 			if kbs[i].ID == id {
 				kb.IsPinned = kbs[i].IsPinned

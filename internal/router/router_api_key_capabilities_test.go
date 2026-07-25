@@ -436,8 +436,6 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/organizations/:id/invite-code"},
 		{http.MethodGet, "/api/v1/organizations/:id/members"},
 		{http.MethodPut, "/api/v1/organizations/:id/members/:tenant_id"},
-		{http.MethodGet, "/api/v1/shared-knowledge-bases"},
-		{http.MethodGet, "/api/v1/shared-agents"},
 		{http.MethodPost, "/api/v1/shared-agents/disabled"},
 	}
 
@@ -477,6 +475,35 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 				t.Fatalf("share route must not be granted by any capability: %#v", policy.Capabilities)
 			}
 		})
+	}
+}
+
+func TestSharedResourceDiscoveryRoutesMatchPrimaryReadCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
+
+	kbPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/shared-knowledge-bases")
+	if !policyHasCapability(kbPolicy, types.APIKeyCapabilityRetrieve) {
+		t.Fatalf("shared KB policy capabilities = %#v, want retrieve", kbPolicy.Capabilities)
+	}
+	if policyHasCapability(kbPolicy, types.APIKeyCapabilityManageSpaces) {
+		t.Fatalf("shared KB discovery must not require manage_spaces: %#v", kbPolicy.Capabilities)
+	}
+
+	agentPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/shared-agents")
+	for _, capability := range []types.APIKeyCapability{
+		types.APIKeyCapabilityReadAgents,
+		types.APIKeyCapabilityManageAgents,
+		types.APIKeyCapabilityChat,
+	} {
+		if !policyHasCapability(agentPolicy, capability) {
+			t.Fatalf("shared agent policy capabilities = %#v, want %s", agentPolicy.Capabilities, capability)
+		}
+	}
+	if policyHasCapability(agentPolicy, types.APIKeyCapabilityManageSpaces) {
+		t.Fatalf("shared agent discovery must not require manage_spaces: %#v", agentPolicy.Capabilities)
 	}
 }
 
