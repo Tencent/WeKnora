@@ -30,6 +30,13 @@ test('wiki drawer navigation and citation fallbacks open in a new tab', () => {
   assert.doesNotMatch(agentStream, /router\.push\(/)
 })
 
+test('wiki drawer hydrates protected images with the active KB context', () => {
+  assert.match(
+    agentStream,
+    /hydrateProtectedFileImages\(wikiDrawerBodyRef\.value,\s*undefined,\s*currentWikiKbId\.value\)/,
+  )
+})
+
 test('agent citations recover drawer references from retrieval tool events', () => {
   assert.match(
     agentStream,
