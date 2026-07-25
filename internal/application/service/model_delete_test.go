@@ -75,7 +75,6 @@ func (s *stubAgentRepoForModelDelete) CountByModelID(context.Context, uint64, st
 type stubModelRepoForDelete struct {
 	model  *types.Model
 	delete func(id string) error
-	update func(model *types.Model) error
 }
 
 func (s *stubModelRepoForDelete) Create(context.Context, *types.Model) error { return nil }
@@ -88,12 +87,7 @@ func (s *stubModelRepoForDelete) GetByID(_ context.Context, _ uint64, id string)
 func (s *stubModelRepoForDelete) List(context.Context, uint64, types.ModelType, types.ModelSource) ([]*types.Model, error) {
 	return nil, nil
 }
-func (s *stubModelRepoForDelete) Update(_ context.Context, model *types.Model) error {
-	if s.update != nil {
-		return s.update(model)
-	}
-	return nil
-}
+func (s *stubModelRepoForDelete) Update(context.Context, *types.Model) error { return nil }
 func (s *stubModelRepoForDelete) Delete(_ context.Context, _ uint64, id string) error {
 	if s.delete != nil {
 		return s.delete(id)
@@ -112,7 +106,7 @@ func TestDeleteModel_RejectsWhenReferenced(t *testing.T) {
 		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
 		&stubKBRepoForModelDelete{count: 1},
 		&stubAgentRepoForModelDelete{count: 0},
-		nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 
 	err := svc.DeleteModel(ctx, modelID)
@@ -131,7 +125,7 @@ func TestDeleteModel_RejectsWhenUsedByAgent(t *testing.T) {
 		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
 		&stubKBRepoForModelDelete{count: 0},
 		&stubAgentRepoForModelDelete{count: 2},
-		nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 
 	err := svc.DeleteModel(ctx, modelID)
@@ -157,7 +151,7 @@ func TestDeleteModel_SucceedsWhenUnreferenced(t *testing.T) {
 		},
 		&stubKBRepoForModelDelete{},
 		&stubAgentRepoForModelDelete{},
-		nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 
 	require.NoError(t, svc.DeleteModel(ctx, modelID))

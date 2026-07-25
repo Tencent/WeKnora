@@ -3,16 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
-	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -26,19 +23,10 @@ import (
 // still pending ops in task_pending_ops for this KB. Returns true when
 // a follow-up was scheduled.
 //
-// Post-Phase-3 this only backstops the case where a batch drained its
-// claimed window but more rows remain and no other trigger is pending
-// (e.g. steady trickle of uploads). Standard mode already fans a KB's
-// backlog across concurrent claiming batches, so the short delay is
-// normally just a light debounce rather than a lock-release wait.
-//
-// `delay` is the ProcessIn before the follow-up fires. Callers pass
-// wikiFollowUpDelay for the normal case and wikiRateLimitBackoff when the
-// batch tripped an upstream rate limit — the released failed rows are
-// eligible immediately, but nothing claims them until a trigger fires, so
-// stretching the follow-up interval is what actually paces retries down
-// during a 429 storm.
-func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload, delay time.Duration) bool {
+// We use a short ProcessIn (5s) so the active-batch lock has time to
+// release before the next worker tries to acquire it; otherwise we'd
+// just bounce on ErrWikiIngestConcurrent and burn an asynq retry slot.
+func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload) bool {
 	if s.pendingRepo == nil {
 		return false
 	}
@@ -47,15 +35,15 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 		return false
 	}
 
-	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up in %s", count, payload.KnowledgeBaseID, delay)
+	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up", count, payload.KnowledgeBaseID)
 
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-		asynq.Queue(types.QueueWiki),
+		asynq.Queue("low"),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(delay), // debounce (or rate-limit backoff) before draining the remainder
+		asynq.ProcessIn(5*time.Second), // short delay — active flag will be released by then
 	)
 	if _, err := s.task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki ingest: follow-up enqueue failed: %v", err)
@@ -64,17 +52,207 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 	return true
 }
 
-// newWikiBatchContext builds the per-run lazy fetchers used by both the ingest
-// batch and the debounced finalize task. These replace the legacy pre-batch
-// ListAllPages dump: instead of pulling ~100MB of rows up front (and walking
-// them several more times), callers pay only for the slugs / knowledge ids they
-// actually reach for. Cache hits keep repeat lookups within a single run free.
-// The cache is per-call (goroutine-safe via fetchMu), so each task gets a fresh,
-// isolated view.
-func (s *wikiIngestService) newWikiBatchContext(
-	kbID string,
-	wikiConfig *types.WikiConfig,
-) *WikiBatchContext {
+func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
+	taskStartedAt := time.Now()
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+
+	var payload WikiIngestPayload
+	exitStatus := "success"
+	mode := "redis"
+	lockAcquired := false
+	pendingOpsCount := 0
+	ingestOps := 0
+	retractOps := 0
+	ingestSucceeded := 0
+	ingestFailed := 0
+	retractHandled := 0
+	indexRebuildAttempted := false
+	indexRebuildSucceeded := false
+	followUpScheduled := false
+	totalPagesAffected := 0
+	docPreview := make([]string, 0, 6)
+	// Tunables resolved from KB.WikiConfig once we've loaded the KB.
+	// Captured up here so the deferred stats log can observe them
+	// regardless of which exit path we took.
+	loggedBatchSize := 0
+	loggedMapPar := 0
+	loggedReducePar := 0
+
+	defer func() {
+		logger.Infof(
+			ctx,
+			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s lock_acquired=%v pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) index(rebuild_attempted=%v,rebuild_succeeded=%v) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d) preview=%s",
+			payload.KnowledgeBaseID,
+			payload.TenantID,
+			retryCount,
+			maxRetry,
+			exitStatus,
+			time.Since(taskStartedAt).Round(time.Millisecond),
+			mode,
+			lockAcquired,
+			pendingOpsCount,
+			ingestOps,
+			retractOps,
+			ingestSucceeded,
+			ingestFailed,
+			retractHandled,
+			totalPagesAffected,
+			indexRebuildAttempted,
+			indexRebuildSucceeded,
+			followUpScheduled,
+			loggedBatchSize,
+			loggedMapPar,
+			loggedReducePar,
+			previewStringSlice(docPreview, 6),
+		)
+	}()
+
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		exitStatus = "invalid_payload"
+		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
+	}
+
+	// Inject context
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
+
+	// Try to acquire the "active batch" flag (non-blocking).
+	//
+	// TTL is intentionally short (wikiActiveLockTTL ≈ 60s) so that if the
+	// owning process dies without releasing the lock (crash, kill -9,
+	// container restart), the orphaned key expires within ~1 minute and new
+	// tasks aren't starved. A renew goroutine keeps the lock alive while
+	// the handler is genuinely running.
+	if s.redisClient != nil {
+		activeKey := wikiActiveKeyPrefix + payload.KnowledgeBaseID
+		acquired, err := s.redisClient.SetNX(ctx, activeKey, "1", wikiActiveLockTTL).Result()
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: redis SetNX failed: %v", err)
+		} else if !acquired {
+			exitStatus = "active_lock_conflict"
+			// If task_pending_ops is already empty for this KB, the active
+			// batch will drain whatever was queued. Returning nil avoids
+			// burning through the retry budget on tasks that would be
+			// no-ops when they eventually acquire the lock. If rows still
+			// remain, retry so we don't miss them in case the active
+			// batch drained its peek before our op landed.
+			n, nErr := s.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID)
+			if nErr != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to read pending count during lock conflict for KB %s: %v", payload.KnowledgeBaseID, nErr)
+				logger.Infof(ctx, "wiki ingest: another batch active for KB %s, deferring to asynq retry", payload.KnowledgeBaseID)
+				return ErrWikiIngestConcurrent
+			}
+			if n == 0 {
+				exitStatus = "active_lock_conflict_empty"
+				logger.Infof(ctx, "wiki ingest: concurrent batch active for KB %s, pending queue empty — skipping", payload.KnowledgeBaseID)
+				return nil
+			}
+			logger.Infof(ctx, "wiki ingest: another batch active for KB %s, deferring to asynq retry", payload.KnowledgeBaseID)
+			return ErrWikiIngestConcurrent
+		}
+		lockAcquired = acquired
+
+		lockCtx, cancelLock := context.WithCancel(context.Background())
+		defer func() {
+			cancelLock()
+			s.redisClient.Del(context.Background(), activeKey)
+		}()
+
+		go func() {
+			ticker := time.NewTicker(wikiActiveLockRenew)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-lockCtx.Done():
+					return
+				case <-ticker.C:
+					s.redisClient.Expire(context.Background(), activeKey, wikiActiveLockTTL)
+				}
+			}
+		}()
+	} else {
+		mode = "lite"
+		// In-process mutual exclusion: mirrors the Redis SetNX lock above.
+		if _, loaded := s.liteLocks.LoadOrStore(payload.KnowledgeBaseID, struct{}{}); loaded {
+			exitStatus = "active_lock_conflict"
+			logger.Infof(ctx, "wiki ingest: another batch active for KB %s (lite lock), deferring to asynq retry", payload.KnowledgeBaseID)
+			return ErrWikiIngestConcurrent
+		}
+		lockAcquired = true
+		defer s.liteLocks.Delete(payload.KnowledgeBaseID)
+	}
+
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		exitStatus = "get_kb_failed"
+		return fmt.Errorf("wiki ingest: get KB: %w", err)
+	}
+	if !kb.IsWikiEnabled() {
+		exitStatus = "kb_not_wiki_enabled"
+		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
+	}
+
+	var synthesisModelID string
+	if kb.WikiConfig != nil {
+		synthesisModelID = kb.WikiConfig.SynthesisModelID
+	}
+	if synthesisModelID == "" {
+		synthesisModelID = kb.SummaryModelID
+	}
+	if synthesisModelID == "" {
+		exitStatus = "missing_synthesis_model"
+		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
+	}
+	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	if err != nil {
+		exitStatus = "get_chat_model_failed"
+		return fmt.Errorf("wiki ingest: get chat model: %w", err)
+	}
+	// Wrap with LLM cache — same document content + same oldPageSlugs → cached wiki map
+	chatModel = chat.NewCachedChat(chatModel, s.llmCache)
+
+	// Resolve per-KB tunables once. WikiConfig.IngestBatchSize /
+	// IngestMapParallel / IngestReduceParallel let operators on
+	// 4w-document KBs raise the throughput knob (more docs per batch +
+	// more concurrent LLM calls) without a code deploy. Zero falls back
+	// to the historical defaults so existing KBs see no behaviour
+	// change until they opt in.
+	batchSize := kb.WikiConfig.IngestBatchSizeOrDefault(wikiMaxDocsPerBatch)
+	mapParallel := kb.WikiConfig.IngestMapParallelOrDefault(10)
+	reduceParallel := kb.WikiConfig.IngestReduceParallelOrDefault(10)
+	loggedBatchSize = batchSize
+	loggedMapPar = mapParallel
+	loggedReducePar = reduceParallel
+
+	lang := types.LanguageNameFromContext(ctx)
+
+	pendingOps, peekedIDs := s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
+	pendingOpsCount = len(pendingOps)
+	if len(pendingOps) == 0 {
+		exitStatus = "no_pending_ops"
+		logger.Infof(ctx, "wiki ingest: no pending operations for KB %s", payload.KnowledgeBaseID)
+		return nil
+	}
+
+	logger.Infof(ctx, "wiki ingest: batch processing %d ops for KB %s", len(pendingOps), payload.KnowledgeBaseID)
+
+	// Resolve extraction granularity once per batch. Historical rows with
+	// empty/unknown values fall back to Standard via Normalize(). Failures
+	// to load the KB (unlikely since we're already acting on it) also
+	// degrade gracefully to Standard.
+	granularity := types.WikiExtractionStandard
+	if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID); kbErr == nil && kb != nil && kb.WikiConfig != nil {
+		granularity = kb.WikiConfig.ExtractionGranularity.Normalize()
+	}
+
+	// Build the per-batch lazy fetchers. These replace the legacy
+	// pre-batch ListAllPages dump: instead of pulling ~100MB of rows
+	// up front (and walking them several more times during the batch),
+	// callers pay only for the slugs / knowledge ids they actually
+	// reach for. Cache hits keep repeat lookups within the batch free.
 	var (
 		fetchMu         sync.Mutex
 		slugTitleCache  = make(map[string]string) // slug -> title; "" = known-missing
@@ -94,7 +272,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 		fetchMu.Unlock()
 
 		if len(need) > 0 {
-			pages, err := s.wikiService.ListBySlugs(ctx, kbID, need)
+			pages, err := s.wikiService.ListBySlugs(ctx, payload.KnowledgeBaseID, need)
 			if err != nil {
 				logger.Warnf(ctx, "wiki ingest: ListBySlugs(%d slugs) failed: %v", len(need), err)
 			}
@@ -139,7 +317,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 		fetchMu.Unlock()
 
 		if len(need) > 0 {
-			contents, err := s.wikiService.ListSummariesByKnowledgeIDs(ctx, kbID, need)
+			contents, err := s.wikiService.ListSummariesByKnowledgeIDs(ctx, payload.KnowledgeBaseID, need)
 			if err != nil {
 				logger.Warnf(ctx, "wiki ingest: ListSummariesByKnowledgeIDs(%d kids) failed: %v", len(need), err)
 			}
@@ -165,15 +343,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 		return out
 	}
 
-	granularity := types.WikiExtractionStandard
-	contentInstructions := ""
-	extractionInstructions := ""
-	if wikiConfig != nil {
-		granularity = wikiConfig.ExtractionGranularity.Normalize()
-		contentInstructions = wikiConfig.ContentInstructions
-		extractionInstructions = wikiConfig.ExtractionInstructions
-	}
-	return &WikiBatchContext{
+	batchCtx := &WikiBatchContext{
 		SlugTitle: func(ctx context.Context, slug string) string {
 			m := resolveSlugs(ctx, []string{slug})
 			return m[slug]
@@ -183,249 +353,15 @@ func (s *wikiIngestService) newWikiBatchContext(
 			m := resolveSummaries(ctx, []string{kid})
 			return m[kid]
 		},
-		ExtractionGranularity:  granularity,
-		ContentInstructions:    contentInstructions,
-		ExtractionInstructions: extractionInstructions,
+		ExtractionGranularity: granularity,
 	}
-}
-
-func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
-	taskStartedAt := time.Now()
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
-
-	var payload WikiIngestPayload
-	exitStatus := "success"
-	mode := "redis"
-	pendingOpsCount := 0
-	ingestOps := 0
-	retractOps := 0
-	ingestSucceeded := 0
-	ingestFailed := 0
-	retractHandled := 0
-	followUpScheduled := false
-	totalPagesAffected := 0
-	docPreview := make([]string, 0, 6)
-	// Tunables resolved from KB.WikiConfig once we've loaded the KB.
-	// Captured up here so the deferred stats log can observe them
-	// regardless of which exit path we took. (Index-intro rebuild moved to
-	// the debounced wiki:finalize task in Phase 1, so it's logged there, not
-	// here; the exclusive per-KB lock was removed in Phase 3.)
-	loggedBatchSize := 0
-	loggedMapPar := 0
-	loggedReducePar := 0
-	loggedMaxInflight := 0
-
-	defer func() {
-		logger.Infof(
-			ctx,
-			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
-			payload.KnowledgeBaseID,
-			payload.TenantID,
-			retryCount,
-			maxRetry,
-			exitStatus,
-			time.Since(taskStartedAt).Round(time.Millisecond),
-			mode,
-			pendingOpsCount,
-			ingestOps,
-			retractOps,
-			ingestSucceeded,
-			ingestFailed,
-			retractHandled,
-			totalPagesAffected,
-			followUpScheduled,
-			loggedBatchSize,
-			loggedMapPar,
-			loggedReducePar,
-			loggedMaxInflight,
-			previewStringSlice(docPreview, 6),
-		)
-	}()
-
-	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		exitStatus = "invalid_payload"
-		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
-	}
-
-	// Inject context
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if payload.Language != "" {
-		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
-	}
-
-	// Concurrency model (Phase 3):
-	//
-	//   - Standard (Redis) mode: NO exclusive per-KB lock. Multiple batches
-	//     for the same KB may run at once, each claiming a DISJOINT set of
-	//     rows via claimPendingList (below). This lets one KB's backlog fan
-	//     out across the whole wiki worker pool instead of draining one
-	//     5-doc batch at a time. Same-slug reduce safety is provided by
-	//     withSlugLock, not by a batch-wide lock.
-	//
-	//   - Lite mode (no Redis, single process): keep the in-process
-	//     liteLocks guard so exactly one batch per KB runs at a time. Lite
-	//     targets small/local scale where serial-per-KB is simplest and the
-	//     claiming machinery (which needs FOR UPDATE SKIP LOCKED) buys
-	//     nothing.
-	if s.redisClient == nil {
-		mode = "lite"
-		if _, loaded := s.liteLocks.LoadOrStore(payload.KnowledgeBaseID, struct{}{}); loaded {
-			exitStatus = "active_lock_conflict"
-			logger.Infof(ctx, "wiki ingest: another batch active for KB %s (lite lock), deferring to asynq retry", payload.KnowledgeBaseID)
-			return ErrWikiIngestConcurrent
-		}
-		defer s.liteLocks.Delete(payload.KnowledgeBaseID)
-	}
-
-	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
-		exitStatus = "kb_deleted"
-		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
-			return fmt.Errorf("wiki ingest: clear deleted KB queue: %w", cleanupErr)
-		}
-		return nil
-	}
-	if err != nil {
-		exitStatus = "get_kb_failed"
-		return fmt.Errorf("wiki ingest: get KB: %w", err)
-	}
-	if !kb.IsWikiEnabled() {
-		exitStatus = "kb_not_wiki_enabled"
-		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
-	}
-
-	var synthesisModelID string
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
-	}
-	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
-	if err != nil {
-		exitStatus = "get_chat_model_failed"
-		return fmt.Errorf("wiki ingest: get chat model: %w", err)
-	}
-
-	// Resolve per-KB tunables once. WikiConfig.IngestBatchSize /
-	// IngestMapParallel / IngestReduceParallel let operators on
-	// 4w-document KBs raise the throughput knob (more docs per batch +
-	// more concurrent LLM calls) without a code deploy. Zero falls back
-	// to the historical defaults so existing KBs see no behaviour
-	// change until they opt in.
-	batchSize := kb.WikiConfig.IngestBatchSizeOrDefault(wikiMaxDocsPerBatch)
-	mapParallel := kb.WikiConfig.IngestMapParallelOrDefault(10)
-	reduceParallel := kb.WikiConfig.IngestReduceParallelOrDefault(10)
-	loggedBatchSize = batchSize
-	loggedMapPar = mapParallel
-	loggedReducePar = reduceParallel
-
-	lang := types.LanguageNameFromContext(ctx)
-
-	// Per-KB in-flight cap (Phase 4, standard mode): keep one KB's bulk
-	// import from monopolizing the shared wiki pool. If the KB is already at
-	// its cap we schedule a coalesced retry and bail without claiming, so the
-	// rows stay available for whichever running batch frees a slot first.
-	maxInflight := kb.WikiConfig.IngestMaxInflightOrDefault(wikiInflightDefault)
-	loggedMaxInflight = maxInflight
-	releaseSlot, gotSlot := s.reserveInflightSlot(ctx, payload.KnowledgeBaseID, maxInflight)
-	if !gotSlot {
-		exitStatus = "inflight_cap"
-		logger.Infof(ctx, "wiki ingest: KB %s at in-flight cap (%d), rescheduling", payload.KnowledgeBaseID, maxInflight)
-		s.scheduleCappedRetry(ctx, payload)
-		return nil
-	}
-	defer releaseSlot()
-
-	// Standard mode claims rows (marks claimed_at, disjoint across concurrent
-	// batches); Lite mode peeks under its in-process lock.
-	var pendingOps []WikiPendingOp
-	var peekedIDs []int64
-	var loadErr error
-	if s.redisClient != nil {
-		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
-	} else {
-		pendingOps, peekedIDs, loadErr = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
-	}
-	if loadErr != nil {
-		// Transient failure loading the pending list. Return an error so
-		// asynq retries this trigger with backoff — acking here would strand
-		// the queue until an unrelated upload happened to re-trigger it.
-		exitStatus = "load_pending_failed"
-		logger.Warnf(ctx, "wiki ingest: failed to load pending list for KB %s: %v", payload.KnowledgeBaseID, loadErr)
-		return fmt.Errorf("wiki ingest: load pending list: %w", loadErr)
-	}
-	pendingOpsCount = len(pendingOps)
-	if len(pendingOps) == 0 {
-		exitStatus = "no_pending_ops"
-		logger.Infof(ctx, "wiki ingest: no pending operations for KB %s", payload.KnowledgeBaseID)
-		// We claimed nothing, but rows may still exist held by a FRESH claim
-		// (a concurrent batch that is still running, or one that crashed
-		// mid-flight and left claimed_at stamped). This no-op return does not
-		// chain a follow-up, so without a safety net a crashed batch's rows
-		// would sit unclaimable until wikiClaimStaleAfter AND never get
-		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
-		// coalesced recheck timed past the stale threshold so those rows are
-		// reclaimed automatically once eligible.
-		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
-		return nil
-	}
-
-	logger.Infof(ctx, "wiki ingest: batch processing %d ops for KB %s", len(pendingOps), payload.KnowledgeBaseID)
-
-	// Crash/abort safety net (standard/claim mode only). If this batch exits
-	// abnormally — panic, ctx timeout, or an early error return — BEFORE it
-	// settles its claimed rows (trim + requeueFailedOps), release the claims
-	// so the next trigger can re-claim within seconds instead of waiting out
-	// wikiClaimStaleAfter (~90m). On the normal path claimsSettled flips true
-	// once the rows reach their terminal state, making this a no-op. Uses a
-	// bounded detached cleanup context because ctx may already be cancelled on
-	// the timeout path. Lite mode peeks without claiming, so there is nothing
-	// to release.
-	claimsSettled := false
-	if s.redisClient != nil && len(peekedIDs) > 0 {
-		defer func() {
-			if claimsSettled {
-				return
-			}
-			releaseCtx, releaseCancel := wikiIngestCleanupContext(ctx)
-			defer releaseCancel()
-			if err := s.pendingRepo.ReleaseByIDs(releaseCtx, peekedIDs); err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to release %d claims on abnormal exit for KB %s: %v", len(peekedIDs), payload.KnowledgeBaseID, err)
-				return
-			}
-			logger.Warnf(ctx, "wiki ingest: released %d claimed rows on abnormal exit for KB %s (re-claimable immediately)", len(peekedIDs), payload.KnowledgeBaseID)
-		}()
-	}
-
-	// Resolve extraction granularity once per batch. Historical rows with
-	// empty/unknown values fall back to Standard via Normalize(). Failures
-	// to load the KB (unlikely since we're already acting on it) also
-	// degrade gracefully to Standard.
-	var wikiConfig *types.WikiConfig
-	if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID); kbErr == nil && kb != nil && kb.WikiConfig != nil {
-		wikiConfig = kb.WikiConfig
-	}
-
-	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, wikiConfig)
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
 	var failedOps []WikiPendingOp
 	slugUpdates := make(map[string][]SlugUpdate)
 	var docResults []*docIngestResult
-	var retractFolderIDs []string
-	// rateLimited flips true when any map/reduce LLM failure looks like an
-	// upstream 429/quota trip. It steers the follow-up scheduler onto the
-	// longer wikiRateLimitBackoff so retries don't keep hammering an already
-	// saturated rpm budget. Guarded by mapMu (map phase) / reduceMu (reduce
-	// phase) — both are held when written.
-	rateLimited := false
+	var retractChangeDesc strings.Builder
 
 	eg, mapCtx := errgroup.WithContext(ctx)
 	eg.SetLimit(mapParallel) // Map phase limit (configurable via WikiConfig)
@@ -449,17 +385,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// PageSlugs as "figure it out yourself" — see
 				// cleanupWikiOnKnowledgeDelete's comment (3).
 				slugSet := make(map[string]struct{}, len(op.PageSlugs))
-				folderSet := make(map[string]struct{}, len(op.FolderIDs))
 				for _, slug := range op.PageSlugs {
 					if slug == "" {
 						continue
 					}
 					slugSet[slug] = struct{}{}
-				}
-				for _, folderID := range op.FolderIDs {
-					if folderID != "" {
-						folderSet[folderID] = struct{}{}
-					}
 				}
 				if op.KnowledgeID != "" {
 					livePages, err := s.wikiService.ListPagesBySourceRef(mapCtx, payload.KnowledgeBaseID, op.KnowledgeID)
@@ -477,9 +407,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 								continue
 							}
 							slugSet[p.Slug] = struct{}{}
-							if p.FolderID != "" {
-								folderSet[p.FolderID] = struct{}{}
-							}
 						}
 					}
 				}
@@ -488,6 +415,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				retractOps++
 				retractHandled++
 				docPreview = append(docPreview, fmt.Sprintf("retract[%s]: %s (%d slugs)", previewText(op.KnowledgeID, 24), previewText(op.DocTitle, 48), len(slugSet)))
+				fmt.Fprintf(&retractChangeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", op.DocTitle, op.DocSummary)
 
 				for slug := range slugSet {
 					slugUpdates[slug] = append(slugUpdates[slug], SlugUpdate{
@@ -498,9 +426,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						KnowledgeID:       op.KnowledgeID,
 						Language:          types.LanguageLocaleName(op.Language),
 					})
-				}
-				for folderID := range folderSet {
-					retractFolderIDs = append(retractFolderIDs, folderID)
 				}
 				mapMu.Unlock()
 				return nil
@@ -517,9 +442,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestFailed++
 				failedOps = append(failedOps, op)
-				if isLikelyRateLimitError(err) {
-					rateLimited = true
-				}
 				mapMu.Unlock()
 				logger.Warnf(mapCtx, "wiki ingest: failed to map knowledge %s: %v", op.KnowledgeID, err)
 				return nil // Don't fail the whole batch
@@ -584,27 +506,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// references from the same batch's summary pages and exclude failed
 	// pages from finalize processing.
 	failedAdditionSlugs := make(map[string]struct{})
-	// unappliedSlugKIDs collects the knowledge_ids that contributed to a
-	// slug whose update never landed — either because we could NOT acquire
-	// the per-slug lock within wikiSlugLockWait, or because reduce returned
-	// an error. In both cases the page keeps its prior content, so the
-	// owning document(s) must be re-queued rather than trimmed — otherwise
-	// the row is deleted and the contribution is silently lost forever
-	// (finalize only rebuilds the index / cross-links, it does not re-run
-	// reduce). requeueFailedOps' fail_count budget bounds the retries and
-	// dead-letters a document whose slug fails/stays hot permanently.
-	unappliedSlugKIDs := make(map[string]struct{})
-	// collectUnapplied records every knowledge_id backing a slug we failed
-	// to apply. Caller holds no lock; it takes reduceMu itself.
-	collectUnapplied := func(updates []SlugUpdate) {
-		reduceMu.Lock()
-		for _, u := range updates {
-			if u.KnowledgeID != "" {
-				unappliedSlugKIDs[u.KnowledgeID] = struct{}{}
-			}
-		}
-		reduceMu.Unlock()
-	}
 
 	// Build the kid → wikiSpan lookup before kicking off reduce. Each
 	// per-slug reduce attaches a postprocess.wiki.page[slug] subspan
@@ -621,46 +522,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		slug := slug
 		updates := updates
 		egReduce.Go(func() error {
-			var (
-				changed        bool
-				affectedType   string
-				additionFailed bool
-				reduceErr      error
-			)
-			// Serialize same-slug read-modify-write across concurrent batches
-			// (standard mode). runs fn directly in Lite mode.
-			acquired, lockErr := s.withSlugLock(reduceCtx, payload.KnowledgeBaseID, slug, func() error {
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
-					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
-				return reduceErr
-			})
-			if lockErr != nil {
-				collectUnapplied(updates)
-				// ctx cancelled (batch timeout / shutdown) — stop quietly.
-				return nil
-			}
-			if !acquired {
-				// Contended slug we couldn't get in time. The page keeps its
-				// prior content, so the documents that fed this slug are NOT
-				// done: record their knowledge_ids so the trim phase re-queues
-				// them (via the failed-op retry budget) for a later,
-				// hopefully-uncontended batch instead of deleting their rows.
-				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
-				collectUnapplied(updates)
-				return nil
-			}
-			if reduceErr != nil {
-				// The page's read-modify-write failed, so this slug's update
-				// never landed. Re-queue the contributing documents (same
-				// fail_count budget as a map failure) so a later batch retries
-				// instead of silently dropping the row at trim time.
-				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, reduceErr)
-				collectUnapplied(updates)
-				if isLikelyRateLimitError(reduceErr) {
-					reduceMu.Lock()
-					rateLimited = true
-					reduceMu.Unlock()
-				}
+			changed, affectedType, additionFailed, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
+			if err != nil {
+				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, err)
 			}
 			if changed {
 				reduceMu.Lock()
@@ -682,9 +546,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = egReduce.Wait()
 
-	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
-	defer tailCancel()
-
 	// Sanitize the doc summary pages produced by this batch BEFORE we
 	// rebuild the index. The summary LLM (run during
 	// map) was free to inject [[entity/foo|name]] links to every slug it
@@ -692,7 +553,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// those slugs into actual pages. Rewrite those dead links to plain
 	// text so the summary doesn't contain unresolvable references.
 	if len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
-		s.sanitizeDeadSummaryLinks(tailCtx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
+		s.sanitizeDeadSummaryLinks(ctx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
 	}
 
 	totalPagesAffected = len(allPagesAffected)
@@ -701,6 +562,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Detailed per-document Wiki log rows duplicated that feed and were never
 	// consumed by retrieval, so the activity record is now written directly.
 	wikiActivityActions := make(map[string]int, 2)
+
 	for _, op := range pendingOps {
 		if op.Op == WikiOpRetract {
 			wikiActivityActions["retract"]++
@@ -713,53 +575,72 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	RecordWikiContentActivity(tailCtx, s.audit, payload.TenantID, payload.KnowledgeBaseID, wikiActivityActions)
 
-	// Publish freshly-generated pages immediately (NOT deferred to finalize):
-	// users should see a document's wiki pages as soon as their content is
-	// written, not after the debounce window. This is a cheap status flip.
-	if len(allPagesAffected) > 0 {
-		logger.Infof(ctx, "wiki ingest: publishing draft pages")
-		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+	// Build change description for the Index Intro LLM prompt
+	var changeDesc strings.Builder
+	if len(docResults) > 0 {
+		for _, r := range docResults {
+			fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n", r.DocTitle, r.Summary)
+		}
+	}
+	if retractChangeDesc.Len() > 0 {
+		changeDesc.WriteString(retractChangeDesc.String())
 	}
 
-	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
-	// cross-link injection) to a debounced per-KB wiki:finalize task instead of
-	// running it at the tail of every 5-doc batch. We record what changed into
-	// the finalize lane and schedule a coalesced trigger; a burst of N documents
-	// then rebuilds the index ONCE. See ProcessWikiFinalize.
-	//
-	// freshTitleBySlug carries the (slug → title) pairs this batch successfully
-	// wrote (minus reduce-phase failures) so finalize's cross-link pass can
-	// linkify mentions of the new pages.
-	freshTitleBySlug := make(map[string]string, len(docResults)*4)
-	for _, dr := range docResults {
-		if dr == nil {
-			continue
-		}
-		for _, p := range dr.Pages {
-			if p.Slug == "" || p.Title == "" {
-				continue
-			}
-			if _, bad := failedAdditionSlugs[p.Slug]; bad {
-				continue
-			}
-			freshTitleBySlug[p.Slug] = p.Title
+	// Rebuild index page
+	if changeDesc.Len() > 0 {
+		indexRebuildAttempted = true
+		logger.Infof(ctx, "wiki ingest: rebuilding index page")
+		if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang); err != nil {
+			logger.Warnf(ctx, "wiki ingest: rebuild index failed: %v", err)
+			docPreview = append(docPreview, fmt.Sprintf("index_change=%s", previewText(changeDesc.String(), 160)))
+		} else {
+			indexRebuildSucceeded = true
+			docPreview = append(docPreview, fmt.Sprintf("index_change=%s", previewText(changeDesc.String(), 160)))
 		}
 	}
-	if len(allPagesAffected) > 0 || len(docResults) > 0 || retractHandled > 0 || len(retractFolderIDs) > 0 {
-		changes := make([]wikiFinalizeChange, 0, len(docResults)+len(pendingOps))
-		for _, r := range docResults {
-			changes = append(changes, wikiFinalizeChange{
-				Action: wikiFinalizeAdded, DocTitle: r.DocTitle, DocSummary: r.Summary,
-			})
-		}
-		for _, op := range pendingOps {
-			if op.Op == WikiOpRetract {
-				changes = append(changes, wikiFinalizeChange{
-					Action: wikiFinalizeRemoved, DocTitle: op.DocTitle, DocSummary: op.DocSummary,
-				})
+
+	// Clean dead [[slug]] references whenever ANY page was touched this
+	// batch (not just retracts). Reduce-phase failures can leave stale
+	// references in pages we just rewrote (e.g. summary pages cite
+	// failed entity slugs); sanitizeDeadSummaryLinks above handles the
+	// well-known summary case, and this pass is the safety net for the
+	// long tail (cross-doc citations, prior batches' lingering refs).
+	// Dead-link cleanup: scoped to this batch's affected pages so the
+	// pass scales with batch size, not with KB size. The lint
+	// AutoFix path takes care of long-tail cleanup across the whole
+	// KB out-of-band.
+	if len(allPagesAffected) > 0 {
+		logger.Infof(ctx, "wiki ingest: cleaning dead links")
+		s.cleanDeadLinks(ctx, payload.KnowledgeBaseID, allPagesAffected, batchCtx)
+	}
+
+	if len(allPagesAffected) > 0 {
+		// Build the freshRefs set: every (slug, title) pair this batch
+		// successfully wrote, minus any that landed in failedAdditionSlugs.
+		// These are the "newly-mentionable" pages — links to them will
+		// not have appeared in older content yet, so injectCrossLinks
+		// targets exactly the affected pages with this fresh ref set.
+		freshRefs := make([]linkRef, 0, len(docResults)*4)
+		for _, dr := range docResults {
+			if dr == nil {
+				continue
+			}
+			for _, p := range dr.Pages {
+				if p.Slug == "" || p.Title == "" {
+					continue
+				}
+				if _, bad := failedAdditionSlugs[p.Slug]; bad {
+					continue
+				}
+				freshRefs = append(freshRefs, linkRef{slug: p.Slug, matchText: p.Title})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+
+		logger.Infof(ctx, "wiki ingest: injecting cross links")
+		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, allPagesAffected, freshRefs, batchCtx)
+
+		logger.Infof(ctx, "wiki ingest: publishing draft pages")
+		s.publishDraftPages(ctx, payload.KnowledgeBaseID, allPagesAffected)
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
@@ -771,7 +652,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// actually landed (vs. dropped because reduce-phase generation
 	// failed).
 	failedAdditionSlugCount := len(failedAdditionSlugs)
-	spanCtx, spanCancel := wikiIngestCleanupContext(ctx)
 	for _, r := range docResults {
 		if r == nil {
 			continue
@@ -782,14 +662,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// the WikiSpan nil-check below so a doc that had no attempt to
 		// attach a span to still drains its counter slot. The matching +1
 		// is seeded by KnowledgePostProcess.SetFinalizing.
-		//
-		// EXCEPT docs with an unapplied slug (contended lock or reduce
-		// error): those are re-queued below, so keep their finalizing slot
-		// held — the retry (or the dead-letter drain in requeueFailedOps)
-		// releases it once the op reaches a real terminal state.
-		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
-			s.finalizeWikiSubtask(ctx, r.KnowledgeID)
-		}
+		s.finalizeWikiSubtask(ctx, r.KnowledgeID)
 		if r.WikiSpan == nil {
 			continue
 		}
@@ -819,35 +692,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		for k, v := range r.MapStats {
 			output[k] = v
 		}
-		s.tracker().EndSpan(spanCtx, r.WikiSpan, output)
+		s.tracker().EndSpan(ctx, r.WikiSpan, output)
 	}
-	spanCancel()
 	// Failed-map docs already had FailSpan called inside
 	// mapOneDocument (the failedOps path returns before reaching
 	// docResults). Nothing extra to do here for them.
-
-	// Fold documents with an unapplied slug (contended lock or reduce error)
-	// into failedOps so they are neither trimmed nor promoted to completed:
-	// requeueFailedOps then runs them through the same fail_count budget
-	// (retry now, dead-letter once the slug stays permanently hot/broken) as
-	// a map-phase failure. A doc already counted as a map failure is skipped
-	// to avoid a double fail_count bump.
-	if len(unappliedSlugKIDs) > 0 {
-		failedKIDs := make(map[string]struct{}, len(failedOps))
-		for _, op := range failedOps {
-			failedKIDs[op.KnowledgeID] = struct{}{}
-		}
-		for _, op := range pendingOps {
-			if _, unapplied := unappliedSlugKIDs[op.KnowledgeID]; !unapplied {
-				continue
-			}
-			if _, already := failedKIDs[op.KnowledgeID]; already {
-				continue
-			}
-			failedOps = append(failedOps, op)
-			failedKIDs[op.KnowledgeID] = struct{}{}
-		}
-	}
 
 	// Build the trim set: rows that should be removed from
 	// task_pending_ops. We start from the full peekedIDs (every row we
@@ -867,284 +716,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 		trimIDs = append(trimIDs, id)
 	}
-	settleCtx, settleCancel := wikiIngestCleanupContext(ctx)
-	trimErr := s.trimPendingList(settleCtx, trimIDs)
+	s.trimPendingList(ctx, trimIDs)
 
 	// Process failed ops: increment fail_count and dead-letter once
 	// the cap is hit. Must come AFTER trim so successful siblings are
 	// already gone from the queue — otherwise a follow-up batch could
 	// re-pick them up.
-	var requeueErr error
 	if len(failedOps) > 0 {
-		requeueErr = s.requeueFailedOps(settleCtx, payload, failedOps)
+		s.requeueFailedOps(ctx, payload, failedOps)
 	}
-	settleCancel()
-	if err := errors.Join(trimErr, requeueErr); err != nil {
-		exitStatus = "settle_failed"
-		return fmt.Errorf("wiki ingest: settle claimed rows: %w", err)
-	}
-	// All claimed rows have now reached a terminal state (deleted on success,
-	// released for retry, or dead-lettered), so disarm the abnormal-exit
-	// release net.
-	claimsSettled = true
 
 	logger.Infof(ctx, "wiki ingest: batch completed for KB %s, %d ops, %d pages affected", payload.KnowledgeBaseID, len(pendingOps), len(allPagesAffected))
 
-	// Pace the follow-up: on a rate-limit trip, back off so the per-minute
-	// window can reset instead of retrying the failed docs immediately.
-	followUpDelay := wikiFollowUpDelay
-	if rateLimited {
-		followUpDelay = wikiRateLimitBackoff
-		logger.Warnf(ctx, "wiki ingest: KB %s hit upstream rate limiting, backing off follow-up to %s", payload.KnowledgeBaseID, followUpDelay)
-	}
-	followCtx, followCancel := wikiIngestCleanupContext(ctx)
-	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay)
-	followCancel()
-	return nil
-}
-
-// ProcessWikiFinalize runs the debounced, per-KB KB-global convergence pass:
-// index-intro rebuild, dead-link cleanup, and cross-link injection. It drains
-// the finalize lane of task_pending_ops (written by ProcessWikiIngest via
-// enqueueFinalize) so a burst of documents rebuilds the index ONCE instead of
-// once per 5-doc batch.
-func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Task) error {
-	startedAt := time.Now()
-	var payload WikiIngestPayload
-	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		return fmt.Errorf("wiki finalize: unmarshal payload: %w", err)
-	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if payload.Language != "" {
-		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
-	}
-	if s.pendingRepo == nil {
-		return nil
-	}
-
-	// Per-KB finalize lock, separate from the ingest active lock so finalize
-	// and ingest batches never block each other. Coalescing via asynq.TaskID
-	// already keeps at most one finalize pending per KB; this guards the
-	// reschedule-overlap window against a concurrent index-page write.
-	if s.redisClient != nil {
-		key := "wiki:finalize:active:" + payload.KnowledgeBaseID
-		acquired, err := s.redisClient.SetNX(ctx, key, "1", wikiFinalizeLockTTL).Result()
-		if err != nil {
-			// Fail CLOSED: proceeding unlocked would let two finalize runs
-			// drain the same PeekBatch rows and double-rebuild the index page
-			// (GetPage→modify→UpdatePage lost update). Return an error so
-			// asynq retries the (coalesced) finalize once Redis recovers,
-			// instead of racing a concurrent finalize.
-			logger.Warnf(ctx, "wiki finalize: SetNX failed for KB %s: %v (retrying)", payload.KnowledgeBaseID, err)
-			return fmt.Errorf("wiki finalize: acquire lock: %w", err)
-		} else if !acquired {
-			// Another finalize is running; it will drain the lane and
-			// reschedule if rows remain. Safe to no-op.
-			return nil
-		}
-		lockCtx, cancelLock := context.WithCancel(context.Background())
-		defer func() {
-			cancelLock()
-			s.redisClient.Del(context.Background(), key)
-		}()
-		go func() {
-			ticker := time.NewTicker(wikiFinalizeLockRenew)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-lockCtx.Done():
-					return
-				case <-ticker.C:
-					s.redisClient.Expire(context.Background(), key, wikiFinalizeLockTTL)
-				}
-			}
-		}()
-	} else {
-		if _, loaded := s.liteFinalizeLocks.LoadOrStore(payload.KnowledgeBaseID, struct{}{}); loaded {
-			return nil
-		}
-		defer s.liteFinalizeLocks.Delete(payload.KnowledgeBaseID)
-	}
-
-	rows, err := s.pendingRepo.PeekBatch(ctx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID, wikiFinalizeMaxRows)
-	if err != nil {
-		return fmt.Errorf("wiki finalize: peek: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-
-	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-	if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) || (err == nil && kb == nil) {
-		if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
-			return fmt.Errorf("wiki finalize: clear deleted KB queue: %w", cleanupErr)
-		}
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("wiki finalize: get KB: %w", err)
-	}
-
-	// Aggregate the drained rows into: affected slugs (dedup), fresh cross-link
-	// refs, and the index-intro change description. We collect ids up front so
-	// we can drain the lane even on the KB-disabled short-circuit below.
-	ids := make([]int64, 0, len(rows))
-	pruneRowIDs := make([]int64, 0)
-	affectedSet := make(map[string]struct{}, len(rows))
-	var affectedSlugs []string
-	var freshRefs []linkRef
-	var folderPruneIDs []string
-	var changeDesc strings.Builder
-	for _, r := range rows {
-		ids = append(ids, r.ID)
-		if r.Op == wikiFinalizeOpFolderPrune {
-			pruneRowIDs = append(pruneRowIDs, r.ID)
-		}
-		if len(r.Payload) == 0 {
-			continue
-		}
-		var row wikiFinalizeRow
-		if err := json.Unmarshal(r.Payload, &row); err != nil {
-			logger.Warnf(ctx, "wiki finalize: unmarshal row id=%d failed: %v", r.ID, err)
-			continue
-		}
-		if r.Op == wikiFinalizeOpFolderPrune {
-			folderPruneIDs = append(folderPruneIDs, row.FolderIDs...)
-			continue
-		}
-		if row.Change != nil {
-			if row.Change.Action == wikiFinalizeRemoved {
-				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", row.Change.DocTitle, row.Change.DocSummary)
-			} else {
-				fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n", row.Change.DocTitle, row.Change.DocSummary)
-			}
-			continue
-		}
-		if row.Slug != "" {
-			if _, ok := affectedSet[row.Slug]; !ok {
-				affectedSet[row.Slug] = struct{}{}
-				affectedSlugs = append(affectedSlugs, row.Slug)
-			}
-			if row.Title != "" {
-				freshRefs = append(freshRefs, linkRef{slug: row.Slug, matchText: row.Title})
-			}
-		}
-	}
-
-	// KB flipped away from wiki (deleted / type change) — drain the lane so the
-	// rows don't accumulate, then stop.
-	if !kb.IsWikiEnabled() {
-		drainCtx, drainCancel := wikiIngestCleanupContext(ctx)
-		err := s.trimPendingList(drainCtx, ids)
-		drainCancel()
-		if err != nil {
-			return fmt.Errorf("wiki finalize: trim disabled lane: %w", err)
-		}
-		return nil
-	}
-
-	synthesisModelID := ""
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		// No model to rebuild the index with; still run the pure-text passes,
-		// then drain. Missing model is a config gap, not a transient error.
-		logger.Warnf(ctx, "wiki finalize: no synthesis model for KB %s, skipping index rebuild", payload.KnowledgeBaseID)
-	}
-
-	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, kb.WikiConfig)
-	lang := types.LanguageNameFromContext(ctx)
-
-	indexRebuilt := false
-	if changeDesc.Len() > 0 && synthesisModelID != "" {
-		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
-		if mErr != nil {
-			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)
-		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
-			batchCtx.ContentInstructions); err != nil {
-			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", err)
-		} else {
-			indexRebuilt = true
-		}
-	}
-
-	if len(affectedSlugs) > 0 {
-		s.cleanDeadLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, batchCtx)
-		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, freshRefs, batchCtx)
-	}
-
-	// A retract may leave one or more generated folders empty. Do not prune
-	// while any ingest row for this KB is queued or claimed: taxonomy planning
-	// creates folders before reduce writes pages, so an apparently-empty folder
-	// can still be owned by an in-flight batch. The durable prune rows stay in
-	// the finalize lane and are retried after the ingest lane drains.
-	pruneDeferred := false
-	deletedFolders := 0
-	if len(folderPruneIDs) > 0 {
-		pending, pErr := s.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID)
-		if pErr != nil {
-			logger.Warnf(ctx, "wiki finalize: cannot verify ingest drain before folder prune: %v", pErr)
-			pruneDeferred = true
-		} else if pending > 0 {
-			pruneDeferred = true
-		} else {
-			deleted, pruneErr := s.wikiService.PruneEmptyFolderChains(
-				ctx, payload.KnowledgeBaseID, uniqueWikiFolderIDs(folderPruneIDs))
-			if pruneErr != nil {
-				logger.Warnf(ctx, "wiki finalize: prune empty folders failed: %v", pruneErr)
-				pruneDeferred = true
-			} else {
-				deletedFolders = len(deleted)
-			}
-		}
-	}
-
-	// Drain the processed rows. Best-effort convergence mirrors the legacy
-	// in-batch behaviour: a failed index rebuild is logged (not retried),
-	// so we delete regardless to avoid re-doing the whole pass forever.
-	idsToTrim := ids
-	if pruneDeferred && len(pruneRowIDs) > 0 {
-		deferred := make(map[int64]struct{}, len(pruneRowIDs))
-		for _, id := range pruneRowIDs {
-			deferred[id] = struct{}{}
-		}
-		idsToTrim = idsToTrim[:0:0]
-		for _, id := range ids {
-			if _, keep := deferred[id]; !keep {
-				idsToTrim = append(idsToTrim, id)
-			}
-		}
-	}
-	drainCtx, drainCancel := wikiIngestCleanupContext(ctx)
-	err = s.trimPendingList(drainCtx, idsToTrim)
-	drainCancel()
-	if err != nil {
-		return fmt.Errorf("wiki finalize: trim pending rows: %w", err)
-	}
-
-	// If more finalize rows landed while we were working, reschedule so they
-	// get their own convergence pass.
-	rescheduled := false
-	if pruneDeferred {
-		s.scheduleFinalizeRetry(ctx, payload)
-		rescheduled = true
-	}
-	if n, cErr := s.pendingRepo.PendingCount(ctx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID); cErr == nil && n > 0 {
-		if !pruneDeferred {
-			s.scheduleFinalize(ctx, payload)
-		}
-		rescheduled = true
-	}
-
-	logger.Infof(ctx,
-		"wiki finalize: kb=%s rows=%d affected_slugs=%d deleted_folders=%d folder_prune_deferred=%v index_rebuilt=%v rescheduled=%v elapsed=%s",
-		payload.KnowledgeBaseID, len(rows), len(affectedSlugs), deletedFolders, pruneDeferred, indexRebuilt, rescheduled,
-		time.Since(startedAt).Round(time.Millisecond),
-	)
+	followUpScheduled = s.scheduleFollowUp(ctx, payload)
 	return nil
 }
 
@@ -1322,11 +906,9 @@ func (s *wikiIngestService) mapOneDocument(
 	go func() {
 		defer wg.Done()
 		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Content":            content,
-			"Language":           lang,
-			"ExtractedSlugs":     slugListing,
-			"CustomInstructions": batchCtx.ContentInstructions,
-			"InstructionScope":   "wiki_content",
+			"Content":        content,
+			"Language":       lang,
+			"ExtractedSlugs": slugListing,
 		})
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
@@ -1498,7 +1080,7 @@ func (s *wikiIngestService) mapOneDocument(
 	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
 	//      body as the old-version signal) AND the normal addition. The
 	//      reduce stage sees HasAdditions=1 + HasRetractions=1 and the
-	//      WikiPageModifyUserPrompt correctly tells the editor model to
+	//      WikiPageModifyPrompt correctly tells the editor model to
 	//      remove the old K section and add the new K section in one
 	//      pass — giving us replace-not-append semantics that "append
 	//      new K on top of old K" would otherwise violate.
@@ -1620,11 +1202,9 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	}
 
 	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
-		"Content":            content,
-		"Language":           lang,
-		"PreviousSlugs":      prevSlugsText,
-		"CustomInstructions": batchCtx.ExtractionInstructions,
-		"InstructionScope":   "wiki_extraction",
+		"Content":       content,
+		"Language":      lang,
+		"PreviousSlugs": prevSlugsText,
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("combined extraction failed: %w", err)
@@ -1666,7 +1246,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 //   - changed:          whether the wiki page was created or updated
 //   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
 //   - additionFailed:   true iff the slug had entity/concept additions queued
-//     AND the WikiPageModifyUserPrompt LLM call failed, so no page exists/was
+//     AND the WikiPageModifyPrompt LLM call failed, so no page exists/was
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
@@ -1835,7 +1415,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
 	var newContentBuilder strings.Builder
-	var sharedSourceContexts strings.Builder
 	var docTitles []string
 	var language string
 
@@ -1897,11 +1476,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// knowledge ID, so the <new_information> block can quote the chunks
 		// verbatim instead of relying on the short Details paraphrase.
 		chunkContentByID := s.resolveCitedChunks(ctx, tenantID, additions)
-		// A document summary is shared by every page derived from that document.
-		// Render a deterministic, de-duplicated block before any page-specific
-		// metadata so provider prefix caches can reuse it across parallel reduce
-		// calls.
-		sourceContextByRef := make(map[string]string)
 
 		for _, add := range additions {
 			cited := collectCitedChunkContent(add.SourceChunks, chunkContentByID)
@@ -1913,27 +1487,21 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// source documents, and calibrating tone (self-reported vs
 			// third-party authoritative) benefits from the richer context.
 			sourceCtx := strings.TrimSpace(add.DocSummary)
+			sourceCtxBlock := ""
 			if sourceCtx != "" {
-				contextKey := add.SourceRef
-				if contextKey == "" {
-					contextKey = add.KnowledgeID + "\x00" + add.DocTitle
-				}
-				sourceContextByRef[contextKey] = fmt.Sprintf(
-					"<document>\n<title>%s</title>\n<context>\n%s\n</context>\n</document>\n",
-					add.DocTitle, sourceCtx,
-				)
+				sourceCtxBlock = fmt.Sprintf("<source_context>\n%s\n</source_context>\n", sourceCtx)
 			}
 			if cited != "" {
 				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, cited)
+					"<document>\n<title>%s</title>\n%s<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					add.DocTitle, sourceCtxBlock, add.Item.Name, add.Item.Description, cited)
 			} else {
 				// Fallback: no citations available (legacy path, citation pass
 				// failed, or bad chunk IDs were filtered out) — stick with
 				// the short Details summary so the page still gets real text.
 				fmt.Fprintf(&newContentBuilder,
-					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, add.Item.Details)
+					"<document>\n<title>%s</title>\n%s<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					add.DocTitle, sourceCtxBlock, add.Item.Name, add.Item.Description, add.Item.Details)
 			}
 			docTitles = appendUnique(docTitles, add.DocTitle)
 
@@ -1948,15 +1516,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			if page.PageType == "" {
 				page.PageType = add.Type
 			}
-		}
-
-		contextKeys := make([]string, 0, len(sourceContextByRef))
-		for key := range sourceContextByRef {
-			contextKeys = append(contextKeys, key)
-		}
-		sort.Strings(contextKeys)
-		for _, key := range contextKeys {
-			sharedSourceContexts.WriteString(sourceContextByRef[key])
 		}
 	}
 
@@ -2019,7 +1578,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		pageAliases := strings.Join(page.Aliases, ", ")
 
 		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
+		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,
@@ -2027,20 +1586,17 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"PageType":                pageType,
 			"PageAliases":             pageAliases,
 			"ExistingContent":         existingContent,
-			"SharedSourceContexts":    sharedSourceContexts.String(),
 			"NewContent":              newContentBuilder.String(),
 			"DeletedContent":          deletedContent.String(),
 			"RemainingSourcesContent": remainingSourcesContent.String(),
 			"AvailableSlugs":          relatedSlugs.String(),
 			"Language":                language,
-			"CustomInstructions":      batchCtx.ContentInstructions,
-			"InstructionScope":        "wiki_content",
 		})
 
 		if err == nil && updatedContent != "" {
 			// Translate request-local handles (ref-N) the model copied from the
 			// encoded context back to their real slugs BEFORE the content is
-			// parsed/stored, so out_links reflect real pages again.
+			// parsed/stored, so out_linksreflect real pages again.
 			updatedContent = slugHandles.decodeContent(updatedContent)
 			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
 			if updatedBody != "" {

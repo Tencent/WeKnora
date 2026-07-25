@@ -24,6 +24,7 @@ type PluginExtractEntity struct {
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	knowledgeService  interfaces.KnowledgeService // For shared KB document resolution
 	knowledgeRepo     interfaces.KnowledgeRepository
+	llmCache          *chat.LLMCache // LLM result cache for entity extraction
 }
 
 // NewPluginExtractEntity creates a new extract-entity plugin instance
@@ -34,6 +35,7 @@ func NewPluginExtractEntity(
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	knowledgeService interfaces.KnowledgeService,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	llmCache *chat.LLMCache,
 	config *config.Config,
 ) *PluginExtractEntity {
 	res := &PluginExtractEntity{
@@ -42,6 +44,7 @@ func NewPluginExtractEntity(
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		knowledgeService:  knowledgeService,
 		knowledgeRepo:     knowledgeRepo,
+		llmCache:          llmCache,
 	}
 	eventManager.Register(res)
 	return res
@@ -136,6 +139,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		Description: p.template.Description,
 		Examples:    p.template.Examples,
 	}
+	// Wrap with LLM cache — same query + same model + same prompt → cached entity extraction
+	if p.llmCache != nil {
+		model = chat.NewCachedChat(model, p.llmCache)
+	}
 	extractor := NewExtractor(model, template)
 	graph, err := extractor.Extract(ctx, query)
 	if err != nil {
@@ -184,8 +191,7 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))
 	// logger.Debugf(ctx, "chat user: %s", generator.User(ctx, content))
 
-	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
-	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
+	chatResponse, err := e.chat.Chat(ctx, generator.Render(ctx, content), e.chatOpt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to chat: %v", err)
 		return nil, err

@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS vlm_cache;

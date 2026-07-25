@@ -3,14 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -19,7 +18,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -48,16 +46,8 @@ const (
 		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
 		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
 		"</instructions>"
+	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
-
-func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
-	language := strings.TrimSpace(cfg.DescriptionLanguage)
-	if language == "" {
-		language = types.LanguageNameFromContext(ctx)
-	}
-	prompt := fmt.Sprintf("Provide a brief and concise description of the main content of the image in %s.", language)
-	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
-}
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
@@ -73,17 +63,13 @@ type ImageMultimodalService struct {
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
+	vlmCache       *vlm.VLMCache
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
 	// tenant's StorageEngineConfig.MinIO is empty). Mirrors the write-side
 	// fallback in knowledgeService.resolveFileService.
-	fileSvc         interfaces.FileService
-	storageResolver interfaces.StorageBackendResolver
-	// resourceCatalog resolves resource:// references to their owning storage
-	// backend so multimodal reads target the resource's real backend instead of
-	// the knowledge base's currently configured one.
-	resourceCatalog interfaces.ResourceCatalog
+	fileSvc interfaces.FileService
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
@@ -101,26 +87,24 @@ func NewImageMultimodalService(
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
+	vlmCache *vlm.VLMCache,
 	fileSvc interfaces.FileService,
-	storageResolver interfaces.StorageBackendResolver,
-	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
-		chunkService:    chunkService,
-		modelService:    modelService,
-		kbService:       kbService,
-		knowledgeRepo:   knowledgeRepo,
-		tenantRepo:      tenantRepo,
-		retrieveEngine:  retrieveEngine,
-		ownership:       ownership,
-		ollamaService:   ollamaService,
-		taskEnqueuer:    taskEnqueuer,
-		redisClient:     redisClient,
-		fileSvc:         fileSvc,
-		storageResolver: storageResolver,
-		resourceCatalog: resourceCatalog,
-		spanTracker:     spanTracker,
+		chunkService:   chunkService,
+		modelService:   modelService,
+		kbService:      kbService,
+		knowledgeRepo:  knowledgeRepo,
+		tenantRepo:     tenantRepo,
+		retrieveEngine: retrieveEngine,
+		ownership:      ownership,
+		ollamaService:  ollamaService,
+		taskEnqueuer:   taskEnqueuer,
+		redisClient:    redisClient,
+		vlmCache:       vlmCache,
+		fileSvc:        fileSvc,
+		spanTracker:    spanTracker,
 	}
 }
 
@@ -148,21 +132,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
-	// Drop orphaned or user-aborted work before touching VLM. Missing
-	// knowledge/KB rows are permanent failures — retrying only burns queue
-	// capacity (asynq default MaxRetry=25 on legacy tasks).
-	drop, dropErr := s.shouldDropOrphanedMultimodal(ctx, &payload)
-	if dropErr != nil {
-		return dropErr
-	}
-	if drop {
-		logger.Infof(ctx,
-			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
-			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
-		// Still count this image toward the parent finalize gate so a batch
-		// of dropped orphans cannot strand multimodal:pending forever.
-		s.checkAndFinalizeAllImages(ctx, payload)
-		return nil
+	// Short-circuit when the parent knowledge has been cancelled by the user
+	// or marked for deletion. Skip the VLM call entirely so we don't burn
+	// model quota on already-aborted work.
+	if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); kerr == nil && k != nil {
+		switch k.ParseStatus {
+		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			logger.Infof(ctx, "[ImageMultimodal] Knowledge %s aborted (%s), skipping image %s",
+				payload.KnowledgeID, k.ParseStatus, payload.ImageURL)
+			return nil
+		}
 	}
 
 	// Open a per-image subspan under the parent attempt's multimodal
@@ -229,6 +208,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
 	}
+	// Wrap with VLM cache — same image bytes + prompt → cached OCR/Caption result
+	vlmModel = vlm.NewCachedVLM(vlmModel, s.vlmCache)
 	// Capture the resolved VLM model id (or "legacy_inline" for the
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
@@ -266,7 +247,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
@@ -286,7 +266,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -302,11 +282,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              StableChunkID(payload.KnowledgeID, 0, imageInfo.OCRText),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.OCRText,
+			ContentHash:     ComputeContentHash(payload.KnowledgeID, 0, imageInfo.OCRText),
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -319,11 +300,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              StableChunkID(payload.KnowledgeID, 1, imageInfo.Caption),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.Caption,
+			ContentHash:     ComputeContentHash(payload.KnowledgeID, 1, imageInfo.Caption),
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -363,41 +345,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// all images are processed before triggering summary/question generation.
 	// Deferred finalize handles the parent knowledge counter.
 	return nil
-}
-
-// shouldDropOrphanedMultimodal reports whether the task should exit without
-// retrying. True for user-cancelled/deleting knowledge, or when the parent
-// knowledge / knowledge-base row no longer exists (deleted while queue entries
-// survived).
-func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
-	ctx context.Context, payload *types.ImageMultimodalPayload,
-) (bool, error) {
-	if payload.KnowledgeID != "" && s.knowledgeRepo != nil {
-		k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
-		if errors.Is(err, repository.ErrKnowledgeNotFound) {
-			return true, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		switch k.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
-			return true, nil
-		}
-	}
-	if payload.KnowledgeBaseID != "" && s.kbService != nil {
-		kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-		if errors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			return true, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if kb == nil {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // isFinalAsynqAttempt reports whether the current task context belongs to the
@@ -558,40 +505,18 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 		return s.fileSvc
 	}
 
-	backendID, _, _ := types.ParseStorageBackendPath(payload.ImageURL)
 	provider := types.ParseProviderScheme(payload.ImageURL)
-	// A resource:// reference carries no provider/backend in the URL itself; the
-	// authoritative backend lives on the stored resource record. Using the KB's
-	// currently configured backend here would break reads when the resource was
-	// stored on a different backend (multi-backend / post-migration).
-	if _, isResourceRef := types.ParseResourcePath(payload.ImageURL); isResourceRef && s.resourceCatalog != nil {
-		if resource, resErr := s.resourceCatalog.Resolve(ctx, payload.ImageURL); resErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: url=%s err=%v", payload.ImageURL, resErr)
-		} else if resource != nil {
-			backendID = resource.StorageBackendID
-			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
-		}
-	}
 	if provider == "" {
 		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 		if kbErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
 		} else if kb != nil {
 			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
-			if backendID == "" && kb.StorageBackendID != nil {
-				backendID = *kb.StorageBackendID
-			}
 		}
 	}
 
-	if s.storageResolver == nil {
-		return s.fileSvc
-	}
-
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
-		payload.TenantID, provider, baseDir, payload.ImageURL)
-	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+	fileSvc, _, svcErr := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, baseDir)
 	if svcErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
 			payload.TenantID, provider, svcErr)
@@ -608,8 +533,7 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 //     file before falling back to the URL.
 //   - For plain http(s):// URLs it uses the SSRF-safe downloader.
 func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload types.ImageMultimodalPayload) ([]byte, error) {
-	_, isResourceRef := types.ParseResourcePath(payload.ImageURL)
-	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
+	if types.ParseProviderScheme(payload.ImageURL) != "" {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
 		if fileSvc == nil {
 			return nil, fmt.Errorf("no file service available for %s", payload.ImageURL)
@@ -696,8 +620,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		return
 	}
 
-	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
-		knowledgePostProcessTaskOptions()...)
+	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: %v", payload.KnowledgeID, err)
 	} else {
