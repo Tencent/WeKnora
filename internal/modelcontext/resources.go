@@ -34,10 +34,11 @@ var storedRefRE = regexp.MustCompile(
 		`summary/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
 )
 
-// aliasShapeRE matches the alias syntax produced by EncodeText. It is used only
-// to spot alias-shaped tokens the model emitted that the registry cannot map
-// back — either a hallucinated reference or a coincidental collision.
-var aliasShapeRE = regexp.MustCompile(`res://\d+`)
+// resourceHandleShapeRE matches the handle syntax produced by EncodeText. It
+// is used to spot handle-shaped tokens the registry cannot map back — either a
+// hallucinated reference or a coincidental collision — and by the stream-side
+// orphan filter.
+var resourceHandleShapeRE = regexp.MustCompile(`res://\d+`)
 
 // resourceRegistry assigns low-entropy, request-local aliases to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
@@ -85,7 +86,7 @@ func (r *resourceRegistry) StripOrphanAliases(value string) string {
 	if value == "" {
 		return value
 	}
-	return aliasShapeRE.ReplaceAllString(value, "")
+	return resourceHandleShapeRE.ReplaceAllString(value, "")
 }
 
 // EncodeMessages returns a copied message slice with textual references
@@ -133,7 +134,7 @@ func (r *resourceRegistry) OrphanAliases(decoded string) []string {
 	}
 	var orphans []string
 	seen := make(map[string]struct{})
-	for _, match := range aliasShapeRE.FindAllString(decoded, -1) {
+	for _, match := range resourceHandleShapeRE.FindAllString(decoded, -1) {
 		if r != nil && r.table.has(match) {
 			continue
 		}
@@ -153,52 +154,4 @@ func (r *resourceRegistry) aliases() []string {
 		aliases = append(aliases, item.handle)
 	}
 	return aliases
-}
-
-// resourceStreamDecoder holds only a suffix that could be the beginning of a known
-// alias, allowing aliases split across provider chunks to round-trip exactly.
-type resourceStreamDecoder struct {
-	registry *resourceRegistry
-	pending  string
-}
-
-// newResourceStreamDecoder creates an alias decoder for one streaming text channel.
-func newResourceStreamDecoder(registry *resourceRegistry) *resourceStreamDecoder {
-	return &resourceStreamDecoder{registry: registry}
-}
-
-// Feed decodes a chunk while retaining suffixes that may complete an alias in
-// the next provider chunk.
-func (d *resourceStreamDecoder) Feed(chunk string) string {
-	if d == nil || d.registry == nil {
-		return chunk
-	}
-	combined := d.pending + chunk
-	d.pending = ""
-	hold := 0
-	for _, alias := range d.registry.aliases() {
-		// A provider may split the token at any byte boundary, including
-		// "re" + "s://0001". Holding at most the short matching suffix is the
-		// only way to guarantee that a request-local handle never leaks.
-		for n := 1; n < len(alias); n++ {
-			if n > hold && strings.HasSuffix(combined, alias[:n]) {
-				hold = n
-			}
-		}
-	}
-	if hold > 0 {
-		d.pending = combined[len(combined)-hold:]
-		combined = combined[:len(combined)-hold]
-	}
-	return d.registry.DecodeText(combined)
-}
-
-// Flush returns any buffered suffix when the provider stream closes.
-func (d *resourceStreamDecoder) Flush() string {
-	if d == nil {
-		return ""
-	}
-	pending := d.pending
-	d.pending = ""
-	return d.registry.DecodeText(pending)
 }
