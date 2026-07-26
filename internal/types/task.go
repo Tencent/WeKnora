@@ -407,9 +407,16 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64        `json:"tenant_id"`
-	KnowledgeIDs []string      `json:"knowledge_ids"`
-	Initiator    TaskInitiator `json:"initiator,omitempty"`
+	TenantID           uint64              `json:"tenant_id"`
+	KnowledgeIDs       []string            `json:"knowledge_ids"`
+	FolderDeleteTarget *FolderDeleteTarget `json:"folder_delete_target,omitempty"`
+	Initiator          TaskInitiator       `json:"initiator,omitempty"`
+}
+
+// FolderDeleteTarget finalizes a recursive folder deletion after its documents are removed.
+type FolderDeleteTarget struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	FolderID        string `json:"folder_id"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload

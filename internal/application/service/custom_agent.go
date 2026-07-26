@@ -42,6 +42,7 @@ type customAgentService struct {
 	wikiPageRepo   interfaces.WikiPageRepository
 	tagRepo        interfaces.KnowledgeTagRepository
 	knowledgeRepo  interfaces.KnowledgeRepository
+	folderService  interfaces.KnowledgeFolderService
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -53,6 +54,7 @@ func NewCustomAgentService(
 	wikiPageRepo interfaces.WikiPageRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	folderService interfaces.KnowledgeFolderService,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
@@ -62,6 +64,7 @@ func NewCustomAgentService(
 		wikiPageRepo:   wikiPageRepo,
 		tagRepo:        tagRepo,
 		knowledgeRepo:  knowledgeRepo,
+		folderService:  folderService,
 	}
 }
 
@@ -482,9 +485,10 @@ func (s *customAgentService) GetSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, true)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, folderScopes, limit, true)
 }
 
 func (s *customAgentService) GetKnowledgeSuggestedQuestions(
@@ -493,9 +497,10 @@ func (s *customAgentService) GetKnowledgeSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, false)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, folderScopes, limit, false)
 }
 
 func (s *customAgentService) getSuggestedQuestions(
@@ -504,6 +509,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopes []types.FolderScope,
 	limit int,
 	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
@@ -519,6 +525,9 @@ func (s *customAgentService) getSuggestedQuestions(
 	}
 
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+		return nil, err
+	}
+	if err := types.AuthorizeTenantAPIKeyFolderScopes(ctx, folderScopes); err != nil {
 		return nil, err
 	}
 	scopeTagIDs := flattenTagScopeIDs(tagScopes)
@@ -582,10 +591,18 @@ func (s *customAgentService) getSuggestedQuestions(
 			})
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
-		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolvedTags.KnowledgeIDs)
 		if len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
+	}
+
+	resolvedFolders, err := s.resolveSuggestionFolderScopes(ctx, tenantID, folderScopes)
+	if err != nil {
+		return nil, err
+	}
+	knowledgeIDs = combineSuggestionScopedKnowledgeIDs(knowledgeIDs, resolvedTags, resolvedFolders, kbIDs)
+	if len(folderScopes) > 0 && len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 && len(kbIDs) == 0 {
+		return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 	}
 
 	// 2. Determine knowledge base scope
@@ -627,7 +644,21 @@ func (s *customAgentService) getSuggestedQuestions(
 	// Match the chat retrieval target semantics: a tag scope narrows its parent
 	// KB even when that KB is present in the agent's preselected KB list. Other
 	// explicitly selected KBs remain additive.
-	effectiveKBIDs = excludeSuggestionStrings(effectiveKBIDs, resolvedTags.KnowledgeBaseIDs)
+	narrowedKBIDs := mergeUniqueStrings(nil, resolvedTags.KnowledgeBaseIDs)
+	explicitFullKBs := make(map[string]bool, len(kbIDs))
+	for _, kbID := range kbIDs {
+		explicitFullKBs[kbID] = true
+	}
+	tagScopedKBs := make(map[string]bool, len(resolvedTags.KnowledgeBaseIDs))
+	for _, kbID := range resolvedTags.KnowledgeBaseIDs {
+		tagScopedKBs[kbID] = true
+	}
+	for _, kbID := range resolvedFolders.KnowledgeBaseIDs {
+		if !explicitFullKBs[kbID] || tagScopedKBs[kbID] {
+			narrowedKBIDs = mergeUniqueStrings(narrowedKBIDs, []string{kbID})
+		}
+	}
+	effectiveKBIDs = excludeSuggestionStrings(effectiveKBIDs, narrowedKBIDs)
 
 	filteredKBIDs, err := types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, kbIDs, effectiveKBIDs)
 	if err != nil {
@@ -667,7 +698,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	// rows live under that tenant. Without this grouping a caller in tenant A
 	// querying a KB shared from tenant B would hit `tenant_id = A` and get zero
 	// rows back — the symptom is "suggested questions never appear for shared KBs".
-	scopeKBIDs := mergeUniqueStrings(queryKBIDs, resolvedTags.KnowledgeBaseIDs)
+	scopeKBIDs := mergeUniqueStrings(queryKBIDs, mergeUniqueStrings(resolvedTags.KnowledgeBaseIDs, resolvedFolders.KnowledgeBaseIDs))
 	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, scopeKBIDs)
 	// Always keep the caller's tenant in the iteration so knowledge_ids-only
 	// requests (no kbIDs) still execute one query under the caller's tenant.
@@ -816,6 +847,7 @@ func (s *customAgentService) getSuggestedQuestions(
 type resolvedSuggestionTagScopes struct {
 	KnowledgeBaseIDs []string
 	KnowledgeIDs     []string
+	KnowledgeIDsByKB map[string][]string
 	TagIDsByTenant   map[uint64][]string
 }
 
@@ -828,7 +860,10 @@ func (s *customAgentService) resolveSuggestionTagScopes(
 	callerTenantID uint64,
 	tagScopes []types.TagScope,
 ) (resolvedSuggestionTagScopes, error) {
-	result := resolvedSuggestionTagScopes{TagIDsByTenant: make(map[uint64][]string)}
+	result := resolvedSuggestionTagScopes{
+		KnowledgeIDsByKB: make(map[string][]string),
+		TagIDsByTenant:   make(map[uint64][]string),
+	}
 	if len(tagScopes) == 0 || s.tagRepo == nil || s.knowledgeRepo == nil || s.kbService == nil {
 		return result, nil
 	}
@@ -882,9 +917,84 @@ func (s *customAgentService) resolveSuggestionTagScopes(
 				return result, err
 			}
 			result.KnowledgeIDs = mergeUniqueStrings(result.KnowledgeIDs, knowledgeIDs)
+			result.KnowledgeIDsByKB[kbID] = mergeUniqueStrings(result.KnowledgeIDsByKB[kbID], knowledgeIDs)
 		}
 	}
 	return result, nil
+}
+
+type resolvedSuggestionFolderScopes struct {
+	KnowledgeBaseIDs []string
+	KnowledgeIDs     []string
+	KnowledgeIDsByKB map[string][]string
+}
+
+func (s *customAgentService) resolveSuggestionFolderScopes(
+	ctx context.Context,
+	callerTenantID uint64,
+	folderScopes []types.FolderScope,
+) (resolvedSuggestionFolderScopes, error) {
+	result := resolvedSuggestionFolderScopes{KnowledgeIDsByKB: make(map[string][]string)}
+	if len(folderScopes) == 0 {
+		return result, nil
+	}
+	if s.folderService == nil {
+		return result, errors.New("knowledge folder service is unavailable")
+	}
+
+	byKB := make(map[string][]types.FolderScope)
+	for _, scope := range folderScopes {
+		if scope.KnowledgeBaseID == "" || scope.FolderID == "" {
+			continue
+		}
+		byKB[scope.KnowledgeBaseID] = append(byKB[scope.KnowledgeBaseID], scope)
+	}
+	kbIDs := make([]string, 0, len(byKB))
+	for kbID := range byKB {
+		kbIDs = append(kbIDs, kbID)
+	}
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, callerTenantID, kbIDs)
+	for tenantID, groupKBIDs := range kbGroups {
+		for _, kbID := range groupKBIDs {
+			result.KnowledgeBaseIDs = mergeUniqueStrings(result.KnowledgeBaseIDs, []string{kbID})
+			for _, scope := range byKB[kbID] {
+				knowledgeIDs, err := s.folderService.ResolveKnowledgeIDs(ctx, tenantID, scope)
+				if err != nil {
+					return result, err
+				}
+				result.KnowledgeIDs = mergeUniqueStrings(result.KnowledgeIDs, knowledgeIDs)
+				result.KnowledgeIDsByKB[kbID] = mergeUniqueStrings(result.KnowledgeIDsByKB[kbID], knowledgeIDs)
+			}
+		}
+	}
+	return result, nil
+}
+
+func combineSuggestionScopedKnowledgeIDs(
+	explicit []string,
+	tags resolvedSuggestionTagScopes,
+	folders resolvedSuggestionFolderScopes,
+	fullKBIDs []string,
+) []string {
+	result := mergeUniqueStrings(nil, explicit)
+	fullKBSet := make(map[string]bool, len(fullKBIDs))
+	for _, kbID := range fullKBIDs {
+		fullKBSet[kbID] = true
+	}
+	kbIDs := mergeUniqueStrings(tags.KnowledgeBaseIDs, folders.KnowledgeBaseIDs)
+	for _, kbID := range kbIDs {
+		tagIDs, hasTags := tags.KnowledgeIDsByKB[kbID]
+		folderIDs, hasFolders := folders.KnowledgeIDsByKB[kbID]
+		switch {
+		case hasTags && hasFolders:
+			result = mergeUniqueStrings(result, intersectSuggestionStrings(tagIDs, folderIDs))
+		case hasTags:
+			result = mergeUniqueStrings(result, tagIDs)
+		case hasFolders && !fullKBSet[kbID]:
+			result = mergeUniqueStrings(result, folderIDs)
+		}
+	}
+	return result
 }
 
 func flattenTagScopeIDs(scopes []types.TagScope) []string {

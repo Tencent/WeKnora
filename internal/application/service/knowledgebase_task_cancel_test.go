@@ -160,6 +160,27 @@ func TestDeleteKnowledgeBaseCancelsQueuedTasksBestEffort(t *testing.T) {
 	}
 }
 
+type recordingKnowledgeFolderService struct {
+	interfaces.KnowledgeFolderService
+	recursiveTargets []types.FolderDeleteTarget
+	deletedKBIDs     []string
+}
+
+func (s *recordingKnowledgeFolderService) DeleteRecursive(
+	_ context.Context, kbID, folderID string,
+) error {
+	s.recursiveTargets = append(s.recursiveTargets, types.FolderDeleteTarget{
+		KnowledgeBaseID: kbID,
+		FolderID:        folderID,
+	})
+	return nil
+}
+
+func (s *recordingKnowledgeFolderService) DeleteByKnowledgeBase(_ context.Context, kbID string) error {
+	s.deletedKBIDs = append(s.deletedKBIDs, kbID)
+	return nil
+}
+
 type emptyKBKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 }
@@ -175,8 +196,10 @@ func (emptyKBKnowledgeRepo) ListKnowledgeByKnowledgeBaseID(
 func TestProcessKBDeleteRepeatsQueueCleanup(t *testing.T) {
 	inspector := &recordingKBTaskInspector{}
 	pendingRepo := &recordingKBPendingRepo{}
+	folderService := &recordingKnowledgeFolderService{}
 	svc := &knowledgeBaseService{
 		kgRepo:          emptyKBKnowledgeRepo{},
+		folderService:   folderService,
 		taskInspector:   inspector,
 		taskPendingRepo: pendingRepo,
 	}
@@ -192,6 +215,7 @@ func TestProcessKBDeleteRepeatsQueueCleanup(t *testing.T) {
 		assert.Empty(t, call.knowledgeIDs)
 	}
 	assert.Equal(t, []string{"kb-race", "kb-race"}, pendingRepo.scopeIDs)
+	assert.Equal(t, []string{"kb-race"}, folderService.deletedKBIDs)
 }
 
 type populatedKBKnowledgeRepo struct {
@@ -261,6 +285,7 @@ func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
 		}},
 		chunkRepo:     kbCleanupChunkRepo{},
 		modelService:  kbCleanupModelService{},
+		folderService: &recordingKnowledgeFolderService{},
 		taskInspector: inspector,
 	}
 	payload, err := json.Marshal(types.KBDeletePayload{TenantID: 1, KnowledgeBaseID: "kb-1"})

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -15,6 +15,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
@@ -22,6 +23,7 @@ const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const settingsStore = useSettingsStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -35,12 +37,20 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  listKnowledgeFiles,
+  listKnowledgeFolders,
+  createKnowledgeFolder,
+  moveKnowledgeToFolder,
+  reparseKnowledgeFolder,
+  deleteKnowledgeFolderRecursive,
+  type KnowledgeFolder,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import KnowledgeFolderTree from './components/KnowledgeFolderTree.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -62,6 +72,21 @@ const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
+const folderTreeRef = ref<InstanceType<typeof KnowledgeFolderTree> | null>(null);
+const selectedFolder = ref<KnowledgeFolder | null>(null);
+const selectedFolderId = computed(() => selectedFolder.value?.id || null);
+const knowledgeFolders = ref<KnowledgeFolder[]>([]);
+const folderLoading = ref(false);
+let folderRequestSequence = 0;
+const visibleKnowledgeFolders = computed(() => {
+  const parentId = selectedFolderId.value;
+  return knowledgeFolders.value
+    .filter(folder => (folder.parent_folder_id || null) === parentId)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+});
+const folderMoveVisible = ref(false);
+const folderMoveTargetId = ref('');
+const folderMoveLoading = ref(false);
 const uploading = ref(false);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
@@ -321,7 +346,8 @@ const showKbDetailContextualGuide = computed(() => {
     && !isFAQ.value
     && canEdit.value
     && !docListLoading.value
-    && cardList.value.length === 0;
+    && cardList.value.length === 0
+    && visibleKnowledgeFolders.value.length === 0;
 });
 
 const onVisibleChange = (visible: boolean) => {
@@ -388,6 +414,7 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 let scrollLoading = false;
+let documentListRequestSequence = 0;
 const resetPage = () => { page = 1; scrollLoading = false; };
 
 // Move state — inline in card menu
@@ -518,6 +545,33 @@ const tagTotal = ref(0);
 let tagSearchDebounce: number | null = null;
 let docSearchDebounce: number | null = null;
 const docSearchKeyword = ref('');
+const contentMatchedFolderIds = ref<Set<string>>(new Set());
+let folderContentSearchSequence = 0;
+
+const folderById = computed(() => new Map(knowledgeFolders.value.map(folder => [folder.id, folder])));
+
+const isFolderInCurrentSearchTree = (folder: KnowledgeFolder) => {
+  const rootFolderId = selectedFolderId.value;
+  if (!rootFolderId) return true;
+  let parentId = folder.parent_folder_id || '';
+  const visited = new Set<string>();
+  while (parentId && !visited.has(parentId)) {
+    if (parentId === rootFolderId) return true;
+    visited.add(parentId);
+    parentId = folderById.value.get(parentId)?.parent_folder_id || '';
+  }
+  return false;
+};
+
+const displayedKnowledgeFolders = computed(() => {
+  const keyword = docSearchKeyword.value.trim().toLocaleLowerCase();
+  if (!keyword) return visibleKnowledgeFolders.value;
+  const matchedIds = contentMatchedFolderIds.value;
+  return knowledgeFolders.value
+    .filter(folder => isFolderInCurrentSearchTree(folder))
+    .filter(folder => folder.name.toLocaleLowerCase().includes(keyword) || matchedIds.has(folder.id))
+    .sort((a, b) => a.depth - b.depth || a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+});
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
   { label: t('knowledgeBase.allFileTypes'), value: '' },
@@ -582,6 +636,8 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_id: selectedFolderId.value || '',
+    include_descendants: false,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -591,6 +647,177 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
+const folderMoveOptions = computed(() => [
+  { label: t('knowledgeBase.folderRoot'), value: '' },
+  ...knowledgeFolders.value.map(folder => ({
+    label: '  '.repeat(Math.max(0, folder.depth - 1)) + folder.name,
+    value: folder.id,
+  })),
+]);
+
+const refreshFolders = async () => {
+  const targetKbId = kbId.value;
+  const requestSequence = ++folderRequestSequence;
+  if (!targetKbId) {
+    knowledgeFolders.value = [];
+    return;
+  }
+  folderLoading.value = true;
+  try {
+    const response: any = await listKnowledgeFolders(targetKbId);
+    if (requestSequence !== folderRequestSequence || targetKbId !== kbId.value) return;
+    const data = response?.data ?? response;
+    const folders: KnowledgeFolder[] = Array.isArray(data) ? data : [];
+    knowledgeFolders.value = folders;
+    if (selectedFolderId.value) {
+      selectedFolder.value = folders.find(folder => folder.id === selectedFolderId.value) || null;
+    }
+  } catch (error: any) {
+    if (requestSequence === folderRequestSequence) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.folderLoadFailed'));
+    }
+  } finally {
+    if (requestSequence === folderRequestSequence) folderLoading.value = false;
+  }
+};
+
+const refreshAfterFolderDeletion = async (targetKbId: string, folderId: string) => {
+  const maxPolls = 75;
+  const delayMs = 400;
+  for (let i = 0; i < maxPolls; i++) {
+    if (targetKbId !== kbId.value) return;
+    try {
+      const response: any = await listKnowledgeFolders(targetKbId);
+      const data = response?.data ?? response;
+      const folders: KnowledgeFolder[] = Array.isArray(data) ? data : [];
+      if (!folders.some(folder => folder.id === folderId)) {
+        await Promise.all([handleFolderTreeChanged(), loadKnowledgeFiles(targetKbId)]);
+        return;
+      }
+    } catch {
+      // Keep polling; the shared folder-change refresh will surface an error on the final authoritative refresh.
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  }
+  if (targetKbId === kbId.value) {
+    await Promise.all([handleFolderTreeChanged(), loadKnowledgeFiles(targetKbId)]);
+  }
+};
+
+const handleFolderSelect = (folder: KnowledgeFolder | null) => {
+  selectedFolder.value = folder;
+  // Do not briefly render documents or error cards from the previously selected folder.
+  cardList.value = [];
+  total.value = 0;
+  resetPage();
+  clearSelection();
+  if (kbId.value) loadKnowledgeFiles(kbId.value);
+};
+
+const handleFolderTreeChanged = async () => {
+  await refreshFolders();
+};
+
+const confirmFolderReparse = (folder: KnowledgeFolder) => {
+  const count = folder.recursive_knowledge_count || 0;
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.folderReparseTitle'),
+    body: t('knowledgeBase.folderReparseConfirm', { name: folder.name, count }),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      try {
+        const response: any = await reparseKnowledgeFolder(kbId.value, folder.id);
+        const submittedCount = response?.data?.reparse_count ?? response?.reparse_count ?? count;
+        await Promise.all([loadKnowledgeFiles(kbId.value), refreshFolders()]);
+        MessagePlugin.success(t('knowledgeBase.folderReparseSubmitted', { count: submittedCount }));
+        dialog.destroy();
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeBase.folderReparseFailed'));
+      }
+    },
+  });
+};
+
+const confirmFolderRecursiveDelete = (folder: KnowledgeFolder) => {
+  const count = folder.recursive_knowledge_count || 0;
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.folderDeleteRecursiveTitle'),
+    body: t('knowledgeBase.folderDeleteRecursiveConfirm', { name: folder.name, count }),
+    confirmBtn: { content: t('common.delete'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      try {
+        const targetKbId = kbId.value;
+        const response: any = await deleteKnowledgeFolderRecursive(targetKbId, folder.id);
+        const submittedCount = response?.data?.deleted_count ?? response?.deleted_count ?? count;
+        if (selectedFolderId.value === folder.id) selectedFolder.value = null;
+        resetPage();
+        await loadKnowledgeFiles(targetKbId);
+        MessagePlugin.success(t('knowledgeBase.folderDeleteRecursiveSubmitted', { count: submittedCount }));
+        dialog.destroy();
+        void refreshAfterFolderDeletion(targetKbId, folder.id);
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeBase.folderDeleteRecursiveFailed'));
+      }
+    },
+  });
+};
+
+const handleFolderAction = (
+  action: 'ask' | 'create-child' | 'rename' | 'move' | 'reparse' | 'delete',
+  folder: KnowledgeFolder,
+) => {
+  if (action === 'ask') return handleAskFolder(folder);
+  if (action === 'create-child') return folderTreeRef.value?.createChild(folder);
+  if (action === 'rename') return folderTreeRef.value?.rename(folder);
+  if (action === 'move') return folderTreeRef.value?.move(folder);
+  if (action === 'reparse') return confirmFolderReparse(folder);
+  return confirmFolderRecursiveDelete(folder);
+};
+
+const handleAskFolder = (folder: KnowledgeFolder) => {
+  settingsStore.clearKnowledgeBases();
+  settingsStore.clearFiles();
+  settingsStore.clearTags();
+  settingsStore.clearFolders();
+  settingsStore.addFolder({
+    id: folder.id,
+    name: folder.name,
+    kbId: kbId.value,
+    kbName: kbInfo.value?.name,
+    includeDescendants: true,
+  });
+  router.push('/platform/creatChat');
+};
+
+const openBatchFolderMove = async () => {
+  if (selectedIds.value.size === 0) return;
+  try {
+    await refreshFolders();
+    folderMoveTargetId.value = selectedFolderId.value || '';
+    folderMoveVisible.value = true;
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderLoadFailed'));
+  }
+};
+
+const confirmBatchFolderMove = async () => {
+  if (!kbId.value || selectedIds.value.size === 0 || folderMoveLoading.value) return;
+  folderMoveLoading.value = true;
+  try {
+    await moveKnowledgeToFolder(kbId.value, Array.from(selectedIds.value), folderMoveTargetId.value || null);
+    folderMoveVisible.value = false;
+    clearSelection();
+    await Promise.all([loadKnowledgeFiles(kbId.value), refreshFolders()]);
+    MessagePlugin.success(t('knowledgeBase.folderMoveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderMoveFailed'));
+  } finally {
+    folderMoveLoading.value = false;
+  }
+};
+
 const sidebarCategoryCount = computed(() => tagTotal.value || tagList.value.length);
 const sidebarTags = computed(() => {
   const list = tagList.value;
@@ -661,11 +888,58 @@ const getTagName = (tagId?: string | number) => {
   return tagMap.value[key]?.name || '';
 };
 
+const loadFolderContentMatches = async (kbIdValue: string) => {
+  const keyword = docSearchKeyword.value.trim();
+  const requestSequence = ++folderContentSearchSequence;
+  const searchRootFolderId = selectedFolderId.value;
+  if (!kbIdValue || !keyword || isFAQ.value) {
+    contentMatchedFolderIds.value = new Set();
+    return;
+  }
+
+  const pageSize = 1000;
+  const matchedFolderIds = new Set<string>();
+  try {
+    let pageNumber = 1;
+    let totalMatches = 0;
+    do {
+      const response: any = await listKnowledgeFiles(kbIdValue, {
+        page: pageNumber,
+        page_size: pageSize,
+        ...filterParams.value,
+        folder_id: searchRootFolderId || undefined,
+        include_descendants: searchRootFolderId ? true : undefined,
+      });
+      if (
+        requestSequence !== folderContentSearchSequence
+        || kbIdValue !== kbId.value
+        || keyword !== docSearchKeyword.value.trim()
+        || searchRootFolderId !== selectedFolderId.value
+      ) return;
+      const items = Array.isArray(response?.data) ? response.data : [];
+      totalMatches = Number(response?.total || items.length);
+      for (const item of items) {
+        const folderId = String(item?.folder_id || '');
+        if (folderId && folderId !== searchRootFolderId) matchedFolderIds.add(folderId);
+      }
+      pageNumber++;
+    } while ((pageNumber - 1) * pageSize < totalMatches);
+    contentMatchedFolderIds.value = matchedFolderIds;
+  } catch {
+    if (requestSequence === folderContentSearchSequence) {
+      contentMatchedFolderIds.value = new Set();
+    }
+  }
+};
+
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
+  const requestSequence = ++documentListRequestSequence;
+  const folderScope = selectedFolderId.value || '';
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
+  void loadFolderContentMatches(kbIdValue);
   return getKnowled(
     {
       page: 1,
@@ -674,7 +948,13 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
     },
     kbIdValue,
   ).finally(() => {
-    if (isCurrentKb(kbIdValue) && !isFAQ.value) {
+    // A response from an earlier folder must not finish the newer folder's loading state.
+    if (
+      isCurrentKb(kbIdValue)
+      && requestSequence === documentListRequestSequence
+      && folderScope === (selectedFolderId.value || '')
+      && !isFAQ.value
+    ) {
       docListLoading.value = false;
     }
   });
@@ -819,6 +1099,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
   if (!targetKbId) {
     kbInfo.value = null;
     cardList.value = [];
+    knowledgeFolders.value = [];
     total.value = 0;
     return;
   }
@@ -911,8 +1192,13 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     resetPage();
     tagSearchQuery.value = '';
     tagPage.value = 1;
+    selectedFolder.value = null;
+    knowledgeFolders.value = [];
     uiStore.clearSelectedTagIds();
   }
+  void refreshFolders().catch((error) => {
+    console.error('Failed to load knowledge folders:', error);
+  });
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
 
@@ -968,14 +1254,19 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
-  const uploadedKbId = event.detail.kbId;
+  const detail = event.detail || {};
+  const uploadedKbId = detail.kbId;
+  const hasFolderScope = Object.prototype.hasOwnProperty.call(detail, 'folderId');
+  const uploadedFolderId = detail.folderId || null;
   console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
     console.log('匹配当前知识库，开始刷新文件列表');
-    // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
-    resetPage(); // Reset page counter when reloading files after upload
-    loadKnowledgeFiles(uploadedKbId);
+    if (!hasFolderScope || uploadedFolderId === selectedFolderId.value) {
+      resetPage();
+      loadKnowledgeFiles(uploadedKbId);
+    }
     loadTags(uploadedKbId);
+    void handleFolderTreeChanged();
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
   }
@@ -1040,6 +1331,13 @@ const handleOpenKnowledgeEvent = (e: Event) => {
   tryAutoOpenDocument();
 };
 
+const handleKnowledgeFileDrop = (event: Event) => {
+  const detail = (event as CustomEvent<{ kbId: string; files: File[] }>).detail;
+  if (!detail || detail.kbId !== kbId.value || !Array.isArray(detail.files)) return;
+  if (!ensureDocumentKbReady() || detail.files.length === 0) return;
+  void openUploadConfirmDialog(detail.files);
+};
+
 onMounted(() => {
   loadKnowledgeList();
   editorResources.ensureParserEngines();
@@ -1047,12 +1345,14 @@ onMounted(() => {
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   stopMovePoll();
   if (timeout !== null) {
     clearTimeout(timeout);
@@ -1061,7 +1361,6 @@ onUnmounted(() => {
 });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
-  docListLoading.value = false;
 
   // Auto-open document if navigated with ?knowledge_id=xxx
   if (pendingKnowledgeId.value && newValue?.length) {
@@ -1211,6 +1510,7 @@ const confirmDeleteKnowledge = (index: number, item: KnowledgeCard) => {
       if (!stillPresent) break;
       await new Promise<void>((r) => setTimeout(r, delayMs));
     }
+    await refreshFolders();
     loadTags(kbId.value, true);
   });
 };
@@ -1272,7 +1572,7 @@ const handleMoveConfirm = async () => {
     } else {
       moveSubmitting.value = false;
       resetPage(); // Reset page counter when reloading files after move
-      loadKnowledgeFiles(kbId.value);
+      await Promise.all([loadKnowledgeFiles(kbId.value), refreshFolders()]);
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.moveFailed'));
@@ -1297,7 +1597,7 @@ const startMovePoll = (taskId: string) => {
           MessagePlugin.success(t('knowledgeBase.moveCompleted'));
         }
         resetPage(); // Reset page counter when reloading files after move completion
-        loadKnowledgeFiles(kbId.value);
+        await Promise.all([loadKnowledgeFiles(kbId.value), refreshFolders()]);
       } else if (data.status === 'failed') {
         stopMovePoll();
         moveSubmitting.value = false;
@@ -1320,6 +1620,7 @@ const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: s
   if (savedKbId === kbId.value && !isFAQ.value) {
     resetPage(); // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
+    void refreshFolders();
   }
 };
 
@@ -1363,13 +1664,75 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
+type FolderUploadFile = File & { webkitRelativePath?: string; weknoraRelativePath?: string };
+
+const getFolderUploadPathParts = (file: File) => {
+  const uploadFile = file as FolderUploadFile;
+  const relativePath = (uploadFile.weknoraRelativePath || uploadFile.webkitRelativePath)
+    ?.replace(/\\/g, '/')
+    .trim();
+  if (!relativePath) return [];
+  return relativePath.split('/').filter(Boolean);
+};
+
+const isFolderUpload = (files: File[]) => files.some(file => getFolderUploadPathParts(file).length >= 2);
+
+const ensureFolderUploadTree = async (
+  targetKbId: string,
+  files: File[],
+  targetFolderId: string | null,
+  targetFolderDepth: number,
+) => {
+  await refreshFolders();
+  const folderByParentAndName = new Map<string, KnowledgeFolder>();
+  for (const folder of knowledgeFolders.value) {
+    folderByParentAndName.set(`${folder.parent_folder_id || ''}\0${folder.name.toLocaleLowerCase()}`, folder);
+  }
+
+  const folderPaths = new Map<string, string[]>();
+  for (const file of files) {
+    const parts = getFolderUploadPathParts(file);
+    if (parts.length < 2) continue;
+    const pathParts = parts.slice(0, -1);
+    if (targetFolderDepth + pathParts.length > 10) {
+      throw new Error(t('knowledgeBase.folderUploadDepthExceeded'));
+    }
+    folderPaths.set(pathParts.join('/'), pathParts);
+  }
+
+  const sortedPaths = [...folderPaths.values()].sort((a, b) => a.length - b.length);
+  const folderIDByPath = new Map<string, string>();
+  for (const pathParts of sortedPaths) {
+    let parentID = targetFolderId || '';
+    const traversed: string[] = [];
+    for (const folderName of pathParts) {
+      traversed.push(folderName);
+      const pathKey = traversed.join('/');
+      const cachedID = folderIDByPath.get(pathKey);
+      if (cachedID) {
+        parentID = cachedID;
+        continue;
+      }
+
+      const siblingKey = `${parentID}\0${folderName.toLocaleLowerCase()}`;
+      let folder = folderByParentAndName.get(siblingKey);
+      if (!folder) {
+        const response: any = await createKnowledgeFolder(targetKbId, {
+          parent_folder_id: parentID || null,
+          name: folderName,
+        });
+        folder = response?.data ?? response;
+        if (!folder?.id) {
+          throw new Error(t('knowledgeBase.folderSaveFailed'));
+        }
+        folderByParentAndName.set(siblingKey, folder);
+      }
+      folderIDByPath.set(pathKey, folder.id);
+      parentID = folder.id;
+    }
+  }
+
+  return folderIDByPath;
 };
 
 const showUploadResultMessages = (
@@ -1407,7 +1770,11 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: {
+    processConfig?: KnowledgeProcessOverrides
+    targetFolderId?: string | null
+    targetFolderDepth?: number
+  } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
@@ -1418,22 +1785,43 @@ const executeUploadBatch = async (
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
-  const hasFolderPaths = files.some((file) => {
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
-  });
+  const targetFolderId = options.targetFolderId !== undefined
+    ? options.targetFolderId
+    : selectedFolderId.value;
+  const targetFolderDepth = options.targetFolderDepth ?? selectedFolder.value?.depth ?? 0;
+  const hasFolderPaths = isFolderUpload(files);
+  let folderIDByPath = new Map<string, string>();
+  if (hasFolderPaths) {
+    try {
+      folderIDByPath = await ensureFolderUploadTree(
+        targetKbId,
+        files,
+        targetFolderId,
+        targetFolderDepth,
+      );
+    } catch (error: any) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.folderSaveFailed'));
+      return { successCount: 0, failCount: files.length };
+    }
+  }
 
   for (const file of files) {
     try {
-      const uploadData: {
+      const relativePathParts = getFolderUploadPathParts(file);
+      const relativeFolderPath = relativePathParts.slice(0, -1).join('/');
+      const uploadFolderID = relativeFolderPath
+        ? folderIDByPath.get(relativeFolderPath)
+        : targetFolderId || undefined;
+      const uploadData = {
+        file,
+        tag_ids: tagIdsToUpload,
+        folder_id: uploadFolderID,
+      } as {
         file: File
         tag_ids?: string[]
-        fileName?: string
         process_config?: KnowledgeProcessOverrides
-      } = { file, tag_ids: tagIdsToUpload };
-
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
+        folder_id?: string
+      };
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
       }
@@ -1471,7 +1859,7 @@ const executeUploadBatch = async (
 
   if (successCount > 0) {
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
+      detail: { kbId: targetKbId, folderId: targetFolderId || null },
     }));
   }
 
@@ -1492,6 +1880,7 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
       url,
       tag_ids: tagIdsToUpload,
       process_config: processConfig,
+      folder_id: selectedFolderId.value || undefined,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: targetKbId },
@@ -1520,7 +1909,10 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
   }
 };
 
-const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
+const handleUploadConfirmResult = async (
+  result: UploadConfirmResult,
+  targetFolder: { id: string | null; depth: number },
+) => {
   if (result.mode === 'manual') {
     return;
   }
@@ -1530,14 +1922,15 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const processConfig = result.processConfig;
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
-    });
+    const hasFolderPaths = isFolderUpload(files);
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, {
+      processConfig,
+      targetFolderId: targetFolder.id,
+      targetFolderDepth: targetFolder.depth,
+    });
   }
 
   for (const url of urls) {
@@ -1548,6 +1941,10 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
 const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
   if (!kbInfo.value) return;
   if (files.length === 0 && urls.length === 0) return;
+  const targetFolder = {
+    id: selectedFolderId.value,
+    depth: selectedFolder.value?.depth || 0,
+  };
   try {
     const result = await uploadConfirmStore.open({
       mode: 'file',
@@ -1557,7 +1954,7 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
     });
-    await handleUploadConfirmResult(result);
+    await handleUploadConfirmResult(result, targetFolder);
   } catch {
     // cancelled
   }
@@ -1579,6 +1976,7 @@ const handleManualCreate = () => {
   uiStore.openManualEditor({
     mode: 'create',
     kbId: kbId.value,
+    folderId: selectedFolderId.value,
     status: 'draft',
     onSuccess: manualEditorSuccess,
   });
@@ -1698,7 +2096,7 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
     traceAvailableById[id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
     resetPage();
-    loadKnowledgeFiles(kbId.value);
+    await Promise.all([loadKnowledgeFiles(kbId.value), refreshFolders()]);
     scheduleWikiStatusProbes();
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
@@ -1849,6 +2247,7 @@ const confirmBatchDelete = async () => {
         if (!stillPresent) break;
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
+      await refreshFolders();
       loadTags(kbId.value, true);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
@@ -1906,7 +2305,7 @@ const handleListAction = (
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
-  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, selectedFolderId, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
   () => {
     clearSelection();
   },
@@ -2064,6 +2463,19 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KnowledgeFolderTree
+            v-if="kbId"
+            ref="folderTreeRef"
+            :knowledge-base-id="kbId"
+            :folders="knowledgeFolders"
+            :loading="folderLoading"
+            :selected-folder-id="selectedFolderId"
+            :can-edit="canEdit"
+            @select="handleFolderSelect"
+            @ask="handleAskFolder"
+            @folder-action="handleFolderAction"
+            @changed="handleFolderTreeChanged"
+          />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2230,13 +2642,13 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{ 'is-empty': !cardList.length && !displayedKnowledgeFolders.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && cardList.length === 0 && displayedKnowledgeFolders.length === 0" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -2251,9 +2663,10 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="(cardList.length || displayedKnowledgeFolders.length) && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
+                    :folders="displayedKnowledgeFolders"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
@@ -2266,6 +2679,8 @@ async function createNewSession(value: string): Promise<void> {
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    @open-folder="handleFolderSelect"
+                    @folder-action="handleFolderAction"
                     @open="(item: any) => openKnowledgeItem(item)"
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
@@ -2277,8 +2692,9 @@ async function createNewSession(value: string): Promise<void> {
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
+                <template v-else-if="(cardList.length || displayedKnowledgeFolders.length) && viewMode === 'list'">
+                  <DocumentListView :items="cardList" :folders="displayedKnowledgeFolders"
+                    :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2287,6 +2703,7 @@ async function createNewSession(value: string): Promise<void> {
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    @open-folder="handleFolderSelect" @folder-action="handleFolderAction"
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
@@ -2305,13 +2722,26 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :move-loading="folderMoveLoading"
+                  :visible="batchMode || selectedIds.size > 0"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @move="openBatchFolderMove" />
               </div>
             </div>
           </div>
         </div>
       </template>
+
+      <t-dialog
+        v-model:visible="folderMoveVisible"
+        :header="$t('knowledgeBase.folderMoveTitle')"
+        :confirm-btn="{ content: $t('common.confirm'), loading: folderMoveLoading }"
+        :cancel-btn="$t('common.cancel')"
+        width="440px"
+        @confirm="confirmBatchFolderMove"
+      >
+        <t-select v-model="folderMoveTargetId" :options="folderMoveOptions" filterable />
+      </t-dialog>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
@@ -2457,6 +2887,23 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 0;
   background: transparent;
   border: none;
+}
+
+@media (max-width: 720px) {
+  .knowledge-main {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  :deep(.folder-panel) {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+    padding: 0 0 10px;
+  }
 }
 
 // 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间

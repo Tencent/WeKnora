@@ -291,7 +291,7 @@ func (s *sessionService) buildAgentConfig(
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
 
 	// Log knowledge bases if present
-	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
+	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 || len(req.FolderScopes) > 0 {
 		if len(agentConfig.KnowledgeBases) > 0 {
 			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
 				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
@@ -303,11 +303,11 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes, req.FolderScopes)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
-	agentConfig.SearchTargets = searchTargets
+	agentConfig.SearchTargets = searchTargets.Retrievable()
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import FolderActionMenu from './FolderActionMenu.vue';
+import type { KnowledgeFolder } from '@/api/knowledge-base';
 
 interface Tag {
   id: string;
@@ -29,6 +31,7 @@ interface KnowledgeItem {
 
 const props = defineProps<{
   items: KnowledgeItem[];
+  folders?: KnowledgeFolder[];
   selectedIds: Set<string>;
   canEdit: boolean;
   canMutateKnowledge: boolean;
@@ -45,6 +48,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  (e: 'open-folder', folder: KnowledgeFolder): void;
+  (e: 'folder-action', action: 'ask' | 'create-child' | 'rename' | 'move' | 'reparse' | 'delete', folder: KnowledgeFolder): void;
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
@@ -174,6 +179,7 @@ const onRowCheckboxChange = (item: KnowledgeItem, checked: boolean, ctx?: { e?: 
 };
 
 const moreOpen = ref<string | null>(null);
+const folderMenuVisible = reactive<Record<string, boolean>>({});
 const onMoreVisible = (id: string, visible: boolean) => {
   moreOpen.value = visible ? id : null;
   if (visible) {
@@ -213,6 +219,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   emit('action', action, item);
 };
 
+const handleFolderAction = (
+  action: 'ask' | 'create-child' | 'rename' | 'move' | 'reparse' | 'delete',
+  folder: KnowledgeFolder,
+) => {
+  folderMenuVisible[folder.id] = false;
+  emit('folder-action', action, folder);
+};
+
 </script>
 
 <template>
@@ -233,6 +247,60 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
+      <div
+        v-for="folder in folders || []"
+        :key="'folder-' + folder.id"
+        class="doc-list-row doc-list-folder-row"
+        :class="{ 'menu-open': folderMenuVisible[folder.id] }"
+        role="row"
+        @click="emit('open-folder', folder)"
+      >
+        <div class="cell cell-check" aria-hidden="true"></div>
+
+        <div class="cell cell-name">
+          <span class="row-file-icon-wrap row-folder-icon-wrap">
+            <t-icon name="folder" />
+          </span>
+          <div class="row-file-text">
+            <span class="row-file-name" :title="folder.name">{{ folder.name }}</span>
+            <span v-if="folder.description" class="row-file-desc" :title="folder.description">
+              {{ folder.description }}
+            </span>
+          </div>
+        </div>
+
+        <div class="cell cell-tag"><span class="row-tag-add">+ {{ t('knowledgeBase.tagLabel') }}</span></div>
+        <div class="cell cell-source"><span class="row-muted">--</span></div>
+        <div class="cell cell-size">
+          <span class="row-mono">{{ t('knowledgeBase.folderItemCount', { count: folder.recursive_knowledge_count }) }}</span>
+        </div>
+        <div class="cell cell-status"><span class="row-muted">--</span></div>
+        <div class="cell cell-time"><span class="row-mono">{{ formatTime(folder.updated_at) }}</span></div>
+
+        <div v-if="canEdit" class="cell cell-actions" @click.stop>
+          <t-popup
+            v-model="folderMenuVisible[folder.id]"
+            placement="bottom-right"
+            trigger="click"
+            destroy-on-close
+            overlay-class-name="card-more"
+          >
+            <button
+              type="button"
+              class="row-more-btn"
+              :class="{ active: folderMenuVisible[folder.id] }"
+              :aria-label="t('knowledgeBase.columnActions')"
+              @click.stop
+            >
+              <t-icon name="more" size="16px" />
+            </button>
+            <template #content>
+              <FolderActionMenu :folder="folder" @action="handleFolderAction" />
+            </template>
+          </t-popup>
+        </div>
+      </div>
+
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
@@ -569,6 +637,10 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   font-size: 16px;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
+}
+
+.row-folder-icon-wrap {
+  color: var(--td-brand-color);
 }
 
 .row-file-text {

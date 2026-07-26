@@ -88,6 +88,11 @@ const (
 // KnowledgeListFilter aggregates optional filters for listing knowledge entries
 // under a knowledge base. Empty / zero fields mean "no filter on that dimension".
 type KnowledgeListFilter struct {
+	// FolderID filters by direct folder placement. A non-nil empty value means
+	// knowledge placed directly at the knowledge-base root.
+	FolderID *string
+	// IncludeFolderDescendants expands FolderID to its descendant folders.
+	IncludeFolderDescendants bool
 	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
 	TagIDs []string
 	// Keyword performs a LIKE match on file_name / title when non-empty.
@@ -116,6 +121,9 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the knowledge item's unique organizational parent. Nil means
+	// the item is placed directly at the knowledge-base root.
+	FolderID *string `json:"folder_id,omitempty" gorm:"type:varchar(36);index"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
@@ -209,6 +217,7 @@ type ManualKnowledgePayload struct {
 	Content       string                     `json:"content"`
 	Status        string                     `json:"status"`
 	TagIDs        []string                   `json:"tag_ids"`
+	FolderID      *string                    `json:"folder_id,omitempty"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }

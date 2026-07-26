@@ -229,7 +229,7 @@ export function uploadKnowledgeFile(
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides; folder_id?: string },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
@@ -243,6 +243,7 @@ export function createManualKnowledge(
     content: string
     status: string
     tag_ids?: string[]
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides
   },
 ) {
@@ -261,6 +262,8 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string;
+    include_descendants?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -273,8 +276,68 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id !== undefined) query.append('folder_id', params.folder_id);
+  if (params.include_descendants !== undefined) query.append('include_descendants', String(params.include_descendants));
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+export interface KnowledgeFolder {
+  id: string
+  tenant_id: number
+  knowledge_base_id: string
+  parent_folder_id?: string | null
+  name: string
+  description?: string
+  depth: number
+  sort_order: number
+  direct_knowledge_count: number
+  recursive_knowledge_count: number
+  has_children: boolean
+  created_at: string
+  updated_at: string
+}
+
+export function listKnowledgeFolders(kbId: string, params?: { parent_folder_id?: string }) {
+  return get(`/api/v1/knowledge-bases/${kbId}/folders`, params ? { params } : undefined)
+}
+
+export function createKnowledgeFolder(kbId: string, data: {
+  parent_folder_id?: string | null
+  name: string
+  description?: string
+}) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders`, data)
+}
+
+export function updateKnowledgeFolder(kbId: string, folderId: string, data: {
+  name?: string
+  description?: string
+  parent_folder_id?: string
+  move_to_root?: boolean
+  update_sort_order?: boolean
+  sort_order?: number
+}) {
+  return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data)
+}
+
+export function deleteKnowledgeFolder(kbId: string, folderId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`)
+}
+
+export function reparseKnowledgeFolder(kbId: string, folderId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}/reparse`, {})
+}
+
+export function deleteKnowledgeFolderRecursive(kbId: string, folderId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}/recursive`)
+}
+
+export function moveKnowledgeToFolder(kbId: string, knowledgeIds: string[], folderId?: string | null) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/move-to-folder`, {
+    knowledge_ids: knowledgeIds,
+    folder_id: folderId || null,
+  })
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {

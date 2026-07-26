@@ -763,10 +763,22 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	// Delete knowledge list
-	if err := s.DeleteKnowledgeList(ctx, payload.KnowledgeIDs); err != nil {
-		logger.Errorf(ctx, "Failed to delete knowledge list: %v", err)
-		return err
+	// Delete knowledge list before finalizing an optional recursive folder deletion.
+	if len(payload.KnowledgeIDs) > 0 {
+		if err := s.DeleteKnowledgeList(ctx, payload.KnowledgeIDs); err != nil {
+			logger.Errorf(ctx, "Failed to delete knowledge list: %v", err)
+			return err
+		}
+	}
+	if payload.FolderDeleteTarget != nil {
+		if err := s.folderService.DeleteRecursive(
+			ctx,
+			payload.FolderDeleteTarget.KnowledgeBaseID,
+			payload.FolderDeleteTarget.FolderID,
+		); err != nil {
+			logger.Errorf(ctx, "Failed to finalize folder deletion: %v", err)
+			return err
+		}
 	}
 
 	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))

@@ -348,6 +348,18 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	}
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
+	folders := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	foldersRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		foldersRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
+		folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFolder)
+		folders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeFolder)
+		folders.POST("/:folder_id/reparse", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ReparseKnowledgeFolder)
+		folders.DELETE("/:folder_id/recursive", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeFolderRecursive)
+		folders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeFolder)
+	}
+	kb.POST("/move-to-folder", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.MoveKnowledgeToFolder)
+
 	kgrp := r.Group("/knowledge")
 	k := g.apiKeyGroup(kgrp, apiKeyIngest(apiKeyFullAccess()))
 	kRead := k.With(apiKeyRetrieve(apiKeyFullAccess()))

@@ -59,10 +59,34 @@ CREATE TABLE knowledge_bases (
 
 CREATE INDEX idx_knowledge_bases_tenant_name ON knowledge_bases(tenant_id, name);
 
+CREATE TABLE knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_folder_id VARCHAR(36),
+    name VARCHAR(255) NOT NULL,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    parent_scope VARCHAR(36) GENERATED ALWAYS AS (IFNULL(parent_folder_id, '')) STORED,
+    live_normalized_name VARCHAR(255) GENERATED ALWAYS AS (IF(deleted_at IS NULL, LOWER(name), NULL)) STORED,
+    description TEXT NOT NULL,
+    depth INT NOT NULL DEFAULT 1,
+    sort_order INT NOT NULL DEFAULT 0,
+    creator_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CHECK (depth >= 1 AND depth <= 10)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_knowledge_folders_kb_parent
+    ON knowledge_folders(tenant_id, knowledge_base_id, parent_folder_id);
+CREATE UNIQUE INDEX idx_knowledge_folders_live_sibling_name
+    ON knowledge_folders(tenant_id, knowledge_base_id, parent_scope, live_normalized_name);
+
 CREATE TABLE knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    folder_id VARCHAR(36),
     type VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
@@ -85,6 +109,7 @@ CREATE TABLE knowledges (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
+CREATE INDEX idx_knowledges_kb_folder ON knowledges(tenant_id, knowledge_base_id, folder_id);
 
 CREATE TABLE sessions (
     id VARCHAR(36) PRIMARY KEY,

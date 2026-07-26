@@ -406,6 +406,7 @@ watch(
         agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
+        folders: useSettingsStoreInstance.settings.selectedFolders,
         tags: useSettingsStoreInstance.settings.selectedTags,
         mcps: useSettingsStoreInstance.settings.selectedMCPServices,
         skills: useSettingsStoreInstance.settings.selectedSkills,
@@ -801,6 +802,13 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
+    const folderScopes = (mentionedItems || [])
+        .filter(item => item.type === 'folder' && item.id && item.kb_id)
+        .map(item => ({
+            knowledge_base_id: item.kb_id,
+            folder_id: item.id,
+            include_descendants: item.include_descendants !== false,
+        }));
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
@@ -823,6 +831,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
+        folder_scopes: folderScopes,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,

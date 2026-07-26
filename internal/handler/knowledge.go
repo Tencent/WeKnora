@@ -38,6 +38,7 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	folderService     interfaces.KnowledgeFolderService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -49,6 +50,7 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	folderService interfaces.KnowledgeFolderService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		cfg:               cfg,
@@ -58,6 +60,7 @@ func NewKnowledgeHandler(
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		folderService:     folderService,
 	}
 }
 
@@ -244,12 +247,13 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
-	ctx context.Context, tenantID uint64, ids []string,
+	ctx context.Context, tenantID uint64, ids []string, folderTarget *types.FolderDeleteTarget,
 ) (string, error) {
 	payload := types.KnowledgeListDeletePayload{
-		TenantID:     tenantID,
-		KnowledgeIDs: ids,
-		Initiator:    types.TaskInitiatorFromContext(ctx),
+		TenantID:           tenantID,
+		KnowledgeIDs:       ids,
+		FolderDeleteTarget: folderTarget,
+		Initiator:          types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -403,11 +407,16 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	// 获取分类ID列表（如果提供），逗号分隔，用于知识多标签分类管理
 	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
+	folderID := normalizeRequestFolderID(c.PostForm("folder_id"))
+	if err := h.folderService.ValidatePlacement(ctx, effectiveTenantID, kbID, folderID); err != nil {
+		c.Error(mapKnowledgeFolderError(err))
+		return
+	}
 
 	channel := c.PostForm("channel")
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, types.KnowledgePlacement{FolderID: folderID})
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -476,6 +485,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+		FolderID         *string                          `json:"folder_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
@@ -502,9 +512,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		secutils.SanitizeForLog(req.URL),
 	)
 
+	if err := h.folderService.ValidatePlacement(ctx, effectiveTenantID, kbID, normalizeRequestFolderIDPtr(req.FolderID)); err != nil {
+		c.Error(mapKnowledgeFolderError(err))
+		return
+	}
+
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
 		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		types.KnowledgePlacement{FolderID: normalizeRequestFolderIDPtr(req.FolderID)},
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
@@ -570,7 +586,14 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	if err := h.folderService.ValidatePlacement(ctx, effectiveTenantID, kbID, normalizeRequestFolderIDPtr(req.FolderID)); err != nil {
+		c.Error(mapKnowledgeFolderError(err))
+		return
+	}
+
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(
+		ctx, kbID, &req, req.Channel, types.KnowledgePlacement{FolderID: normalizeRequestFolderIDPtr(req.FolderID)},
+	)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -956,6 +979,23 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
 	}
+	if rawFolderID, present := c.GetQuery("folder_id"); present {
+		filter.FolderID = &rawFolderID
+		if rawFolderID != "" {
+			if err := h.folderService.ValidatePlacement(ctx, effectiveTenantID, kbID, &rawFolderID); err != nil {
+				c.Error(mapKnowledgeFolderError(err))
+				return
+			}
+		}
+	}
+	if rawRecursive := c.Query("include_descendants"); rawRecursive != "" {
+		includeDescendants, err := strconv.ParseBool(rawRecursive)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("invalid include_descendants value"))
+			return
+		}
+		filter.IncludeFolderDescendants = includeDescendants
+	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
@@ -1054,7 +1094,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
-	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id})
+	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id}, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
@@ -1161,7 +1201,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
@@ -1235,7 +1275,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))

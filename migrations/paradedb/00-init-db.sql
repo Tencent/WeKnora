@@ -72,11 +72,33 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 -- Add indexes for knowledge_bases
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
 
+CREATE TABLE IF NOT EXISTS knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_folder_id VARCHAR(36),
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    depth INTEGER NOT NULL DEFAULT 1 CHECK (depth >= 1 AND depth <= 10),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    creator_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_folders_kb_parent
+    ON knowledge_folders(tenant_id, knowledge_base_id, parent_folder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_folders_live_sibling_name
+    ON knowledge_folders(tenant_id, knowledge_base_id, COALESCE(parent_folder_id, ''), LOWER(name))
+    WHERE deleted_at IS NULL;
+
 -- Create knowledge table
 CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id INTEGER NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    folder_id VARCHAR(36),
     type VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
@@ -101,6 +123,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
 -- Add indexes for knowledge
 CREATE INDEX IF NOT EXISTS idx_knowledges_tenant_id ON knowledges(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledges_base_id ON knowledges(knowledge_base_id);
+CREATE INDEX IF NOT EXISTS idx_knowledges_kb_folder ON knowledges(tenant_id, knowledge_base_id, folder_id);
 CREATE INDEX IF NOT EXISTS idx_knowledges_parse_status ON knowledges(parse_status);
 CREATE INDEX IF NOT EXISTS idx_knowledges_enable_status ON knowledges(enable_status);
 

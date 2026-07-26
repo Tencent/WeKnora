@@ -243,10 +243,67 @@
             </div>
           </template>
         </t-popup>
-        <!-- Loading indicator -->
-        <div v-if="loading" class="loading-more">
-          <t-loading size="small" />
-        </div>
+      </div>
+
+      <!-- Folder Group -->
+      <div v-if="currentGroupType === 'folder'" class="mention-group" data-group-type="folder">
+        <button v-if="folderKBId" type="button" class="mention-back-row" @click.stop="folderGoBack">
+          <t-icon name="chevron-left" />
+          <span>{{ folderCurrentLabel }}</span>
+        </button>
+        <template v-if="!folderKBId">
+          <div
+            v-for="(item, index) in kbItems"
+            :key="item.id"
+            class="mention-item-folder"
+          >
+            <div class="folder-item-left" @click="selectFolderAsKB(item)">
+              <div class="icon-wrap">
+                <div class="icon kb-icon"><t-icon name="folder" /></div>
+              </div>
+              <div class="item-main">
+                <span class="name">{{ item.name }}</span>
+                <span class="count">{{ item.count || 0 }}</span>
+              </div>
+            </div>
+            <div class="folder-item-right" @click="drillIntoFolderKB(item)">
+              <span class="divider">|</span>
+              <t-icon name="chevron-right" />
+            </div>
+          </div>
+        </template>
+        <template v-if="folderKBId">
+          <div
+            v-for="(folder, index) in folderDrillItems"
+            :key="folder.id"
+            class="mention-item-folder"
+          >
+            <div class="folder-item-left" @click="selectFolder(folder)">
+              <div class="icon-wrap">
+                <div class="icon folder-icon"><t-icon name="folder" /></div>
+              </div>
+              <div class="item-main">
+                <span class="name">{{ folder.name }}</span>
+                <span class="count">{{ folder.recursive_knowledge_count || 0 }}</span>
+              </div>
+            </div>
+            <div v-if="hasChildFolders(folder)" class="folder-item-right" @click="drillIntoSubFolder(folder)">
+              <span class="divider">|</span>
+              <t-icon name="chevron-right" />
+            </div>
+          </div>
+          <div v-if="folderDrillItems.length === 0 && !folderDrillLoading" class="empty">
+            {{ $t('common.noResult') }}
+          </div>
+          <div v-if="folderDrillLoading" class="loading-more">
+            <t-loading size="small" />
+          </div>
+        </template>
+      </div>
+
+      <!-- Loading indicator -->
+      <div v-if="loading" class="loading-more">
+        <t-loading size="small" />
       </div>
 
       <div v-if="items.length === 0 && !loading" class="empty">
@@ -263,6 +320,7 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
+import { listKnowledgeFolders } from '@/api/knowledge-base/index';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { MentionItem, MentionItemType } from '@/types/mention';
@@ -294,6 +352,13 @@ const menuRef = ref<HTMLElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
+// Folder drill navigation state
+const folderKBId = ref<string | null>(null);
+const folderKBName = ref('');
+const folderAllItems = ref<any[]>([]);
+const folderDrillItems = ref<any[]>([]);
+const folderPath = ref<Array<{ id: string; name: string }>>([]);
+const folderDrillLoading = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -311,6 +376,7 @@ const agentIdForDetail = computed(() => {
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
+const folderCurrentLabel = computed(() => folderPath.value.at(-1)?.name || folderKBName.value);
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
@@ -318,6 +384,7 @@ const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; 
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },
   { type: 'file', label: t('common.file'), icon: 'file' },
+  { type: 'folder', label: '文件夹', icon: 'folder-open' },
 ]);
 
 const mentionGroups = computed(() => {
@@ -372,6 +439,13 @@ const enterGroup = (type: MentionItemType) => {
 
 const leaveGroup = () => {
   if (isFlatMode.value) return false;
+  if (currentGroupType.value === 'folder') {
+    folderKBId.value = null;
+    folderKBName.value = '';
+    folderAllItems.value = [];
+    folderDrillItems.value = [];
+    folderPath.value = [];
+  }
   if (!currentGroupType.value) return false;
   const rowIndex = groupRows.value.findIndex(group => group.type === currentGroupType.value);
   groupActiveIndex.value = Math.max(0, rowIndex);
@@ -382,8 +456,89 @@ const leaveGroup = () => {
   return true;
 };
 
+const emitFolderSelect = (kbId: string, kbName: string, folderId?: string, folderName?: string) => {
+  emit('select', {
+    id: folderId ?? kbId,
+    name: folderName ?? kbName,
+    type: 'folder' as const,
+    kbId,
+    kbName,
+    includeDescendants: true,
+  });
+};
+
+const loadFolderChildren = async (kbId: string, parentId: string) => {
+  folderDrillLoading.value = true;
+  try {
+    if (folderKBId.value !== kbId || folderAllItems.value.length === 0) {
+      const res: any = await listKnowledgeFolders(kbId);
+      const data = res?.data ?? res;
+      const folders = Array.isArray(data) ? data : [];
+      const childCounts = new Map<string, number>();
+      folders.forEach((folder: any) => {
+        const parentFolderId = folder.parent_folder_id || '';
+        if (parentFolderId) {
+          childCounts.set(parentFolderId, (childCounts.get(parentFolderId) || 0) + 1);
+        }
+      });
+      folderAllItems.value = folders.map((folder: any) => ({
+        ...folder,
+        child_count: childCounts.get(folder.id) || 0,
+      }));
+    }
+    folderDrillItems.value = folderAllItems.value.filter((folder: any) =>
+      (folder.parent_folder_id || '') === parentId
+    );
+  } catch {
+    folderAllItems.value = [];
+    folderDrillItems.value = [];
+  } finally {
+    folderDrillLoading.value = false;
+  }
+};
+
+const drillInto = async (kbId: string, kbName: string | null, parentId: string) => {
+  if (kbName !== null) {
+    folderKBId.value = kbId;
+    folderKBName.value = kbName;
+    folderAllItems.value = [];
+    folderPath.value = [];
+  }
+  await loadFolderChildren(kbId, parentId);
+};
+
+const drillIntoFolderKB = (item: any) => drillInto(item.id, item.name, '');
+const drillIntoSubFolder = async (folder: any) => {
+  folderPath.value.push({ id: folder.id, name: folder.name });
+  await drillInto(folderKBId.value!, null, folder.id);
+};
+
+const folderGoBack = async () => {
+  if (folderPath.value.length > 0) {
+    folderPath.value.pop();
+    const parentId = folderPath.value.at(-1)?.id || '';
+    await loadFolderChildren(folderKBId.value!, parentId);
+    return;
+  }
+  folderKBId.value = null;
+  folderKBName.value = '';
+  folderAllItems.value = [];
+  folderDrillItems.value = [];
+  folderPath.value = [];
+};
+
+const hasChildFolders = (folder: any) => (folder.child_count ?? 0) > 0;
+
+const selectFolderAsKB = (item: any) => {
+  emit('select', item);
+};
+
+const selectFolder = (folder: any) => {
+  emitFolderSelect(folderKBId.value!, folderKBName.value, folder.id, folder.name);
+};
+
 const updateActiveGroupFromIndex = (index: number) => {
-  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
+  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.loadedCount);
   if (group) currentGroupType.value = group.type;
 };
 
@@ -409,8 +564,9 @@ const moveActive = (delta: number) => {
 
   const group = currentGroup.value;
   if (!group) return;
+  if (group.loadedCount === 0) return;
   const currentLocalIndex = props.activeIndex - group.offset;
-  const nextLocalIndex = Math.min(group.count - 1, Math.max(0, currentLocalIndex + delta));
+  const nextLocalIndex = Math.min(group.loadedCount - 1, Math.max(0, currentLocalIndex + delta));
   emit('update:activeIndex', group.offset + nextLocalIndex);
   scrollToItem(nextLocalIndex);
 };
@@ -817,6 +973,61 @@ const scrollToItem = (index: number) => {
   display: flex;
   justify-content: center;
   padding: 8px 12px;
+}
+
+.mention-item-folder {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: default;
+  border-radius: var(--td-radius-medium, 6px);
+  transition: background 0.15s ease;
+}
+.mention-item-folder:hover {
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+}
+.folder-item-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.folder-item-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  cursor: pointer;
+  color: var(--td-text-color-placeholder, #999);
+  flex-shrink: 0;
+}
+.folder-item-right:hover {
+  color: var(--td-brand-color, #07c05f);
+}
+.divider {
+  color: var(--td-component-stroke, #e7e7e7);
+  user-select: none;
+}
+.folder-item-left .icon-wrap {
+  margin-right: 8px;
+}
+.folder-item-left .item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.folder-item-left .item-main .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-item-left .item-main .count {
+  flex-shrink: 0;
+  font-size: var(--td-font-size-mark-small, 12px);
+  color: var(--td-text-color-placeholder, #999);
 }
 </style>
 
