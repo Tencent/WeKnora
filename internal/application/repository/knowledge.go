@@ -36,7 +36,11 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+//
+// FolderID is owned by knowledgeFolderRepository.MoveKnowledge. Omitting it
+// prevents a processing worker from undoing a concurrent folder move when it
+// saves a Knowledge value loaded before that move.
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "FolderID"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
