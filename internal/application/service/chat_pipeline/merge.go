@@ -201,6 +201,10 @@ func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*t
 		mergedChunks = append(mergedChunks, g...)
 	}
 
+	// Global sort restores relevance order after map-based grouping.
+	// n is typically < 100, O(n log n) is negligible here.
+	sortSearchResultsDeterministically(mergedChunks)
+
 	pipelineInfo(ctx, "Merge", "output", map[string]interface{}{
 		"merged_total": len(mergedChunks),
 	})
