@@ -128,16 +128,12 @@ func (h *KnowledgeHandler) DeleteKnowledgeFolderRecursive(c *gin.Context) {
 		return
 	}
 
-	taskID := ""
-	if len(ids) > 0 {
-		taskID, err = h.enqueueKnowledgeListDelete(ctx, tenantID, ids)
-		if err != nil {
-			c.Error(apperrors.NewInternalServerError("failed to enqueue folder delete task"))
-			return
-		}
-	}
-	if err := h.folderService.DeleteRecursive(ctx, kbID, folderID); err != nil {
-		c.Error(mapKnowledgeFolderError(err))
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, tenantID, ids, &types.FolderDeleteTarget{
+		KnowledgeBaseID: kbID,
+		FolderID:        folderID,
+	})
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("failed to enqueue folder delete task"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

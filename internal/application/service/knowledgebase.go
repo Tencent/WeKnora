@@ -31,6 +31,7 @@ const kbTaskCleanupTimeout = 5 * time.Second
 type knowledgeBaseService struct {
 	repo            interfaces.KnowledgeBaseRepository
 	kgRepo          interfaces.KnowledgeRepository
+	folderService   interfaces.KnowledgeFolderService
 	chunkRepo       interfaces.ChunkRepository
 	shareRepo       interfaces.KBShareRepository
 	kbShareService  interfaces.KBShareService
@@ -53,6 +54,7 @@ type knowledgeBaseService struct {
 // NewKnowledgeBaseService creates a new knowledge base service
 func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
+	folderService interfaces.KnowledgeFolderService,
 	chunkRepo interfaces.ChunkRepository,
 	shareRepo interfaces.KBShareRepository,
 	kbShareService interfaces.KBShareService,
@@ -74,6 +76,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	return &knowledgeBaseService{
 		repo:            repo,
 		kgRepo:          kgRepo,
+		folderService:   folderService,
 		chunkRepo:       chunkRepo,
 		shareRepo:       shareRepo,
 		kbShareService:  kbShareService,
@@ -816,6 +819,15 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	}()
 
 	logger.Infof(ctx, "Processing KB delete task for knowledge base: %s", kbID)
+
+	// The KB is already soft-deleted, so remove its folder scope before heavy cleanup.
+	// This is idempotent and prevents early exits from leaving active orphan folders.
+	if err := s.folderService.DeleteByKnowledgeBase(ctx, kbID); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": kbID,
+		})
+		return err
+	}
 
 	// Step 1: Get all knowledge entries in this knowledge base
 	logger.Infof(ctx, "Fetching all knowledge entries in knowledge base, ID: %s", kbID)

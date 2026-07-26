@@ -189,6 +189,15 @@ WHERE tenant_id = ? AND knowledge_base_id = ?
 	})
 }
 
+func (r *knowledgeFolderRepository) DeleteByKnowledgeBase(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Updates(map[string]interface{}{"deleted_at": now, "updated_at": now}).Error
+}
+
 func (r *knowledgeFolderRepository) ListKnowledgeIDsByScope(
 	ctx context.Context, tenantID uint64, kbID, folderID string, includeDescendants bool,
 ) ([]string, error) {

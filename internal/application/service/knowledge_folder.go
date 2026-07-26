@@ -223,11 +223,11 @@ func (s *knowledgeFolderService) Delete(ctx context.Context, kbID, folderID stri
 }
 
 func (s *knowledgeFolderService) DeleteRecursive(ctx context.Context, kbID, folderID string) error {
-	tenantID := types.MustTenantIDFromContext(ctx)
-	if _, err := s.repo.GetByID(ctx, tenantID, kbID, folderID); err != nil {
-		return err
-	}
-	return s.repo.DeleteTree(ctx, tenantID, kbID, folderID)
+	return s.repo.DeleteTree(ctx, types.MustTenantIDFromContext(ctx), kbID, folderID)
+}
+
+func (s *knowledgeFolderService) DeleteByKnowledgeBase(ctx context.Context, kbID string) error {
+	return s.repo.DeleteByKnowledgeBase(ctx, types.MustTenantIDFromContext(ctx), kbID)
 }
 
 func (s *knowledgeFolderService) MoveKnowledge(

@@ -47,6 +47,7 @@ type knowledgeService struct {
 	ownership       retriever.TenantStoreOwnership
 	repo            interfaces.KnowledgeRepository
 	kbService       interfaces.KnowledgeBaseService
+	folderService   interfaces.KnowledgeFolderService
 	tenantRepo      interfaces.TenantRepository
 	tenantService   interfaces.TenantService
 	documentReader  interfaces.DocumentReader
@@ -92,6 +93,7 @@ func NewKnowledgeService(
 	repo interfaces.KnowledgeRepository,
 	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
+	folderService interfaces.KnowledgeFolderService,
 	tenantRepo interfaces.TenantRepository,
 	tenantService interfaces.TenantService,
 	chunkService interfaces.ChunkService,
@@ -120,6 +122,7 @@ func NewKnowledgeService(
 		config:          config,
 		repo:            repo,
 		kbService:       kbService,
+		folderService:   folderService,
 		tenantRepo:      tenantRepo,
 		tenantService:   tenantService,
 		documentReader:  documentReader,

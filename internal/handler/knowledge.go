@@ -247,12 +247,13 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
-	ctx context.Context, tenantID uint64, ids []string,
+	ctx context.Context, tenantID uint64, ids []string, folderTarget *types.FolderDeleteTarget,
 ) (string, error) {
 	payload := types.KnowledgeListDeletePayload{
-		TenantID:     tenantID,
-		KnowledgeIDs: ids,
-		Initiator:    types.TaskInitiatorFromContext(ctx),
+		TenantID:           tenantID,
+		KnowledgeIDs:       ids,
+		FolderDeleteTarget: folderTarget,
+		Initiator:          types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -1093,7 +1094,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
-	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id})
+	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id}, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
@@ -1200,7 +1201,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
@@ -1274,7 +1275,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs, nil)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))

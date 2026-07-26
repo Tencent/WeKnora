@@ -681,6 +681,29 @@ const refreshFolders = async () => {
   }
 };
 
+const refreshAfterFolderDeletion = async (targetKbId: string, folderId: string) => {
+  const maxPolls = 75;
+  const delayMs = 400;
+  for (let i = 0; i < maxPolls; i++) {
+    if (targetKbId !== kbId.value) return;
+    try {
+      const response: any = await listKnowledgeFolders(targetKbId);
+      const data = response?.data ?? response;
+      const folders: KnowledgeFolder[] = Array.isArray(data) ? data : [];
+      if (!folders.some(folder => folder.id === folderId)) {
+        await Promise.all([handleFolderTreeChanged(), loadKnowledgeFiles(targetKbId)]);
+        return;
+      }
+    } catch {
+      // Keep polling; the shared folder-change refresh will surface an error on the final authoritative refresh.
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  }
+  if (targetKbId === kbId.value) {
+    await Promise.all([handleFolderTreeChanged(), loadKnowledgeFiles(targetKbId)]);
+  }
+};
+
 const handleFolderSelect = (folder: KnowledgeFolder | null) => {
   selectedFolder.value = folder;
   // Do not briefly render documents or error cards from the previously selected folder.
@@ -725,14 +748,15 @@ const confirmFolderRecursiveDelete = (folder: KnowledgeFolder) => {
     cancelBtn: t('common.cancel'),
     onConfirm: async () => {
       try {
-        const response: any = await deleteKnowledgeFolderRecursive(kbId.value, folder.id);
+        const targetKbId = kbId.value;
+        const response: any = await deleteKnowledgeFolderRecursive(targetKbId, folder.id);
         const submittedCount = response?.data?.deleted_count ?? response?.deleted_count ?? count;
         if (selectedFolderId.value === folder.id) selectedFolder.value = null;
-        await refreshFolders();
         resetPage();
-        await loadKnowledgeFiles(kbId.value);
+        await loadKnowledgeFiles(targetKbId);
         MessagePlugin.success(t('knowledgeBase.folderDeleteRecursiveSubmitted', { count: submittedCount }));
         dialog.destroy();
+        void refreshAfterFolderDeletion(targetKbId, folder.id);
       } catch (error: any) {
         MessagePlugin.error(error?.message || t('knowledgeBase.folderDeleteRecursiveFailed'));
       }
@@ -1242,7 +1266,7 @@ const handleFileUploaded = (event: CustomEvent) => {
       loadKnowledgeFiles(uploadedKbId);
     }
     loadTags(uploadedKbId);
-    void refreshFolders();
+    void handleFolderTreeChanged();
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
   }
