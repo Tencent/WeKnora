@@ -32,7 +32,7 @@ const (
 
 // sourceKeySpaces is the single table of ID-bearing keys the source codec
 // understands. It drives both handle registration (registerSourceIDByKey) and
-// the alias-shaped-value decode gate (walkJSON), so registration and decoding
+// the handle-shaped-value decode gate (walkJSON), so registration and decoding
 // cannot drift apart. Every key referenced by a toolHandlePolicies sourceIDKeys
 // set must appear here (enforced by a test).
 var sourceKeySpaces = map[string]sourceKeySpace{

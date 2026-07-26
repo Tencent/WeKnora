@@ -45,12 +45,12 @@ func newResourceStreamDecoder(registry *resourceRegistry) *resourceStreamDecoder
 	return &resourceStreamDecoder{hold: streamHold{
 		holdLen: func(combined string) int {
 			hold := 0
-			for _, alias := range registry.aliases() {
+			for _, handle := range registry.handles() {
 				// A provider may split the token at any byte boundary, including
 				// "re" + "s://0001". Holding at most the short matching suffix is
 				// the only way to guarantee a request-local handle never leaks.
-				for n := 1; n < len(alias); n++ {
-					if n > hold && strings.HasSuffix(combined, alias[:n]) {
+				for n := 1; n < len(handle); n++ {
+					if n > hold && strings.HasSuffix(combined, handle[:n]) {
 						hold = n
 					}
 				}

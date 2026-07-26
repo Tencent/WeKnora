@@ -1,7 +1,20 @@
 # Model context boundary
 
 `modelcontext.Registry` is the only application-facing boundary for values
-that are shortened before an LLM call and restored afterwards.
+that are shortened before an LLM call and restored afterwards. The whole
+codec lives in this one package:
+
+| File | Role |
+| --- | --- |
+| `registry.go` | `Registry` facade — the only type request lifecycles use |
+| `handle_table.go` | `handleTable[M]`, the generic bidirectional primitive behind every handle space |
+| `sources.go` | source handles (`cN`/`dN`/`bN`/`wN`) and the tool-argument codec |
+| `citations.go` | protocol prompts, `<ref/>` → `<kb/>`/`<web/>` expansion, citation stream expander |
+| `model_output.go` | compact source-centric renderings of tool results |
+| `resources.go` | durable-resource handles (`res://NNNN`) |
+| `stream.go` | `streamHold` suffix-hold primitive and every streaming decoder |
+| `tool_policy.go` | the single policy layer: per-tool key contracts + `sourceKeySpaces` dispatch |
+| `handles.go` | exported `HandleTable` for invocation-local spaces (`iN`, `ref-N`, `c000`) |
 
 ## Identity rules
 
@@ -24,7 +37,7 @@ that are shortened before an LLM call and restored afterwards.
 
 Unknown handle-shaped values in declared tool fields are rejected before tool
 execution. The same per-tool policy is applied when historical assistant tool
-calls and tool results are replayed, so aliases neither disappear nor drift to
+calls and tool results are replayed, so handles neither disappear nor drift to
 new numbers across Agent rounds.
 
 The registry owns codec ordering. Resource references are encoded before
@@ -45,7 +58,10 @@ mapping.
 ## Built-in tool policies
 
 Canonical ID-bearing arguments for knowledge, graph, data, web, and Wiki tools
-are decoded centrally through a tool-name plus JSON-field allowlist.
+are decoded centrally through a tool-name plus JSON-field allowlist. The
+`sourceKeySpaces` table is the single source of truth for which keys are
+ID-bearing and which handle space they register into; per-tool `sourceIDKeys`
+contracts gate which of those keys each tool may use.
 `database_query.sql` and `data_analysis.sql` have an explicit policy because
 source handles can be embedded inside quoted SQL values; unquoted SQL aliases
 and arbitrary prose are never rewritten. Wiki issue IDs use the same lifecycle

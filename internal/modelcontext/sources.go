@@ -81,7 +81,7 @@ func (r *sourceRegistry) RegisterChunk(ref ChunkReference) string {
 	if ref.ChunkID == "" {
 		return ""
 	}
-	if shortSourceAliasRE.MatchString(ref.ChunkID) {
+	if shortSourceHandleRE.MatchString(ref.ChunkID) {
 		return knownHandle(r.chunks, ref.ChunkID)
 	}
 	return r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
@@ -110,7 +110,7 @@ func (r *sourceRegistry) RegisterDocument(id string) string {
 	if r == nil || id == "" {
 		return ""
 	}
-	if shortSourceAliasRE.MatchString(id) {
+	if shortSourceHandleRE.MatchString(id) {
 		return knownHandle(r.docs, id)
 	}
 	return r.docs.register(id, id, struct{}{}, nil)
@@ -121,7 +121,7 @@ func (r *sourceRegistry) RegisterKnowledgeBase(id string) string {
 	if r == nil || id == "" {
 		return ""
 	}
-	if shortSourceAliasRE.MatchString(id) {
+	if shortSourceHandleRE.MatchString(id) {
 		return knownHandle(r.kbs, id)
 	}
 	return r.kbs.register(id, id, struct{}{}, nil)
@@ -132,7 +132,7 @@ func (r *sourceRegistry) RegisterWeb(rawURL, title string) string {
 	if r == nil || rawURL == "" {
 		return ""
 	}
-	if shortSourceAliasRE.MatchString(rawURL) {
+	if shortSourceHandleRE.MatchString(rawURL) {
 		return knownHandle(r.webs, rawURL)
 	}
 	// Dedup on the canonical (fragment-stripped) URL while decoding back to
@@ -180,7 +180,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (r *sourceRegistry) ChunkAlias(id string) string {
+func (r *sourceRegistry) ChunkHandle(id string) string {
 	handle, _ := r.chunks.handleForKey(id)
 	return handle
 }
@@ -191,7 +191,7 @@ func (r *sourceRegistry) ChunkAlias(id string) string {
 // package-internal replay paths that predate per-tool contracts.
 type toolArgumentPolicy func(toolName, key string) bool
 
-// DecodeToolCallsWithPolicy restores aliases only for fields explicitly owned
+// DecodeToolCallsWithPolicy restores handles only for fields explicitly owned
 // by the named tool. This prevents dynamic tools with coincidentally named
 // fields from inheriting built-in source semantics.
 func (r *sourceRegistry) DecodeToolCallsWithPolicy(toolCalls []types.LLMToolCall, policy toolArgumentPolicy) {
@@ -244,7 +244,7 @@ func (r *sourceRegistry) collectUnresolvedToolHandles(
 			return
 		}
 		handle := strings.TrimSpace(typed)
-		if shortSourceAliasRE.MatchString(handle) && (r == nil || r.realForAlias(handle) == "") {
+		if shortSourceHandleRE.MatchString(handle) && (r == nil || r.durableForHandle(handle) == "") {
 			seen[handle] = struct{}{}
 		}
 	case []interface{}:
@@ -316,9 +316,9 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	return out
 }
 
-var shortSourceAliasRE = regexp.MustCompile(`(?i)^[cdbw][1-9][0-9]*$`)
+var shortSourceHandleRE = regexp.MustCompile(`(?i)^[cdbw][1-9][0-9]*$`)
 
-var shortSourceAliasInTextRE = regexp.MustCompile(`(?i)\b[cdbw][1-9][0-9]*\b`)
+var shortSourceHandleInTextRE = regexp.MustCompile(`(?i)\b[cdbw][1-9][0-9]*\b`)
 
 // DecodeKnownText restores registered source handles embedded in a structured
 // expression such as a built-in SQL tool argument. It must not be used for
@@ -327,8 +327,8 @@ func (r *sourceRegistry) DecodeKnownText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
-	return shortSourceAliasInTextRE.ReplaceAllStringFunc(text, func(handle string) string {
-		if real := r.realForAlias(handle); real != "" {
+	return shortSourceHandleInTextRE.ReplaceAllStringFunc(text, func(handle string) string {
+		if real := r.durableForHandle(handle); real != "" {
 			return real
 		}
 		return handle
@@ -338,14 +338,14 @@ func (r *sourceRegistry) DecodeKnownText(text string) string {
 // DecodeKnownQuotedText restores source handles only inside single-quoted,
 // double-quoted, or backtick-quoted segments. It is intended for structured
 // expressions such as SQL, where replacing an unquoted token could corrupt a
-// legitimate table/column alias that happens to look like d1 or b2.
+// legitimate table/column handle that happens to look like d1 or b2.
 func (r *sourceRegistry) DecodeKnownQuotedText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
 	return rewriteQuotedText(text, func(segment string) string {
-		return shortSourceAliasInTextRE.ReplaceAllStringFunc(segment, func(handle string) string {
-			if real := r.realForAlias(handle); real != "" {
+		return shortSourceHandleInTextRE.ReplaceAllStringFunc(segment, func(handle string) string {
+			if real := r.durableForHandle(handle); real != "" {
 				return real
 			}
 			return handle
@@ -353,7 +353,7 @@ func (r *sourceRegistry) DecodeKnownQuotedText(text string) string {
 	})
 }
 
-// UnresolvedQuotedTextHandles reports alias-shaped values inside quoted
+// UnresolvedQuotedTextHandles reports handle-shaped values inside quoted
 // structured-text segments that do not exist in this request registry.
 func (r *sourceRegistry) UnresolvedQuotedTextHandles(text string) []string {
 	if text == "" {
@@ -361,8 +361,8 @@ func (r *sourceRegistry) UnresolvedQuotedTextHandles(text string) []string {
 	}
 	seen := make(map[string]struct{})
 	rewriteQuotedText(text, func(segment string) string {
-		for _, handle := range shortSourceAliasInTextRE.FindAllString(segment, -1) {
-			if r == nil || r.realForAlias(handle) == "" {
+		for _, handle := range shortSourceHandleInTextRE.FindAllString(segment, -1) {
+			if r == nil || r.durableForHandle(handle) == "" {
 				seen[handle] = struct{}{}
 			}
 		}
@@ -441,12 +441,12 @@ func (r *sourceRegistry) registerToolArgumentValue(key string, value interface{}
 
 // registerSourceIDByKey is the single key→source-space dispatch used for tool
 // arguments, structured tool results, and database rows. It is driven by
-// sourceKeySpaces — the same table that gates alias decode — so the recognized
+// sourceKeySpaces — the same table that gates handle decode — so the recognized
 // key set (and the http/https guard for web references) cannot drift between
 // registration and decoding.
 func (r *sourceRegistry) registerSourceIDByKey(key, value string) {
 	value = strings.TrimSpace(value)
-	if value == "" || shortSourceAliasRE.MatchString(value) {
+	if value == "" || shortSourceHandleRE.MatchString(value) {
 		return
 	}
 	space, ok := sourceKeySpaces[strings.ToLower(key)]
@@ -498,20 +498,20 @@ func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, al
 		if encode {
 			// Encode matches on exact real identifiers (UUIDs/URLs), which do
 			// not collide with prose, so it stays key-agnostic.
-			if alias := r.aliasForRealValue(typed); alias != "" {
-				return alias
+			if handle := r.handleForDurable(typed); handle != "" {
+				return handle
 			}
 			return typed
 		}
-		// Decode only ID-bearing keys, and only when the value is alias-shaped,
-		// so ordinary strings that coincidentally equal an alias are preserved.
+		// Decode only ID-bearing keys, and only when the value is handle-shaped,
+		// so ordinary strings that coincidentally equal an handle are preserved.
 		if _, ok := sourceKeySpaces[strings.ToLower(key)]; !ok {
 			return typed
 		}
-		if !shortSourceAliasRE.MatchString(strings.TrimSpace(typed)) {
+		if !shortSourceHandleRE.MatchString(strings.TrimSpace(typed)) {
 			return typed
 		}
-		if real := r.realForAlias(typed); real != "" {
+		if real := r.durableForHandle(typed); real != "" {
 			return real
 		}
 		return typed
@@ -527,7 +527,7 @@ func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, al
 	return value
 }
 
-func (r *sourceRegistry) aliasForRealValue(real string) string {
+func (r *sourceRegistry) handleForDurable(real string) string {
 	if handle, ok := r.chunks.handleForKey(real); ok {
 		return handle
 	}
@@ -543,18 +543,18 @@ func (r *sourceRegistry) aliasForRealValue(real string) string {
 	return ""
 }
 
-func (r *sourceRegistry) realForAlias(alias string) string {
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	if real, _, ok := r.chunks.resolve(alias); ok {
+func (r *sourceRegistry) durableForHandle(handle string) string {
+	handle = strings.ToLower(strings.TrimSpace(handle))
+	if real, _, ok := r.chunks.resolve(handle); ok {
 		return real
 	}
-	if real, _, ok := r.docs.resolve(alias); ok {
+	if real, _, ok := r.docs.resolve(handle); ok {
 		return real
 	}
-	if real, _, ok := r.kbs.resolve(alias); ok {
+	if real, _, ok := r.kbs.resolve(handle); ok {
 		return real
 	}
-	if real, _, ok := r.webs.resolve(alias); ok {
+	if real, _, ok := r.webs.resolve(handle); ok {
 		return real
 	}
 	return ""
