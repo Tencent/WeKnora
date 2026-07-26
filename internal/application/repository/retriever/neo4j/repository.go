@@ -2,19 +2,29 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
+const graphEntityLabel = "GRAPH_ENTITY"
+
 // Neo4jRepository is a repository for Neo4j
 type Neo4jRepository struct {
-	driver     neo4j.Driver
-	nodePrefix string
+	driver                neo4j.Driver
+	nodePrefix            string
+	writeTransaction      func(context.Context, neo4j.ManagedTransactionWork) error
+	graphRecoveryRequired func(context.Context, types.NameSpace) (bool, error)
+
+	ownershipSchemaMu    sync.Mutex
+	ownershipSchemaReady bool
 }
 
 // NewNeo4jRepository creates a new Neo4j repository
@@ -42,6 +52,11 @@ func (n *Neo4jRepository) Label(namespace types.NameSpace) string {
 	return strings.Join(labels, ":")
 }
 
+func (n *Neo4jRepository) ownershipLabels(namespace types.NameSpace) []string {
+	labels := append([]string(nil), n.Labels(namespace)...)
+	return append(labels, graphEntityLabel)
+}
+
 // AddGraph adds a graph to the Neo4j repository
 func (n *Neo4jRepository) AddGraph(ctx context.Context, namespace types.NameSpace, graphs []*types.GraphData) error {
 	if n.driver == nil {
@@ -66,7 +81,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		node_import_query := `
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
-			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
+			SET node.chunks = apoc.coll.union(coalesce(node.chunks, []), row.chunks)
 			RETURN distinct 'done' AS result
 		`
 		nodeData := []map[string]interface{}{}
@@ -76,7 +91,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"knowledge_id": namespace.Knowledge,
 				"props":        map[string][]string{"attributes": node.Attributes},
 				"chunks":       node.Chunks,
-				"labels":       n.Labels(namespace),
+				"labels":       n.ownershipLabels(namespace),
 			})
 		}
 		if _, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData}); err != nil {
@@ -88,7 +103,8 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
 			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
-			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
+			CALL apoc.merge.relationship(source, row.type, {}, {}, target) YIELD rel
+			SET rel.chunks = apoc.coll.union(coalesce(rel.chunks, []), row.chunks)
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
@@ -98,8 +114,9 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target":        rel.Node2,
 				"knowledge_id":  namespace.Knowledge,
 				"type":          rel.Type,
-				"source_labels": n.Labels(namespace),
-				"target_labels": n.Labels(namespace),
+				"chunks":        rel.Chunks,
+				"source_labels": n.ownershipLabels(namespace),
+				"target_labels": n.ownershipLabels(namespace),
 			})
 		}
 		if _, err := tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData}); err != nil {
@@ -116,48 +133,135 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 
 // DelGraph deletes a graph from the Neo4j repository
 func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameSpace) error {
-	if n.driver == nil {
+	if n.driver == nil && n.writeTransaction == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil
 	}
-	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	if err := n.ensureGraphOwnershipSchema(ctx); err != nil {
+		return err
+	}
+	for _, namespace := range namespaces {
+		if err := n.validateGraphChunkOperation(namespace, nil); err != nil {
+			return err
+		}
+		deletionToken := uuid.NewString()
+		if err := n.beginGraphNamespaceDeletion(ctx, namespace, deletionToken); err != nil {
+			return err
+		}
+		deleteErr := n.deleteGraphNamespaceData(ctx, namespace, deletionToken)
+		finishErr := n.finishGraphNamespaceDeletion(ctx, namespace, deletionToken, deleteErr == nil)
+		if deleteErr != nil || finishErr != nil {
+			return errors.Join(deleteErr, finishErr)
+		}
+	}
+	return nil
+}
 
-	result, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		for _, namespace := range namespaces {
-			labelExpr := n.Label(namespace)
+func (n *Neo4jRepository) deleteGraphNamespaceData(
+	ctx context.Context,
+	namespace types.NameSpace,
+	deletionToken string,
+) error {
+	labelExpr := n.Label(namespace)
+	return n.runGraphWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		deleteRelsQuery := `
+			CALL apoc.periodic.iterate(
+				"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id})
+				 RETURN DISTINCT r",
+				"MATCH (state:GRAPH_OWNERSHIP_STATE {kg: $knowledge_id})
+				 CALL apoc.util.validate(
+					coalesce(state.deletion_token, '') <> $deletion_token,
+					'graph namespace deletion superseded',
+					[]
+				 )
+				 DELETE r",
+				{
+					batchSize: 1000,
+					parallel: false,
+					retries: 3,
+					params: {
+						knowledge_id: $knowledge_id,
+						deletion_token: $deletion_token
+					}
+				}
+			) YIELD total, failedOperations, failedBatches, errorMessages, wasTerminated
+			MATCH (state:GRAPH_OWNERSHIP_STATE {kg: $knowledge_id})
+			CALL apoc.util.validate(
+				coalesce(state.deletion_token, '') <> $deletion_token,
+				'graph namespace deletion superseded',
+				[]
+			)
+			WITH total, failedOperations, failedBatches, errorMessages, wasTerminated
+			CALL apoc.util.validate(
+				failedOperations > 0 OR failedBatches > 0 OR coalesce(wasTerminated, false),
+				'graph relationship batch deletion failed',
+				[]
+			)
+			RETURN total
+		`
+		if err := runConsumedGraphQuery(ctx, tx, deleteRelsQuery, map[string]any{
+			"knowledge_id":   namespace.Knowledge,
+			"deletion_token": deletionToken,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to delete relationships: %w", err)
+		}
 
-			deleteRelsQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) RETURN r",
-					"DELETE r",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
-			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete relationships: %v", err)
-			}
-
-			deleteNodesQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
-					"DELETE n",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
-			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete nodes: %v", err)
-			}
+		deleteNodesQuery := `
+			CALL apoc.periodic.iterate(
+				"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
+				"MATCH (state:GRAPH_OWNERSHIP_STATE {kg: $knowledge_id})
+				 CALL apoc.util.validate(
+					coalesce(state.deletion_token, '') <> $deletion_token,
+					'graph namespace deletion superseded',
+					[]
+				 )
+				 DETACH DELETE n",
+				{
+					batchSize: 1000,
+					parallel: false,
+					retries: 3,
+					params: {
+						knowledge_id: $knowledge_id,
+						deletion_token: $deletion_token
+					}
+				}
+			) YIELD total, failedOperations, failedBatches, errorMessages, wasTerminated
+			MATCH (state:GRAPH_OWNERSHIP_STATE {kg: $knowledge_id})
+			CALL apoc.util.validate(
+				coalesce(state.deletion_token, '') <> $deletion_token,
+				'graph namespace deletion superseded',
+				[]
+			)
+			WITH total, failedOperations, failedBatches, errorMessages, wasTerminated
+			CALL apoc.util.validate(
+				failedOperations > 0 OR failedBatches > 0 OR coalesce(wasTerminated, false),
+				'graph node batch deletion failed',
+				[]
+			)
+			RETURN total
+		`
+		if err := runConsumedGraphQuery(ctx, tx, deleteNodesQuery, map[string]any{
+			"knowledge_id":   namespace.Knowledge,
+			"deletion_token": deletionToken,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to delete nodes: %w", err)
 		}
 		return nil, nil
 	})
-	if err != nil {
+}
+
+func runConsumedGraphQuery(
+	ctx context.Context,
+	tx neo4j.ManagedTransaction,
+	query string,
+	params map[string]any,
+) error {
+	result, err := tx.Run(ctx, query, params)
+	if err != nil || result == nil {
 		return err
 	}
-	logger.Infof(ctx, "delete graph result: %v", result)
-	return nil
+	_, err = result.Consume(ctx)
+	return err
 }
 
 // SearchNode searches for nodes in the Neo4j repository

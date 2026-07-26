@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
-	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -164,6 +163,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	artifactStore     interfaces.ProcessingArtifactStore
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -178,6 +178,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	artifactStore interfaces.ProcessingArtifactStore,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -187,6 +188,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		artifactStore:     artifactStore,
 		spanTracker:       spanTracker,
 	}
 }
@@ -329,12 +331,42 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	artifactStore := s.artifactStore
+	modelRevision := ""
+	if artifactStore != nil {
+		model, modelErr := s.modelService.GetModelByID(ctx, p.ModelID)
+		if modelErr != nil {
+			logger.Warnf(ctx, "graph artifact cache disabled for model %s: failed to load model revision: %v",
+				p.ModelID, modelErr)
+			artifactStore = nil
+		} else if modelRevision, modelErr = chatArtifactModelRevision(model); modelErr != nil {
+			logger.Warnf(ctx, "graph artifact cache disabled for model %s: %v", p.ModelID, modelErr)
+			artifactStore = nil
+		}
+	}
+	graph, cacheHit, providerCalled, err := extractGraphArtifact(
+		ctx,
+		artifactStore,
+		p.TenantID,
+		chunk.ID,
+		chatModel,
+		modelRevision,
+		template,
+		chunk.Content,
+	)
 	if err != nil {
 		handleErr = err
 		return err
 	}
+	graphOut["cache_hit"] = cacheHit
+	if artifactStore == nil {
+		graphOut["cache_status"] = "bypass"
+	} else if cacheHit {
+		graphOut["cache_status"] = "hit"
+	} else {
+		graphOut["cache_status"] = "miss"
+	}
+	graphOut["provider_called"] = providerCalled
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
@@ -343,12 +375,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	for _, node := range graph.Node {
-		node.Chunks = []string{chunk.ID}
-	}
-	if err = s.graphEngine.AddGraph(ctx,
+	if err = s.graphEngine.ReplaceGraphChunk(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
-		[]*types.GraphData{graph},
+		chunk.ID,
+		p.Attempt,
+		graph,
 	); err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err

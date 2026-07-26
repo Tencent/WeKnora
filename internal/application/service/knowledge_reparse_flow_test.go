@@ -8,9 +8,146 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type reparseGraphRepository struct {
+	interfaces.RetrieveGraphRepository
+	fullDeletes    int
+	preciseDeletes [][]string
+	fencedAttempts []int
+	calls          []string
+	fenceErr       error
+	recoveryErr    error
+}
+
+func (r *reparseGraphRepository) FenceGraphAttempt(
+	_ context.Context,
+	_ types.NameSpace,
+	attempt int,
+) error {
+	r.calls = append(r.calls, "fence")
+	r.fencedAttempts = append(r.fencedAttempts, attempt)
+	return r.fenceErr
+}
+
+func (r *reparseGraphRepository) RecoverGraphNamespace(
+	_ context.Context,
+	_ types.NameSpace,
+) error {
+	r.calls = append(r.calls, "recover")
+	return r.recoveryErr
+}
+
+func (r *reparseGraphRepository) DelGraph(context.Context, []types.NameSpace) error {
+	r.calls = append(r.calls, "full-delete")
+	r.fullDeletes++
+	return nil
+}
+
+func (r *reparseGraphRepository) DelGraphChunks(
+	_ context.Context,
+	_ types.NameSpace,
+	ids []string,
+) error {
+	r.calls = append(r.calls, "precise-delete")
+	r.preciseDeletes = append(r.preciseDeletes, append([]string(nil), ids...))
+	return nil
+}
+
+func TestCleanupReparseGraphSelectsPreciseOrFullRetraction(t *testing.T) {
+	namespace := types.NameSpace{KnowledgeBase: "kb-1", Knowledge: "knowledge-1"}
+	t.Run("enabled with stale chunks", func(t *testing.T) {
+		repository := &reparseGraphRepository{}
+		require.NoError(t, cleanupReparseGraph(
+			context.Background(), repository, namespace, 7, true, []string{"chunk-1"},
+		))
+		assert.Equal(t, []int{7}, repository.fencedAttempts)
+		assert.Equal(t, []string{"fence", "recover", "precise-delete"}, repository.calls)
+		assert.Zero(t, repository.fullDeletes)
+		assert.Equal(t, [][]string{{"chunk-1"}}, repository.preciseDeletes)
+	})
+	t.Run("enabled without stale chunks", func(t *testing.T) {
+		repository := &reparseGraphRepository{}
+		require.NoError(t, cleanupReparseGraph(
+			context.Background(), repository, namespace, 8, true, nil,
+		))
+		assert.Equal(t, []int{8}, repository.fencedAttempts)
+		assert.Equal(t, []string{"fence", "recover"}, repository.calls)
+		assert.Zero(t, repository.fullDeletes)
+		assert.Empty(t, repository.preciseDeletes)
+	})
+	t.Run("disabled", func(t *testing.T) {
+		repository := &reparseGraphRepository{}
+		require.NoError(t, cleanupReparseGraph(
+			context.Background(), repository, namespace, 9, false, nil,
+		))
+		assert.Equal(t, []int{9}, repository.fencedAttempts)
+		assert.Equal(t, []string{"fence", "full-delete"}, repository.calls)
+		assert.Equal(t, 1, repository.fullDeletes)
+		assert.Empty(t, repository.preciseDeletes)
+	})
+	t.Run("fence failure prevents cleanup", func(t *testing.T) {
+		want := errors.New("fence unavailable")
+		repository := &reparseGraphRepository{fenceErr: want}
+
+		err := cleanupReparseGraph(
+			context.Background(), repository, namespace, 10, true, []string{"chunk-1"},
+		)
+
+		require.ErrorIs(t, err, want)
+		assert.Equal(t, []string{"fence"}, repository.calls)
+		assert.Zero(t, repository.fullDeletes)
+		assert.Empty(t, repository.preciseDeletes)
+	})
+	t.Run("recovery failure prevents cleanup", func(t *testing.T) {
+		want := errors.New("recovery failed")
+		repository := &reparseGraphRepository{recoveryErr: want}
+
+		err := cleanupReparseGraph(
+			context.Background(), repository, namespace, 11, true, []string{"chunk-1"},
+		)
+
+		require.ErrorIs(t, err, want)
+		assert.Equal(t, []string{"fence", "recover"}, repository.calls)
+		assert.Zero(t, repository.fullDeletes)
+		assert.Empty(t, repository.preciseDeletes)
+	})
+}
+
+func TestEffectiveKnowledgeGraphEnabledUsesProcessOverrides(t *testing.T) {
+	t.Run("override disables enabled KB graph", func(t *testing.T) {
+		disabled := false
+		knowledge := &types.Knowledge{}
+		require.NoError(t, knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{
+			GraphEnabled: &disabled,
+		}))
+		kb := &types.KnowledgeBase{
+			IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+			ExtractConfig:    &types.ExtractConfig{Enabled: true},
+		}
+
+		assert.False(t, effectiveKnowledgeGraphEnabled(kb, knowledge))
+	})
+
+	t.Run("override enables disabled KB graph", func(t *testing.T) {
+		enabled := true
+		knowledge := &types.Knowledge{}
+		require.NoError(t, knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{
+			GraphEnabled: &enabled,
+			ExtractConfig: &types.ExtractConfig{
+				Enabled: true,
+			},
+		}))
+		kb := &types.KnowledgeBase{
+			ExtractConfig: &types.ExtractConfig{},
+		}
+
+		assert.True(t, effectiveKnowledgeGraphEnabled(kb, knowledge))
+	})
+}
 
 func TestExecuteChunkReconciliation(t *testing.T) {
 	t.Run("unchanged indexed chunk skips indexing and reports reuse", func(t *testing.T) {
@@ -102,8 +239,8 @@ func TestExecuteChunkReconciliation(t *testing.T) {
 			Create:          []*types.Chunk{{ID: "created"}},
 			Index:           []*types.Chunk{{ID: "created"}},
 			Update:          []*types.Chunk{{ID: "existing"}},
-			Delete:          []*types.Chunk{{ID: "stale"}},
-			DeleteGenerated: []*types.Chunk{{ID: "generated"}},
+			Delete:          []*types.Chunk{{ID: "stale", ChunkType: types.ChunkTypeText}},
+			DeleteGenerated: []*types.Chunk{{ID: "generated", ChunkType: types.ChunkTypeSummary}},
 		}
 		var calls []string
 
@@ -129,6 +266,11 @@ func TestExecuteChunkReconciliation(t *testing.T) {
 				calls = append(calls, "delete-images")
 				return nil
 			},
+			DeleteGraph: func(_ context.Context, ids []string) error {
+				calls = append(calls, "delete-graph")
+				assert.Equal(t, []string{"stale"}, ids)
+				return nil
+			},
 			HardDelete: func(_ context.Context, ids []string) error {
 				calls = append(calls, "hard-delete")
 				assert.Equal(t, []string{"stale", "generated"}, ids)
@@ -138,8 +280,34 @@ func TestExecuteChunkReconciliation(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, []string{
-			"create", "index", "update", "delete-vector", "delete-images", "hard-delete",
+			"create", "index", "update", "delete-vector", "delete-images", "delete-graph", "hard-delete",
 		}, calls)
+	})
+
+	t.Run("graph deletion failure preserves stale rows for retry", func(t *testing.T) {
+		graphErr := errors.New("graph unavailable")
+		plan := &chunkReusePlan{Delete: []*types.Chunk{
+			{ID: "stale-text", ChunkType: types.ChunkTypeText},
+			{ID: "stale-parent", ChunkType: types.ChunkTypeParentText},
+		}}
+		hardDeleteCalls := 0
+		err := executeChunkReconciliation(context.Background(), plan, chunkReconcileOps{
+			Create:       func(context.Context, []*types.Chunk) error { return nil },
+			Index:        func(context.Context, []*types.Chunk) error { return nil },
+			Update:       func(context.Context, []*types.Chunk) error { return nil },
+			DeleteVector: func(context.Context, []string) error { return nil },
+			DeleteGraph: func(_ context.Context, ids []string) error {
+				assert.Equal(t, []string{"stale-text"}, ids)
+				return graphErr
+			},
+			HardDelete: func(context.Context, []string) error {
+				hardDeleteCalls++
+				return nil
+			},
+		})
+
+		require.ErrorIs(t, err, graphErr)
+		assert.Zero(t, hardDeleteCalls)
 	})
 
 	t.Run("image deletion failure preserves rows for retry", func(t *testing.T) {

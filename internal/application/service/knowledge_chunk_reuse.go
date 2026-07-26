@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 type chunkReusePlan struct {
@@ -23,6 +24,7 @@ type chunkReconcileOps struct {
 	Update       func(context.Context, []*types.Chunk) error
 	DeleteVector func(context.Context, []string) error
 	DeleteImages func(context.Context) error
+	DeleteGraph  func(context.Context, []string) error
 	HardDelete   func(context.Context, []string) error
 }
 
@@ -52,6 +54,11 @@ func executeChunkReconciliation(
 	}
 	if ops.DeleteImages != nil {
 		if err := ops.DeleteImages(ctx); err != nil {
+			return err
+		}
+	}
+	if ops.DeleteGraph != nil {
+		if err := ops.DeleteGraph(ctx, graphContributorChunkIDs(stale)); err != nil {
 			return err
 		}
 	}
@@ -251,6 +258,51 @@ func chunkIDs(chunks []*types.Chunk) []string {
 		}
 	}
 	return ids
+}
+
+func graphContributorChunkIDs(chunks []*types.Chunk) []string {
+	ids := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		switch chunk.ChunkType {
+		case types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
+			ids = append(ids, chunk.ID)
+		}
+	}
+	return ids
+}
+
+func cleanupReparseGraph(
+	ctx context.Context,
+	repository interfaces.RetrieveGraphRepository,
+	namespace types.NameSpace,
+	attempt int,
+	graphEnabled bool,
+	staleChunkIDs []string,
+) error {
+	if err := repository.FenceGraphAttempt(ctx, namespace, attempt); err != nil {
+		return err
+	}
+	if !graphEnabled {
+		return repository.DelGraph(ctx, []types.NameSpace{namespace})
+	}
+	if err := repository.RecoverGraphNamespace(ctx, namespace); err != nil {
+		return err
+	}
+	if len(staleChunkIDs) == 0 {
+		return nil
+	}
+	return repository.DelGraphChunks(ctx, namespace, staleChunkIDs)
+}
+
+func effectiveKnowledgeGraphEnabled(kb *types.KnowledgeBase, knowledge *types.Knowledge) bool {
+	var overrides *types.KnowledgeProcessOverrides
+	if knowledge != nil {
+		overrides, _ = knowledge.ProcessOverrides()
+	}
+	return ResolveProcessConfig(kb, overrides).GraphEnabled
 }
 
 func linkAdjacentChunks(chunks []*types.Chunk) {

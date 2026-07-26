@@ -573,6 +573,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					DeleteImages: func(ctx context.Context) error {
 						return deleteExtractedImagesStrict(ctx, s.resolveFileService(ctx, kb), staleImageURLs)
 					},
+					DeleteGraph: func(ctx context.Context, ids []string) error {
+						if err := checkReconciliationAbort(ctx, "graph cleanup"); err != nil {
+							return err
+						}
+						namespace := types.NameSpace{
+							KnowledgeBase: knowledge.KnowledgeBaseID,
+							Knowledge:     knowledge.ID,
+						}
+						return cleanupReparseGraph(
+							ctx,
+							s.graphEngine,
+							namespace,
+							attemptFromCtx(ctx),
+							effectiveKnowledgeGraphEnabled(kb, knowledge),
+							ids,
+						)
+					},
 					HardDelete: func(ctx context.Context, ids []string) error {
 						if len(ids) == 0 {
 							return nil
@@ -596,14 +613,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					); err != nil {
 						return err
 					}
-				}
-
-				if err := checkReconciliationAbort(reconcileCtx, "graph cleanup"); err != nil {
-					return err
-				}
-				namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-				if err := s.graphEngine.DelGraph(reconcileCtx, []types.NameSpace{namespace}); err != nil {
-					return err
 				}
 
 				knowledge.EmbeddingModelID = kb.EmbeddingModelID
