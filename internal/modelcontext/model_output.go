@@ -92,21 +92,21 @@ func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, 
 	count := 0
 	for _, row := range rows {
 		knowledgeID := stringValue(row, "knowledge_id")
-		docAlias := r.RegisterDocument(knowledgeID)
+		docHandle := r.RegisterDocument(knowledgeID)
 		if boolValue(row, "is_faq") {
 			chunkID := stringValue(row, "faq_id")
 			if chunkID == "" {
 				continue
 			}
 			title := firstNonEmpty(stringValue(row, "faq_question"), stringValue(row, "title"))
-			chunkAlias := r.RegisterChunk(ChunkReference{
+			chunkHandle := r.RegisterChunk(ChunkReference{
 				ChunkID:       chunkID,
 				KnowledgeID:   knowledgeID,
 				DocumentTitle: title,
 				ChunkType:     "faq",
 			})
-			fmt.Fprintf(&b, "  <document id=\"%s\" type=\"faq\">\n", escapeAttr(docAlias))
-			fmt.Fprintf(&b, "    <chunk id=\"%s\" type=\"faq\">\n", escapeAttr(chunkAlias))
+			fmt.Fprintf(&b, "  <document id=\"%s\" type=\"faq\">\n", escapeAttr(docHandle))
+			fmt.Fprintf(&b, "    <chunk id=\"%s\" type=\"faq\">\n", escapeAttr(chunkHandle))
 			if title != "" {
 				fmt.Fprintf(&b, "      <question>%s</question>\n", escapeText(title))
 			}
@@ -118,10 +118,10 @@ func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, 
 			continue
 		}
 
-		if docAlias == "" {
+		if docHandle == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "  <document id=\"%s\"", escapeAttr(docAlias))
+		fmt.Fprintf(&b, "  <document id=\"%s\"", escapeAttr(docHandle))
 		if title := stringValue(row, "title"); title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}
@@ -146,9 +146,9 @@ func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, 
 }
 
 type modelChunk struct {
-	alias      string
-	docAlias   string
-	kbAlias    string
+	handle     string
+	docHandle  string
+	kbHandle   string
 	title      string
 	chunkType  string
 	index      int
@@ -182,7 +182,7 @@ func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]int
 		if chunkIndex == 0 {
 			chunkIndex = intValue(row, "index")
 		}
-		chunkAlias := r.RegisterChunk(ChunkReference{
+		chunkHandle := r.RegisterChunk(ChunkReference{
 			ChunkID:         chunkID,
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: kbID,
@@ -191,9 +191,9 @@ func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]int
 			ChunkType:       chunkType,
 		})
 		chunks = append(chunks, modelChunk{
-			alias:      chunkAlias,
-			docAlias:   r.RegisterDocument(knowledgeID),
-			kbAlias:    r.RegisterKnowledgeBase(kbID),
+			handle:     chunkHandle,
+			docHandle:  r.RegisterDocument(knowledgeID),
+			kbHandle:   r.RegisterKnowledgeBase(kbID),
 			title:      title,
 			chunkType:  chunkType,
 			index:      chunkIndex,
@@ -252,22 +252,22 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 
 func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	type docGroup struct {
-		alias   string
-		kbAlias string
-		title   string
-		chunks  []modelChunk
-		order   int
+		handle   string
+		kbHandle string
+		title    string
+		chunks   []modelChunk
+		order    int
 	}
 	groupsByKey := make(map[string]*docGroup)
 	var groups []*docGroup
 	for _, chunk := range chunks {
-		key := chunk.docAlias
+		key := chunk.docHandle
 		if key == "" {
-			key = "chunk:" + chunk.alias
+			key = "chunk:" + chunk.handle
 		}
 		group := groupsByKey[key]
 		if group == nil {
-			group = &docGroup{alias: chunk.docAlias, kbAlias: chunk.kbAlias, title: chunk.title, order: chunk.inputOrder}
+			group = &docGroup{handle: chunk.docHandle, kbHandle: chunk.kbHandle, title: chunk.title, order: chunk.inputOrder}
 			groupsByKey[key] = group
 			groups = append(groups, group)
 		}
@@ -279,18 +279,18 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	fmt.Fprintf(&b, "<retrieval type=\"knowledge\" mode=\"%s\">\n", escapeAttr(mode))
 	for _, group := range groups {
 		b.WriteString("  <document")
-		if group.alias != "" {
-			fmt.Fprintf(&b, " id=\"%s\"", escapeAttr(group.alias))
+		if group.handle != "" {
+			fmt.Fprintf(&b, " id=\"%s\"", escapeAttr(group.handle))
 		}
-		if group.kbAlias != "" {
-			fmt.Fprintf(&b, " kb=\"%s\"", escapeAttr(group.kbAlias))
+		if group.kbHandle != "" {
+			fmt.Fprintf(&b, " kb=\"%s\"", escapeAttr(group.kbHandle))
 		}
 		if group.title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(group.title))
 		}
 		b.WriteString(">\n")
 		for _, chunk := range group.chunks {
-			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.alias, chunk.index, chunk.view)
+			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.handle, chunk.index, chunk.view)
 			if chunk.chunkType != "" {
 				fmt.Fprintf(&b, " type=\"%s\"", escapeAttr(chunk.chunkType))
 			}
@@ -335,8 +335,8 @@ func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fal
 		if rawURL == "" {
 			continue
 		}
-		alias := r.RegisterWeb(rawURL, stringValue(row, "title"))
-		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", alias, escapeAttr(stringValue(row, "title")))
+		handle := r.RegisterWeb(rawURL, stringValue(row, "title"))
+		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", handle, escapeAttr(stringValue(row, "title")))
 		if snippet := stringValue(row, "snippet"); snippet != "" {
 			fmt.Fprintf(&b, "    <match>%s</match>\n", escapeText(snippet))
 		}
@@ -366,8 +366,8 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 			continue
 		}
 		title := stringValue(row, "title")
-		alias := r.RegisterWeb(rawURL, title)
-		fmt.Fprintf(&b, "  <page id=\"%s\"", alias)
+		handle := r.RegisterWeb(rawURL, title)
+		fmt.Fprintf(&b, "  <page id=\"%s\"", handle)
 		if title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}

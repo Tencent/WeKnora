@@ -31,7 +31,7 @@ func TestRegistryAliasesWikiSummarySlug(t *testing.T) {
 	require.Equal(t, "see [[res://0001|Foo.md - Summary]]", encoded)
 	require.Equal(t, "see [["+slug+"|Foo.md - Summary]]", r.DecodeText(encoded))
 
-	// The same slug as a tool-call argument value resolves to one alias.
+	// The same slug as a tool-call argument value resolves to one handle.
 	require.Equal(t, "res://0001", r.EncodeText(slug))
 }
 
@@ -76,19 +76,19 @@ func TestOrphanAliasesReportsUnresolvableTokens(t *testing.T) {
 	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
 	require.Equal(t, "res://0001", r.EncodeText(ref))
 
-	// Known alias resolves and leaves no orphan once decoded.
-	require.Nil(t, r.OrphanAliases(r.DecodeText("see res://0001")))
+	// Known handle resolves and leaves no orphan once decoded.
+	require.Nil(t, r.OrphanHandles(r.DecodeText("see res://0001")))
 
 	// A reference the registry never assigned is reported (deduplicated).
-	require.Equal(t, []string{"res://0099"}, r.OrphanAliases("look at res://0099 and res://0099"))
+	require.Equal(t, []string{"res://0099"}, r.OrphanHandles("look at res://0099 and res://0099"))
 }
 
 func TestStripOrphanAliasesRemovesIncompleteNumericHandle(t *testing.T) {
 	r := newResourceRegistry()
-	require.Equal(t, "broken ", r.StripOrphanAliases("broken res://1"))
+	require.Equal(t, "broken ", r.StripOrphanHandles("broken res://1"))
 }
 
 func TestOrphanAliasesNilRegistry(t *testing.T) {
 	var r *resourceRegistry
-	require.Equal(t, []string{"res://0001"}, r.OrphanAliases("res://0001"))
+	require.Equal(t, []string{"res://0001"}, r.OrphanHandles("res://0001"))
 }

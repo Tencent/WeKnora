@@ -106,7 +106,7 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 		r.decodeToolPolicies(&toolCalls[i])
 		resolved := toolCalls[i].Function.Arguments
 		unresolved := append(
-			r.resources.OrphanAliases(resolved),
+			r.resources.OrphanHandles(resolved),
 			r.sources.UnresolvedToolHandlesWithPolicy(
 				toolCalls[i].Function.Name, resolved, sourceArgumentAllowed,
 			)...,
@@ -181,7 +181,7 @@ func (r *Registry) OrphanResourceHandles(decoded string) []string {
 	if r == nil {
 		return nil
 	}
-	return r.resources.OrphanAliases(decoded)
+	return r.resources.OrphanHandles(decoded)
 }
 
 func (r *Registry) RegisterChunk(ref ChunkReference) string {
@@ -223,7 +223,7 @@ func (r *Registry) ChunkHandle(id string) string {
 	if r == nil || r.sources == nil {
 		return ""
 	}
-	return r.sources.ChunkAlias(id)
+	return r.sources.ChunkHandle(id)
 }
 
 // CompactKnownText replaces only previously registered durable source IDs.
@@ -285,7 +285,7 @@ func (r *Registry) DecodeOutputText(text string) string {
 		return text
 	}
 	text = r.resources.DecodeText(text)
-	text = r.resources.StripOrphanAliases(text)
+	text = r.resources.StripOrphanHandles(text)
 	text = r.sources.ExpandText(text)
 	return r.issues.DecodeKnownText(text)
 }

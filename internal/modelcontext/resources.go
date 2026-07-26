@@ -14,10 +14,10 @@ import (
 
 // storedRefRE also recognizes legacy physical references. New writes persist
 // resource:// handles, but old chunks and message history can still contain a
-// provider URL. Giving both forms the same request-local alias makes rollout
+// provider URL. Giving both forms the same request-local handle makes rollout
 // safe without a blocking full-table content rewrite.
 //
-// The final alternative aliases wiki summary-page slugs (summary/<uuid>). They
+// The final alternative handles wiki summary-page slugs (summary/<uuid>). They
 // are not storage handles, but they share the exact failure mode this registry
 // exists to prevent: a high-entropy identifier the model must reproduce
 // verbatim (inside [[slug|display]] links and as wiki-tool slug arguments).
@@ -40,13 +40,13 @@ var storedRefRE = regexp.MustCompile(
 // orphan filter.
 var resourceHandleShapeRE = regexp.MustCompile(`res://\d+`)
 
-// resourceRegistry assigns low-entropy, request-local aliases to stable resource
+// resourceRegistry assigns low-entropy, request-local handles to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
 type resourceRegistry struct {
 	table *handleTable[struct{}]
 }
 
-// newResourceRegistry creates an empty request-local alias registry.
+// newResourceRegistry creates an empty request-local handle registry.
 func newResourceRegistry() *resourceRegistry {
 	// A URL-shaped handle (scheme://digits) keeps the token low-entropy while
 	// looking enough like a link that the model reuses it verbatim inside
@@ -54,7 +54,7 @@ func newResourceRegistry() *resourceRegistry {
 	return &resourceRegistry{table: newHandleTable[struct{}]("res://", 4, 1)}
 }
 
-// EncodeText replaces stored references with compact, stable aliases.
+// EncodeText replaces stored references with compact, stable handles.
 func (r *resourceRegistry) EncodeText(value string) string {
 	if r == nil || value == "" {
 		return value
@@ -64,7 +64,7 @@ func (r *resourceRegistry) EncodeText(value string) string {
 	})
 }
 
-// DecodeText restores every alias currently known to the registry. Aliases are
+// DecodeText restores every handle currently known to the registry. Handles are
 // replaced longest-first with no word-boundary check — this plain substring
 // behavior is load-bearing for handles adjacent to punctuation in Markdown.
 func (r *resourceRegistry) DecodeText(value string) string {
@@ -79,10 +79,10 @@ func (r *resourceRegistry) DecodeText(value string) string {
 	return value
 }
 
-// StripOrphanAliases removes alias-shaped tokens after all known aliases have
+// StripOrphanHandles removes handle-shaped tokens after all known handles have
 // been restored. Use this only on model output; tool arguments must retain
-// unknown aliases long enough for modelcontext to reject the call.
-func (r *resourceRegistry) StripOrphanAliases(value string) string {
+// unknown handles long enough for modelcontext to reject the call.
+func (r *resourceRegistry) StripOrphanHandles(value string) string {
 	if value == "" {
 		return value
 	}
@@ -116,19 +116,19 @@ func (r *resourceRegistry) EncodeMessages(messages []chat.Message) []chat.Messag
 	return encoded
 }
 
-// DecodeToolCalls restores aliases in tool-call JSON arguments.
+// DecodeToolCalls restores handles in tool-call JSON arguments.
 func (r *resourceRegistry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 	for i := range toolCalls {
 		toolCalls[i].Function.Arguments = r.DecodeText(toolCalls[i].Function.Arguments)
 	}
 }
 
-// OrphanAliases returns the distinct alias-shaped tokens in an already-decoded
+// OrphanHandles returns the distinct handle-shaped tokens in an already-decoded
 // string that the registry cannot resolve. A non-empty result means the model
 // emitted a reference no real resource backs (hallucination) or the user text
-// happened to collide with the alias syntax. Callers should log/observe these
+// happened to collide with the handle syntax. Callers should log/observe these
 // rather than surfacing them to end users as broken links.
-func (r *resourceRegistry) OrphanAliases(decoded string) []string {
+func (r *resourceRegistry) OrphanHandles(decoded string) []string {
 	if decoded == "" {
 		return nil
 	}
@@ -147,11 +147,11 @@ func (r *resourceRegistry) OrphanAliases(decoded string) []string {
 	return orphans
 }
 
-func (r *resourceRegistry) aliases() []string {
+func (r *resourceRegistry) handles() []string {
 	pairs := r.table.pairs()
-	aliases := make([]string, 0, len(pairs))
+	handles := make([]string, 0, len(pairs))
 	for _, item := range pairs {
-		aliases = append(aliases, item.handle)
+		handles = append(handles, item.handle)
 	}
-	return aliases
+	return handles
 }

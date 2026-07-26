@@ -347,7 +347,7 @@ func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
 	})
 
 	// An internal handle in a url-labeled field must never enter the web
-	// alias space, where CompactKnownText would rewrite it a second time.
+	// handle space, where CompactKnownText would rewrite it a second time.
 	require.Contains(t, output, "res://0001")
 	require.NotContains(t, output, "w1")
 	require.Contains(t, output, "d1")

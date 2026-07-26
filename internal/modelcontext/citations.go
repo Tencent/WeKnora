@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const sourceAliasProtocolPrompt = `
+const sourceHandleProtocolPrompt = `
 
 ## Source handling protocol (system-owned)
 Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, dN a document, and bN a knowledge base.
@@ -33,9 +33,9 @@ const citationDisabledProtocolPrompt = `
 // model call. Citation formatting stays out of custom and template prompts.
 func sourceProtocolPrompt(citationsEnabled bool) string {
 	if citationsEnabled {
-		return sourceAliasProtocolPrompt + citationEnabledProtocolPrompt
+		return sourceHandleProtocolPrompt + citationEnabledProtocolPrompt
 	}
-	return sourceAliasProtocolPrompt + citationDisabledProtocolPrompt
+	return sourceHandleProtocolPrompt + citationDisabledProtocolPrompt
 }
 
 // ProtocolPrompt returns the source protocol configured for this registry.
@@ -91,20 +91,20 @@ func (r *sourceRegistry) CompactPublicCitations(text string) string {
 		if chunkID == "" {
 			return tag
 		}
-		alias := r.RegisterChunk(ChunkReference{
+		handle := r.RegisterChunk(ChunkReference{
 			ChunkID:         chunkID,
 			KnowledgeBaseID: publicAttr(publicKBAttrRE, tag),
 			DocumentTitle:   publicAttr(docAttrRE, tag),
 		})
-		return `<ref id="` + alias + `"/>`
+		return `<ref id="` + handle + `"/>`
 	})
 	return publicWebTagRE.ReplaceAllStringFunc(text, func(tag string) string {
 		rawURL := publicAttr(urlAttrRE, tag)
 		if rawURL == "" {
 			return tag
 		}
-		alias := r.RegisterWeb(rawURL, publicAttr(titleAttrRE, tag))
-		return `<ref id="` + alias + `"/>`
+		handle := r.RegisterWeb(rawURL, publicAttr(titleAttrRE, tag))
+		return `<ref id="` + handle + `"/>`
 	})
 }
 
@@ -154,13 +154,13 @@ func (r *sourceRegistry) registerLabeledReferences(text string) {
 }
 
 // ExpandText converts the private model protocol into the existing public
-// <kb/> / <web/> contract. Unknown aliases fail closed and disappear.
+// <kb/> / <web/> contract. Unknown handles fail closed and disappear.
 func (r *sourceRegistry) ExpandText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
 	// Public citation tags are output-only. Drop any instance written directly
-	// by the model, then create canonical tags solely from registered aliases.
+	// by the model, then create canonical tags solely from registered handles.
 	text = modelKBTagRE.ReplaceAllString(text, "")
 	text = modelWebTagRE.ReplaceAllString(text, "")
 	if !r.citationsEnabled {
@@ -171,15 +171,15 @@ func (r *sourceRegistry) ExpandText(text string) string {
 		if len(match) != 2 {
 			return ""
 		}
-		alias := strings.ToLower(match[1])
-		if chunkID, chunkRef, ok := r.chunks.resolve(alias); ok {
+		handle := strings.ToLower(match[1])
+		if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
 			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
 			if chunkRef.KnowledgeBaseID != "" {
 				attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
 			}
 			return "<kb " + attrs + " />"
 		}
-		if rawURL, web, ok := r.webs.resolve(alias); ok {
+		if rawURL, web, ok := r.webs.resolve(handle); ok {
 			return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
 		}
 		return ""
