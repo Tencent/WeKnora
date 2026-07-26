@@ -75,11 +75,6 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		return
 	}
 
-	// 对 chunk 内容进行安全清理
-	if chunk.Content != "" {
-		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    chunk,
@@ -144,13 +139,6 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
-	}
-
-	// 对 chunk 内容进行安全清理
-	for _, chunk := range result.Data.([]*types.Chunk) {
-		if chunk.Content != "" {
-			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
