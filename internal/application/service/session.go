@@ -78,20 +78,21 @@ func generateEventID(suffix string) string {
 // (see service.LoadAgentHistory and chat_pipeline history loading) — there is no
 // separate cross-turn cache layer.
 type sessionService struct {
-	cfg                   *config.Config                         // Application configuration
-	sessionRepo           interfaces.SessionRepository           // Repository for session data
-	messageRepo           interfaces.MessageRepository           // Repository for message data
-	knowledgeBaseService  interfaces.KnowledgeBaseService        // Service for knowledge base operations
-	modelService          interfaces.ModelService                // Service for model operations
-	tenantService         interfaces.TenantService               // Service for tenant operations
-	eventManager          *chatpipeline.EventManager             // Event manager for chat pipeline
-	agentService          interfaces.AgentService                // Service for agent operations
-	knowledgeService      interfaces.KnowledgeService            // Service for knowledge operations
-	chunkService          interfaces.ChunkService                // Service for chunk operations
-	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
-	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
-	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
-	suggestionRepo        interfaces.MessageSuggestionRepository
+	cfg                    *config.Config                         // Application configuration
+	sessionRepo            interfaces.SessionRepository           // Repository for session data
+	messageRepo            interfaces.MessageRepository           // Repository for message data
+	knowledgeBaseService   interfaces.KnowledgeBaseService        // Service for knowledge base operations
+	modelService           interfaces.ModelService                // Service for model operations
+	tenantService          interfaces.TenantService               // Service for tenant operations
+	eventManager           *chatpipeline.EventManager             // Event manager for chat pipeline
+	agentService           interfaces.AgentService                // Service for agent operations
+	knowledgeService       interfaces.KnowledgeService            // Service for knowledge operations
+	knowledgeFolderService interfaces.KnowledgeFolderService      // Folder scope resolution
+	chunkService           interfaces.ChunkService                // Service for chunk operations
+	webSearchStateRepo     interfaces.WebSearchStateService       // Service for web search state
+	webSearchProviderRepo  interfaces.WebSearchProviderRepository // Repository for web search provider entities
+	kbShareService         interfaces.KBShareService              // Service for KB sharing operations
+	suggestionRepo         interfaces.MessageSuggestionRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -100,6 +101,7 @@ func NewSessionService(cfg *config.Config,
 	messageRepo interfaces.MessageRepository,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	knowledgeFolderService interfaces.KnowledgeFolderService,
 	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
 	tenantService interfaces.TenantService,
@@ -111,20 +113,21 @@ func NewSessionService(cfg *config.Config,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 ) interfaces.SessionService {
 	return &sessionService{
-		cfg:                   cfg,
-		sessionRepo:           sessionRepo,
-		messageRepo:           messageRepo,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		modelService:          modelService,
-		tenantService:         tenantService,
-		eventManager:          eventManager,
-		agentService:          agentService,
-		webSearchStateRepo:    webSearchStateRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-		kbShareService:        kbShareService,
-		suggestionRepo:        suggestionRepo,
+		cfg:                    cfg,
+		sessionRepo:            sessionRepo,
+		messageRepo:            messageRepo,
+		knowledgeBaseService:   knowledgeBaseService,
+		knowledgeService:       knowledgeService,
+		knowledgeFolderService: knowledgeFolderService,
+		chunkService:           chunkService,
+		modelService:           modelService,
+		tenantService:          tenantService,
+		eventManager:           eventManager,
+		agentService:           agentService,
+		webSearchStateRepo:     webSearchStateRepo,
+		webSearchProviderRepo:  webSearchProviderRepo,
+		kbShareService:         kbShareService,
+		suggestionRepo:         suggestionRepo,
 	}
 }
 

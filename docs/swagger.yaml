@@ -449,6 +449,15 @@ definitions:
     - AuditOutcomeFailed
     - AuditOutcomePartial
     - AuditOutcomeCanceled
+  github_com_Tencent_WeKnora_internal_types.BatchMoveKnowledgeFolderRequest:
+    properties:
+      folder_id:
+        type: string
+      knowledge_ids:
+        items:
+          type: string
+        type: array
+    type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
       app_id:
@@ -628,6 +637,13 @@ definitions:
       summarize_threshold:
         description: 'Summarize threshold: number of messages before summarization'
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CreateKnowledgeFolderRequest:
+    properties:
+      name:
+        type: string
+      parent_id:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest:
     properties:
@@ -1422,6 +1438,9 @@ definitions:
       file_type:
         description: File type of the knowledge
         type: string
+      folder_id:
+        description: FolderID is nil for documents stored at the knowledge-base root.
+        type: string
       id:
         description: Unique identifier of the knowledge
         type: string
@@ -1695,6 +1714,15 @@ definitions:
         type: string
       source_tenant_id:
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeFolderScope:
+    properties:
+      folder_ids:
+        items:
+          type: string
+        type: array
+      knowledge_base_id:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress:
     properties:
@@ -2401,6 +2429,11 @@ definitions:
     - ModelTypeKnowledgeQA
     - ModelTypeVLLM
     - ModelTypeASR
+  github_com_Tencent_WeKnora_internal_types.MoveKnowledgeFolderRequest:
+    properties:
+      folder_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.OBSEngineConfig:
     properties:
       access_key:
@@ -3192,6 +3225,10 @@ definitions:
         type: boolean
       agent_id:
         type: string
+      folder_scopes:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeFolderScope'
+        type: array
       knowledge_base_ids:
         items:
           type: string
@@ -3632,6 +3669,15 @@ definitions:
       success:
         description: Whether the tool executed successfully
         type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UpdateKnowledgeFolderRequest:
+    properties:
+      move_parent:
+        type: boolean
+      name:
+        type: string
+      parent_id:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest:
     properties:
@@ -5584,6 +5630,11 @@ definitions:
       disable_title:
         description: Whether to disable auto title generation
         type: boolean
+      folder_scopes:
+        description: Selected folder subtrees, grouped by KB
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeFolderScope'
+        type: array
       images:
         description: Attached images for multimodal chat
         items:
@@ -8745,6 +8796,113 @@ paths:
       summary: 搜索FAQ
       tags:
       - FAQ管理
+  /knowledge-bases/{id}/folders:
+    get:
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List knowledge folders
+      tags:
+      - Knowledge Folders
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Folder
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CreateKnowledgeFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Create a knowledge folder
+      tags:
+      - Knowledge Folders
+  /knowledge-bases/{id}/folders/{folder_id}:
+    delete:
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Delete an empty knowledge folder
+      tags:
+      - Knowledge Folders
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      - description: Folder update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateKnowledgeFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Rename or move a knowledge folder
+      tags:
+      - Knowledge Folders
   /knowledge-bases/{id}/hybrid-search:
     get:
       consumes:
@@ -8873,6 +9031,14 @@ paths:
         in: query
         name: keyword
         type: string
+      - description: 目录ID；传空值表示根目录
+        in: query
+        name: folder_id
+        type: string
+      - description: 同时搜索后代目录
+        in: query
+        name: include_descendants
+        type: boolean
       - description: 文件类型筛选
         in: query
         name: file_type
@@ -8912,6 +9078,71 @@ paths:
       summary: 获取知识列表
       tags:
       - 知识管理
+  /knowledge-bases/{id}/knowledge/{knowledge_id}/folder:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Knowledge ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+      - description: Target folder
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MoveKnowledgeFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Move one document to a folder
+      tags:
+      - Knowledge Folders
+  /knowledge-bases/{id}/knowledge/batch-folder:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Documents and target folder
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.BatchMoveKnowledgeFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Move documents to a folder
+      tags:
+      - Knowledge Folders
   /knowledge-bases/{id}/knowledge/file:
     post:
       consumes:

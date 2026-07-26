@@ -49,6 +49,7 @@ type RouterParams struct {
 	AgentShareService            interfaces.AgentShareService
 	KBHandler                    *handler.KnowledgeBaseHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
+	KnowledgeFolderHandler       *handler.KnowledgeFolderHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
@@ -230,6 +231,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeFolderRoutes(v1, params.KnowledgeFolderHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
@@ -395,6 +397,37 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
+}
+
+// RegisterKnowledgeFolderRoutes exposes folder navigation and document
+// placement under a knowledge-base-scoped RBAC boundary.
+func RegisterKnowledgeFolderRoutes(
+	r *gin.RouterGroup,
+	handler *handler.KnowledgeFolderHandler,
+	g *rbacGuards,
+) {
+	if handler == nil {
+		return
+	}
+	base := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyIngest(apiKeyFullAccess()))
+	read := base.With(apiKeyRetrieve(apiKeyFullAccess()))
+
+	read.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.List)
+	base.POST("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Create)
+	base.PUT("/folders/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Update)
+	base.DELETE("/folders/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.Delete)
+	base.PUT(
+		"/knowledge/:knowledge_id/folder",
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.MoveKnowledge,
+	)
+	base.POST(
+		"/knowledge/batch-folder",
+		g.OwnedKBOrAdmin(),
+		g.KBAccessWrite("id"),
+		handler.BatchMoveKnowledge,
+	)
 }
 
 // RegisterFAQRoutes 注册 FAQ 相关路由

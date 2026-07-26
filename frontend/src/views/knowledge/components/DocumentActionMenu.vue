@@ -22,6 +22,7 @@ const emit = defineEmits<{
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
   (e: 'move'): void;
+  (e: 'move-folder'): void;
   (e: 'batch-manage'): void;
   (e: 'delete'): void;
 }>();
@@ -81,6 +82,11 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   </t-popconfirm>
 
   <!-- 移动到... -->
+  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move-folder')">
+    <t-icon class="icon" name="folder" />
+    <span>{{ $t('knowledgeFolder.moveDocument') }}</span>
+  </div>
+
   <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move')">
     <t-icon class="icon" name="swap" />
     <span>{{ $t('knowledgeBase.moveDocument') }}</span>

@@ -97,7 +97,43 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // applyKnowledgeListFilter applies the optional filter dimensions of
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
-func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+func applyKnowledgeListFilter(
+	query *gorm.DB,
+	tenantID uint64,
+	kbID string,
+	filter types.KnowledgeListFilter,
+) *gorm.DB {
+	if filter.FolderIDSet {
+		switch {
+		case filter.FolderID == nil && filter.IncludeFolderDescendants:
+			// The knowledge-base root is the ancestor of every folder. An
+			// explicitly selected root with recursive search therefore needs no
+			// additional folder predicate.
+		case filter.FolderID == nil:
+			query = query.Where("folder_id IS NULL")
+		case filter.IncludeFolderDescendants:
+			subtree := query.Session(&gorm.Session{NewDB: true}).
+				Model(&types.KnowledgeFolder{}).
+				Select("descendant.id").
+				Table("knowledge_folders AS descendant").
+				Joins(
+					"JOIN knowledge_folders AS root ON root.tenant_id = descendant.tenant_id "+
+						"AND root.knowledge_base_id = descendant.knowledge_base_id",
+				).
+				Where(
+					"root.tenant_id = ? AND root.knowledge_base_id = ? AND root.id = ?",
+					tenantID,
+					kbID,
+					*filter.FolderID,
+				).
+				Where(
+					"(descendant.path = root.path OR descendant.path LIKE root.path || '/%')",
+				)
+			query = query.Where("folder_id IN (?)", subtree)
+		default:
+			query = query.Where("folder_id = ?", *filter.FolderID)
+		}
+	}
 	if len(filter.TagIDs) > 0 {
 		query = query.Where(
 			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
@@ -167,6 +203,8 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	scope := func(q *gorm.DB) *gorm.DB {
 		return applyKnowledgeListFilter(
 			q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
+			tenantID,
+			kbID,
 			filter,
 		)
 	}

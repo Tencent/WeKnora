@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, listKnowledgeFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -42,6 +42,8 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import type { KnowledgeFolder } from '@/types/knowledgeFolder';
+import KnowledgeFolderScopeDialog from './KnowledgeFolderScopeDialog.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -503,10 +505,57 @@ const props = defineProps({
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
+const selectedFolderScopes = computed(() => settingsStore.settings.selectedFolderScopes || {});
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
+const folderScopeDialogVisible = ref(false);
+const folderScopeKb = ref<{ id: string; name: string } | null>(null);
+const folderScopeFolders = ref<KnowledgeFolder[]>([]);
+const folderScopeLoading = ref(false);
+
+const folderScopeLabel = (kbId: string) => {
+  const count = selectedFolderScopes.value[kbId]?.length || 0;
+  return count > 0
+    ? t('knowledgeFolder.selectedCount', { count })
+    : t('knowledgeFolder.entireKnowledgeBase');
+};
+
+const openFolderScopeDialog = async (item: any) => {
+  if (item.type !== 'kb' || item.kbType === 'faq') return;
+  const requestedKbId = item.id;
+  folderScopeKb.value = { id: item.id, name: item.name };
+  folderScopeFolders.value = [];
+  folderScopeDialogVisible.value = true;
+  folderScopeLoading.value = true;
+  try {
+    const response = await listKnowledgeFolders(requestedKbId);
+    if (folderScopeKb.value?.id === requestedKbId) {
+      folderScopeFolders.value = response.data || [];
+      const available = new Set(folderScopeFolders.value.map(folder => folder.id));
+      const selected = selectedFolderScopes.value[requestedKbId] || [];
+      const validSelection = selected.filter(folderId => available.has(folderId));
+      if (validSelection.length !== selected.length) {
+        settingsStore.setFolderScope(requestedKbId, validSelection);
+      }
+    }
+  } catch {
+    if (folderScopeKb.value?.id === requestedKbId) {
+      MessagePlugin.error(t('knowledgeFolder.operationFailed'));
+    }
+  } finally {
+    if (folderScopeKb.value?.id === requestedKbId) {
+      folderScopeLoading.value = false;
+    }
+  }
+};
+
+const confirmFolderScope = (folderIds: string[]) => {
+  if (!folderScopeKb.value) return;
+  settingsStore.setFolderScope(folderScopeKb.value.id, folderIds);
+  folderScopeDialogVisible.value = false;
+};
 
 // 已就绪的知识库（来自空间级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
@@ -2499,6 +2548,14 @@ defineExpose({
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
+          <button
+            v-if="item.type === 'kb' && item.kbType !== 'faq' && !embeddedMode"
+            type="button"
+            class="mention-chip__folder-scope"
+            @click.stop="openFolderScopeDialog(item)"
+          >
+            {{ folderScopeLabel(item.id) }}
+          </button>
           <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
             :aria-label="$t('common.remove')">×</span>
         </span>
@@ -2703,6 +2760,16 @@ defineExpose({
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
+    <KnowledgeFolderScopeDialog
+      v-if="folderScopeKb"
+      v-model:visible="folderScopeDialogVisible"
+      :knowledge-base-name="folderScopeKb.name"
+      :folders="folderScopeFolders"
+      :model-value="selectedFolderScopes[folderScopeKb.id] || []"
+      :loading="folderScopeLoading"
+      @confirm="confirmFolderScope"
+    />
+
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
       <KnowledgeBaseSelector v-model:visible="showKbSelector" :anchorEl="atButtonRef" @close="showKbSelector = false" />
@@ -2835,6 +2902,25 @@ const getImgSrc = (url: string) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: currentColor;
+}
+
+.mention-chip__folder-scope {
+  max-width: 120px;
+  padding: 0 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  background: var(--td-brand-color-light, #e8f8ef);
+  color: var(--td-brand-color, #07c05f);
+  font: inherit;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-brand-color-focus, #d8f3e4);
+  }
 }
 
 .mention-chip__remove {

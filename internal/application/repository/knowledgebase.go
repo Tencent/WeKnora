@@ -174,7 +174,14 @@ func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *t
 
 // DeleteKnowledgeBase deletes a knowledge base
 func (r *knowledgeBaseRepository) DeleteKnowledgeBase(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("knowledge_base_id = ?", id).
+			Delete(&types.KnowledgeFolder{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error
+	})
 }
 
 // CountByVectorStoreID counts active knowledge bases that are bound to the

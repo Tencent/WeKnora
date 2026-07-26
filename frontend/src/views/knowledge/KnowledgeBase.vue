@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -35,6 +35,12 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  listKnowledgeFolders,
+  createKnowledgeFolder,
+  updateKnowledgeFolder,
+  deleteKnowledgeFolder,
+  moveKnowledgeToFolder,
+  batchMoveKnowledgeToFolder,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -57,6 +63,9 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import type { KnowledgeFolder } from '@/types/knowledgeFolder';
+import KnowledgeFolderSidebar from './components/KnowledgeFolderSidebar.vue';
+import KnowledgeFolderMoveDialog from './components/KnowledgeFolderMoveDialog.vue';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -423,6 +432,184 @@ const batchReparsing = ref(false);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
+const folders = ref<KnowledgeFolder[]>([]);
+const foldersLoading = ref(false);
+const currentFolderId = ref<string | null>(
+  typeof route.query.folder_id === 'string' ? route.query.folder_id : null,
+);
+const folderById = computed(() => new Map(folders.value.map(folder => [folder.id, folder])));
+const folderBreadcrumb = computed(() => {
+  const result: KnowledgeFolder[] = [];
+  const visited = new Set<string>();
+  let id = currentFolderId.value;
+  while (id && !visited.has(id)) {
+    visited.add(id);
+    const folder = folderById.value.get(id);
+    if (!folder) break;
+    result.push(folder);
+    id = folder.parent_id;
+  }
+  return result.reverse();
+});
+
+const folderEditorVisible = ref(false);
+const folderEditorMode = ref<'create' | 'rename'>('create');
+const folderEditorName = ref('');
+const folderEditorParentId = ref<string | null>(null);
+const folderEditorTarget = ref<KnowledgeFolder | null>(null);
+const folderEditorSubmitting = ref(false);
+const manualEditorCreating = ref(false);
+const manualEditorCreateFolderId = ref<string | null>(null);
+
+const folderMoveVisible = ref(false);
+const folderMoveSubmitting = ref(false);
+const folderMoveKind = ref<'folder' | 'knowledge'>('knowledge');
+const folderMoveTarget = ref<KnowledgeFolder | null>(null);
+const folderMoveKnowledgeIds = ref<string[]>([]);
+const folderMoveDisabledIds = computed(() => {
+  const disabled = new Set<string>();
+  const target = folderMoveTarget.value;
+  if (!target) return disabled;
+  for (const folder of folders.value) {
+    if (folder.id === target.id || folder.path.startsWith(`${target.path}/`)) {
+      disabled.add(folder.id);
+    }
+  }
+  return disabled;
+});
+
+const loadKnowledgeFolders = async (targetKbId = kbId.value) => {
+  if (!targetKbId || isFAQ.value) {
+    folders.value = [];
+    return;
+  }
+  foldersLoading.value = true;
+  try {
+    const response = await listKnowledgeFolders(targetKbId);
+    if (!isCurrentKb(targetKbId)) return;
+    folders.value = response.data || [];
+    if (currentFolderId.value && !folders.value.some(folder => folder.id === currentFolderId.value)) {
+      currentFolderId.value = null;
+      const query = { ...route.query };
+      delete query.folder_id;
+      await router.replace({ query });
+    }
+  } catch {
+    if (isCurrentKb(targetKbId)) folders.value = [];
+  } finally {
+    if (isCurrentKb(targetKbId)) foldersLoading.value = false;
+  }
+};
+
+const selectKnowledgeFolder = async (folderId: string | null) => {
+  if (folderId === currentFolderId.value) return;
+  currentFolderId.value = folderId;
+  clearSelection();
+  resetPage();
+  const query = { ...route.query };
+  if (folderId) query.folder_id = folderId;
+  else delete query.folder_id;
+  await router.replace({ query });
+  await loadKnowledgeFiles(kbId.value);
+};
+
+const openCreateFolder = (parentId: string | null) => {
+  folderEditorMode.value = 'create';
+  folderEditorParentId.value = parentId;
+  folderEditorTarget.value = null;
+  folderEditorName.value = '';
+  folderEditorVisible.value = true;
+};
+
+const openRenameFolder = (folder: KnowledgeFolder) => {
+  folderEditorMode.value = 'rename';
+  folderEditorTarget.value = folder;
+  folderEditorName.value = folder.name;
+  folderEditorVisible.value = true;
+};
+
+const submitFolderEditor = async () => {
+  const name = folderEditorName.value.trim();
+  if (!name || folderEditorSubmitting.value) return;
+  folderEditorSubmitting.value = true;
+  try {
+    if (folderEditorMode.value === 'create') {
+      await createKnowledgeFolder(kbId.value, name, folderEditorParentId.value);
+      MessagePlugin.success(t('knowledgeFolder.created'));
+    } else if (folderEditorTarget.value) {
+      await updateKnowledgeFolder(kbId.value, folderEditorTarget.value.id, { name });
+      MessagePlugin.success(t('knowledgeFolder.renamed'));
+    }
+    folderEditorVisible.value = false;
+    await loadKnowledgeFolders();
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeFolder.operationFailed'));
+  } finally {
+    folderEditorSubmitting.value = false;
+  }
+};
+
+const confirmDeleteFolder = (folder: KnowledgeFolder) => {
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeFolder.delete'),
+    body: t('knowledgeFolder.deleteConfirm', { name: folder.name }),
+    confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+    onConfirm: async () => {
+      try {
+        await deleteKnowledgeFolder(kbId.value, folder.id);
+        if (currentFolderId.value === folder.id) {
+          await selectKnowledgeFolder(folder.parent_id);
+        }
+        await loadKnowledgeFolders();
+        MessagePlugin.success(t('knowledgeFolder.deleted'));
+        dialog.destroy();
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeFolder.notEmpty'));
+      }
+    },
+  });
+};
+
+const openFolderMove = (folder: KnowledgeFolder) => {
+  folderMoveKind.value = 'folder';
+  folderMoveTarget.value = folder;
+  folderMoveKnowledgeIds.value = [];
+  folderMoveVisible.value = true;
+};
+
+const openKnowledgeFolderMove = (ids: string[]) => {
+  folderMoveKind.value = 'knowledge';
+  folderMoveTarget.value = null;
+  folderMoveKnowledgeIds.value = ids;
+  folderMoveVisible.value = true;
+};
+
+const submitFolderMove = async (targetFolderId: string | null) => {
+  if (folderMoveSubmitting.value) return;
+  folderMoveSubmitting.value = true;
+  try {
+    if (folderMoveKind.value === 'folder' && folderMoveTarget.value) {
+      await updateKnowledgeFolder(kbId.value, folderMoveTarget.value.id, {
+        parent_id: targetFolderId,
+        move_parent: true,
+      });
+      await loadKnowledgeFolders();
+      MessagePlugin.success(t('knowledgeFolder.moved'));
+    } else {
+      await batchMoveKnowledgeToFolder(kbId.value, folderMoveKnowledgeIds.value, targetFolderId);
+      clearSelection();
+      batchMode.value = false;
+      await loadKnowledgeFiles(kbId.value);
+      MessagePlugin.success(t('knowledgeFolder.documentsMoved'));
+    }
+    folderMoveVisible.value = false;
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeFolder.operationFailed'));
+  } finally {
+    folderMoveSubmitting.value = false;
+  }
+};
+
 const applyOptimisticBatchReparse = (ids: string[]) => {
   const idSet = new Set(ids);
   for (const card of cardList.value) {
@@ -574,6 +761,7 @@ const updatedTimeRange = ref<string[]>([]);
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
+  const hasKeyword = !!docSearchKeyword.value?.trim();
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
@@ -582,6 +770,10 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    // Searching from root covers the whole KB. Browsing root without a
+    // keyword still shows only documents placed directly at root.
+    folder_id: hasKeyword && currentFolderId.value === null ? undefined : currentFolderId.value,
+    include_descendants: hasKeyword && currentFolderId.value !== null,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -831,6 +1023,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     selectedTagIds.value = [];
     tagFilterCleared.value = false;
     uiStore.clearSelectedTagIds();
+    await loadKnowledgeFolders(targetKbId);
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.clearSelectedTagIds();
     if (!isFAQ.value) {
@@ -904,6 +1097,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId === oldKbId && kbInfo.value) return;
 
   if (newKbId !== oldKbId) {
+    currentFolderId.value = typeof route.query.folder_id === 'string' ? route.query.folder_id : null;
     clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
@@ -915,6 +1109,17 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   }
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
+
+watch(
+  () => route.query.folder_id,
+  (folderID) => {
+    const normalized = typeof folderID === 'string' ? folderID : null;
+    if (normalized === currentFolderId.value) return;
+    currentFolderId.value = normalized;
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  },
+);
 
 watch(selectedTagIds, (newVal, oldVal) => {
   if (oldVal === undefined) return;
@@ -1097,6 +1302,7 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  folder_id?: string | null;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1316,8 +1522,19 @@ const stopMovePoll = () => {
   }
 };
 
-const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
+const manualEditorSuccess = async ({ kbId: savedKbId, knowledgeId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
+  const shouldPlaceNewKnowledge = manualEditorCreating.value;
+  const targetFolderId = manualEditorCreateFolderId.value;
+  manualEditorCreating.value = false;
+  manualEditorCreateFolderId.value = null;
   if (savedKbId === kbId.value && !isFAQ.value) {
+    if (shouldPlaceNewKnowledge && targetFolderId) {
+      try {
+        await moveKnowledgeToFolder(savedKbId, knowledgeId, targetFolderId);
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeFolder.operationFailed'));
+      }
+    }
     resetPage(); // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
   }
@@ -1410,6 +1627,7 @@ const executeUploadBatch = async (
   options: { processConfig?: KnowledgeProcessOverrides } = {},
 ) => {
   const targetKbId = kbId.value;
+  const targetFolderId = currentFolderId.value;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
@@ -1441,6 +1659,10 @@ const executeUploadBatch = async (
       const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
+        const knowledgeId = responseData?.data?.id;
+        if (knowledgeId && targetFolderId) {
+          await moveKnowledgeToFolder(targetKbId, knowledgeId, targetFolderId);
+        }
         successCount++;
       } else {
         failCount++;
@@ -1481,6 +1703,7 @@ const executeUploadBatch = async (
 
 const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
   const targetKbId = kbId.value;
+  const targetFolderId = currentFolderId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
@@ -1498,6 +1721,10 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
     }));
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
+      const knowledgeId = responseData?.data?.id;
+      if (knowledgeId && targetFolderId) {
+        await moveKnowledgeToFolder(targetKbId, knowledgeId, targetFolderId);
+      }
       MessagePlugin.success(t('knowledgeBase.urlImportSuccess'));
     } else {
       let errorMessage = t('knowledgeBase.urlImportFailed');
@@ -1576,6 +1803,8 @@ const handleUploadSourceUrl = (url: string) => {
 
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
+  manualEditorCreating.value = true;
+  manualEditorCreateFolderId.value = currentFolderId.value;
   uiStore.openManualEditor({
     mode: 'create',
     kbId: kbId.value,
@@ -1609,6 +1838,8 @@ const handleKnowledgeDropdownSelect = (data: { value: string }) => {
 
 const handleManualEdit = (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
+  manualEditorCreating.value = false;
+  manualEditorCreateFolderId.value = null;
   if (cardList.value[index]) {
     cardList.value[index].isMore = false;
   }
@@ -1873,7 +2104,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1884,6 +2115,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openKnowledgeFolderMove([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1891,7 +2123,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1899,6 +2131,7 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openKnowledgeFolderMove([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2026,6 +2259,18 @@ async function createNewSession(value: string): Promise<void> {
                 </t-tooltip>
               </template>
               <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
+              <template v-if="activeKbTab === 'documents'">
+                <t-icon name="chevron-right" class="breadcrumb-separator" />
+                <button type="button" class="breadcrumb-link" @click="selectKnowledgeFolder(null)">
+                  {{ $t('knowledgeFolder.root') }}
+                </button>
+                <template v-for="folder in folderBreadcrumb" :key="folder.id">
+                  <t-icon name="chevron-right" class="breadcrumb-separator" />
+                  <button type="button" class="breadcrumb-link" @click="selectKnowledgeFolder(folder.id)">
+                    {{ folder.name }}
+                  </button>
+                </template>
+              </template>
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
@@ -2064,6 +2309,17 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <KnowledgeFolderSidebar
+            :folders="folders"
+            :current-folder-id="currentFolderId"
+            :loading="foldersLoading"
+            :can-edit="canEdit"
+            @select="selectKnowledgeFolder"
+            @create="openCreateFolder"
+            @rename="openRenameFolder"
+            @move="openFolderMove"
+            @delete="confirmDeleteFolder"
+          />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2306,7 +2562,8 @@ async function createNewSession(value: string): Promise<void> {
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @move-folder="openKnowledgeFolderMove(Array.from(selectedIds))" />
               </div>
             </div>
           </div>
@@ -2346,6 +2603,24 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId"
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
+  />
+
+  <t-dialog
+    v-model:visible="folderEditorVisible"
+    :header="folderEditorMode === 'create' ? $t('knowledgeFolder.create') : $t('knowledgeFolder.rename')"
+    :confirm-btn="{ content: $t('common.confirm'), loading: folderEditorSubmitting, disabled: !folderEditorName.trim() }"
+    @confirm="submitFolderEditor"
+  >
+    <t-input v-model="folderEditorName" :placeholder="$t('knowledgeFolder.namePlaceholder')" maxlength="255" />
+  </t-dialog>
+
+  <KnowledgeFolderMoveDialog
+    v-model:visible="folderMoveVisible"
+    :folders="folders"
+    :title="folderMoveKind === 'folder' ? $t('knowledgeFolder.move') : $t('knowledgeFolder.moveDocument')"
+    :disabled-ids="folderMoveDisabledIds"
+    :submitting="folderMoveSubmitting"
+    @confirm="submitFolderMove"
   />
 </template>
 <style>
@@ -2457,6 +2732,7 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 0;
   background: transparent;
   border: none;
+  gap: 16px;
 }
 
 // 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
@@ -3343,6 +3619,10 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 @media (max-width: 750px) {
+  .knowledge-main {
+    flex-direction: column;
+  }
+
   .answers-input {
     transform: translateX(-182px);
   }

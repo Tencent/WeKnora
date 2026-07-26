@@ -405,6 +405,7 @@ watch(
     () => ({
         agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
+        folders: useSettingsStoreInstance.settings.selectedFolderScopes,
         files: useSettingsStoreInstance.settings.selectedFiles,
         tags: useSettingsStoreInstance.settings.selectedTags,
         mcps: useSettingsStoreInstance.settings.selectedMCPServices,
@@ -800,6 +801,14 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    const folderScopes = props.embeddedMode
+        ? []
+        : Object.entries(useSettingsStoreInstance.settings.selectedFolderScopes || {})
+            .filter(([kbId, folderIds]) => kbIdSet.has(kbId) && Array.isArray(folderIds) && folderIds.length > 0)
+            .map(([knowledge_base_id, folderIds]) => ({
+                knowledge_base_id,
+                folder_ids: [...new Set(folderIds)],
+            }));
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
@@ -816,6 +825,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
+        folder_scopes: folderScopes,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,

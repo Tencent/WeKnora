@@ -1,6 +1,7 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
+import type { KnowledgeFolder } from '@/types/knowledgeFolder';
 
 export type KnowledgeBaseActivity = AuditLog;
 
@@ -261,6 +262,8 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string | null;
+    include_descendants?: boolean;
   },
 ) {
   const query = new URLSearchParams();
@@ -273,8 +276,58 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id === null) query.append('folder_id', '');
+  if (typeof params.folder_id === 'string') query.append('folder_id', params.folder_id);
+  if (params.include_descendants) query.append('include_descendants', 'true');
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+export function listKnowledgeFolders(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/folders`) as Promise<{
+    success: boolean
+    data: KnowledgeFolder[]
+  }>
+}
+
+export function createKnowledgeFolder(kbId: string, name: string, parentId: string | null) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders`, {
+    name,
+    parent_id: parentId,
+  })
+}
+
+export function updateKnowledgeFolder(
+  kbId: string,
+  folderId: string,
+  data: { name?: string; parent_id?: string | null; move_parent?: boolean },
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data)
+}
+
+export function deleteKnowledgeFolder(kbId: string, folderId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`)
+}
+
+export function moveKnowledgeToFolder(
+  kbId: string,
+  knowledgeId: string,
+  folderId: string | null,
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/${knowledgeId}/folder`, {
+    folder_id: folderId,
+  })
+}
+
+export function batchMoveKnowledgeToFolder(
+  kbId: string,
+  knowledgeIds: string[],
+  folderId: string | null,
+) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/batch-folder`, {
+    knowledge_ids: knowledgeIds,
+    folder_id: folderId,
+  })
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {

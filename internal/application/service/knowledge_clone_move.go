@@ -1288,6 +1288,9 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
 	knowledge.KnowledgeBaseID = targetKB.ID
+	// Folder IDs are scoped to one knowledge base. Cross-KB moves always land
+	// at the target root unless the caller subsequently chooses a target folder.
+	knowledge.FolderID = nil
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -1316,6 +1319,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
 	}
 	knowledge.KnowledgeBaseID = targetKB.ID
+	knowledge.FolderID = nil
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"

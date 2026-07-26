@@ -916,6 +916,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
 // @Param        keyword       query     string  false  "关键词搜索"
+// @Param        folder_id     query     string  false  "目录ID；传空值表示根目录"
+// @Param        include_descendants query bool false "同时搜索后代目录"
 // @Param        file_type     query     string  false  "文件类型筛选"
 // @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
@@ -955,6 +957,28 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+	}
+	if values, present := c.Request.URL.Query()["folder_id"]; present {
+		if len(values) != 1 {
+			c.Error(errors.NewBadRequestError("folder_id must be provided once"))
+			return
+		}
+		filter.FolderIDSet = true
+		if folderID := strings.TrimSpace(values[0]); folderID != "" {
+			if !validKnowledgeFolderUUID(folderID) {
+				c.Error(errors.NewBadRequestError("invalid folder_id"))
+				return
+			}
+			filter.FolderID = &folderID
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("include_descendants")); raw != "" {
+		include, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("invalid include_descendants"))
+			return
+		}
+		filter.IncludeFolderDescendants = include
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)

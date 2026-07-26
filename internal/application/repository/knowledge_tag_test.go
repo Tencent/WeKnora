@@ -163,7 +163,7 @@ func TestApplyKnowledgeListFilter_TagIDsOrSemantics(t *testing.T) {
 
 	query := db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ?", uint64(1), kbID)
-	query = applyKnowledgeListFilter(query, types.KnowledgeListFilter{
+	query = applyKnowledgeListFilter(query, 1, kbID, types.KnowledgeListFilter{
 		TagIDs: []string{tagA, tagB},
 	})
 

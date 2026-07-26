@@ -52,6 +52,7 @@ type CreateKnowledgeQARequest struct {
 	MCPServiceIDs         []string                     `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
 	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
+	FolderScopes          []types.KnowledgeFolderScope `json:"folder_scopes,omitempty"`               // Selected folder subtrees, grouped by KB
 	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle          bool                         `json:"disable_title"`                         // Whether to disable auto title generation
 	Images                []ImageAttachment            `json:"images"`                                // Attached images for multimodal chat
