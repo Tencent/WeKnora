@@ -171,7 +171,7 @@ func (r *Registry) StreamDecoder() *StreamDecoder {
 		resources: newResourceStreamDecoder(r.resources),
 		sources:   newCitationStreamExpander(r.sources),
 		issues:    NewHandleStreamDecoder(r.issues),
-		orphans:   &orphanResourceStreamFilter{},
+		orphans:   newOrphanResourceStreamFilter(),
 	}
 }
 
@@ -288,52 +288,4 @@ func (r *Registry) DecodeOutputText(text string) string {
 	text = r.resources.StripOrphanAliases(text)
 	text = r.sources.ExpandText(text)
 	return r.issues.DecodeKnownText(text)
-}
-
-// StreamDecoder composes resource restoration and source-citation expansion
-// so callers cannot split handle processing or apply stages in the wrong order.
-type StreamDecoder struct {
-	resources *resourceStreamDecoder
-	sources   *citationStreamExpander
-	issues    *HandleStreamDecoder
-	orphans   *orphanResourceStreamFilter
-}
-
-func (d *StreamDecoder) Feed(chunk string) string {
-	if d == nil {
-		return chunk
-	}
-	if d.resources != nil {
-		chunk = d.resources.Feed(chunk)
-	}
-	if d.sources != nil {
-		chunk = d.sources.Feed(chunk)
-	}
-	if d.issues != nil {
-		chunk = d.issues.Feed(chunk)
-	}
-	if d.orphans != nil {
-		chunk = d.orphans.Feed(chunk)
-	}
-	return chunk
-}
-
-func (d *StreamDecoder) Flush() string {
-	if d == nil {
-		return ""
-	}
-	var tail string
-	if d.resources != nil {
-		tail = d.resources.Flush()
-	}
-	if d.sources != nil {
-		tail = d.sources.Feed(tail) + d.sources.Flush()
-	}
-	if d.issues != nil {
-		tail = d.issues.Feed(tail) + d.issues.Flush()
-	}
-	if d.orphans != nil {
-		tail = d.orphans.Feed(tail) + d.orphans.Flush()
-	}
-	return tail
 }
