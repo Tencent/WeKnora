@@ -37,10 +37,50 @@ func (r *Registry) ModelOutput(result *types.ToolResult) string {
 		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "web_fetch_results":
 		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
+	case "database_query":
+		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:
 		r.registerLabeledReferences(result.Output)
+		r.registerStructuredReferences(result.Output)
 		return r.CompactKnownText(result.Output)
 	}
+}
+
+// registerStructuredReferences registers durable IDs found under explicitly
+// labeled keys of a JSON tool result, using the same key dispatch as tool
+// arguments. Non-JSON output is a no-op.
+func (r *Registry) registerStructuredReferences(raw string) {
+	var value interface{}
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return
+	}
+	var walk func(string, interface{})
+	walk = func(key string, value interface{}) {
+		switch typed := value.(type) {
+		case string:
+			r.registerSourceIDByKey(key, typed)
+		case []interface{}:
+			for _, item := range typed {
+				walk(key, item)
+			}
+		case map[string]interface{}:
+			for childKey, item := range typed {
+				walk(childKey, item)
+			}
+		}
+	}
+	walk("", value)
+}
+
+func (r *Registry) modelDatabaseQueryOutput(rows []map[string]interface{}, fallback string) string {
+	for _, row := range rows {
+		for key, raw := range row {
+			if value, ok := raw.(string); ok {
+				r.registerSourceIDByKey(key, value)
+			}
+		}
+	}
+	return r.CompactKnownText(fallback)
 }
 
 func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {

@@ -124,6 +124,14 @@ type DataAnalysisTool struct {
 	// after startup, causing GetFile to look in the wrong directory (#1040).
 	localBaseDir    string
 	storageResolver interfaces.StorageBackendResolver
+	searchTargets   types.SearchTargets
+}
+
+// WithSearchTargets enables the Agent-only authorization boundary. Other
+// internal data-analysis callers retain their existing service-owned scope.
+func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) *DataAnalysisTool {
+	t.searchTargets = searchTargets
+	return t
 }
 
 func NewDataAnalysisTool(
@@ -200,6 +208,11 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			Success: false,
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
+	}
+	if len(t.searchTargets) > 0 {
+		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 	}
 
 	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
@@ -659,7 +672,10 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
 	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil {
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
 		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)
 	}

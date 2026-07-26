@@ -112,6 +112,7 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 		Updates(map[string]interface{}{
 			"in_links":      page.InLinks,
 			"out_links":     page.OutLinks,
+			"aliases":       page.Aliases,
 			"status":        page.Status,
 			"source_refs":   page.SourceRefs,
 			"chunk_refs":    page.ChunkRefs,

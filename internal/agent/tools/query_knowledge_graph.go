@@ -68,15 +68,34 @@ type QueryKnowledgeGraphInput struct {
 // QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships
 type QueryKnowledgeGraphTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeBaseService
+	scopeKnowledgeService interfaces.KnowledgeService
+	searchTargets         types.SearchTargets
+}
+
+// WithKnowledgeScope enables document/tag-level result filtering for Agent
+// calls. The graph backend queries by KB, so the tool must enforce narrower
+// SearchTargets before returning any result to the model.
+func (t *QueryKnowledgeGraphTool) WithKnowledgeScope(
+	knowledgeService interfaces.KnowledgeService,
+) *QueryKnowledgeGraphTool {
+	t.scopeKnowledgeService = knowledgeService
+	return t
 }
 
 // NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
-func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService) *QueryKnowledgeGraphTool {
-	return &QueryKnowledgeGraphTool{
+func NewQueryKnowledgeGraphTool(
+	knowledgeService interfaces.KnowledgeBaseService,
+	searchTargets ...types.SearchTargets,
+) *QueryKnowledgeGraphTool {
+	tool := &QueryKnowledgeGraphTool{
 		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
 	}
+	if len(searchTargets) > 0 {
+		tool.searchTargets = searchTargets[0]
+	}
+	return tool
 }
 
 // Execute performs the knowledge graph query with concurrent KB processing
@@ -104,6 +123,11 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			Success: false,
 			Error:   "knowledge_base_ids must contain at most 10 KB IDs",
 		}, fmt.Errorf("too many KB IDs")
+	}
+	if len(t.searchTargets) > 0 {
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, input.KnowledgeBaseIDs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 	}
 
 	query := input.Query
@@ -137,7 +161,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			defer wg.Done()
 
 			// Get knowledge base to check graph configuration
-			kb, err := t.knowledgeService.GetKnowledgeBaseByID(ctx, id)
+			kb, err := t.knowledgeService.GetKnowledgeBaseByIDOnly(ctx, id)
 			if err != nil {
 				mu.Lock()
 				kbResults[id] = &graphQueryResult{kbID: id, err: fmt.Errorf("failed to get knowledge base: %v", err)}
@@ -160,6 +184,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: fmt.Errorf("query failed: %v", err)}
 				mu.Unlock()
 				return
+			}
+			if len(t.searchTargets) > 0 {
+				results, err = filterSearchResultsInSearchTargets(
+					ctx, t.searchTargets, id, results, t.scopeKnowledgeService,
+				)
+				if err != nil {
+					mu.Lock()
+					kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: err}
+					mu.Unlock()
+					return
+				}
 			}
 
 			mu.Lock()

@@ -72,11 +72,6 @@ Count documents by status:
   "sql": "SELECT parse_status, COUNT(*) as count FROM knowledges GROUP BY parse_status"
 }
 
-Find recent sessions:
-{
-  "sql": "SELECT id, title, created_at FROM sessions ORDER BY created_at DESC LIMIT 5"
-}
-
 Get storage usage:
 {
   "sql": "SELECT SUM(storage_size) as total_storage FROM knowledges"
@@ -255,13 +250,17 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
+	searchScopes := searchScopesFromTargets(t.searchTargets)
+	if len(searchScopes) == 0 {
+		return "", fmt.Errorf("no effective Agent knowledge scope is available")
+	}
 	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
 		sqlQuery,
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithHiddenKBFilter(),
 		utils.WithInjectionRiskCheck(),
-		utils.WithSearchScopes(searchScopesFromTargets(t.searchTargets)),
+		utils.WithSearchScopes(searchScopes),
 	)
 	if err != nil {
 		return "", err
@@ -284,10 +283,16 @@ func searchScopesFromTargets(searchTargets types.SearchTargets) []utils.SearchSc
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
+		tagIDs := effectiveSearchTargetTagIDs(target)
+		wholeKB := target.Type == types.SearchTargetTypeKnowledgeBase &&
+			len(target.KnowledgeIDs) == 0 && len(tagIDs) == 0
+		if !wholeKB && len(target.KnowledgeIDs) == 0 && len(tagIDs) == 0 {
+			continue
+		}
 		scopes = append(scopes, utils.SearchScope{
 			KnowledgeBaseID: target.KnowledgeBaseID,
 			KnowledgeIDs:    append([]string(nil), target.KnowledgeIDs...),
-			TagIDs:          append([]string(nil), target.TagIDs...),
+			TagIDs:          tagIDs,
 		})
 	}
 	return scopes

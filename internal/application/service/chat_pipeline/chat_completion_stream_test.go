@@ -78,10 +78,9 @@ func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, err
 	return s.model, nil
 }
 
-// TestStreamFlushesHeldAliasOnCancel verifies that when the request is cancelled
-// mid-stream, the decoder's held-back alias suffix is flushed (emitted) rather
-// than silently dropped. Without the ctx.Done() flush, "res://0" would be lost.
-func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
+// TestStreamDropsIncompleteHandleOnCancel verifies that cancellation cannot
+// leak a model-context protocol fragment to the client.
+func TestStreamDropsIncompleteHandleOnCancel(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
 	bus := &syncEventBus{}
 	model := &openStreamChat{chunks: []types.StreamResponse{
@@ -111,13 +110,9 @@ func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 
 	cancel()
 
-	// After cancel, the held "res://0" suffix must be flushed as a final-answer chunk.
-	require.Eventually(t, func() bool {
-		for _, c := range bus.finalAnswerContents() {
-			if c == "res://0" {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 5*time.Millisecond)
+	// Give the cancellation path time to flush, then assert that only the
+	// meaningful prefix was emitted; the incomplete private handle is dropped.
+	require.Eventually(t, func() bool { return len(bus.finalAnswerContents()) >= 1 }, 2*time.Second, 5*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	require.Equal(t, []string{"hello "}, bus.finalAnswerContents())
 }

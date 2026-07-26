@@ -32,6 +32,19 @@ func TestBuildLangfuseGenerationOutput(t *testing.T) {
 	}
 }
 
+func TestSnapshotLangfuseToolCallsKeepsModelArguments(t *testing.T) {
+	providerCalls := []types.LLMToolCall{{
+		ID:       "call_1",
+		Function: types.FunctionCall{Name: "wiki_read_page", Arguments: `{"slugs":["res://0001"]}`},
+	}}
+	snapshot := snapshotLangfuseToolCalls(providerCalls)
+	providerCalls[0].Function.Arguments = `{"slugs":["summary/uuid"]}`
+
+	if got := snapshot[0].Function.Arguments; got != `{"slugs":["res://0001"]}` {
+		t.Fatalf("Langfuse snapshot was mutated to %s", got)
+	}
+}
+
 func TestBuildLangfuseMessagesReasoningContent(t *testing.T) {
 	msgs := buildLangfuseMessages([]Message{
 		{Role: "assistant", ReasoningContent: "chain of thought", ToolCalls: []ToolCall{{ID: "tc1"}}},

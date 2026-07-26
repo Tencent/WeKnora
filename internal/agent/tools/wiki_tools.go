@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -110,12 +112,72 @@ type WikiScope struct {
 // NewWikiScopesFromKBIDs is a convenience constructor for callers that only
 // carry plain KB IDs and don't need per-document filtering (e.g. legacy tests).
 func NewWikiScopesFromKBIDs(kbIDs []string) []WikiScope {
-	scopes := make([]WikiScope, 0, len(kbIDs))
-	for _, id := range kbIDs {
-		if id == "" {
+	// Deduplicate defensively: resolveUniqueWikiPage counts one hit per scope
+	// as a distinct owner, so a duplicated KB ID would misreport a unique slug
+	// as ambiguous.
+	deduped := dedupNonEmptyStrings(kbIDs)
+	scopes := make([]WikiScope, 0, len(deduped))
+	for _, id := range deduped {
+		scopes = append(scopes, WikiScope{KnowledgeBaseID: id})
+	}
+	return scopes
+}
+
+// NewWikiScopesFromSearchTargets merges all targets for a Wiki KB into one
+// scope. SearchTargets are alternatives selected by the user, so document and
+// tag constraints are combined as a union; an unrestricted whole-KB target
+// supersedes narrower targets for that KB.
+func NewWikiScopesFromSearchTargets(searchTargets types.SearchTargets, wikiKBIDs []string) []WikiScope {
+	allowed := make(map[string]struct{}, len(wikiKBIDs))
+	for _, kbID := range dedupNonEmptyStrings(wikiKBIDs) {
+		allowed[kbID] = struct{}{}
+	}
+	type accumulatedScope struct {
+		WikiScope
+		unrestricted bool
+	}
+	byKB := make(map[string]*accumulatedScope, len(allowed))
+	for _, target := range searchTargets {
+		if target == nil {
 			continue
 		}
-		scopes = append(scopes, WikiScope{KnowledgeBaseID: id})
+		if _, ok := allowed[target.KnowledgeBaseID]; !ok {
+			continue
+		}
+		targetTagIDs := effectiveSearchTargetTagIDs(target)
+		wholeKB := target.Type == types.SearchTargetTypeKnowledgeBase &&
+			len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0
+		if !wholeKB && len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0 {
+			// A malformed empty document target must not silently become
+			// whole-KB authorization.
+			continue
+		}
+		scope := byKB[target.KnowledgeBaseID]
+		if scope == nil {
+			scope = &accumulatedScope{WikiScope: WikiScope{KnowledgeBaseID: target.KnowledgeBaseID}}
+			byKB[target.KnowledgeBaseID] = scope
+		}
+		if wholeKB {
+			scope.unrestricted = true
+			continue
+		}
+		scope.KnowledgeIDs = append(scope.KnowledgeIDs, target.KnowledgeIDs...)
+		scope.TagIDs = append(scope.TagIDs, targetTagIDs...)
+	}
+
+	scopes := make([]WikiScope, 0, len(allowed))
+	for _, kbID := range dedupNonEmptyStrings(wikiKBIDs) {
+		scope := byKB[kbID]
+		if scope == nil {
+			continue
+		}
+		if scope.unrestricted {
+			scopes = append(scopes, WikiScope{KnowledgeBaseID: kbID})
+			continue
+		}
+		scope.KnowledgeIDs = dedupNonEmptyStrings(scope.KnowledgeIDs)
+		scope.TagIDs = dedupNonEmptyStrings(scope.TagIDs)
+		scopes = append(scopes, scope.WikiScope)
 	}
 	return scopes
 }
@@ -241,22 +303,27 @@ func pagePassesWikiScope(
 	scope WikiScope,
 	fetchTags knowledgeTagsFetcher,
 ) (bool, error) {
-	if allowed, has := scopeKnowledgeFilter(scope); has {
-		if !pageIntersectsKnowledgeIDs(page, allowed) {
-			return false, nil
-		}
-	}
-
+	allowed, hasKnowledgeFilter := scopeKnowledgeFilter(scope)
 	tagIDs := dedupNonEmptyStrings(scope.TagIDs)
-	if len(tagIDs) == 0 {
+	if !hasKnowledgeFilter && len(tagIDs) == 0 {
 		return true, nil
 	}
+	// Under a document/tag-constrained scope, every surfaced page must prove
+	// provenance. Structural pages and uncited pages describe the whole Wiki
+	// and cannot be safely attributed to the selected subset; wiki_search is
+	// still available for scoped discovery.
 	if isStructuralPage(page) {
-		return true, nil
+		return false, nil
 	}
 	sourceKnowledgeIDs := extractSourceKnowledgeIDs(page)
 	if len(sourceKnowledgeIDs) == 0 {
+		return false, nil
+	}
+	if hasKnowledgeFilter && pageIntersectsKnowledgeIDs(page, allowed) {
 		return true, nil
+	}
+	if len(tagIDs) == 0 {
+		return false, nil
 	}
 	matches, err := knowledgeIDsMatchingAnyTag(ctx, sourceKnowledgeIDs, tagIDs, fetchTags)
 	if err != nil {
@@ -270,6 +337,7 @@ type wikiReadPageTool struct {
 	wikiService      interfaces.WikiPageService
 	knowledgeService interfaces.KnowledgeService
 	scopes           []WikiScope
+	routes           *WikiRouteResolver
 	seenLinks        map[string]bool
 	mu               sync.Mutex
 }
@@ -278,13 +346,17 @@ func NewWikiReadPageTool(
 	wikiService interfaces.WikiPageService,
 	knowledgeService interfaces.KnowledgeService,
 	scopes []WikiScope,
+	routes *WikiRouteResolver,
 ) types.Tool {
+	if routes == nil {
+		routes = NewWikiRouteResolver()
+	}
 	return &wikiReadPageTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadPage,
 			`Read one or more wiki pages by their slugs. Returns the full markdown content, metadata, and links.
 Use this to read specific wiki pages when you know their slug (e.g. "entity/acme-corp", "concept/rag").
-When the same slug exists in multiple knowledge bases, all matching pages are returned (each tagged with its short bN knowledge_base_id). Pass that bN value in "knowledge_base_id" to limit to a specific KB.`,
+Knowledge-base routing is automatic. Known link/search provenance is preferred; otherwise every wiki knowledge base in scope is checked and ambiguous matches are returned.`,
 			json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -292,10 +364,6 @@ When the same slug exists in multiple knowledge bases, all matching pages are re
       "type": "array",
       "items": { "type": "string" },
       "description": "List of wiki page slugs to read (e.g. ['entity/acme-corp', 'index'])"
-    },
-    "knowledge_base_id": {
-      "type": "string",
-      "description": "Optional: specific short bN knowledge base ID. If omitted, reads the slug from every wiki KB in scope (all matches returned)."
     }
   },
   "required": ["slugs"]
@@ -304,6 +372,7 @@ When the same slug exists in multiple knowledge bases, all matching pages are re
 		wikiService:      wikiService,
 		knowledgeService: knowledgeService,
 		scopes:           scopes,
+		routes:           routes,
 		seenLinks:        make(map[string]bool),
 	}
 }
@@ -316,9 +385,8 @@ func seenLinkKey(kbID, slug string) string {
 
 func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		Slug            any    `json:"slug"`
-		Slugs           any    `json:"slugs"`
-		KnowledgeBaseID string `json:"knowledge_base_id"`
+		Slug  any `json:"slug"`
+		Slugs any `json:"slugs"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
@@ -330,27 +398,6 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	if len(slugsToFetch) == 0 {
 		return &types.ToolResult{Success: false, Error: "Missing 'slugs' parameter"}, nil
-	}
-
-	// Build effective scope list. If the caller pinned a knowledge_base_id,
-	// limit to that KB while preserving any scope-level knowledge_ids filter
-	// (the filter itself is never exposed as a tool argument — it comes from
-	// the server-side scope so the model doesn't have to reason about it).
-	effectiveScopes := t.scopes
-	if params.KnowledgeBaseID != "" {
-		filtered := make([]WikiScope, 0, 1)
-		for _, sc := range t.scopes {
-			if sc.KnowledgeBaseID == params.KnowledgeBaseID {
-				filtered = append(filtered, sc)
-				break
-			}
-		}
-		if len(filtered) == 0 {
-			// Not in the agent's scope list — still allow direct addressing
-			// but without any pin (scopes were the source of the pin).
-			filtered = append(filtered, WikiScope{KnowledgeBaseID: params.KnowledgeBaseID})
-		}
-		effectiveScopes = filtered
 	}
 
 	var outputs []string
@@ -420,6 +467,11 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		if page.PageType == types.WikiPageTypeIndex {
 			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil && overview != nil {
 				contentBody = renderIndexOverviewForAgent(overview)
+				for _, group := range overview.Groups {
+					for _, item := range group.Items {
+						t.routes.remember(item.Slug, kbID)
+					}
+				}
 			}
 		}
 
@@ -458,6 +510,7 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// Track slugs that were found in the raw lookup but filtered out by a
 	// knowledge_ids whitelist, so we can surface a clearer error.
 	filteredOut := make(map[string][]string) // slug -> list of KB IDs where filtered
+	lookupFailed := make(map[string]bool)
 	var fetchTags knowledgeTagsFetcher
 	if t.knowledgeService != nil {
 		fetchTags = t.knowledgeService.GetKnowledgeTags
@@ -467,45 +520,71 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			page *types.WikiPage
 			kbID string
 		}
-		for _, sc := range effectiveScopes {
-			kbID := sc.KnowledgeBaseID
-			if kbID == "" {
-				continue
-			}
-			page, err := t.wikiService.GetPageBySlug(ctx, kbID, slug)
-			if err != nil || page == nil {
-				continue
-			}
-			actualKBID := kbID
-			if page.KnowledgeBaseID != "" {
-				actualKBID = page.KnowledgeBaseID
-			}
+		cachedScopes := t.routes.scopesForSlug(slug, t.scopes)
+		// Provenance is an ordering hint, never an authority boundary. Always
+		// inspect every legal scope so a cached hit cannot hide a duplicate slug
+		// in another Wiki KB and make the model act on an apparently unique page.
+		effectiveScopes := append(
+			append([]WikiScope(nil), cachedScopes...),
+			scopesOutsideKBs(t.scopes, cachedScopes)...,
+		)
 
-			// Apply server-enforced source-document / tag scope (silent; never
-			// exposed to the model as a tool argument).
-			passesScope, scopeErr := pagePassesWikiScope(ctx, page, sc, fetchTags)
-			if scopeErr != nil {
-				errs = append(errs, fmt.Sprintf("Failed to validate wiki scope for '%s' in KB %s: %v", slug, actualKBID, scopeErr))
-				continue
-			}
-			if !passesScope {
-				filteredOut[slug] = append(filteredOut[slug], actualKBID)
-				continue
-			}
+		lookupScopes := func(scopes []WikiScope) {
+			for _, sc := range scopes {
+				kbID := sc.KnowledgeBaseID
+				if kbID == "" {
+					continue
+				}
+				page, err := t.wikiService.GetPageBySlug(ctx, kbID, slug)
+				if err != nil {
+					if !errors.Is(err, repository.ErrWikiPageNotFound) {
+						lookupFailed[slug] = true
+						errs = append(errs, fmt.Sprintf("Failed to read Wiki page '%s' in KB %s: %v", slug, kbID, err))
+					}
+					continue
+				}
+				if page == nil {
+					continue
+				}
+				if page.KnowledgeBaseID != "" && page.KnowledgeBaseID != kbID {
+					lookupFailed[slug] = true
+					errs = append(errs, fmt.Sprintf(
+						"Wiki page '%s' returned KB %s while resolving allowed KB %s",
+						slug, page.KnowledgeBaseID, kbID,
+					))
+					continue
+				}
+				actualKBID := kbID
 
-			hits = append(hits, struct {
-				page *types.WikiPage
-				kbID string
-			}{page, actualKBID})
-			foundKBs[slug] = append(foundKBs[slug], actualKBID)
-			// Also register the page's neighbours so that when the model
-			// echoes a link like `[[summary/xyz]]` from this page's body,
-			// the frontend can resolve it to the same KB without guessing.
-			registerLinkedSlugs(foundKBs, page, actualKBID)
-			t.mu.Lock()
-			t.seenLinks[seenLinkKey(actualKBID, slug)] = true
-			t.mu.Unlock()
+				// Apply server-enforced source-document / tag scope (silent; never
+				// exposed to the model as a tool argument).
+				passesScope, scopeErr := pagePassesWikiScope(ctx, page, sc, fetchTags)
+				if scopeErr != nil {
+					errs = append(errs, fmt.Sprintf("Failed to validate wiki scope for '%s' in KB %s: %v", slug, actualKBID, scopeErr))
+					continue
+				}
+				if !passesScope {
+					filteredOut[slug] = append(filteredOut[slug], actualKBID)
+					continue
+				}
+
+				hits = append(hits, struct {
+					page *types.WikiPage
+					kbID string
+				}{page, actualKBID})
+				t.routes.rememberPage(page, actualKBID)
+				foundKBs[slug] = append(foundKBs[slug], actualKBID)
+				// Also register the page's neighbours so that when the model
+				// echoes a link like `[[summary/xyz]]` from this page's body,
+				// the frontend can resolve it to the same KB without guessing.
+				registerLinkedSlugs(foundKBs, page, actualKBID)
+				t.mu.Lock()
+				t.seenLinks[seenLinkKey(actualKBID, slug)] = true
+				t.mu.Unlock()
+			}
 		}
+
+		lookupScopes(effectiveScopes)
 
 		if len(hits) == 0 {
 			if kbs := filteredOut[slug]; len(kbs) > 0 {
@@ -513,15 +592,14 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 					"Wiki page '%s' exists in %v but none of its source documents are within the scope pinned by the user",
 					slug, kbs,
 				))
-			} else {
+			} else if !lookupFailed[slug] {
 				errs = append(errs, fmt.Sprintf("Wiki page '%s' not found", slug))
 			}
 			continue
 		}
 
-		// When the same slug exists in multiple KBs (and the caller did not
-		// specify a knowledge_base_id), emit all pages so the model can pick
-		// the right one or compare them explicitly.
+		// When routing remains ambiguous, emit every matched page so the model
+		// can use or compare them explicitly.
 		for _, h := range hits {
 			outputs = append(outputs, renderPage(h.page, h.kbID))
 		}
@@ -562,6 +640,7 @@ type wikiSearchTool struct {
 	wikiService      interfaces.WikiPageService
 	knowledgeService interfaces.KnowledgeService
 	scopes           []WikiScope
+	routes           *WikiRouteResolver
 	seenSlugs        map[string]bool
 	mu               sync.Mutex
 }
@@ -570,7 +649,11 @@ func NewWikiSearchTool(
 	wikiService interfaces.WikiPageService,
 	knowledgeService interfaces.KnowledgeService,
 	scopes []WikiScope,
+	routes *WikiRouteResolver,
 ) types.Tool {
+	if routes == nil {
+		routes = NewWikiRouteResolver()
+	}
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
@@ -607,6 +690,7 @@ Use this to find relevant wiki pages when you don't know the exact slug.`,
 		wikiService:      wikiService,
 		knowledgeService: knowledgeService,
 		scopes:           scopes,
+		routes:           routes,
 		seenSlugs:        make(map[string]bool),
 	}
 }
@@ -645,12 +729,17 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			}
 		}
 		if len(filtered) == 0 {
-			filtered = append(filtered, WikiScope{KnowledgeBaseID: params.KnowledgeBaseID})
+			return &types.ToolResult{
+				Success: false,
+				Error:   "knowledge_base_id is not within the current wiki scope",
+			}, nil
 		}
 		effectiveScopes = filtered
 	}
 
 	var allOutputs []string
+	var searchErrors []string
+	successfulSearchCalls := 0
 	// Per-slug list of KB IDs that produced a match. Multiple KBs may share a
 	// slug when the agent has several wiki KBs in scope, so we keep the full list.
 	foundKBs := make(map[string][]string)
@@ -674,22 +763,35 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			}
 			pages, err := t.wikiService.SearchPages(ctx, kbID, query, params.Limit)
 			if err != nil {
+				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
 			}
+			successfulSearchCalls++
 			for _, p := range pages {
 				if p == nil {
 					continue
 				}
 				passesScope, scopeErr := pagePassesWikiScope(ctx, p, sc, fetchTags)
-				if scopeErr != nil || !passesScope {
+				if scopeErr != nil {
+					searchErrors = append(searchErrors, fmt.Sprintf(
+						"Failed to validate Wiki search result %q in KB %s: %v", p.Slug, kbID, scopeErr,
+					))
+					continue
+				}
+				if !passesScope {
 					filteredCount++
 					continue
 				}
-				actualKBID := kbID
-				if p.KnowledgeBaseID != "" {
-					actualKBID = p.KnowledgeBaseID
+				if p.KnowledgeBaseID != "" && p.KnowledgeBaseID != kbID {
+					searchErrors = append(searchErrors, fmt.Sprintf(
+						"Wiki search result %q returned KB %s while resolving allowed KB %s",
+						p.Slug, p.KnowledgeBaseID, kbID,
+					))
+					continue
 				}
+				actualKBID := kbID
 				allHits = append(allHits, searchHit{page: p, kbID: actualKBID})
+				t.routes.rememberPage(p, actualKBID)
 				foundKBs[p.Slug] = append(foundKBs[p.Slug], actualKBID)
 				// Register neighbour slugs so links surfaced from this
 				// page's body can be routed to the same KB by the frontend.
@@ -737,9 +839,16 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		allOutputs = append(allOutputs, sb.String())
 	}
 
+	if successfulSearchCalls == 0 && len(searchErrors) > 0 {
+		return &types.ToolResult{Success: false, Error: strings.Join(searchErrors, "; ")}, nil
+	}
+	output := strings.Join(allOutputs, "\n\n")
+	if len(searchErrors) > 0 {
+		output += "\n\n<errors>\n" + strings.Join(searchErrors, "\n") + "\n</errors>"
+	}
 	return &types.ToolResult{
 		Success: true,
-		Output:  strings.Join(allOutputs, "\n\n"),
+		Output:  output,
 		Data: map[string]interface{}{
 			"found_kbs": foundKBs,
 		},

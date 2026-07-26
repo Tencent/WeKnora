@@ -32,28 +32,23 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	)
 }
 
-func TestCompactKnownTextPreservesWikiSummarySlug(t *testing.T) {
-	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
-	const kbID = "250368ff-f5a2-4e9e-868a-07bc9b857c44"
+func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
+	r := NewRegistry()
+	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))
+	require.Equal(t, "d1", r.RegisterDocument("doc-real"))
+	require.Equal(t, "b1", r.RegisterKnowledgeBase("kb-real"))
+	require.Equal(t, "w1", r.RegisterWeb("https://example.com", "Example"))
 
-	registry := NewRegistry()
-	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
-	require.Equal(t, "b1", registry.RegisterKnowledgeBase(kbID))
-
-	// A wiki_search result: the summary slug embeds the document UUID, and the
-	// same UUID also appears as a standalone <knowledge_id> label.
-	in := "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
-		"<link>[[summary/" + knowledgeID + "|Doc - Summary]]</link>\n" +
-		"<knowledge_id>" + knowledgeID + "</knowledge_id>"
-
-	got := registry.CompactKnownText(in)
-
-	// The slug-embedded UUID must survive verbatim — no summary/d1 mangling.
-	require.Contains(t, got, "[[summary/"+knowledgeID+"|Doc - Summary]]")
-	require.NotContains(t, got, "summary/d1")
-	// The standalone label and the KB id still compact normally.
-	require.Contains(t, got, "<knowledge_id>d1</knowledge_id>")
-	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
+	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "c1"}))
+	require.Equal(t, "d1", r.RegisterDocument("d1"))
+	require.Equal(t, "b1", r.RegisterKnowledgeBase("b1"))
+	require.Equal(t, "w1", r.RegisterWeb("w1", ""))
+	require.Empty(t, r.RegisterDocument("d99"))
+	require.Empty(t, r.RegisterDocument("c1"), "a chunk handle must not be accepted as a document identity")
+	require.Equal(t, 1, len(r.chunkByAlias))
+	require.Equal(t, 1, len(r.aliasToDoc))
+	require.Equal(t, 1, len(r.aliasToKB))
+	require.Equal(t, 1, len(r.webByAlias))
 }
 
 func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
@@ -336,5 +331,29 @@ func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
 	require.Equal(t,
 		`<kb doc="Graph Source" chunk_id="graph-chunk-real" kb_id="graph-kb-real" />`,
 		registry.ExpandText(`<ref id="c1"/>`),
+	)
+}
+
+func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
+	registry := NewRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Output:  `{"url":"res://0001","knowledge_id":"doc-real-id"}`,
+	})
+
+	// An internal handle in a url-labeled field must never enter the web
+	// alias space, where CompactKnownText would rewrite it a second time.
+	require.Contains(t, output, "res://0001")
+	require.NotContains(t, output, "w1")
+	require.Contains(t, output, "d1")
+	require.NotContains(t, output, "doc-real-id")
+
+	registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Output:  `{"url":"https://example.com/page"}`,
+	})
+	require.Equal(t,
+		`<web url="https://example.com/page" title="" />`,
+		registry.ExpandText(`<ref id="w1"/>`),
 	)
 }
