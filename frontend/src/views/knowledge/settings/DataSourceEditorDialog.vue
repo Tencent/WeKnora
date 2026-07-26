@@ -415,6 +415,21 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open-dev.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/document/orgapp/read-knowledge-base-documents',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      '企业内知识库读取权限',
+      '文档读取权限',
+    ],
+    fields: [
+      { key: 'app_key', labelKey: 'datasource.field.appKey', placeholder: 'dingxxxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
