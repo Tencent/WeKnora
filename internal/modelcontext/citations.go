@@ -172,19 +172,15 @@ func (r *sourceRegistry) ExpandText(text string) string {
 			return ""
 		}
 		alias := strings.ToLower(match[1])
-		r.mu.RLock()
-		chunkRef := r.chunkByAlias[alias]
-		webRef := r.webByAlias[alias]
-		r.mu.RUnlock()
-		if chunkRef != nil {
-			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkRef.ChunkID))
+		if chunkID, chunkRef, ok := r.chunks.resolve(alias); ok {
+			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
 			if chunkRef.KnowledgeBaseID != "" {
 				attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
 			}
 			return "<kb " + attrs + " />"
 		}
-		if webRef != nil {
-			return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(webRef.URL), escapeAttr(webRef.Title))
+		if rawURL, web, ok := r.webs.resolve(alias); ok {
+			return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
 		}
 		return ""
 	})

@@ -45,10 +45,10 @@ func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
 	require.Equal(t, "w1", r.RegisterWeb("w1", ""))
 	require.Empty(t, r.RegisterDocument("d99"))
 	require.Empty(t, r.RegisterDocument("c1"), "a chunk handle must not be accepted as a document identity")
-	require.Equal(t, 1, len(r.chunkByAlias))
-	require.Equal(t, 1, len(r.aliasToDoc))
-	require.Equal(t, 1, len(r.aliasToKB))
-	require.Equal(t, 1, len(r.webByAlias))
+	require.Equal(t, 1, r.chunks.size())
+	require.Equal(t, 1, r.docs.size())
+	require.Equal(t, 1, r.kbs.size())
+	require.Equal(t, 1, r.webs.size())
 }
 
 func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {

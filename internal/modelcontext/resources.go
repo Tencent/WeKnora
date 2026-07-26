@@ -4,11 +4,9 @@
 package modelcontext
 
 import (
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -44,17 +42,15 @@ var aliasShapeRE = regexp.MustCompile(`res://\d+`)
 // resourceRegistry assigns low-entropy, request-local aliases to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
 type resourceRegistry struct {
-	mu         sync.RWMutex
-	refToAlias map[string]string
-	aliasToRef map[string]string
+	table *handleTable[struct{}]
 }
 
 // newResourceRegistry creates an empty request-local alias registry.
 func newResourceRegistry() *resourceRegistry {
-	return &resourceRegistry{
-		refToAlias: make(map[string]string),
-		aliasToRef: make(map[string]string),
-	}
+	// A URL-shaped handle (scheme://digits) keeps the token low-entropy while
+	// looking enough like a link that the model reuses it verbatim inside
+	// Markdown image/link syntax instead of reasoning about or rewriting it.
+	return &resourceRegistry{table: newHandleTable[struct{}]("res://", 4, 1)}
 }
 
 // EncodeText replaces stored references with compact, stable aliases.
@@ -63,38 +59,23 @@ func (r *resourceRegistry) EncodeText(value string) string {
 		return value
 	}
 	return storedRefRE.ReplaceAllStringFunc(value, func(ref string) string {
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if alias, ok := r.refToAlias[ref]; ok {
-			return alias
-		}
-		// A URL-shaped alias (scheme://digits) keeps the token low-entropy while
-		// looking enough like a link that the model reuses it verbatim inside
-		// Markdown image/link syntax instead of reasoning about or rewriting it.
-		alias := fmt.Sprintf("res://%04d", len(r.aliasToRef)+1)
-		r.refToAlias[ref] = alias
-		r.aliasToRef[alias] = ref
-		return alias
+		return r.table.register(ref, ref, struct{}{}, nil)
 	})
 }
 
-// DecodeText restores every alias currently known to the registry.
+// DecodeText restores every alias currently known to the registry. Aliases are
+// replaced longest-first with no word-boundary check — this plain substring
+// behavior is load-bearing for handles adjacent to punctuation in Markdown.
 func (r *resourceRegistry) DecodeText(value string) string {
 	if r == nil || value == "" {
 		return value
 	}
-	r.mu.RLock()
-	aliases := make([]string, 0, len(r.aliasToRef))
-	for alias := range r.aliasToRef {
-		aliases = append(aliases, alias)
+	pairs := r.table.pairs()
+	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].handle) > len(pairs[j].handle) })
+	for _, item := range pairs {
+		value = strings.ReplaceAll(value, item.handle, item.value)
 	}
-	sort.SliceStable(aliases, func(i, j int) bool { return len(aliases[i]) > len(aliases[j]) })
-	decoded := value
-	for _, alias := range aliases {
-		decoded = strings.ReplaceAll(decoded, alias, r.aliasToRef[alias])
-	}
-	r.mu.RUnlock()
-	return decoded
+	return value
 }
 
 // StripOrphanAliases removes alias-shaped tokens after all known aliases have
@@ -153,13 +134,8 @@ func (r *resourceRegistry) OrphanAliases(decoded string) []string {
 	var orphans []string
 	seen := make(map[string]struct{})
 	for _, match := range aliasShapeRE.FindAllString(decoded, -1) {
-		if r != nil {
-			r.mu.RLock()
-			_, known := r.aliasToRef[match]
-			r.mu.RUnlock()
-			if known {
-				continue
-			}
+		if r != nil && r.table.has(match) {
+			continue
 		}
 		if _, dup := seen[match]; dup {
 			continue
@@ -171,11 +147,10 @@ func (r *resourceRegistry) OrphanAliases(decoded string) []string {
 }
 
 func (r *resourceRegistry) aliases() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	aliases := make([]string, 0, len(r.aliasToRef))
-	for alias := range r.aliasToRef {
-		aliases = append(aliases, alias)
+	pairs := r.table.pairs()
+	aliases := make([]string, 0, len(pairs))
+	for _, item := range pairs {
+		aliases = append(aliases, item.handle)
 	}
 	return aliases
 }
