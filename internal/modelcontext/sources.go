@@ -258,16 +258,10 @@ func (r *sourceRegistry) ChunkAlias(id string) string {
 	return ""
 }
 
-// DecodeToolCalls restores exact alias-valued JSON strings before tools parse
-// or validate their arguments. It never performs substring replacement.
-func (r *sourceRegistry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
-	r.DecodeToolCallsWithPolicy(toolCalls, nil)
-}
-
 // toolArgumentPolicy decides whether a source-bearing JSON key belongs to a
-// particular tool contract. A nil policy retains the codec's legacy generic
-// behavior; application request lifecycles should provide an explicit policy
-// through Registry.
+// particular tool contract. Request lifecycles always pass the per-tool policy
+// (sourceArgumentAllowed); a nil policy allows every key and exists only for
+// package-internal replay paths that predate per-tool contracts.
 type toolArgumentPolicy func(toolName, key string) bool
 
 // DecodeToolCallsWithPolicy restores aliases only for fields explicitly owned
@@ -319,7 +313,7 @@ func (r *sourceRegistry) collectUnresolvedToolHandles(
 	switch typed := value.(type) {
 	case string:
 		key = strings.ToLower(key)
-		if _, ok := decodableKeys[key]; !ok || !allowed(key) {
+		if _, ok := sourceKeySpaces[key]; !ok || !allowed(key) {
 			return
 		}
 		handle := strings.TrimSpace(typed)
@@ -337,13 +331,9 @@ func (r *sourceRegistry) collectUnresolvedToolHandles(
 	}
 }
 
-// EncodeMessages compacts known real identifiers in assistant tool-call replay.
-func (r *sourceRegistry) EncodeMessages(messages []chat.Message) []chat.Message {
-	return r.EncodeMessagesWithPolicies(messages, nil, nil)
-}
-
-// EncodeMessagesWithPolicies additionally gates source processing for tool
-// result messages. A nil result policy retains the legacy generic behavior.
+// EncodeMessagesWithPolicies compacts known real identifiers in replayed
+// messages and gates source processing for tool results by tool name. A nil
+// policy retains the legacy generic behavior for package-internal callers.
 func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	messages []chat.Message,
 	argumentPolicy toolArgumentPolicy,
@@ -523,27 +513,32 @@ func (r *sourceRegistry) registerToolArgumentValue(key string, value interface{}
 }
 
 // registerSourceIDByKey is the single key→source-space dispatch used for tool
-// arguments, structured tool results, and database rows. Keeping one dispatch
-// stops the recognized key set (and the http/https guard for web references)
-// from drifting between call sites; it must stay in sync with decodableKeys.
+// arguments, structured tool results, and database rows. It is driven by
+// sourceKeySpaces — the same table that gates alias decode — so the recognized
+// key set (and the http/https guard for web references) cannot drift between
+// registration and decoding.
 func (r *sourceRegistry) registerSourceIDByKey(key, value string) {
 	value = strings.TrimSpace(value)
 	if value == "" || shortSourceAliasRE.MatchString(value) {
 		return
 	}
-	switch strings.ToLower(key) {
-	case "chunk_id", "faq_id", "chunk_ids", "faq_ids":
+	space, ok := sourceKeySpaces[strings.ToLower(key)]
+	if !ok {
+		return
+	}
+	switch space {
+	case spaceChunk:
 		r.RegisterChunk(ChunkReference{ChunkID: value})
-	case "knowledge_id", "knowledge_ids", "suspected_knowledge_ids":
+	case spaceDocument:
 		r.RegisterDocument(value)
-	case "source_refs":
+	case spaceDocumentRef:
 		// Stored refs use "knowledgeID|title"; only the ID part is durable.
 		r.RegisterDocument(strings.TrimSpace(strings.SplitN(value, "|", 2)[0]))
-	case "knowledge_base", "knowledge_base_id", "knowledge_base_ids", "kb_id", "kb_ids":
+	case spaceKnowledgeBase:
 		r.RegisterKnowledgeBase(value)
-	case "url", "urls":
+	case spaceWeb:
 		// Only public web pages become web references. Internal schemes
-		// (res://, storage providers) must never enter the web alias space,
+		// (res://, storage providers) must never enter the web handle space,
 		// where CompactKnownText would rewrite them a second time.
 		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 			r.RegisterWeb(value, "")
@@ -567,18 +562,6 @@ func (r *sourceRegistry) decodeJSONWithPolicy(raw string, encode bool, allowed f
 	return string(encoded)
 }
 
-// decodableKeys mirrors the ID-bearing keys recognized by
-// registerToolArgumentValue. Alias -> real substitution on decode is restricted
-// to these keys so that free-text values (e.g. a grep/search query that happens
-// to equal "d1") are never rewritten into internal identifiers.
-var decodableKeys = map[string]struct{}{
-
-	"chunk_id": {}, "faq_id": {}, "chunk_ids": {}, "faq_ids": {},
-	"knowledge_id": {}, "knowledge_ids": {}, "suspected_knowledge_ids": {}, "source_refs": {},
-	"knowledge_base": {}, "knowledge_base_id": {}, "knowledge_base_ids": {}, "kb_id": {}, "kb_ids": {},
-	"url": {}, "urls": {},
-}
-
 func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, allowed func(string) bool) interface{} {
 	switch typed := value.(type) {
 	case string:
@@ -595,7 +578,7 @@ func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, al
 		}
 		// Decode only ID-bearing keys, and only when the value is alias-shaped,
 		// so ordinary strings that coincidentally equal an alias are preserved.
-		if _, ok := decodableKeys[strings.ToLower(key)]; !ok {
+		if _, ok := sourceKeySpaces[strings.ToLower(key)]; !ok {
 			return typed
 		}
 		if !shortSourceAliasRE.MatchString(strings.TrimSpace(typed)) {

@@ -18,6 +18,32 @@ const (
 
 var issueHandleShapeRE = regexp.MustCompile(`^i[1-9][0-9]*$`)
 
+// sourceKeySpace identifies which source-handle space an ID-bearing JSON key
+// belongs to.
+type sourceKeySpace int
+
+const (
+	spaceChunk sourceKeySpace = iota
+	spaceDocument
+	spaceDocumentRef // "knowledgeID|title" stored refs; only the ID is durable
+	spaceKnowledgeBase
+	spaceWeb
+)
+
+// sourceKeySpaces is the single table of ID-bearing keys the source codec
+// understands. It drives both handle registration (registerSourceIDByKey) and
+// the alias-shaped-value decode gate (walkJSON), so registration and decoding
+// cannot drift apart. Every key referenced by a toolHandlePolicies sourceIDKeys
+// set must appear here (enforced by a test).
+var sourceKeySpaces = map[string]sourceKeySpace{
+	"chunk_id": spaceChunk, "faq_id": spaceChunk, "chunk_ids": spaceChunk, "faq_ids": spaceChunk,
+	"knowledge_id": spaceDocument, "knowledge_ids": spaceDocument, "suspected_knowledge_ids": spaceDocument,
+	"source_refs":    spaceDocumentRef,
+	"knowledge_base": spaceKnowledgeBase, "knowledge_base_id": spaceKnowledgeBase,
+	"knowledge_base_ids": spaceKnowledgeBase, "kb_id": spaceKnowledgeBase, "kb_ids": spaceKnowledgeBase,
+	"url": spaceWeb, "urls": spaceWeb,
+}
+
 type toolHandlePolicy struct {
 	sourceIDKeys        map[string]struct{}
 	sourceTextKeys      map[string]struct{}

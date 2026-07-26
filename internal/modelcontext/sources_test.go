@@ -67,41 +67,42 @@ func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 }
 
 func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
-	registry := newSourceRegistry()
+	registry := NewRegistry(true)
 	registry.RegisterDocument("knowledge-uuid-1")
-	registry.RegisterKnowledgeBase("kb-uuid-1")
-	registry.RegisterWeb("https://example.com/page", "Example")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
 
+	// Handles nested inside arrays and objects must decode as long as the key
+	// belongs to the named tool's declared source contract.
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
-			Arguments: `{"knowledge_id":"d1","knowledge_base_ids":["b1"],"url":"w1","chunk_id":"c1"}`,
+			Name:      "list_knowledge_chunks",
+			Arguments: `{"knowledge_id":"d1","filters":{"chunk_id":"c1","faq_id":["c1"]}}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_ids":["kb-uuid-1"],"url":"https://example.com/page","chunk_id":"chunk-uuid-1"}`,
+		`{"knowledge_id":"knowledge-uuid-1","filters":{"chunk_id":"chunk-uuid-1","faq_id":["chunk-uuid-1"]}}`,
 		calls[0].Function.Arguments,
 	)
 }
 
 func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
-	registry := newSourceRegistry()
-	registry.RegisterDocument("knowledge-uuid-1")
-	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
+	registry := NewRegistry(true)
+	registry.RegisterKnowledgeBase("kb-uuid-1")
 
-	// A free-text field (query) whose value coincidentally equals an alias must
-	// be preserved verbatim, while ID-bearing keys still resolve to real IDs.
+	// A free-text field (query) whose value coincidentally equals a handle must
+	// be preserved verbatim, while declared ID-bearing keys resolve to real IDs.
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
-			Arguments: `{"query":"d1","knowledge_id":"d1","content":"see c1 for details","chunk_id":"c1"}`,
+			Name:      "knowledge_search",
+			Arguments: `{"query":"b1","content":"see b1 for details","knowledge_base_ids":["b1"]}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"query":"d1","knowledge_id":"knowledge-uuid-1","content":"see c1 for details","chunk_id":"chunk-uuid-1"}`,
+		`{"query":"b1","content":"see b1 for details","knowledge_base_ids":["kb-uuid-1"]}`,
 		calls[0].Function.Arguments,
 	)
 }
@@ -131,7 +132,7 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 			`web <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
 	}}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Content)
 	require.NotContains(t, encoded[0].Content, "chunk-real")
 	require.NotContains(t, encoded[0].Content, "https://example.com")
@@ -165,7 +166,7 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 		},
 	}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.JSONEq(t, `{"knowledge_base_ids":["b1"],"knowledge_ids":["d1"]}`,
 		encoded[0].ToolCalls[0].Function.Arguments)
 	require.Contains(t, encoded[1].Content, `chunk_id="c1"`)
@@ -185,7 +186,7 @@ func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T
 		Content: `Old rule: cite <kb doc="..." chunk_id="..." />`,
 	}}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.Equal(t, messages[0].Content, encoded[0].Content)
 	require.Zero(t, registry.Count())
 }
@@ -303,9 +304,13 @@ func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
 	require.Contains(t, output, `<knowledge_base_id>b1</knowledge_base_id>`)
 	require.Contains(t, output, `knowledge_id="d1"`)
 
-	toolCalls := []types.LLMToolCall{{Function: types.FunctionCall{Arguments: `{"knowledge_id":"d1","knowledge_base_id":"b1"}`}}}
-	registry.DecodeToolCalls(toolCalls)
-	require.JSONEq(t, `{"knowledge_id":"doc-real-id","knowledge_base_id":"kb-real-id"}`, toolCalls[0].Function.Arguments)
+	toolCalls := []types.LLMToolCall{
+		{Function: types.FunctionCall{Name: "wiki_read_source_doc", Arguments: `{"knowledge_id":"d1"}`}},
+		{Function: types.FunctionCall{Name: "wiki_search", Arguments: `{"knowledge_base_id":"b1"}`}},
+	}
+	registry.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
+	require.JSONEq(t, `{"knowledge_id":"doc-real-id"}`, toolCalls[0].Function.Arguments)
+	require.JSONEq(t, `{"knowledge_base_id":"kb-real-id"}`, toolCalls[1].Function.Arguments)
 }
 
 func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
