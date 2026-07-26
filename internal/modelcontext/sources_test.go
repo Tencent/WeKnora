@@ -1,4 +1,4 @@
-package llmreference
+package modelcontext
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	first := registry.RegisterChunk(ChunkReference{
 		ChunkID:         "chunk-uuid-1",
 		KnowledgeID:     "knowledge-uuid-1",
@@ -33,7 +33,7 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 }
 
 func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
-	r := NewRegistry()
+	r := newSourceRegistry()
 	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))
 	require.Equal(t, "d1", r.RegisterDocument("doc-real"))
 	require.Equal(t, "b1", r.RegisterKnowledgeBase("kb-real"))
@@ -52,12 +52,12 @@ func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
 }
 
 func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
-	registry := NewRegistry(false)
+	registry := newSourceRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
 	registry.RegisterWeb("https://example.com", "Example")
 
-	require.Contains(t, ProtocolPrompt(false), "Source citations are disabled")
-	require.NotContains(t, ProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
+	require.Contains(t, sourceProtocolPrompt(false), "Source citations are disabled")
+	require.NotContains(t, sourceProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
 	require.Equal(t, "knowledge  web ", registry.ExpandText(
 		`knowledge <ref id="c1"/> web <ref id="w1"/>`,
 	))
@@ -67,7 +67,7 @@ func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 }
 
 func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	registry.RegisterDocument("knowledge-uuid-1")
 	registry.RegisterKnowledgeBase("kb-uuid-1")
 	registry.RegisterWeb("https://example.com/page", "Example")
@@ -87,7 +87,7 @@ func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 }
 
 func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	registry.RegisterDocument("knowledge-uuid-1")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
 
@@ -107,9 +107,9 @@ func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
 }
 
 func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
-	expander := NewStreamExpander(registry)
+	expander := newCitationStreamExpander(registry)
 
 	require.Equal(t, "before ", expander.Feed(`before <ref id="`))
 	require.Equal(t, `<kb doc="Doc" chunk_id="chunk-1" /> after`, expander.Feed(`c1"/> after`))
@@ -124,7 +124,7 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 }
 
 func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{{
 		Role: "assistant",
 		Content: `Knowledge <kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" />; ` +
@@ -142,7 +142,7 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 }
 
 func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{
 		{
 			Role: "assistant",
@@ -179,7 +179,7 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 }
 
 func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{{
 		Role:    "system",
 		Content: `Old rule: cite <kb doc="..." chunk_id="..." />`,
@@ -191,7 +191,7 @@ func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T
 }
 
 func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	search := &types.ToolResult{
 		Success: true,
 		Output:  "raw UUID output",
@@ -234,7 +234,7 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 }
 
 func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -253,7 +253,7 @@ func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 }
 
 func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	result := &types.ToolResult{
 		Success: true,
 		Output:  "raw IDs must not be used",
@@ -288,7 +288,7 @@ func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
 }
 
 func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	result := &types.ToolResult{
 		Success: true,
 		Output: `<wiki_page>
@@ -309,7 +309,7 @@ func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
 }
 
 func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -335,7 +335,7 @@ func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
 }
 
 func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Output:  `{"url":"res://0001","knowledge_id":"doc-real-id"}`,

@@ -14,7 +14,6 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -33,10 +32,6 @@ Some durable resources and high-entropy Wiki slugs are represented by request-lo
 - Copy only handles that appeared in supplied context or tool results, preserving them exactly in links, images, and tool arguments.
 - Never invent, edit, or expand any handle. The system restores it after generation.`
 
-// ChunkReference describes a retrieved chunk registered in model context.
-// It aliases the codec type so callers do not need to import llmreference.
-type ChunkReference = llmreference.ChunkReference
-
 // Registry is the single request-scoped boundary between durable application
 // identities and temporary model handles.
 //
@@ -45,7 +40,7 @@ type ChunkReference = llmreference.ChunkReference
 // protected as one resource-like handle before the embedded document ID can be
 // compacted to dN. Callers therefore cannot accidentally reverse the codecs.
 type Registry struct {
-	sources   *llmreference.Registry
+	sources   *sourceRegistry
 	resources *resourceRegistry
 	issues    *HandleTable
 }
@@ -53,7 +48,7 @@ type Registry struct {
 // NewRegistry creates a registry for one model request/Agent execution.
 func NewRegistry(citationsEnabled bool) *Registry {
 	return &Registry{
-		sources:   llmreference.NewRegistry(citationsEnabled),
+		sources:   newSourceRegistry(citationsEnabled),
 		resources: newResourceRegistry(),
 		issues:    NewHandleTable("i", 0, 1),
 	}
@@ -174,7 +169,7 @@ func (r *Registry) StreamDecoder() *StreamDecoder {
 	}
 	return &StreamDecoder{
 		resources: newResourceStreamDecoder(r.resources),
-		sources:   llmreference.NewStreamExpander(r.sources),
+		sources:   newCitationStreamExpander(r.sources),
 		issues:    NewHandleStreamDecoder(r.issues),
 		orphans:   &orphanResourceStreamFilter{},
 	}
@@ -299,7 +294,7 @@ func (r *Registry) DecodeOutputText(text string) string {
 // so callers cannot split handle processing or apply stages in the wrong order.
 type StreamDecoder struct {
 	resources *resourceStreamDecoder
-	sources   *llmreference.StreamExpander
+	sources   *citationStreamExpander
 	issues    *HandleStreamDecoder
 	orphans   *orphanResourceStreamFilter
 }

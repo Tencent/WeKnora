@@ -1,4 +1,4 @@
-package llmreference
+package modelcontext
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 
 // ModelOutput returns a compact, source-centric representation for the LLM.
 // The canonical ToolResult.Output remains untouched for UI, logs and storage.
-func (r *Registry) ModelOutput(result *types.ToolResult) string {
+func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	if result == nil {
 		return ""
 	}
@@ -49,7 +49,7 @@ func (r *Registry) ModelOutput(result *types.ToolResult) string {
 // registerStructuredReferences registers durable IDs found under explicitly
 // labeled keys of a JSON tool result, using the same key dispatch as tool
 // arguments. Non-JSON output is a no-op.
-func (r *Registry) registerStructuredReferences(raw string) {
+func (r *sourceRegistry) registerStructuredReferences(raw string) {
 	var value interface{}
 	if json.Unmarshal([]byte(raw), &value) != nil {
 		return
@@ -72,7 +72,7 @@ func (r *Registry) registerStructuredReferences(raw string) {
 	walk("", value)
 }
 
-func (r *Registry) modelDatabaseQueryOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelDatabaseQueryOutput(rows []map[string]interface{}, fallback string) string {
 	for _, row := range rows {
 		for key, raw := range row {
 			if value, ok := raw.(string); ok {
@@ -83,7 +83,7 @@ func (r *Registry) modelDatabaseQueryOutput(rows []map[string]interface{}, fallb
 	return r.CompactKnownText(fallback)
 }
 
-func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
@@ -164,7 +164,7 @@ type modelChunk struct {
 	inputOrder int
 }
 
-func (r *Registry) modelKnowledgeOutput(mode string, rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]interface{}, fallback string) string {
 	chunks := make([]modelChunk, 0, len(rows))
 	for idx, row := range rows {
 		chunkID := firstNonEmpty(stringValue(row, "chunk_id"), stringValue(row, "faq_id"), stringValue(row, "id"))
@@ -225,7 +225,7 @@ func viewForRow(row map[string]interface{}, mode string) string {
 	return "match"
 }
 
-func (r *Registry) modelKnowledgeChunksOutput(data map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{}, fallback string) string {
 	rows := mapsValue(data["chunks"])
 	title := stringValue(data, "knowledge_title")
 	knowledgeID := stringValue(data, "knowledge_id")
@@ -323,7 +323,7 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	return b.String()
 }
 
-func (r *Registry) modelWebSearchOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
@@ -353,7 +353,7 @@ func (r *Registry) modelWebSearchOutput(rows []map[string]interface{}, fallback 
 	return b.String()
 }
 
-func (r *Registry) modelWebFetchOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
