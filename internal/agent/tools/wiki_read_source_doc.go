@@ -16,10 +16,15 @@ type wikiReadSourceDocTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
+	searchTargets    types.SearchTargets
 }
 
-func NewWikiReadSourceDocTool(knowledgeService interfaces.KnowledgeService, chunkService interfaces.ChunkService) types.Tool {
-	return &wikiReadSourceDocTool{
+func NewWikiReadSourceDocTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+	searchTargets ...types.SearchTargets,
+) types.Tool {
+	tool := &wikiReadSourceDocTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadSourceDoc,
 			`Read or search within a specific source document to drill down for details omitted from the wiki.
@@ -52,6 +57,10 @@ If neither query nor range is provided, it returns the beginning of the document
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
 	}
+	if len(searchTargets) > 0 {
+		tool.searchTargets = searchTargets[0]
+	}
+	return tool
 }
 
 // enrichChunkImageInfo populates chunk.ImageInfo for a batch of parent text
@@ -123,8 +132,17 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 		return &types.ToolResult{Success: false, Error: "knowledge_id is required"}, nil
 	}
 
-	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil {
+	var knowledge *types.Knowledge
+	var err error
+	if len(t.searchTargets) > 0 {
+		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, knowledgeID, t.knowledgeService)
+	} else {
+		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	}
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Document not found: %v", err)}, nil
 	}
 

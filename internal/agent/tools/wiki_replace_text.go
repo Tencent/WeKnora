@@ -15,10 +15,17 @@ type wikiReplaceTextTool struct {
 	wikiPageService  interfaces.WikiPageService
 	knowledgeService interfaces.KnowledgeService
 	kbIDs            []string
+	routes           *WikiRouteResolver
+	searchTargets    types.SearchTargets
 }
 
 // NewWikiReplaceTextTool creates a new wiki_replace_text tool
-func NewWikiReplaceTextTool(wikiPageService interfaces.WikiPageService, kbIDs []string, knowledgeService interfaces.KnowledgeService) types.Tool {
+func NewWikiReplaceTextTool(
+	wikiPageService interfaces.WikiPageService,
+	kbIDs []string,
+	knowledgeService interfaces.KnowledgeService,
+	routes ...*WikiRouteResolver,
+) *wikiReplaceTextTool {
 	return &wikiReplaceTextTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReplaceText,
@@ -50,15 +57,21 @@ func NewWikiReplaceTextTool(wikiPageService interfaces.WikiPageService, kbIDs []
 		wikiPageService:  wikiPageService,
 		knowledgeService: knowledgeService,
 		kbIDs:            kbIDs,
+		routes:           firstWikiRoute(routes),
 	}
+}
+
+func (t *wikiReplaceTextTool) WithSearchTargets(searchTargets types.SearchTargets) *wikiReplaceTextTool {
+	t.searchTargets = searchTargets
+	return t
 }
 
 func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		Slug       string   `json:"slug"`
-		OldText    string   `json:"old_text"`
-		NewText    string   `json:"new_text"`
-		SourceRefs []string `json:"source_refs"`
+		Slug       string    `json:"slug"`
+		OldText    string    `json:"old_text"`
+		NewText    string    `json:"new_text"`
+		SourceRefs *[]string `json:"source_refs"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -68,14 +81,17 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for editing"}, nil
 	}
-	kbID := t.kbIDs[0]
-
 	if params.OldText == "" {
 		return &types.ToolResult{Success: false, Error: "old_text is required"}, nil
 	}
+	normalizedSlug, slugErr := normalizeAndValidateWikiSlug(params.Slug)
+	if slugErr != nil {
+		return &types.ToolResult{Success: false, Error: slugErr.Error()}, nil
+	}
+	params.Slug = normalizedSlug
 
 	// Get the existing page
-	existingPage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, params.Slug)
+	existingPage, _, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}
@@ -86,8 +102,16 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 
 	existingPage.Content = strings.Replace(existingPage.Content, params.OldText, params.NewText, 1)
 
-	if len(params.SourceRefs) > 0 {
-		existingPage.SourceRefs = resolveSourceRefs(ctx, t.knowledgeService, params.SourceRefs)
+	if params.SourceRefs != nil {
+		if len(t.searchTargets) > 0 {
+			resolvedRefs, scopeErr := resolveAuthorizedSourceRefs(ctx, t.searchTargets, *params.SourceRefs, t.knowledgeService)
+			if scopeErr != nil {
+				return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + scopeErr.Error()}, nil
+			}
+			existingPage.SourceRefs = resolvedRefs
+		} else {
+			existingPage.SourceRefs = resolveSourceRefs(ctx, t.knowledgeService, *params.SourceRefs)
+		}
 	}
 
 	_, err = t.wikiPageService.UpdatePage(ctx, existingPage)

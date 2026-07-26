@@ -14,10 +14,15 @@ type wikiRenamePageTool struct {
 	BaseTool
 	wikiPageService interfaces.WikiPageService
 	kbIDs           []string
+	routes          *WikiRouteResolver
 }
 
 // NewWikiRenamePageTool creates a new wiki_rename_page tool
-func NewWikiRenamePageTool(wikiPageService interfaces.WikiPageService, kbIDs []string) types.Tool {
+func NewWikiRenamePageTool(
+	wikiPageService interfaces.WikiPageService,
+	kbIDs []string,
+	routes ...*WikiRouteResolver,
+) types.Tool {
 	return &wikiRenamePageTool{
 		BaseTool: NewBaseTool(
 			ToolWikiRenamePage,
@@ -39,6 +44,7 @@ func NewWikiRenamePageTool(wikiPageService interfaces.WikiPageService, kbIDs []s
 		),
 		wikiPageService: wikiPageService,
 		kbIDs:           kbIDs,
+		routes:          firstWikiRoute(routes),
 	}
 }
 
@@ -55,19 +61,27 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for editing"}, nil
 	}
-	kbID := t.kbIDs[0]
-
 	if params.NewSlug == "" {
 		return &types.ToolResult{Success: false, Error: "new_slug is required"}, nil
 	}
+	normalizedSlug, slugErr := normalizeAndValidateWikiSlug(params.Slug)
+	if slugErr != nil {
+		return &types.ToolResult{Success: false, Error: slugErr.Error()}, nil
+	}
+	params.Slug = normalizedSlug
+	normalizedNewSlug, slugErr := normalizeAndValidateWikiSlug(params.NewSlug)
+	if slugErr != nil {
+		return &types.ToolResult{Success: false, Error: slugErr.Error()}, nil
+	}
+	params.NewSlug = normalizedNewSlug
 	if params.NewSlug == params.Slug {
 		return &types.ToolResult{Success: false, Error: "new_slug must be different from old slug"}, nil
 	}
 
 	// Get existing page
-	existingPage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, params.Slug)
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Page %s not found. Cannot rename a non-existent page.", params.Slug)}, nil
+		return &types.ToolResult{Success: false, Error: "Failed to resolve page to rename: " + err.Error()}, nil
 	}
 
 	inLinks := make([]string, len(existingPage.InLinks))
@@ -75,58 +89,64 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 
 	// Create new page with new slug but same content
 	newPage := &types.WikiPage{
+		TenantID:        existingPage.TenantID,
 		KnowledgeBaseID: kbID,
 		Slug:            params.NewSlug,
 		Title:           existingPage.Title,
 		Summary:         existingPage.Summary,
 		Content:         existingPage.Content,
 		PageType:        existingPage.PageType,
-		Aliases:         existingPage.Aliases,
+		Status:          existingPage.Status,
+		Aliases:         append(types.StringArray(nil), existingPage.Aliases...),
+		ParentSlug:      existingPage.ParentSlug,
+		FolderID:        existingPage.FolderID,
+		SortOrder:       existingPage.SortOrder,
+		SourceRefs:      append(types.StringArray(nil), existingPage.SourceRefs...),
+		ChunkRefs:       append(types.StringArray(nil), existingPage.ChunkRefs...),
+		InLinks:         append(types.StringArray(nil), existingPage.InLinks...),
+		PageMetadata:    append(types.JSON(nil), existingPage.PageMetadata...),
 	}
 	_, err = t.wikiPageService.CreatePage(ctx, newPage)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to create renamed page: " + err.Error()}, nil
 	}
 
-	// Update incoming links in other pages
-	updatedCount := 0
-	var updatedSlugs []string
-	for _, sourceSlug := range inLinks {
-		sourcePage, err := t.wikiPageService.GetPageBySlug(ctx, kbID, sourceSlug)
-		if err == nil {
-			changed := false
-			
-			// Replace [[old-slug]] with [[new-slug]]
-			link1 := "[[" + params.Slug + "]]"
-			newLink1 := "[[" + params.NewSlug + "]]"
-			if strings.Contains(sourcePage.Content, link1) {
-				sourcePage.Content = strings.ReplaceAll(sourcePage.Content, link1, newLink1)
-				changed = true
-			}
-			
-			// Replace [[old-slug|text]] with [[new-slug|text]]
-			link2 := "[[" + params.Slug + "|"
-			newLink2 := "[[" + params.NewSlug + "|"
-			if strings.Contains(sourcePage.Content, link2) {
-				sourcePage.Content = strings.ReplaceAll(sourcePage.Content, link2, newLink2)
-				changed = true
-			}
-
-			if changed {
-				_, updateErr := t.wikiPageService.UpdatePage(ctx, sourcePage)
-				if updateErr == nil {
-					updatedCount++
-					updatedSlugs = append(updatedSlugs, sourceSlug)
-				}
-			}
-		}
+	changes, updatedSlugs, rewriteErr := applyIncomingWikiContentRewrite(
+		ctx, t.wikiPageService, kbID, inLinks,
+		func(content string) (string, bool) {
+			updated := strings.ReplaceAll(
+				content, "[["+params.Slug+"]]", "[["+params.NewSlug+"]]",
+			)
+			updated = strings.ReplaceAll(
+				updated, "[["+params.Slug+"|", "[["+params.NewSlug+"|",
+			)
+			return updated, updated != content
+		},
+	)
+	if rewriteErr != nil {
+		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
+		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
+		return &types.ToolResult{
+			Success: false,
+			Error: "Rename aborted while updating incoming links: " +
+				joinWikiMutationErrors(rewriteErr, rollbackErr, cleanupErr),
+		}, nil
 	}
+	updatedCount := len(updatedSlugs)
 
 	// Delete old page
 	err = t.wikiPageService.DeletePage(ctx, kbID, params.Slug)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Successfully created new page and updated links, but failed to delete old page: " + err.Error()}, nil
+		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
+		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
+		return &types.ToolResult{
+			Success: false,
+			Error: "Rename aborted because the old page could not be deleted: " +
+				joinWikiMutationErrors(err, rollbackErr, cleanupErr),
+		}, nil
 	}
+	t.routes.forget(params.Slug, kbID)
+	t.routes.remember(params.NewSlug, kbID)
 
 	// Inject cross-links so other pages know about this new slug
 	t.wikiPageService.InjectCrossLinks(ctx, kbID, []string{params.NewSlug})
@@ -143,12 +163,12 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Success: true,
 		Output:  outputMsg,
 		Data: map[string]interface{}{
-			"display_type":    "wiki_rename_page",
-			"old_slug":        params.Slug,
-			"new_slug":        params.NewSlug,
-			"title":           existingPage.Title,
-			"updated_count":   updatedCount,
-			"affected_pages":  updatedSlugs,
+			"display_type":   "wiki_rename_page",
+			"old_slug":       params.Slug,
+			"new_slug":       params.NewSlug,
+			"title":          existingPage.Title,
+			"updated_count":  updatedCount,
+			"affected_pages": updatedSlugs,
 		},
 	}, nil
 }

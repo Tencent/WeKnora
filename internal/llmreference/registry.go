@@ -1,7 +1,6 @@
-// Package llmreference keeps internal source identifiers out of LLM-facing
-// context. It assigns request-local aliases to chunks, documents, knowledge
-// bases and web pages, decodes aliases used in tool arguments, and expands the
-// model's compact <ref/> citations before application code consumes them.
+// Package llmreference is the low-level source codec used by modelcontext.
+// Application request lifecycles should depend on modelcontext.Registry so
+// source and resource handles cannot be encoded or decoded out of order.
 package llmreference
 
 import (
@@ -96,6 +95,15 @@ func NewRegistry(citationsEnabled ...bool) *Registry {
 	}
 }
 
+// ProtocolPrompt returns the source protocol configured for this registry.
+// Request lifecycle code should normally call this through modelcontext.Registry.
+func (r *Registry) ProtocolPrompt() string {
+	if r == nil {
+		return ""
+	}
+	return ProtocolPrompt(r.citationsEnabled)
+}
+
 func (r *Registry) Count() int {
 	if r == nil {
 		return 0
@@ -106,7 +114,21 @@ func (r *Registry) Count() int {
 }
 
 func (r *Registry) RegisterChunk(ref ChunkReference) string {
-	if r == nil || strings.TrimSpace(ref.ChunkID) == "" {
+	if r == nil {
+		return ""
+	}
+	ref.ChunkID = strings.TrimSpace(ref.ChunkID)
+	if ref.ChunkID == "" {
+		return ""
+	}
+	if shortSourceAliasRE.MatchString(ref.ChunkID) {
+		alias := strings.ToLower(ref.ChunkID)
+		r.mu.RLock()
+		_, known := r.chunkByAlias[alias]
+		r.mu.RUnlock()
+		if known {
+			return alias
+		}
 		return ""
 	}
 	r.mu.Lock()
@@ -141,7 +163,18 @@ func mergeChunkReference(dst *ChunkReference, src ChunkReference) {
 }
 
 func (r *Registry) RegisterDocument(id string) string {
-	if r == nil || strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if r == nil || id == "" {
+		return ""
+	}
+	if shortSourceAliasRE.MatchString(id) {
+		alias := strings.ToLower(id)
+		r.mu.RLock()
+		_, known := r.aliasToDoc[alias]
+		r.mu.RUnlock()
+		if known {
+			return alias
+		}
 		return ""
 	}
 	r.mu.Lock()
@@ -156,7 +189,18 @@ func (r *Registry) RegisterDocument(id string) string {
 }
 
 func (r *Registry) RegisterKnowledgeBase(id string) string {
-	if r == nil || strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if r == nil || id == "" {
+		return ""
+	}
+	if shortSourceAliasRE.MatchString(id) {
+		alias := strings.ToLower(id)
+		r.mu.RLock()
+		_, known := r.aliasToKB[alias]
+		r.mu.RUnlock()
+		if known {
+			return alias
+		}
 		return ""
 	}
 	r.mu.Lock()
@@ -171,7 +215,18 @@ func (r *Registry) RegisterKnowledgeBase(id string) string {
 }
 
 func (r *Registry) RegisterWeb(rawURL, title string) string {
-	if r == nil || strings.TrimSpace(rawURL) == "" {
+	rawURL = strings.TrimSpace(rawURL)
+	if r == nil || rawURL == "" {
+		return ""
+	}
+	if shortSourceAliasRE.MatchString(rawURL) {
+		alias := strings.ToLower(rawURL)
+		r.mu.RLock()
+		_, known := r.webByAlias[alias]
+		r.mu.RUnlock()
+		if known {
+			return alias
+		}
 		return ""
 	}
 	key := canonicalWebURL(rawURL)
@@ -253,13 +308,94 @@ func (r *Registry) KnowledgeBaseAlias(id string) string {
 // DecodeToolCalls restores exact alias-valued JSON strings before tools parse
 // or validate their arguments. It never performs substring replacement.
 func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
+	r.DecodeToolCallsWithPolicy(toolCalls, nil)
+}
+
+// ToolArgumentPolicy decides whether a source-bearing JSON key belongs to a
+// particular tool contract. A nil policy retains the codec's legacy generic
+// behavior; application request lifecycles should provide an explicit policy
+// through modelcontext.Registry.
+type ToolArgumentPolicy func(toolName, key string) bool
+
+// DecodeToolCallsWithPolicy restores aliases only for fields explicitly owned
+// by the named tool. This prevents dynamic tools with coincidentally named
+// fields from inheriting built-in source semantics.
+func (r *Registry) DecodeToolCallsWithPolicy(toolCalls []types.LLMToolCall, policy ToolArgumentPolicy) {
 	for i := range toolCalls {
-		toolCalls[i].Function.Arguments = r.decodeJSON(toolCalls[i].Function.Arguments, false)
+		toolName := toolCalls[i].Function.Name
+		toolCalls[i].Function.Arguments = r.decodeJSONWithPolicy(
+			toolCalls[i].Function.Arguments,
+			false,
+			func(key string) bool { return policy == nil || policy(toolName, key) },
+		)
+	}
+}
+
+// UnresolvedToolHandlesWithPolicy reports unknown handles only in fields that
+// belong to the named tool's declared source contract.
+func (r *Registry) UnresolvedToolHandlesWithPolicy(
+	toolName, raw string,
+	policy ToolArgumentPolicy,
+) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	r.collectUnresolvedToolHandles(
+		"", value, seen,
+		func(key string) bool { return policy == nil || policy(toolName, key) },
+	)
+	result := make([]string, 0, len(seen))
+	for handle := range seen {
+		result = append(result, handle)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (r *Registry) collectUnresolvedToolHandles(
+	key string,
+	value interface{},
+	seen map[string]struct{},
+	allowed func(string) bool,
+) {
+	switch typed := value.(type) {
+	case string:
+		key = strings.ToLower(key)
+		if _, ok := decodableKeys[key]; !ok || !allowed(key) {
+			return
+		}
+		handle := strings.TrimSpace(typed)
+		if shortSourceAliasRE.MatchString(handle) && (r == nil || r.realForAlias(handle) == "") {
+			seen[handle] = struct{}{}
+		}
+	case []interface{}:
+		for _, item := range typed {
+			r.collectUnresolvedToolHandles(key, item, seen, allowed)
+		}
+	case map[string]interface{}:
+		for childKey, item := range typed {
+			r.collectUnresolvedToolHandles(childKey, item, seen, allowed)
+		}
 	}
 }
 
 // EncodeMessages compacts known real identifiers in assistant tool-call replay.
 func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
+	return r.EncodeMessagesWithPolicies(messages, nil, nil)
+}
+
+// EncodeMessagesWithPolicies additionally gates source processing for tool
+// result messages. A nil result policy retains the legacy generic behavior.
+func (r *Registry) EncodeMessagesWithPolicies(
+	messages []chat.Message,
+	argumentPolicy ToolArgumentPolicy,
+	resultPolicy func(toolName string) bool,
+) []chat.Message {
 	if r == nil || len(messages) == 0 {
 		return messages
 	}
@@ -269,14 +405,15 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 	// and canonical assistant citations. This two-pass shape lets an early tool
 	// message reuse metadata that appears only in the turn's final answer.
 	for i := range out {
-		if out[i].Role == "assistant" || out[i].Role == "tool" {
+		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
+		if out[i].Role == "assistant" || processToolResult {
 			out[i].Content = r.CompactPublicCitations(out[i].Content)
 			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent)
 		}
 		if len(out[i].MultiContent) > 0 {
 			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)
 			for j := range out[i].MultiContent {
-				if out[i].MultiContent[j].Type == "text" && (out[i].Role == "assistant" || out[i].Role == "tool") {
+				if out[i].MultiContent[j].Type == "text" && (out[i].Role == "assistant" || processToolResult) {
 					out[i].MultiContent[j].Text = r.CompactPublicCitations(out[i].MultiContent[j].Text)
 				}
 			}
@@ -284,25 +421,126 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 		if len(out[i].ToolCalls) > 0 {
 			out[i].ToolCalls = append([]chat.ToolCall(nil), out[i].ToolCalls...)
 			for j := range out[i].ToolCalls {
-				r.registerToolArguments(out[i].ToolCalls[j].Function.Arguments)
+				toolName := out[i].ToolCalls[j].Function.Name
+				r.registerToolArguments(
+					out[i].ToolCalls[j].Function.Arguments,
+					func(key string) bool { return argumentPolicy == nil || argumentPolicy(toolName, key) },
+				)
 			}
 		}
 	}
 	for i := range out {
-		if out[i].Role == "tool" {
+		if out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name)) {
 			r.registerLegacyToolReferences(out[i].Content)
 			out[i].Content = r.CompactKnownText(out[i].Content)
 		}
 		for j := range out[i].ToolCalls {
-			out[i].ToolCalls[j].Function.Arguments = r.decodeJSON(out[i].ToolCalls[j].Function.Arguments, true)
+			toolName := out[i].ToolCalls[j].Function.Name
+			out[i].ToolCalls[j].Function.Arguments = r.decodeJSONWithPolicy(
+				out[i].ToolCalls[j].Function.Arguments,
+				true,
+				func(key string) bool { return argumentPolicy == nil || argumentPolicy(toolName, key) },
+			)
 		}
 	}
 	return out
 }
 
 var shortSourceAliasRE = regexp.MustCompile(`(?i)^[cdbw][1-9][0-9]*$`)
+var shortSourceAliasInTextRE = regexp.MustCompile(`(?i)\b[cdbw][1-9][0-9]*\b`)
 
-func (r *Registry) registerToolArguments(raw string) {
+// DecodeKnownText restores registered source handles embedded in a structured
+// expression such as a built-in SQL tool argument. It must not be used for
+// arbitrary prose; modelcontext owns the small tool/key policy that calls it.
+func (r *Registry) DecodeKnownText(text string) string {
+	if r == nil || text == "" {
+		return text
+	}
+	return shortSourceAliasInTextRE.ReplaceAllStringFunc(text, func(handle string) string {
+		if real := r.realForAlias(handle); real != "" {
+			return real
+		}
+		return handle
+	})
+}
+
+// DecodeKnownQuotedText restores source handles only inside single-quoted,
+// double-quoted, or backtick-quoted segments. It is intended for structured
+// expressions such as SQL, where replacing an unquoted token could corrupt a
+// legitimate table/column alias that happens to look like d1 or b2.
+func (r *Registry) DecodeKnownQuotedText(text string) string {
+	if r == nil || text == "" {
+		return text
+	}
+	return rewriteQuotedText(text, func(segment string) string {
+		return shortSourceAliasInTextRE.ReplaceAllStringFunc(segment, func(handle string) string {
+			if real := r.realForAlias(handle); real != "" {
+				return real
+			}
+			return handle
+		})
+	})
+}
+
+// UnresolvedQuotedTextHandles reports alias-shaped values inside quoted
+// structured-text segments that do not exist in this request registry.
+func (r *Registry) UnresolvedQuotedTextHandles(text string) []string {
+	if text == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	rewriteQuotedText(text, func(segment string) string {
+		for _, handle := range shortSourceAliasInTextRE.FindAllString(segment, -1) {
+			if r == nil || r.realForAlias(handle) == "" {
+				seen[handle] = struct{}{}
+			}
+		}
+		return segment
+	})
+	result := make([]string, 0, len(seen))
+	for handle := range seen {
+		result = append(result, handle)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func rewriteQuotedText(text string, rewrite func(string) string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+	for i := 0; i < len(text); {
+		quote := text[i]
+		if quote != '\'' && quote != '"' && quote != '`' {
+			out.WriteByte(text[i])
+			i++
+			continue
+		}
+		start := i
+		i++
+		for i < len(text) {
+			if text[i] == '\\' && i+1 < len(text) {
+				i += 2
+				continue
+			}
+			if text[i] != quote {
+				i++
+				continue
+			}
+			// SQL escapes a quote by doubling it (''). Keep scanning the
+			// same literal instead of treating the first quote as its end.
+			if i+1 < len(text) && text[i+1] == quote {
+				i += 2
+				continue
+			}
+			i++
+			break
+		}
+		out.WriteString(rewrite(text[start:i]))
+	}
+	return out.String()
+}
+
+func (r *Registry) registerToolArguments(raw string, allowed func(string) bool) {
 	if r == nil || strings.TrimSpace(raw) == "" {
 		return
 	}
@@ -310,35 +548,51 @@ func (r *Registry) registerToolArguments(raw string) {
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return
 	}
-	r.registerToolArgumentValue("", value)
+	r.registerToolArgumentValue("", value, allowed)
 }
 
-func (r *Registry) registerToolArgumentValue(key string, value interface{}) {
+func (r *Registry) registerToolArgumentValue(key string, value interface{}, allowed func(string) bool) {
 	switch typed := value.(type) {
 	case string:
-		value := strings.TrimSpace(typed)
-		if value == "" || shortSourceAliasRE.MatchString(value) {
-			return
-		}
-		switch strings.ToLower(key) {
-		case "chunk_id", "faq_id", "chunk_ids", "faq_ids":
-			r.RegisterChunk(ChunkReference{ChunkID: value})
-		case "knowledge_id", "knowledge_ids", "suspected_knowledge_ids", "source_refs":
-			r.RegisterDocument(value)
-		case "knowledge_base", "knowledge_base_id", "knowledge_base_ids", "kb_id", "kb_ids":
-			r.RegisterKnowledgeBase(value)
-		case "url", "urls":
-			if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
-				r.RegisterWeb(value, "")
-			}
+		if allowed(strings.ToLower(key)) {
+			r.registerSourceIDByKey(key, typed)
 		}
 	case []interface{}:
 		for _, item := range typed {
-			r.registerToolArgumentValue(key, item)
+			r.registerToolArgumentValue(key, item, allowed)
 		}
 	case map[string]interface{}:
 		for childKey, item := range typed {
-			r.registerToolArgumentValue(childKey, item)
+			r.registerToolArgumentValue(childKey, item, allowed)
+		}
+	}
+}
+
+// registerSourceIDByKey is the single key→source-space dispatch used for tool
+// arguments, structured tool results, and database rows. Keeping one dispatch
+// stops the recognized key set (and the http/https guard for web references)
+// from drifting between call sites; it must stay in sync with decodableKeys.
+func (r *Registry) registerSourceIDByKey(key, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" || shortSourceAliasRE.MatchString(value) {
+		return
+	}
+	switch strings.ToLower(key) {
+	case "chunk_id", "faq_id", "chunk_ids", "faq_ids":
+		r.RegisterChunk(ChunkReference{ChunkID: value})
+	case "knowledge_id", "knowledge_ids", "suspected_knowledge_ids":
+		r.RegisterDocument(value)
+	case "source_refs":
+		// Stored refs use "knowledgeID|title"; only the ID part is durable.
+		r.RegisterDocument(strings.TrimSpace(strings.SplitN(value, "|", 2)[0]))
+	case "knowledge_base", "knowledge_base_id", "knowledge_base_ids", "kb_id", "kb_ids":
+		r.RegisterKnowledgeBase(value)
+	case "url", "urls":
+		// Only public web pages become web references. Internal schemes
+		// (res://, storage providers) must never enter the web alias space,
+		// where CompactKnownText would rewrite them a second time.
+		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+			r.RegisterWeb(value, "")
 		}
 	}
 }
@@ -412,7 +666,7 @@ func publicAttr(expression *regexp.Regexp, tag string) string {
 	return html.UnescapeString(match[1])
 }
 
-func (r *Registry) decodeJSON(raw string, encode bool) string {
+func (r *Registry) decodeJSONWithPolicy(raw string, encode bool, allowed func(string) bool) string {
 	if r == nil || strings.TrimSpace(raw) == "" {
 		return raw
 	}
@@ -420,7 +674,7 @@ func (r *Registry) decodeJSON(raw string, encode bool) string {
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return raw
 	}
-	value = r.walkJSON("", value, encode)
+	value = r.walkJSON("", value, encode, allowed)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return raw
@@ -439,9 +693,12 @@ var decodableKeys = map[string]struct{}{
 	"url": {}, "urls": {},
 }
 
-func (r *Registry) walkJSON(key string, value interface{}, encode bool) interface{} {
+func (r *Registry) walkJSON(key string, value interface{}, encode bool, allowed func(string) bool) interface{} {
 	switch typed := value.(type) {
 	case string:
+		if !allowed(strings.ToLower(key)) {
+			return typed
+		}
 		if encode {
 			// Encode matches on exact real identifiers (UUIDs/URLs), which do
 			// not collide with prose, so it stays key-agnostic.
@@ -464,11 +721,11 @@ func (r *Registry) walkJSON(key string, value interface{}, encode bool) interfac
 		return typed
 	case []interface{}:
 		for i := range typed {
-			typed[i] = r.walkJSON(key, typed[i], encode)
+			typed[i] = r.walkJSON(key, typed[i], encode, allowed)
 		}
 	case map[string]interface{}:
 		for childKey, item := range typed {
-			typed[childKey] = r.walkJSON(childKey, item, encode)
+			typed[childKey] = r.walkJSON(childKey, item, encode, allowed)
 		}
 	}
 	return value
@@ -493,6 +750,7 @@ func (r *Registry) aliasForRealValue(real string) string {
 }
 
 func (r *Registry) realForAlias(alias string) string {
+	alias = strings.ToLower(strings.TrimSpace(alias))
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if ref := r.chunkByAlias[alias]; ref != nil {
@@ -536,45 +794,10 @@ func (r *Registry) CompactKnownText(text string) string {
 	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].real) > len(pairs[j].real) })
 	for _, item := range pairs {
 		if item.real != "" {
-			text = replaceIDExceptWikiSummarySlug(text, item.real, item.alias)
+			text = strings.ReplaceAll(text, item.real, item.alias)
 		}
 	}
 	return text
-}
-
-// wikiSummarySlugPrefix guards wiki summary-page slugs (summary/<knowledgeID>)
-// from citation compaction. A summary slug embeds a document's knowledge ID
-// verbatim, so a blind ReplaceAll of that ID into its citation alias (d1) would
-// mangle the slug into summary/d1 — an unrecoverable dead link the model then
-// copies into wiki tool calls. Only the slug-embedded occurrence is preserved;
-// the same document ID elsewhere in the text still compacts normally.
-const wikiSummarySlugPrefix = "summary/"
-
-// replaceIDExceptWikiSummarySlug replaces every occurrence of real with alias,
-// except one that is immediately preceded by "summary/" (i.e. it is the
-// identifier segment of a wiki summary-page slug). Go's regexp package has no
-// lookbehind, so the scan is done manually.
-func replaceIDExceptWikiSummarySlug(text, real, alias string) string {
-	if real == "" || !strings.Contains(text, real) {
-		return text
-	}
-	var b strings.Builder
-	b.Grow(len(text))
-	for {
-		i := strings.Index(text, real)
-		if i < 0 {
-			b.WriteString(text)
-			break
-		}
-		b.WriteString(text[:i])
-		if strings.HasSuffix(text[:i], wikiSummarySlugPrefix) {
-			b.WriteString(real) // part of a summary slug — keep intact
-		} else {
-			b.WriteString(alias)
-		}
-		text = text[i+len(real):]
-	}
-	return b.String()
 }
 
 var (

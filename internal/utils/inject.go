@@ -1118,15 +1118,15 @@ func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
 		}
 		kbID := quoteString(scope.KnowledgeBaseID)
 		switch {
-		case len(scope.KnowledgeIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND %s.id IN (%s))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
-			))
 		case len(scope.TagIDs) > 0:
 			clauses = append(clauses, fmt.Sprintf(
 				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))",
 				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
 			))
 		default:
 			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
@@ -1143,15 +1143,15 @@ func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
 		}
 		kbID := quoteString(scope.KnowledgeBaseID)
 		switch {
-		case len(scope.KnowledgeIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND %s.knowledge_id IN (%s))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
-			))
 		case len(scope.TagIDs) > 0:
 			clauses = append(clauses, fmt.Sprintf(
 				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))",
 				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.knowledge_id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
 			))
 		default:
 			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))

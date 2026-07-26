@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,9 +22,9 @@ import (
 // wikiLinkRegex matches [[wiki-link]] syntax in markdown content
 var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
-// wikiInlineChunkCitationRegex matches internal short aliases emitted by the
+// wikiInlineChunkCitationRegex matches internal short handles emitted by the
 // wiki ingest prompt while it classifies supporting chunks. The stable source
-// relationship lives in WikiPage.ChunkRefs, so these aliases have no meaning
+// relationship lives in WikiPage.ChunkRefs, so these handles have no meaning
 // to readers and must not leak into generated Markdown.
 var wikiInlineChunkCitationRegex = regexp.MustCompile(`[ \t]*\[c\d{3,}(?:\s*[,;]\s*c\d{3,})*\]`)
 
@@ -130,12 +131,14 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		existing.Content != page.Content ||
 		existing.Summary != page.Summary ||
 		existing.PageType != page.PageType ||
-		existing.Status != page.Status
+		existing.Status != page.Status ||
+		!slices.Equal(existing.Aliases, page.Aliases)
 
 	existing.Title = page.Title
 	existing.Content = page.Content
 	existing.Summary = page.Summary
 	existing.PageType = page.PageType
+	existing.Aliases = append(types.StringArray(nil), page.Aliases...)
 	existing.SourceRefs = page.SourceRefs
 	existing.ChunkRefs = page.ChunkRefs
 	existing.PageMetadata = page.PageMetadata

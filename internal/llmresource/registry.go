@@ -1,5 +1,6 @@
-// Package llmresource shortens stored-resource references while they are in an
-// LLM context and restores them before application code consumes the output.
+// Package llmresource is the low-level durable-resource codec used by
+// modelcontext. Application request lifecycles should not coordinate it
+// independently from source-reference handling.
 package llmresource
 
 import (
@@ -38,7 +39,7 @@ var storedRefRE = regexp.MustCompile(
 // aliasShapeRE matches the alias syntax produced by EncodeText. It is used only
 // to spot alias-shaped tokens the model emitted that the registry cannot map
 // back — either a hallucinated reference or a coincidental collision.
-var aliasShapeRE = regexp.MustCompile(`res://\d{4,}`)
+var aliasShapeRE = regexp.MustCompile(`res://\d+`)
 
 // Registry assigns low-entropy, request-local aliases to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
@@ -94,6 +95,16 @@ func (r *Registry) DecodeText(value string) string {
 	}
 	r.mu.RUnlock()
 	return decoded
+}
+
+// StripOrphanAliases removes alias-shaped tokens after all known aliases have
+// been restored. Use this only on model output; tool arguments must retain
+// unknown aliases long enough for modelcontext to reject the call.
+func (r *Registry) StripOrphanAliases(value string) string {
+	if value == "" {
+		return value
+	}
+	return aliasShapeRE.ReplaceAllString(value, "")
 }
 
 // EncodeMessages returns a copied message slice with textual references
@@ -201,6 +212,9 @@ func (d *StreamDecoder) Feed(chunk string) string {
 	d.pending = ""
 	hold := 0
 	for _, alias := range d.registry.aliases() {
+		// A provider may split the token at any byte boundary, including
+		// "re" + "s://0001". Holding at most the short matching suffix is the
+		// only way to guarantee that a request-local handle never leaks.
 		for n := 1; n < len(alias); n++ {
 			if n > hold && strings.HasSuffix(combined, alias[:n]) {
 				hold = n

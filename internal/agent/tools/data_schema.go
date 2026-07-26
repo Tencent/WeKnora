@@ -25,6 +25,13 @@ type DataSchemaTool struct {
 	knowledgeService interfaces.KnowledgeService
 	chunkRepo        interfaces.ChunkRepository
 	targetChunkTypes []types.ChunkType
+	searchTargets    types.SearchTargets
+}
+
+// WithSearchTargets enables Agent request-scope authorization.
+func (t *DataSchemaTool) WithSearchTargets(searchTargets types.SearchTargets) *DataSchemaTool {
+	t.searchTargets = searchTargets
+	return t
 }
 
 func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo interfaces.ChunkRepository, targetChunkTypes ...types.ChunkType) *DataSchemaTool {
@@ -50,8 +57,17 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}
 
 	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)
-	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
-	if err != nil {
+	var knowledge *types.Knowledge
+	var err error
+	if len(t.searchTargets) > 0 {
+		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService)
+	} else {
+		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
+	}
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to get knowledge '%s': %v", input.KnowledgeID, err),
@@ -73,10 +89,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		page,
 		chunkTypes,
 		nil, // tagIDs
-		"", // keyword
-		"", // searchField
-		"", // sortOrder
-		"", // knowledgeType
+		"",  // keyword
+		"",  // searchField
+		"",  // sortOrder
+		"",  // knowledgeType
 	)
 	if err != nil {
 		return &types.ToolResult{
