@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -89,6 +90,9 @@ type MigrationOptions struct {
 	// AutoRecoverDirty when true, automatically attempts to recover from dirty state
 	// by forcing to the previous version and retrying the migration
 	AutoRecoverDirty bool
+	// FailOnDirty disables automatic recovery for databases such as MySQL
+	// whose DDL implicitly commits and may leave partially applied schemas.
+	FailOnDirty bool
 
 	// SQLiteDBPath is the raw filesystem path to the SQLite database file.
 	// When set, the migrator opens the DB directly via sql.Open instead of
@@ -103,10 +107,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
-	}
+	migrationsPath := migrationPathForDSN(dsn)
 
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
@@ -160,6 +161,12 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	// If database is in dirty state, try to recover or return error
 	if oldDirty {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
+		if opts.FailOnDirty {
+			return captureMigrationFailure(m, fmt.Errorf(
+				"database migration is dirty at version %d; automatic recovery is disabled because MySQL DDL is non-transactional",
+				oldVersion,
+			))
+		}
 		if opts.AutoRecoverDirty {
 			logger.Infof(ctx, "AutoRecoverDirty is enabled, attempting recovery...")
 			if err := recoverFromDirtyState(ctx, m, oldVersion); err != nil {
@@ -198,6 +205,12 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		currentVersion, currentDirty, versionCheckErr := m.Version()
 		if versionCheckErr == nil && currentDirty {
 			logger.Warnf(ctx, "Migration caused dirty state at version %d", currentVersion)
+			if opts.FailOnDirty {
+				return captureMigrationFailure(m, fmt.Errorf(
+					"database migration became dirty at version %d; inspect or recreate the MySQL schema before retrying",
+					currentVersion,
+				))
+			}
 			if opts.AutoRecoverDirty {
 				logger.Infof(ctx, "Attempting to recover from dirty state...")
 				// Try to recover and retry
@@ -298,20 +311,38 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 	return nil
 }
 
+func migrationPathForDSN(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "sqlite3://"):
+		return "file://migrations/sqlite"
+	case strings.HasPrefix(dsn, "mysql://"):
+		return "file://migrations/mysql"
+	default:
+		return "file://migrations/versioned"
+	}
+}
+
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
+	var dsn string
+	if os.Getenv("DB_DRIVER") == "mysql" {
+		cfg, err := BuildMySQLConfig(os.Getenv)
+		if err != nil {
+			return 0, false, err
+		}
+		dsn = cfg.MigrationURL
+	} else {
+		dsn = fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+	}
 
-	migrationsPath := "file://migrations/versioned"
-
-	m, err := migrate.New(migrationsPath, dbURL)
+	m, err := migrate.New(migrationPathForDSN(dsn), dsn)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}

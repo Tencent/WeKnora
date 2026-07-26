@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -152,7 +153,7 @@ func (r *messageRepository) GetMessageByRequestID(
 	return &message, nil
 }
 
-// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+// SearchMessagesByKeyword performs a case-insensitive keyword search across a tenant's sessions.
 func (r *messageRepository) SearchMessagesByKeyword(
 	ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int,
 ) ([]*types.MessageWithSession, error) {
@@ -168,7 +169,8 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(database.CaseInsensitiveMatch(r.db.Dialector.Name(), "messages.content"),
+			"%"+escapeLikeKeyword(keyword)+"%")
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)

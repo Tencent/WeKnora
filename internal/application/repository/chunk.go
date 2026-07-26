@@ -357,22 +357,17 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
-		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		isEnabledArgs = append(isEnabledArgs, chunk.ID, chunk.IsEnabled)
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
 
 		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
+		flagsArgs = append(flagsArgs, chunk.ID, int(chunk.Flags))
 
 		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
+		statusArgs = append(statusArgs, chunk.ID, int(chunk.Status))
 	}
 
 	// Build IN clause placeholders
@@ -414,6 +409,10 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(inPlaceholders, ","),
 		)
 	} else {
+		nowExpression := "datetime('now')"
+		if r.db.Dialector.Name() == "mysql" {
+			nowExpression = "NOW(6)"
+		}
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -421,7 +420,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -429,6 +428,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowExpression,
 			strings.Join(inPlaceholders, ","),
 		)
 	}
