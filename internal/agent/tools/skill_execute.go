@@ -47,6 +47,46 @@ type ExecuteSkillScriptInput struct {
 	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
 }
 
+// UnmarshalJSON accepts args as either the documented string array or a single
+// command-line string. Some model providers emit a string for a single tool
+// argument; accepting it here keeps that malformed-but-unambiguous call from
+// failing before the script can run.
+func (i *ExecuteSkillScriptInput) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		SkillName  string          `json:"skill_name"`
+		ScriptPath string          `json:"script_path"`
+		Args       json.RawMessage `json:"args"`
+		Input      string          `json:"input"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	i.SkillName = raw.SkillName
+	i.ScriptPath = raw.ScriptPath
+	i.Input = raw.Input
+	i.Args = nil
+
+	if len(raw.Args) == 0 || string(raw.Args) == "null" {
+		return nil
+	}
+
+	if err := json.Unmarshal(raw.Args, &i.Args); err == nil {
+		return nil
+	}
+
+	var argsString string
+	if err := json.Unmarshal(raw.Args, &argsString); err != nil {
+		return fmt.Errorf("args must be a string or an array of strings: %w", err)
+	}
+
+	// A string is interpreted as a conventional space-separated command line.
+	// The tool schema continues to advertise []string, so well-formed calls are
+	// unaffected; this is only a compatibility fallback for model output.
+	i.Args = strings.Fields(argsString)
+	return nil
+}
+
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox
 type ExecuteSkillScriptTool struct {
 	BaseTool
