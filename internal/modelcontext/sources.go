@@ -7,19 +7,16 @@ package modelcontext
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type ChunkReference struct {
-	Alias           string
 	ChunkID         string
 	KnowledgeID     string
 	KnowledgeBaseID string
@@ -28,27 +25,20 @@ type ChunkReference struct {
 	ChunkType       string
 }
 
-type WebReference struct {
-	Alias string
-	URL   string
-	Title string
+// webMeta is the per-web-page metadata stored next to the raw URL.
+type webMeta struct {
+	title string
 }
 
 // sourceRegistry is scoped to one assistant response (including every Agent tool
-// round). Aliases are never persisted or accepted across requests.
+// round). Handles are never persisted or accepted across requests.
 type sourceRegistry struct {
-	mu sync.RWMutex
-
 	citationsEnabled bool
 
-	chunkByID    map[string]*ChunkReference
-	chunkByAlias map[string]*ChunkReference
-	docToAlias   map[string]string
-	aliasToDoc   map[string]string
-	kbToAlias    map[string]string
-	aliasToKB    map[string]string
-	webByURL     map[string]*WebReference
-	webByAlias   map[string]*WebReference
+	chunks *handleTable[ChunkReference]
+	docs   *handleTable[struct{}]
+	kbs    *handleTable[struct{}]
+	webs   *handleTable[webMeta]
 }
 
 func newSourceRegistry(citationsEnabled ...bool) *sourceRegistry {
@@ -58,14 +48,10 @@ func newSourceRegistry(citationsEnabled ...bool) *sourceRegistry {
 	}
 	return &sourceRegistry{
 		citationsEnabled: enabled,
-		chunkByID:        make(map[string]*ChunkReference),
-		chunkByAlias:     make(map[string]*ChunkReference),
-		docToAlias:       make(map[string]string),
-		aliasToDoc:       make(map[string]string),
-		kbToAlias:        make(map[string]string),
-		aliasToKB:        make(map[string]string),
-		webByURL:         make(map[string]*WebReference),
-		webByAlias:       make(map[string]*WebReference),
+		chunks:           newHandleTable[ChunkReference]("c", 0, 1),
+		docs:             newHandleTable[struct{}]("d", 0, 1),
+		kbs:              newHandleTable[struct{}]("b", 0, 1),
+		webs:             newHandleTable[webMeta]("w", 0, 1),
 	}
 }
 
@@ -73,9 +59,18 @@ func (r *sourceRegistry) Count() int {
 	if r == nil {
 		return 0
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.chunkByAlias) + len(r.webByAlias)
+	return r.chunks.size() + r.webs.size()
+}
+
+// knownHandle implements the shared guard for handle-shaped registration
+// input: a model-emitted handle is echoed back only when it already exists,
+// and is never accepted as a new durable identity.
+func knownHandle[M any](table *handleTable[M], id string) string {
+	handle := strings.ToLower(id)
+	if table.has(handle) {
+		return handle
+	}
+	return ""
 }
 
 func (r *sourceRegistry) RegisterChunk(ref ChunkReference) string {
@@ -87,26 +82,9 @@ func (r *sourceRegistry) RegisterChunk(ref ChunkReference) string {
 		return ""
 	}
 	if shortSourceAliasRE.MatchString(ref.ChunkID) {
-		alias := strings.ToLower(ref.ChunkID)
-		r.mu.RLock()
-		_, known := r.chunkByAlias[alias]
-		r.mu.RUnlock()
-		if known {
-			return alias
-		}
-		return ""
+		return knownHandle(r.chunks, ref.ChunkID)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if existing := r.chunkByID[ref.ChunkID]; existing != nil {
-		mergeChunkReference(existing, ref)
-		return existing.Alias
-	}
-	ref.Alias = fmt.Sprintf("c%d", len(r.chunkByAlias)+1)
-	copyRef := ref
-	r.chunkByID[ref.ChunkID] = &copyRef
-	r.chunkByAlias[ref.Alias] = &copyRef
-	return ref.Alias
+	return r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
 }
 
 func mergeChunkReference(dst *ChunkReference, src ChunkReference) {
@@ -133,24 +111,9 @@ func (r *sourceRegistry) RegisterDocument(id string) string {
 		return ""
 	}
 	if shortSourceAliasRE.MatchString(id) {
-		alias := strings.ToLower(id)
-		r.mu.RLock()
-		_, known := r.aliasToDoc[alias]
-		r.mu.RUnlock()
-		if known {
-			return alias
-		}
-		return ""
+		return knownHandle(r.docs, id)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if alias := r.docToAlias[id]; alias != "" {
-		return alias
-	}
-	alias := fmt.Sprintf("d%d", len(r.aliasToDoc)+1)
-	r.docToAlias[id] = alias
-	r.aliasToDoc[alias] = id
-	return alias
+	return r.docs.register(id, id, struct{}{}, nil)
 }
 
 func (r *sourceRegistry) RegisterKnowledgeBase(id string) string {
@@ -159,24 +122,9 @@ func (r *sourceRegistry) RegisterKnowledgeBase(id string) string {
 		return ""
 	}
 	if shortSourceAliasRE.MatchString(id) {
-		alias := strings.ToLower(id)
-		r.mu.RLock()
-		_, known := r.aliasToKB[alias]
-		r.mu.RUnlock()
-		if known {
-			return alias
-		}
-		return ""
+		return knownHandle(r.kbs, id)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if alias := r.kbToAlias[id]; alias != "" {
-		return alias
-	}
-	alias := fmt.Sprintf("b%d", len(r.aliasToKB)+1)
-	r.kbToAlias[id] = alias
-	r.aliasToKB[alias] = id
-	return alias
+	return r.kbs.register(id, id, struct{}{}, nil)
 }
 
 func (r *sourceRegistry) RegisterWeb(rawURL, title string) string {
@@ -185,32 +133,15 @@ func (r *sourceRegistry) RegisterWeb(rawURL, title string) string {
 		return ""
 	}
 	if shortSourceAliasRE.MatchString(rawURL) {
-		alias := strings.ToLower(rawURL)
-		r.mu.RLock()
-		_, known := r.webByAlias[alias]
-		r.mu.RUnlock()
-		if known {
-			return alias
+		return knownHandle(r.webs, rawURL)
+	}
+	// Dedup on the canonical (fragment-stripped) URL while decoding back to
+	// the raw URL the model was originally shown.
+	return r.webs.register(canonicalWebURL(rawURL), rawURL, webMeta{title: title}, func(dst *webMeta, src webMeta) {
+		if dst.title == "" && src.title != "" {
+			dst.title = src.title
 		}
-		return ""
-	}
-	key := canonicalWebURL(rawURL)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if existing := r.webByURL[key]; existing != nil {
-		if existing.Title == "" && title != "" {
-			existing.Title = title
-		}
-		return existing.Alias
-	}
-	ref := &WebReference{
-		Alias: fmt.Sprintf("w%d", len(r.webByAlias)+1),
-		URL:   rawURL,
-		Title: title,
-	}
-	r.webByURL[key] = ref
-	r.webByAlias[ref.Alias] = ref
-	return ref.Alias
+	})
 }
 
 func canonicalWebURL(raw string) string {
@@ -250,12 +181,8 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (r *sourceRegistry) ChunkAlias(id string) string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if ref := r.chunkByID[id]; ref != nil {
-		return ref.Alias
-	}
-	return ""
+	handle, _ := r.chunks.handleForKey(id)
+	return handle
 }
 
 // toolArgumentPolicy decides whether a source-bearing JSON key belongs to a
@@ -601,38 +528,34 @@ func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, al
 }
 
 func (r *sourceRegistry) aliasForRealValue(real string) string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if ref := r.chunkByID[real]; ref != nil {
-		return ref.Alias
+	if handle, ok := r.chunks.handleForKey(real); ok {
+		return handle
 	}
-	if alias := r.docToAlias[real]; alias != "" {
-		return alias
+	if handle, ok := r.docs.handleForKey(real); ok {
+		return handle
 	}
-	if alias := r.kbToAlias[real]; alias != "" {
-		return alias
+	if handle, ok := r.kbs.handleForKey(real); ok {
+		return handle
 	}
-	if ref := r.webByURL[canonicalWebURL(real)]; ref != nil {
-		return ref.Alias
+	if handle, ok := r.webs.handleForKey(canonicalWebURL(real)); ok {
+		return handle
 	}
 	return ""
 }
 
 func (r *sourceRegistry) realForAlias(alias string) string {
 	alias = strings.ToLower(strings.TrimSpace(alias))
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if ref := r.chunkByAlias[alias]; ref != nil {
-		return ref.ChunkID
-	}
-	if real := r.aliasToDoc[alias]; real != "" {
+	if real, _, ok := r.chunks.resolve(alias); ok {
 		return real
 	}
-	if real := r.aliasToKB[alias]; real != "" {
+	if real, _, ok := r.docs.resolve(alias); ok {
 		return real
 	}
-	if ref := r.webByAlias[alias]; ref != nil {
-		return ref.URL
+	if real, _, ok := r.kbs.resolve(alias); ok {
+		return real
+	}
+	if real, _, ok := r.webs.resolve(alias); ok {
+		return real
 	}
 	return ""
 }
@@ -644,26 +567,17 @@ func (r *sourceRegistry) CompactKnownText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
-	type pair struct{ real, alias string }
-	r.mu.RLock()
-	pairs := make([]pair, 0, len(r.chunkByID)+len(r.docToAlias)+len(r.kbToAlias)+len(r.webByURL))
-	for real, ref := range r.chunkByID {
-		pairs = append(pairs, pair{real, ref.Alias})
-	}
-	for real, alias := range r.docToAlias {
-		pairs = append(pairs, pair{real, alias})
-	}
-	for real, alias := range r.kbToAlias {
-		pairs = append(pairs, pair{real, alias})
-	}
-	for _, ref := range r.webByURL {
-		pairs = append(pairs, pair{ref.URL, ref.Alias})
-	}
-	r.mu.RUnlock()
-	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].real) > len(pairs[j].real) })
+	// The snapshot spans all four source tables and is sorted longest-value
+	// first GLOBALLY: a web URL may contain a registered document UUID as a
+	// substring, so per-table passes could corrupt the longer value.
+	pairs := r.chunks.pairs()
+	pairs = append(pairs, r.docs.pairs()...)
+	pairs = append(pairs, r.kbs.pairs()...)
+	pairs = append(pairs, r.webs.pairs()...)
+	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].value) > len(pairs[j].value) })
 	for _, item := range pairs {
-		if item.real != "" {
-			text = strings.ReplaceAll(text, item.real, item.alias)
+		if item.value != "" {
+			text = strings.ReplaceAll(text, item.value, item.handle)
 		}
 	}
 	return text

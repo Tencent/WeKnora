@@ -1,35 +1,24 @@
 package modelcontext
 
 import (
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // HandleTable is a typed, invocation-local bidirectional mapping used when a
-// prompt needs compact handles for durable values. Handles must never be
-// persisted; Resolve converts model output back to the durable value first.
+// prompt needs compact handles for durable values (wiki issue iN handles,
+// ingest ref-N slug handles, c000 citation-batch handles). Handles must never
+// be persisted; Resolve converts model output back to the durable value first.
+// It is the exported word-boundary-aware wrapper over handleTable.
 type HandleTable struct {
-	mu       sync.RWMutex
-	prefix   string
-	width    int
-	next     int
-	toHandle map[string]string
-	toValue  map[string]string
+	table *handleTable[struct{}]
 }
 
 // NewHandleTable creates a handle space such as c000 (prefix=c, width=3,
 // start=0) or ref-1 (prefix=ref-, width=0, start=1).
 func NewHandleTable(prefix string, width, start int) *HandleTable {
-	return &HandleTable{
-		prefix:   prefix,
-		width:    width,
-		next:     start,
-		toHandle: make(map[string]string),
-		toValue:  make(map[string]string),
-	}
+	return &HandleTable{table: newHandleTable[struct{}](prefix, width, start)}
 }
 
 // Register returns the stable handle assigned to value in this table.
@@ -41,20 +30,7 @@ func (t *HandleTable) Register(value string) string {
 	if value == "" {
 		return ""
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if handle := t.toHandle[value]; handle != "" {
-		return handle
-	}
-	number := fmt.Sprintf("%d", t.next)
-	if t.width > 0 {
-		number = fmt.Sprintf("%0*d", t.width, t.next)
-	}
-	t.next++
-	handle := t.prefix + number
-	t.toHandle[value] = handle
-	t.toValue[handle] = value
-	return handle
+	return t.table.register(value, value, struct{}{}, nil)
 }
 
 // Handle returns an already registered handle without creating one.
@@ -62,10 +38,7 @@ func (t *HandleTable) Handle(value string) (string, bool) {
 	if t == nil {
 		return "", false
 	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	handle, ok := t.toHandle[value]
-	return handle, ok
+	return t.table.handleForKey(value)
 }
 
 // Resolve converts a known model handle back to its durable value.
@@ -73,28 +46,19 @@ func (t *HandleTable) Resolve(handle string) (string, bool) {
 	if t == nil {
 		return "", false
 	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	value, ok := t.toValue[strings.TrimSpace(handle)]
+	value, _, ok := t.table.resolve(strings.TrimSpace(handle))
 	return value, ok
 }
 
 func (t *HandleTable) Empty() bool {
-	if t == nil {
-		return true
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.toHandle) == 0
+	return t == nil || t.table.size() == 0
 }
 
 func (t *HandleTable) Len() int {
 	if t == nil {
 		return 0
 	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.toHandle)
+	return t.table.size()
 }
 
 // EncodeKnownText replaces already-registered durable values with their model
@@ -103,13 +67,7 @@ func (t *HandleTable) EncodeKnownText(value string) string {
 	if t == nil || value == "" {
 		return value
 	}
-	t.mu.RLock()
-	type pair struct{ value, handle string }
-	pairs := make([]pair, 0, len(t.toHandle))
-	for durable, handle := range t.toHandle {
-		pairs = append(pairs, pair{durable, handle})
-	}
-	t.mu.RUnlock()
+	pairs := t.table.pairs()
 	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].value) > len(pairs[j].value) })
 	for _, item := range pairs {
 		value = strings.ReplaceAll(value, item.value, item.handle)
@@ -117,25 +75,21 @@ func (t *HandleTable) EncodeKnownText(value string) string {
 	return value
 }
 
-// DecodeKnownText restores registered handles in complete text.
+// DecodeKnownText restores registered handles in complete text. Unlike the
+// resource codec, replacement is word-boundary-aware so short handles such as
+// i1 cannot fire inside ordinary prose tokens.
 func (t *HandleTable) DecodeKnownText(value string) string {
 	if t == nil || value == "" {
 		return value
 	}
-	t.mu.RLock()
-	handles := make([]string, 0, len(t.toValue))
-	for handle := range t.toValue {
-		handles = append(handles, handle)
-	}
-	t.mu.RUnlock()
-	sort.SliceStable(handles, func(i, j int) bool { return len(handles[i]) > len(handles[j]) })
-	for _, handle := range handles {
-		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(handle) + `\b`)
-		if durable, ok := t.Resolve(handle); ok {
-			// A durable value may legally contain '$'. ReplaceAllString would
-			// interpret it as a regexp expansion, so use a literal callback.
-			value = pattern.ReplaceAllStringFunc(value, func(string) string { return durable })
-		}
+	pairs := t.table.pairs()
+	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].handle) > len(pairs[j].handle) })
+	for _, item := range pairs {
+		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(item.handle) + `\b`)
+		// A durable value may legally contain '$'. ReplaceAllString would
+		// interpret it as a regexp expansion, so use a literal callback.
+		durable := item.value
+		value = pattern.ReplaceAllStringFunc(value, func(string) string { return durable })
 	}
 	return value
 }
@@ -165,9 +119,8 @@ func (d *HandleStreamDecoder) Feed(chunk string) string {
 		start--
 	}
 	tail := combined[start:]
-	d.table.mu.RLock()
-	prefix := d.table.prefix
-	d.table.mu.RUnlock()
+	// The prefix is immutable after construction, so no lock is needed.
+	prefix := d.table.table.prefix
 	if couldBeNumericHandle(tail, prefix) {
 		d.pending = tail
 		combined = combined[:start]
