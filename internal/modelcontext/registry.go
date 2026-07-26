@@ -15,7 +15,6 @@ import (
 	"sort"
 
 	"github.com/Tencent/WeKnora/internal/llmreference"
-	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -47,7 +46,7 @@ type ChunkReference = llmreference.ChunkReference
 // compacted to dN. Callers therefore cannot accidentally reverse the codecs.
 type Registry struct {
 	sources   *llmreference.Registry
-	resources *llmresource.Registry
+	resources *resourceRegistry
 	issues    *HandleTable
 }
 
@@ -55,7 +54,7 @@ type Registry struct {
 func NewRegistry(citationsEnabled bool) *Registry {
 	return &Registry{
 		sources:   llmreference.NewRegistry(citationsEnabled),
-		resources: llmresource.NewRegistry(),
+		resources: newResourceRegistry(),
 		issues:    NewHandleTable("i", 0, 1),
 	}
 }
@@ -174,7 +173,7 @@ func (r *Registry) StreamDecoder() *StreamDecoder {
 		return &StreamDecoder{}
 	}
 	return &StreamDecoder{
-		resources: llmresource.NewStreamDecoder(r.resources),
+		resources: newResourceStreamDecoder(r.resources),
 		sources:   llmreference.NewStreamExpander(r.sources),
 		issues:    NewHandleStreamDecoder(r.issues),
 		orphans:   &orphanResourceStreamFilter{},
@@ -299,7 +298,7 @@ func (r *Registry) DecodeOutputText(text string) string {
 // StreamDecoder composes resource restoration and source-citation expansion
 // so callers cannot split handle processing or apply stages in the wrong order.
 type StreamDecoder struct {
-	resources *llmresource.StreamDecoder
+	resources *resourceStreamDecoder
 	sources   *llmreference.StreamExpander
 	issues    *HandleStreamDecoder
 	orphans   *orphanResourceStreamFilter
