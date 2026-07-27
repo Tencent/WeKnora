@@ -2054,6 +2054,7 @@ export default {
     saveSuccess: "저장 성공",
     saveFailed: "저장 실패",
     file: "파일",
+    folder: "폴더",
     knowledgeBase: "지식베이스",
     noResult: "결과 없음",
     remove: "제거",
@@ -2070,6 +2071,9 @@ export default {
     belongsToOrg: "스페이스: ",
     readOnlyFromAgent: "이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.",
     noCompatibleKbForAgent: "현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.",
+    folderEmpty: "멘션 가능한 지식 베이스에 폴더가 없습니다",
+    folderInvalid: "만료됨",
+    folderDeleted: "폴더가 삭제되어 범위에서 제거되었습니다",
   },
   agent: {
     taskLabel: "작업:",

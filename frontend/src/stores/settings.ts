@@ -4,6 +4,7 @@ import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent
 import { getApiBaseUrl } from "@/utils/api-base";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import { buildFolderIdsField } from "@/views/chat/folderScope";
 
 // 定义设置接口
 interface Settings {
@@ -15,6 +16,8 @@ interface Settings {
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
+  selectedFolders: string[]; // 当前选中的文件夹ID列表（问答范围）
+  selectedFolderKbMap: Record<string, string>; // 文件夹ID -> 知识库ID，用于按 KB 拉树/角标
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
   selectedSkills: string[];
@@ -84,6 +87,8 @@ const defaultSettings: Settings = {
   selectedKnowledgeBases: [],  // 默认为空数组
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
+  selectedFolders: [], // 默认为空数组
+  selectedFolderKbMap: {}, // 文件夹ID -> 知识库ID
   selectedTags: [],
   selectedMCPServices: [],
   selectedSkills: [],
@@ -356,6 +361,30 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    // Folder selection actions (chat/agent QA scope)
+    addFolder(folderId: string, kbId: string) {
+      if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+      if (!this.settings.selectedFolders.includes(folderId)) {
+        this.settings.selectedFolders.push(folderId);
+        if (!this.settings.selectedFolderKbMap) this.settings.selectedFolderKbMap = {};
+        this.settings.selectedFolderKbMap[folderId] = kbId;
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFolder(folderId: string) {
+      if (!this.settings.selectedFolders) return;
+      this.settings.selectedFolders = this.settings.selectedFolders.filter((id: string) => id !== folderId);
+      if (this.settings.selectedFolderKbMap) delete this.settings.selectedFolderKbMap[folderId];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolders = [];
+      this.settings.selectedFolderKbMap = {};
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {
       if (!this.settings.selectedTags) this.settings.selectedTags = [];
       if (!this.settings.selectedTags.some(t => t.id === tag.id && t.kbId === tag.kbId)) {
@@ -418,6 +447,10 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedFiles || [];
     },
 
+    getSelectedFolders(): string[] {
+      return this.settings.selectedFolders || [];
+    },
+
     /** Scope for suggested-questions API (KB / file / tag @mentions). */
     getSuggestedQuestionsParams(limit = 6) {
       const selectedKBs = this.getSelectedKnowledgeBases();
@@ -437,6 +470,7 @@ export const useSettingsStore = defineStore("settings", {
         // every document in that KB.
         knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
+        folder_ids: buildFolderIdsField(this.getSelectedFolders()),
         tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
         limit,
       };
@@ -526,6 +560,11 @@ export const useSettingsStore = defineStore("settings", {
           // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
           // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
         }
+        if (Array.isArray(state.folder_ids)) {
+          this.settings.selectedFolders = [...state.folder_ids];
+          // selectedFolderKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
+          // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件夹映射。
+        }
         if (Array.isArray(state.mentioned_items)) {
           const fromMentions = state.mentioned_items
             .filter(item => item.type === "tag" && item.id && item.kb_id)
@@ -584,6 +623,7 @@ export interface SessionLastRequestStatePayload {
   model_id?: string;
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
+  folder_ids?: string[];
   tag_ids?: string[];
   mcp_service_ids?: string[];
   skill_names?: string[];

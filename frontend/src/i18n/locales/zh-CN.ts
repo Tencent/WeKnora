@@ -2060,6 +2060,7 @@ export default {
     saveSuccess: "保存成功",
     saveFailed: "保存失败",
     file: "文件",
+    folder: "文件夹",
     knowledgeBase: "知识库",
     noResult: "无结果",
     remove: "移除",
@@ -2076,6 +2077,9 @@ export default {
     belongsToOrg: "所属空间：",
     readOnlyFromAgent: "仅在此对话中只读，不显示在知识库列表中",
     noCompatibleKbForAgent: "当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。",
+    folderEmpty: "无可提及知识库的文件夹",
+    folderInvalid: "已失效",
+    folderDeleted: "该文件夹已被删除，已从范围中移除",
   },
   agent: {
     taskLabel: "任务:",

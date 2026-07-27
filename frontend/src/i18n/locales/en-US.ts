@@ -2195,6 +2195,7 @@ export default {
     saveSuccess: 'Saved successfully',
     saveFailed: 'Save failed',
     file: 'File',
+    folder: 'Folder',
     knowledgeBase: 'Knowledge Base',
     noResult: 'No results',
     remove: 'Remove',
@@ -2211,6 +2212,9 @@ export default {
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
     noCompatibleKbForAgent: "This agent's tools don't match any knowledge base's capabilities in scope, so nothing can be referenced.",
+    folderEmpty: 'No folders in mentionable knowledge bases',
+    folderInvalid: 'Invalid',
+    folderDeleted: 'The folder has been deleted and was removed from scope',
   },
   file: {
     upload: 'Upload File',

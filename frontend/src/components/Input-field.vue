@@ -8,6 +8,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { knowledgeFolderApi } from '@/api/knowledge-base/folders';
+import { buildFolderIndex, folderPathItems, folderPathLabel } from '@/views/knowledge/folderModel';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -453,6 +455,8 @@ const mentionQuery = ref("");
 const mentionItems = ref<MentionItem[]>([]);
 /** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
 const fileIdToKbId = ref<Record<string, string>>({});
+/** folderId -> { kbId, folderPath } 缓存；选择时写入，会话恢复时惰性补全。 */
+const folderIdToInfo = ref<Record<string, { kbId: string; folderPath: string }>>({});
 const mcpServices = ref<MCPService[]>([]);
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
@@ -617,6 +621,21 @@ const allSelectedItems = computed(() => {
     };
   });
 
+  // 用户选择的文件夹（问答范围）。name/folderPath 来自 folderIdToInfo 缓存，
+  // 选择时由 MentionFolderTree 的 pick 写入；会话恢复时惰性解析补全。
+  const folderKbMap = settingsStore.settings.selectedFolderKbMap || {};
+  const folders = (settingsStore.settings.selectedFolders || []).map((id: string) => {
+    const info = folderIdToInfo.value[id];
+    return {
+      id,
+      name: info?.folderPath || id,
+      type: 'folder' as const,
+      kbId: info?.kbId || folderKbMap[id] || '',
+      folderPath: info?.folderPath || '',
+      isAgentConfigured: false,
+    };
+  });
+
   // 智能体配置的放在前面
   const agentConfiguredKbs = allKbs.filter(kb => kb.isAgentConfigured);
   const userSelectedKbs = allKbs.filter(kb => !kb.isAgentConfigured);
@@ -630,7 +649,7 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...folders, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -639,6 +658,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeKnowledgeBase(item.id);
   } else if (item.type === 'file') {
     settingsStore.removeFile(item.id);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
   } else if (item.type === 'mcp') {
@@ -651,6 +672,7 @@ const removeSelectedItem = (item: MentionItem) => {
 const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
+    case 'folder': return 'folder-open';
     case 'tag': return 'tag';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
@@ -660,6 +682,7 @@ const getMentionIcon = (item: MentionItem) => {
 
 const getMentionChipClass = (item: MentionItem) => {
   if (item.type === 'kb') return item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb';
+  if (item.type === 'folder') return 'mention-chip--folder';
   return `mention-chip--${item.type}`;
 };
 
@@ -797,6 +820,29 @@ const loadMCPServices = async () => {
 
 watch(selectedFileIds, () => {
   loadFiles();
+}, { immediate: true });
+
+// 会话恢复后，对没有 folderPath 缓存的 folder_id 惰性解析：并发拉各可提及 KB 树定位，
+// 命中即写 folderIdToInfo。folderPathLabel 对未知 id 只返回根标签，故用 folderPathItems
+// 的长度 > 0 来确认该 folder 确实属于此 KB。
+watch(() => settingsStore.settings.selectedFolders, async (ids) => {
+  if (!ids || ids.length === 0) return;
+  const unresolved = ids.filter(id => !folderIdToInfo.value[id]);
+  if (unresolved.length === 0) return;
+  const kbs = knowledgeBases.value || [];
+  await Promise.all(kbs.map(async (kb: any) => {
+    try {
+      const tree = await knowledgeFolderApi.tree(kb.id);
+      const index = buildFolderIndex(tree || []);
+      for (const id of unresolved) {
+        if (folderIdToInfo.value[id]) continue; // 已被别的 KB 命中
+        if (folderPathItems(index, id).length > 0) {
+          const path = folderPathLabel(index, id, t('knowledgeBase.rootFolder'));
+          folderIdToInfo.value[id] = { kbId: kb.id, folderPath: path };
+        }
+      }
+    } catch { /* KB tree load failed; skip */ }
+  }));
 }, { immediate: true });
 
 const isWebSearchConfigured = computed(() => {
@@ -1633,6 +1679,11 @@ const onMentionSelect = (item: any) => {
     // Add to local cache immediately
     if (!fileList.value.find(f => f.id === item.id)) {
       fileList.value.push({ id: item.id, name: item.name });
+    }
+  } else if (item.type === 'folder') {
+    if (item.id && item.kbId) {
+      settingsStore.addFolder(item.id, item.kbId);
+      folderIdToInfo.value[item.id] = { kbId: item.kbId, folderPath: item.folderPath || item.name || '' };
     }
   } else if (item.type === 'tag') {
     if (item.kbId) {
@@ -2888,6 +2939,15 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--file .mention-chip__icon-wrap {
   color: var(--td-text-color-secondary, #6b7280);
+}
+
+/* 文件夹范围：琥珀色 + 展开文件夹图标，与 KB 的闭合文件夹区分。 */
+.mention-chip--folder .mention-chip__icon-wrap {
+  color: #d97706;
+}
+.mention-chip--folder .mention-chip__name :deep(.sep) {
+  color: var(--td-text-color-placeholder);
+  margin: 0 1px;
 }
 
 .mention-chip--tag,

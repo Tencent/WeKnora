@@ -108,6 +108,15 @@
         </t-popup>
       </div>
 
+      <!-- Folder Group (per-KB tree, not flat items) -->
+      <div v-if="currentGroupType === 'folder'" class="mention-group" data-group-type="folder">
+        <MentionFolderTree
+          :kbs="kbItems.map(kb => ({ id: kb.id, name: kb.name, orgName: kb.orgName }))"
+          :root-label="t('knowledgeBase.rootFolder')"
+          @pick="(f) => $emit('select', { type: 'folder', id: f.id, name: f.folderPath || f.name, kbId: f.kbId, folderPath: f.folderPath })"
+        />
+      </div>
+
       <template v-for="group in activeExtraGroups" :key="group.type">
         <div
           v-if="isFlatMode && groupTabs.length > 1"
@@ -265,6 +274,7 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
+import MentionFolderTree from './MentionFolderTree.vue';
 import type { MentionItem, MentionItemType } from '@/types/mention';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
@@ -314,6 +324,7 @@ const fileItems = computed(() => props.items.filter(item => item.type === 'file'
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
+  { type: 'folder', label: t('common.folder'), icon: 'folder-open' },
   { type: 'tag', label: '标签', icon: 'tag' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },
@@ -325,7 +336,10 @@ const mentionGroups = computed(() => {
   return mentionGroupDefs.value.map(def => {
     const items = props.items.filter(item => item.type === def.type);
     const loadedCount = items.length;
-    const count = props.groupCounts?.[def.type] ?? loadedCount;
+    // folder 分组不是扁平 item 列表，而是懒加载的树；始终可进入。
+    const count = def.type === 'folder'
+      ? (props.groupCounts?.folder ?? 1)
+      : (props.groupCounts?.[def.type] ?? loadedCount);
     const group = { ...def, items, offset, count, loadedCount };
     offset += items.length;
     return group;
@@ -347,7 +361,7 @@ const groupRows = computed(() => groupTabs.value);
 const isFlatMode = computed(() => (props.query ?? '').trim().length > 0);
 const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value));
 const extraGroups = computed(() => mentionGroups.value.filter(group =>
-  group.type !== 'kb' && group.type !== 'file' && group.count > 0
+  group.type !== 'kb' && group.type !== 'file' && group.type !== 'folder' && group.count > 0
 ));
 const activeExtraGroups = computed(() => {
   if (isFlatMode.value) return extraGroups.value;
@@ -383,7 +397,13 @@ const leaveGroup = () => {
 };
 
 const updateActiveGroupFromIndex = (index: number) => {
-  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
+  // folder 分组是懒加载树，不参与扁平 item 的 activeIndex 映射；
+  // 否则当其前置分组为空时，folder 的虚占 count=1 会吞掉 file 的首个 index，
+  // 导致鼠标 hover 文件时 currentGroupType 误判为 folder（自动跳转）。
+  // 已在 folder 分组时更不能反推：folder.offset 与 file.offset 重叠（folder items.length=0），
+  // 反推会把刚由 enterGroup 设定的 'folder' 覆盖成 'file'，首次点击必进文件选择器。
+  if (currentGroupType.value === 'folder') return;
+  const group = groupTabs.value.find(item => item.type !== 'folder' && index >= item.offset && index < item.offset + item.count);
   if (group) currentGroupType.value = group.type;
 };
 
@@ -504,6 +524,9 @@ watch(() => props.activeIndex, (newIndex) => {
     scrollToItem(newIndex);
     return;
   }
+  // folder 分组走 MentionFolderTree 自己的选中/键盘导航，不参与扁平 activeIndex 体系；
+  // 此处早退，避免 activeIndex 反推覆盖 currentGroupType 及 scrollToItem 的副作用。
+  if (currentGroupType.value === 'folder') return;
   if (currentGroupType.value) {
     updateActiveGroupFromIndex(newIndex);
     const group = currentGroup.value;

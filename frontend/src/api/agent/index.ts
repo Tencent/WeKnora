@@ -366,6 +366,7 @@ export function getSuggestedQuestions(
   params?: {
     knowledge_base_ids?: string[];
     knowledge_ids?: string[];
+    folder_ids?: string[];
     tag_scopes?: Array<{ knowledge_base_id: string; tag_ids: string[] }>;
     limit?: number;
   }
@@ -373,6 +374,10 @@ export function getSuggestedQuestions(
   const query = new URLSearchParams();
   if (params?.knowledge_base_ids?.length) query.set('knowledge_base_ids', params.knowledge_base_ids.join(','));
   if (params?.knowledge_ids?.length) query.set('knowledge_ids', params.knowledge_ids.join(','));
+  // 后端用 c.QueryArray("folder_ids") 读多值（重复 key），需 append 每个 id。
+  if (params?.folder_ids?.length) {
+    for (const id of params.folder_ids) query.append('folder_ids', id);
+  }
   if (params?.tag_scopes?.length) query.set('tag_scopes', JSON.stringify(params.tag_scopes));
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString();

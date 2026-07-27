@@ -134,6 +134,7 @@ import { getMessageList, getSession } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
+import { collectFolderIdsFromMentions } from './folderScope';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -314,7 +315,8 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams(6));
+        const params = useSettingsStoreInstance.getSuggestedQuestionsParams(6);
+        const res = await getSuggestedQuestions(agentId, params);
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -400,12 +402,13 @@ const debouncedFetchSuggestions = () => {
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention，重新获取推荐问题
+// 监听 Agent / 知识库 / 文件 / 文件夹 / 标签 / MCP / Skill @mention，重新获取推荐问题
 watch(
     () => ({
         agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
+        folders: useSettingsStoreInstance.settings.selectedFolders,
         tags: useSettingsStoreInstance.settings.selectedTags,
         mcps: useSettingsStoreInstance.settings.selectedMCPServices,
         skills: useSettingsStoreInstance.settings.selectedSkills,
@@ -800,6 +803,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    const folderIds = collectFolderIdsFromMentions(mentionedItems || []);
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
@@ -816,6 +820,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
+        folder_ids: folderIds,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,

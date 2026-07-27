@@ -2062,6 +2062,7 @@ export default {
     saveSuccess: 'Успешно сохранено',
     saveFailed: 'Ошибка сохранения',
     file: 'Файл',
+    folder: 'Папка',
     knowledgeBase: 'База знаний',
     noResult: 'Нет результатов',
     remove: 'Удалить',
@@ -2080,6 +2081,9 @@ export default {
     belongsToKb: 'База знаний: ',
     belongsToOrg: 'Пространство: ',
     readOnlyFromAgent: 'Только чтение (от агента)',
+    folderEmpty: 'В доступных базах знаний нет папок',
+    folderInvalid: 'Недоступно',
+    folderDeleted: 'Папка удалена и убрана из области поиска',
     noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
   file: {
