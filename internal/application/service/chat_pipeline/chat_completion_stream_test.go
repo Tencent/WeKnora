@@ -48,7 +48,8 @@ func (b *syncEventBus) finalAnswerContents() []string {
 // closes it, so the stream plugin blocks on the channel until ctx is cancelled
 // — deterministically exercising the ctx.Done() branch.
 type openStreamChat struct {
-	chunks []types.StreamResponse
+	chunks      []types.StreamResponse
+	closeStream bool
 }
 
 func (m *openStreamChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -62,7 +63,10 @@ func (m *openStreamChat) ChatStream(
 	for _, c := range m.chunks {
 		ch <- c
 	}
-	return ch, nil // intentionally left open
+	if m.closeStream {
+		close(ch)
+	}
+	return ch, nil
 }
 
 func (m *openStreamChat) GetModelName() string { return "mock" }
@@ -115,4 +119,37 @@ func TestStreamDropsIncompleteHandleOnCancel(t *testing.T) {
 	require.Eventually(t, func() bool { return len(bus.finalAnswerContents()) >= 1 }, 2*time.Second, 5*time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
 	require.Equal(t, []string{"hello "}, bus.finalAnswerContents())
+}
+
+func TestStreamIgnoresDuplicateTerminalAnswer(t *testing.T) {
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "hello"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+		// Some providers repeat the same terminal response when their EOF
+		// sentinel is received after finish_reason.
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-duplicate-done"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
+
+	require.Eventually(t, func() bool {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		return len(bus.events) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	var answerEvents []event.AgentFinalAnswerData
+	for _, evt := range bus.events {
+		if evt.Type == types.EventType(event.EventAgentFinalAnswer) {
+			answerEvents = append(answerEvents, evt.Data.(event.AgentFinalAnswerData))
+		}
+	}
+	require.Equal(t, []event.AgentFinalAnswerData{{Content: "hello"}, {Done: true}}, answerEvents)
 }

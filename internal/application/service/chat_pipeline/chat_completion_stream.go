@@ -112,6 +112,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
+		answerCompleted := false
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -216,9 +217,17 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					// Providers can emit a completion once for finish_reason and again
+					// for their EOF sentinel. A final answer is a terminal event for a
+					// single stream, so forwarding a later duplicate would put an answer
+					// after the session's complete event.
+					if answerCompleted {
+						continue
+					}
 					response.Content = answerDecoder.Feed(response.Content)
 					if response.Done {
 						response.Content += answerDecoder.Flush()
+						answerCompleted = true
 					}
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{
