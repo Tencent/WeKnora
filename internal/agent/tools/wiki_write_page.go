@@ -85,6 +85,9 @@ func (t *wikiWritePageTool) WithSearchTargets(searchTargets types.SearchTargets)
 }
 
 func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	// Attribute every page write performed by this tool to the agent so
+	// revision history distinguishes agent edits from pipeline/user ones.
+	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
 		Slug       string    `json:"slug"`
 		Title      string    `json:"title"`

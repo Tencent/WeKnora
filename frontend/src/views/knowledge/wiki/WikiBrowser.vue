@@ -259,6 +259,12 @@
                       <t-icon name="folder-add" />
                     </button>
                   </t-tooltip>
+                  <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.newPageBtn')" placement="top">
+                    <button type="button" class="wiki-tab-bar-action"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.newPageBtn')" @click.stop="openCreatePageDialog">
+                      <t-icon name="file-add" />
+                    </button>
+                  </t-tooltip>
                 </div>
               </div>
 
@@ -479,12 +485,37 @@
                       selectedPage.version
                   })
                   }}</span>
+                  <!-- Provenance of the current version; only surfaced when a
+                       human / agent / revert touched it — pipeline is the
+                       default and would just be noise. -->
+                  <t-tag v-if="editSourceVisible(selectedPage.last_edit_source)" size="small"
+                    :theme="editSourceTheme(selectedPage.last_edit_source)" variant="light">
+                    {{ editSourceLabel(selectedPage.last_edit_source) }}
+                  </t-tag>
                   <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
                   <t-link theme="primary" hover="color" class="wiki-reader-graph-link"
                     @click="emit('view-graph', selectedPage.slug)">
                     <template #prefixIcon><t-icon name="chart-bubble" /></template>
                     {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
                   </t-link>
+                  <span class="wiki-reader-actions">
+                    <t-link theme="default" hover="color" @click="openRevisionDrawer">
+                      <template #prefixIcon><t-icon name="history" /></template>
+                      {{ $t('knowledgeEditor.wikiBrowser.historyBtn') }}
+                    </t-link>
+                    <t-link v-if="props.canEdit && !editingPage" theme="primary" hover="color" @click="startEditPage">
+                      <template #prefixIcon><t-icon name="edit" /></template>
+                      {{ $t('knowledgeEditor.wikiBrowser.editBtn') }}
+                    </t-link>
+                    <t-popconfirm v-if="props.canEdit" theme="danger"
+                      :content="$t('knowledgeEditor.wikiBrowser.deletePageConfirm', { title: selectedPage.title })"
+                      @confirm="confirmDeletePage">
+                      <t-link theme="danger" hover="color">
+                        <template #prefixIcon><t-icon name="delete" /></template>
+                        {{ $t('knowledgeEditor.wikiBrowser.deletePageBtn') }}
+                      </t-link>
+                    </t-popconfirm>
+                  </span>
                 </div>
               </div>
 
@@ -499,7 +530,40 @@
               </div>
 
               <!-- Content -->
-              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick">
+              <div v-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent"
+                @click="handleContentClick">
+              </div>
+
+              <!-- Inline markdown editor (canEdit only). Saves are guarded by
+                   the page version captured at edit start; the backend answers
+                   409 when someone (or the pipeline) edited in between. -->
+              <div v-else class="wiki-page-editor">
+                <t-input v-model="editForm.title" class="wiki-page-editor-title"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editTitlePlaceholder')" />
+                <t-textarea v-model="editForm.summary" class="wiki-page-editor-summary"
+                  :autosize="{ minRows: 2, maxRows: 4 }"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editSummaryPlaceholder')" />
+                <t-textarea v-model="editForm.content" class="wiki-page-editor-content"
+                  :autosize="{ minRows: 16, maxRows: 40 }"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editContentPlaceholder')" />
+                <div v-if="editConflictVersion !== null" class="wiki-page-editor-conflict">
+                  <t-icon name="error-circle" />
+                  <span>{{ $t('knowledgeEditor.wikiBrowser.editConflictHint', { ver: editConflictVersion }) }}</span>
+                  <t-link theme="primary" hover="color" @click="reloadLatestIntoEditor">
+                    {{ $t('knowledgeEditor.wikiBrowser.editConflictReload') }}
+                  </t-link>
+                  <t-link theme="warning" hover="color" @click="overwriteSavePage">
+                    {{ $t('knowledgeEditor.wikiBrowser.editConflictOverwrite') }}
+                  </t-link>
+                </div>
+                <div class="wiki-page-editor-footer">
+                  <t-button theme="primary" :loading="savingPage" @click="savePageEdit()">
+                    {{ $t('common.save') }}
+                  </t-button>
+                  <t-button variant="outline" :disabled="savingPage" @click="cancelEditPage">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                </div>
               </div>
 
               <!-- Source refs -->
@@ -562,8 +626,8 @@
                 </div>
                 <div v-for="entry in logEntries" :key="entry.id" class="wiki-log-entry">
                   <div class="wiki-log-entry-header">
-                    <t-tag size="small" :theme="entry.action === 'retract' ? 'danger' : 'primary'" variant="light">
-                      {{ entry.action }}
+                    <t-tag size="small" :theme="logActionTheme(entry.action)" variant="light">
+                      {{ logActionLabel(entry.action) }}
                     </t-tag>
                     <span class="wiki-log-entry-title">{{ entry.doc_title || entry.knowledge_id || '—' }}</span>
                     <span class="wiki-log-entry-time">{{ formatDate(entry.created_at) }}</span>
@@ -664,6 +728,45 @@
         :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
     </t-drawer>
 
+    <!-- Revision history drawer -->
+    <WikiRevisionDrawer v-model:visible="showRevisionDrawer" :kb-id="props.knowledgeBaseId"
+      :slug="selectedPage?.slug || ''" :current-page="selectedPage" :can-edit="props.canEdit"
+      @reverted="onPageReverted" />
+
+    <!-- Create page dialog -->
+    <t-dialog v-model:visible="showCreatePageDialog" :header="$t('knowledgeEditor.wikiBrowser.newPageTitle')"
+      :confirm-btn="{ content: $t('common.confirm'), loading: creatingPage }" :cancel-btn="$t('common.cancel')"
+      width="520px" @confirm="submitCreatePage">
+      <div class="wiki-create-page-form">
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageTitleLabel') }}</label>
+          <t-input v-model="createPageForm.title"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.newPageTitlePlaceholder')" @input="syncCreatePageSlug" />
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageSlugLabel') }}</label>
+          <t-input v-model="createPageForm.slug"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.newPageSlugPlaceholder')"
+            @input="createPageSlugTouched = true" />
+          <div class="wiki-create-page-hint">{{ $t('knowledgeEditor.wikiBrowser.newPageSlugHint') }}</div>
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageTypeLabel') }}</label>
+          <t-select v-model="createPageForm.pageType">
+            <t-option value="concept" :label="$t('knowledgeEditor.wikiBrowser.filterConcept')" />
+            <t-option value="entity" :label="$t('knowledgeEditor.wikiBrowser.filterEntity')" />
+            <t-option value="synthesis" :label="$t('knowledgeEditor.wikiBrowser.filterSynthesis')" />
+            <t-option value="comparison" :label="$t('knowledgeEditor.wikiBrowser.filterComparison')" />
+          </t-select>
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageContentLabel') }}</label>
+          <t-textarea v-model="createPageForm.content" :autosize="{ minRows: 6, maxRows: 16 }"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.editContentPlaceholder')" />
+        </div>
+      </div>
+    </t-dialog>
+
     <!-- In-place move confirmation, anchored at the drop point. Confirming runs
          the actual move API; cancelling discards the staged move. -->
     <teleport to="body">
@@ -702,6 +805,7 @@ import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
+import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
@@ -711,6 +815,9 @@ import {
   updateWikiFolder,
   deleteWikiFolder,
   moveWikiPage,
+  createWikiPage,
+  updateWikiPage,
+  deleteWikiPage,
   getWikiPage,
   getWikiIndex,
   getWikiLog,
@@ -2206,7 +2313,7 @@ async function confirmPendingMove() {
   } catch (e: any) {
     console.error('Failed to move wiki folder:', e)
     MessagePlugin.error(
-      e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
+      e?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
     )
   }
 }
@@ -2229,7 +2336,7 @@ async function createFolder(parentId: string, parentPath: string[], name: string
     await reloadDirectoryForType(activeTab.value)
   } catch (e: any) {
     console.error('Failed to create wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
   }
 }
 
@@ -2292,7 +2399,7 @@ async function commitRenameFolder(folderId: string, originalName: string) {
     await reloadDirectoryForType(activeTab.value)
   } catch (e: any) {
     console.error('Failed to rename wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
   }
 }
 
@@ -2304,7 +2411,7 @@ async function deleteFolder(folderId: string) {
     await reloadDirectoryForType(activeTab.value)
   } catch (e: any) {
     console.error('Failed to delete wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
   }
 }
 
@@ -2756,6 +2863,251 @@ async function loadStats() {
       }
     }
   } catch (e) { /* ignore */ }
+}
+
+// --- Manual page editing / version management ---------------------------
+
+const editingPage = ref(false)
+const savingPage = ref(false)
+const editForm = ref({ title: '', summary: '', content: '' })
+// Version the user started editing from — the optimistic-lock guard sent
+// with the save. 409 → someone (or the pipeline) edited in between.
+const editBaseVersion = ref(0)
+const editConflictVersion = ref<number | null>(null)
+
+const showRevisionDrawer = ref(false)
+
+const showCreatePageDialog = ref(false)
+const creatingPage = ref(false)
+const createPageForm = ref({ title: '', slug: '', pageType: 'concept', content: '' })
+const createPageSlugTouched = ref(false)
+
+// Navigating to another page (or view) silently drops an in-progress edit;
+// the editor is inline, so a route-level guard would be overkill here.
+watch(() => selectedPage.value?.slug, () => {
+  editingPage.value = false
+  editConflictVersion.value = null
+})
+
+function startEditPage() {
+  if (!selectedPage.value) return
+  editForm.value = {
+    title: selectedPage.value.title,
+    summary: selectedPage.value.summary || '',
+    content: selectedPage.value.content || '',
+  }
+  editBaseVersion.value = selectedPage.value.version
+  editConflictVersion.value = null
+  editingPage.value = true
+}
+
+function cancelEditPage() {
+  editingPage.value = false
+  editConflictVersion.value = null
+}
+
+async function savePageEdit(versionOverride?: number) {
+  if (!selectedPage.value) return
+  const slug = selectedPage.value.slug
+  savingPage.value = true
+  try {
+    const res = await updateWikiPage(props.knowledgeBaseId, slug, {
+      title: editForm.value.title,
+      summary: editForm.value.summary,
+      content: editForm.value.content,
+      version: versionOverride ?? editBaseVersion.value,
+    })
+    const updated = ((res as any).data || res) as WikiPage
+    selectedPage.value = updated
+    editingPage.value = false
+    editConflictVersion.value = null
+    updateSidebarPageTitle(slug, updated.title)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.editSaveSuccess'))
+  } catch (e: any) {
+    // The request interceptor rejects with a flattened { status, message,
+    // ...body } object, so the conflict payload sits on `e` directly.
+    if (e?.status === 409) {
+      editConflictVersion.value = e?.current_version ?? 0
+    } else {
+      MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.editSaveFailed'))
+    }
+  } finally {
+    savingPage.value = false
+  }
+}
+
+// overwriteSavePage resolves an edit conflict by re-saving on top of the
+// server's current version (last write wins, but the loser's version stays
+// in the revision history, so nothing is destroyed).
+async function overwriteSavePage() {
+  if (!selectedPage.value) return
+  try {
+    const res = await getWikiPage(props.knowledgeBaseId, selectedPage.value.slug)
+    const latest = ((res as any).data || res) as WikiPage
+    await savePageEdit(latest.version)
+  } catch (e) {
+    console.error('Failed to fetch latest version for overwrite save:', e)
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.editSaveFailed'))
+  }
+}
+
+// reloadLatestIntoEditor resolves an edit conflict by discarding the local
+// draft and re-opening the editor on the server's current content.
+async function reloadLatestIntoEditor() {
+  await refreshSelectedPage()
+  startEditPage()
+}
+
+async function confirmDeletePage() {
+  if (!selectedPage.value) return
+  const slug = selectedPage.value.slug
+  try {
+    await deleteWikiPage(props.knowledgeBaseId, slug)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.deletePageSuccess'))
+    selectedPage.value = null
+    editingPage.value = false
+    loadPages()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.deletePageFailed'))
+  }
+}
+
+function openRevisionDrawer() {
+  if (!selectedPage.value) return
+  showRevisionDrawer.value = true
+}
+
+function onPageReverted(page: WikiPage) {
+  selectedPage.value = page
+  editingPage.value = false
+  updateSidebarPageTitle(page.slug, page.title)
+}
+
+function openCreatePageDialog() {
+  createPageForm.value = { title: '', slug: '', pageType: 'concept', content: '' }
+  createPageSlugTouched.value = false
+  showCreatePageDialog.value = true
+}
+
+// syncCreatePageSlug derives "<type>/<slugified-title>" while the user has
+// not touched the slug field themselves. Only ASCII-ish titles produce a
+// usable slug automatically; otherwise the user types one.
+function syncCreatePageSlug() {
+  if (createPageSlugTouched.value) return
+  const base = createPageForm.value.title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s_-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+  createPageForm.value.slug = base ? `${createPageForm.value.pageType}/${base}` : ''
+}
+
+async function submitCreatePage() {
+  const title = createPageForm.value.title.trim()
+  const slug = createPageForm.value.slug.trim().replace(/^\/+|\/+$/g, '')
+  if (!title || !slug) {
+    MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.newPageMissingFields'))
+    return
+  }
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s_\-/]*$/u.test(slug)) {
+    MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.newPageSlugHint'))
+    return
+  }
+  creatingPage.value = true
+  try {
+    await createWikiPage(props.knowledgeBaseId, {
+      slug,
+      title,
+      page_type: createPageForm.value.pageType,
+      content: createPageForm.value.content,
+    })
+    showCreatePageDialog.value = false
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.newPageSuccess'))
+    loadPages()
+    navigateToSlug(slug)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.newPageFailed'))
+  } finally {
+    creatingPage.value = false
+  }
+}
+
+// updateSidebarPageTitle patches the already-loaded sidebar entries in place
+// after a rename so the tree reflects the edit without a full reload.
+function updateSidebarPageTitle(slug: string, title: string) {
+  for (const p of pages.value) {
+    if (p.slug === slug) p.title = title
+  }
+  for (const bucket of Object.values(pagesByType.value)) {
+    for (const p of bucket.items) {
+      if (p.slug === slug) p.title = title
+    }
+    for (const p of bucket.flatItems) {
+      if (p.slug === slug) p.title = title
+    }
+  }
+}
+
+// Log actions written by the manual editing paths. Pipeline actions keep
+// their raw tag (they are already short English verbs the log has always
+// shown); these four are new and would otherwise read as snake_case.
+const MANUAL_LOG_ACTION_KEYS: Record<string, string> = {
+  manual_create: 'logActionManualCreate',
+  manual_edit: 'logActionManualEdit',
+  manual_delete: 'logActionManualDelete',
+  revert: 'logActionRevert',
+}
+
+function logActionLabel(action: string): string {
+  const key = MANUAL_LOG_ACTION_KEYS[action]
+  return key ? t(`knowledgeEditor.wikiBrowser.${key}`) : action
+}
+
+function logActionTheme(action: string): 'primary' | 'danger' | 'warning' | 'success' {
+  switch (action) {
+    case 'retract':
+    case 'manual_delete':
+      return 'danger'
+    case 'revert':
+      return 'warning'
+    case 'manual_create':
+    case 'manual_edit':
+      return 'success'
+    default:
+      return 'primary'
+  }
+}
+
+function editSourceVisible(source?: string): boolean {
+  return source === 'user' || source === 'agent' || source === 'revert'
+}
+
+function editSourceLabel(source?: string): string {
+  switch (source) {
+    case 'user':
+      return t('knowledgeEditor.wikiBrowser.editSourceUser')
+    case 'agent':
+      return t('knowledgeEditor.wikiBrowser.editSourceAgent')
+    case 'revert':
+      return t('knowledgeEditor.wikiBrowser.editSourceRevert')
+    default:
+      return t('knowledgeEditor.wikiBrowser.editSourcePipeline')
+  }
+}
+
+function editSourceTheme(source?: string): 'primary' | 'success' | 'warning' | 'default' {
+  switch (source) {
+    case 'user':
+      return 'success'
+    case 'agent':
+      return 'primary'
+    case 'revert':
+      return 'warning'
+    default:
+      return 'default'
+  }
 }
 
 // Refresh the currently selected page's content without touching navigation history
@@ -5108,6 +5460,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .wiki-reader-meta-text {
@@ -5118,6 +5471,69 @@ onUnmounted(() => {
 .wiki-reader-graph-link {
   margin-left: auto;
   font-size: 13px;
+}
+
+.wiki-reader-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.wiki-page-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+
+  .wiki-page-editor-title :deep(.t-input__inner) {
+    font-weight: 600;
+  }
+
+  .wiki-page-editor-content :deep(textarea) {
+    font-family: var(--td-font-family-mono, monospace);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+}
+
+.wiki-page-editor-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--td-warning-color-1);
+  color: var(--td-warning-color-7);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.wiki-page-editor-footer {
+  display: flex;
+  gap: 8px;
+}
+
+.wiki-create-page-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .wiki-create-page-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    label {
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  .wiki-create-page-hint {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .wiki-reader-links {
