@@ -180,6 +180,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, userSpecifiedKBs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
@@ -193,6 +196,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 		var filteredTargets types.SearchTargets
 		for _, target := range t.searchTargets {
+			if target == nil {
+				continue
+			}
 			if userKBSet[target.KnowledgeBaseID] {
 				filteredTargets = append(filteredTargets, target)
 			}
@@ -460,6 +466,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	}
 	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		if searchableKBs[st.KnowledgeBaseID] {
 			filteredTargets = append(filteredTargets, st)
 			continue
@@ -482,6 +491,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 
 	groups := make(map[string][]*types.SearchTarget)
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		key := modelKeyMap[st.KnowledgeBaseID]
 		groups[key] = append(groups[key], st)
 	}
@@ -1124,7 +1136,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
-		kbCounts[r.KnowledgeID]++
+		kbCounts[r.KnowledgeBaseID]++
 	}
 
 	// Format individual results as XML. Tag names are kept in sync with

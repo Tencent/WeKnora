@@ -314,7 +314,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams(6));
+        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }

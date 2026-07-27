@@ -124,7 +124,7 @@ func TestWikiChunkCitationPrompt_PreservesPlaceholders(t *testing.T) {
 	}
 }
 
-func TestWikiPageModifyUserPrompt_HidesInternalChunkAliases(t *testing.T) {
+func TestWikiPageModifyUserPrompt_HidesInternalChunkHandles(t *testing.T) {
 	combined := WikiPageModifySystemPrompt + "\n" + WikiPageModifyUserPrompt
 	for _, guidance := range []string{
 		"NEVER output them in the page body or summary",
@@ -132,7 +132,7 @@ func TestWikiPageModifyUserPrompt_HidesInternalChunkAliases(t *testing.T) {
 		"clean Markdown without inline chunk IDs",
 	} {
 		if !strings.Contains(combined, guidance) {
-			t.Errorf("WikiPageModifyUserPrompt missing chunk-alias guidance %q", guidance)
+			t.Errorf("WikiPageModifyUserPrompt missing chunk-handle guidance %q", guidance)
 		}
 	}
 

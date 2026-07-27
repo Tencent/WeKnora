@@ -140,7 +140,7 @@ import { ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useOrganizationStore } from '@/stores/organization'
-import { shareKnowledgeBase, listKBShares, removeShare, updateSharePermission } from '@/api/organization'
+import { listKBShares } from '@/api/organization'
 import type { KnowledgeBaseShare } from '@/api/organization'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ShareToSpaceOrgSelect from '@/components/ShareToSpaceOrgSelect.vue'
@@ -261,7 +261,7 @@ async function handleShare() {
 
   submitting.value = true
   try {
-    const result = await shareKnowledgeBase(props.kbId, {
+    const result = await orgStore.shareKnowledgeBase(props.kbId, {
       organization_id: selectedOrgId.value,
       permission: selectedPermission.value
     })
@@ -286,7 +286,7 @@ async function handleUpdatePermission(share: KnowledgeBaseShare, newPermission: 
   if (share.permission === newPermission) return
 
   try {
-    const result = await updateSharePermission(props.kbId, share.id, {
+    const result = await orgStore.changeKnowledgeBaseSharePermission(props.kbId, share.id, {
       permission: newPermission as 'viewer' | 'editor'
     })
     if (result.success) {
@@ -303,7 +303,11 @@ async function handleUpdatePermission(share: KnowledgeBaseShare, newPermission: 
 
 async function handleUnshare(share: KnowledgeBaseShare) {
   try {
-    const result = await removeShare(props.kbId, share.id)
+    const result = await orgStore.unshareKnowledgeBase(
+      props.kbId,
+      share.id,
+      share.organization_id
+    )
     if (result.success) {
       MessagePlugin.success(t('organization.share.unshareSuccess'))
       await loadShares()

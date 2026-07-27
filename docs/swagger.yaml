@@ -6098,7 +6098,7 @@ paths:
         in: query
         name: tag_scopes
         type: string
-      - description: 返回数量上限（默认6）
+      - description: 返回数量上限（未传时使用智能体配置的开场问题数量，最大30）
         in: query
         name: limit
         type: integer
@@ -11950,14 +11950,14 @@ paths:
       - 组织管理
   /organizations/{id}/search-tenants:
     get:
-      description: 搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户
+      description: 按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 搜索关键词（空间名、用户名或邮箱）
+      - description: 搜索关键词（空间名）
         in: query
         name: q
         required: true

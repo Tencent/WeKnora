@@ -25,7 +25,7 @@ func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []stri
   "properties": {
     "issue_id": {
       "type": "string",
-      "description": "The ID of the issue to update."
+      "description": "The short iN issue ID from wiki_read_issue."
     },
     "status": {
       "type": "string",
@@ -60,8 +60,11 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available"}, nil
 	}
+	if _, err := resolveWikiIssue(ctx, t.wikiService, params.IssueID, t.kbIDs); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
-	// Update issue status
+	// Update only after the issue has been proven to belong to an allowed KB.
 	err := t.wikiService.UpdateIssueStatus(ctx, params.IssueID, params.Status)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to update issue status: " + err.Error()}, nil

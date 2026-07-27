@@ -2170,19 +2170,39 @@ func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, 
 	}
 }
 
-// writeDedupItemXML renders a single entity/concept entry as a structured XML
-// block for the deduplication prompt. Structured form (versus a single
-// pipe-separated line) helps the LLM reliably tell name / aliases / type apart
-// and reduces nonsensical merges like "居民身份证" → "工作居住证".
-func writeDedupItemXML(buf *strings.Builder, slug, name, itemType string, aliases []string) {
-	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", slug, itemType)
-	fmt.Fprintf(buf, "    <name>%s</name>\n", xmlEscape(name))
-	for _, alias := range aliases {
+// writeDedupCandidateGroup renders one new item together with its own
+// similarity-candidate existing pages, nested under a <candidates> element.
+// This per-item grouping is what constrains the dedup model to local
+// decisions (see the grouping rationale in deduplicateExtractedBatch). The
+// candidate pages keep their aliases so the model still has the acronym /
+// translation signal it needs to accept a legitimate merge.
+func writeDedupCandidateGroup(
+	buf *strings.Builder, item extractedItem, itemType string, candidates []*types.WikiPageLite,
+) {
+	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", item.Slug, itemType)
+	fmt.Fprintf(buf, "    <name>%s</name>\n", xmlEscape(item.Name))
+	for _, alias := range item.Aliases {
 		if alias == "" {
 			continue
 		}
 		fmt.Fprintf(buf, "    <alias>%s</alias>\n", xmlEscape(alias))
 	}
+	buf.WriteString("    <candidates>\n")
+	for _, p := range candidates {
+		if p == nil {
+			continue
+		}
+		fmt.Fprintf(buf, "      <page slug=%q type=%q>\n", p.Slug, p.PageType)
+		fmt.Fprintf(buf, "        <name>%s</name>\n", xmlEscape(p.Title))
+		for _, alias := range []string(p.Aliases) {
+			if alias == "" {
+				continue
+			}
+			fmt.Fprintf(buf, "        <alias>%s</alias>\n", xmlEscape(alias))
+		}
+		buf.WriteString("      </page>\n")
+	}
+	buf.WriteString("    </candidates>\n")
 	buf.WriteString("  </item>\n")
 }
 
@@ -2226,7 +2246,16 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	// Build the candidate set: for each new item, ask the repo for
 	// the top-K trigram-similar pages and union the results. Dedup by
 	// slug as we go so the prompt only carries each candidate once.
+	//
+	// itemCandidates additionally records, per new item, the slugs that
+	// surfaced for THAT item specifically. The prompt only ever sees the
+	// flattened union, so validMerge below uses this per-item scoping to
+	// reject a merge whose target was pulled in for a *different* item —
+	// the class of hallucination the union otherwise enables (e.g. weak
+	// models emitting entity/tencent-open → entity/hiring-agent, which
+	// share no trigram signal and were never candidates for each other).
 	candidatePages := make(map[string]*types.WikiPageLite)
+	itemCandidates := make(map[string]map[string]bool)
 	probe := func(item extractedItem) {
 		queries := make([]string, 0, 1+len(item.Aliases))
 		if item.Name != "" {
@@ -2236,6 +2265,11 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 			if alias != "" {
 				queries = append(queries, alias)
 			}
+		}
+		own := itemCandidates[item.Slug]
+		if own == nil {
+			own = make(map[string]bool)
+			itemCandidates[item.Slug] = own
 		}
 		for _, q := range queries {
 			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
@@ -2252,6 +2286,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 				if _, ok := candidatePages[p.Slug]; !ok {
 					candidatePages[p.Slug] = p
 				}
+				own[p.Slug] = true
 			}
 		}
 	}
@@ -2270,25 +2305,59 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	logger.Infof(ctx, "wiki ingest: %d similar existing pages selected for %d new items",
 		len(candidatePages), len(entities)+len(concepts))
 
-	var existingBuf strings.Builder
-	for _, p := range candidatePages {
-		writeDedupItemXML(&existingBuf, p.Slug, p.Title, p.PageType, []string(p.Aliases))
+	// Group each new item with ONLY the existing pages that surfaced for
+	// its own similarity probe. Presenting the model two flat lists (all
+	// new items × all candidates) invites cross-item mispairings — it has
+	// no way to tell which candidate is relevant to which item, so a weak
+	// model pairs unrelated slugs that merely coexist in the prompt. A
+	// per-item shortlist turns dedup into a local yes/no decision against
+	// a handful of genuinely-similar pages and makes cross-item pairings
+	// structurally unnatural to express. Items with no candidate are
+	// omitted entirely (they cannot merge and only add hallucination
+	// surface + tokens).
+	var candBuf strings.Builder
+	groups := 0
+	renderGroup := func(item extractedItem, itemType string) {
+		cset := itemCandidates[item.Slug]
+		if len(cset) == 0 {
+			return
+		}
+		slugs := make([]string, 0, len(cset))
+		for slug := range cset {
+			// Skip the item's own slug: an identically-slugged existing
+			// page is a re-ingest/update, not a merge target.
+			if slug == item.Slug {
+				continue
+			}
+			if _, ok := candidatePages[slug]; ok {
+				slugs = append(slugs, slug)
+			}
+		}
+		if len(slugs) == 0 {
+			return
+		}
+		sort.Strings(slugs)
+		pages := make([]*types.WikiPageLite, 0, len(slugs))
+		for _, slug := range slugs {
+			pages = append(pages, candidatePages[slug])
+		}
+		writeDedupCandidateGroup(&candBuf, item, itemType, pages)
+		groups++
 	}
-	if existingBuf.Len() == 0 {
+	for _, item := range entities {
+		renderGroup(item, "entity")
+	}
+	for _, item := range concepts {
+		renderGroup(item, "concept")
+	}
+	if groups == 0 {
+		// Every new item's candidate list is empty after scoping —
+		// nothing the model could safely merge.
 		return entities, concepts
 	}
 
-	var newBuf strings.Builder
-	for _, item := range entities {
-		writeDedupItemXML(&newBuf, item.Slug, item.Name, "entity", item.Aliases)
-	}
-	for _, item := range concepts {
-		writeDedupItemXML(&newBuf, item.Slug, item.Name, "concept", item.Aliases)
-	}
-
 	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
-		"NewItems":      newBuf.String(),
-		"ExistingPages": existingBuf.String(),
+		"Candidates": candBuf.String(),
 	})
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
@@ -2309,36 +2378,9 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return entities, concepts
 	}
 
-	// Build the existing-slug set from the candidate map: anything not
-	// in candidates is rejected as an LLM hallucination, since by
-	// construction the model only ever saw those slugs as merge
-	// targets. Compare with the legacy "look up against allPages"
-	// path which had a wider acceptance window.
-	existingSlugs := make(map[string]bool, len(candidatePages))
-	for slug := range candidatePages {
-		existingSlugs[slug] = true
-	}
-
 	validMerge := func(srcSlug, dstSlug string) bool {
-		if !existingSlugs[dstSlug] {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (target slug does not exist in candidate set)", srcSlug, dstSlug)
-			return false
-		}
-		srcSlash := strings.Index(srcSlug, "/")
-		dstSlash := strings.Index(dstSlug, "/")
-		if srcSlash <= 0 || dstSlash <= 0 {
-			// A type-prefixed slug must look like "entity/foo" or
-			// "concept/bar". An LLM that emits an un-prefixed slug
-			// here is hallucinating; reject rather than fall through
-			// the prefix-equality check (which would treat both empty
-			// prefixes as a match).
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (missing type prefix)", srcSlug, dstSlug)
-			return false
-		}
-		srcPrefix := srcSlug[:srcSlash+1]
-		dstPrefix := dstSlug[:dstSlash+1]
-		if srcPrefix != dstPrefix {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (type mismatch: %s vs %s)", srcSlug, dstSlug, srcPrefix, dstPrefix)
+		if reason := dedupMergeRejectReason(srcSlug, dstSlug, itemCandidates[srcSlug]); reason != "" {
+			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (%s)", srcSlug, dstSlug, reason)
 			return false
 		}
 		return true
