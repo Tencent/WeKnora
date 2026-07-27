@@ -466,8 +466,8 @@ func getPassageList(dataset []*types.QAPair) []string {
 			maxPID = max(maxPID, qaPair.PIDs[i])
 		}
 	}
-	passages := make([]string, maxPID)
-	for i := 0; i < maxPID; i++ {
+	passages := make([]string, maxPID+1)
+	for i := 0; i <= maxPID; i++ {
 		if _, ok := pIDMap[i]; ok {
 			passages[i] = pIDMap[i]
 		}
