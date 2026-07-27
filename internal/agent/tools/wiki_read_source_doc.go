@@ -17,6 +17,7 @@ type wikiReadSourceDocTool struct {
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
 	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
 func NewWikiReadSourceDocTool(
@@ -57,8 +58,11 @@ If neither query nor range is provided, it returns the beginning of the document
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
 	}
+	// Presence of the variadic argument — not its length — enables the Agent
+	// authorization boundary, so an empty scope fails closed.
 	if len(searchTargets) > 0 {
 		tool.searchTargets = searchTargets[0]
+		tool.scopeEnforced = true
 	}
 	return tool
 }
@@ -134,7 +138,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	var knowledge *types.Knowledge
 	var err error
-	if len(t.searchTargets) > 0 {
+	if t.scopeEnforced {
 		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, knowledgeID, t.knowledgeService)
 	} else {
 		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)

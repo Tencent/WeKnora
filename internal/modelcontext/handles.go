@@ -1,7 +1,6 @@
 package modelcontext
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -85,11 +84,13 @@ func (t *HandleTable) DecodeKnownText(value string) string {
 	pairs := t.table.pairs()
 	sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i].handle) > len(pairs[j].handle) })
 	for _, item := range pairs {
-		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(item.handle) + `\b`)
+		if item.wordBounded == nil {
+			continue
+		}
 		// A durable value may legally contain '$'. ReplaceAllString would
 		// interpret it as a regexp expansion, so use a literal callback.
 		durable := item.value
-		value = pattern.ReplaceAllStringFunc(value, func(string) string { return durable })
+		value = item.wordBounded.ReplaceAllStringFunc(value, func(string) string { return durable })
 	}
 	return value
 }

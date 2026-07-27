@@ -18,6 +18,7 @@ type wikiWritePageTool struct {
 	kbIDs            []string
 	routes           *WikiRouteResolver
 	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
 // NewWikiWritePageTool creates a new wiki_write_page tool
@@ -75,8 +76,11 @@ func NewWikiWritePageTool(
 	}
 }
 
+// WithSearchTargets enables the Agent authorization boundary for source_refs.
+// An Agent turn with no search target must reject every source document.
 func (t *wikiWritePageTool) WithSearchTargets(searchTargets types.SearchTargets) *wikiWritePageTool {
 	t.searchTargets = searchTargets
+	t.scopeEnforced = true
 	return t
 }
 
@@ -117,7 +121,7 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	var resolvedRefs []string
 	var err error
 	if params.SourceRefs != nil {
-		if len(t.searchTargets) > 0 {
+		if t.scopeEnforced {
 			resolvedRefs, err = resolveAuthorizedSourceRefs(ctx, t.searchTargets, *params.SourceRefs, t.knowledgeService)
 			if err != nil {
 				return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + err.Error()}, nil

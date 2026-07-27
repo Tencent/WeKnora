@@ -125,12 +125,17 @@ type DataAnalysisTool struct {
 	localBaseDir    string
 	storageResolver interfaces.StorageBackendResolver
 	searchTargets   types.SearchTargets
+	scopeEnforced   bool
 }
 
 // WithSearchTargets enables the Agent-only authorization boundary. Other
 // internal data-analysis callers retain their existing service-owned scope.
+// The flag is set independently of the slice length: an Agent turn that ended
+// up with no search target must reject every document, not fall back to
+// unrestricted access.
 func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) *DataAnalysisTool {
 	t.searchTargets = searchTargets
+	t.scopeEnforced = true
 	return t
 }
 
@@ -209,7 +214,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
 	}
-	if len(t.searchTargets) > 0 {
+	if t.scopeEnforced {
 		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}

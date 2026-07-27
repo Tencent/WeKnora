@@ -263,13 +263,18 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
+		// A target that carries a resolved document whitelist is already the
+		// intersection of its mention and any tag scope, so it must be grepped
+		// by knowledge ID. Falling back to the tag branch would widen the
+		// search to every document carrying the tag.
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
 		switch {
-		case len(effectiveSearchTargetTagIDs(target)) > 0:
+		case len(targetTagIDs) > 0:
 			tenantID := target.TenantID
 			if tenantID == 0 {
 				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
 			}
-			tagIDs := effectiveSearchTargetTagIDs(target)
+			tagIDs := targetTagIDs
 			if len(tagIDs) == 0 || tenantID == 0 {
 				continue
 			}
@@ -284,9 +289,9 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 				TenantID:        tenantID,
 				TagIDs:          tagIDs,
 			})
-		case len(target.KnowledgeIDs) > 0:
-			for _, kid := range target.KnowledgeIDs {
-				if kid != "" && !seenKnowledge[kid] {
+		case len(targetKnowledgeIDs) > 0:
+			for _, kid := range targetKnowledgeIDs {
+				if !seenKnowledge[kid] {
 					seenKnowledge[kid] = true
 					knowledgeIDs = append(knowledgeIDs, kid)
 				}

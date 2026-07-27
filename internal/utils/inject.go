@@ -1110,26 +1110,40 @@ func buildKnowledgeBaseScopeCondition(alias string, scopes []SearchScope) string
 	return fmt.Sprintf("%s.id IN (%s)", alias, strings.Join(quoteStringSlice(kbIDs), ", "))
 }
 
+// buildScopeClause renders one scope. A scope's document whitelist and tag
+// filter are ANDed: each is an independent narrowing of the same KB, so
+// applying only one of them would admit rows the other excludes. Scopes are
+// ORed against each other by joinOrClauses because they are alternatives.
+func buildScopeClause(alias, knowledgeIDColumn string, scope SearchScope) string {
+	if scope.KnowledgeBaseID == "" {
+		return ""
+	}
+	conditions := []string{
+		fmt.Sprintf("%s.knowledge_base_id = %s", alias, quoteString(scope.KnowledgeBaseID)),
+	}
+	if len(scope.KnowledgeIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf(
+			"%s.%s IN (%s)",
+			alias, knowledgeIDColumn, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
+		))
+	}
+	if len(scope.TagIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.%s AND ktr.tag_id IN (%s))",
+			alias, knowledgeIDColumn, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+		))
+	}
+	if len(conditions) == 1 {
+		return conditions[0]
+	}
+	return "(" + strings.Join(conditions, " AND ") + ")"
+}
+
 func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
 	clauses := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope.KnowledgeBaseID == "" {
-			continue
-		}
-		kbID := quoteString(scope.KnowledgeBaseID)
-		switch {
-		case len(scope.TagIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
-			))
-		case len(scope.KnowledgeIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND %s.id IN (%s))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
-			))
-		default:
-			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		if clause := buildScopeClause(alias, "id", scope); clause != "" {
+			clauses = append(clauses, clause)
 		}
 	}
 	return joinOrClauses(clauses)
@@ -1138,23 +1152,8 @@ func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
 func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
 	clauses := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope.KnowledgeBaseID == "" {
-			continue
-		}
-		kbID := quoteString(scope.KnowledgeBaseID)
-		switch {
-		case len(scope.TagIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
-			))
-		case len(scope.KnowledgeIDs) > 0:
-			clauses = append(clauses, fmt.Sprintf(
-				"(%s.knowledge_base_id = %s AND %s.knowledge_id IN (%s))",
-				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
-			))
-		default:
-			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		if clause := buildScopeClause(alias, "knowledge_id", scope); clause != "" {
+			clauses = append(clauses, clause)
 		}
 	}
 	return joinOrClauses(clauses)

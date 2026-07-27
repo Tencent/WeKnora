@@ -18,6 +18,40 @@ func effectiveSearchTargetTagIDs(target *types.SearchTarget) []string {
 	))
 }
 
+// searchTargetScope returns what a SINGLE search target authorizes.
+//
+// Inside one target, KnowledgeIDs and tags are an intersection, never a union.
+// A tag-scoped mention is built by resolving the tag relation table into
+// KnowledgeIDs and intersecting that with any explicitly mentioned documents;
+// TagIDs/ScopeTagIDs are kept alongside as the physical index filter and as
+// the logical scope record. Treating them as an independent way to authorize a
+// document would re-admit every document carrying the tag and silently undo
+// that intersection. Tags therefore only authorize when the target carries no
+// resolved document whitelist.
+//
+// Alternatives ACROSS targets remain a union; that merge happens in callers.
+func searchTargetScope(target *types.SearchTarget) (knowledgeIDs, tagIDs []string) {
+	if target == nil {
+		return nil, nil
+	}
+	knowledgeIDs = dedupNonEmptyStrings(target.KnowledgeIDs)
+	if len(knowledgeIDs) > 0 {
+		return knowledgeIDs, nil
+	}
+	return nil, effectiveSearchTargetTagIDs(target)
+}
+
+// searchTargetIsWholeKB reports whether a target grants unrestricted access to
+// its knowledge base.
+func searchTargetIsWholeKB(target *types.SearchTarget) bool {
+	if target == nil {
+		return false
+	}
+	knowledgeIDs, tagIDs := searchTargetScope(target)
+	return target.Type == types.SearchTargetTypeKnowledgeBase &&
+		len(knowledgeIDs) == 0 && len(tagIDs) == 0
+}
+
 // authorizeKnowledgeInSearchTargets is the shared authorization boundary for
 // every Agent tool that accepts a model-visible dN/knowledge_id. Handle
 // decoding is necessary but never sufficient: the durable document must also
@@ -165,12 +199,11 @@ func searchTargetsAllowKnowledgeID(
 			continue
 		}
 		matchedKB = true
-		targetTagIDs := effectiveSearchTargetTagIDs(target)
-		if target.Type == types.SearchTargetTypeKnowledgeBase &&
-			len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0 {
+		if searchTargetIsWholeKB(target) {
 			return true, nil
 		}
-		for _, allowedID := range target.KnowledgeIDs {
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
+		for _, allowedID := range targetKnowledgeIDs {
 			if allowedID == knowledgeID {
 				return true, nil
 			}
@@ -207,12 +240,11 @@ func filterSearchResultsInSearchTargets(
 			continue
 		}
 		matchedKB = true
-		targetTagIDs := effectiveSearchTargetTagIDs(target)
-		if target.Type == types.SearchTargetTypeKnowledgeBase &&
-			len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0 {
+		if searchTargetIsWholeKB(target) {
 			return results, nil
 		}
-		explicitIDs = append(explicitIDs, target.KnowledgeIDs...)
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
+		explicitIDs = append(explicitIDs, targetKnowledgeIDs...)
 		tagIDs = append(tagIDs, targetTagIDs...)
 	}
 	if !matchedKB {

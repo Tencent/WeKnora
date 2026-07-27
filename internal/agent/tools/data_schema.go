@@ -26,11 +26,15 @@ type DataSchemaTool struct {
 	chunkRepo        interfaces.ChunkRepository
 	targetChunkTypes []types.ChunkType
 	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
-// WithSearchTargets enables Agent request-scope authorization.
+// WithSearchTargets enables Agent request-scope authorization. An Agent turn
+// with no search target must reject every document rather than fall back to
+// the unrestricted service-owned lookup.
 func (t *DataSchemaTool) WithSearchTargets(searchTargets types.SearchTargets) *DataSchemaTool {
 	t.searchTargets = searchTargets
+	t.scopeEnforced = true
 	return t
 }
 
@@ -59,7 +63,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)
 	var knowledge *types.Knowledge
 	var err error
-	if len(t.searchTargets) > 0 {
+	if t.scopeEnforced {
 		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService)
 	} else {
 		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)

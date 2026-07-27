@@ -71,6 +71,7 @@ type QueryKnowledgeGraphTool struct {
 	knowledgeService      interfaces.KnowledgeBaseService
 	scopeKnowledgeService interfaces.KnowledgeService
 	searchTargets         types.SearchTargets
+	scopeEnforced         bool
 }
 
 // WithKnowledgeScope enables document/tag-level result filtering for Agent
@@ -92,8 +93,11 @@ func NewQueryKnowledgeGraphTool(
 		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
 	}
+	// Presence of the variadic argument — not its length — enables the Agent
+	// authorization boundary, so an empty scope fails closed.
 	if len(searchTargets) > 0 {
 		tool.searchTargets = searchTargets[0]
+		tool.scopeEnforced = true
 	}
 	return tool
 }
@@ -124,7 +128,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			Error:   "knowledge_base_ids must contain at most 10 KB IDs",
 		}, fmt.Errorf("too many KB IDs")
 	}
-	if len(t.searchTargets) > 0 {
+	if t.scopeEnforced {
 		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, input.KnowledgeBaseIDs); err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}
@@ -185,7 +189,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				mu.Unlock()
 				return
 			}
-			if len(t.searchTargets) > 0 {
+			if t.scopeEnforced {
 				results, err = filterSearchResultsInSearchTargets(
 					ctx, t.searchTargets, id, results, t.scopeKnowledgeService,
 				)
