@@ -350,11 +350,9 @@ services:
       - OIDC_AUTH_SCOPES=${OIDC_AUTH_SCOPES:-}
       - OIDC_USER_INFO_MAPPING_USER_NAME=${OIDC_USER_INFO_MAPPING_USER_NAME:-}
       - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
+    # Local reuse: DB/Redis via host.docker.internal (.env). Bundled postgres/redis
+    # are behind profile "bundled-infra" and are not required to start app.
     depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
       docreader:
         condition: service_healthy
     networks:
@@ -497,10 +495,13 @@ services:
       - WeKnora-network
     restart: unless-stopped
 
-  # 修改的PostgreSQL配置
+  # 修改的PostgreSQL配置（默认不启动；本机复用时用 .env 的 host.docker.internal。
+  # 需要 Compose 自带库时：docker compose --profile bundled-infra up -d）
   postgres:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres
+    profiles:
+      - bundled-infra
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
@@ -522,6 +523,8 @@ services:
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
+    profiles:
+      - bundled-infra
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     restart: always
     networks:
