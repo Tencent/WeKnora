@@ -61,7 +61,6 @@ import useKnowledgeFolders from '@/hooks/useKnowledgeFolders';
 import useFolderEditing from './useFolderEditing';
 import useFolderOperations, { evaluateReparseLimit } from './useFolderOperations';
 import FolderPickerDialog from './components/FolderPickerDialog.vue';
-import FolderDeleteDialog from './components/FolderDeleteDialog.vue';
 import FolderBreadcrumb from './components/FolderBreadcrumb.vue';
 import FolderNavigationPanel from './components/FolderNavigationPanel.vue';
 import FolderGridItems from './components/FolderGridItems.vue';
@@ -353,9 +352,15 @@ const {
   setTreeVisible: setFolderTreeVisible,
   toggleExpanded: toggleFolderExpanded,
 } = folders;
-const { moving: folderMoving, deleting: folderDeleting } = folderOperations;
+const { moving: folderMoving } = folderOperations;
 // Folder-editing computed views (template auto-unwraps top-level bindings).
-const { renamingFolderId: folderRenamingId, renameError: folderRenameError } = folderEditing;
+const {
+  renamingFolderId: folderRenamingId,
+  renameError: folderRenameError,
+  creatingParentId: folderCreatingParentId,
+  creatingSurface: folderCreatingSurface,
+  createError: folderCreateError,
+} = folderEditing;
 
 // Current folder / search derived from the route query (root is "" - the
 // __root__ sentinel is an API-boundary concern only and never surfaces into
@@ -507,8 +512,6 @@ function nextQueryGeneration() {
 function cancelTransientInteraction() {
   moveMenuMode.value = 'normal';
   folderEditing.cancelEdit();
-  // Close dialogs only when idle so an in-flight delete/move is not interrupted.
-  if (!folderDeleting.value) deleteTargetFolderId.value = null;
   if (!folderMoving.value) moveFlow.value = null;
   clearSelection();
   selectedFolderIds.value = new Set();
@@ -516,16 +519,35 @@ function cancelTransientInteraction() {
   nextQueryGeneration();
 }
 
-// Delete placeholder: opens FolderDeleteDialog here. This only records the
-// target folder id (recursive delete uses batchDelete).
-const deleteTargetFolderId = ref<string | null>(null);
-
 // Entry-point handlers. These are bound to the folder components' emits when
 // rendered. Each handler is a no-op for Viewers (folderEditable gate) so the
 // editing state can never be entered read-only.
-const handleFolderCreate = (parentId: string) => {
+const handleFolderCreate = (parentId: string, surface: "tree" | "content" = "content") => {
   if (!folderEditable.value) return;
-  folderEditing.startCreate(parentId);
+  // Tree surface: expand the parent so the inline input row (rendered under the
+  // parent) is visible. Root ('') is always expanded implicitly, so skip it.
+  // toggleFolderExpanded persists the expansion to prefs; only call when the
+  // parent is collapsed so we never accidentally collapse it.
+  if (surface === "tree" && parentId !== "" && !folderExpandedIds.value.has(parentId)) {
+    toggleFolderExpanded(parentId);
+  }
+  folderEditing.startCreate(parentId, surface);
+};
+// Card/row "new subfolder" action: navigate INTO the target folder first so
+// the content-area create input appears in the folder it will actually be
+// created under (fixes trigger/input位置脱节). The route watcher's
+// cancelTransientInteraction fires on navigation; we MUST await router.replace
+// (vue-router updates route reactively, async) AND then nextTick so the pre-
+// flush watcher's cancelEdit runs to completion BEFORE startCreate sets the
+// new editState - otherwise the watcher fires after startCreate and clears it
+// (create input never shows). executeFolderDelete uses the same await pattern.
+const handleCardCreateSubfolder = async (folderId: string) => {
+  if (!folderEditable.value) return;
+  if (currentFolderId.value !== folderId) {
+    await router.replace({ query: formatKnowledgeFolderRouteQuery(folderId, currentSearchTerm.value) });
+    await nextTick();
+  }
+  handleFolderCreate(folderId, 'content');
 };
 const handleFolderRename = (folderId: string) => {
   if (!folderEditable.value) return;
@@ -540,53 +562,16 @@ const handleFolderRenameCommit = (folderId: string, name: string) => {
 const handleFolderRenameCancel = (_folderId: string) => {
   folderEditing.cancelEdit();
 };
-const handleFolderDelete = (folderId: string) => {
-  if (!folderEditable.value) return;
-  // Ensure the tree is cached so FolderDeleteDialog's recursive impact
-  // (descendant folders + document count from the tree index) is accurate.
-  // ensureTree is a lazy no-op after the first load for a KB.
-  if (kbId.value) void folders.ensureTree(kbId.value);
-  // Opens FolderDeleteDialog. No delete API call is made here - the
-  // dialog submits via useFolderOperations.deleteFolders (batch-delete).
-  deleteTargetFolderId.value = folderId;
+// Single-folder delete: the FolderActionMenu popconfirm is the only confirmation
+// gate (cascading delete is announced in its content), so we skip the second
+// dialog and go straight to the batch-delete submit. ensureTree is awaited so
+// descendantIds (used to decide whether the current folder is inside the
+// deletion set) is authoritative; after first load it is a lazy no-op.
+const handleFolderDelete = async (folderId: string) => {
+  if (!folderEditable.value || !kbId.value) return;
+  await folders.ensureTree(kbId.value);
+  await executeFolderDelete(folderId);
 };
-
-// --- Folder delete dialog ---
-// Consumes deleteTargetFolderId: when set, FolderDeleteDialog opens.
-// The dialog shows the recursive impact (descendant folders + documents) and
-// submits via useFolderOperations.deleteFolders -> POST /api/v1/knowledge/
-// batch-delete. On confirm, if the deleted folder IS the current folder (or an ancestor of it), the page navigates to
-// the closest surviving parent BEFORE refreshing so the URL never points at a
-// soon-to-be-gone folder.
-const deleteDialogVisible = computed(() => deleteTargetFolderId.value !== null);
-const deleteTargetFolder = computed(() => {
-  const id = deleteTargetFolderId.value;
-  if (!id) return null;
-  // Tree index is the authoritative source for descendants + recursive counts;
-  // fall back to direct folders (browse context) for the name if the tree is
-  // still loading.
-  return (
-    folderIndex.value.byId.get(id) ??
-    folderDirectFolders.value.find((f) => f.id === id) ??
-    null
-  );
-});
-const deleteFolderName = computed(() => deleteTargetFolder.value?.name ?? '');
-// Descendant folder count (excluding the folder itself). descendantIds includes
-// the folder; subtract one. Returns 0 when the tree is not loaded - the dialog
-// then shows the empty/folder-only impact (the backend still deletes recursively).
-const deleteDescendantFolderCount = computed(() => {
-  const id = deleteTargetFolderId.value;
-  if (!id) return 0;
-  return Math.max(0, descendantIds(folderIndex.value, id).size - 1);
-});
-// Recursive document count from the tree (authoritative). Null when unknown so
-// the dialog shows the folder-only impact line instead of a misleading "0".
-const deleteDocumentCount = computed<number | null>(() => {
-  const folder = deleteTargetFolder.value;
-  if (!folder) return 0;
-  return folder.knowledge_count ?? null;
-});
 
 // Find the closest ancestor of `folderId` that is NOT in the deletion set, via
 // folderPathItems (the breadcrumb chain). Returns '' (root) when no ancestor
@@ -602,9 +587,15 @@ function closestSurvivingParent(folderId: string, deletedIds: Set<string>): stri
   return ''; // root
 }
 
-async function handleFolderDeleteConfirm() {
-  const deletedId = deleteTargetFolderId.value;
-  if (!deletedId || !kbId.value) return;
+// Single-folder recursive delete. The FolderActionMenu popconfirm is the only
+// confirmation gate, so we go straight to the batch-delete submit. If the
+// deleted folder IS the current folder (or an ancestor of it), the page
+// navigates to the closest surviving parent BEFORE refreshing so the URL never
+// points at a soon-to-be-gone folder. Submitted, not done: the backend runs the
+// recursive delete async; onDone invalidates the local caches and we toast
+// "submitted".
+async function executeFolderDelete(deletedId: string) {
+  if (!kbId.value) return;
   const selection: FileSystemSelection = {
     knowledgeIds: new Set<string>(),
     folderIds: new Set([deletedId]),
@@ -635,19 +626,26 @@ async function handleFolderDeleteConfirm() {
     // Submitted, not done: the backend runs the recursive delete async. The
     // toast says "submitted"; onDone already invalidated the folder caches.
     MessagePlugin.success(t('knowledgeBase.folderDeleteSubmitted'));
-    deleteTargetFolderId.value = null;
-    // Refresh the document list for the (possibly new) current folder so docs
-    // that lived under the deleted subtree leave the view.
+    // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删文件夹；短轮询直到
+    // 被删子树从 folder index / direct folders 消失或超时。与 confirmBatchDelete
+    // 对齐——文档列表每轮一并刷新，确保子树下的文档也同步离开视图。
     resetPage();
-    loadKnowledgeFiles(kbId.value);
+    {
+      const maxPolls = 30;
+      const delayMs = 400;
+      for (let i = 0; i < maxPolls; i++) {
+        await loadKnowledgeFiles(kbId.value);
+        await folders.refreshAll(kbId.value, currentFolderId.value);
+        const stillInTree = [...deletedIds].some(
+          (id) => folderIndex.value.byId.has(id) || folderDirectFolders.value.some((f) => f.id === id),
+        );
+        if (!stillInTree) break;
+        await new Promise<void>((r) => setTimeout(r, delayMs));
+      }
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.folderDeleteFailed'));
   }
-}
-
-function handleFolderDeleteCancel() {
-  // Cancel keeps the page on the current folder; just close the dialog.
-  deleteTargetFolderId.value = null;
 }
 // Create-commit helper: called by the create input UI on Enter.
 const handleFolderCreateCommit = (name: string) => {
@@ -679,7 +677,7 @@ const handleFolderOpen = (folderId: string) => {
 // creates at root.
 function handleFolderTreeAction(action: FolderActionType, folderId: string) {
   if (action === 'add-subfolder') {
-    handleFolderCreate(folderId);
+    handleFolderCreate(folderId, 'tree');
   } else if (action === 'rename') {
     handleFolderRename(folderId);
   } else if (action === 'delete') {
@@ -692,7 +690,10 @@ function handleFolderTreeAction(action: FolderActionType, folderId: string) {
 const folderCreateDraft = ref('');
 const folderCreateInputEl = ref<HTMLInputElement | null>(null);
 const isCreatingFolder = computed(
-  () => folderEditing.isEditing.value && folderEditing.editState.value?.mode === 'create',
+  () =>
+    folderEditing.isEditing.value &&
+    folderEditing.editState.value?.mode === 'create' &&
+    folderCreatingSurface.value === 'content',
 );
 const setFolderCreateInput = (el: any) => {
   folderCreateInputEl.value = (el as HTMLInputElement | null) || null;
@@ -705,9 +706,9 @@ watch(isCreatingFolder, (active) => {
     });
   }
 });
-const commitFolderCreate = () => {
-  if (!isCreatingFolder.value) return;
-  const trimmed = folderCreateDraft.value.trim();
+const commitFolderCreate = (name: string) => {
+  if (!folderEditing.isEditing.value || folderEditing.editState.value?.mode !== 'create') return;
+  const trimmed = name.trim();
   if (!trimmed) {
     folderEditing.cancelEdit();
     return;
@@ -715,7 +716,7 @@ const commitFolderCreate = () => {
   handleFolderCreateCommit(trimmed);
 };
 const cancelFolderCreate = () => {
-  if (!isCreatingFolder.value) return;
+  if (!folderEditing.isEditing.value || folderEditing.editState.value?.mode !== 'create') return;
   folderEditing.cancelEdit();
 };
 
@@ -1537,7 +1538,6 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     // transition (cancels edit state).
     folders.resetForKnowledgeBase(newKbId);
     folderEditing.cancelEdit();
-    deleteTargetFolderId.value = null;
     // Clear same-KB transient state so a stale folder selection / move flow from
     // the previous KB cannot survive the switch.
     selectedFolderIds.value = new Set();
@@ -2545,6 +2545,12 @@ const handleEnterBatchFromCard = (item: any) => {
   clearSelection();
   batchMode.value = true;
 };
+// 从文件夹菜单进入批量管理：与文档版对齐（清空当前选择 + 进多选模式，不预选该文件夹）。
+const handleFolderBatchManage = (_folderId: string) => {
+  moreIndex.value = -1;
+  clearSelection();
+  batchMode.value = true;
+};
 const {
   onContainerMouseDown: onDocMarqueeMouseDown,
   marqueeVisible: docMarqueeVisible,
@@ -2849,11 +2855,15 @@ async function createNewSession(value: string): Promise<void> {
             :visible="folderTreeVisible"
             :loading="folderTreeLoading"
             :error="folderTreeError"
+            :creating-parent-id="folderCreatingParentId"
+            :create-error="folderCreateError"
             @navigate="handleFolderOpen"
             @toggle-expand="toggleFolderExpanded"
             @action="handleFolderTreeAction"
             @toggle="setFolderTreeVisible(!folderTreeVisible)"
             @retry="retryFolderTree"
+            @create-commit="(name: string) => commitFolderCreate(name)"
+            @create-cancel="cancelFolderCreate"
           />
           <div class="tag-content">
             <div class="doc-card-area">
@@ -3037,13 +3047,13 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !hasContent && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{ 'is-empty': !hasContent && !docListLoading && !isCreatingFolder, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && !hasContent" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && !hasContent && !isCreatingFolder" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -3058,7 +3068,7 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="hasContent && viewMode === 'grid'">
+                <template v-else-if="(hasContent || isCreatingFolder) && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
                     :selected-ids="selectedIds"
@@ -3091,22 +3101,23 @@ async function createNewSession(value: string): Promise<void> {
                         <input :ref="setFolderCreateInput" v-model.trim="folderCreateDraft"
                           class="folder-card-rename-input folder-create-input" type="text"
                           :placeholder="$t('knowledgeBase.newFolder')" :aria-label="$t('knowledgeBase.newFolder')"
-                          @click.stop @keydown.enter.prevent="commitFolderCreate"
-                          @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate" />
+                          @click.stop @keydown.enter.prevent="commitFolderCreate(folderCreateDraft)"
+                          @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate(folderCreateDraft)" />
                       </div>
                       <FolderGridItems v-if="displayedFolders.length" :folders="displayedFolders"
                         :selected-folder-ids="selectedFolderIds" :editable="folderEditable"
                         :batch-mode="batchMode"
                         :renaming-folder-id="folderRenamingId" :rename-error="folderRenameError"
                         @open="handleFolderOpen" @toggle-selection="onFolderToggleSelection"
-                        @create="handleFolderCreate" @rename="handleFolderRename"
+                        @create="handleCardCreateSubfolder" @rename="handleFolderRename"
                         @rename-commit="handleFolderRenameCommit" @rename-cancel="handleFolderRenameCancel"
                         @move-folder="(id: string) => openMoveFolderFlow(`folder:${id}`)"
+                        @batch-manage="handleFolderBatchManage"
                         @delete="handleFolderDelete" />
                     </template>
                   </DocumentCardView>
                 </template>
-                <template v-else-if="hasContent && viewMode === 'list'">
+                <template v-else-if="(hasContent || isCreatingFolder) && viewMode === 'list'">
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
@@ -3134,8 +3145,8 @@ async function createNewSession(value: string): Promise<void> {
                             <input :ref="setFolderCreateInput" v-model.trim="folderCreateDraft"
                               class="folder-list-rename-input folder-create-input" type="text"
                               :placeholder="$t('knowledgeBase.newFolder')" :aria-label="$t('knowledgeBase.newFolder')"
-                              @click.stop @keydown.enter.prevent="commitFolderCreate"
-                              @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate" />
+                              @click.stop @keydown.enter.prevent="commitFolderCreate(folderCreateDraft)"
+                              @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate(folderCreateDraft)" />
                           </div>
                         </div>
                         <div class="cell cell-tag"><span class="row-muted">--</span></div>
@@ -3149,9 +3160,10 @@ async function createNewSession(value: string): Promise<void> {
                         :selected-folder-ids="selectedFolderIds" :editable="folderEditable"
                         :renaming-folder-id="folderRenamingId" :rename-error="folderRenameError"
                         @open="handleFolderOpen" @toggle-selection="onFolderToggleSelection"
-                        @create="handleFolderCreate" @rename="handleFolderRename"
+                        @create="handleCardCreateSubfolder" @rename="handleFolderRename"
                         @rename-commit="handleFolderRenameCommit" @rename-cancel="handleFolderRenameCancel"
                         @move-folder="(id: string) => openMoveFolderFlow(`folder:${id}`)"
+                        @batch-manage="handleFolderBatchManage"
                         @delete="handleFolderDelete" />
                     </template>
                   </DocumentListView>
@@ -3250,18 +3262,6 @@ async function createNewSession(value: string): Promise<void> {
     :submitting="folderMoving"
     @update:visible="handleFolderPickerVisibleChange"
     @confirm="handleFolderPickerConfirm"
-  />
-
-  <!-- 递归删除文件夹 (batch-delete). Submitted, not done. -->
-  <FolderDeleteDialog
-    :visible="deleteDialogVisible"
-    :folder-name="deleteFolderName"
-    :descendant-folder-count="deleteDescendantFolderCount"
-    :document-count="deleteDocumentCount"
-    :submitting="folderDeleting"
-    @update:visible="(val: boolean) => { if (!val && !folderDeleting) handleFolderDeleteCancel(); }"
-    @confirm="handleFolderDeleteConfirm"
-    @cancel="handleFolderDeleteCancel"
   />
 </template>
 <style>
@@ -4475,7 +4475,6 @@ async function createNewSession(value: string): Promise<void> {
     font-size: 12px;
   }
 }
-
 
 .card-menu {
   display: flex;

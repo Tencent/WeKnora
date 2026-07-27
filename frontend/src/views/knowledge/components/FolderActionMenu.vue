@@ -3,15 +3,6 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { KnowledgeFolder } from '@/types/knowledgeFolder';
 
-// FolderActionMenu is the per-folder action dropdown content. It is rendered
-// inside the same `.card-more` t-popup overlay the document cards use, so it
-// shares the document action-menu visual rhythm (复用现有视图语言). It is DISTINCT
-// from DocumentActionMenu: folders get create-subfolder, rename, move-to-folder
-// (same-KB) and delete. The document cross-KB transfer (`moveToKnowledgeBase`)
-// is intentionally NOT present here - that action only applies to documents.
-// Delete shows a cascading-effect popconfirm (folder + all subfolders +
-// documents).
-
 const props = defineProps<{
   folder: KnowledgeFolder;
 }>();
@@ -20,6 +11,7 @@ const emit = defineEmits<{
   (e: 'create', folderId: string): void;
   (e: 'rename', folderId: string): void;
   (e: 'move-folder', folderId: string): void;
+  (e: 'batch-manage', folderId: string): void;
   (e: 'delete', folderId: string): void;
 }>();
 
@@ -41,10 +33,16 @@ const folderName = computed(() => props.folder.name);
     <span>{{ t('knowledgeBase.folderActionRename') }}</span>
   </div>
 
-  <!-- 移动到文件夹… (same-KB folder move; distinct from document cross-KB transfer) -->
+  <!-- 移动到文件夹… -->
   <div class="folder-action-menu-item" @click.stop="emit('move-folder', folder.id)">
     <t-icon class="icon" name="swap" />
     <span>{{ t('knowledgeBase.folderActionMoveTo') }}</span>
+  </div>
+
+  <!-- 批量管理 -->
+  <div class="folder-action-menu-item" @click.stop="emit('batch-manage', folder.id)">
+    <t-icon class="icon" name="queue" />
+    <span>{{ t('menu.batchManage') }}</span>
   </div>
 
   <!-- 删除文件夹 -->

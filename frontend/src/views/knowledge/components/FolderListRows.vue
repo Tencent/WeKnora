@@ -24,6 +24,7 @@ const emit = defineEmits<{
   (e: 'rename-commit', folderId: string, name: string): void;
   (e: 'rename-cancel', folderId: string): void;
   (e: 'move-folder', folderId: string): void;
+  (e: 'batch-manage', folderId: string): void;
   (e: 'delete', folderId: string): void;
 }>();
 
@@ -204,6 +205,7 @@ const describedBy = (folder: KnowledgeFolder) =>
               @create="emit('create', folder.id)"
               @rename="emit('rename', folder.id)"
               @move-folder="emit('move-folder', folder.id)"
+              @batch-manage="emit('batch-manage', folder.id)"
               @delete="emit('delete', folder.id)"
             />
           </div>

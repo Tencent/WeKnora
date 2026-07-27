@@ -170,3 +170,27 @@ export function isMoveTargetDisabled(
   }
   return false
 }
+
+// A synthetic create-input row inserted into a flattened visible-node list
+// when folder creation is active in the tree. The level mirrors what a real
+// child of the parent would have, so the input row indents correctly.
+export interface CreatePlaceholderNode {
+  isPlaceholder: true
+  level: number
+}
+
+export function insertCreatePlaceholder<T extends { id: string; level: number }>(
+  nodes: T[],
+  creatingParentId: string | null,
+): Array<T | CreatePlaceholderNode> {
+  if (creatingParentId === null) return nodes
+  const parentIndex = nodes.findIndex((node) => node.id === creatingParentId)
+  if (parentIndex < 0) return nodes
+  const placeholder: CreatePlaceholderNode = {
+    isPlaceholder: true,
+    level: nodes[parentIndex].level + 1,
+  }
+  const result: Array<T | CreatePlaceholderNode> = nodes.slice()
+  result.splice(parentIndex + 1, 0, placeholder)
+  return result
+}

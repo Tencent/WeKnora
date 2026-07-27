@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { KnowledgeFolder } from '@/types/knowledgeFolder';
-
-// FolderTree is a presentational, accessible folder tree. It renders data from
-// props and emits navigation / expand / action events; it never calls folder
-// APIs and contains no drag handling (first version explicitly cancels drag).
-//
-// The root is a LOCAL VIRTUAL NODE (id ""). The root API sentinel never
-// appears in this component. Tree node height 32-36px, indent 16px per level,
-// icon-name gap 8px. Current folder uses light brand background + brand
-// icon/name; expanded chevron rotates 90deg.
+import { insertCreatePlaceholder } from '../folderModel';
 
 export type FolderActionType = 'rename' | 'delete' | 'add-subfolder';
 
@@ -21,15 +13,25 @@ const props = withDefaults(defineProps<{
   editable: boolean;
   loading?: boolean;
   rootLabel?: string;
+  // Tree-surface create: when non-null, an inline create-input row renders
+  // immediately under the node whose id === creatingParentId ('' = root).
+  // Null = no tree-surface create active.
+  creatingParentId?: string | null;
+  // Inline error message for the tree create input (empty when none).
+  createError?: string;
 }>(), {
   loading: false,
   rootLabel: '',
+  creatingParentId: null,
+  createError: '',
 });
 
 const emit = defineEmits<{
   (e: 'navigate', folderId: string): void;
   (e: 'toggle-expand', folderId: string): void;
   (e: 'action', action: FolderActionType, folderId: string): void;
+  (e: 'create-commit', name: string): void;
+  (e: 'create-cancel'): void;
 }>();
 
 const { t, te } = useI18n();
@@ -93,14 +95,24 @@ const visibleNodes = computed<VisibleNode[]>(() => {
   return nodes;
 });
 
-const isEmpty = computed(() => props.tree.length === 0);
+type RenderItem =
+  | { kind: 'node'; node: VisibleNode; visibleIdx: number }
+  | { kind: 'placeholder'; level: number };
 
-// Roving tabindex: exactly one node (the focused one, or the current node by
-// default) has tabindex=0; all others have tabindex=-1. This is the ARIA APG
-// treeview pattern - a single tab stop within the tree.
-//
-// null = "no explicit focus" (fall back to current/root via focusedIndex).
-// '' = root is focused (root's id is '' per ROOT_FOLDER_ID). The nullable type
+const renderNodes = computed<RenderItem[]>(() => {
+  const base = visibleNodes.value;
+  const augmented = insertCreatePlaceholder(base, props.creatingParentId ?? null);
+  let visibleIdx = 0;
+  return augmented.map((item) => {
+    if ('isPlaceholder' in item) {
+      return { kind: 'placeholder' as const, level: item.level };
+    }
+    const node = item;
+    const idx = visibleIdx++;
+    return { kind: 'node' as const, node, visibleIdx: idx };
+  });
+});
+
 // is required so '' is not treated as falsy/no-focus.
 const focusedId = ref<string | null>(null);
 const treeRef = ref<HTMLElement | null>(null);
@@ -129,9 +141,6 @@ function focusNodeById(id: string) {
   });
 }
 
-// ARIA treeview keyboard model (APG Multi-Select Treeview pattern, single
-// selection). Arrow keys move/expand/collapse; Enter navigates; Home/End jump
-// to first/last visible node.
 function onTreeKeydown(e: KeyboardEvent) {
   const nodes = visibleNodes.value;
   if (nodes.length === 0) return;
@@ -199,6 +208,43 @@ function onChevronClick(node: VisibleNode, e: MouseEvent) {
 function onAction(action: FolderActionType, folderId: string) {
   emit('action', action, folderId);
 }
+
+// --- Inline create (tree surface) ---
+// Local draft + input ref, mirroring the rename mechanic in FolderGridItems.
+// The parent (page) owns the editing state machine; this component only owns
+// the input element + draft, emitting create-commit(name) / create-cancel().
+const treeCreateDraft = ref('');
+const createInputEl = ref<HTMLInputElement | null>(null);
+const setCreateInput = (el: any) => {
+  createInputEl.value = (el as HTMLInputElement | null) || null;
+};
+// When the parent activates tree-surface create (creatingParentId turns
+// non-null), seed an empty draft and focus the input. nextTick lets the
+// placeholder row render before we query/focus the input.
+watch(
+  () => props.creatingParentId,
+  (id) => {
+    if (id !== null) {
+      treeCreateDraft.value = '';
+      nextTick(() => {
+        createInputEl.value?.focus();
+      });
+    }
+  },
+);
+const commitTreeCreate = () => {
+  if (props.creatingParentId === null) return;
+  const trimmed = treeCreateDraft.value.trim();
+  if (!trimmed) {
+    emit('create-cancel');
+    return;
+  }
+  emit('create-commit', trimmed);
+};
+const cancelTreeCreate = () => {
+  if (props.creatingParentId === null) return;
+  emit('create-cancel');
+};
 </script>
 
 <template>
@@ -214,100 +260,122 @@ function onAction(action: FolderActionType, folderId: string) {
       <t-icon name="loading" size="20px" class="folder-tree-loading-icon" />
     </div>
 
-    <!-- Empty state: 空文件夹 居中空状态, 主说明 14px, 辅助说明 12px. -->
-    <div
-      v-else-if="isEmpty"
-      class="folder-tree-state folder-tree-empty"
-      role="status"
-    >
-      <t-icon name="folder-add" size="32px" class="folder-tree-empty-icon" aria-hidden="true" />
-      <p class="folder-tree-empty-title">{{ t('knowledgeBase.emptyFolderTree') }}</p>
-      <p class="folder-tree-empty-hint">{{ t('knowledgeBase.emptyFolderTreeHint') }}</p>
-    </div>
-
-    <!-- Visible nodes (flat list, hierarchy expressed via aria-level + indent). -->
+    <!-- Visible nodes (flat list, hierarchy expressed via aria-level + indent)
+         with an optional tree-surface create-input placeholder interleaved.
+         The root is ALWAYS rendered (even with zero folders) so the panel "+"
+         can create the first folder under it - no separate empty state. -->
     <template v-else>
       <div
-        v-for="(node, idx) in visibleNodes"
-        :key="node.id || 'root'"
-        class="folder-tree-node"
-        :class="{
-          'is-current': node.isCurrent,
-          'is-root': node.isRoot,
-        }"
-        role="treeitem"
-        :data-folder-idx="idx"
-        :aria-level="node.level"
-        :aria-expanded="node.hasChildren ? node.isExpanded : undefined"
-        :aria-selected="node.isCurrent"
-        :tabindex="focusedIndex === idx ? 0 : -1"
-        :style="{ paddingLeft: (node.level - 1) * 16 + 'px' }"
-        @click="onNodeClick(node)"
+        v-for="(item, idx) in renderNodes"
+        :key="item.kind === 'placeholder' ? '__folder-create__' : (item.node.id || 'root')"
       >
-        <!-- Expand/collapse chevron. Root has no chevron (always expanded);
-             leaf nodes get a placeholder for alignment. -->
-        <button
-          v-if="node.hasChildren && !node.isRoot"
-          type="button"
-          class="folder-tree-chevron"
-          tabindex="-1"
-          :aria-label="node.isExpanded ? t('knowledgeBase.collapseFolder') : t('knowledgeBase.expandFolder')"
-          @click="onChevronClick(node, $event)"
-        >
-          <t-icon
-            name="chevron-right"
-            size="14px"
-            class="folder-tree-chevron-icon"
-            aria-hidden="true"
-          />
-        </button>
-        <span v-else class="folder-tree-chevron-placeholder" aria-hidden="true"></span>
-
-        <t-icon
-          :name="node.isRoot ? 'root-list' : (node.hasChildren && node.isExpanded ? 'folder-open' : 'folder')"
-          size="16px"
-          class="folder-tree-node-icon"
-          aria-hidden="true"
-        />
-
-        <span class="folder-tree-node-label" :title="node.name">{{ node.name }}</span>
-
-        <!-- Per-node actions menu. Only for editable users and non-root nodes.
-             Root-level creation goes through the panel header button. -->
+        <!-- Tree-surface create input row -->
         <div
-          v-if="!node.isRoot && editable"
-          class="folder-tree-node-actions"
+          v-if="item.kind === 'placeholder'"
+          class="folder-tree-node folder-tree-create-node"
+          :style="{ paddingLeft: (item.level - 1) * 16 + 'px' }"
           @click.stop
           @keydown.stop
         >
-          <t-dropdown trigger="click" placement="bottom-right" :min-column-width="148">
-            <button
-              type="button"
-              class="folder-tree-actions-trigger"
-              :tabindex="focusedId === node.id ? 0 : -1"
-              :aria-label="t('knowledgeBase.folderActions')"
+          <span class="folder-tree-chevron-placeholder" aria-hidden="true"></span>
+          <t-icon name="folder-add" size="16px" class="folder-tree-node-icon" aria-hidden="true" />
+          <div class="folder-tree-create-input-wrap">
+            <input
+              :ref="setCreateInput"
+              v-model.trim="treeCreateDraft"
+              class="folder-tree-create-input"
+              type="text"
+              :placeholder="t('knowledgeBase.newFolder')"
+              :aria-label="t('knowledgeBase.newFolder')"
+              :aria-invalid="!!props.createError"
               @click.stop
-            >
-              <t-icon name="more" size="16px" aria-hidden="true" />
-            </button>
-            <template #dropdown>
-              <t-dropdown-menu>
-                <t-dropdown-item @click="onAction('add-subfolder', node.id)">
-                  <t-icon name="folder-add" /> {{ t('knowledgeBase.folderActionAddSubfolder') }}
-                </t-dropdown-item>
-                <t-dropdown-item @click="onAction('rename', node.id)">
-                  <t-icon name="edit" /> {{ t('knowledgeBase.folderActionRename') }}
-                </t-dropdown-item>
-                <t-dropdown-item
-                  theme="error"
-                  class="folder-tree-action-delete"
-                  @click="onAction('delete', node.id)"
-                >
-                  <t-icon name="delete" /> {{ t('knowledgeBase.folderActionDelete') }}
-                </t-dropdown-item>
-              </t-dropdown-menu>
-            </template>
-          </t-dropdown>
+              @keydown.enter.prevent="commitTreeCreate"
+              @keydown.esc.prevent="cancelTreeCreate"
+              @blur="commitTreeCreate"
+            />
+            <span v-if="props.createError" class="folder-tree-create-error" role="alert">
+              {{ props.createError }}
+            </span>
+          </div>
+        </div>
+        <!-- Real tree node (existing markup; node -> item.node) -->
+        <div
+          v-else
+          class="folder-tree-node"
+          :class="{
+            'is-current': item.node.isCurrent,
+            'is-root': item.node.isRoot,
+          }"
+          role="treeitem"
+          :data-folder-idx="item.visibleIdx"
+          :aria-level="item.node.level"
+          :aria-expanded="item.node.hasChildren ? item.node.isExpanded : undefined"
+          :aria-selected="item.node.isCurrent"
+          :tabindex="focusedIndex === item.visibleIdx ? 0 : -1"
+          :style="{ paddingLeft: (item.node.level - 1) * 16 + 'px' }"
+          @click="onNodeClick(item.node)"
+        >
+          <button
+            v-if="item.node.hasChildren && !item.node.isRoot"
+            type="button"
+            class="folder-tree-chevron"
+            tabindex="-1"
+            :aria-label="item.node.isExpanded ? t('knowledgeBase.collapseFolder') : t('knowledgeBase.expandFolder')"
+            @click="onChevronClick(item.node, $event)"
+          >
+            <t-icon
+              name="chevron-right"
+              size="14px"
+              class="folder-tree-chevron-icon"
+              aria-hidden="true"
+            />
+          </button>
+          <span v-else class="folder-tree-chevron-placeholder" aria-hidden="true"></span>
+
+          <t-icon
+            :name="item.node.isRoot ? 'root-list' : (item.node.hasChildren && item.node.isExpanded ? 'folder-open' : 'folder')"
+            size="16px"
+            class="folder-tree-node-icon"
+            aria-hidden="true"
+          />
+
+          <span class="folder-tree-node-label" :title="item.node.name">{{ item.node.name }}</span>
+
+          <div
+            v-if="!item.node.isRoot && editable"
+            class="folder-tree-node-actions"
+            @click.stop
+            @keydown.stop
+          >
+            <t-dropdown trigger="click" placement="bottom-right" :min-column-width="148">
+              <button
+                type="button"
+                class="folder-tree-actions-trigger"
+                :tabindex="focusedId === item.node.id ? 0 : -1"
+                :aria-label="t('knowledgeBase.folderActions')"
+                @click.stop
+              >
+                <t-icon name="more" size="16px" aria-hidden="true" />
+              </button>
+              <template #dropdown>
+                <t-dropdown-menu>
+                  <t-dropdown-item @click="onAction('add-subfolder', item.node.id)">
+                    <t-icon name="folder-add" /> {{ t('knowledgeBase.folderActionAddSubfolder') }}
+                  </t-dropdown-item>
+                  <t-dropdown-item @click="onAction('rename', item.node.id)">
+                    <t-icon name="edit" /> {{ t('knowledgeBase.folderActionRename') }}
+                  </t-dropdown-item>
+                  <t-dropdown-item
+                    theme="error"
+                    class="folder-tree-action-delete"
+                    @click="onAction('delete', item.node.id)"
+                  >
+                    <t-icon name="delete" /> {{ t('knowledgeBase.folderActionDelete') }}
+                  </t-dropdown-item>
+                </t-dropdown-menu>
+              </template>
+            </t-dropdown>
+          </div>
         </div>
       </div>
     </template>
@@ -344,26 +412,6 @@ function onAction(action: FolderActionType, folderId: string) {
   to { transform: rotate(360deg); }
 }
 
-// 空文件夹 - 主说明 14px, 辅助说明 12px.
-.folder-tree-empty {
-  .folder-tree-empty-icon {
-    color: var(--td-text-color-placeholder);
-    margin-bottom: 8px;
-  }
-  .folder-tree-empty-title {
-    margin: 0 0 4px;
-    font-size: 14px;
-    color: var(--td-text-color-primary);
-  }
-  .folder-tree-empty-hint {
-    margin: 0;
-    font-size: 12px;
-    line-height: 18px;
-    color: var(--td-text-color-placeholder);
-  }
-}
-
-// 树节点高度 32-36px (using 32px); 图标与名称间距 8px.
 .folder-tree-node {
   display: flex;
   align-items: center;
@@ -382,11 +430,9 @@ function onAction(action: FolderActionType, folderId: string) {
   }
 
   &:focus-visible {
-    // Visible focus ring (焦点态可见).
     box-shadow: inset 0 0 0 2px var(--td-brand-color);
   }
 
-  // 当前文件夹 - 浅品牌背景, 图标/名称品牌色, 字重 500-600.
   &.is-current {
     background: var(--td-brand-color-light);
 
@@ -423,13 +469,11 @@ function onAction(action: FolderActionType, folderId: string) {
     color: var(--td-text-color-secondary);
   }
 
-  // chevron 旋转 90°, 0.15-0.2s 过渡.
   .folder-tree-chevron-icon {
     transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
   }
 }
 
-// Expanded treeitem: rotate the chevron icon 90deg.
 .folder-tree-node[aria-expanded='true'] .folder-tree-chevron-icon {
   transform: rotate(90deg);
 }
@@ -439,6 +483,51 @@ function onAction(action: FolderActionType, folderId: string) {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+}
+
+// Tree-surface create input row. Mirrors the real node footprint (32px height,
+// same indent via paddingLeft) so the input lines up with siblings.
+.folder-tree-create-node {
+  // The input wrap takes the label's flex slot; keep chevron/icon alignment.
+  gap: 8px;
+
+  &:hover {
+    background: transparent;
+  }
+}
+
+.folder-tree-create-input-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folder-tree-create-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+
+  &:focus {
+    box-shadow: 0 0 0 2px var(--td-brand-color-light);
+  }
+}
+
+.folder-tree-create-error {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--td-error-color-6);
+  white-space: normal;
+  word-break: break-word;
 }
 
 .folder-tree-node-icon {

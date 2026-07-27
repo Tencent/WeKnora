@@ -2,49 +2,14 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { knowledgeFolderApi } from "@/api/knowledge-base/folders";
 
-// useFolderEditing owns the page-level inline folder editing state machine.
-// The shape:
-//   { mode: 'create' | 'rename'; folderId: string; value: string; error: string } | null
-//
-// - `mode === 'rename'`: `folderId` is the folder being renamed. The inline
-//   input lives inside FolderGridItems / FolderListRows (driven by the
-//   `renamingFolderId` / `renameError` props they already accept).
-// - `mode === 'create'`: `folderId` is the PARENT folder id under which the
-//   new folder will be created ("new folder parent = current folder").
-//
-// The page owns the entry-point wiring (create/rename/delete emits from the
-// folder components call into this composable's start/commit helpers). This
-// composable owns: the state machine, the UX pre-validation (normalize rules),
-// the backend error -> inline-message mapping, and the API calls. The service
-// remains the authority - frontend normalize is UX pre-validation only; the
-// backend re-validates and returns conflict / depth / invalid errors that we
-// map back to the inline `error` field, keeping the editing state active so
-// the user can fix the name.
-//
-// Backend name validation (internal/application/service/knowledge_folder.go
-// normalizeFolderName): rejects empty, `.`, `..`, or names containing `/` or
-// `\` or control characters. The frontend normalize mirrors the visible part
-// (non-empty, not `.`/`..`, no slash/backslash); control-char rejection is
-// left to the backend and surfaces as a generic 400 invalid error.
-
 export interface FolderEditState {
   mode: "create" | "rename";
-  // For 'rename': the folder being renamed. For 'create': the parent folder
-  // id under which the new folder will be created.
   folderId: string;
+  surface: "tree" | "content";
   value: string;
   error: string;
 }
 
-// Reduce the varied request-util reject shape ({ status, message, ...data })
-// to an inline error message keyed off the HTTP status. The folder handler
-// (internal/handler/knowledge_folder.go writeKnowledgeFolderError) maps:
-//   - ErrFolderAlreadyExists -> 409 Conflict
-//   - ErrInvalidArgument (bad name OR depth > MaxFolderDepth) -> 400 BadRequest
-// Since both invalid-name and depth-exceeded share HTTP 400, and the frontend
-// pre-validates the name before calling the API, a 400 reaching us after
-// pre-validation is most likely depth exceeded. Conflict is cleanly
-// distinguishable via 409.
 function mapFolderApiError(
   err: unknown,
   t: (key: string) => string,
@@ -86,16 +51,32 @@ export default function useFolderEditing() {
       : "",
   );
   const creatingParentId = computed<string | null>(() =>
-    editState.value && editState.value.mode === "create"
+    editState.value && editState.value.mode === "create" && editState.value.surface === "tree"
       ? editState.value.folderId
       : null,
   );
   const isEditing = computed(() => editState.value !== null);
 
-  function startCreate(parentId: string): void {
+  // Which surface is currently in create mode (null when not creating or when
+  // renaming). The page uses this to gate the content-area input
+  // (surface === 'content') vs passing creatingParentId to the tree
+  // (surface === 'tree').
+  const creatingSurface = computed<"tree" | "content" | null>(() =>
+    editState.value && editState.value.mode === "create" ? editState.value.surface : null,
+  );
+
+  // Inline error message for the active create (empty when no create or no
+  // error). The tree surfaces this as createError; the content area does NOT
+  // display it (out of scope).
+  const createError = computed<string>(() =>
+    editState.value && editState.value.mode === "create" ? editState.value.error : "",
+  );
+
+  function startCreate(parentId: string, surface: "tree" | "content" = "content"): void {
     editState.value = {
       mode: "create",
       folderId: parentId,
+      surface,
       value: "",
       error: "",
     };
@@ -105,6 +86,8 @@ export default function useFolderEditing() {
     editState.value = {
       mode: "rename",
       folderId,
+      // Rename is always content-surface (card/row inline). Unused in this mode.
+      surface: "content",
       value: "",
       error: "",
     };
@@ -146,11 +129,6 @@ export default function useFolderEditing() {
     return { name: trimmed };
   }
 
-  // Commit a create. On success: clear edit state and call refresh so the
-  // new folder appears in direct folders / tree / breadcrumb WITHOUT changing
-  // the URL (the URL stays on the current folder). On error: map the backend
-  // error to an inline message and KEEP the editing state so the user can fix
-  // the name.
   async function commitCreate(
     kbId: string,
     name: string,
@@ -208,6 +186,8 @@ export default function useFolderEditing() {
     renamingFolderId,
     renameError,
     creatingParentId,
+    creatingSurface,
+    createError,
     isEditing,
     startCreate,
     startRename,

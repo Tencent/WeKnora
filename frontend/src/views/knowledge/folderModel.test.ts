@@ -9,6 +9,7 @@ import {
   flattenFolders,
   folderPathItems,
   folderPathLabel,
+  insertCreatePlaceholder,
   isMoveTargetDisabled,
   searchFolders,
   selectionCapabilities,
@@ -173,4 +174,47 @@ test('disables self, descendants, and current parent as move targets', () => {
   assert.equal(isMoveTargetDisabled(index, new Set(['a']), 'c', ''), true)
   assert.equal(isMoveTargetDisabled(index, new Set(['a']), '', ''), true)
   assert.equal(isMoveTargetDisabled(index, new Set(['a']), 'd', ''), false)
+})
+
+test('insertCreatePlaceholder returns nodes unchanged when no create is active', () => {
+  const nodes = [
+    { id: '', level: 1 },
+    { id: 'a', level: 2 },
+    { id: 'b', level: 2 },
+  ]
+  assert.deepEqual(insertCreatePlaceholder(nodes, null), nodes)
+})
+
+test('insertCreatePlaceholder inserts a level-2 placeholder after the root for root create', () => {
+  const nodes = [
+    { id: '', level: 1 },
+    { id: 'a', level: 2 },
+  ]
+  const result = insertCreatePlaceholder(nodes, '')
+  assert.equal(result.length, 3)
+  assert.deepEqual(result[1], { isPlaceholder: true, level: 2 })
+  // Surrounding nodes are preserved (by reference, in order).
+  assert.equal(result[0], nodes[0])
+  assert.equal(result[2], nodes[1])
+})
+
+test('insertCreatePlaceholder inserts a placeholder immediately after the parent node', () => {
+  const nodes = [
+    { id: '', level: 1 },
+    { id: 'a', level: 2 },
+    { id: 'b', level: 3 }, // child of a
+    { id: 'c', level: 2 },
+  ]
+  const result = insertCreatePlaceholder(nodes, 'a')
+  assert.equal(result.length, 5)
+  assert.deepEqual(result[2], { isPlaceholder: true, level: 3 })
+  assert.equal(result[1], nodes[1]) // 'a' still at index 1
+  assert.equal(result[3], nodes[2]) // 'b' shifted to index 3
+  assert.equal(result[4], nodes[3]) // 'c' shifted to index 4
+})
+
+test('insertCreatePlaceholder returns nodes unchanged when the parent is not visible', () => {
+  const nodes = [{ id: '', level: 1 }, { id: 'a', level: 2 }]
+  // 'ghost' is not in the visible (expanded) node list.
+  assert.equal(insertCreatePlaceholder(nodes, 'ghost'), nodes)
 })
