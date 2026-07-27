@@ -4,46 +4,42 @@
     @update:visible="(v: boolean) => emit('update:visible', v)">
     <div class="wiki-rev-layout">
       <!-- Version list -->
-      <div class="wiki-rev-list">
-        <!-- Current version pseudo-entry -->
-        <div v-if="currentPage" class="wiki-rev-item"
-          :class="{ 'wiki-rev-item--active': selectedVersion === currentPage.version }"
-          @click="selectCurrent">
-          <div class="wiki-rev-item-head">
-            <span class="wiki-rev-version">v{{ currentPage.version }}</span>
-            <t-tag size="small" theme="primary" variant="light">
-              {{ t('knowledgeEditor.wikiBrowser.revisionCurrent') }}
-            </t-tag>
-            <t-tag size="small" :theme="sourceTheme(currentPage.last_edit_source)" variant="light-outline">
-              {{ sourceLabel(currentPage.last_edit_source) }}
-            </t-tag>
+      <aside class="wiki-rev-list">
+        <div class="wiki-rev-list-items">
+          <div v-if="currentPage" class="wiki-rev-item"
+            :class="{ 'wiki-rev-item--active': selectedVersion === currentPage.version }"
+            @click="selectCurrent">
+            <div class="wiki-rev-item-primary">
+              <span class="wiki-rev-version">v{{ currentPage.version }}</span>
+              <span class="wiki-rev-current-label">{{ t('knowledgeEditor.wikiBrowser.revisionCurrent') }}</span>
+            </div>
+            <div class="wiki-rev-item-secondary">
+              <span>{{ sourceLabel(currentPage.last_edit_source) }}</span>
+              <span class="wiki-rev-time">{{ formatShortTime(currentPage.updated_at) }}</span>
+            </div>
           </div>
-          <div class="wiki-rev-item-meta">{{ formatTime(currentPage.updated_at) }}</div>
-        </div>
 
-        <div v-for="rev in revisions" :key="rev.id" class="wiki-rev-item"
-          :class="{ 'wiki-rev-item--active': selectedVersion === rev.version }" @click="selectRevision(rev)">
-          <div class="wiki-rev-item-head">
-            <span class="wiki-rev-version">v{{ rev.version }}</span>
-            <t-tag size="small" :theme="sourceTheme(rev.edit_source)" variant="light-outline">
-              {{ sourceLabel(rev.edit_source) }}
-            </t-tag>
+          <div v-for="rev in revisions" :key="rev.id" class="wiki-rev-item"
+            :class="{ 'wiki-rev-item--active': selectedVersion === rev.version }" @click="selectRevision(rev)">
+            <div class="wiki-rev-item-primary">
+              <span class="wiki-rev-version">v{{ rev.version }}</span>
+            </div>
+            <div class="wiki-rev-item-secondary">
+              <span>{{ sourceLabel(rev.edit_source) }}</span>
+              <span class="wiki-rev-time">{{ formatShortTime(rev.edited_at) }}</span>
+            </div>
           </div>
-          <div class="wiki-rev-item-meta">
-            {{ formatTime(rev.edited_at) }}
-            <span v-if="rev.editor_id" class="wiki-rev-editor">· {{ rev.editor_id }}</span>
-          </div>
-        </div>
 
-        <div v-if="revisions.length < total" class="wiki-rev-load-more">
-          <t-link theme="primary" hover="color" :disabled="loadingList" @click="loadMore">
-            {{ t('knowledgeEditor.wikiBrowser.logLoadMore') }}
-          </t-link>
+          <div v-if="revisions.length < total" class="wiki-rev-load-more">
+            <t-button size="small" variant="outline" theme="default" :loading="loadingList" block @click="loadMore">
+              {{ t('knowledgeEditor.wikiBrowser.logLoadMore') }}
+            </t-button>
+          </div>
         </div>
         <div v-if="!loadingList && revisions.length === 0" class="wiki-rev-empty">
           {{ t('knowledgeEditor.wikiBrowser.revisionEmpty') }}
         </div>
-      </div>
+      </aside>
 
       <!-- Detail pane -->
       <div class="wiki-rev-detail">
@@ -54,14 +50,22 @@
         <template v-else-if="selectedRevision">
           <div class="wiki-rev-detail-toolbar">
             <div class="wiki-rev-detail-title">
-              v{{ selectedRevision.version }} · {{ selectedRevision.title }}
+              <span class="wiki-rev-detail-version">v{{ selectedRevision.version }}</span>
+              <span class="wiki-rev-detail-name">{{ selectedRevision.title }}</span>
             </div>
             <div class="wiki-rev-detail-actions">
-              <t-radio-group v-model="detailMode" variant="default-filled" size="small">
-                <t-radio-button value="diff">{{ t('knowledgeEditor.wikiBrowser.revisionDiff') }}</t-radio-button>
-                <t-radio-button value="raw">{{ t('knowledgeEditor.wikiBrowser.revisionRaw') }}</t-radio-button>
-              </t-radio-group>
-              <t-popconfirm v-if="canEdit" :content="t('knowledgeEditor.wikiBrowser.revertConfirm', { ver: selectedRevision.version })"
+              <div class="wiki-rev-mode-toggle" role="group">
+                <button type="button" class="wiki-rev-mode-btn"
+                  :class="{ active: detailMode === 'diff' }" @click="detailMode = 'diff'">
+                  {{ t('knowledgeEditor.wikiBrowser.revisionDiff') }}
+                </button>
+                <button type="button" class="wiki-rev-mode-btn"
+                  :class="{ active: detailMode === 'raw' }" @click="detailMode = 'raw'">
+                  {{ t('knowledgeEditor.wikiBrowser.revisionRaw') }}
+                </button>
+              </div>
+              <t-popconfirm v-if="canEdit"
+                :content="t('knowledgeEditor.wikiBrowser.revertConfirm', { ver: selectedRevision.version })"
                 @confirm="doRevert">
                 <t-button size="small" theme="warning" variant="outline" :loading="reverting">
                   <template #icon><t-icon name="rollback" /></template>
@@ -71,7 +75,10 @@
             </div>
           </div>
 
-          <div v-if="loadingDetail" class="wiki-rev-detail-hint">{{ t('knowledgeEditor.wikiBrowser.logLoading') }}</div>
+          <div v-if="loadingDetail" class="wiki-rev-detail-loading">
+            <t-loading size="small" />
+            <span>{{ t('knowledgeEditor.wikiBrowser.logLoading') }}</span>
+          </div>
 
           <!-- Diff vs current -->
           <div v-else-if="detailMode === 'diff'" class="wiki-rev-diff">
@@ -255,96 +262,142 @@ function sourceLabel(source?: string): string {
   }
 }
 
-function sourceTheme(source?: string): 'primary' | 'success' | 'warning' | 'default' {
-  switch (source) {
-    case 'user':
-      return 'success'
-    case 'agent':
-      return 'primary'
-    case 'revert':
-      return 'warning'
-    default:
-      return 'default'
-  }
-}
-
-function formatTime(iso?: string): string {
+function formatShortTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
+
 </script>
 
 <style scoped>
 .wiki-rev-layout {
   display: flex;
-  gap: 16px;
-  height: 100%;
+  flex: 1;
   min-height: 0;
+  height: 100%;
+  align-items: stretch;
 }
 
 .wiki-rev-list {
   width: 220px;
   flex-shrink: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 0;
   border-right: 1px solid var(--td-component-stroke);
-  padding-right: 12px;
+  display: flex;
+  flex-direction: column;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-rev-list-items {
+  flex: 0 0 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 8px 0 14px;
 }
 
 .wiki-rev-item {
-  padding: 8px 10px;
+  border: none;
   border-radius: 6px;
+  padding: 6px 10px 6px 14px;
   cursor: pointer;
-  margin-bottom: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.wiki-rev-item:hover {
+.wiki-rev-item:hover,
+.wiki-rev-item--active {
   background: var(--td-bg-color-container-hover);
 }
 
-.wiki-rev-item--active {
-  background: var(--td-brand-color-light);
+.wiki-rev-item--active .wiki-rev-version,
+.wiki-rev-item--active .wiki-rev-current-label {
+  color: var(--td-brand-color);
 }
 
-.wiki-rev-item-head {
+.wiki-rev-item-primary {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 
 .wiki-rev-version {
-  font-weight: 600;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 20px;
   font-family: var(--td-font-family-mono, monospace);
+  color: var(--td-text-color-primary);
+  transition: color 0.15s ease;
 }
 
-.wiki-rev-item-meta {
-  margin-top: 4px;
+.wiki-rev-current-label {
   font-size: 12px;
+  line-height: 16px;
   color: var(--td-text-color-placeholder);
-  word-break: break-all;
+  transition: color 0.15s ease;
 }
 
-.wiki-rev-load-more,
+.wiki-rev-item-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--td-text-color-placeholder);
+}
+
+.wiki-rev-time {
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.wiki-rev-load-more {
+  padding: 8px 0 4px;
+}
+
 .wiki-rev-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 14px;
   text-align: center;
-  padding: 12px 0;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
 
 .wiki-rev-detail {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 16px 20px;
 }
 
 .wiki-rev-detail-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
@@ -352,7 +405,24 @@ function formatTime(iso?: string): string {
 }
 
 .wiki-rev-detail-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wiki-rev-detail-version {
   font-weight: 600;
+  font-family: var(--td-font-family-mono, monospace);
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.wiki-rev-detail-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -365,10 +435,59 @@ function formatTime(iso?: string): string {
   flex-shrink: 0;
 }
 
+.wiki-rev-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+}
+
+.wiki-rev-mode-btn {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wiki-rev-mode-btn:hover {
+  color: var(--td-text-color-primary);
+}
+
+.wiki-rev-mode-btn.active {
+  color: var(--td-brand-color);
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  font-weight: 500;
+}
+
 .wiki-rev-detail-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--td-text-color-placeholder);
-  padding: 40px 0;
+  padding: 24px;
   text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wiki-rev-detail-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
 }
 
 .wiki-rev-diff {
@@ -389,9 +508,10 @@ function formatTime(iso?: string): string {
   flex: 1;
   overflow: auto;
   margin: 0;
-  padding: 12px;
-  background: var(--td-bg-color-page);
-  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
   font-size: 12px;
   line-height: 1.7;
   font-family: var(--td-font-family-mono, monospace);
@@ -404,13 +524,39 @@ function formatTime(iso?: string): string {
 }
 
 .wiki-rev-diff-line--add {
-  background: var(--td-success-color-1);
-  color: var(--td-success-color-7);
+  background: rgba(7, 192, 95, 0.08);
+  color: var(--td-text-color-primary);
 }
 
 .wiki-rev-diff-line--del {
-  background: var(--td-error-color-1);
-  color: var(--td-error-color-6);
-  text-decoration: line-through;
+  background: rgba(213, 73, 65, 0.06);
+  color: var(--td-text-color-secondary);
+}
+</style>
+
+<style lang="less">
+.wiki-revision-drawer {
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .t-drawer__header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--td-component-stroke);
+    flex-shrink: 0;
+  }
+
+  .t-drawer__body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--td-bg-color-container);
+  }
 }
 </style>
