@@ -5945,13 +5945,14 @@ onUnmounted(() => {
   padding: 2px 10px;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
-  color: var(--td-brand-color);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: color 0.15s, background 0.15s;
 
   &:hover {
+    color: var(--td-brand-color);
     background: var(--td-brand-color-light);
   }
 }
