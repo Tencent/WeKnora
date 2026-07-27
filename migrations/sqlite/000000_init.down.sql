@@ -1,5 +1,10 @@
 DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS tenant_api_keys;
+DROP TABLE IF EXISTS wiki_page_revisions;
+DROP TABLE IF EXISTS wiki_log_entries;
+DROP TABLE IF EXISTS wiki_page_issues;
+DROP TABLE IF EXISTS wiki_pages;
+DROP TABLE IF EXISTS wiki_folders;
 DROP TABLE IF EXISTS user_kb_pins;
 DROP TABLE IF EXISTS user_resource_favorites;
 DROP TABLE IF EXISTS tenant_disabled_shared_agents;
