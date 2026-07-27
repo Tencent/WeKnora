@@ -43,6 +43,12 @@ const (
 	// heartbeat pong) before treating the connection as dead. Set to 3× heartbeat
 	// interval so a single missed pong does not cause a spurious reconnect.
 	readTimeout = 3 * defaultHeartbeatInterval
+
+	// writeTimeout bounds a single frame write. Without it a stalled peer can
+	// block a write while holding c.mu, which in turn blocks Stop() and — since
+	// the IM service tears channels down while holding its own channel-map lock
+	// — every other channel operation in the process.
+	writeTimeout = 10 * time.Second
 )
 
 // wsFrame is the JSON frame exchanged over the WeCom bot WebSocket.
@@ -775,6 +781,7 @@ func (c *LongConnClient) writeJSON(v interface{}) error {
 	if c.conn == nil {
 		return fmt.Errorf("connection closed")
 	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return c.conn.WriteJSON(v)
 }
 
