@@ -367,6 +367,40 @@ func TestFindSemanticOverlapBoundary_IgnoresProtectedContent(t *testing.T) {
 	}
 }
 
+func TestFindSemanticOverlapBoundary_FiltersEligibilityBeforePriorityAndPosition(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		minEnd int
+		want   string
+	}{
+		{
+			name:   "earlier ineligible sentence does not hide eligible sentence",
+			text:   "a。bc。XYZ",
+			minEnd: 4,
+			want:   "XYZ",
+		},
+		{
+			name:   "ineligible paragraph does not outrank eligible sentence",
+			text:   "\n\nx?tail",
+			minEnd: 3,
+			want:   "tail",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			end, ok := findSemanticOverlapBoundaryEndingAtOrAfter(tt.text, tt.minEnd)
+			if !ok {
+				t.Fatal("expected eligible semantic overlap boundary")
+			}
+			if got := string([]rune(tt.text)[end:]); got != tt.want {
+				t.Fatalf("overlap tail = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestComputeOverlap_FindsBoundaryInsideLargeUnit(t *testing.T) {
 	text := "abcdefgh。尾巴内容"
 	unit := splitUnit{text: text, start: 100, end: 100 + len([]rune(text))}
@@ -403,6 +437,51 @@ func TestComputeOverlap_RespectsNextChunkCapacity(t *testing.T) {
 	}
 	if overlapLen+5 > 8 {
 		t.Fatalf("overlap plus next content exceeds chunk size: %d + %d > %d", overlapLen, 5, 8)
+	}
+}
+
+func TestComputeOverlap_LookbehindBoundaryEligibility(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "single rune separator ending at minus one is eligible",
+			text: "abcd。WXYZ",
+			want: "WXYZ",
+		},
+		{
+			name: "longest separator ending at minus one is eligible",
+			text: "\r\n\r\nWXYZ",
+			want: "WXYZ",
+		},
+		{
+			name: "separator ending before minus one is ineligible",
+			text: "a。bcWXYZ",
+			want: "",
+		},
+		{
+			name: "separator crossing original window start is eligible",
+			text: "abc. WXY",
+			want: "WXY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unit := splitUnit{text: tt.text, start: 0, end: len([]rune(tt.text))}
+			overlap, overlapLen := computeOverlap([]splitUnit{unit}, 4, 20, 4)
+			if got := unitsText(overlap); got != tt.want {
+				t.Fatalf("overlap = %q, want %q", got, tt.want)
+			}
+			if overlapLen != len([]rune(tt.want)) {
+				t.Fatalf("overlapLen = %d, want %d", overlapLen, len([]rune(tt.want)))
+			}
+			if overlapLen > 4 {
+				t.Fatalf("overlap exceeds configured limit: %d > 4", overlapLen)
+			}
+		})
 	}
 }
 

@@ -585,7 +585,11 @@ func buildChunk(units []splitUnit, seq int) Chunk {
 // rune length.
 //
 // The configured overlap is a hard upper bound, not a raw character slice.
-// Within that tail window we look for semantic boundaries using this priority:
+// Boundary detection may inspect up to four additional runes immediately
+// before that tail window so a separator cut by the window boundary remains
+// visible. A candidate is eligible only when its last rune is at position -1
+// relative to the original window, or later, so retained content never exceeds
+// the overlap limit. Eligible boundaries use this priority:
 //
 //  1. paragraph break (\n\n / \r\n\r\n)
 //  2. line break (\n / \r\n)
@@ -598,6 +602,8 @@ func buildChunk(units []splitUnit, seq int) Chunk {
 // deterministic and bounded while allowing a boundary inside a large split
 // unit (the previous implementation could only retain whole units and often
 // collapsed to zero overlap for ordinary paragraphs).
+const semanticOverlapLookbehind = 4 // rune length of the longest separator: \r\n\r\n
+
 func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) ([]splitUnit, int) {
 	if chunkOverlap <= 0 {
 		return nil, 0
@@ -614,13 +620,20 @@ func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) (
 		return nil, 0
 	}
 
-	window := semanticOverlapWindow(current, maxOverlap)
+	window := semanticOverlapWindow(current, maxOverlap+semanticOverlapLookbehind)
 	if len(window) == 0 {
 		return nil, 0
 	}
 
 	windowText := unitsText(window)
-	boundaryEnd, ok := findSemanticOverlapBoundary(windowText)
+	// Coordinates before originalWindowStart are the lookbehind region. With
+	// end-exclusive offsets, requiring boundaryEnd >= originalWindowStart is
+	// equivalent to requiring the separator's final rune to be at -1 or later.
+	originalWindowStart := runeLen(windowText) - maxOverlap
+	if originalWindowStart < 0 {
+		originalWindowStart = 0
+	}
+	boundaryEnd, ok := findSemanticOverlapBoundaryEndingAtOrAfter(windowText, originalWindowStart)
 	if !ok {
 		return nil, 0
 	}
@@ -630,7 +643,7 @@ func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) (
 	for _, u := range overlap {
 		overlapLen += runeLen(u.text)
 	}
-	if overlapLen <= 0 || strings.TrimSpace(unitsText(overlap)) == "" {
+	if overlapLen <= 0 || overlapLen > maxOverlap || strings.TrimSpace(unitsText(overlap)) == "" {
 		return nil, 0
 	}
 	return overlap, overlapLen
@@ -696,8 +709,22 @@ type semanticOverlapBoundary struct {
 // selected separator. Boundaries inside protected Markdown/code/math regions
 // are ignored, and a boundary is invalid when only whitespace follows it.
 func findSemanticOverlapBoundary(text string) (int, bool) {
+	return findSemanticOverlapBoundaryEndingAtOrAfter(text, 0)
+}
+
+// findSemanticOverlapBoundaryEndingAtOrAfter applies the normal priority and
+// earliest-position rules only to candidates whose end-exclusive rune offset
+// is at least minEnd. Filtering before comparison prevents an earlier but
+// ineligible lookbehind separator from hiding a later eligible boundary.
+func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd int) (int, bool) {
 	runes := []rune(text)
 	if len(runes) == 0 {
+		return 0, false
+	}
+	if minEnd < 0 {
+		minEnd = 0
+	}
+	if minEnd > len(runes) {
 		return 0, false
 	}
 
@@ -720,7 +747,8 @@ func findSemanticOverlapBoundary(text string) (int, bool) {
 	var best semanticOverlapBoundary
 	found := false
 	consider := func(start, end, priority int) {
-		if start < 0 || end <= start || end > len(runes) || insideProtected(start) || !hasMeaningfulTail(end) {
+		if start < 0 || end <= start || end < minEnd || end > len(runes) ||
+			insideProtected(start) || !hasMeaningfulTail(end) {
 			return
 		}
 		candidate := semanticOverlapBoundary{start: start, end: end, priority: priority}
