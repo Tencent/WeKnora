@@ -460,10 +460,14 @@ func (s *agentService) registerTools(
 	}
 	wikiKBIDs = dedupStrings(wikiKBIDs)
 	wikiScopes := tools.NewWikiScopesFromSearchTargets(config.SearchTargets, wikiKBIDs)
-	wikiKBIDs = wikiKBIDs[:0]
+	// Narrow to the KBs that survived scope resolution. Build a fresh slice
+	// rather than truncating in place, so the argument passed above can never
+	// be overwritten through a shared backing array.
+	scopedWikiKBIDs := make([]string, 0, len(wikiScopes))
 	for _, scope := range wikiScopes {
-		wikiKBIDs = append(wikiKBIDs, scope.KnowledgeBaseID)
+		scopedWikiKBIDs = append(scopedWikiKBIDs, scope.KnowledgeBaseID)
 	}
+	wikiKBIDs = scopedWikiKBIDs
 	hasWikiKB := len(wikiKBIDs) > 0
 
 	// Filter out knowledge base tools if no knowledge scope is configured for this turn.

@@ -125,6 +125,34 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,
 	},
+	// Mutation tools echo the slug they acted on and surface validation errors
+	// that can quote a durable KB or document ID. They own no source arguments,
+	// but their output must still be compacted before the model sees it.
+	"wiki_rename_page": {
+		sourceOutput: true,
+	},
+	"wiki_delete_page": {
+		sourceOutput: true,
+	},
+	// Agent-private bookkeeping tools echo model-authored text. They need
+	// compaction so a durable ID quoted back by the model is re-compacted, but
+	// never structured source rendering.
+	"thinking":   {},
+	"todo_write": {},
+	// Skill output is user-authored content of unknown shape. Compact known
+	// durable IDs, but do not mine it for source keys: a skill's JSON may use
+	// "url"/"knowledge_id" with unrelated semantics.
+	"read_skill":           {},
+	"execute_skill_script": {},
+}
+
+// HasToolPolicy reports whether a tool has an explicit model-handle policy.
+// Built-in tools must declare one (even an empty policy) so that adding a tool
+// is a deliberate decision about what the model may see, rather than a silent
+// fall-through to fully opaque output.
+func HasToolPolicy(toolName string) bool {
+	_, ok := toolHandlePolicies[toolName]
+	return ok
 }
 
 func sourceArgumentAllowed(toolName, key string) bool {

@@ -256,9 +256,11 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	// source codec sees any embedded document IDs. Encode once more afterwards
 	// for resource references rendered from structured ToolResult.Data.
 	copyResult := *result
-	copyResult.Output = r.encodeToolPrivateResult(toolName, result.Output)
-	copyResult.Output = r.resources.EncodeText(copyResult.Output)
-	copyResult.Error = r.resources.EncodeText(result.Error)
+	// Error text is encoded on the same path as Output: a failed tool call
+	// routinely echoes the offending argument, so a raw durable ID would leak
+	// through the error branch of an otherwise handle-only tool.
+	copyResult.Output = r.resources.EncodeText(r.encodeToolPrivateResult(toolName, result.Output))
+	copyResult.Error = r.resources.EncodeText(r.encodeToolPrivateResult(toolName, result.Error))
 	var modelOutput string
 	if sourceOutputAllowed(toolName) {
 		modelOutput = r.sources.ModelOutput(&copyResult)

@@ -11,10 +11,23 @@ import (
 type scopeKnowledgeService struct {
 	interfaces.KnowledgeService
 	knowledge *types.Knowledge
+	tags      map[string][]*types.KnowledgeTag
 }
 
 func (s *scopeKnowledgeService) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
 	return s.knowledge, nil
+}
+
+func (s *scopeKnowledgeService) GetKnowledgeTags(
+	_ context.Context, ids []string,
+) (map[string][]*types.KnowledgeTag, error) {
+	out := make(map[string][]*types.KnowledgeTag, len(ids))
+	for _, id := range ids {
+		if tags, ok := s.tags[id]; ok {
+			out[id] = tags
+		}
+	}
+	return out, nil
 }
 
 func testKnowledgeTag(id string) *types.KnowledgeTag {
@@ -65,6 +78,74 @@ func TestAuthorizeKnowledgeInSearchTargetsAllowsBoundDocument(t *testing.T) {
 	got, err := authorizeKnowledgeInSearchTargets(context.Background(), targets, "doc-1", service)
 	if err != nil || got == nil || got.ID != "doc-1" {
 		t.Fatalf("bound document authorization failed: got=%+v err=%v", got, err)
+	}
+}
+
+// A tag-scoped mention is resolved into KnowledgeIDs (intersected with any
+// explicitly mentioned documents) while the tag is retained as the logical
+// scope record. Re-admitting every document carrying that tag would undo the
+// intersection and leak documents the user never mentioned.
+func TestAuthorizeKnowledgeInSearchTargetsDoesNotWidenResolvedScopeByTag(t *testing.T) {
+	service := &scopeKnowledgeService{
+		knowledge: &types.Knowledge{ID: "doc-tagged", KnowledgeBaseID: "kb-1"},
+		tags:      map[string][]*types.KnowledgeTag{"doc-tagged": {testKnowledgeTag("tag-a")}},
+	}
+	targets := types.SearchTargets{{
+		Type:            types.SearchTargetTypeKnowledge,
+		KnowledgeBaseID: "kb-1",
+		KnowledgeIDs:    []string{"doc-mentioned"},
+		ScopeTagIDs:     []string{"tag-a"},
+	}}
+	if _, err := authorizeKnowledgeInSearchTargets(
+		context.Background(), targets, "doc-tagged", service,
+	); err == nil {
+		t.Fatal("a document outside the resolved whitelist must not be authorized by its tag alone")
+	}
+
+	got, err := authorizeKnowledgeInSearchTargets(
+		context.Background(),
+		targets,
+		"doc-mentioned",
+		&scopeKnowledgeService{knowledge: &types.Knowledge{ID: "doc-mentioned", KnowledgeBaseID: "kb-1"}},
+	)
+	if err != nil || got == nil {
+		t.Fatalf("the resolved document must stay authorized: got=%+v err=%v", got, err)
+	}
+}
+
+// The intersection is per target. Two separate mentions of the same KB remain
+// alternatives, so a tag-only target still authorizes on its own.
+func TestAuthorizeKnowledgeInSearchTargetsKeepsCrossTargetUnion(t *testing.T) {
+	service := &scopeKnowledgeService{
+		knowledge: &types.Knowledge{ID: "doc-tagged", KnowledgeBaseID: "kb-1"},
+		tags:      map[string][]*types.KnowledgeTag{"doc-tagged": {testKnowledgeTag("tag-a")}},
+	}
+	targets := types.SearchTargets{
+		{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", KnowledgeIDs: []string{"doc-mentioned"}},
+		{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TagIDs: []string{"tag-a"}},
+	}
+	got, err := authorizeKnowledgeInSearchTargets(context.Background(), targets, "doc-tagged", service)
+	if err != nil || got == nil {
+		t.Fatalf("a tag-only alternative target must still authorize: got=%+v err=%v", got, err)
+	}
+}
+
+func TestNewWikiScopesDropsTagsOfResolvedDocumentTargets(t *testing.T) {
+	targets := types.SearchTargets{{
+		Type:            types.SearchTargetTypeKnowledge,
+		KnowledgeBaseID: "kb-1",
+		KnowledgeIDs:    []string{"doc-mentioned"},
+		ScopeTagIDs:     []string{"tag-a"},
+	}}
+	scopes := NewWikiScopesFromSearchTargets(targets, []string{"kb-1"})
+	if len(scopes) != 1 {
+		t.Fatalf("scope count = %d, want 1: %+v", len(scopes), scopes)
+	}
+	if len(scopes[0].TagIDs) != 0 {
+		t.Fatalf("resolved document target must not contribute a standalone tag filter: %+v", scopes[0])
+	}
+	if len(scopes[0].KnowledgeIDs) != 1 || scopes[0].KnowledgeIDs[0] != "doc-mentioned" {
+		t.Fatalf("resolved document whitelist was lost: %+v", scopes[0])
 	}
 }
 

@@ -283,15 +283,13 @@ func searchScopesFromTargets(searchTargets types.SearchTargets) []utils.SearchSc
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
-		tagIDs := effectiveSearchTargetTagIDs(target)
-		wholeKB := target.Type == types.SearchTargetTypeKnowledgeBase &&
-			len(target.KnowledgeIDs) == 0 && len(tagIDs) == 0
-		if !wholeKB && len(target.KnowledgeIDs) == 0 && len(tagIDs) == 0 {
+		knowledgeIDs, tagIDs := searchTargetScope(target)
+		if !searchTargetIsWholeKB(target) && len(knowledgeIDs) == 0 && len(tagIDs) == 0 {
 			continue
 		}
 		scopes = append(scopes, utils.SearchScope{
 			KnowledgeBaseID: target.KnowledgeBaseID,
-			KnowledgeIDs:    append([]string(nil), target.KnowledgeIDs...),
+			KnowledgeIDs:    knowledgeIDs,
 			TagIDs:          tagIDs,
 		})
 	}

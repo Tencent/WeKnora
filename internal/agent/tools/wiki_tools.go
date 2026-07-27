@@ -144,10 +144,9 @@ func NewWikiScopesFromSearchTargets(searchTargets types.SearchTargets, wikiKBIDs
 		if _, ok := allowed[target.KnowledgeBaseID]; !ok {
 			continue
 		}
-		targetTagIDs := effectiveSearchTargetTagIDs(target)
-		wholeKB := target.Type == types.SearchTargetTypeKnowledgeBase &&
-			len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0
-		if !wholeKB && len(target.KnowledgeIDs) == 0 && len(targetTagIDs) == 0 {
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
+		wholeKB := searchTargetIsWholeKB(target)
+		if !wholeKB && len(targetKnowledgeIDs) == 0 && len(targetTagIDs) == 0 {
 			// A malformed empty document target must not silently become
 			// whole-KB authorization.
 			continue
@@ -161,7 +160,7 @@ func NewWikiScopesFromSearchTargets(searchTargets types.SearchTargets, wikiKBIDs
 			scope.unrestricted = true
 			continue
 		}
-		scope.KnowledgeIDs = append(scope.KnowledgeIDs, target.KnowledgeIDs...)
+		scope.KnowledgeIDs = append(scope.KnowledgeIDs, targetKnowledgeIDs...)
 		scope.TagIDs = append(scope.TagIDs, targetTagIDs...)
 	}
 
@@ -268,28 +267,15 @@ func registerLinkedSlugs(foundKBs map[string][]string, page *types.WikiPage, kbI
 	}
 }
 
-// pageIntersectsKnowledgeIDs reports whether the page should pass the
-// knowledge-ID scope filter.
-//
-//   - Empty allowed set = "no filter" → always true.
-//   - Structural pages (index/log) are always surfaced so the model can still
-//     navigate wiki topology under a pinned-doc scope.
-//   - Pages with no SourceRefs at all are conservatively allowed through: the
-//     filter is meant to narrow document-derived content, not hide metadata
-//     pages that happen to have empty refs.
-//   - Otherwise, at least one of the page's SourceRefs must be in allowed.
+// pageIntersectsKnowledgeIDs reports whether at least one of the page's source
+// documents is in the allowed whitelist. Callers must already have established
+// that the page has attributable provenance; pagePassesWikiScope owns the
+// fail-closed handling of structural and uncited pages.
 func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) bool {
 	if len(allowed) == 0 {
 		return true
 	}
-	if isStructuralPage(page) {
-		return true
-	}
-	ids := extractSourceKnowledgeIDs(page)
-	if len(ids) == 0 {
-		return true
-	}
-	for _, kid := range ids {
+	for _, kid := range extractSourceKnowledgeIDs(page) {
 		if allowed[kid] {
 			return true
 		}

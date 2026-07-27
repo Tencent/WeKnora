@@ -2,6 +2,7 @@ package modelcontext
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 )
 
@@ -26,14 +27,19 @@ type handleTable[M any] struct {
 }
 
 type handleEntry[M any] struct {
-	value string // durable value a handle decodes back to
-	meta  M
+	value       string // durable value a handle decodes back to
+	meta        M
+	wordBounded *regexp.Regexp
 }
 
 // handlePair is a snapshot row for text codecs (compaction/decoding).
 type handlePair struct {
 	value  string
 	handle string
+	// wordBounded matches the handle only on word boundaries. It is compiled
+	// once at registration because DecodeKnownText runs on every streamed
+	// chunk, where recompiling per handle per chunk dominated the cost.
+	wordBounded *regexp.Regexp
 }
 
 // newHandleTable creates a handle space such as c1 (prefix="c", width=0,
@@ -71,7 +77,11 @@ func (t *handleTable[M]) register(key, value string, meta M, merge func(dst *M, 
 	t.next++
 	handle := t.prefix + number
 	t.handleByKey[key] = handle
-	t.entryByHandle[handle] = &handleEntry[M]{value: value, meta: meta}
+	t.entryByHandle[handle] = &handleEntry[M]{
+		value:       value,
+		meta:        meta,
+		wordBounded: regexp.MustCompile(`\b` + regexp.QuoteMeta(handle) + `\b`),
+	}
 	return handle
 }
 
@@ -131,7 +141,11 @@ func (t *handleTable[M]) pairs() []handlePair {
 	defer t.mu.RUnlock()
 	out := make([]handlePair, 0, len(t.entryByHandle))
 	for handle, entry := range t.entryByHandle {
-		out = append(out, handlePair{value: entry.value, handle: handle})
+		out = append(out, handlePair{
+			value:       entry.value,
+			handle:      handle,
+			wordBounded: entry.wordBounded,
+		})
 	}
 	return out
 }

@@ -17,6 +17,7 @@ type wikiReplaceTextTool struct {
 	kbIDs            []string
 	routes           *WikiRouteResolver
 	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
 // NewWikiReplaceTextTool creates a new wiki_replace_text tool
@@ -61,8 +62,11 @@ func NewWikiReplaceTextTool(
 	}
 }
 
+// WithSearchTargets enables the Agent authorization boundary for source_refs.
+// An Agent turn with no search target must reject every source document.
 func (t *wikiReplaceTextTool) WithSearchTargets(searchTargets types.SearchTargets) *wikiReplaceTextTool {
 	t.searchTargets = searchTargets
+	t.scopeEnforced = true
 	return t
 }
 
@@ -103,7 +107,7 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	existingPage.Content = strings.Replace(existingPage.Content, params.OldText, params.NewText, 1)
 
 	if params.SourceRefs != nil {
-		if len(t.searchTargets) > 0 {
+		if t.scopeEnforced {
 			resolvedRefs, scopeErr := resolveAuthorizedSourceRefs(ctx, t.searchTargets, *params.SourceRefs, t.knowledgeService)
 			if scopeErr != nil {
 				return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + scopeErr.Error()}, nil

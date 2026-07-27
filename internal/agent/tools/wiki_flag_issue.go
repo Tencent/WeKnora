@@ -17,6 +17,7 @@ type wikiFlagIssueTool struct {
 	routes           *WikiRouteResolver
 	knowledgeService interfaces.KnowledgeService
 	searchTargets    types.SearchTargets
+	scopeEnforced    bool
 }
 
 func NewWikiFlagIssueTool(
@@ -67,6 +68,7 @@ func (t *wikiFlagIssueTool) WithKnowledgeScope(
 ) *wikiFlagIssueTool {
 	t.knowledgeService = knowledgeService
 	t.searchTargets = searchTargets
+	t.scopeEnforced = true
 	return t
 }
 
@@ -97,7 +99,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}
 	suspectedKnowledgeIDs := params.SuspectedKnowledgeIDs
-	if len(t.searchTargets) > 0 && len(suspectedKnowledgeIDs) > 0 {
+	if t.scopeEnforced && len(suspectedKnowledgeIDs) > 0 {
 		resolved, scopeErr := resolveAuthorizedSourceRefs(
 			ctx, t.searchTargets, suspectedKnowledgeIDs, t.knowledgeService,
 		)
