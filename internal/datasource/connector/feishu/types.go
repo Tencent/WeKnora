@@ -10,7 +10,10 @@
 //   - Auth:             https://open.feishu.cn/document/server-docs/authentication-management/access-token/tenant_access_token_internal
 package feishu
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config holds Feishu-specific configuration for the data source connector.
 // Uses the self-built app (企业自建应用) authentication model.
@@ -174,9 +177,9 @@ type exportTaskStatusResponse struct {
 			FileToken string `json:"file_token"`
 			FileSize  int64  `json:"file_size"`
 			// JobStatus: 0=success, 1=initializing, 2=processing
-			JobStatus    int    `json:"job_status"`
-			JobErrorMsg  string `json:"job_error_msg"`
-			FileName     string `json:"file_name"`
+			JobStatus   int    `json:"job_status"`
+			JobErrorMsg string `json:"job_error_msg"`
+			FileName    string `json:"file_name"`
 		} `json:"result"`
 	} `json:"data"`
 }
@@ -193,6 +196,81 @@ type driveFileMetaResponse struct {
 			Title    string `json:"title"`
 		} `json:"metas"`
 	} `json:"data"`
+}
+
+// --- Drive (云盘) file listing types ---
+
+// driveFile represents a file/folder in Feishu Drive (云空间). Returned by
+// GET /open-apis/drive/v1/files?folder_token=xxx. The list API returns
+// modified_time directly (verified), so no batch_query/metas call is needed for
+// incremental detection - see ADR-0002.
+type driveFile struct {
+	Token        string `json:"token"`
+	Name         string `json:"name"`
+	Type         string `json:"type"` // doc/docx/sheet/bitable/file/folder/shortcut/mindnote/slides/board
+	ParentToken  string `json:"parent_token"`
+	URL          string `json:"url"`
+	CreatedTime  string `json:"created_time"`  // unix seconds string
+	ModifiedTime string `json:"modified_time"` // unix seconds string - 等价知识库 obj_edit_time
+	OwnerID      string `json:"owner_id"`
+	// ShortcutInfo is populated only for type=="shortcut". target_type can only
+	// be doc/sheet/mindnote/bitable/file/docx (Feishu does not allow shortcuts to
+	// folders, verified) - see ADR-0002 / glossary shortcut entry.
+	ShortcutInfo *driveShortcutInfo `json:"shortcut_info,omitempty"`
+}
+
+// driveShortcutInfo is the target metadata of a Drive shortcut.
+type driveShortcutInfo struct {
+	TargetToken string `json:"target_token"`
+	TargetType  string `json:"target_type"`
+}
+
+// driveFileListResponse is the response for GET /open-apis/drive/v1/files.
+type driveFileListResponse struct {
+	apiResponse
+	Data struct {
+		Files         []driveFile `json:"files"`
+		HasMore       bool        `json:"has_more"`
+		NextPageToken string      `json:"next_page_token"`
+	} `json:"data"`
+}
+
+// driveFileListFailure records a single sub-folder listing that failed during a
+// recursive walk. Mirrors wikiNodeListFailure.
+type driveFileListFailure struct {
+	FolderToken string
+	Err         error
+}
+
+// partialDriveFileListError aggregates per-folder listing failures so the walk
+// can continue and the caller can still surface the partial result. Mirrors
+// partialWikiNodeListError.
+type partialDriveFileListError struct {
+	Failures []driveFileListFailure
+}
+
+func (e *partialDriveFileListError) Error() string {
+	if e == nil || len(e.Failures) == 0 {
+		return "partial drive file listing failed"
+	}
+	parts := make([]string, 0, len(e.Failures))
+	for _, failure := range e.Failures {
+		parts = append(parts, failure.Err.Error())
+	}
+	return strings.Join(parts, "; ")
+}
+
+// feishuDriveCursor stores incremental sync state for Feishu Drive (云盘).
+// Structurally symmetric with feishuCursor: outer key = resourceID
+// ("folderToken" or "folderToken:fileToken"), inner key = file_token,
+// value = modified_time. See ADR-0001.
+type feishuDriveCursor struct {
+	// LastSyncTime is the timestamp of the last successful sync.
+	LastSyncTime time.Time `json:"last_sync_time"`
+
+	// FileTimes maps resourceID -> file_token -> last known modified_time.
+	// Used to detect which files have changed since last sync.
+	FileTimes map[string]map[string]string `json:"file_times,omitempty"`
 }
 
 // feishuCursor stores incremental sync state for Feishu.

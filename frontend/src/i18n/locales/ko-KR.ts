@@ -6359,6 +6359,8 @@ export default {
     connector: {
       feishu: "페이슈 (Feishu)",
       lark: "Lark (Feishu 글로벌)",
+      feishu_drive: "페이슈 드라이브",
+      lark_drive: "Lark 드라이브",
       notion: "Notion",
       yuque: "위큐 (Yuque)",
       rss: "RSS / Atom 피드",
@@ -6366,9 +6368,19 @@ export default {
     connectorDesc: {
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
       lark: "Lark 위키에서 문서, 스프레드시트, 파일 동기화",
+      feishu_drive: "페이슈 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
+      lark_drive: "Lark 드라이브 폴더에서 문서, 스프레드시트, 파일 동기화",
       notion: "Notion에서 페이지 및 데이터베이스 동기화",
       yuque: "위큐 지식베이스에서 문서 동기화",
       rss: "RSS / Atom 피드에서 글 동기화",
+    },
+    drive: {
+      folderTokenLabel: "드라이브 폴더 토큰",
+      folderTokenPlaceholder: "페이슈 드라이브 폴더의 folder_token 입력",
+      folderTokenRequired: "구체적인 폴더의 folder_token을 입력하세요. 클라우드 루트는 지원되지 않습니다",
+      rootNotSupportedHint: "루트 폴더는 페이지네이션되지 않고 바로가기를 반환하지 않습니다. 구체적인 폴더를 선택하세요",
+      load: "로드",
+      shareHint: "앱이 접근할 수 있도록 먼저 드라이브 폴더를 앱이 속한 그룹에 공유하세요",
     },
     field: {
       appId: "App ID",

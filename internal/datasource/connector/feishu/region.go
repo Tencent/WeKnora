@@ -48,10 +48,34 @@ var (
 		WebBaseURL:    larkWebBaseURL,
 		Label:         "Lark",
 	}
+
+	// RegionFeishuDrive is the Chinese mainland cloud, Drive (云盘) mode.
+	// Shares the feishu connector package with RegionFeishu; only the connector
+	// type differs so the registry dispatches to the Drive connector.
+	RegionFeishuDrive = Region{
+		ConnectorType: types.ConnectorTypeFeishuDrive,
+		OpenBaseURL:   feishuOpenBaseURL,
+		WebBaseURL:    feishuWebBaseURL,
+		Label:         "FeishuDrive",
+	}
+
+	// RegionLarkDrive is the international cloud, Drive mode.
+	RegionLarkDrive = Region{
+		ConnectorType: types.ConnectorTypeLarkDrive,
+		OpenBaseURL:   larkOpenBaseURL,
+		WebBaseURL:    larkWebBaseURL,
+		Label:         "LarkDrive",
+	}
 )
 
 // wikiURL builds the user-facing link to a wiki space or node on this cloud.
 // The token is either a space_id or a node_token; both live under /wiki/.
 func (r Region) wikiURL(token string) string {
 	return r.WebBaseURL + "/wiki/" + token
+}
+
+// driveFolderURL builds the user-facing link to a Drive folder on this cloud.
+// A folder_token lives under /drive/folder/.
+func (r Region) driveFolderURL(folderToken string) string {
+	return r.WebBaseURL + "/drive/folder/" + folderToken
 }

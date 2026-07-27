@@ -6411,6 +6411,8 @@ export default {
     connector: {
       feishu: "飞书",
       lark: "Lark（飞书国际版）",
+      feishu_drive: "飞书云盘",
+      lark_drive: "Lark 云盘",
       notion: "Notion",
       yuque: "语雀",
       rss: "RSS / Atom 订阅",
@@ -6418,9 +6420,19 @@ export default {
     connectorDesc: {
       feishu: "同步飞书知识库中的文档、表格、文件",
       lark: "同步 Lark 知识库中的文档、表格、文件（飞书国际版）",
+      feishu_drive: "同步飞书云盘文件夹中的文档、表格、文件",
+      lark_drive: "同步 Lark 云盘文件夹中的文档、表格、文件（飞书国际版）",
       notion: "同步 Notion 中的页面和数据库",
       yuque: "同步语雀知识库中的文档",
       rss: "同步 RSS / Atom 订阅源中的文章",
+    },
+    drive: {
+      folderTokenLabel: "云盘文件夹 Token",
+      folderTokenPlaceholder: "输入飞书云盘文件夹的 folder_token",
+      folderTokenRequired: "请输入具体文件夹的 folder_token，不支持云空间根目录",
+      rootNotSupportedHint: "根目录不分页且不返回快捷方式，请选择具体文件夹",
+      load: "加载",
+      shareHint: "需先将该云盘文件夹分享给应用所在的群，应用才能访问",
     },
     field: {
       appId: "App ID",

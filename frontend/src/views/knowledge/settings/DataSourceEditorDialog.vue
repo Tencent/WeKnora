@@ -196,6 +196,33 @@ const loadingChildrenIds = ref(new Set<string>())
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
 
+// Drive (云盘) root input: the Drive connectors have no "list spaces" API, so
+// the user must supply a root folder_token. We collect it here, write it into
+// form.config.resource_ids as the single root, then loadResources lists its
+// children. See 飞书云盘数据源设计.md §5.2 / ADR-0004.
+const driveFolderToken = ref('')
+const driveRootLoaded = ref(false)
+const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
+
+// loadDriveRoot writes the user-supplied folder_token as the root resource_id,
+// then delegates to loadResources so the existing lazy-load tree takes over.
+async function loadDriveRoot() {
+  const token = driveFolderToken.value.trim()
+  if (!token) {
+    MessagePlugin.warning(t('datasource.drive.folderTokenRequired'))
+    return
+  }
+  form.value.config.resource_ids = [token]
+  driveRootLoaded.value = false
+  await loadResources()
+  // loadResources populates resources.value; if the root was reachable it now
+  // has at least the synthesized root node. On failure the error toast is shown
+  // by loadResources and we keep driveRootLoaded false so the input stays visible.
+  if (resources.value.length > 0) {
+    driveRootLoaded.value = true
+  }
+}
+
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
   const map = new Map<string, Resource[]>()
@@ -389,6 +416,42 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // Feishu Drive (云盘) mode: sync documents/files under a user-supplied Drive
+    // folder_token. Same auth as the wiki connector but no wiki:wiki:readonly
+    // scope - Drive only needs drive + export + docx.
+    type: 'feishu_drive',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+    ],
+  },
+  {
+    // Lark Drive: international counterpart of feishu_drive.
+    type: 'lark_drive',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',
@@ -455,6 +518,8 @@ watch(visible, async (v) => {
   loadedChildrenIds.value = new Set()
   loadingChildrenIds.value = new Set()
   treeFullyLoaded.value = false
+  driveFolderToken.value = ''
+  driveRootLoaded.value = false
   rssAuthHeaders.value = []
 
   if (isEdit.value && props.dataSource) {
@@ -482,6 +547,18 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    // Pre-fill the Drive root folder_token from the saved resource_ids so the
+    // user sees what they previously entered. driveRootLoaded stays false: the
+    // tree has not been listed yet, and clicking "load" triggers listResources
+    // + revealExistingSelections so pre-existing selections are revealed.
+    if (isDriveConnector(form.value.type)) {
+      const rids = form.value.config?.resource_ids || []
+      if (rids.length > 0) {
+        // resource_id is "folderToken" or "folderToken:fileToken"; the root is
+        // the first segment.
+        driveFolderToken.value = rids[0].split(':')[0]
+      }
+    }
     tempDsId.value = props.dataSource.id
   } else {
     replaceCredentialsMode.value = false
@@ -762,6 +839,11 @@ async function nextStep() {
   }
   step.value++
   if (step.value === 2) {
+    // Drive connectors need a user-supplied folder_token before listing; skip
+    // the auto-load and let the user fill the input and click "load".
+    if (isDriveConnector(form.value.type) && !driveRootLoaded.value) {
+      return
+    }
     loadResources()
   }
 }
@@ -1301,7 +1383,37 @@ const drawerConfirmText = computed(() => {
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
-      <div v-if="loadingResources" class="ds-loading-center"><t-loading /></div>
+
+      <!-- Drive (云盘) root input: the user supplies a folder_token before the
+           lazy-load tree can start. Other connectors go straight to the tree. -->
+      <div v-if="isDriveConnector(form.type) && !driveRootLoaded" class="drive-folder-input">
+        <label class="drive-folder-input__label">{{ t('datasource.drive.folderTokenLabel') }}</label>
+        <div class="drive-folder-input__row">
+          <t-input
+            v-model="driveFolderToken"
+            :placeholder="t('datasource.drive.folderTokenPlaceholder')"
+            clearable
+            @enter="loadDriveRoot"
+          />
+          <t-button theme="primary" :loading="loadingResources" @click="loadDriveRoot">
+            {{ t('datasource.drive.load') }}
+          </t-button>
+        </div>
+        <t-alert
+          :message="t('datasource.drive.shareHint')"
+          theme="info"
+          :close="false"
+          class="drive-folder-input__hint"
+        />
+        <t-alert
+          :message="t('datasource.drive.rootNotSupportedHint')"
+          theme="warning"
+          :close="false"
+          class="drive-folder-input__hint"
+        />
+      </div>
+
+      <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
       <div v-else-if="resources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
@@ -1922,6 +2034,33 @@ const drawerConfirmText = computed(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+/* Drive (云盘) root folder_token input - shown before the lazy-load tree. */
+.drive-folder-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-border-level-1-color);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+}
+
+.drive-folder-input__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.drive-folder-input__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.drive-folder-input__hint {
+  margin: 0;
 }
 
 .resource-picker {

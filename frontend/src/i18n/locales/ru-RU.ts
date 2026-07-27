@@ -6182,6 +6182,8 @@ export default {
     connector: {
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
+      feishu_drive: 'Feishu Drive',
+      lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
       rss: 'RSS / Atom лента',
@@ -6189,9 +6191,19 @@ export default {
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
+      feishu_drive: 'Синхронизация документов, таблиц и файлов из папки Feishu Drive',
+      lark_drive: 'Синхронизация документов, таблиц и файлов из папки Lark Drive',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
       rss: 'Синхронизация статей из лент RSS / Atom',
+    },
+    drive: {
+      folderTokenLabel: 'Токен папки Drive',
+      folderTokenPlaceholder: 'Введите folder_token папки Feishu Drive',
+      folderTokenRequired: 'Введите конкретный folder_token; корень облачного пространства не поддерживается',
+      rootNotSupportedHint: 'Корневая папка не поддерживает постраничный вывод и не возвращает ярлыки; выберите конкретную папку',
+      load: 'Загрузить',
+      shareHint: 'Сначала поделитесь папкой Drive с группой приложения, иначе приложение не получит к ней доступ',
     },
     field: {
       appId: 'App ID',

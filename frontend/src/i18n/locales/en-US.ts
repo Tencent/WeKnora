@@ -6358,6 +6358,8 @@ export default {
     connector: {
       feishu: 'Feishu',
       lark: 'Lark',
+      feishu_drive: 'Feishu Drive',
+      lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
@@ -6365,9 +6367,19 @@ export default {
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
+      feishu_drive: 'Sync documents, spreadsheets and files from a Feishu Drive folder',
+      lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
+    },
+    drive: {
+      folderTokenLabel: 'Drive folder token',
+      folderTokenPlaceholder: 'Enter the folder_token of a Feishu Drive folder',
+      folderTokenRequired: 'Please enter a concrete folder_token; the cloud-space root is not supported',
+      rootNotSupportedHint: 'The root folder is not paginated and does not return shortcuts; pick a concrete folder',
+      load: 'Load',
+      shareHint: 'Share the Drive folder with the app’s group first, otherwise the app cannot access it',
     },
     field: {
       appId: 'App ID',

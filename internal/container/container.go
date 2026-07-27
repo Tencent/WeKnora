@@ -1578,6 +1578,15 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
 	}
+	// Feishu/Lark Drive (云盘) mode: same package, different connector type so
+	// the registry dispatches to the Drive connector. Shares Client/Region/export
+	// logic with the wiki connector. See 飞书云盘数据源设计.md / ADR-0001.
+	if err := registry.Register(feishuConnector.NewDriveConnector(feishuConnector.RegionFeishuDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_drive connector: %w", err))
+	}
+	if err := registry.Register(feishuConnector.NewDriveConnector(feishuConnector.RegionLarkDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
+	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
 	}

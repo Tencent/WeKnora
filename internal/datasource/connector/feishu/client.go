@@ -650,6 +650,132 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 	return c.downloadRawBytes(ctx, path)
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Drive (云盘) file listing: for feishu_drive / lark_drive connectors.
+// Mirrors the wiki ListWikiNodes / ListWikiNodesRecursiveFrom shape so the
+// Drive connector's FetchStream mirrors the wiki connector's. See ADR-0001/0002.
+// ──────────────────────────────────────────────────────────────────────
+
+// ListDriveFiles lists files in a Drive folder (non-recursive), one page at a
+// time. Pass pageToken="" for the first page; the returned nextPageToken is ""
+// when there are no more pages.
+//
+// folderToken == "" is rejected: the root folder is not paginated and does
+// not return shortcuts (Feishu API limitation), which would silently drop
+// content and risk an unbounded single response. See ADR-0004.
+func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken string) ([]driveFile, string, error) {
+	if folderToken == "" {
+		return nil, "", fmt.Errorf("root folder not supported; specify a concrete folder_token (root folder is not paginated and does not return shortcuts)")
+	}
+
+	path := "/open-apis/drive/v1/files?folder_token=" + url.QueryEscape(folderToken)
+	path += "&page_size=200" // max
+	path += "&order_by=EditedTime&direction=DESC"
+	if pageToken != "" {
+		path += "&page_token=" + url.QueryEscape(pageToken)
+	}
+
+	var resp driveFileListResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, "", fmt.Errorf("list drive files: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, "", fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	logger.Infof(ctx, "[FeishuDrive] ListDriveFiles: folder=%s got %d files, has_more=%v",
+		folderToken, len(resp.Data.Files), resp.Data.HasMore)
+	return resp.Data.Files, resp.Data.NextPageToken, nil
+}
+
+// listDriveFilesAllPages lists every direct child of a folder across all pages.
+func (c *Client) listDriveFilesAllPages(ctx context.Context, folderToken string) ([]driveFile, error) {
+	var all []driveFile
+	pageToken := ""
+	for {
+		files, next, err := c.ListDriveFiles(ctx, folderToken, pageToken)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, files...)
+		if next == "" {
+			break
+		}
+		pageToken = next
+	}
+	return all, nil
+}
+
+// ListDriveFilesRecursiveFrom walks a Drive folder subtree depth-first,
+// returning all non-folder files. Mirrors ListWikiNodesRecursiveFrom.
+//
+//   - folder -> recurse (visited is a pure-defensive cycle guard; Drive folders
+//     have no shortcut concept so cycles are not expected - see glossary).
+//   - shortcut -> expand to its target (target_type is never "folder", verified)
+//     and include the target as a regular file. No extra API call: shortcut_info
+//     is returned by the list API.
+//   - other -> collect.
+//
+// Partial failures (a sub-folder listing returns an error) are collected into a
+// *partialDriveFileListError and the walk continues, mirroring the wiki
+// connector's partialWikiNodeListError semantics.
+func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken string) ([]driveFile, error) {
+	visited := make(map[string]bool)
+	var all []driveFile
+	var failures []driveFileListFailure
+
+	var walk func(folderToken string)
+	walk = func(folderToken string) {
+		if visited[folderToken] {
+			return
+		}
+		visited[folderToken] = true
+
+		files, err := c.listDriveFilesAllPages(ctx, folderToken)
+		if err != nil {
+			wrappedErr := fmt.Errorf("list children of %s: %w", folderToken, err)
+			failures = append(failures, driveFileListFailure{
+				FolderToken: folderToken,
+				Err:         wrappedErr,
+			})
+			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
+				folderToken, err)
+			return
+		}
+
+		for _, f := range files {
+			switch f.Type {
+			case "folder":
+				walk(f.Token)
+			case "shortcut":
+				// Expand to target. target_type is never "folder" (verified), so
+				// no recursion here - the target is a regular file.
+				if f.ShortcutInfo != nil && f.ShortcutInfo.TargetToken != "" {
+					expanded := driveFile{
+						Token:        f.ShortcutInfo.TargetToken,
+						Name:         f.Name,
+						Type:         f.ShortcutInfo.TargetType,
+						ParentToken:  f.ParentToken,
+						URL:          f.URL,
+						CreatedTime:  f.CreatedTime,
+						ModifiedTime: f.ModifiedTime,
+						OwnerID:      f.OwnerID,
+					}
+					all = append(all, expanded)
+				}
+			default:
+				all = append(all, f)
+			}
+		}
+	}
+
+	walk(folderToken)
+	if len(failures) > 0 {
+		return all, &partialDriveFileListError{Failures: failures}
+	}
+	return all, nil
+}
+
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
 	token, err := c.getTenantAccessToken(ctx)
