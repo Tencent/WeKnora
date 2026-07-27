@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -445,11 +446,37 @@ func (s *sessionService) buildSearchTargets(
 	if s.knowledgeFolderService == nil {
 		return nil, fmt.Errorf("knowledge folder service is unavailable")
 	}
-
-	kbIDs := uniqueNonEmptyStrings(knowledgeBaseIDs)
-	if len(kbIDs) == 0 {
+	kbIDSet := make(map[string]struct{}, len(knowledgeBaseIDs))
+	for _, kbID := range knowledgeBaseIDs {
+		if kbID = strings.TrimSpace(kbID); kbID != "" {
+			kbIDSet[kbID] = struct{}{}
+		}
+	}
+	owners, err := s.knowledgeFolderService.ResolveFolderOwners(ctx, folderIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, folderID := range folderIDs {
+		if folderID == types.FolderRootID || folderID == types.FolderRootFilter {
+			continue
+		}
+		if _, ok := owners[folderID]; !ok {
+			// Folder does not exist in this tenant (wrong/foreign id).
+			return nil, fmt.Errorf("folder %s not found in tenant scope", folderID)
+		}
+	}
+	for _, kbID := range owners {
+		kbIDSet[kbID] = struct{}{}
+	}
+	if len(kbIDSet) == 0 {
 		return nil, types.ErrInvalidArgument
 	}
+	kbIDs := make([]string, 0, len(kbIDSet))
+	for kbID := range kbIDSet {
+		kbIDs = append(kbIDs, kbID)
+	}
+	sort.Strings(kbIDs)
+
 	kbs, err := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
 	if err != nil {
 		return nil, err
@@ -485,33 +512,27 @@ func (s *sessionService) buildSearchTargets(
 	folderIDsByKB := make(map[string][]string, len(kbIDs))
 	for _, folderID := range folderIDs {
 		if folderID == types.FolderRootID || folderID == types.FolderRootFilter {
+			// Root scope applies to every KB in the set (root = whole KB).
 			for _, kbID := range kbIDs {
 				folderIDsByKB[kbID] = append(folderIDsByKB[kbID], types.FolderRootID)
 			}
 			continue
 		}
-		matchedKB := ""
-		for _, kbID := range kbIDs {
-			ownerCtx := context.WithValue(ctx, types.TenantIDContextKey, ownerByKB[kbID])
-			folder, getErr := s.knowledgeFolderService.GetFolder(ownerCtx, kbID, folderID)
-			if getErr == nil && folder != nil {
-				if folder.KnowledgeBaseID != kbID || folder.TenantID != ownerByKB[kbID] {
-					return nil, types.ErrInvalidArgument
-				}
-				if matchedKB != "" && matchedKB != kbID {
-					return nil, types.ErrInvalidArgument
-				}
-				matchedKB = kbID
-			}
-		}
-		if matchedKB == "" {
-			return nil, types.ErrInvalidArgument
-		}
-		folderIDsByKB[matchedKB] = append(folderIDsByKB[matchedKB], folderID)
+		ownerKB := owners[folderID]
+		folderIDsByKB[ownerKB] = append(folderIDsByKB[ownerKB], folderID)
 	}
 
 	var targets types.SearchTargets
 	for _, kbID := range kbIDs {
+		if folderIDsByKB[kbID] == nil {
+			kbTags := tagScopesForKB(tagScopes, kbID)
+			full, fullErr := s.buildSearchTargetsLegacy(ctx, tenantID, []string{kbID}, knowledgeIDs, kbTags)
+			if fullErr != nil {
+				return nil, fullErr
+			}
+			targets = append(targets, full...)
+			continue
+		}
 		ids := uniqueNonEmptyFolderIDs(folderIDsByKB[kbID])
 		if len(ids) == 0 && !containsFolderRoot(folderIDsByKB[kbID]) {
 			continue

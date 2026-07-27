@@ -15,6 +15,7 @@ type KnowledgeFolderRepository interface {
 	Create(context.Context, *types.KnowledgeFolder) error
 	CreateIfAbsent(context.Context, *types.KnowledgeFolder) (*types.KnowledgeFolder, bool, error)
 	GetByID(context.Context, uint64, string, string) (*types.KnowledgeFolder, error)
+	GetByIDsForTenant(context.Context, uint64, []string) ([]*types.KnowledgeFolder, error)
 	// LockKnowledgeBase acquires the transaction-scoped KB structural-write lock.
 	LockKnowledgeBase(context.Context, uint64, string) error
 	GetByIDForUpdate(context.Context, uint64, string, string) (*types.KnowledgeFolder, error)
@@ -44,6 +45,7 @@ type KnowledgeFolderService interface {
 		context.Context, string, *types.ResolveFolderPathsRequest,
 	) (*types.ResolveFolderPathsResponse, error)
 	GetFolder(context.Context, string, string) (*types.KnowledgeFolder, error)
+	ResolveFolderOwners(context.Context, []string) (map[string]string, error)
 	ListByParent(context.Context, string, string) ([]*types.KnowledgeFolder, error)
 	GetTree(context.Context, string) ([]*types.KnowledgeFolder, error)
 	UpdateFolder(context.Context, string, string, *types.UpdateFolderRequest) (*types.KnowledgeFolder, error)

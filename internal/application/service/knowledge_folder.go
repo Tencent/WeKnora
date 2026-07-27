@@ -290,6 +290,36 @@ func (s *knowledgeFolderService) GetFolder(
 	}
 	return s.folders.GetByID(ctx, tenantID, kbID, folderID)
 }
+func (s *knowledgeFolderService) ResolveFolderOwners(
+	ctx context.Context, folderIDs []string,
+) (map[string]string, error) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, types.ErrInvalidArgument
+	}
+	// Filter out the root sentinel - it has no owning KB (it IS the KB).
+	realIDs := make([]string, 0, len(folderIDs))
+	for _, id := range folderIDs {
+		if id == "" || id == types.FolderRootFilter {
+			continue
+		}
+		realIDs = append(realIDs, id)
+	}
+	owners := make(map[string]string, len(realIDs))
+	if len(realIDs) == 0 {
+		return owners, nil
+	}
+	folders, err := s.folders.GetByIDsForTenant(ctx, tenantID, realIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range folders {
+		if f != nil {
+			owners[f.ID] = f.KnowledgeBaseID
+		}
+	}
+	return owners, nil
+}
 
 func (s *knowledgeFolderService) ListByParent(
 	ctx context.Context, kbID, parentID string,

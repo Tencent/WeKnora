@@ -130,6 +130,22 @@ func (r *knowledgeFolderRepository) GetByID(
 	}
 	return &folder, nil
 }
+func (r *knowledgeFolderRepository) GetByIDsForTenant(
+	ctx context.Context, tenantID uint64, ids []string,
+) ([]*types.KnowledgeFolder, error) {
+	ids = uniqueNonEmpty(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var folders []*types.KnowledgeFolder
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Find(&folders).Error
+	if err != nil {
+		return nil, err
+	}
+	return folders, nil
+}
 
 func (r *knowledgeFolderRepository) GetByIDForUpdate(
 	ctx context.Context, tenantID uint64, kbID, id string,

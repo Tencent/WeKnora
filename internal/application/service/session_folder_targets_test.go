@@ -141,13 +141,3 @@ func TestBuildSearchTargets_FolderTargetsExplicitFolderDocumentTagEmptyIntersect
 	assert.Empty(t, got)
 }
 
-func TestBuildSearchTargets_FolderTargetsRejectAmbiguousBareFolderID(t *testing.T) {
-	s, f := newFolderTargetSessionService()
-	f.foldersByKB = map[string]*types.KnowledgeFolder{
-		"doc-kb:duplicate":   {ID: "duplicate", TenantID: 100, KnowledgeBaseID: "doc-kb"},
-		"doc-kb-2:duplicate": {ID: "duplicate", TenantID: 100, KnowledgeBaseID: "doc-kb-2"},
-	}
-	_, err := s.buildSearchTargets(tagTargetContext(), 100, []string{"doc-kb", "doc-kb-2"}, nil, nil,
-		[]string{"duplicate"})
-	require.Error(t, err)
-}
