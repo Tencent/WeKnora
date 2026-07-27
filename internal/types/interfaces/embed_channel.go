@@ -22,7 +22,7 @@ type EmbedChannelService interface {
 	Create(ctx context.Context, tenantID uint64, agentID string, req *types.EmbedChannel) (*types.EmbedChannel, string, error)
 	ListByAgent(ctx context.Context, tenantID uint64, agentID string) ([]*types.EmbedChannel, error)
 	ListByTenant(ctx context.Context, tenantID uint64) ([]*types.EmbedChannel, error)
-	Update(ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel, enabled *bool, showSuggested *bool, allowWebSearch *bool, allowMemory *bool, allowFileUpload *bool, defaultLocale *string, webhookURL *string, webhookSecret *string) (*types.EmbedChannel, error)
+	Update(ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel, enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool, defaultLocale *string, webhookURL *string, webhookSecret *string) (*types.EmbedChannel, error)
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	RotateToken(ctx context.Context, tenantID uint64, id string) (*types.EmbedChannel, string, error)
 	LookupForEmbed(ctx context.Context, channelID, token string) (*types.EmbedChannel, error)

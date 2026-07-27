@@ -1,8 +1,10 @@
 package im
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -94,7 +96,7 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 		ch.ID = uuid.New().String()
 	}
 	if ch.Mode == "" {
-		if ch.Platform == "mattermost" {
+		if ch.Platform == "mattermost" || ch.Platform == "yunzhijia" {
 			ch.Mode = "webhook"
 		} else {
 			ch.Mode = "websocket"
@@ -170,9 +172,11 @@ func (ch *IMChannel) computeBotIdentity() string {
 				return "wecom:wh:" + corpID + ":" + agentID
 			}
 		}
-	case "feishu":
+	// Feishu and Lark app_ids live in separate clouds and never collide, so the
+	// platform prefix keeps the same app_id on both from looking like one bot.
+	case "feishu", "lark":
 		if appID := str("app_id"); appID != "" {
-			return "feishu:" + appID
+			return ch.Platform + ":" + appID
 		}
 	case "telegram":
 		if botToken := str("bot_token"); botToken != "" {
@@ -197,6 +201,16 @@ func (ch *IMChannel) computeBotIdentity() string {
 	case "qqbot":
 		if appID := str("app_id"); appID != "" {
 			return "qqbot:" + appID
+		}
+	case "yunzhijia":
+		if sendMsgURL := str("send_msg_url"); sendMsgURL != "" {
+			parsed, err := url.Parse(sendMsgURL)
+			if err != nil {
+				return ""
+			}
+			if token := strings.TrimSpace(parsed.Query().Get("yzjtoken")); token != "" {
+				return fmt.Sprintf("yunzhijia:%x", sha256.Sum256([]byte(token)))
+			}
 		}
 	}
 	return ""

@@ -33,15 +33,22 @@ func TestGetSuggestedQuestionsRejectsKnowledgeIDsForRestrictedKey(t *testing.T) 
 	}
 }
 
-func TestGetSuggestedQuestionsRejectsTagIDsForRestrictedKey(t *testing.T) {
+func TestGetSuggestedQuestionsRejectsTagScopesForRestrictedKey(t *testing.T) {
 	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
 		KnowledgeBaseIDs: types.StringArray{"kb-1"},
 	})
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(1))
 
 	svc := &customAgentService{}
-	_, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, []string{"tag-1"}, 6)
+	_, err := svc.GetSuggestedQuestions(
+		ctx,
+		"agent-1",
+		nil,
+		nil,
+		[]types.TagScope{{KnowledgeBaseID: "kb-1", TagIDs: []string{"tag-1"}}},
+		6,
+	)
 	if err == nil {
-		t.Fatal("expected forbidden for tag_ids under KB-restricted key")
+		t.Fatal("expected forbidden for tag_scopes under KB-restricted key")
 	}
 }

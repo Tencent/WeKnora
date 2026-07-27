@@ -154,6 +154,10 @@ onUnmounted(() => {
 })
 const missingStorageEngine = computed(() => {
   if (!kbInfo.value || isFAQ.value) return false
+  // storage_backend_id is authoritative; storage_provider_config.provider is a
+  // compatibility projection for older clients. Either being present means the
+  // KB has a bound storage instance and uploads should not be blocked.
+  if (kbInfo.value.storage_backend_id) return false
   const spc = kbInfo.value.storage_provider_config
   return !spc || !spc.provider
 })
@@ -278,6 +282,9 @@ const canManage = computed(() => {
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// The activity feed exposes owner-side actor and configuration summaries.
+// It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
+
 // Can mutate knowledge (move / batch-delete): the backend gate for these
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
 // in their tenant on top of having KB edit permission. Without the extra
@@ -295,6 +302,16 @@ const canMutateKnowledge = computed(() => {
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
+// Downloading returns the original source file, which is intentionally more
+// restrictive than viewing parsed content or using the preview tab. A tenant
+// Viewer can never download; for cross-tenant KBs the effective share
+// permission must additionally be Editor or Admin.
+const canDownloadKnowledge = computed(() => {
+  if (!authStore.hasRole('contributor')) return false;
+  const permission = effectiveKBPermission.value;
+  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
@@ -528,6 +545,9 @@ const parseStatusOptions = computed(() => [
   { label: t('knowledgeBase.parseStatusProcessing'), value: 'processing' },
   { label: t('knowledgeBase.parseStatusCompleted'), value: 'completed' },
   { label: t('knowledgeBase.parseStatusFailed'), value: 'failed' },
+  { label: t('knowledgeBase.parseStatusCancelled'), value: 'cancelled' },
+  { label: t('knowledgeBase.parseStatusFinalizing'), value: 'finalizing' },
+  { label: t('knowledgeBase.parseStatusDraft'), value: 'draft' },
 ]);
 const selectedSource = ref('');
 // Source filter combines ingestion channels and the "manual"/"url" virtual
@@ -777,7 +797,10 @@ const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
       await loadKnowledgeFiles(kbId.value);
       await loadTags(kbId.value, true);
     })();
+    return;
   }
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
 };
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
@@ -2292,6 +2315,7 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
         @closeDoc="closeDoc" @getDoc="getDoc">
       </DocContent>
     </div>
@@ -2317,6 +2341,7 @@ async function createNewSession(value: string): Promise<void> {
     @open-manage="openTagManageFromEditDialog" />
 
   <KbTagManageDrawer
+    v-if="!isFAQ"
     v-model:visible="tagManageDrawerVisible"
     :kb-id="kbId"
     :is-faq="isFAQ"

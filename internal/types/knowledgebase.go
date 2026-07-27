@@ -9,6 +9,24 @@ import (
 	"gorm.io/gorm"
 )
 
+const storageBackendScheme = "storage://"
+
+func BuildStorageBackendPath(backendID, providerPath string) string {
+	return storageBackendScheme + strings.TrimSpace(backendID) + "/" + providerPath
+}
+
+func ParseStorageBackendPath(path string) (backendID, providerPath string, ok bool) {
+	if !strings.HasPrefix(path, storageBackendScheme) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(path, storageBackendScheme)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 // KnowledgeBaseType represents the type of the knowledge base
 const (
 	// KnowledgeBaseTypeDocument represents the document knowledge base type
@@ -49,13 +67,13 @@ type KnowledgeBase struct {
 	IsTemporary bool `yaml:"is_temporary"            json:"is_temporary"            gorm:"default:false"`
 	// Description of the knowledge base
 	Description string `yaml:"description"             json:"description"`
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
 	// CreatorID records the user ID of whoever originally created the KB.
-	// Used by the tenant-level RBAC middleware to let Contributors edit
+	// Used by the workspace-level RBAC middleware to let Contributors edit
 	// their own KBs without granting them access to everyone else's.
 	// Nullable for backward compatibility with rows created before the
-	// RBAC migration backfilled the column to the tenant Owner.
+	// RBAC migration backfilled the column to the workspace Owner.
 	CreatorID string `yaml:"creator_id"              json:"creator_id"              gorm:"type:varchar(36);index"`
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
@@ -69,12 +87,15 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
-	// Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig
+	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
+	// StorageBackendID binds this KB to one concrete storage instance. The
+	// legacy provider field remains readable during migration only.
+	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
 	// VectorStoreID references the VectorStore this knowledge base is bound to.
-	// When nil, the KB falls back to the tenant's effective engines derived from
+	// When nil, the KB falls back to the workspace's effective engines derived from
 	// the RETRIEVE_DRIVER environment variable (env store flow).
 	// This field is set once at creation time and must not be modified afterwards;
 	// enforcement lives at the GORM layer (`<-:create`) plus the service-layer
@@ -93,7 +114,7 @@ type KnowledgeBase struct {
 	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
 	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
 	// (see migration 000050). They used to be stored on the row itself,
-	// which made pinning a tenant-wide ordering decision gated behind
+	// which made pinning a workspace-wide ordering decision gated behind
 	// the kb-edit RBAC guard. The columns are still present in legacy
 	// schemas for rollback safety but are no longer read or written by
 	// the application — both fields are tagged `gorm:"-"` so GORM
@@ -121,7 +142,7 @@ type KnowledgeBase struct {
 	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
 	// CreatorName 是 CreatorID 对应用户的展示名（username / email 等），
 	// 仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、
-	// CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs tenant 的二分。
+	// CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs workspace 的二分。
 	CreatorName string `yaml:"-"                       json:"creator_name,omitempty"  gorm:"-"`
 }
 
@@ -178,6 +199,10 @@ type ChunkingConfig struct {
 	// Languages hints the heuristic patterns. Empty = auto-detect from content.
 	// Examples: ["de"], ["en", "zh"].
 	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
+	// TableMetadataInstructions contains optional business guidance used when
+	// generating searchable summaries for CSV/Excel tables. The system-owned
+	// output contract remains fixed; these instructions only add domain context.
+	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
 // ResolveParserEngine returns the engine name for the given file type
@@ -313,6 +338,27 @@ func (kb *KnowledgeBase) SetStorageProvider(provider string) {
 	kb.StorageProviderConfig = &StorageProviderConfig{Provider: provider}
 }
 
+// SharesStorageBackendWith compares concrete instance bindings first. Provider
+// comparison is only a compatibility fallback for rows not yet backfilled.
+func (kb *KnowledgeBase) SharesStorageBackendWith(other *KnowledgeBase, defaultBackendID, defaultProvider string) bool {
+	if kb == nil || other == nil {
+		return false
+	}
+	effectiveID := func(candidate *KnowledgeBase) string {
+		if candidate.StorageBackendID != nil {
+			if id := strings.TrimSpace(*candidate.StorageBackendID); id != "" {
+				return id
+			}
+		}
+		return strings.TrimSpace(defaultBackendID)
+	}
+	leftID, rightID := effectiveID(kb), effectiveID(other)
+	if leftID != "" || rightID != "" {
+		return leftID != "" && leftID == rightID
+	}
+	return kb.EffectiveStorageProvider(defaultProvider) == other.EffectiveStorageProvider(defaultProvider)
+}
+
 // InferStorageFromFilePath deduces the storage provider from a file path format.
 // Used as a safety fallback when the KB's configured provider doesn't match the data.
 // Supports provider:// scheme (local://, minio://, cos://, tos://),
@@ -335,7 +381,10 @@ func InferStorageFromFilePath(filePath string) string {
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"} {
+	if _, inner, ok := ParseStorageBackendPath(filePath); ok {
+		filePath = inner
+	}
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs", "dummy"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}
@@ -387,6 +436,12 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 type VLMConfig struct {
 	Enabled bool   `yaml:"enabled"  json:"enabled"`
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// DescriptionLanguage controls the language used for generated image
+	// captions. Empty means follow the document/request language.
+	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty"`
+	// CustomInstructions adds KB-specific image interpretation guidance without
+	// replacing the system-owned OCR and Markdown output contract.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 
 	// 兼容老版本
 	// Model Name
@@ -421,6 +476,9 @@ type QuestionGenerationConfig struct {
 	Enabled bool `yaml:"enabled"  json:"enabled"`
 	// Number of questions to generate per chunk (default: 3, max: 10)
 	QuestionCount int `yaml:"question_count" json:"question_count"`
+	// CustomInstructions describes the intended audience or question style.
+	// It is appended to the stable system question-generation template.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 }
 
 // Value implements the driver.Valuer interface
@@ -493,6 +551,9 @@ type ExtractConfig struct {
 	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
 	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
 	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	// CustomInstructions adds domain-specific extraction guidance while the
+	// system keeps ownership of the structured graph output protocol.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

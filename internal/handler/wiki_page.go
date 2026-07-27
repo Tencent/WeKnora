@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -314,7 +316,7 @@ func writeWikiFolderError(c *gin.Context, err error) {
 	switch {
 	case stderrors.Is(err, repository.ErrWikiFolderNotFound), stderrors.Is(err, repository.ErrWikiPageNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case stderrors.Is(err, repository.ErrWikiFolderConflict):
+	case stderrors.Is(err, repository.ErrWikiFolderConflict), stderrors.Is(err, repository.ErrWikiFolderNotEmpty):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -363,14 +365,51 @@ func (h *WikiPageHandler) CreatePage(c *gin.Context) {
 
 	page.KnowledgeBaseID = kbID
 	page.TenantID = tenantID
+	page.PageType = strings.TrimSpace(page.PageType)
+	page.Status = strings.TrimSpace(page.Status)
+	if page.PageType != "" && !types.IsValidWikiPageType(page.PageType) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page_type: " + page.PageType})
+		return
+	}
+	if page.Status != "" && !types.IsValidWikiPageStatus(page.Status) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status: " + page.Status})
+		return
+	}
 
-	created, err := h.wikiService.CreatePage(c.Request.Context(), &page)
+	ctx := types.WithWikiEditSource(c.Request.Context(), types.WikiEditSourceUser)
+	created, err := h.wikiService.CreatePage(ctx, &page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	h.appendManualLogEntry(ctx, created, "manual_create", "Page created manually")
 	c.JSON(http.StatusCreated, created)
+}
+
+// appendManualLogEntry records a manual page mutation in the wiki operation
+// log so human/agent-driven edits show up in the same event feed as ingest.
+// Best-effort: a log write failure must never fail the edit itself.
+func (h *WikiPageHandler) appendManualLogEntry(
+	ctx context.Context, page *types.WikiPage, action string, summary string,
+) {
+	if h.logEntryService == nil || page == nil {
+		return
+	}
+	entry := &types.WikiLogEntry{
+		TenantID:        page.TenantID,
+		KnowledgeBaseID: page.KnowledgeBaseID,
+		Action:          action,
+		// Manual edits have no source document, so the log feed's title slot
+		// would fall back to a placeholder. Use the page title instead.
+		DocTitle:      page.Title,
+		Summary:       summary,
+		PagesAffected: types.WikiLogPageRefs{{Slug: page.Slug, Title: page.Title}},
+		CreatedAt:     time.Now(),
+	}
+	if err := h.logEntryService.AppendBatch(ctx, []*types.WikiLogEntry{entry}); err != nil {
+		logger.Warnf(ctx, "wiki: failed to append %s log entry for %s: %v", action, page.Slug, err)
+	}
 }
 
 // GetPage godoc
@@ -412,19 +451,25 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 
 // UpdatePage godoc
 // @Summary      Update a wiki page
-// @Description  Update an existing wiki page by slug
+// @Description  Partially update a wiki page by slug. Absent fields keep
+// @Description  their stored value. When `version` is > 0 it acts as an
+// @Description  optimistic-lock guard: a mismatch with the stored version
+// @Description  returns 409 together with the current version so the client
+// @Description  can reload and re-apply.
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
-// @Param        kb_id  path  string          true  "Knowledge base ID"
-// @Param        slug   path  string          true  "Page slug"
-// @Param        page   body  types.WikiPage  true  "Updated wiki page data"
+// @Param        kb_id  path  string                       true  "Knowledge base ID"
+// @Param        slug   path  string                       true  "Page slug"
+// @Param        page   body  types.WikiPageUpdateRequest  true  "Fields to update"
 // @Success      200  {object}  types.WikiPage
+// @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
+// @Failure      409  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [put]
 func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
-	kbID, tenantID, err := h.validateWikiKB(c)
+	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -436,17 +481,15 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 		return
 	}
 
-	var page types.WikiPage
-	if err := c.ShouldBindJSON(&page); err != nil {
+	var req types.WikiPageUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
 
-	page.KnowledgeBaseID = kbID
-	page.TenantID = tenantID
-	page.Slug = slug
+	ctx := types.WithWikiEditSource(c.Request.Context(), types.WikiEditSourceUser)
 
-	updated, err := h.wikiService.UpdatePage(c.Request.Context(), &page)
+	existing, err := h.wikiService.GetPageBySlug(ctx, kbID, slug)
 	if err != nil {
 		if stderrors.Is(err, repository.ErrWikiPageNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
@@ -455,7 +498,195 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Version > 0 && req.Version != existing.Version {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":           "Wiki page was modified by someone else",
+			"current_version": existing.Version,
+		})
+		return
+	}
 
+	// Merge the provided fields onto the stored page so absent fields keep
+	// their value — the service's UpdatePage semantics are "full intended
+	// state", and sending it a half-empty struct would clear real data.
+	page := *existing
+	if req.Title != nil {
+		page.Title = strings.TrimSpace(*req.Title)
+	}
+	if req.Content != nil {
+		page.Content = *req.Content
+	}
+	if req.Summary != nil {
+		page.Summary = *req.Summary
+	}
+	if req.PageType != nil {
+		page.PageType = strings.TrimSpace(*req.PageType)
+		if !types.IsValidWikiPageType(page.PageType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page_type: " + page.PageType})
+			return
+		}
+	}
+	if req.Status != nil {
+		page.Status = strings.TrimSpace(*req.Status)
+		if !types.IsValidWikiPageStatus(page.Status) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status: " + page.Status})
+			return
+		}
+	}
+	if req.Aliases != nil {
+		page.Aliases = *req.Aliases
+	}
+
+	updated, err := h.wikiService.UpdatePage(ctx, &page)
+	if err != nil {
+		switch {
+		case stderrors.Is(err, repository.ErrWikiPageNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+		case stderrors.Is(err, repository.ErrWikiPageConflict):
+			c.JSON(http.StatusConflict, gin.H{"error": "Wiki page was modified by someone else"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	if updated.Version != existing.Version {
+		h.appendManualLogEntry(ctx, updated, "manual_edit", "Page edited manually")
+	}
+	c.JSON(http.StatusOK, updated)
+}
+
+// ListRevisions godoc
+// @Summary      List wiki page revisions
+// @Description  Returns the stored historical snapshots for a page, newest
+// @Description  first (content omitted), plus the current version. Passing
+// @Description  `version` returns that single snapshot with full content.
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id    path   string  true   "Knowledge base ID"
+// @Param        slug     path   string  true   "Page slug"
+// @Param        version  query  int     false  "Return this single revision with content"
+// @Param        limit    query  int     false  "Page size (default 50, max 200)"
+// @Param        offset   query  int     false  "Offset into the newest-first list"
+// @Success      200  {object}  types.WikiPageRevisionListResponse
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/revisions/{slug} [get]
+func (h *WikiPageHandler) ListRevisions(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	slug := getSlugParam(c)
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Page slug is required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	if raw := c.Query("version"); raw != "" {
+		version, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || version < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version"})
+			return
+		}
+		rev, err := h.wikiService.GetRevision(ctx, kbID, slug, version)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page revision not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, rev)
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit < 1 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	resp, err := h.wikiService.ListRevisions(ctx, kbID, slug, limit, offset)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrWikiPageNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// RevertPage godoc
+// @Summary      Revert a wiki page to an earlier revision
+// @Description  Rolls the page (slug in the body, like move-page) back to
+// @Description  the content of the given stored revision. Applied as a
+// @Description  regular edit: the pre-revert state is snapshotted and the
+// @Description  version advances.
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        kb_id   path  string                       true  "Knowledge base ID"
+// @Param        revert  body  types.WikiPageRevertRequest  true  "Revert target"
+// @Success      200  {object}  types.WikiPage
+// @Failure      400  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Failure      409  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/revert [post]
+func (h *WikiPageHandler) RevertPage(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req types.WikiPageRevertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	slug := strings.TrimSpace(req.Slug)
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Page slug is required"})
+		return
+	}
+	if req.Version < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	updated, err := h.wikiService.RevertPageToVersion(ctx, kbID, slug, req.Version)
+	if err != nil {
+		switch {
+		case stderrors.Is(err, repository.ErrWikiPageNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page or revision not found"})
+		case stderrors.Is(err, repository.ErrWikiPageConflict):
+			c.JSON(http.StatusConflict, gin.H{"error": "Wiki page was modified by someone else"})
+		case stderrors.Is(err, service.ErrWikiRevertToCurrentVersion):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	h.appendManualLogEntry(ctx, updated,
+		"revert", fmt.Sprintf("Page reverted to v%d", req.Version))
 	c.JSON(http.StatusOK, updated)
 }
 
@@ -482,7 +713,11 @@ func (h *WikiPageHandler) DeletePage(c *gin.Context) {
 		return
 	}
 
-	if err := h.wikiService.DeletePage(c.Request.Context(), kbID, slug); err != nil {
+	ctx := c.Request.Context()
+	// Load first so the log entry can carry the page title after deletion.
+	page, _ := h.wikiService.GetPageBySlug(ctx, kbID, slug)
+
+	if err := h.wikiService.DeletePage(ctx, kbID, slug); err != nil {
 		if stderrors.Is(err, repository.ErrWikiPageNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
 			return
@@ -491,6 +726,7 @@ func (h *WikiPageHandler) DeletePage(c *gin.Context) {
 		return
 	}
 
+	h.appendManualLogEntry(ctx, page, "manual_delete", "Page deleted manually")
 	c.Status(http.StatusNoContent)
 }
 

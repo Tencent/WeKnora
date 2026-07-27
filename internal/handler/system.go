@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
@@ -32,6 +33,10 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
+type runtimeKnowledgeCanceller interface {
+	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+}
+
 // SystemHandler handles system-related requests
 type SystemHandler struct {
 	cfg              *config.Config
@@ -40,6 +45,7 @@ type SystemHandler struct {
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
 	systemSettingSvc interfaces.SystemSettingService
+	apiKeySvc        interfaces.TenantAPIKeyService
 	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
 	// tests that wire a partial container still compile. In production
 	// the dig graph always provides one.
@@ -49,6 +55,15 @@ type SystemHandler struct {
 	// Lite mode), so GetRuntimeQueues can distinguish "no queues in this
 	// deployment" from "queues are empty".
 	taskInspector interfaces.TaskInspector
+	// knowledgeSvc supplies the domain-level cancellation path used by the
+	// runtime task console. It updates business state and tracing before queue
+	// records are removed, unlike a raw Redis deletion.
+	knowledgeSvc runtimeKnowledgeCanceller
+	// storageBackendRepo lets GetStorageEngineStatus report multi-instance
+	// storage backends (Settings → Storage) as "available", not just the legacy
+	// singleton tenant.StorageEngineConfig. Optional — nil in partially-wired
+	// unit tests, in which case only the legacy config is consulted.
+	storageBackendRepo interfaces.StorageBackendRepository
 }
 
 // NewSystemHandler creates a new system handler
@@ -58,19 +73,161 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	apiKeySvc interfaces.TenantAPIKeyService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
+	knowledgeSvc interfaces.KnowledgeService,
+	storageBackendRepo interfaces.StorageBackendRepository,
 ) *SystemHandler {
 	return &SystemHandler{
-		cfg:              cfg,
-		neo4jDriver:      neo4jDriver,
-		documentReader:   documentReader,
-		tenantSvc:        tenantSvc,
-		userSvc:          userSvc,
-		systemSettingSvc: systemSettingSvc,
-		auditSvc:         auditSvc,
-		taskInspector:    taskInspector,
+		cfg:                cfg,
+		neo4jDriver:        neo4jDriver,
+		documentReader:     documentReader,
+		tenantSvc:          tenantSvc,
+		userSvc:            userSvc,
+		systemSettingSvc:   systemSettingSvc,
+		apiKeySvc:          apiKeySvc,
+		auditSvc:           auditSvc,
+		taskInspector:      taskInspector,
+		knowledgeSvc:       knowledgeSvc,
+		storageBackendRepo: storageBackendRepo,
 	}
+}
+
+type platformAPIKeyCreateRequest struct {
+	Name         string   `json:"name"`
+	Capabilities []string `json:"capabilities"`
+	ExpiresAt    *int64   `json:"expires_at_unix"`
+}
+
+// ListPlatformAPIKeys godoc
+// @Summary      List platform API keys
+// @Description  Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [get]
+func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
+	keys, err := h.apiKeySvc.ListPlatformAPIKeys(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to list platform API keys").WithDetails(err.Error()))
+		return
+	}
+	response := make([]tenantAPIKeyResponse, 0, len(keys))
+	for _, key := range keys {
+		item := tenantAPIKeyForResponse(key)
+		item.APIKey = maskManagedAPIKey(key.APIKey)
+		response = append(response, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
+}
+
+// CreatePlatformAPIKey godoc
+// @Summary      Create a platform API key
+// @Description  Creates a capability-scoped key that may target any workspace through X-Tenant-ID. The plaintext token is returned once. Human SystemAdmin only.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body platformAPIKeyCreateRequest true "Platform API key"
+// @Success      201 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [post]
+func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
+	var req platformAPIKeyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.Error(apperrors.NewValidationError("name is required"))
+		return
+	}
+	capabilities := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if len(capabilities) == 0 || len(capabilities) != len(req.Capabilities) {
+		c.Error(apperrors.NewValidationError("valid capabilities are required"))
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		value := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !value.After(time.Now().UTC()) {
+			c.Error(apperrors.NewValidationError("expires_at_unix must be in the future"))
+			return
+		}
+		expiresAt = &value
+	}
+	result, err := h.apiKeySvc.CreateAPIKey(c.Request.Context(), interfaces.TenantAPIKeyCreateRequest{
+		ScopeType:    types.APIKeyScopePlatform,
+		Name:         req.Name,
+		Capabilities: []string(capabilities),
+		ExpiresAt:    expiresAt,
+	})
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to create platform API key").WithDetails(err.Error()))
+		return
+	}
+	item := tenantAPIKeyForResponse(result.APIKey)
+	item.APIKey = maskManagedAPIKey(result.Token)
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyCreated, result.APIKey)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    tenantAPIKeyCreateResponse{tenantAPIKeyResponse: item, Token: result.Token},
+	})
+}
+
+// DeletePlatformAPIKey godoc
+// @Summary      Revoke a platform API key
+// @Description  Immediately revokes a platform API key. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Param        key_id path int true "API key ID"
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys/{key_id} [delete]
+func (h *SystemHandler) DeletePlatformAPIKey(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || id == 0 {
+		c.Error(apperrors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	if err := h.apiKeySvc.RevokePlatformAPIKey(c.Request.Context(), id); err != nil {
+		c.Error(apperrors.NewNotFoundError("Platform API key not found"))
+		return
+	}
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyRevoked, &types.TenantAPIKey{ID: id})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func maskManagedAPIKey(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 12 {
+		return "***"
+	}
+	return token[:7] + "..." + token[len(token)-4:]
+}
+
+func (h *SystemHandler) emitAPIKeyAudit(ctx context.Context, action types.AuditAction, key *types.TenantAPIKey) {
+	if h.auditSvc == nil || key == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	details, _ := json.Marshal(map[string]any{
+		"scope_type":   types.APIKeyScopePlatform,
+		"capabilities": key.Capabilities,
+	})
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID: 0, ActorUserID: actorID, ActorRole: systemAuditActorRole(ctx),
+		Action: action, TargetType: "api_key", TargetID: strconv.FormatUint(key.ID, 10),
+		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+	})
+}
+
+func systemAuditActorRole(ctx context.Context) string {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsPlatform() {
+		return "platform_api_key"
+	}
+	return "system_admin"
 }
 
 // emitAdminAudit writes one audit row for a system-admin lifecycle event
@@ -102,7 +259,7 @@ func (h *SystemHandler) emitAdminAudit(
 		// events (matches AuditActionSystemSettingChanged).
 		TenantID:    0,
 		ActorUserID: actorID,
-		ActorRole:   "system_admin",
+		ActorRole:   systemAuditActorRole(ctx),
 		Action:      action,
 		TargetType:  "user",
 		Outcome:     types.AuditOutcomeSuccess,
@@ -491,6 +648,40 @@ func (h *SystemHandler) getMinioConfig(c *gin.Context) (endpoint, accessKeyID, s
 	return
 }
 
+// activeBackendProviders returns the set of storage providers that have at
+// least one active multi-instance backend registered for the caller's
+// workspace. Used to keep GetStorageEngineStatus in sync with the new Storage
+// settings UI, which writes to storage_backends rather than the legacy
+// tenant.StorageEngineConfig singleton. Best-effort and nil-safe: a missing
+// repo, missing tenant, or query error yields an empty set so callers fall
+// back to the legacy config checks.
+func (h *SystemHandler) activeBackendProviders(c *gin.Context) map[string]bool {
+	result := map[string]bool{}
+	if h.storageBackendRepo == nil {
+		return result
+	}
+	v, exists := c.Get(types.TenantInfoContextKey.String())
+	if !exists {
+		return result
+	}
+	tenant, ok := v.(*types.Tenant)
+	if !ok || tenant == nil {
+		return result
+	}
+	backends, err := h.storageBackendRepo.List(c.Request.Context(), tenant.ID)
+	if err != nil {
+		logger.Warnf(c.Request.Context(), "[storage] list backends for status failed: tenant=%d err=%v", tenant.ID, err)
+		return result
+	}
+	for _, backend := range backends {
+		if backend == nil || backend.Status != types.StorageBackendStatusActive {
+			continue
+		}
+		result[strings.ToLower(strings.TrimSpace(backend.Provider))] = true
+	}
+	return result
+}
+
 // isMinioConfigured checks whether MinIO connection info is available (from tenant config or env).
 func (h *SystemHandler) isMinioConfigured(c *gin.Context) bool {
 	endpoint, accessKeyID, secretAccessKey := h.getMinioConfig(c)
@@ -548,6 +739,17 @@ func (h *SystemHandler) isKS3Configured(c *gin.Context) bool {
 	return false
 }
 
+// isOBSConfigured checks whether OBS connection info is available from tenant config or env.
+func (h *SystemHandler) isOBSConfigured(c *gin.Context) bool {
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OBS != nil {
+			obsConf := tenant.StorageEngineConfig.OBS
+			return obsConf.Endpoint != "" && obsConf.Region != "" && obsConf.AccessKey != "" && obsConf.SecretKey != "" && obsConf.BucketName != ""
+		}
+	}
+	return h.isOBSEnvAvailable()
+}
+
 // isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
 	return os.Getenv("TOS_ENDPOINT") != "" &&
@@ -557,9 +759,18 @@ func (h *SystemHandler) isTOSEnvAvailable() bool {
 		os.Getenv("TOS_BUCKET_NAME") != ""
 }
 
+// isOBSEnvAvailable checks whether OBS env vars are set.
+func (h *SystemHandler) isOBSEnvAvailable() bool {
+	return os.Getenv("OBS_ENDPOINT") != "" &&
+		os.Getenv("OBS_REGION") != "" &&
+		os.Getenv("OBS_ACCESS_KEY") != "" &&
+		os.Getenv("OBS_SECRET_KEY") != "" &&
+		os.Getenv("OBS_BUCKET_NAME") != ""
+}
+
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
-	Name        string `json:"name"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
+	Name        string `json:"name"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`   // whether the engine can be used
 	Description string `json:"description"` // short description for UI
@@ -580,15 +791,21 @@ type GetStorageEngineStatusResponse struct {
 // @Success      200  {object}  GetStorageEngineStatusResponse
 // @Router       /system/storage-engine-status [get]
 func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
-	minioConfigured := h.isMinioConfigured(c)
+	// Providers that already have an active multi-instance backend registered
+	// (Settings → Storage). These are authoritative and independent of the
+	// legacy singleton tenant.StorageEngineConfig, so a workspace that only
+	// configured storage through the new UI is still reported as available.
+	activeBackend := h.activeBackendProviders(c)
+	minioConfigured := h.isMinioConfigured(c) || activeBackend["minio"]
 	minioEnvAvailable := h.isMinioEnvAvailable()
-	cosConfigured := h.isCOSConfigured(c)
-	tosConfigured := h.isTOSConfigured(c)
-	s3Configured := h.isS3Configured(c)
-	ossConfigured := h.isOSSConfigured(c)
-	ks3Configured := h.isKS3Configured(c)
+	cosConfigured := h.isCOSConfigured(c) || activeBackend["cos"]
+	tosConfigured := h.isTOSConfigured(c) || activeBackend["tos"]
+	s3Configured := h.isS3Configured(c) || activeBackend["s3"]
+	ossConfigured := h.isOSSConfigured(c) || activeBackend["oss"]
+	ks3Configured := h.isKS3Configured(c) || activeBackend["ks3"]
+	obsConfigured := h.isOBSConfigured(c) || activeBackend["obs"]
 	allowed := getAllowedStorageProviders()
-	allowedProviders := make([]string, 0, len(supportedStorageProviders))
+	allowedProviders := make([]string, 0, len(getSupportedStorageProviders()))
 	for _, provider := range getSupportedStorageProviders() {
 		if allowed[provider] {
 			allowedProviders = append(allowedProviders, provider)
@@ -602,6 +819,7 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 		{Name: "s3", Allowed: allowed["s3"], Available: s3Configured, Description: "AWS S3 与兼容对象存储服务，适合公有云与混合云部署"},
 		{Name: "oss", Allowed: allowed["oss"], Available: ossConfigured, Description: "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议"},
 		{Name: "ks3", Allowed: allowed["ks3"], Available: ks3Configured, Description: "金山云对象存储服务，适合公有云部署"},
+		{Name: "obs", Allowed: allowed["obs"], Available: obsConfigured, Description: "华为云对象存储服务，适合公有云部署"},
 	}
 	c.JSON(200, gin.H{
 		"code": 0,
@@ -619,28 +837,9 @@ var ossFieldPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
 // sanitizeStorageCheckError converts a raw storage connectivity error into a safe
 // user-facing message that does not leak internal network details (hostnames, IPs, ports).
+// The concrete mapping lives in internal/utils so the service layer can share it.
 func sanitizeStorageCheckError(err error) string {
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "Endpoint url cannot have fully qualified paths"):
-		return "Endpoint 地址格式错误：请去除 http:// 或 https:// 前缀，只填写域名或 IP 地址和端口（例如：minio.example.com:9000）"
-	case strings.Contains(msg, "no such host"):
-		return "DNS 解析失败，请检查地址是否正确"
-	case strings.Contains(msg, "connection refused"):
-		return "连接被拒绝，请确认服务已启动且端口正确"
-	case strings.Contains(msg, "no route to host"):
-		return "无法路由到目标地址，请检查网络配置"
-	case strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "context deadline"):
-		return "连接超时，请检查网络或服务状态"
-	case strings.Contains(msg, "403") || strings.Contains(msg, "AccessDenied") || strings.Contains(msg, "access denied"):
-		return "认证失败，请检查访问凭证是否正确"
-	case strings.Contains(msg, "certificate") || strings.Contains(msg, "tls") || strings.Contains(msg, "x509"):
-		return "TLS/SSL 证书错误，请检查 SSL 配置"
-	case strings.Contains(msg, "404") || strings.Contains(msg, "NoSuchBucket"):
-		return "Bucket 不存在，请检查名称和 Region"
-	default:
-		return "连接失败，请检查配置参数是否正确"
-	}
+	return secutils.SanitizeStorageConnectivityError(err)
 }
 
 // storageEndpointHost extracts the hostname from a storage endpoint string.
@@ -1368,6 +1567,72 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 	})
 }
 
+// ResetUserPasswordRequest defines the system-administrator password-reset
+// payload. Email is intentionally the only user-facing identifier: the UI is
+// an operator tool and emails are easier to verify than UUIDs. The password is
+// never written to logs or audit details.
+type ResetUserPasswordRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// ResetUserPassword godoc
+// @Summary      Reset another user's password
+// @Description  Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).
+// @Description  A system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body ResetUserPasswordRequest true "Password reset request"
+// @Success      200  {object}  map[string]interface{}  "Password reset successfully"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request, weak password, or self reset"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/users/reset-password [post]
+func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req ResetUserPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid password reset request"})
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if err := service.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userSvc.GetUserByEmail(ctx, req.Email)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	callerID, _ := types.UserIDFromContext(ctx)
+	if callerID == user.ID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot reset your own password here"})
+		return
+	}
+
+	if err := h.userSvc.AdminResetPassword(ctx, user.ID, req.NewPassword); err != nil {
+		if errors.Is(err, service.ErrPasswordPolicy) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		logger.Errorf(ctx, "Failed to reset password for user %s: %v", user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset user password"})
+		return
+	}
+
+	logger.Infof(ctx, "Password reset by system administrator for user ID: %s", user.ID)
+	h.emitAdminAudit(ctx, types.AuditActionSystemUserPasswordReset, user, map[string]any{
+		"target_email":     user.Email,
+		"target_username":  user.Username,
+		"sessions_revoked": true,
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
+}
+
 // ============================================================================
 // System Settings (P1)
 // ----------------------------------------------------------------------------
@@ -1382,7 +1647,7 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // ListSystemSettings godoc
 // @Summary      List all system settings
 // @Description  Return every row in the system_settings table (system-scope,
-// @Description  not tenant-scope). SystemAdmin only.
+// @Description  not workspace-scoped). SystemAdmin only.
 // @Tags         System Admin
 // @Produce      json
 // @Success      200 {array} types.SystemSetting "list of settings"
@@ -1391,13 +1656,16 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // RuntimeQueuesResponse is the payload for the SystemAdmin runtime queue
 // dashboard. `available` is false in Lite mode (no Redis/asynq) so the
 // UI can render an "unavailable in this deployment" state instead of an
-// empty table. Pool concurrency is the configured per-process capacity
-// (resolved DB > ENV > default), not live busy-worker count or cluster-wide
-// capacity (see QueueStat.Active for currently running tasks).
+// empty table. Each pool reports configured per-process concurrency plus live
+// cluster capacity/active workers aggregated from asynq server heartbeats.
 type RuntimeWorkerPool struct {
-	Name        string `json:"name"`
-	Concurrency int    `json:"concurrency"`
-	QueueCount  int    `json:"queue_count"`
+	Name            string  `json:"name"`
+	Concurrency     int     `json:"concurrency"` // configured per instance
+	QueueCount      int     `json:"queue_count"`
+	Instances       int     `json:"instances"`        // live asynq server heartbeats
+	ClusterCapacity int     `json:"cluster_capacity"` // sum of live server concurrency
+	Active          int     `json:"active"`           // live workers assigned to this pool
+	Utilization     float64 `json:"utilization"`      // Active / ClusterCapacity
 }
 
 type RuntimeQueuesResponse struct {
@@ -1412,6 +1680,56 @@ type RuntimeQueuesResponse struct {
 	Timestamp             int64                      `json:"timestamp"`
 }
 
+func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
+	queueConfigs := map[string]map[string]int{
+		types.WorkerPoolCore:        types.QueueWeightsForPool(types.WorkerPoolCore),
+		types.WorkerPoolPostProcess: types.QueueWeightsForPool(types.WorkerPoolPostProcess),
+		types.WorkerPoolEnrichment:  types.QueueWeightsForPool(types.WorkerPoolEnrichment),
+		types.WorkerPoolMaintenance: types.QueueWeightsForPool(types.WorkerPoolMaintenance),
+		types.WorkerPoolShared:      types.QueueWeightsForSharedPool(),
+		types.WorkerPoolWiki:        types.QueueWeightsForPool(types.WorkerPoolWiki),
+	}
+	indexes := make(map[string]int, len(pools))
+	for i := range pools {
+		indexes[pools[i].Name] = i
+	}
+	for _, server := range servers {
+		if server.Status != "active" {
+			continue
+		}
+		for poolName, expectedQueues := range queueConfigs {
+			if !sameQueueWeights(server.Queues, expectedQueues) {
+				continue
+			}
+			idx, ok := indexes[poolName]
+			if !ok {
+				break
+			}
+			pools[idx].Instances++
+			pools[idx].ClusterCapacity += server.Concurrency
+			pools[idx].Active += server.Active
+			break
+		}
+	}
+	for i := range pools {
+		if pools[i].ClusterCapacity > 0 {
+			pools[i].Utilization = float64(pools[i].Active) / float64(pools[i].ClusterCapacity)
+		}
+	}
+}
+
+func sameQueueWeights(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, weight := range left {
+		if right[name] != weight {
+			return false
+		}
+	}
+	return true
+}
+
 // GetRuntimeQueues godoc
 // @Summary      获取解析任务队列运行时状态
 // @Description  返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
@@ -1421,34 +1739,30 @@ type RuntimeQueuesResponse struct {
 // @Router       /system/admin/runtime/queues [get]
 func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
-	upstreamConcurrency := types.DefaultUpstreamWorkerConcurrency
-	wikiConcurrency := types.DefaultWikiWorkerConcurrency
+	var allocation types.WorkerPoolConcurrency
 	if h.systemSettingSvc != nil {
-		if configured := h.systemSettingSvc.GetInt(
-			ctx, "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", types.DefaultUpstreamWorkerConcurrency,
-		); configured > 0 {
-			upstreamConcurrency = int(configured)
-		}
-		if configured := h.systemSettingSvc.GetInt(
-			ctx, "asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", types.DefaultWikiWorkerConcurrency,
-		); configured > 0 {
-			wikiConcurrency = int(configured)
-		}
+		allocation = types.ResolveWorkerPoolConcurrency(func(key, env string, fallback int) int {
+			configured := h.systemSettingSvc.GetInt(ctx, key, env, int64(fallback))
+			return int(configured)
+		})
+	} else {
+		allocation = types.DefaultWorkerPoolConcurrency()
 	}
-	allocation := types.AllocateWorkerPoolConcurrency(upstreamConcurrency)
 	queueCounts := make(map[string]int)
 	for _, definition := range types.QueueDefinitions() {
 		queueCounts[definition.Pool]++
 	}
 	resp := RuntimeQueuesResponse{
-		UpstreamConcurrency: allocation.Total,
-		ParseConcurrency:    allocation.Total,
-		WikiConcurrency:     wikiConcurrency,
+		UpstreamConcurrency: allocation.UpstreamTotal(),
+		ParseConcurrency:    allocation.UpstreamTotal(),
+		WikiConcurrency:     allocation.Wiki,
 		Pools: []RuntimeWorkerPool{
 			{Name: types.WorkerPoolCore, Concurrency: allocation.Core, QueueCount: queueCounts[types.WorkerPoolCore]},
+			{Name: types.WorkerPoolPostProcess, Concurrency: allocation.PostProcess, QueueCount: queueCounts[types.WorkerPoolPostProcess]},
 			{Name: types.WorkerPoolEnrichment, Concurrency: allocation.Enrichment, QueueCount: queueCounts[types.WorkerPoolEnrichment]},
 			{Name: types.WorkerPoolMaintenance, Concurrency: allocation.Maintenance, QueueCount: queueCounts[types.WorkerPoolMaintenance]},
-			{Name: types.WorkerPoolWiki, Concurrency: wikiConcurrency, QueueCount: queueCounts[types.WorkerPoolWiki]},
+			{Name: types.WorkerPoolShared, Concurrency: allocation.Shared, QueueCount: len(types.QueueWeightsForSharedPool())},
+			{Name: types.WorkerPoolWiki, Concurrency: allocation.Wiki, QueueCount: queueCounts[types.WorkerPoolWiki]},
 		},
 		Timestamp: time.Now().Unix(),
 	}
@@ -1461,6 +1775,12 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 		resp.Available = supported
 		if stats != nil {
 			resp.Queues = stats
+		}
+		serverStats, _, serverErr := h.taskInspector.WorkerServerStats(ctx)
+		if serverErr != nil {
+			logger.Errorf(ctx, "get worker server stats failed: %v", serverErr)
+		} else {
+			aggregateRuntimeWorkerPools(resp.Pools, serverStats)
 		}
 	}
 	// Always emit a non-nil array so the JSON serialises to `[]` rather
@@ -1476,6 +1796,317 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	resp.Models = modelStats
 
 	c.JSON(http.StatusOK, resp)
+}
+
+type RuntimeTasksResponse struct {
+	Available  bool                    `json:"available"`
+	Tasks      []types.RuntimeTaskInfo `json:"tasks"`
+	PageSize   int                     `json:"page_size"`
+	HasMore    bool                    `json:"has_more"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
+}
+
+func isKnownRuntimeQueue(name string) bool {
+	for _, definition := range types.QueueDefinitions() {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTaskPageSize(c *gin.Context) int {
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return pageSize
+}
+
+func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTaskState) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task queue"})
+		return
+	}
+	if !state.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task state"})
+		return
+	}
+	pageSize := runtimeTaskPageSize(c)
+	cursor := c.Query("cursor")
+	inspector, ok := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !ok {
+		c.JSON(http.StatusOK, RuntimeTasksResponse{
+			Available: false,
+			Tasks:     []types.RuntimeTaskInfo{},
+			PageSize:  pageSize,
+		})
+		return
+	}
+	page, supported, err := inspector.ListRuntimeTasks(c.Request.Context(), queue, state, cursor, pageSize)
+	if err != nil {
+		if errors.Is(err, types.ErrInvalidRuntimeTaskCursor) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid task list cursor",
+				"code":  "runtime_task_cursor_invalid",
+			})
+			return
+		}
+		if errors.Is(err, types.ErrExpiredRuntimeTaskCursor) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Task list changed; refresh from the beginning",
+				"code":  "runtime_task_cursor_expired",
+			})
+			return
+		}
+		logger.Errorf(c.Request.Context(), "list runtime queue tasks queue=%s state=%s: %v", queue, state, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list queue tasks"})
+		return
+	}
+	if page.Tasks == nil {
+		page.Tasks = []types.RuntimeTaskInfo{}
+	}
+	c.JSON(http.StatusOK, RuntimeTasksResponse{
+		Available:  supported,
+		Tasks:      page.Tasks,
+		PageSize:   pageSize,
+		HasMore:    page.HasMore,
+		NextCursor: page.NextCursor,
+	})
+}
+
+// ListRuntimeTasks returns one live task-state page for the unified operator
+// drawer. Raw task payloads are never included.
+// @Summary      List runtime queue tasks by state
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed)
+// @Param        cursor query string false "Opaque continuation cursor"
+// @Param        page_size query int false "Page size" default(20)
+// @Success      200 {object} RuntimeTasksResponse
+// @Router       /system/admin/runtime/queues/{queue}/tasks [get]
+func (h *SystemHandler) ListRuntimeTasks(c *gin.Context) {
+	h.listRuntimeTasks(c, types.RuntimeTaskState(c.Query("state")))
+}
+
+func (h *SystemHandler) emitQueueTaskAudit(
+	ctx context.Context,
+	action types.AuditAction,
+	queue, taskID string,
+	extra map[string]string,
+) {
+	if h.auditSvc == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	detailMap := map[string]string{"queue": queue, "task_id": taskID}
+	for key, value := range extra {
+		detailMap[key] = value
+	}
+	details, _ := json.Marshal(detailMap)
+	targetType := "queue_task"
+	targetID := taskID
+	if targetID == "" {
+		targetType = "task_queue"
+		targetID = queue
+	}
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID:    0,
+		ActorUserID: actorID,
+		ActorRole:   systemAuditActorRole(ctx),
+		Action:      action,
+		TargetType:  targetType,
+		TargetID:    targetID,
+		Outcome:     types.AuditOutcomeSuccess,
+		Details:     types.JSON(details),
+	})
+}
+
+func runtimeTaskParams(c *gin.Context) (string, string, bool) {
+	queue := c.Param("queue")
+	taskID := c.Param("task_id")
+	if !isKnownRuntimeQueue(queue) || taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue or task ID"})
+		return "", "", false
+	}
+	return queue, taskID, true
+}
+
+func (h *SystemHandler) mutateRuntimeTask(c *gin.Context, action types.RuntimeTaskAction) {
+	queue, taskID, ok := runtimeTaskParams(c)
+	if !ok {
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	task, available, err := inspector.GetRuntimeTask(c.Request.Context(), queue, taskID)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil || task == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available"})
+		return
+	}
+	if !task.Allows(action) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Action is not allowed for the current task state"})
+		return
+	}
+
+	var auditAction types.AuditAction
+	auditDetails := map[string]string{
+		"task_type":  task.Type,
+		"from_state": string(task.State),
+		"action":     string(action),
+	}
+	switch action {
+	case types.RuntimeTaskActionCancel:
+		if h.knowledgeSvc == nil || task.TenantID == 0 || task.KnowledgeID == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Business cancellation is unavailable"})
+			return
+		}
+		cancelCtx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, task.TenantID)
+		if _, err = h.knowledgeSvc.CancelKnowledgeParse(cancelCtx, task.KnowledgeID); err != nil {
+			if isKnowledgeGone(err) {
+				if h.purgeOrphanRuntimeTask(c.Request.Context(), inspector, queue, taskID, task.KnowledgeID) {
+					logger.Warnf(c.Request.Context(),
+						"cancel runtime queue task queue=%s task=%s: knowledge gone, purged queue record",
+						queue, taskID)
+					auditDetails["orphan_purge"] = "true"
+					auditAction = types.AuditActionSystemQueueTaskCancelled
+					break
+				}
+			}
+			logger.Errorf(c.Request.Context(), "cancel runtime queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task can no longer be cancelled"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskCancelled
+	case types.RuntimeTaskActionRunNow:
+		available, err = inspector.RunRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "run queue task now queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available to run"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskRunNow
+	case types.RuntimeTaskActionDelete:
+		available, err = inspector.DeleteRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "delete queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for deletion"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskDeleted
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task action"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), auditAction, queue, taskID, auditDetails)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func isKnowledgeGone(err error) bool {
+	if errors.Is(err, repository.ErrKnowledgeNotFound) {
+		return true
+	}
+	var appErr *apperrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == apperrors.ErrNotFound
+}
+
+// purgeOrphanRuntimeTask removes queue records for a task whose knowledge row
+// is already gone. CancelTasksForKnowledge sweeps sibling tasks best-effort;
+// success is reported only once the requested task ID is gone.
+func (h *SystemHandler) purgeOrphanRuntimeTask(
+	ctx context.Context,
+	inspector interfaces.RuntimeTaskInspector,
+	queue, taskID, knowledgeID string,
+) bool {
+	if h.taskInspector != nil && knowledgeID != "" {
+		if _, _, err := h.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID); err != nil {
+			logger.Warnf(ctx, "purge orphan tasks for knowledge %s: %v", knowledgeID, err)
+		}
+	}
+	supported, err := inspector.ForceDeleteRuntimeTask(ctx, queue, taskID)
+	if !supported {
+		return false
+	}
+	if err == nil {
+		return true
+	}
+	// The knowledge-wide sweep may have already removed this task ID.
+	if _, available, getErr := inspector.GetRuntimeTask(ctx, queue, taskID); available && getErr != nil {
+		return true
+	}
+	logger.Warnf(ctx, "force delete orphan task queue=%s task=%s: %v", queue, taskID, err)
+	return false
+}
+
+// MutateRuntimeTask executes a backend-advertised action after re-reading the
+// current task state to close click/race windows.
+// @Summary      Run a safe runtime task action
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        task_id path string true "Task ID"
+// @Param        action path string true "Action" Enums(cancel,run_now,delete)
+// @Success      200 {object} map[string]bool
+// @Router       /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action} [post]
+func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
+	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
+}
+
+// PurgeArchivedRuntimeTasks clears every archived (finally-failed) task in one
+// queue. It only touches the archived dead-letter set — live pending/active/
+// scheduled/retry tasks are untouched — and mirrors single-record delete
+// semantics by leaving business state as-is (archived tasks already had their
+// document status flipped to "failed" on their last retry).
+// @Summary      Purge all archived tasks in a queue
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Success      200 {object} map[string]interface{}
+// @Router       /system/admin/runtime/queues/{queue}/archived [delete]
+func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue"})
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	deleted, available, err := inspector.PurgeArchivedRuntimeTasks(c.Request.Context(), queue)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "purge archived queue tasks queue=%s: %v", queue, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Archived tasks could not be purged"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueArchivedPurged, queue, "",
+		map[string]string{"deleted": strconv.Itoa(deleted)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": deleted})
 }
 
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
@@ -1625,11 +2256,11 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 }
 
 // ApplyDefaultStorageQuotaToAllTenants godoc
-// @Summary      Apply the default storage quota to every existing tenant
+// @Summary      Apply the default storage quota to every existing workspace
 // @Description  Reads the current value of `tenant.default_storage_quota_gb`
 // @Description  (3-tier resolver: DB > ENV > default) and writes that many
 // @Description  GiB into storage_quota for every row in tenants. Bypasses
-// @Description  the per-tenant PUT whitelist, which forbids storage_quota
+// @Description  the per-workspace PUT whitelist, which forbids storage_quota
 // @Description  edits by Owners. SystemAdmin only.
 // @Description  Idempotent — running twice with the same setting is a no-op.
 // @Tags         System Admin
@@ -1673,7 +2304,7 @@ func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 		_ = h.auditSvc.Log(ctx, &types.AuditLog{
 			TenantID:    0,
 			ActorUserID: actorID,
-			ActorRole:   "system_admin",
+			ActorRole:   systemAuditActorRole(ctx),
 			Action:      types.AuditActionSystemSettingChanged,
 			TargetType:  "tenant_storage_quota",
 			TargetID:    "all",

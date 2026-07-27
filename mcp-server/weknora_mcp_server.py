@@ -456,7 +456,6 @@ class WeKnoraClient:
         query: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
-        enable_memory: bool = False,
     ) -> Dict:
         """Send a message to the RAG pipeline (knowledge-chat) and return the assembled answer.
 
@@ -470,8 +469,6 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
-        if enable_memory:
-            body["enable_memory"] = True
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -483,7 +480,6 @@ class WeKnoraClient:
         agent_id: str,
         knowledge_base_ids: list = None,
         web_search_enabled: bool = False,
-        enable_memory: bool = False,
     ) -> Dict:
         """Send a message to the agentic pipeline (agent-chat) and return the assembled answer.
 
@@ -498,8 +494,6 @@ class WeKnoraClient:
             body["knowledge_base_ids"] = knowledge_base_ids
         if web_search_enabled:
             body["web_search_enabled"] = True
-        if enable_memory:
-            body["enable_memory"] = True
         result = self._consume_sse_stream(url, body)
         result["session_id"] = session_id
         return result
@@ -908,7 +902,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "Knowledge base names OR UUIDs to search. Strongly recommended for RAG — without them the answer falls back to LLM knowledge only. E.g. ['my-knowledge-base'] or ['a1b2c3d4-...']. Use list_knowledge_bases to find them.",
                     },
                     "web_search_enabled": {"type": "boolean", "description": "Enable web search alongside KB retrieval.", "default": False},
-                    "enable_memory": {"type": "boolean", "description": "Enable cross-session memory.", "default": False},
                 },
                 "required": ["session_id", "query"],
             },
@@ -940,7 +933,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "Names or UUIDs of knowledge bases to search. REQUIRED when the agent's kb_selection_mode is 'none' or 'selected' with no built-in KBs. Use list_knowledge_bases to find them.",
                     },
                     "web_search_enabled": {"type": "boolean", "description": "Enable web search.", "default": False},
-                    "enable_memory": {"type": "boolean", "description": "Enable cross-session memory.", "default": False},
                 },
                 "required": ["session_id", "query", "agent_id"],
             },
@@ -1220,7 +1212,6 @@ async def handle_call_tool(
                 args["query"],
                 knowledge_base_ids=kb_ids,
                 web_search_enabled=args.get("web_search_enabled", False),
-                enable_memory=args.get("enable_memory", False),
             )
             # get_running_loop() is the correct API inside async functions (get_event_loop() is deprecated)
             result = await asyncio.get_running_loop().run_in_executor(None, fn)
@@ -1271,7 +1262,6 @@ async def handle_call_tool(
                 agent_id,
                 knowledge_base_ids=kb_ids,
                 web_search_enabled=args.get("web_search_enabled", False),
-                enable_memory=args.get("enable_memory", False),
             )
             result = await asyncio.get_running_loop().run_in_executor(None, fn)
 

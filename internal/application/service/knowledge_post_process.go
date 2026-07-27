@@ -54,6 +54,25 @@ func (s *KnowledgePostProcessService) tracker() SpanTracker {
 	return s.spanTracker
 }
 
+// finishRunningMultimodalStage closes the multimodal stage only when image
+// work really ran and is still open. The canonical stage also exists when
+// multimodal processing is disabled, but that row is already "skipped" and
+// must not be rewritten to "done" with the postprocess queueing delay as its
+// duration.
+func (s *KnowledgePostProcessService) finishRunningMultimodalStage(
+	ctx context.Context,
+	knowledgeID string,
+	attempt int,
+) {
+	mm := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StageMultimodal)
+	if mm == nil ||
+		mm.Kind != types.SpanKindStage ||
+		mm.Status != types.SpanStatusRunning {
+		return
+	}
+	s.tracker().EndSpan(ctx, mm, nil)
+}
+
 // Handle implements asynq handler for TypeKnowledgePostProcess.
 func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Task) error {
 	var payload types.KnowledgePostProcessPayload
@@ -79,15 +98,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// Close the multimodal stage span (parent enqueued it as "running"
 	// and we never see the per-image fan-in here other than by reaching
 	// post-process). If the parent skipped multimodal entirely, the
-	// stage row will already be in "skipped" state and EndSpan is a
-	// no-op for missing rows. Per-image success/failure counts are NOT
+	// stage row will already be in "skipped" state and must remain so.
+	// Per-image success/failure counts are NOT
 	// aggregated here — the frontend already walks the children when
 	// rendering the multimodal stage detail and counts them itself,
 	// avoiding an extra query path.
-	if mm := s.tracker().LookupStage(ctx, payload.KnowledgeID, attempt, types.StageMultimodal); mm != nil &&
-		mm.Kind == types.SpanKindStage {
-		s.tracker().EndSpan(ctx, mm, nil)
-	}
+	s.finishRunningMultimodalStage(ctx, payload.KnowledgeID, attempt)
 
 	postSpan := s.tracker().BeginStage(ctx, payload.KnowledgeID, attempt, types.StagePostProcess, nil)
 

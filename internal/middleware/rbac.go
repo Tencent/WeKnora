@@ -104,9 +104,29 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
 		}
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Forbidden: insufficient tenant role",
+			"error": "Forbidden: insufficient workspace role",
 		})
 		c.Abort()
+	}
+}
+
+// RequireRoleOrSystemAdmin applies the tenant role floor while also allowing
+// platform system administrators. Use it for routes that normally mutate
+// tenant infrastructure but have a narrowly-scoped platform-owned resource
+// (for example built-in models) that system administrators must be able to
+// maintain independently of their role in the active tenant.
+//
+// API-key behavior remains identical to RequireRole: the APIKeyGate is the
+// source of truth for machine principals, so they short-circuit the role
+// check here as well.
+func RequireRoleOrSystemAdmin(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
+	requireRole := RequireRole(min, cfg)
+	return func(c *gin.Context) {
+		if types.IsSystemAdminFromContext(c.Request.Context()) {
+			c.Next()
+			return
+		}
+		requireRole(c)
 	}
 }
 
@@ -117,7 +137,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 // System administrators operate independently of tenant-scoped roles and
 // are not bound by the per-tenant RBAC matrix. Use this guard for
 // platform-wide administrative endpoints (managing other system admins,
-// editing global settings, cross-tenant operations) where the per-tenant
+// editing global settings, cross-workspace operations) where the per-tenant
 // Owner/Admin/Contributor/Viewer ladder does not apply.
 //
 // Unlike tenant-role guards, this check is always enforced. The
@@ -128,9 +148,14 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		// API-key principals must never reach system-admin routes, even if a
-		// future route registration mistakenly declares an apiKey* policy.
-		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		// The API-key gate runs before this guard and default-denies undeclared
+		// routes. Only platform keys that passed an explicit platform capability
+		// policy may reuse the system-admin handlers below.
+		if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			if scope.IsPlatform() {
+				c.Next()
+				return
+			}
 			logger.Warnf(ctx,
 				"[rbac] system admin required: API-key principal denied path=%s",
 				c.Request.URL.Path)
@@ -294,6 +319,17 @@ func EvaluateOwnershipOrRole(
 	creatorID string,
 	lookupErr error,
 ) error {
+	// API-key principals are authorized solely by the APIKeyGate (route
+	// policy) plus the KB allow-list handlers enforce separately
+	// (requireTenantAPIKeyKnowledgeBase(s)). Ownership ("creator OR Admin+")
+	// is a human concept that never applies to a machine principal, so
+	// short-circuit here — exactly as RequireOwnershipOrRole does for the
+	// middleware form. Without this, a scoped key (synthesized as Viewer for
+	// legacy-guard compatibility) would be 403'd by the body-carried-KB
+	// ownership checks even though the gate + allow-list already admitted it.
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return nil
+	}
 	role := types.TenantRoleFromContext(ctx)
 	if role.HasPermission(min) {
 		return nil

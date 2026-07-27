@@ -44,6 +44,21 @@ func TestLastConsolidatedRetrievalStage(t *testing.T) {
 	assert.Equal(t, types.FILTER_TOP_K, LastConsolidatedRetrievalStage(pipeline, cm))
 }
 
+func TestShouldCloseRetrievalProgress(t *testing.T) {
+	last := types.FILTER_TOP_K
+
+	// Normal completion: only the last retrieval stage closes the window.
+	assert.True(t, ShouldCloseRetrievalProgress(types.FILTER_TOP_K, last, nil))
+	assert.False(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, nil))
+
+	// ErrSearchNothing at an earlier retrieval stage must still close the
+	// window so the frontend stops spinning before the fallback answer streams.
+	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, ErrSearchNothing))
+
+	// A hard error at any retrieval stage must also close the window.
+	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_RERANK, last, &PluginError{}))
+}
+
 func TestShouldEmitQueryUnderstandProgress(t *testing.T) {
 	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{EnableRewrite: true}}
 	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))

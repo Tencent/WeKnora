@@ -33,9 +33,9 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 
 以下是各种 MCP 工具的使用示例：
 
-### 租户管理
+### 空间管理
 
-#### 创建租户
+#### 创建空间
 ```json
 {
   "tool": "create_tenant",
@@ -53,7 +53,7 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 }
 ```
 
-#### 列出所有租户
+#### 列出所有空间
 ```json
 {
   "tool": "list_tenants",
@@ -256,7 +256,7 @@ python main.py --verbose
 # 2. 在 MCP 客户端中执行以下步骤：
 ```
 
-#### 步骤 1: 创建租户
+#### 步骤 1: 创建空间
 ```json
 {
   "tool": "create_tenant",

@@ -135,6 +135,15 @@ var registry = map[string]settingSpec{
 		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
 			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
 	},
+	"auth.default_tenant_mode": {
+		Type:     "string",
+		EnvName:  "WEKNORA_AUTH_DEFAULT_TENANT_MODE",
+		Default:  "create_personal",
+		Enum:     []string{"create_personal", "tenantless"},
+		Category: "auth",
+		Description: "公开注册成功后的默认空间策略。create_personal = 自动创建个人空间并设为 Owner；" +
+			"tenantless = 仅创建用户，等待接受邀请或主动创建空间。修改后只影响新注册用户。",
+	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser
 	// can create (and Own) via self-service POST /tenants. Read on every
 	// request — UI edits take effect immediately, no restart required. The
@@ -147,8 +156,16 @@ var registry = map[string]settingSpec{
 		EnvName:  "WEKNORA_TENANT_MAX_OWNED_PER_USER",
 		Default:  int64(10),
 		Category: "tenant",
-		Description: "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
+		Description: "每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，" +
 			"修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+	},
+	"tenant.self_service_creation_enabled": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED",
+		Default:  true,
+		Category: "tenant",
+		Description: "是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；" +
+			"跨空间超管仍可创建。修改后立即生效。",
 	},
 	// tenant.default_storage_quota_gb is the default storage quota (in GB)
 	// applied to a newly-created tenant when the caller doesn't specify
@@ -162,8 +179,8 @@ var registry = map[string]settingSpec{
 		EnvName:  "WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
 		Default:  int64(10),
 		Category: "tenant",
-		Description: "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
-			"仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
+		Description: "新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
+			"仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。" +
 			"0 或负数表示使用内置默认值 10GB。",
 	},
 	// tenant.auto_create_api_key restores the legacy behaviour where creating
@@ -179,28 +196,54 @@ var registry = map[string]settingSpec{
 		EnvName:  "WEKNORA_TENANT_AUTO_CREATE_API_KEY",
 		Default:  false,
 		Category: "tenant",
-		Description: "创建租户时是否自动生成一个全量权限（full_access）的 API Key，并在创建接口的响应中返回其明文 token。" +
-			"用于兼容旧版本「创建租户即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
-			"每次创建租户时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
+		Description: "创建空间时是否自动生成一个全量权限（full_access）的 API Key，并在创建接口的响应中返回其明文 token。" +
+			"用于兼容旧版本「创建空间即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
+			"每次创建空间时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
 	},
-	// asynq.concurrency is the total per-process upstream worker budget.
-	// It is divided deterministically across independent core, enrichment,
-	// and maintenance servers. Read once at startup; changing it requires a
-	// process restart. Mirrors WEKNORA_ASYNQ_CONCURRENCY (default 32).
-	"asynq.concurrency": {
+	"asynq.core_concurrency": {
 		Type:            "int",
-		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
-		Default:         int64(types.DefaultUpstreamWorkerConcurrency),
+		EnvName:         "WEKNORA_ASYNQ_CORE_CONCURRENCY",
+		Default:         int64(types.DefaultCoreWorkerConcurrency),
 		Category:        "worker",
 		RequiresRestart: true,
-		Description: "上游任务的每实例 worker 总并发预算（不含 Wiki）。系统会按核心解析 1/2、" +
-			"内容富化 3/8、维护与同步为剩余容量，拆分为相互隔离的 worker 池。" +
-			"最小值为 3；修改后需重启服务进程方可生效。",
+		Description:     "文档解析、手工重解析等核心任务的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.postprocess_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY",
+		Default:         int64(types.DefaultPostProcessWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "解析完成后的轻量编排与富化扇出专用并发，避免被长时间文档解析阻塞；修改后需重启。",
+	},
+	"asynq.enrichment_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY",
+		Default:         int64(types.DefaultEnrichmentWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "摘要、图片、图谱和问题生成的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.maintenance_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY",
+		Default:         int64(types.DefaultMaintenanceWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "数据源同步、批处理、移动和删除清理的每实例保底并发，与用户面流水线硬隔离；修改后需重启。",
+	},
+	"asynq.shared_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_SHARED_CONCURRENCY",
+		Default:         int64(types.DefaultSharedWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "核心解析与内容富化共用的每实例弹性并发。空闲容量由有积压的一侧借用；修改后需重启。",
 	},
 	// asynq.wiki_concurrency is the size of the DEDICATED wiki worker pool,
-	// separate from asynq.concurrency. Read once when the wiki asynq server
+	// separate from the upstream pools. Read once when the wiki asynq server
 	// starts — changing it in the UI requires a process restart. Mirrors
-	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 16).
+	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 8).
 	"asynq.wiki_concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_WIKI_ASYNQ_CONCURRENCY",
@@ -669,6 +712,10 @@ func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting
 	for _, row := range rows {
 		byKey[row.Key] = row
 	}
+	// asynq.concurrency was the old fixed-ratio aggregate. Keeping an old DB
+	// row visible would suggest it still controls runtime capacity, so retire it
+	// explicitly while preserving all genuinely unknown rows for diagnostics.
+	delete(byKey, "asynq.concurrency")
 
 	keys := make([]string, 0, len(registry))
 	for key := range registry {
@@ -1228,17 +1275,15 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 //     400 body verbatim).
 func validateRegistryEntry(key string, rawValue any) error {
 	switch key {
-	case "asynq.concurrency", "asynq.wiki_concurrency":
+	case "asynq.core_concurrency", "asynq.postprocess_concurrency",
+		"asynq.enrichment_concurrency", "asynq.maintenance_concurrency",
+		"asynq.shared_concurrency", "asynq.wiki_concurrency":
 		n, err := coerceToPositiveInt64(rawValue)
 		if err != nil {
 			return err
 		}
-		minimum := int64(1)
-		if key == "asynq.concurrency" {
-			minimum = 3
-		}
-		if n < minimum {
-			return fmt.Errorf("concurrency must be at least %d", minimum)
+		if n < 1 {
+			return errors.New("concurrency must be at least 1")
 		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't

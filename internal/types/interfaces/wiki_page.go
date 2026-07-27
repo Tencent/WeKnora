@@ -39,6 +39,13 @@ type WikiPageService interface {
 	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
 	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
 
+	// RepairContentLinks rewrites dead [[slug]] references in content to their
+	// most likely live target (rewrite-only — never strips). Used by the agent
+	// write path to auto-correct LLM-mangled slugs (especially UUID-based
+	// summary slugs) before persistence. Returns the possibly-updated content
+	// and whether any rewrite happened. Best-effort: callers may ignore errors.
+	RepairContentLinks(ctx context.Context, kbID, selfSlug, content string) (string, bool, error)
+
 	// GetPageByID retrieves a wiki page by its unique ID.
 	GetPageByID(ctx context.Context, id string) (*types.WikiPage, error)
 
@@ -185,6 +192,10 @@ type WikiPageService interface {
 	// DeleteFolder removes an empty folder. Fails if it still contains pages
 	// or child folders (the UI must move or delete contents first).
 	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// PruneEmptyFolderChains deletes candidate folders that are still empty,
+	// walking upward through newly-empty ancestors. Candidates are supplied by
+	// document retract cleanup so unrelated user-created empty folders remain.
+	PruneEmptyFolderChains(ctx context.Context, kbID string, folderIDs []string) ([]string, error)
 	// FindOrCreateFolderPath resolves a category path (e.g. ["AI","RAG"]) to a
 	// folder id, creating any missing intermediate folders. Returns the leaf
 	// folder id and the canonical (cleaned) path. An empty/blank path resolves
@@ -203,6 +214,21 @@ type WikiPageService interface {
 
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// ListRevisions returns the stored historical snapshots for a page
+	// (newest first, content omitted) plus the total snapshot count and the
+	// page's current version. The current version itself has no revision
+	// row — it lives in wiki_pages.
+	ListRevisions(ctx context.Context, kbID string, slug string, limit int, offset int) (*types.WikiPageRevisionListResponse, error)
+
+	// GetRevision returns one historical snapshot (content included).
+	GetRevision(ctx context.Context, kbID string, slug string, version int) (*types.WikiPageRevision, error)
+
+	// RevertPageToVersion rolls the page back to the content of the given
+	// stored revision by applying it as a regular edit: the pre-revert state
+	// is snapshotted, version advances, and links are re-parsed. The edit is
+	// attributed to WikiEditSourceRevert.
+	RevertPageToVersion(ctx context.Context, kbID string, slug string, version int) (*types.WikiPage, error)
 
 	// CreateIssue logs a new issue for a wiki page.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error)
@@ -362,6 +388,26 @@ type WikiPageRepository interface {
 
 	// CountOrphans returns the number of pages with no inbound links.
 	CountOrphans(ctx context.Context, kbID string) (int64, error)
+
+	// UpdateWithRevision snapshots the version being superseded and applies
+	// the page update in a single transaction, so history can never contain
+	// a snapshot of a version that is still current. Inserting an already-
+	// present (page_id, version) pair is a silent no-op.
+	UpdateWithRevision(ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision) error
+
+	// ListRevisions returns snapshots for a page newest-first (content
+	// column omitted) plus the total snapshot count.
+	ListRevisions(ctx context.Context, kbID string, pageID string, limit int, offset int) ([]*types.WikiPageRevision, int64, error)
+
+	// GetRevision returns one snapshot with content.
+	GetRevision(ctx context.Context, kbID string, pageID string, version int) (*types.WikiPageRevision, error)
+
+	// PruneRevisions bounds per-page history storage using the two-tier
+	// retention described by the request.
+	PruneRevisions(ctx context.Context, req types.WikiRevisionPruneRequest) error
+
+	// DeleteRevisionsByPage hard-deletes a page's entire snapshot history.
+	DeleteRevisionsByPage(ctx context.Context, pageID string) error
 
 	// CreateIssue inserts a new wiki page issue record.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error

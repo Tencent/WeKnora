@@ -24,11 +24,12 @@ const (
 	ErrValidation         ErrorCode = 1010
 
 	// Tenant related error codes (2000-2099)
-	ErrTenantNotFound      ErrorCode = 2000
-	ErrTenantAlreadyExists ErrorCode = 2001
-	ErrTenantInactive      ErrorCode = 2002
-	ErrTenantNameRequired  ErrorCode = 2003
-	ErrTenantInvalidStatus ErrorCode = 2004
+	ErrTenantNotFound         ErrorCode = 2000
+	ErrTenantAlreadyExists    ErrorCode = 2001
+	ErrTenantInactive         ErrorCode = 2002
+	ErrTenantNameRequired     ErrorCode = 2003
+	ErrTenantInvalidStatus    ErrorCode = 2004
+	ErrTenantCreationDisabled ErrorCode = 2005
 
 	// Agent related error codes (2100-2199)
 	ErrAgentMissingThinkingModel ErrorCode = 2100
@@ -161,7 +162,7 @@ func NewValidationError(message string) *AppError {
 func NewTenantNotFoundError() *AppError {
 	return &AppError{
 		Code:     ErrTenantNotFound,
-		Message:  "租户不存在",
+		Message:  "空间不存在",
 		HTTPCode: http.StatusNotFound,
 	}
 }
@@ -170,7 +171,7 @@ func NewTenantNotFoundError() *AppError {
 func NewTenantAlreadyExistsError() *AppError {
 	return &AppError{
 		Code:     ErrTenantAlreadyExists,
-		Message:  "租户已存在",
+		Message:  "空间已存在",
 		HTTPCode: http.StatusConflict,
 	}
 }
@@ -179,7 +180,17 @@ func NewTenantAlreadyExistsError() *AppError {
 func NewTenantInactiveError() *AppError {
 	return &AppError{
 		Code:     ErrTenantInactive,
-		Message:  "租户已停用",
+		Message:  "空间已停用",
+		HTTPCode: http.StatusForbidden,
+	}
+}
+
+// NewTenantCreationDisabledError reports a deployment-policy denial for
+// ordinary self-service tenant creation.
+func NewTenantCreationDisabledError() *AppError {
+	return &AppError{
+		Code:     ErrTenantCreationDisabled,
+		Message:  "self-service workspace creation is disabled; join a workspace by invitation",
 		HTTPCode: http.StatusForbidden,
 	}
 }

@@ -4,11 +4,12 @@
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -63,14 +64,7 @@
                   <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
-              <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                <div class="loading-typing">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-              <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+              <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                 {{ thinkingContent }}
               </div>
             </div>
@@ -165,14 +159,7 @@
                     <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
-                <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                  <div class="loading-typing">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-                <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                   {{ thinkingContent }}
                 </div>
               </div>
@@ -209,7 +196,8 @@ import {
   getRagPipelineStepTitle,
   getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
-import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
+import { RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { buildReferenceSections } from '@/utils/referenceSources'
 
@@ -275,7 +263,7 @@ const steps = computed(() => {
       return (
         event.type === 'tool_call' &&
         typeof event.tool_name === 'string' &&
-        RAG_PIPELINE_TOOL_NAMES.has(event.tool_name)
+        RAG_TIMELINE_TOOL_NAMES.has(event.tool_name)
       )
     })
     .map((event) => {
@@ -287,13 +275,16 @@ const steps = computed(() => {
           : null
 
       const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
+      const isAttachmentTool = toolName === 'attachment_parsing' || toolName === 'image_analysis'
       const searchSource = isSearchTool
         ? getRetrievalSearchSource(event.arguments, toolData)
         : undefined
-      const summaryHtml =
-        !pending && isSearchTool && toolData
-          ? getKnowledgeSearchSummaryHtml(t, toolData)
-          : ''
+      let summaryHtml = ''
+      if (!pending && isSearchTool && toolData) {
+        summaryHtml = getKnowledgeSearchSummaryHtml(t, toolData)
+      } else if (!pending && isAttachmentTool) {
+        summaryHtml = getAttachmentParsingSummaryHtml(t, event)
+      }
       const canOpenReferences = !pending && isSearchTool && hasReferences.value
 
       return {
@@ -632,7 +623,7 @@ watch(thinkingExpanded, (expanded) => {
     font-weight: 400;
     color: var(--td-text-color-secondary);
     word-break: break-word;
-    max-width: min(680px, 100%);
+    max-width: min(820px, 100%);
   }
 }
 
@@ -653,10 +644,6 @@ watch(thinkingExpanded, (expanded) => {
 }
 
 .rag-thinking-step {
-  .thinking-loading {
-    padding: 4px 0 0;
-  }
-
   .thinking-detail-content {
     margin-top: 4px;
     padding: 0;

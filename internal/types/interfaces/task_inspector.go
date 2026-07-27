@@ -57,4 +57,56 @@ type TaskInspector interface {
 	// surfaced as a zeroed row (so the full lane set stays visible) rather
 	// than failing the whole call.
 	QueueStats(ctx context.Context) (stats []types.QueueStat, supported bool, err error)
+
+	// WorkerServerStats returns live asynq server heartbeats across all
+	// replicas. The runtime dashboard uses them to aggregate actual cluster
+	// capacity and busy workers for each configured pool.
+	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
+}
+
+// KnowledgeBaseTaskCanceller is the optional queue-cleanup capability used
+// when a knowledge base is deleted. It is separate from TaskInspector so
+// lightweight test doubles and queue backends that cannot inspect tasks do
+// not need to implement knowledge-base-wide scanning.
+type KnowledgeBaseTaskCanceller interface {
+	// CancelTasksForKnowledgeBase removes pending/scheduled/retry tasks
+	// associated with kbID and signals matching active workers to stop.
+	// knowledgeIDs covers batch tasks whose payload references documents but
+	// does not carry the parent knowledge-base ID. dataSourceIDs covers sync
+	// tasks whose payload only identifies a data source.
+	CancelTasksForKnowledgeBase(
+		ctx context.Context,
+		kbID string,
+		knowledgeIDs []string,
+		dataSourceIDs []string,
+	) (deleted int, cancelled int, err error)
+}
+
+// RuntimeTaskInspector is the optional operator surface implemented by queue
+// backends that retain inspectable task state. It is separate from
+// TaskInspector so Lite mode and light-weight tests do not need to implement
+// queue mutations.
+type RuntimeTaskInspector interface {
+	ListRuntimeTasks(
+		ctx context.Context,
+		queue string,
+		state types.RuntimeTaskState,
+		cursor string,
+		pageSize int,
+	) (page types.RuntimeTaskPage, supported bool, err error)
+	GetRuntimeTask(ctx context.Context, queue, taskID string) (task *types.RuntimeTaskInfo, supported bool, err error)
+	RunRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	DeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	// ForceDeleteRuntimeTask removes a queue record without checking the
+	// operator-facing AllowedActions. Used when the business row is already
+	// gone but a retry/pending task survived (orphan cleanup).
+	ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	// PurgeArchivedRuntimeTasks removes every archived (finally-failed) task
+	// from one queue in a single call and returns how many records were
+	// deleted. It only ever touches the archived (dead-letter) set, so live
+	// pending/active/scheduled/retry tasks are never affected. Business state
+	// is intentionally left untouched: archived tasks have already had their
+	// document status flipped to "failed" on their last retry, mirroring the
+	// semantics of deleting archived records one by one.
+	PurgeArchivedRuntimeTasks(ctx context.Context, queue string) (deleted int, supported bool, err error)
 }
