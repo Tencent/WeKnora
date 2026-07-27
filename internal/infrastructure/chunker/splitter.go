@@ -122,6 +122,7 @@ var protectedPatterns = []*regexp.Regexp{
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|[\\r\\n]+"), // Table header+separator
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
 	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
+	regexp.MustCompile("`[^`\\r\\n]+`"),                                                                 // Markdown inline code
 }
 
 type span struct {
@@ -580,57 +581,234 @@ func buildChunk(units []splitUnit, seq int) Chunk {
 	}
 }
 
-// computeOverlap returns the units to keep for overlap and their total rune length.
+// computeOverlap returns the semantic suffix to keep for overlap and its total
+// rune length.
+//
+// The configured overlap is a hard upper bound, not a raw character slice.
+// Within that tail window we look for semantic boundaries using this priority:
+//
+//  1. paragraph break (\n\n / \r\n\r\n)
+//  2. line break (\n / \r\n)
+//  3. sentence end (。？！, ". ", and English ?/!)
+//
+// Priority wins first; for boundaries with the same priority, the earliest
+// one in the window wins so the useful overlap is as large as possible. The
+// next chunk starts immediately after the selected separator. If the window
+// has no valid semantic boundary, no overlap is retained. This keeps overlap
+// deterministic and bounded while allowing a boundary inside a large split
+// unit (the previous implementation could only retain whole units and often
+// collapsed to zero overlap for ordinary paragraphs).
 func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) ([]splitUnit, int) {
 	if chunkOverlap <= 0 {
 		return nil, 0
 	}
 
-	// Walk backward from end, accumulating overlap
-	overlapLen := 0
-	startIdx := len(current)
-	for i := len(current) - 1; i >= 0; i-- {
-		uLen := runeLen(current[i].text)
-		if overlapLen+uLen > chunkOverlap {
-			break
-		}
-		// Check that overlap + next unit fits in chunk
-		if overlapLen+uLen+nextLen > chunkSize {
-			break
-		}
-		overlapLen += uLen
-		startIdx = i
+	// Overlap is part of the next chunk's total size. When the incoming unit
+	// is already close to the chunk budget, shrink the search window rather
+	// than creating an oversized chunk.
+	maxOverlap := chunkOverlap
+	if remaining := chunkSize - nextLen; remaining < maxOverlap {
+		maxOverlap = remaining
 	}
-
-	// Skip leading separator-only and header-marker units in the overlap
-	for startIdx < len(current) {
-		u := current[startIdx]
-		isHeaderMarker := u.start == u.end
-		trimmed := strings.TrimSpace(u.text)
-		if isHeaderMarker || trimmed == "" || isSeparatorOnly(u.text) {
-			overlapLen -= runeLen(u.text)
-			startIdx++
-		} else {
-			break
-		}
-	}
-
-	if startIdx >= len(current) {
+	if maxOverlap <= 0 {
 		return nil, 0
 	}
 
-	overlap := make([]splitUnit, len(current)-startIdx)
-	copy(overlap, current[startIdx:])
+	window := semanticOverlapWindow(current, maxOverlap)
+	if len(window) == 0 {
+		return nil, 0
+	}
+
+	windowText := unitsText(window)
+	boundaryEnd, ok := findSemanticOverlapBoundary(windowText)
+	if !ok {
+		return nil, 0
+	}
+
+	overlap := trimUnitsPrefix(window, boundaryEnd)
+	overlapLen := 0
+	for _, u := range overlap {
+		overlapLen += runeLen(u.text)
+	}
+	if overlapLen <= 0 || strings.TrimSpace(unitsText(overlap)) == "" {
+		return nil, 0
+	}
 	return overlap, overlapLen
 }
 
-func isSeparatorOnly(s string) bool {
-	for _, r := range s {
-		if r != '\n' && r != '\r' && r != ' ' && r != '\t' && r != '。' {
-			return false
+// semanticOverlapWindow returns at most maxLen source-backed runes from the
+// tail of current. It may slice inside the first retained splitUnit so a
+// semantic boundary inside a large paragraph remains discoverable. Synthetic
+// zero-width units (for example repeated table headers) form a hard barrier:
+// crossing them would break the Start/End-to-Content source invariant.
+func semanticOverlapWindow(current []splitUnit, maxLen int) []splitUnit {
+	if maxLen <= 0 || len(current) == 0 {
+		return nil
+	}
+
+	remaining := maxLen
+	reversed := make([]splitUnit, 0, len(current))
+	for i := len(current) - 1; i >= 0 && remaining > 0; i-- {
+		u := current[i]
+		uLen := runeLen(u.text)
+		if uLen == 0 {
+			continue
+		}
+		// Header markers contain generated text but occupy no source range.
+		// Do not include or cross them when deriving an overlap suffix.
+		if u.start == u.end || u.end-u.start != uLen {
+			break
+		}
+
+		if uLen <= remaining {
+			reversed = append(reversed, u)
+			remaining -= uLen
+			continue
+		}
+
+		runes := []rune(u.text)
+		start := uLen - remaining
+		reversed = append(reversed, splitUnit{
+			text:  string(runes[start:]),
+			start: u.start + start,
+			end:   u.end,
+		})
+		remaining = 0
+	}
+
+	if len(reversed) == 0 {
+		return nil
+	}
+	window := make([]splitUnit, len(reversed))
+	for i := range reversed {
+		window[len(reversed)-1-i] = reversed[i]
+	}
+	return window
+}
+
+type semanticOverlapBoundary struct {
+	start    int
+	end      int
+	priority int
+}
+
+// findSemanticOverlapBoundary returns the rune offset immediately after the
+// selected separator. Boundaries inside protected Markdown/code/math regions
+// are ignored, and a boundary is invalid when only whitespace follows it.
+func findSemanticOverlapBoundary(text string) (int, bool) {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return 0, false
+	}
+
+	protected := protectedSpansRune(text, protectedSpans(text))
+	insideProtected := func(pos int) bool {
+		for _, p := range protected {
+			if pos < p.start {
+				return false
+			}
+			if pos >= p.start && pos < p.end {
+				return true
+			}
+		}
+		return false
+	}
+	hasMeaningfulTail := func(end int) bool {
+		return end >= 0 && end < len(runes) && strings.TrimSpace(string(runes[end:])) != ""
+	}
+
+	var best semanticOverlapBoundary
+	found := false
+	consider := func(start, end, priority int) {
+		if start < 0 || end <= start || end > len(runes) || insideProtected(start) || !hasMeaningfulTail(end) {
+			return
+		}
+		candidate := semanticOverlapBoundary{start: start, end: end, priority: priority}
+		if !found || candidate.priority < best.priority ||
+			(candidate.priority == best.priority && candidate.start < best.start) {
+			best = candidate
+			found = true
 		}
 	}
-	return true
+
+	// Mark paragraph-break runes so their component newlines are not also
+	// emitted as lower-priority line-break candidates.
+	paragraphRune := make([]bool, len(runes))
+	for i := 0; i < len(runes); i++ {
+		switch {
+		case i+3 < len(runes) && runes[i] == '\r' && runes[i+1] == '\n' &&
+			runes[i+2] == '\r' && runes[i+3] == '\n':
+			consider(i, i+4, 1)
+			for j := i; j < i+4; j++ {
+				paragraphRune[j] = true
+			}
+			i += 3
+		case i+1 < len(runes) && runes[i] == '\n' && runes[i+1] == '\n':
+			consider(i, i+2, 1)
+			paragraphRune[i], paragraphRune[i+1] = true, true
+			i++
+		}
+	}
+
+	for i := 0; i < len(runes); i++ {
+		if paragraphRune[i] {
+			continue
+		}
+		if runes[i] == '\r' && i+1 < len(runes) && runes[i+1] == '\n' && !paragraphRune[i+1] {
+			consider(i, i+2, 2)
+			i++
+			continue
+		}
+		if runes[i] == '\n' {
+			consider(i, i+1, 2)
+		}
+	}
+
+	for i := 0; i < len(runes); i++ {
+		switch runes[i] {
+		case '。', '？', '！':
+			consider(i, i+1, 3)
+		case '.':
+			if i+1 < len(runes) && runes[i+1] == ' ' {
+				consider(i, i+2, 3)
+			}
+		case '?', '!':
+			consider(i, i+1, 3)
+		}
+	}
+
+	if !found {
+		return 0, false
+	}
+	return best.end, true
+}
+
+// trimUnitsPrefix removes prefixLen source runes while preserving the
+// remaining units' original positions. prefixLen is relative to unitsText.
+func trimUnitsPrefix(units []splitUnit, prefixLen int) []splitUnit {
+	if prefixLen <= 0 {
+		out := make([]splitUnit, len(units))
+		copy(out, units)
+		return out
+	}
+
+	remaining := prefixLen
+	out := make([]splitUnit, 0, len(units))
+	for _, u := range units {
+		uLen := runeLen(u.text)
+		if remaining >= uLen {
+			remaining -= uLen
+			continue
+		}
+		if remaining > 0 {
+			runes := []rune(u.text)
+			u.text = string(runes[remaining:])
+			u.start += remaining
+			remaining = 0
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // ParentChildResult holds the two-level chunking output.
