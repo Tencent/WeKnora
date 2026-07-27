@@ -239,12 +239,7 @@ func (c *DriveConnector) FetchAll(
 	var allItems []types.FetchedItem
 
 	for _, resourceID := range resourceIDs {
-		rootFolderToken, fileToken := parseDriveResourceID(resourceID)
-		folderToken := rootFolderToken
-		if fileToken != "" {
-			folderToken = fileToken
-		}
-		files, err := client.ListDriveFilesRecursiveFrom(ctx, folderToken)
+		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
 		if err != nil {
 			var partialErr *partialDriveFileListError
 			if !errors.As(err, &partialErr) {
@@ -315,12 +310,7 @@ func (c *DriveConnector) FetchIncremental(
 	}
 
 	for _, resourceID := range resourceIDs {
-		rootFolderToken, fileToken := parseDriveResourceID(resourceID)
-		folderToken := rootFolderToken
-		if fileToken != "" {
-			folderToken = fileToken
-		}
-		files, err := client.ListDriveFilesRecursiveFrom(ctx, folderToken)
+		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
 		var partialErr *partialDriveFileListError
 		if err != nil {
 			if !errors.As(err, &partialErr) {
@@ -432,12 +422,7 @@ func (c *DriveConnector) FetchStream(
 	processed := 0
 	lastCheckpoint := time.Now()
 	for _, resourceID := range resourceIDs {
-		rootFolderToken, fileToken := parseDriveResourceID(resourceID)
-		folderToken := rootFolderToken
-		if fileToken != "" {
-			folderToken = fileToken
-		}
-		files, err := client.ListDriveFilesRecursiveFrom(ctx, folderToken)
+		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
 		var partialErr *partialDriveFileListError
 		if err != nil {
 			if !errors.As(err, &partialErr) {
@@ -668,6 +653,78 @@ func makeDriveResourceID(rootFolderToken, fileToken string) string {
 func parseDriveResourceID(resourceID string) (rootFolderToken, fileToken string) {
 	rootFolderToken, fileToken, _ = strings.Cut(resourceID, feishuWikiNodeResourceSeparator)
 	return rootFolderToken, fileToken
+}
+
+// listDriveFilesForResource lists the files to sync for a given resourceID.
+// A resourceID is either a bare root folderToken (sync the whole subtree) or
+// "rootFolderToken:fileToken" (sync a single selected file or sub-folder).
+//
+// For a single-file selection we cannot pass the fileToken to
+// ListDriveFilesRecursiveFrom - that API expects a folder and returns 1061002
+// (params error) for a file token. Instead we walk the root folder subtree (the
+// file's parent) and filter to just the selected fileToken. This mirrors the
+// wiki connector, which resolves a single selected node via GetWikiNode; Drive
+// has no single-file meta API, so filtering the subtree walk is the equivalent.
+//
+// A sub-folder selection (fileToken is itself a folder) is handled by walking
+// that sub-folder's subtree directly - ListDriveFilesRecursiveFrom accepts a
+// folder token, so no filtering is needed there.
+func (c *DriveConnector) listDriveFilesForResource(
+	ctx context.Context, client *Client, resourceID string,
+) ([]driveFile, error) {
+	rootFolderToken, fileToken := parseDriveResourceID(resourceID)
+	if fileToken == "" {
+		// Whole root subtree.
+		return client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
+	}
+
+	// fileToken may be a file or a folder. Try walking it as a folder first; if
+	// that succeeds it was a folder (sync its subtree). If it fails with a
+	// params error it is a file - fall back to walking the root and filtering.
+	files, err := client.ListDriveFilesRecursiveFrom(ctx, fileToken)
+	if err == nil {
+		return files, nil
+	}
+	// Heuristic: a 1061002 (params error) means fileToken is not a folder. Any
+	// other error (auth, not found, ...) propagates as a real failure.
+	if !isDriveNotFolderError(err) {
+		return nil, err
+	}
+
+	// fileToken is a file: walk the root subtree and keep only the match.
+	all, walkErr := client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
+	if walkErr != nil {
+		// If the recursive walk itself partially failed, still search the
+		// successfully-listed subset; the selected file may be among them.
+		var partialErr *partialDriveFileListError
+		if !errors.As(walkErr, &partialErr) {
+			return nil, walkErr
+		}
+		all = filterDriveFileByToken(all, fileToken)
+		if len(all) == 0 {
+			return nil, walkErr
+		}
+		return all, walkErr
+	}
+	return filterDriveFileByToken(all, fileToken), nil
+}
+
+// isDriveNotFolderError reports whether err indicates the token was not a
+// folder (1061002 params error from the list API when a file token is passed).
+func isDriveNotFolderError(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "1061002") || strings.Contains(s, "params error")
+}
+
+// filterDriveFileByToken returns only the entries whose Token matches token.
+func filterDriveFileByToken(files []driveFile, token string) []driveFile {
+	var out []driveFile
+	for _, f := range files {
+		if f.Token == token {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // driveRootFolderToken extracts the user-supplied root folder_token from the
