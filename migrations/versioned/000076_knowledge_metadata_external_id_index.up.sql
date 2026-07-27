@@ -1,4 +1,4 @@
-DO $$ BEGIN RAISE NOTICE '[Migration 000075] Adding knowledge metadata external_id prefix index...'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000076] Adding knowledge metadata external_id prefix index...'; END $$;
 
 -- Speeds up the datasource subtree sweep (repository FindByMetadataKeyPrefix),
 -- which runs on every re-sync of a multi-item source node:
