@@ -134,6 +134,27 @@ func TestConfig_GetBaseURL_UsesExplicitBaseURL(t *testing.T) {
 	}
 }
 
+func TestConfig_GetBaseURL_AddsScheme(t *testing.T) {
+	cfg := &Config{BaseURL: "api.dingtalk.com/"}
+	if got := cfg.GetBaseURL(); got != "https://api.dingtalk.com" {
+		t.Errorf("GetBaseURL() = %q, want https://api.dingtalk.com", got)
+	}
+}
+
+func TestParseDingTalkConfig_RejectsUnsafeBaseURL(t *testing.T) {
+	_, err := parseDingTalkConfig(&types.DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"client_id":     "dingabc123",
+			"client_secret": "secret456",
+			"operator_id":   "user789",
+			"base_url":      "http://127.0.0.1:8080",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsafe base_url")
+	}
+}
+
 func TestParseTime_RFC3339(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -143,6 +164,7 @@ func TestParseTime_RFC3339(t *testing.T) {
 	}{
 		{"RFC3339 with timezone", "2026-01-15T10:30:00+08:00", 10, false},
 		{"RFC3339 UTC", "2026-01-15T02:30:00Z", 2, false},
+		{"DingTalk documented minute precision", "2023-05-15T11:29Z", 11, false},
 		{"alternative format", "2026-01-15T10:30:00Z", 10, false},
 		{"empty string", "", 0, false},
 		{"invalid format", "not-a-time", 0, false},
@@ -165,6 +187,28 @@ func TestParseTime_RFC3339(t *testing.T) {
 				t.Errorf("parseTime(%q).Hour() = %d, want %d", tt.input, got.Hour(), tt.wantHour)
 			}
 		})
+	}
+}
+
+func TestWikiNode_UsesOfficialTimestampAndStatisticalInfo(t *testing.T) {
+	body := `{
+		"nodeId": "node-123",
+		"name": "测试文档",
+		"type": "FILE",
+		"category": "ALIDOC",
+		"modifiedTimestamp": 1684146540000,
+		"statisticalInfo": {"wordCount": 321}
+	}`
+
+	var node WikiNode
+	if err := json.Unmarshal([]byte(body), &node); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if got := node.modifiedAt(); got.IsZero() || got.Year() != 2023 {
+		t.Fatalf("modifiedAt() = %v, want 2023 timestamp", got)
+	}
+	if got := node.wordCount(); got != 321 {
+		t.Fatalf("wordCount() = %d, want 321", got)
 	}
 }
 
@@ -212,6 +256,12 @@ func TestSanitizeFileName_ReplacesInvalidChars(t *testing.T) {
 				t.Errorf("sanitizeFileName(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSanitizeFileName_ReplacesControlChars(t *testing.T) {
+	if got := sanitizeFileName("line1\r\nline2\t"); got != "line1__line2" {
+		t.Fatalf("sanitizeFileName() = %q, want line1__line2", got)
 	}
 }
 
@@ -393,7 +443,7 @@ func TestDingTalkCursor_JSON(t *testing.T) {
 
 func TestAccessTokenResponse_JSON(t *testing.T) {
 	body := `{
-		"access_token": "test-token-123",
+		"accessToken": "test-token-123",
 		"expireIn": 7200
 	}`
 
@@ -407,6 +457,21 @@ func TestAccessTokenResponse_JSON(t *testing.T) {
 	}
 	if resp.ExpireIn != 7200 {
 		t.Errorf("ExpireIn = %d, want %d", resp.ExpireIn, 7200)
+	}
+}
+
+func TestAccessTokenResponse_JSONLegacyField(t *testing.T) {
+	body := `{
+		"access_token": "legacy-token",
+		"expireIn": 7200
+	}`
+
+	var resp accessTokenResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if resp.AccessToken != "legacy-token" {
+		t.Errorf("AccessToken = %q, want legacy-token", resp.AccessToken)
 	}
 }
 
@@ -456,6 +521,7 @@ func TestWikiNodesResponse_JSON(t *testing.T) {
 
 func TestDocBlocksResponse_ResultData(t *testing.T) {
 	body := `{
+		"success": true,
 		"result": {
 			"data": [
 				{"blockId": "block-1", "blockType": "paragraph", "text": "hello"}
@@ -474,6 +540,22 @@ func TestDocBlocksResponse_ResultData(t *testing.T) {
 	}
 	if blocks[0].Text != "hello" {
 		t.Errorf("Text = %q, want hello", blocks[0].Text)
+	}
+}
+
+func TestDocBlocksResponse_SuccessFalse(t *testing.T) {
+	body := `{
+		"success": false,
+		"code": "Forbidden.AccessDenied",
+		"message": "permission denied"
+	}`
+
+	var resp docBlocksResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if err := resp.validate(); err == nil {
+		t.Fatal("expected success=false to be rejected")
 	}
 }
 

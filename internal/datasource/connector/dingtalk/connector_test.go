@@ -48,7 +48,9 @@ type fakeDingTalk struct {
 	blocksByNode  map[string][]docBlock
 }
 
-func newFakeDingTalk() *fakeDingTalk {
+func newFakeDingTalk(t *testing.T) *fakeDingTalk {
+	t.Helper()
+	allowLocalDingTalkHTTPForTest(t)
 	f := &fakeDingTalk{
 		mux:           http.NewServeMux(),
 		nodesByParent: make(map[string][]WikiNode),
@@ -104,6 +106,11 @@ func (f *fakeDingTalk) handleToken() {
 func (f *fakeDingTalk) handleWorkspaces(workspaces []WikiWorkspace) {
 	f.mux.HandleFunc("/v2.0/wiki/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if got := r.URL.Query().Get("operatorId"); got != "operator-1" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(dingtalkErrorResponse{ErrCode: 400, ErrMsg: "operatorId is required"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(wikiWorkspacesResponse{Workspaces: workspaces})
 	})
 }
@@ -112,6 +119,11 @@ func (f *fakeDingTalk) handleNodes() {
 	f.mux.HandleFunc("/v2.0/wiki/nodes", func(w http.ResponseWriter, r *http.Request) {
 		parentID := r.URL.Query().Get("parentNodeId")
 		w.Header().Set("Content-Type", "application/json")
+		if got := r.URL.Query().Get("operatorId"); got != "operator-1" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(dingtalkErrorResponse{ErrCode: 400, ErrMsg: "operatorId is required"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(wikiNodesResponse{Nodes: f.nodesByParent[parentID]})
 	})
 }
@@ -138,7 +150,7 @@ func TestConnectorType(t *testing.T) {
 }
 
 func TestConnectorValidate_Success(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 
 	if err := newTestConnector().Validate(context.Background(), f.config(nil)); err != nil {
@@ -186,7 +198,7 @@ func TestConnectorValidate_NilConfig(t *testing.T) {
 }
 
 func TestConnectorResolveResourceAncestors(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
@@ -206,7 +218,7 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 }
 
 func TestConnectorListResources(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 
 	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "")
@@ -228,11 +240,12 @@ func TestConnectorListResources(t *testing.T) {
 }
 
 func TestConnectorListResources_LoadsWorkspaceChildren(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
 		{NodeID: "doc-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
+		{NodeID: "img-1", Name: "Logo", NodeType: "FILE", Category: "IMAGE"},
 	}
 
 	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "ws-1")
@@ -252,10 +265,13 @@ func TestConnectorListResources_LoadsWorkspaceChildren(t *testing.T) {
 	if byID["ws-1:doc-1:document"].Type != dingtalkResourceDocument || byID["ws-1:doc-1:document"].ParentID != "ws-1" {
 		t.Fatalf("unexpected document resource: %+v", byID["ws-1:doc-1:document"])
 	}
+	if _, ok := byID["ws-1:img-1:image"]; ok {
+		t.Fatalf("unsupported image leaf should not be selectable: %+v", resources)
+	}
 }
 
 func TestConnectorListResources_LoadsFolderChildren(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["folder-1"] = []WikiNode{
 		{NodeID: "doc-2", Name: "Nested", NodeType: "FILE", Category: "DOCUMENT"},
@@ -271,7 +287,7 @@ func TestConnectorListResources_LoadsFolderChildren(t *testing.T) {
 }
 
 func TestConnectorFetchAll_RecursesAndFetchesDocumentBlocks(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
@@ -305,7 +321,7 @@ func TestConnectorFetchAll_RecursesAndFetchesDocumentBlocks(t *testing.T) {
 }
 
 func TestConnectorFetchAll_ContentFailureReturnsErrorItem(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "doc-1", Name: "Private Doc", NodeType: "FILE", Category: "ALIDOC"},
@@ -328,7 +344,7 @@ func TestConnectorFetchAll_ContentFailureReturnsErrorItem(t *testing.T) {
 }
 
 func TestConnectorFetchAll_SyncsSingleDocumentSelection(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "doc-1", DocKey: "doc-key-1", Name: "One Doc", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
@@ -353,7 +369,7 @@ func TestConnectorFetchAll_SyncsSingleDocumentSelection(t *testing.T) {
 }
 
 func TestConnectorFetchIncremental_SkipsUnchangedAndDetectsDeleted(t *testing.T) {
-	f := newFakeDingTalk()
+	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "same-doc", Name: "Same", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
@@ -394,6 +410,97 @@ func TestConnectorFetchIncremental_SkipsUnchangedAndDetectsDeleted(t *testing.T)
 	}
 	if !seenChanged || !seenDeleted {
 		t.Fatalf("seenChanged=%v seenDeleted=%v items=%+v", seenChanged, seenDeleted, items)
+	}
+}
+
+func TestConnectorFetchIncremental_ContentFailureKeepsPreviousCursor(t *testing.T) {
+	f := newFakeDingTalk(t)
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "doc-1", Name: "Needs Retry", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-16T10:00:00+08:00"},
+	}
+	f.blockStatus["doc-1"] = http.StatusForbidden
+
+	prevTime := parseTime("2026-01-15T10:00:00+08:00")
+	cursor := &types.SyncCursor{
+		ConnectorCursor: map[string]interface{}{
+			"workspace_node_times": map[string]interface{}{
+				"ws-1": map[string]interface{}{"doc-1": prevTime},
+			},
+		},
+	}
+
+	items, next, err := newTestConnector().FetchIncremental(context.Background(), f.config([]string{"ws-1"}), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Metadata["failure_stage"] != "fetch_content" {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+	rawTimes, ok := next.ConnectorCursor["workspace_node_times"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing workspace_node_times: %#v", next.ConnectorCursor)
+	}
+	wsTimes, ok := rawTimes["ws-1"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing ws-1 times: %#v", rawTimes)
+	}
+	gotRaw, ok := wsTimes["doc-1"].(string)
+	if !ok {
+		t.Fatalf("doc-1 cursor = %#v, want RFC3339 string", wsTimes["doc-1"])
+	}
+	got := parseTime(gotRaw)
+	if !got.Equal(prevTime) {
+		t.Fatalf("doc-1 cursor = %v, want previous %v", got, prevTime)
+	}
+}
+
+func TestRenderBlocksMarkdown_OfficialBlockShapes(t *testing.T) {
+	var blocks []docBlock
+	body := `[
+		{
+			"blockId": "h1",
+			"blockType": "heading",
+			"heading": {"level": 2, "elements": [{"text": {"content": "Deploy"}}]}
+		},
+		{
+			"blockId": "p1",
+			"blockType": "paragraph",
+			"paragraph": {
+				"elements": [
+					{"text": {"content": "Read "}},
+					{"link": {"href": "https://example.com/runbook", "text": "runbook"}}
+				]
+			}
+		},
+		{
+			"blockId": "t1",
+			"blockType": "table",
+			"table": {"cells": [["Name", "Status"], ["API", "OK"]]}
+		},
+		{
+			"blockId": "i1",
+			"blockType": "image",
+			"image": {"src": "https://example.com/diagram.png", "alt": "Diagram"}
+		}
+	]`
+	if err := json.Unmarshal([]byte(body), &blocks); err != nil {
+		t.Fatalf("unmarshal blocks: %v", err)
+	}
+
+	got := renderBlocksMarkdown("Doc", blocks)
+	for _, want := range []string{
+		"# Doc",
+		"## Deploy",
+		"Read [runbook](https://example.com/runbook)",
+		"| Name | Status |",
+		"| --- | --- |",
+		"| API | OK |",
+		"![Diagram](https://example.com/diagram.png)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, got)
+		}
 	}
 }
 

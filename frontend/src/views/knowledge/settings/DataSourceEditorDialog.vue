@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import { hasRequiredResourceSelection } from './dataSourceResourceSelection'
 
 const props = defineProps<{
   kbId: string
@@ -408,9 +409,9 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
   {
     type: 'dingtalk',
     available: true,
-    docUrl: 'https://developers.dingtalk.com/document/app',
-    permissionDocUrl: 'https://developers.dingtalk.com/document/app',
-    permissionPageUrl: 'https://developers.dingtalk.com/app',
+    docUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
+    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-node-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
     requiredPermissions: [
       'Wiki.Workspace.Read',
       'Wiki.Node.Read',
@@ -749,6 +750,14 @@ function validateStep1Fields(): boolean {
   return true
 }
 
+function validateStep2Resources(): boolean {
+  if (!hasRequiredResourceSelection(form.value.type, selectedResourceIds.value)) {
+    MessagePlugin.warning(t('datasource.resourceRequired'))
+    return false
+  }
+  return true
+}
+
 async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
@@ -756,6 +765,8 @@ async function nextStep() {
       await testConnection()
       if ((testResult.value as string) !== 'success') return
     }
+  } else if (step.value === 2) {
+    if (!validateStep2Resources()) return
   }
   step.value++
   if (step.value === 2) {
@@ -809,6 +820,7 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
 
 // --- Final submit ---
 async function handleSubmit() {
+  if (!validateStep2Resources()) return
   form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {

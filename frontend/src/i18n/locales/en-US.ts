@@ -5588,6 +5588,7 @@ export default {
     isRequired: 'is required',
     credentialsLabel: 'credentials',
     resourceHint: 'Select the spaces or folders to sync',
+    resourceRequired: 'Select at least one resource to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
     noResources: 'No wiki spaces found',

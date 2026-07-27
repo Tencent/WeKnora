@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/utils"
+	"golang.org/x/sync/singleflight"
 )
 
 func TestParseRetryAfter(t *testing.T) {
@@ -92,6 +96,20 @@ func TestSleepCtx_Completes(t *testing.T) {
 	if elapsed < 40*time.Millisecond {
 		t.Errorf("sleep was too short: %v", elapsed)
 	}
+}
+
+func resetAccessTokenCacheForTest() {
+	accessTokenCache.Lock()
+	defer accessTokenCache.Unlock()
+	accessTokenCache.entries = make(map[string]cachedAccessToken)
+	accessTokenRefreshGroup = singleflight.Group{}
+}
+
+func allowLocalDingTalkHTTPForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST_EXTRA", "127.0.0.1,localhost,::1")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 }
 
 // clientTestServer wraps httptest.Server with DingTalk API handlers for testing.
@@ -225,11 +243,12 @@ func TestClientDoRequest_Unauthorized(t *testing.T) {
 	}
 }
 
-// TestClientDoRequest_Forbidden tests that 403 errors wrap ErrInvalidCredentials.
+// TestClientDoRequest_Forbidden tests that permission failures are not reported
+// as invalid credentials.
 func TestClientDoRequest_Forbidden(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = io.WriteString(w, `{"errcode":403,"errmsg":"forbidden"}`)
+		_, _ = io.WriteString(w, `{"code":"Forbidden.AccessDenied","message":"permission denied"}`)
 	}))
 	defer srv.Close()
 
@@ -246,8 +265,46 @@ func TestClientDoRequest_Forbidden(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 403")
 	}
-	if !errors.Is(err, datasource.ErrInvalidCredentials) {
-		t.Errorf("expected ErrInvalidCredentials, got: %v", err)
+	if errors.Is(err, datasource.ErrInvalidCredentials) {
+		t.Errorf("permission error should not be reported as invalid credentials: %v", err)
+	}
+	var apiErr *dingtalkAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "Forbidden.AccessDenied" {
+		t.Errorf("expected DingTalk API permission error, got: %T %v", err, err)
+	}
+}
+
+func TestClientDoRequest_ForbiddenQPSRetries(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Retry-After", "0")
+		w.Header().Set("Content-Type", "application/json")
+		if attempts == 1 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"Forbidden.AccessDenied.QpsLimitForAppkeyAndApi","message":"qps limited"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok": "yes"}`)
+	}))
+	defer srv.Close()
+
+	c := &client{
+		baseURL:     srv.URL,
+		accessToken: "token",
+		tokenExpiry: time.Now().Add(time.Hour),
+		httpClient:  srv.Client(),
+	}
+
+	var result map[string]string
+	if err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, &result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if result["ok"] != "yes" {
+		t.Fatalf("result = %v", result)
 	}
 }
 
@@ -333,6 +390,29 @@ func TestClientDoRequest_BadRequest(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("expected no retry for 400, got %d attempts", attempts)
+	}
+}
+
+func TestClientDoRequest_ErrorDoesNotIncludeResponseBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"errcode":400,"errmsg":"bad request","secret":"document body must not leak"}`)
+	}))
+	defer srv.Close()
+
+	c := &client{
+		baseURL:     srv.URL,
+		accessToken: "token",
+		tokenExpiry: time.Now().Add(time.Hour),
+		httpClient:  srv.Client(),
+	}
+
+	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "document body must not leak") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error leaked response body: %v", err)
 	}
 }
 
@@ -443,6 +523,116 @@ func TestClientListWorkspacesPaginates(t *testing.T) {
 	}
 	if strings.Join(seenTokens, ",") != ",page-2" {
 		t.Fatalf("seen nextToken sequence = %v, want [ page-2]", seenTokens)
+	}
+}
+
+func TestClientPingIncludesOperatorID(t *testing.T) {
+	var operatorID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2.0/wiki/workspaces" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		operatorID = r.URL.Query().Get("operatorId")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"workspaces":[]}`)
+	}))
+	defer srv.Close()
+
+	c := &client{
+		baseURL:     srv.URL,
+		accessToken: "token",
+		tokenExpiry: time.Now().Add(time.Hour),
+		httpClient:  srv.Client(),
+	}
+
+	if err := c.Ping(context.Background(), "operator-123"); err != nil {
+		t.Fatalf("Ping() error = %v", err)
+	}
+	if operatorID != "operator-123" {
+		t.Fatalf("operatorId = %q, want operator-123", operatorID)
+	}
+}
+
+func TestEnsureAccessToken_OfficialResponseAndSharedCache(t *testing.T) {
+	allowLocalDingTalkHTTPForTest(t)
+	resetAccessTokenCacheForTest()
+	t.Cleanup(resetAccessTokenCacheForTest)
+
+	tokenRequests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.0/oauth2/accessToken" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		tokenRequests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"accessToken":"official-token","expireIn":7200}`)
+	}))
+	defer srv.Close()
+
+	cfg := &Config{ClientID: "app-key", ClientSecret: "app-secret", BaseURL: srv.URL}
+	first := newClient(cfg)
+	if err := first.ensureAccessToken(context.Background()); err != nil {
+		t.Fatalf("first ensureAccessToken() error = %v", err)
+	}
+	second := newClient(cfg)
+	if err := second.ensureAccessToken(context.Background()); err != nil {
+		t.Fatalf("second ensureAccessToken() error = %v", err)
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("tokenRequests = %d, want 1", tokenRequests)
+	}
+	if second.accessToken != "official-token" {
+		t.Fatalf("second.accessToken = %q", second.accessToken)
+	}
+}
+
+func TestEnsureAccessToken_CoalescesConcurrentRefreshes(t *testing.T) {
+	allowLocalDingTalkHTTPForTest(t)
+	resetAccessTokenCacheForTest()
+	t.Cleanup(resetAccessTokenCacheForTest)
+
+	tokenRequests := 0
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.0/oauth2/accessToken" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		mu.Lock()
+		tokenRequests++
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"accessToken":"shared-token","expireIn":7200}`)
+	}))
+	defer srv.Close()
+
+	cfg := &Config{ClientID: "app-key", ClientSecret: "app-secret", BaseURL: srv.URL}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := newClient(cfg)
+			if err := c.ensureAccessToken(context.Background()); err != nil {
+				errs <- err
+				return
+			}
+			if c.accessToken != "shared-token" {
+				errs <- fmt.Errorf("accessToken = %q, want shared-token", c.accessToken)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	gotRequests := tokenRequests
+	mu.Unlock()
+	if gotRequests != 1 {
+		t.Fatalf("tokenRequests = %d, want 1", gotRequests)
 	}
 }
 

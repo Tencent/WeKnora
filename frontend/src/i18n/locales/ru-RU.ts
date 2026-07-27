@@ -5421,6 +5421,7 @@ export default {
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
     resourceHint: 'Выберите пространства или папки для синхронизации',
+    resourceRequired: 'Выберите хотя бы один ресурс для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
     noResources: 'Пространства вики не найдены',

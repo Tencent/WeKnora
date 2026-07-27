@@ -3,6 +3,7 @@ package dingtalk
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -36,14 +39,58 @@ type client struct {
 	logTokenOnce sync.Once
 }
 
+type cachedAccessToken struct {
+	token  string
+	expiry time.Time
+}
+
+var accessTokenCache = struct {
+	sync.Mutex
+	entries map[string]cachedAccessToken
+}{
+	entries: make(map[string]cachedAccessToken),
+}
+
+var accessTokenRefreshGroup singleflight.Group
+
 // newClient constructs a client with configuration.
 func newClient(cfg *Config) *client {
+	httpCfg := utils.DefaultSSRFSafeHTTPClientConfig()
+	httpCfg.Timeout = defaultTimeout
 	return &client{
 		baseURL:      cfg.GetBaseURL(),
 		clientID:     cfg.ClientID,
 		clientSecret: cfg.ClientSecret,
-		httpClient:   &http.Client{Timeout: defaultTimeout},
+		httpClient:   utils.NewSSRFSafeHTTPClient(httpCfg),
 	}
+}
+
+func (c *client) cacheKey() string {
+	sum := sha256.Sum256([]byte(c.clientSecret))
+	return fmt.Sprintf("%s\x00%s\x00%x", c.baseURL, c.clientID, sum[:8])
+}
+
+func tokenUsable(token string, expiry time.Time) bool {
+	return token != "" && time.Until(expiry) > 5*time.Minute
+}
+
+func loadCachedAccessToken(key string) (string, time.Time, bool) {
+	accessTokenCache.Lock()
+	defer accessTokenCache.Unlock()
+	entry, ok := accessTokenCache.entries[key]
+	if !ok || !tokenUsable(entry.token, entry.expiry) {
+		if ok {
+			delete(accessTokenCache.entries, key)
+		}
+		return "", time.Time{}, false
+	}
+	return entry.token, entry.expiry, true
+}
+
+func storeCachedAccessToken(key, token string, expiry time.Time) {
+	accessTokenCache.Lock()
+	defer accessTokenCache.Unlock()
+	accessTokenCache.entries[key] = cachedAccessToken{token: token, expiry: expiry}
 }
 
 // ensureAccessToken refreshes the access token if expired or not set.
@@ -52,7 +99,7 @@ func (c *client) ensureAccessToken(ctx context.Context) error {
 	defer c.mu.Unlock()
 
 	// Check if current token is still valid (with 5 minute buffer)
-	if c.accessToken != "" && time.Until(c.tokenExpiry) > 5*time.Minute {
+	if tokenUsable(c.accessToken, c.tokenExpiry) {
 		return nil
 	}
 
@@ -60,7 +107,29 @@ func (c *client) ensureAccessToken(ctx context.Context) error {
 		logger.Infof(ctx, "[DingTalk] client configured clientId=%s base=%s", redactClientID(c.clientID), c.baseURL)
 	})
 
-	// Fetch new token
+	cacheKey := c.cacheKey()
+	if token, expiry, ok := loadCachedAccessToken(cacheKey); ok {
+		c.accessToken = token
+		c.tokenExpiry = expiry
+		return nil
+	}
+
+	value, err, _ := accessTokenRefreshGroup.Do(cacheKey, func() (interface{}, error) {
+		if token, expiry, ok := loadCachedAccessToken(cacheKey); ok {
+			return cachedAccessToken{token: token, expiry: expiry}, nil
+		}
+		return c.fetchAccessToken(ctx, cacheKey)
+	})
+	if err != nil {
+		return err
+	}
+	token := value.(cachedAccessToken)
+	c.accessToken = token.token
+	c.tokenExpiry = token.expiry
+	return nil
+}
+
+func (c *client) fetchAccessToken(ctx context.Context, cacheKey string) (cachedAccessToken, error) {
 	body := accessTokenRequest{
 		AppKey:    c.clientID,
 		AppSecret: c.clientSecret,
@@ -69,7 +138,7 @@ func (c *client) ensureAccessToken(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1.0/oauth2/accessToken", bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("create token request: %w", err)
+		return cachedAccessToken{}, fmt.Errorf("create token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("User-Agent", userAgent)
@@ -78,38 +147,41 @@ func (c *client) ensureAccessToken(ctx context.Context) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("execute token request: %w", err)
+		return cachedAccessToken{}, fmt.Errorf("execute token request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return fmt.Errorf("read token response: %w", readErr)
+		return cachedAccessToken{}, fmt.Errorf("read token response: %w", readErr)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		var apiErr dingtalkErrorResponse
 		_ = json.Unmarshal(respBody, &apiErr)
 		if msg := apiErr.errorMessage(); msg != "" {
-			return fmt.Errorf("dingtalk token error: status=%d code=%s msg=%s", resp.StatusCode, apiErr.errorCode(), msg)
+			return cachedAccessToken{}, fmt.Errorf("dingtalk token error: status=%d code=%s msg=%s", resp.StatusCode, apiErr.errorCode(), msg)
 		}
-		return fmt.Errorf("dingtalk token error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 200))
+		return cachedAccessToken{}, fmt.Errorf("dingtalk token error: status=%d", resp.StatusCode)
 	}
 
 	var tokenResp accessTokenResponse
 	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
-		return fmt.Errorf("decode token response: %w", err)
+		return cachedAccessToken{}, fmt.Errorf("decode token response: %w", err)
 	}
 
 	if tokenResp.AccessToken == "" {
-		return fmt.Errorf("%w: empty access token received", datasource.ErrInvalidCredentials)
+		return cachedAccessToken{}, fmt.Errorf("%w: empty access token received", datasource.ErrInvalidCredentials)
 	}
 
-	c.accessToken = tokenResp.AccessToken
-	c.tokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpireIn) * time.Second)
+	token := cachedAccessToken{
+		token:  tokenResp.AccessToken,
+		expiry: time.Now().Add(time.Duration(tokenResp.ExpireIn) * time.Second),
+	}
+	storeCachedAccessToken(cacheKey, token.token, token.expiry)
 
 	logger.Infof(ctx, "[DingTalk] access token refreshed, expires in %d seconds", tokenResp.ExpireIn)
-	return nil
+	return token, nil
 }
 
 // doRequest executes an authenticated request with automatic token refresh.
@@ -188,14 +260,14 @@ func (c *client) doRequest(ctx context.Context, method, path string, queryParams
 			return lastErr
 		}
 
-		bodyPreview := truncate(string(bodyBytes), 500)
-		logger.Infof(ctx, "[DingTalk] %s %s → status=%d bodyLen=%d body=%s",
-			method, path, resp.StatusCode, len(bodyBytes), bodyPreview)
+		apiErr := parseDingTalkError(bodyBytes)
+		logger.Infof(ctx, "[DingTalk] %s %s → status=%d bodyLen=%d",
+			method, path, resp.StatusCode, len(bodyBytes))
 
 		// Handle rate limiting
-		if resp.StatusCode == http.StatusTooManyRequests {
+		if isDingTalkRateLimit(resp.StatusCode, apiErr) {
 			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])
-			lastErr = fmt.Errorf("dingtalk rate limited: status=429 body=%s", bodyPreview)
+			lastErr = fmt.Errorf("dingtalk rate limited: status=%d code=%s", resp.StatusCode, apiErr.errorCode())
 			if attempt < maxRetries {
 				if sErr := sleepCtx(ctx, wait); sErr != nil {
 					return sErr
@@ -206,7 +278,7 @@ func (c *client) doRequest(ctx context.Context, method, path string, queryParams
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			lastErr = fmt.Errorf("dingtalk server error: status=%d body=%s", resp.StatusCode, bodyPreview)
+			lastErr = fmt.Errorf("dingtalk server error: status=%d code=%s", resp.StatusCode, apiErr.errorCode())
 			if attempt < max5xxRetries {
 				if sErr := sleepCtx(ctx, retry5xxDelay); sErr != nil {
 					return sErr
@@ -216,18 +288,24 @@ func (c *client) doRequest(ctx context.Context, method, path string, queryParams
 			return lastErr
 		}
 
-		// 401/403 → surface as ErrInvalidCredentials
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%w: status=%d body=%s", datasource.ErrInvalidCredentials, resp.StatusCode, bodyPreview)
+		if resp.StatusCode == http.StatusUnauthorized ||
+			(resp.StatusCode == http.StatusForbidden && isCredentialError(apiErr)) {
+			return fmt.Errorf("%w: status=%d code=%s msg=%s",
+				datasource.ErrInvalidCredentials, resp.StatusCode, apiErr.errorCode(), apiErr.errorMessage())
 		}
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			var apiErr dingtalkErrorResponse
-			_ = json.Unmarshal(bodyBytes, &apiErr)
+		if resp.StatusCode == http.StatusForbidden {
 			if msg := apiErr.errorMessage(); msg != "" {
 				return &dingtalkAPIError{Code: apiErr.errorCode(), Msg: msg}
 			}
-			return fmt.Errorf("dingtalk api error: status=%d body=%s", resp.StatusCode, bodyPreview)
+			return fmt.Errorf("dingtalk api forbidden: status=%d", resp.StatusCode)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if msg := apiErr.errorMessage(); msg != "" {
+				return &dingtalkAPIError{Code: apiErr.errorCode(), Msg: msg}
+			}
+			return fmt.Errorf("dingtalk api error: status=%d code=%s", resp.StatusCode, apiErr.errorCode())
 		}
 
 		if result != nil && len(bodyBytes) > 0 {
@@ -238,6 +316,33 @@ func (c *client) doRequest(ctx context.Context, method, path string, queryParams
 		return nil
 	}
 	return lastErr
+}
+
+func parseDingTalkError(body []byte) dingtalkErrorResponse {
+	var apiErr dingtalkErrorResponse
+	_ = json.Unmarshal(body, &apiErr)
+	return apiErr
+}
+
+func isDingTalkRateLimit(status int, apiErr dingtalkErrorResponse) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	text := strings.ToLower(apiErr.errorCode() + " " + apiErr.errorMessage())
+	return strings.Contains(text, "qpslimit") ||
+		strings.Contains(text, "rate limit") ||
+		strings.Contains(text, "ratelimit") ||
+		strings.Contains(text, "too many requests")
+}
+
+func isCredentialError(apiErr dingtalkErrorResponse) bool {
+	text := strings.ToLower(apiErr.errorCode() + " " + apiErr.errorMessage())
+	return strings.Contains(text, "invalidcredential") ||
+		strings.Contains(text, "invalid credentials") ||
+		strings.Contains(text, "invalidaccesstoken") ||
+		strings.Contains(text, "invalid access token") ||
+		strings.Contains(text, "invalid token") ||
+		strings.Contains(text, "unauthorized")
 }
 
 // parseRetryAfter returns the Retry-After duration from the header, or fallback if unparseable.
@@ -285,10 +390,13 @@ func truncate(s string, maxLen int) string {
 	return result + "..."
 }
 
-// Ping verifies the credentials by calling workspaces endpoint.
-func (c *client) Ping(ctx context.Context) error {
+// Ping verifies the credentials by calling the workspaces endpoint.
+func (c *client) Ping(ctx context.Context, operatorID string) error {
 	var resp wikiWorkspacesResponse
-	return c.doRequest(ctx, http.MethodGet, "/v2.0/wiki/workspaces", nil, nil, &resp)
+	return c.doRequest(ctx, http.MethodGet, "/v2.0/wiki/workspaces", map[string]string{
+		"operatorId": operatorID,
+		"maxResults": fmt.Sprintf("%d", defaultPageSize),
+	}, nil, &resp)
 }
 
 // ListWorkspaces returns all accessible knowledge bases.
@@ -415,6 +523,9 @@ func (c *client) GetDocumentBlocks(ctx context.Context, nodeID, operatorID strin
 
 	var resp docBlocksResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, query, nil, &resp); err != nil {
+		return nil, err
+	}
+	if err := resp.validate(); err != nil {
 		return nil, err
 	}
 	return resp.allBlocks(), nil

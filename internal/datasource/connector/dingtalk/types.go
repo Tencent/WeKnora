@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // DefaultBaseURL is the DingTalk OpenAPI base URL.
@@ -52,7 +54,24 @@ func (c *Config) GetBaseURL() string {
 	if baseURL == "" {
 		return DefaultBaseURL
 	}
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "https://" + baseURL
+	}
 	return strings.TrimRight(baseURL, "/")
+}
+
+func validateBaseURL(rawURL string) error {
+	baseURL := strings.TrimSpace(rawURL)
+	if baseURL == "" {
+		return nil
+	}
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "https://" + baseURL
+	}
+	if err := utils.ValidateURLForSSRF(baseURL); err != nil {
+		return fmt.Errorf("%w: base_url failed SSRF validation: %v", datasource.ErrInvalidConfig, err)
+	}
+	return nil
 }
 
 // parseDingTalkConfig extracts and validates DingTalk-specific configuration.
@@ -81,6 +100,9 @@ func parseDingTalkConfig(config *types.DataSourceConfig) (*Config, error) {
 	cfg.ClientSecret = strings.TrimSpace(cfg.ClientSecret)
 	cfg.OperatorID = strings.TrimSpace(cfg.OperatorID)
 	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
+	if err := validateBaseURL(cfg.BaseURL); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -94,8 +116,24 @@ type accessTokenRequest struct {
 
 // accessTokenResponse is the response from getting access token.
 type accessTokenResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"accessToken"`
 	ExpireIn    int    `json:"expireIn"`
+}
+
+func (r *accessTokenResponse) UnmarshalJSON(data []byte) error {
+	type alias accessTokenResponse
+	var raw struct {
+		alias
+		LegacyAccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*r = accessTokenResponse(raw.alias)
+	if r.AccessToken == "" {
+		r.AccessToken = raw.LegacyAccessToken
+	}
+	return nil
 }
 
 // wikiWorkspacesResponse wraps GET /v2.0/wiki/workspaces.
@@ -129,8 +167,9 @@ type wikiNodesResponse struct {
 // DingTalk has returned both top-level and data-wrapped shapes across docs and
 // SDKs, so the client accepts both to keep the connector forward-compatible.
 type docBlocksResponse struct {
-	Blocks []docBlock `json:"blocks,omitempty"`
-	Data   struct {
+	Success *bool      `json:"success,omitempty"`
+	Blocks  []docBlock `json:"blocks,omitempty"`
+	Data    struct {
 		Blocks []docBlock `json:"blocks,omitempty"`
 	} `json:"data,omitempty"`
 	Result struct {
@@ -138,6 +177,10 @@ type docBlocksResponse struct {
 		Data   []docBlock `json:"data,omitempty"`
 		List   []docBlock `json:"list,omitempty"`
 	} `json:"result,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+	ErrCode int    `json:"errcode,omitempty"`
+	ErrMsg  string `json:"errmsg,omitempty"`
 }
 
 func (r docBlocksResponse) allBlocks() []docBlock {
@@ -154,6 +197,22 @@ func (r docBlocksResponse) allBlocks() []docBlock {
 		return r.Result.List
 	}
 	return r.Result.Data
+}
+
+func (r docBlocksResponse) validate() error {
+	if r.Success != nil && !*r.Success {
+		apiErr := dingtalkErrorResponse{
+			ErrCode: r.ErrCode,
+			ErrMsg:  r.ErrMsg,
+			Code:    r.Code,
+			Message: r.Message,
+		}
+		if msg := apiErr.errorMessage(); msg != "" {
+			return &dingtalkAPIError{Code: apiErr.errorCode(), Msg: msg}
+		}
+		return &dingtalkAPIError{Code: apiErr.errorCode(), Msg: "document blocks query failed"}
+	}
+	return nil
 }
 
 // docBlock intentionally models only the portable text-bearing fields we need
@@ -182,21 +241,40 @@ func (b *docBlock) UnmarshalJSON(data []byte) error {
 
 // WikiNode represents a node (file or folder) in DingTalk wiki.
 type WikiNode struct {
-	NodeID       string `json:"nodeId"` // dentryUuid
-	DocKey       string `json:"docKey,omitempty"`
-	WorkspaceID  string `json:"workspaceId"` // spaceUuid
-	Name         string `json:"name"`
-	Size         int64  `json:"size,omitempty"`
-	NodeType     string `json:"type"`     // "FILE" or "FOLDER"
-	Category     string `json:"category"` // "ALIDOC", "DOCUMENT", "IMAGE", etc.
-	Extension    string `json:"extension,omitempty"`
-	URL          string `json:"url,omitempty"`
-	CreatorID    string `json:"creatorId,omitempty"`
-	ModifierID   string `json:"modifierId,omitempty"`
-	CreateTime   string `json:"createTime,omitempty"`
-	ModifiedTime string `json:"modifiedTime,omitempty"`
-	HasChildren  bool   `json:"hasChildren,omitempty"`
-	WordCount    int64  `json:"wordCount,omitempty"`
+	NodeID            string `json:"nodeId"` // dentryUuid
+	DocKey            string `json:"docKey,omitempty"`
+	WorkspaceID       string `json:"workspaceId"` // spaceUuid
+	Name              string `json:"name"`
+	Size              int64  `json:"size,omitempty"`
+	NodeType          string `json:"type"`     // "FILE" or "FOLDER"
+	Category          string `json:"category"` // "ALIDOC", "DOCUMENT", "IMAGE", etc.
+	Extension         string `json:"extension,omitempty"`
+	URL               string `json:"url,omitempty"`
+	CreatorID         string `json:"creatorId,omitempty"`
+	ModifierID        string `json:"modifierId,omitempty"`
+	CreateTime        string `json:"createTime,omitempty"`
+	ModifiedTime      string `json:"modifiedTime,omitempty"`
+	CreateTimestamp   int64  `json:"createTimestamp,omitempty"`
+	ModifiedTimestamp int64  `json:"modifiedTimestamp,omitempty"`
+	HasChildren       bool   `json:"hasChildren,omitempty"`
+	WordCount         int64  `json:"wordCount,omitempty"`
+	StatisticalInfo   struct {
+		WordCount int64 `json:"wordCount,omitempty"`
+	} `json:"statisticalInfo,omitempty"`
+}
+
+func (n WikiNode) modifiedAt() time.Time {
+	if n.ModifiedTimestamp > 0 {
+		return timeFromUnixAuto(n.ModifiedTimestamp)
+	}
+	return parseTime(n.ModifiedTime)
+}
+
+func (n WikiNode) wordCount() int64 {
+	if n.WordCount != 0 {
+		return n.WordCount
+	}
+	return n.StatisticalInfo.WordCount
 }
 
 // dingtalkErrorResponse is the error body shape DingTalk returns on non-2xx.
@@ -245,16 +323,29 @@ func parseTime(ts string) time.Time {
 	if ts == "" {
 		return time.Time{}
 	}
-	// DingTalk uses RFC3339 format: "2024-01-01T00:00:00+08:00"
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		// Try alternative format without timezone
-		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
-		if err != nil {
-			return time.Time{}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04Z07:00",
+		"2006-01-02T15:04Z",
+		"2006-01-02T15:04:05Z",
+	} {
+		if t, err := time.Parse(layout, strings.TrimSpace(ts)); err == nil {
+			return t
 		}
 	}
-	return t
+	return time.Time{}
+}
+
+func timeFromUnixAuto(value int64) time.Time {
+	switch {
+	case value > 1_000_000_000_000:
+		return time.UnixMilli(value)
+	case value > 0:
+		return time.Unix(value, 0)
+	default:
+		return time.Time{}
+	}
 }
 
 // sanitizeFileName removes characters that are invalid in filenames and
@@ -268,6 +359,12 @@ func sanitizeFileName(name string) string {
 		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
 	)
 	result := replacer.Replace(name)
+	result = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '_'
+		}
+		return r
+	}, result)
 	result = strings.Trim(result, " ._")
 	if result == "" {
 		return "untitled"

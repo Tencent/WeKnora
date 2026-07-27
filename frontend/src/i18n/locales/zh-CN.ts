@@ -5601,6 +5601,7 @@ export default {
     isRequired: "为必填项",
     credentialsLabel: "凭证",
     resourceHint: "选择要同步的内容空间/文件夹",
+    resourceRequired: "请至少选择一个要同步的资源",
     untitled: "无标题",
     resourceLoadFailed: "加载资源列表失败",
     noResources: "未找到可同步的知识库空间",

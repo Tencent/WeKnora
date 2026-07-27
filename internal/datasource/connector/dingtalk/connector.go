@@ -97,7 +97,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 		return err
 	}
 	cli := c.clientFor(cfg)
-	if err := cli.Ping(ctx); err != nil {
+	if err := cli.Ping(ctx, cfg.OperatorID); err != nil {
 		return fmt.Errorf("dingtalk connection failed: %w", err)
 	}
 	return nil
@@ -197,6 +197,9 @@ func (c *Connector) ListResources(
 		}
 		out := make([]types.Resource, 0, len(nodes))
 		for _, node := range nodes {
+			if !node.hasChildNodes() && !isDocumentNode(node) {
+				continue
+			}
 			out = append(out, nodeResource(parent.workspaceID, parentID, node))
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].ExternalID < out[j].ExternalID })
@@ -249,7 +252,7 @@ func nodeResource(workspaceID, parentID string, node WikiNode) types.Resource {
 		Name:        node.Name,
 		Type:        nodeResourceType(node),
 		URL:         node.URL,
-		ModifiedAt:  parseTime(node.ModifiedTime),
+		ModifiedAt:  node.modifiedAt(),
 		ParentID:    parentID,
 		HasChildren: node.hasChildNodes(),
 		Metadata: map[string]interface{}{
@@ -258,7 +261,7 @@ func nodeResource(workspaceID, parentID string, node WikiNode) types.Resource {
 			"doc_key":      node.DocKey,
 			"node_type":    node.NodeType,
 			"category":     node.Category,
-			"word_count":   node.WordCount,
+			"word_count":   node.wordCount(),
 		},
 	}
 }
@@ -372,13 +375,13 @@ func (c *Connector) walk(
 				continue
 			}
 
-			newCursor.WorkspaceTimes[resourceID][node.NodeID] = parseTime(node.ModifiedTime)
+			currentModTime := node.modifiedAt()
 
 			// Incremental: skip if content hasn't changed
 			if incremental && prev != nil && prev.WorkspaceTimes != nil {
 				if prevTimes, ok := prev.WorkspaceTimes[resourceID]; ok {
 					if prevModTime, ok := prevTimes[node.NodeID]; ok {
-						currentModTime := parseTime(node.ModifiedTime)
+						newCursor.WorkspaceTimes[resourceID][node.NodeID] = currentModTime
 						if !currentModTime.After(prevModTime) {
 							continue
 						}
@@ -396,6 +399,13 @@ func (c *Connector) walk(
 
 			blocks, err := cli.GetDocumentBlocks(ctx, node.contentKey(), operatorID)
 			if err != nil {
+				if incremental && prev != nil && prev.WorkspaceTimes != nil {
+					if prevTimes, ok := prev.WorkspaceTimes[resourceID]; ok {
+						if prevModTime, ok := prevTimes[node.NodeID]; ok {
+							newCursor.WorkspaceTimes[resourceID][node.NodeID] = prevModTime
+						}
+					}
+				}
 				out = append(out, types.FetchedItem{
 					ExternalID:       node.NodeID,
 					Title:            node.Name,
@@ -412,6 +422,7 @@ func (c *Connector) walk(
 				})
 				continue
 			}
+			newCursor.WorkspaceTimes[resourceID][node.NodeID] = currentModTime
 
 			content := renderBlocksMarkdown(node.Name, blocks)
 			if strings.TrimSpace(content) == "" {
@@ -425,14 +436,14 @@ func (c *Connector) walk(
 				ContentType:      "text/markdown",
 				FileName:         sanitizeFileName(node.Name) + ".md",
 				URL:              node.URL,
-				UpdatedAt:        parseTime(node.ModifiedTime),
+				UpdatedAt:        currentModTime,
 				SourceResourceID: resourceID,
 				Metadata: map[string]string{
 					"node_id":      node.NodeID,
 					"workspace_id": workspaceID,
 					"node_type":    node.NodeType,
 					"category":     node.Category,
-					"word_count":   fmt.Sprintf("%d", node.WordCount),
+					"word_count":   fmt.Sprintf("%d", node.wordCount()),
 					"channel":      types.ChannelDingtalk,
 				},
 			})
@@ -500,26 +511,82 @@ func renderBlocksMarkdown(title string, blocks []docBlock) string {
 }
 
 func writeBlockMarkdown(b *strings.Builder, block docBlock) {
+	raw := blockRawObject(block)
+	blockType := normalizeBlockType(firstNonEmpty(block.BlockType, block.Type, stringValue(raw["blockType"]), stringValue(raw["type"])))
+	if blockType == "table" {
+		if table := tableMarkdown(raw); table != "" {
+			b.WriteString(table)
+			b.WriteString("\n\n")
+		}
+		for _, child := range block.Children {
+			writeBlockMarkdown(b, child)
+		}
+		return
+	}
 	text := strings.TrimSpace(blockText(block))
+	if text == "" {
+		text = strings.TrimSpace(inlineText(raw))
+	}
 	if text != "" {
-		switch strings.ToLower(firstNonEmpty(block.BlockType, block.Type)) {
-		case "heading1", "h1", "title":
-			b.WriteString("# ")
+		switch blockType {
+		case "heading", "heading1", "h1", "title":
+			level := headingLevel(raw)
+			if level <= 1 {
+				b.WriteString("# ")
+			} else if level == 2 {
+				b.WriteString("## ")
+			} else {
+				b.WriteString(strings.Repeat("#", min(level, 6)))
+				b.WriteString(" ")
+			}
 		case "heading2", "h2":
 			b.WriteString("## ")
 		case "heading3", "h3":
 			b.WriteString("### ")
-		case "bullet", "unordered_list", "list":
+		case "bullet", "unorderedlist", "list":
 			b.WriteString("- ")
-		case "ordered_list":
+		case "orderedlist":
 			b.WriteString("1. ")
+		case "blockquote", "callout":
+			writeQuotedMarkdown(b, text)
+			for _, child := range block.Children {
+				writeBlockMarkdown(b, child)
+			}
+			return
+		case "image":
+			if image := imageMarkdown(raw); image != "" {
+				b.WriteString(image)
+				b.WriteString("\n\n")
+				for _, child := range block.Children {
+					writeBlockMarkdown(b, child)
+				}
+				return
+			}
 		}
 		b.WriteString(text)
 		b.WriteString("\n\n")
+	} else if blockType == "image" {
+		if image := imageMarkdown(raw); image != "" {
+			b.WriteString(image)
+			b.WriteString("\n\n")
+		}
 	}
 	for _, child := range block.Children {
 		writeBlockMarkdown(b, child)
 	}
+}
+
+func writeQuotedMarkdown(b *strings.Builder, text string) {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		b.WriteString("> ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 }
 
 func blockText(block docBlock) string {
@@ -532,37 +599,285 @@ func blockText(block docBlock) string {
 	if len(block.Raw) == 0 {
 		return ""
 	}
-	var raw map[string]interface{}
-	if err := json.Unmarshal(block.Raw, &raw); err != nil {
-		return ""
-	}
-	return strings.Join(extractTextFields(raw), " ")
+	return inlineText(blockRawObject(block))
 }
 
-func extractTextFields(value interface{}) []string {
+func blockRawObject(block docBlock) map[string]interface{} {
+	if len(block.Raw) == 0 {
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(block.Raw, &raw); err != nil {
+		return nil
+	}
+	return raw
+}
+
+func normalizeBlockType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "")
+	value = strings.ReplaceAll(value, "-", "")
+	return value
+}
+
+func headingLevel(raw map[string]interface{}) int {
+	if heading, ok := raw["heading"].(map[string]interface{}); ok {
+		if level := intValue(heading["level"]); level > 0 {
+			return level
+		}
+	}
+	if level := intValue(raw["level"]); level > 0 {
+		return level
+	}
+	return 1
+}
+
+func inlineText(value interface{}) string {
+	return strings.TrimSpace(strings.Join(extractInlineParts(value, ""), ""))
+}
+
+func extractInlineParts(value interface{}, parentKey string) []string {
 	switch v := value.(type) {
 	case map[string]interface{}:
-		var out []string
-		for key, child := range v {
-			switch strings.ToLower(key) {
-			case "text", "content", "plaintext", "plain_text", "value":
-				if s, ok := child.(string); ok && strings.TrimSpace(s) != "" {
-					out = append(out, strings.TrimSpace(s))
-					continue
-				}
+		if link := linkMarkdown(v); link != "" {
+			return []string{link}
+		}
+		if normalizeBlockType(stringValue(v["blockType"])) == "image" {
+			if image := imageMarkdown(v); image != "" {
+				return []string{image}
 			}
-			out = append(out, extractTextFields(child)...)
+		}
+		if s := directText(v); s != "" {
+			return []string{s}
+		}
+		var out []string
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			if !isNoiseTextKey(key) {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			out = append(out, extractInlineParts(v[key], key)...)
 		}
 		return out
 	case []interface{}:
 		var out []string
 		for _, child := range v {
-			out = append(out, extractTextFields(child)...)
+			out = append(out, extractInlineParts(child, parentKey)...)
 		}
 		return out
-	default:
+	case string:
+		if isContentTextKey(parentKey) {
+			if s := strings.TrimSpace(v); s != "" {
+				return []string{s}
+			}
+		}
+	}
+	return nil
+}
+
+func directText(v map[string]interface{}) string {
+	for _, key := range []string{"text", "content", "plainText", "plain_text", "value"} {
+		switch child := v[key].(type) {
+		case string:
+			return child
+		case map[string]interface{}:
+			if s := directText(child); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func linkMarkdown(v map[string]interface{}) string {
+	href := firstNonEmpty(
+		stringValue(v["href"]),
+		stringValue(v["url"]),
+		stringValue(nestedValue(v, "properties", "href")),
+	)
+	if href == "" {
+		if link, ok := v["link"].(map[string]interface{}); ok {
+			return linkMarkdown(link)
+		}
+		return ""
+	}
+	label := firstNonEmpty(
+		stringValue(v["label"]),
+		stringValue(v["title"]),
+		directText(v),
+		inlineText(v["children"]),
+		inlineText(v["elements"]),
+		href,
+	)
+	return fmt.Sprintf("[%s](%s)", escapeMarkdownLinkText(label), href)
+}
+
+func imageMarkdown(v map[string]interface{}) string {
+	imageNode := v
+	if nested, ok := v["image"].(map[string]interface{}); ok {
+		imageNode = nested
+	}
+	src := firstNonEmpty(
+		stringValue(imageNode["src"]),
+		stringValue(imageNode["url"]),
+		stringValue(imageNode["downloadUrl"]),
+		stringValue(nestedValue(imageNode, "properties", "src")),
+	)
+	if src == "" {
+		return ""
+	}
+	alt := firstNonEmpty(
+		stringValue(imageNode["alt"]),
+		stringValue(imageNode["title"]),
+		stringValue(imageNode["name"]),
+		"image",
+	)
+	return fmt.Sprintf("![%s](%s)", escapeMarkdownLinkText(alt), src)
+}
+
+func tableMarkdown(raw map[string]interface{}) string {
+	tableNode := raw
+	if nested, ok := raw["table"].(map[string]interface{}); ok {
+		tableNode = nested
+	}
+	rows := tableRows(tableNode["cells"])
+	if len(rows) == 0 {
+		rows = tableRows(tableNode["rows"])
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	cols := 0
+	for _, row := range rows {
+		if len(row) > cols {
+			cols = len(row)
+		}
+	}
+	if cols == 0 {
+		return ""
+	}
+	var b strings.Builder
+	writeTableRow(&b, rows[0], cols)
+	separator := make([]string, cols)
+	for i := range separator {
+		separator[i] = "---"
+	}
+	writeTableRow(&b, separator, cols)
+	for _, row := range rows[1:] {
+		writeTableRow(&b, row, cols)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func tableRows(value interface{}) [][]string {
+	rawRows, ok := value.([]interface{})
+	if !ok {
 		return nil
 	}
+	rows := make([][]string, 0, len(rawRows))
+	for _, rawRow := range rawRows {
+		cells, ok := rawRow.([]interface{})
+		if !ok {
+			continue
+		}
+		row := make([]string, 0, len(cells))
+		for _, cell := range cells {
+			row = append(row, sanitizeTableCell(tableCellText(cell)))
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func tableCellText(value interface{}) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return inlineText(value)
+}
+
+func writeTableRow(b *strings.Builder, row []string, cols int) {
+	b.WriteString("|")
+	for i := 0; i < cols; i++ {
+		cell := ""
+		if i < len(row) {
+			cell = row[i]
+		}
+		b.WriteString(" ")
+		b.WriteString(cell)
+		b.WriteString(" |")
+	}
+	b.WriteString("\n")
+}
+
+func sanitizeTableCell(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.TrimSpace(s)
+}
+
+func escapeMarkdownLinkText(s string) string {
+	s = strings.ReplaceAll(s, "[", "\\[")
+	s = strings.ReplaceAll(s, "]", "\\]")
+	return strings.TrimSpace(s)
+}
+
+func nestedValue(v map[string]interface{}, keys ...string) interface{} {
+	var cur interface{} = v
+	for _, key := range keys {
+		m, ok := cur.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		cur = m[key]
+	}
+	return cur
+}
+
+func stringValue(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func intValue(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
+func isContentTextKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "text", "content", "plaintext", "plain_text", "value", "cells":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNoiseTextKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "blockid", "block_id", "blocktype", "block_type", "type", "category", "extension", "url", "href", "src":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractTextFields(value interface{}) []string {
+	return extractInlineParts(value, "")
 }
 
 func firstNonEmpty(values ...string) string {
