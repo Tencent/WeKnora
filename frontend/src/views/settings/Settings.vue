@@ -1,8 +1,12 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="visible" class="settings-overlay">
-        <div class="settings-modal">
+      <div v-if="visible" class="settings-overlay" :class="{
+        'settings-overlay--collection': currentSection === 'agent-collection',
+      }">
+        <div class="settings-modal" :class="{
+          'settings-modal--collection': currentSection === 'agent-collection',
+        }">
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -71,7 +75,7 @@
             <div class="settings-content">
               <div class="content-wrapper" :class="{
                 'content-wrapper--wide': currentSection === 'members',
-                'content-wrapper--full': currentSection === 'system-global' || isIntegrationSection(currentSection),
+                'content-wrapper--full': currentSection === 'system-global' || currentSection === 'agent-collection' || isIntegrationSection(currentSection),
               }">
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
@@ -139,6 +143,10 @@
                     <SystemSettings />
                   </div>
 
+                  <div v-if="currentSection === 'agent-collection'" class="section">
+                    <AgentCollectionAdmin />
+                  </div>
+
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
                      用户的基本信息不该跟 owner 权限绑定。 -->
                   <div v-if="currentSection === 'userprofile'" class="section">
@@ -195,6 +203,7 @@ import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
+import AgentCollectionAdmin from './AgentCollectionAdmin.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
   INTEGRATION_PREVIEW_ITEMS,
@@ -259,7 +268,7 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   members: 'viewer',
 }
 
-const SYSTEM_ADMIN_SECTIONS = new Set(['system-global'])
+const SYSTEM_ADMIN_SECTIONS = new Set(['system-global', 'agent-collection'])
 const INTEGRATION_SECTION_PREFIX = 'integration-'
 
 const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
@@ -329,6 +338,7 @@ const navItems = computed(() => {
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
+    { key: 'agent-collection', icon: 'form', label: '用户信息采集' },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -391,7 +401,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['system-global', 'system']),
+      items: pickItems(['system-global', 'agent-collection', 'system']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -570,6 +580,13 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.settings-modal--collection {
+  width: calc(100vw - 24px);
+  max-width: 1320px;
+  height: min(860px, calc(100vh - 24px));
+  max-height: none;
 }
 
 /* 关闭按钮 */
@@ -780,6 +797,24 @@ onUnmounted(() => {
     width: 100%;
     padding: 30px 34px 40px;
     box-sizing: border-box;
+  }
+}
+
+@media (max-width: 800px) {
+  .settings-overlay--collection {
+    padding: 8px;
+  }
+
+  .settings-modal--collection {
+    width: calc(100vw - 16px);
+
+    .settings-sidebar {
+      width: 176px;
+    }
+
+    .content-wrapper--full {
+      padding: 20px 18px 32px;
+    }
   }
 }
 

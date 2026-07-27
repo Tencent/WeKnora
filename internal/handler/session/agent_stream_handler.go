@@ -112,6 +112,8 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
 	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
 	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
+	h.eventBus.On(event.EventUserInputRequired, h.handleUserInputRequired)
+	h.eventBus.On(event.EventUserInputResolved, h.handleUserInputResolved)
 }
 
 // handleThought handles agent thought events
@@ -365,6 +367,42 @@ func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt eve
 		Data:      meta,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append mcp oauth resolved event failed", "error", err)
+	}
+	return nil
+}
+
+// handleUserInputRequired persists an actionable structured question for SSE and replay.
+func (h *AgentStreamHandler) handleUserInputRequired(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.UserInputRequiredData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeUserInputRequired,
+		Content: "Agent requires structured user input", Done: true,
+		Timestamp: time.Now(), Data: meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append user input required event failed", "error", err)
+	}
+	return nil
+}
+
+// handleUserInputResolved persists the terminal state used to update the question card.
+func (h *AgentStreamHandler) handleUserInputResolved(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.UserInputResolvedData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeUserInputResolved,
+		Content: "Structured user input resolved", Done: true,
+		Timestamp: time.Now(), Data: meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append user input resolved event failed", "error", err)
 	}
 	return nil
 }

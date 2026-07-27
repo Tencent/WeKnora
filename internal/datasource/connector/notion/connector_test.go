@@ -29,6 +29,7 @@ func TestConnectorType(t *testing.T) {
 }
 
 func TestConnectorValidate(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -40,6 +41,7 @@ func TestConnectorValidate(t *testing.T) {
 }
 
 func TestConnectorValidate_BadToken(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, _ := fakeNotion()
 	defer ts.Close()
 
@@ -53,6 +55,7 @@ func TestConnectorValidate_BadToken(t *testing.T) {
 }
 
 func TestConnectorListResources(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -74,6 +77,7 @@ func TestConnectorListResources(t *testing.T) {
 }
 
 func TestConnectorFetchAll(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -109,6 +113,7 @@ func TestConnectorFetchAll(t *testing.T) {
 }
 
 func TestConnectorFetchAll_Database(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -152,6 +157,7 @@ func TestConnectorFetchAll_Database(t *testing.T) {
 // row by ID routes through fetchPage's record-detection branch and produces an
 // item via buildRecordItem (instead of being silently dropped as an empty page).
 func TestConnectorFetchAll_SingleRecord(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -175,6 +181,7 @@ func TestConnectorFetchAll_SingleRecord(t *testing.T) {
 }
 
 func TestConnectorFetchIncremental_NoChanges(t *testing.T) {
+	allowLoopbackForNotionTest(t)
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 

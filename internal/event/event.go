@@ -67,6 +67,10 @@ const (
 	EventMCPOAuthRequired EventType = "mcp_oauth_required"
 	EventMCPOAuthResolved EventType = "mcp_oauth_resolved"
 
+	// Structured user input pauses a live Web Agent until the session owner responds.
+	EventUserInputRequired EventType = "user_input_required"
+	EventUserInputResolved EventType = "user_input_resolved"
+
 	// Error events
 	EventError EventType = "error" // 错误事件
 

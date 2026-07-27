@@ -1,6 +1,12 @@
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
+import { getPendingUserInput } from '@/api/user-input'
+import {
+  historicalAskUserEvent,
+  pendingSnapshotToEvent,
+  reconcileStructuredQuestionEvents,
+} from '@/utils/structuredQuestionEvents'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -86,6 +92,24 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           timestamp: Date.now(),
           reason: 'user_requested',
         })
+      }
+    }
+  }
+
+  const restorePendingUserInput = async (sessionId: string) => {
+    if (!sessionId) return
+    try {
+      const snapshot = await getPendingUserInput(sessionId)
+      const message = findLastMessage(item => item.id === snapshot.assistant_message_id)
+        || getTrailingIncompleteAssistant()
+      if (!message) return
+      message.agentEventStream = reconcileStructuredQuestionEvents([
+        ...((message.agentEventStream as ChatMessage[] | undefined) || []),
+        pendingSnapshotToEvent(snapshot),
+      ])
+    } catch (error: any) {
+      if (error?.status !== 404 && error?.response?.status !== 404) {
+        log('[User Input] Failed to restore pending question', error)
       }
     }
   }
@@ -295,6 +319,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (toolCalls && Array.isArray(toolCalls)) {
           toolCalls.forEach((toolCall: ChatMessage) => {
             if (toolCall.name === 'final_answer') return
+            const historicalQuestion = historicalAskUserEvent(toolCall)
+            if (historicalQuestion) {
+              events.push(historicalQuestion)
+              return
+            }
             const result = toolCall.result as ChatMessage | undefined
             const resultData = result?.data as ChatMessage | undefined
             events.push({
@@ -508,7 +537,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       (data.response_type === 'thinking' ||
         data.response_type === 'answer' ||
         data.response_type === 'tool_call' ||
-        data.response_type === 'tool_approval_required')
+        data.response_type === 'tool_approval_required' ||
+        data.response_type === 'user_input_required')
     ) {
       log('[Agent Chunk] Closing loading for continued stream')
       loading.value = false
@@ -629,6 +659,29 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             e.canceled = d.canceled
           }
         })
+        break
+      }
+      case 'user_input_required': {
+        const event = {
+          type: 'user_input_required',
+          ...(dataPayload || {}),
+          resolved: false,
+        }
+        message.agentEventStream = reconcileStructuredQuestionEvents([
+          ...((message.agentEventStream as ChatMessage[] | undefined) || []),
+          event,
+        ])
+        break
+      }
+      case 'user_input_resolved': {
+        const event = {
+          type: 'user_input_resolved',
+          ...(dataPayload || {}),
+        }
+        message.agentEventStream = reconcileStructuredQuestionEvents([
+          ...((message.agentEventStream as ChatMessage[] | undefined) || []),
+          event,
+        ])
         break
       }
       case 'tool_call': {
@@ -1013,5 +1066,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     processStreamChunk,
     prepareForNewOutgoingMessage,
     markInFlightAssistantStopped,
+	  restorePendingUserInput,
   }
 }

@@ -129,6 +129,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolWebFetch:            "获取网页",
 	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
 	agenttools.ToolReadSkill:           "读取技能",
+	agenttools.ToolAskUser:             "询问用户",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints

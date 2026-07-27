@@ -88,6 +88,9 @@ func (s *sessionService) AgentQA(
 		logger.Warnf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
+	if err := s.prepareAgentCollection(ctx, req, summaryModel, eventBus); err != nil {
+		return err
+	}
 
 	// Get rerank model from custom agent config only when knowledge_search can
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
@@ -232,6 +235,7 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		InteractiveUserInputEnabled: interactiveUserInputEnabled(req.Channel),
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -460,12 +464,15 @@ func (s *sessionService) configureSkillsFromAgent(
 	if customAgent == nil {
 		return
 	}
-	// When sandbox is disabled, skills cannot be enabled (no script execution environment)
+	// Preloaded scripts need the compatibility sandbox; tenant scripts use the
+	// independent Runner and must not be disabled merely because local fallback is off.
 	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	if sandboxMode == "" || sandboxMode == "disabled" {
+	runnerConfigured := os.Getenv("WEKNORA_SKILL_RUNNER_URL") != "" && os.Getenv("WEKNORA_SKILL_RUNNER_CREDENTIAL") != ""
+	if (sandboxMode == "" || sandboxMode == "disabled") && !runnerConfigured {
 		agentConfig.SkillsEnabled = false
 		agentConfig.SkillDirs = nil
 		agentConfig.AllowedSkills = nil
+		agentConfig.AllowedSkillRefs = nil
 		logger.Infof(ctx, "Sandbox is disabled: skills are not available")
 		return
 	}
@@ -479,12 +486,16 @@ func (s *sessionService) configureSkillsFromAgent(
 		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
 	case "selected":
 		// Enable only selected skills
-		if len(customAgent.Config.SelectedSkills) > 0 {
+		refs := append([]types.SkillReference(nil), customAgent.Config.SelectedSkillRefs...)
+		for _, name := range customAgent.Config.SelectedSkills {
+			refs = append(refs, types.SkillReference{Source: types.SkillSourcePreloaded, SkillID: name})
+		}
+		if len(refs) > 0 {
 			agentConfig.SkillsEnabled = true
 			agentConfig.SkillDirs = []string{dir}
 			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
-			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
-				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
+			agentConfig.AllowedSkillRefs = refs
+			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d canonical skill references", len(refs))
 		} else {
 			agentConfig.SkillsEnabled = false
 			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")

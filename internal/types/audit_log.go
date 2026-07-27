@@ -115,7 +115,11 @@ const (
 	// the idempotent path (target was already not an admin) so an audit
 	// reader can distinguish a real revoke from a noop attempt.
 	// TenantID=0 because the change is system-scope.
-	AuditActionSystemAdminRevoked AuditAction = "system.admin_revoked"
+	AuditActionSystemAdminRevoked      AuditAction = "system.admin_revoked"
+	AuditActionAgentCollectionViewed   AuditAction = "agent_collection.viewed"
+	AuditActionAgentCollectionUpdated  AuditAction = "agent_collection.updated"
+	AuditActionAgentCollectionPurged   AuditAction = "agent_collection.purged"
+	AuditActionAgentCollectionExported AuditAction = "agent_collection.exported"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

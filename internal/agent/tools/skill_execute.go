@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
@@ -41,10 +42,11 @@ var executeSkillScriptTool = BaseTool{
 
 // ExecuteSkillScriptInput defines the input parameters for the execute_skill_script tool
 type ExecuteSkillScriptInput struct {
-	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
-	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
-	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
-	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
+	SkillRef   *SkillRefInput `json:"skill_ref,omitempty" jsonschema:"Canonical skill reference"`
+	SkillName  string         `json:"skill_name,omitempty" jsonschema:"Legacy preloaded skill name"`
+	ScriptPath string         `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
+	Args       []string       `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
+	Input      string         `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
 }
 
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox
@@ -75,11 +77,11 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 		}, nil
 	}
 
-	// Validate required fields
-	if input.SkillName == "" {
+	ref, refErr := canonicalSkillRef(input.SkillRef, input.SkillName)
+	if refErr != nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "skill_name is required",
+			Error:   refErr.Error(),
 		}, nil
 	}
 
@@ -97,12 +99,16 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 			Error:   "Skills are not enabled",
 		}, nil
 	}
+	if recovery, ok := t.missingPreloadedScriptRecovery(ctx, ref, input.ScriptPath); ok {
+		logger.Warnf(ctx, "[Tool][ExecuteSkillScript] Recovered missing script: %s/%s", ref.SkillID, input.ScriptPath)
+		return recovery, nil
+	}
 
 	// Execute the script in sandbox
 	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Executing script: %s/%s with args: %v, input length: %d",
 		input.SkillName, input.ScriptPath, input.Args, len(input.Input))
 
-	result, err := t.skillManager.ExecuteScript(ctx, input.SkillName, input.ScriptPath, input.Args, input.Input)
+	result, err := t.skillManager.ExecuteScriptRef(ctx, ref, input.ScriptPath, input.Args, input.Input)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][ExecuteSkillScript] Script execution failed: %v", err)
 		return &types.ToolResult{
@@ -156,7 +162,7 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 	success := result.IsSuccess()
 
 	resultData := map[string]interface{}{
-		"skill_name":  input.SkillName,
+		"skill_ref":   ref,
 		"script_path": input.ScriptPath,
 		"args":        input.Args,
 		"exit_code":   result.ExitCode,
@@ -182,6 +188,60 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 			return ""
 		}(),
 	}, nil
+}
+
+func (t *ExecuteSkillScriptTool) missingPreloadedScriptRecovery(
+	ctx context.Context,
+	ref types.SkillReference,
+	requestedPath string,
+) (*types.ToolResult, bool) {
+	if ref.Source != types.SkillSourcePreloaded {
+		return nil, false
+	}
+	cleanPath := filepath.Clean(requestedPath)
+	if filepath.IsAbs(cleanPath) || strings.HasPrefix(cleanPath, "..") {
+		return nil, false
+	}
+	files, err := t.skillManager.ListSkillFilesRef(ctx, ref)
+	if err != nil {
+		return nil, false
+	}
+	availableScripts := make([]string, 0)
+	for _, file := range files {
+		if filepath.Clean(file) == cleanPath {
+			return nil, false
+		}
+		if skills.IsScript(file) {
+			availableScripts = append(availableScripts, file)
+		}
+	}
+	return missingScriptRecoveryResult(ref.SkillID, requestedPath, availableScripts), true
+}
+
+func missingScriptRecoveryResult(
+	skillName string,
+	requestedPath string,
+	availableScripts []string,
+) *types.ToolResult {
+	message := fmt.Sprintf(
+		"The loaded skill %q is instruction-only and does not contain %q. "+
+			"Do not retry execute_skill_script or invent script paths. Continue by following SKILL.md "+
+			"with available knowledge-base or web-search tools; otherwise provide a non-real-time analysis and state the limitation.",
+		skillName, requestedPath,
+	)
+	if len(availableScripts) > 0 {
+		message = fmt.Sprintf(
+			"Script %q does not exist in skill %q. Do not retry that path. Available scripts: %s.",
+			requestedPath, skillName, strings.Join(availableScripts, ", "),
+		)
+	}
+	return &types.ToolResult{
+		Success: true,
+		Output:  message,
+		Data: map[string]interface{}{
+			"executed": false, "recovery": "missing_script", "available_scripts": availableScripts,
+		},
+	}
 }
 
 // Cleanup releases any resources

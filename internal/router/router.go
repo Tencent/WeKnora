@@ -53,6 +53,7 @@ type RouterParams struct {
 	TenantService                interfaces.TenantService
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
 	TenantMemberService          interfaces.TenantMemberService
+	TenantMemberRepository       interfaces.TenantMemberRepository
 	TenantMemberHandler          *handler.TenantMemberHandler
 	TenantInvitationHandler      *handler.TenantInvitationHandler
 	AuditLogHandler              *handler.AuditLogHandler
@@ -66,9 +67,11 @@ type RouterParams struct {
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
 	SystemHandler                *handler.SystemHandler
+	SystemAgentCollectionHandler *handler.SystemAgentCollectionHandler
 	MCPServiceHandler            *handler.MCPServiceHandler
 	MCPCredentialsHandler        *handler.MCPCredentialsHandler
 	MCPOAuthHandler              *handler.MCPOAuthHandler
+	UserInputHandler             *handler.UserInputHandler
 	WebSearchHandler             *handler.WebSearchHandler
 	WebSearchProviderHandler     *handler.WebSearchProviderHandler
 	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
@@ -224,14 +227,18 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
-		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
+		RegisterSystemAdminRoutes(
+			v1, params.SystemHandler, params.AuditLogHandler, params.SystemAgentCollectionHandler, rbacGuards,
+		)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
+		RegisterUserInputRoutes(v1, params.UserInputHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
-		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
+		RegisterSkillRoutes(v1, params.SkillHandler, params.TenantMemberRepository, rbacGuards)
+		RegisterTenantSkillSystemAdminRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
@@ -855,6 +862,7 @@ func RegisterSystemAdminRoutes(
 	r *gin.RouterGroup,
 	handler *handler.SystemHandler,
 	auditLogHandler *handler.AuditLogHandler,
+	collectionHandler *handler.SystemAgentCollectionHandler,
 	g *rbacGuards,
 ) {
 	// Apply SystemAdmin() at the group level — every route below inherits
@@ -892,6 +900,15 @@ func RegisterSystemAdminRoutes(
 		// absent, matching RegisterTenantRoutes' /audit-log handling.
 		if auditLogHandler != nil {
 			adminRoutes.GET("/audit-log", auditLogHandler.ListSystemAuditLog)
+		}
+		if collectionHandler != nil {
+			adminRoutes.GET("/collection-profiles", collectionHandler.ListProfiles)
+			adminRoutes.GET("/collection-profiles/:profile_id", collectionHandler.GetProfile)
+			adminRoutes.GET("/collection-profiles/:profile_id/history", collectionHandler.ListHistory)
+			adminRoutes.PUT("/collection-profiles/:profile_id/fields/:field_key", collectionHandler.UpdateField)
+			adminRoutes.DELETE("/collection-profiles/:profile_id", collectionHandler.PurgeProfile)
+			adminRoutes.POST("/collection-profiles/export", collectionHandler.CreateExport)
+			adminRoutes.GET("/collection-exports/:export_id", collectionHandler.GetExport)
 		}
 	}
 }
@@ -957,6 +974,13 @@ func RegisterMCPServiceRoutes(
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id/cancel", g.Viewer(), oauthHandler.CancelMCPOAuth)
 	}
+}
+
+// RegisterUserInputRoutes registers JWT-only live Agent interaction endpoints.
+func RegisterUserInputRoutes(r *gin.RouterGroup, userInputHandler *handler.UserInputHandler, g *rbacGuards) {
+	agentInteraction := r.Group("/agent")
+	agentInteraction.GET("/user-inputs/pending", g.Viewer(), userInputHandler.GetPending)
+	agentInteraction.POST("/user-inputs/:pending_id", g.Viewer(), userInputHandler.Resolve)
 }
 
 // RegisterWebSearchRoutes registers web search routes
@@ -1084,12 +1108,27 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 // PR 2 currently only exposes a read-only `ListSkills`; gated to
 // Viewer+. Future skill upload / enable endpoints must use Admin+ since
 // skills run sandboxed code on tenant resources.
-func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
+func RegisterSkillRoutes(
+	r *gin.RouterGroup,
+	skillHandler *handler.SkillHandler,
+	members interfaces.TenantMemberRepository,
+	g *rbacGuards,
+) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills — Viewer+
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
+		skills.GET("/:id", g.Viewer(), skillHandler.GetSkill)
+		manager := middleware.RequireTenantSkillManager(members)
+		skills.POST("/upload", manager, skillHandler.UploadSkill)
+		skills.PUT("/:id/package", manager, skillHandler.UpdatePackage)
+		skills.PATCH("/:id/status", manager, skillHandler.SetSkillStatus)
+		skills.PATCH("/status/batch", manager, skillHandler.SetSkillStatuses)
+		skills.DELETE("/:id", manager, skillHandler.DeleteSkill)
 	}
+}
+
+func RegisterTenantSkillSystemAdminRoutes(r *gin.RouterGroup, h *handler.SkillHandler, g *rbacGuards) {
+	r.GET("/system/admin/tenant-skills", g.SystemAdmin(), h.ListTenantSkillsForSystemAdmin)
 }
 
 // RegisterOrganizationRoutes registers organization and sharing routes

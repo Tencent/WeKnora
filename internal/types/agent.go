@@ -45,9 +45,10 @@ type AgentConfig struct {
 	RetainRetrievalHistory bool `json:"retain_retrieval_history"`
 
 	// Skills configuration (Progressive Disclosure pattern)
-	SkillsEnabled bool     `json:"skills_enabled"` // Whether skills are enabled (default: false)
-	SkillDirs     []string `json:"skill_dirs"`     // Directories to search for skills
-	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
+	SkillsEnabled    bool             `json:"skills_enabled"` // Whether skills are enabled (default: false)
+	SkillDirs        []string         `json:"skill_dirs"`     // Directories to search for skills
+	AllowedSkills    []string         `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
+	AllowedSkillRefs []SkillReference `json:"allowed_skill_refs,omitempty"`
 
 	// Runtime-only fields (not persisted)
 	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
@@ -69,6 +70,9 @@ type AgentConfig struct {
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.
 	ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"`
+
+	// InteractiveUserInputEnabled is runtime-only and true only for live Web requests.
+	InteractiveUserInputEnabled bool `json:"-"`
 }
 
 // SessionAgentConfig represents session-level agent configuration

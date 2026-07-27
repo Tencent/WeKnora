@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Manager manages skills lifecycle including discovery, loading, and script execution
@@ -17,6 +18,9 @@ type Manager struct {
 	// Configuration
 	skillDirs     []string
 	allowedSkills []string // Empty means all skills are allowed
+	allowedRefs   []types.SkillReference
+	resolver      RuntimeResolver
+	runtimeScope  RuntimeScope
 	enabled       bool
 
 	// Cache
@@ -26,9 +30,12 @@ type Manager struct {
 
 // ManagerConfig holds configuration for the skill manager
 type ManagerConfig struct {
-	SkillDirs     []string // Directories to search for skills
-	AllowedSkills []string // Skill names whitelist (empty = allow all)
-	Enabled       bool     // Whether skills are enabled
+	SkillDirs        []string // Directories to search for skills
+	AllowedSkills    []string // Skill names whitelist (empty = allow all)
+	Enabled          bool     // Whether skills are enabled
+	AllowedSkillRefs []types.SkillReference
+	Resolver         RuntimeResolver
+	RuntimeScope     RuntimeScope
 }
 
 // NewManager creates a new skill manager with the given configuration
@@ -44,8 +51,60 @@ func NewManager(config *ManagerConfig, sandboxMgr sandbox.Manager) *Manager {
 		sandboxMgr:    sandboxMgr,
 		skillDirs:     config.SkillDirs,
 		allowedSkills: config.AllowedSkills,
+		allowedRefs:   config.AllowedSkillRefs,
+		resolver:      config.Resolver,
+		runtimeScope:  config.RuntimeScope,
 		enabled:       config.Enabled,
 	}
+}
+
+func (m *Manager) LoadSkillRef(ctx context.Context, ref types.SkillReference) (*Skill, error) {
+	if !m.enabled {
+		return nil, fmt.Errorf("skills are not enabled")
+	}
+	if ref.Source == types.SkillSourcePreloaded {
+		return m.LoadSkill(ctx, ref.SkillID)
+	}
+	if m.resolver == nil || !referenceAllowed(m.allowedRefs, ref) {
+		return nil, ErrSkillNotAllowed
+	}
+	scope := m.runtimeScope
+	scope.Allowed = m.allowedRefs
+	return m.resolver.LoadInstructions(ctx, scope, ref)
+}
+
+func (m *Manager) ReadSkillFileRef(ctx context.Context, ref types.SkillReference, filePath string) (string, error) {
+	if ref.Source == types.SkillSourcePreloaded {
+		return m.ReadSkillFile(ctx, ref.SkillID, filePath)
+	}
+	if m.resolver == nil || !referenceAllowed(m.allowedRefs, ref) {
+		return "", ErrSkillNotAllowed
+	}
+	scope := m.runtimeScope
+	scope.Allowed = m.allowedRefs
+	return m.resolver.ReadFile(ctx, scope, ref, filePath)
+}
+
+func (m *Manager) ListSkillFilesRef(ctx context.Context, ref types.SkillReference) ([]string, error) {
+	if ref.Source == types.SkillSourcePreloaded {
+		return m.ListSkillFiles(ctx, ref.SkillID)
+	}
+	if _, err := m.LoadSkillRef(ctx, ref); err != nil {
+		return nil, err
+	}
+	return []string{SkillFileName}, nil
+}
+
+func (m *Manager) ExecuteScriptRef(ctx context.Context, ref types.SkillReference, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
+	if ref.Source == types.SkillSourcePreloaded {
+		return m.ExecuteScript(ctx, ref.SkillID, scriptPath, args, stdin)
+	}
+	if m.resolver == nil || !referenceAllowed(m.allowedRefs, ref) {
+		return nil, ErrSkillNotAllowed
+	}
+	scope := m.runtimeScope
+	scope.Allowed = m.allowedRefs
+	return m.resolver.Execute(ctx, scope, ref, scriptPath, args, stdin)
 }
 
 // IsEnabled returns whether skills are enabled

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ var (
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
 	repo           interfaces.CustomAgentRepository
+	collectionRepo agentCollectionCleaner
 	chunkRepo      interfaces.ChunkRepository
 	kbService      interfaces.KnowledgeBaseService
 	kbShareService interfaces.KBShareService
@@ -37,6 +39,7 @@ type customAgentService struct {
 // NewCustomAgentService creates a new custom agent service
 func NewCustomAgentService(
 	repo interfaces.CustomAgentRepository,
+	collectionRepo interfaces.AgentCollectionRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
@@ -46,6 +49,7 @@ func NewCustomAgentService(
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
+		collectionRepo: collectionRepo,
 		chunkRepo:      chunkRepo,
 		kbService:      kbService,
 		kbShareService: kbShareService,
@@ -60,6 +64,10 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	// Validate required fields
 	if strings.TrimSpace(agent.Name) == "" {
 		return nil, ErrAgentNameRequired
+	}
+	normalizeSelectedSkillRefs(&agent.Config)
+	if err := prepareNewAgentCollectionConfig(&agent.Config); err != nil {
+		return nil, err
 	}
 
 	// Generate UUID and set creation timestamps
@@ -233,6 +241,7 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")
 	}
+	normalizeSelectedSkillRefs(&agent.Config)
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
@@ -263,6 +272,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	if strings.TrimSpace(agent.Name) == "" {
 		return nil, ErrAgentNameRequired
 	}
+	if err := prepareUpdatedAgentCollectionConfig(existingAgent.Config, &agent.Config); err != nil {
+		return nil, err
+	}
 
 	// Update fields
 	existingAgent.Name = agent.Name
@@ -289,6 +301,7 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 // updateBuiltinAgent updates a built-in agent's configuration (but not basic info)
 func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *types.CustomAgent, tenantID uint64) (*types.CustomAgent, error) {
+	normalizeSelectedSkillRefs(&agent.Config)
 	// Get the default built-in agent from registry (i18n-aware)
 	defaultAgent := types.GetBuiltinAgentWithContext(ctx, agent.ID, tenantID)
 	if defaultAgent == nil {
@@ -302,6 +315,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	}
 
 	if existingAgent != nil {
+		if err := prepareUpdatedAgentCollectionConfig(existingAgent.Config, &agent.Config); err != nil {
+			return nil, err
+		}
 		// Update existing record - only update config, keep basic info unchanged
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
@@ -318,6 +334,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 
 		logger.Infof(ctx, "Built-in agent config updated successfully, ID: %s", agent.ID)
 		return existingAgent, nil
+	}
+	if err := prepareNewAgentCollectionConfig(&agent.Config); err != nil {
+		return nil, err
 	}
 
 	// Create new record for built-in agent with customized config
@@ -346,6 +365,22 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 
 	logger.Infof(ctx, "Built-in agent config record created successfully, ID: %s", agent.ID)
 	return newAgent, nil
+}
+
+func normalizeSelectedSkillRefs(config *types.CustomAgentConfig) {
+	if config == nil {
+		return
+	}
+	if len(config.SelectedSkillRefs) == 0 {
+		for _, name := range config.SelectedSkills {
+			if name != "" {
+				config.SelectedSkillRefs = append(config.SelectedSkillRefs, types.SkillReference{Source: types.SkillSourcePreloaded, SkillID: name})
+			}
+		}
+	}
+	if len(config.SelectedSkillRefs) > 0 {
+		config.SelectedSkills = nil
+	}
 }
 
 // DeleteAgent deletes an agent
@@ -387,6 +422,11 @@ func (s *customAgentService) DeleteAgent(ctx context.Context, id string) error {
 			"agent_id": id,
 		})
 		return err
+	}
+	if s.collectionRepo != nil {
+		if err := s.collectionRepo.SoftDeleteByAgent(ctx, id); err != nil {
+			return fmt.Errorf("soft delete agent collection profiles: %w", err)
+		}
 	}
 
 	logger.Infof(ctx, "Custom agent deleted successfully, ID: %s", id)

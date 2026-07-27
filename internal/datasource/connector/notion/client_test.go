@@ -5,16 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
-
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func mustTestClient(t *testing.T, token, baseURL string) *notionClient {
 	t.Helper()
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
-	secutils.ResetSSRFWhitelistForTest()
+	allowLoopbackForNotionTest(t)
 
 	client, err := newClient(token, baseURL)
 	if err != nil {
@@ -349,8 +347,9 @@ func TestClientQueryDatabaseAll(t *testing.T) {
 var _ = time.Now
 
 func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
-	secutils.ResetSSRFWhitelistForTest()
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	t.Setenv("SSRF_WHITELIST", "")
+	t.Setenv("SSRF_WHITELIST_EXTRA", "")
+	resetSSRFWhitelistForTest(t)
 
 	client, err := newClient("test-token", "https://api.notion.com")
 	if err != nil {
@@ -359,5 +358,8 @@ func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
 	_, err = client.DownloadFile(context.Background(), "http://127.0.0.1/secret")
 	if err == nil {
 		t.Fatal("expected loopback attachment URL to be rejected")
+	}
+	if !strings.Contains(err.Error(), "attachment URL rejected") {
+		t.Fatalf("expected SSRF rejection, got: %v", err)
 	}
 }

@@ -98,6 +98,19 @@
                   v-bind="embedAuthProps" />
               </div>
 
+              <div v-else-if="event.type === 'user_input_required'" class="tool-event">
+                <StructuredQuestionCard :pending-id="event.pending_id" :question="event.question || ''"
+                  :mode="event.mode || 'single_choice'" :question-group-id="event.question_group_id || ''"
+                  :field-key="event.field_key" :schema-version="Number(event.schema_version || 0)"
+                  :question-index="Number(event.question_index || 1)" :question-total="Number(event.question_total || 1)"
+                  :completed-count="event.completed_count" :remaining-count="event.remaining_count"
+                  :options="event.options || []" :allow-other="event.allow_other !== false"
+                  :allow-skip="event.allow_skip !== false" :resolved="event.resolved" :status="event.status"
+                  :selected-options="event.selected_options || []" :resolved-other-text="event.other_text || ''"
+                  :resolved-value="event.value" :validation="event.validation || {}"
+                  :reason="event.reason || ''" />
+              </div>
+
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div class="action-card" :class="{
@@ -200,7 +213,7 @@
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
     <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
       class="streaming-steps-container" :class="{
-        'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
+        'streaming-steps-constrained': !answerEverStarted && !isConversationDone && !hasActiveStructuredQuestion,
         'is-streaming-timeline': showStreamingTimeline
       }">
       <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
@@ -258,6 +271,19 @@
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
                 :canceled="event.canceled" v-bind="embedAuthProps" />
+            </div>
+
+            <div v-else-if="event.type === 'user_input_required'" class="tool-event">
+              <StructuredQuestionCard :pending-id="event.pending_id" :question="event.question || ''"
+                :mode="event.mode || 'single_choice'" :question-group-id="event.question_group_id || ''"
+                :field-key="event.field_key" :schema-version="Number(event.schema_version || 0)"
+                :question-index="Number(event.question_index || 1)" :question-total="Number(event.question_total || 1)"
+                :completed-count="event.completed_count" :remaining-count="event.remaining_count"
+                :options="event.options || []" :allow-other="event.allow_other !== false"
+                :allow-skip="event.allow_skip !== false" :resolved="event.resolved" :status="event.status"
+                :selected-options="event.selected_options || []" :resolved-other-text="event.other_text || ''"
+                :resolved-value="event.value" :validation="event.validation || {}"
+                :reason="event.reason || ''" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -453,6 +479,7 @@ import 'katex/dist/katex.min.css';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
+import StructuredQuestionCard from './StructuredQuestionCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -471,6 +498,7 @@ import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
+import { reconcileStructuredQuestionEvents } from '@/utils/structuredQuestionEvents';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
@@ -532,6 +560,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
+  ask_user: 'agentStream.tools.askUser',
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
@@ -1420,7 +1449,9 @@ const getThinkingSummary = (event: any): string => {
 
 // Helper: build the full result list with plan_task_change injections and thinking merging
 const buildFullEventList = (stream: any[]) => {
-  const validStream = stream.filter((e: any) => e && typeof e === 'object' && e.type);
+  const validStream = reconcileStructuredQuestionEvents(
+    stream.filter((e: any) => e && typeof e === 'object' && e.type),
+  );
   let lastTask: string | null = null;
   const result: any[] = [];
 
@@ -1672,6 +1703,10 @@ const displayEvents = computed(() => {
   return result;
 });
 
+const hasActiveStructuredQuestion = computed(() => displayEvents.value.some((event: any) =>
+  event?.type === 'user_input_required' && !event.resolved && !event.status
+));
+
 // Get unique key for event
 const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
@@ -1682,6 +1717,9 @@ const getEventKey = (event: any, index: number): string => {
   }
   if (event.type === 'mcp_oauth_required' && event.pending_id) {
     return `mcp-oauth-${event.pending_id}`;
+  }
+  if (event.type === 'user_input_required' && event.pending_id) {
+    return `question-${event.pending_id}`;
   }
   return `event-${index}-${event.type || 'unknown'}`;
 };

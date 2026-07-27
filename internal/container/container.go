@@ -34,6 +34,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/userinput"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
@@ -160,6 +161,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
+	must(container.Provide(repository.NewAgentCollectionRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(repository.NewAgentShareRepository))
@@ -213,6 +215,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPServiceService))
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
+	must(container.Provide(service.NewAgentCollectionService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 	must(container.Provide(memoryService.NewMemoryService))
 	must(container.Provide(service.NewWikiPageService))
@@ -253,6 +256,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
+	must(container.Provide(func(cfg *config.Config, rdb *redis.Client) *userinput.Gate {
+		return userinput.NewGate(cfg, rdb)
+	}))
+	must(container.Provide(func(g *userinput.Gate) userinput.Requester { return g }))
+	must(container.Provide(func(g *userinput.Gate) userinput.Resolver { return g }))
+	must(registerSkillComponents(container))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -344,9 +353,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))
+	must(container.Provide(handler.NewSystemAgentCollectionHandler))
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
+	must(container.Provide(handler.NewUserInputHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
 	must(container.Provide(handler.NewWebSearchProviderCredentialsHandler))
 	must(container.Provide(handler.NewDataSourceCredentialsHandler))
@@ -355,8 +366,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
-	must(container.Provide(service.NewSkillService))
-	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
 
 	// Data source handler
@@ -388,6 +397,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
+}
+
+func registerSkillComponents(container *dig.Container) error {
+	for _, constructor := range []interface{}{
+		repository.NewTenantSkillRepository,
+		service.NewConfiguredSkillService,
+		handler.NewSkillHandler,
+	} {
+		if err := container.Provide(constructor); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // registerChatLocalImageResolver wires the chat package's LocalImageResolver

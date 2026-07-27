@@ -40,6 +40,7 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      - tenant-skills:/data/skills
       # Optional: declarative built-in models. Copy config/builtin_models.yaml.example
       # to config/builtin_models.yaml, edit it for your deployment, then
       # uncomment the line below. See docs/BUILTIN_MODELS.md.
@@ -183,6 +184,9 @@ services:
       - WEKNORA_SANDBOX_MODE=${WEKNORA_SANDBOX_MODE:-docker}
       - WEKNORA_SANDBOX_TIMEOUT=${WEKNORA_SANDBOX_TIMEOUT:-60}
       - WEKNORA_SANDBOX_DOCKER_IMAGE=${WEKNORA_SANDBOX_DOCKER_IMAGE:-wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}}
+      - WEKNORA_TENANT_SKILLS_DIR=/data/skills
+      - WEKNORA_SKILL_RUNNER_URL=http://skill-runner:8091
+      - WEKNORA_SKILL_RUNNER_CREDENTIAL=${WEKNORA_SKILL_RUNNER_CREDENTIAL:-}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
@@ -206,6 +210,7 @@ services:
         condition: service_healthy
     networks:
       - WeKnora-network
+      - skill-runner-internal
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -221,6 +226,29 @@ services:
       - full
     command: ["true"]
     restart: "no"
+
+  skill-runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.skill-runner
+    container_name: WeKnora-skill-runner
+    expose:
+      - "8091"
+    environment:
+      - WEKNORA_TENANT_SKILLS_DIR=/data/skills
+      - WEKNORA_TENANT_SKILLS_VOLUME=${COMPOSE_PROJECT_NAME:-weknora}_tenant-skills
+      - WEKNORA_SKILL_RUNNER_CREDENTIAL=${WEKNORA_SKILL_RUNNER_CREDENTIAL:-}
+    volumes:
+      - tenant-skills:/data/skills:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - skill-runner-internal
+    restart: unless-stopped
 
   docreader:
     image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
@@ -789,6 +817,8 @@ services:
 networks:
   WeKnora-network:
     driver: bridge
+  skill-runner-internal:
+    internal: true
 
 volumes:
   postgres-data:
@@ -807,3 +837,5 @@ volumes:
   langfuse_clickhouse_logs:
   langfuse_minio_data:
   searxng_config:
+  tenant-skills:
+    name: ${COMPOSE_PROJECT_NAME:-weknora}_tenant-skills

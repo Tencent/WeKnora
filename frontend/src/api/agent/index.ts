@@ -8,7 +8,51 @@ import { get, post, put, del } from "../../utils/request";
 // 'custom'       : 完全自定义（不应用预设）
 export type AgentType = 'rag-qa' | 'wiki-qa' | 'hybrid-rag-wiki' | 'data-analysis' | 'custom';
 
+export type AgentCollectionFieldType =
+  | 'single_choice' | 'multiple_choice' | 'short_text'
+  | 'long_text' | 'number' | 'date';
+
+export interface AgentCollectionOption { id: string; label: string }
+export interface AgentCollectionValidation {
+  min_length?: number;
+  max_length?: number;
+  min_number?: number;
+  max_number?: number;
+  min_date?: string;
+  max_date?: string;
+}
+export interface AgentCollectionCondition {
+  field: string;
+  operator: 'equals' | 'not_equals' | 'contains' | 'not_empty' | 'empty';
+  value?: unknown;
+}
+export interface AgentCollectionField {
+  key: string;
+  label: string;
+  description?: string;
+  type: AgentCollectionFieldType;
+  required: boolean;
+  enabled: boolean;
+  order: number;
+  options?: AgentCollectionOption[];
+  validation?: AgentCollectionValidation;
+  visible_when?: AgentCollectionCondition;
+}
+
+export interface SkillReference {
+  source: 'preloaded' | 'tenant';
+  skill_id: string;
+}
+
 export interface CustomAgentConfig {
+  // ===== 用户信息采集 =====
+  collection_enabled?: boolean;
+  collection_goal?: string;
+  collection_schema_version?: number;
+  collection_extract_from_messages?: boolean;
+  collection_extraction_threshold?: number;
+  collection_collect_optional_during_intake?: boolean;
+  collection_fields?: AgentCollectionField[];
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
   // 智能推理模式下的类型预设，用于一键应用"系统提示词 + 工具 + KB 兼容性"组合
@@ -41,6 +85,7 @@ export interface CustomAgentConfig {
   // Skills选择模式：all=全部预装, selected=指定, none=不使用
   skills_selection_mode?: 'all' | 'selected' | 'none';
   selected_skills?: string[];       // 选择的Skill名称列表
+  selected_skill_refs?: SkillReference[]; // 带来源的稳定 Skill 引用
 
   // ===== 知识库设置 =====
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库

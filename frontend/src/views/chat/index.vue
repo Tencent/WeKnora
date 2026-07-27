@@ -452,6 +452,7 @@ const {
     processStreamChunk,
     prepareForNewOutgoingMessage,
     markInFlightAssistantStopped,
+	  restorePendingUserInput,
 } = useChatStreamHandler({
     messagesList,
     loading,
@@ -539,6 +540,7 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         }
         created_at.value = nextCursor;
         await handleMsgList(batch, isScrollType, scrollHeight);
+		if (!isScrollType) await restorePendingUserInput(String(session_id.value || ''));
     }).catch((err) => {
         console.error('Failed to load messages:', err);
         if (isScrollType) {

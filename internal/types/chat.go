@@ -109,6 +109,10 @@ const (
 	// MCPOAuthResolved: authorization completed / timed out / canceled;
 	// informational for UI replay.
 	ResponseTypeMCPOAuthResolved ResponseType = "mcp_oauth_resolved"
+	// UserInputRequired: ask_user is waiting for the session owner to answer.
+	ResponseTypeUserInputRequired ResponseType = "user_input_required"
+	// UserInputResolved: the structured question reached a terminal state.
+	ResponseTypeUserInputResolved ResponseType = "user_input_resolved"
 )
 
 // StreamResponse stream response

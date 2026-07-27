@@ -143,7 +143,8 @@ type CustomAgentConfig struct {
 	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
 	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
 	// Selected skill names (only used when SkillsSelectionMode is "selected")
-	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`
+	SelectedSkills    []string         `yaml:"selected_skills,omitempty" json:"selected_skills,omitempty"`
+	SelectedSkillRefs []SkillReference `yaml:"selected_skill_refs,omitempty" json:"selected_skill_refs,omitempty"`
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
 	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode"`
@@ -244,6 +245,15 @@ type CustomAgentConfig struct {
 	// intents (greeting, chitchat, etc.). Empty values fall back to templates
 	// under config/prompt_templates/intent_prompts.yaml.
 	IntentPrompts map[string]string `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
+
+	// ===== Structured Information Collection =====
+	CollectionEnabled                     bool                   `yaml:"collection_enabled" json:"collection_enabled"`
+	CollectionGoal                        string                 `yaml:"collection_goal,omitempty" json:"collection_goal,omitempty"`
+	CollectionSchemaVersion               int64                  `yaml:"collection_schema_version,omitempty" json:"collection_schema_version,omitempty"`
+	CollectionExtractFromMessages         bool                   `yaml:"collection_extract_from_messages" json:"collection_extract_from_messages"`
+	CollectionExtractionThreshold         float64                `yaml:"collection_extraction_threshold,omitempty" json:"collection_extraction_threshold,omitempty"`
+	CollectionCollectOptionalDuringIntake bool                   `yaml:"collection_collect_optional_during_intake" json:"collection_collect_optional_during_intake"`
+	CollectionFields                      []AgentCollectionField `yaml:"collection_fields,omitempty" json:"collection_fields,omitempty"`
 
 	// ===== Suggested Prompts =====
 	// 推荐问题列表，用于在前端对话面板展示快捷提问

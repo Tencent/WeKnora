@@ -47,7 +47,7 @@ var transientErrorMarkers = []string{
 	"429", "rate limit",
 	"500", "502", "503", "504",
 	"overloaded", "timeout", "timed out",
-	"connection", "server error", "temporarily unavailable",
+	"connection", "eof", "server error", "temporarily unavailable",
 }
 
 // isTransientError checks whether an error is likely transient and worth retrying.

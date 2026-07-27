@@ -41,7 +41,7 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		if !ok {
 			continue
 		}
-		targetType, _ := prop["type"].(string)
+		targetType := schemaTargetType(prop)
 		if targetType == "" {
 			continue
 		}

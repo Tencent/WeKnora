@@ -52,27 +52,30 @@ func getJwtSecret() string {
 
 // userService implements the UserService interface
 type userService struct {
-	userRepo      interfaces.UserRepository
-	tokenRepo     interfaces.AuthTokenRepository
-	tenantService interfaces.TenantService
-	memberService interfaces.TenantMemberService
-	config        *config.Config
+	userRepo       interfaces.UserRepository
+	collectionRepo agentCollectionCleaner
+	tokenRepo      interfaces.AuthTokenRepository
+	tenantService  interfaces.TenantService
+	memberService  interfaces.TenantMemberService
+	config         *config.Config
 }
 
 // NewUserService creates a new user service instance
 func NewUserService(
 	configInfo *config.Config,
 	userRepo interfaces.UserRepository,
+	collectionRepo interfaces.AgentCollectionRepository,
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
 	memberService interfaces.TenantMemberService,
 ) interfaces.UserService {
 	return &userService{
-		userRepo:      userRepo,
-		tokenRepo:     tokenRepo,
-		tenantService: tenantService,
-		memberService: memberService,
-		config:        configInfo,
+		userRepo:       userRepo,
+		collectionRepo: collectionRepo,
+		tokenRepo:      tokenRepo,
+		tenantService:  tenantService,
+		memberService:  memberService,
+		config:         configInfo,
 	}
 }
 
@@ -563,7 +566,16 @@ func (s *userService) UpdateUserPreferences(
 
 // DeleteUser deletes a user
 func (s *userService) DeleteUser(ctx context.Context, id string) error {
-	return s.userRepo.DeleteUser(ctx, id)
+	if err := s.userRepo.DeleteUser(ctx, id); err != nil {
+		return err
+	}
+	if s.collectionRepo == nil {
+		return nil
+	}
+	if err := s.collectionRepo.SoftDeleteByUser(ctx, id); err != nil {
+		return fmt.Errorf("soft delete user collection profiles: %w", err)
+	}
+	return nil
 }
 
 // ChangePassword changes user password

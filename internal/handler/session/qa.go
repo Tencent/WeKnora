@@ -72,6 +72,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		WebSearchEnabled:   rc.webSearchEnabled,
 		EnableMemory:       rc.enableMemory,
 		Attachments:        rc.attachments,
+		Channel:            rc.channel,
 	}
 }
 

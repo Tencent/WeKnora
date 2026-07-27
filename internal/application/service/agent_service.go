@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/agent/userinput"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,6 +21,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/skillpkg"
+	"github.com/Tencent/WeKnora/internal/skillrunner"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -101,6 +106,8 @@ type agentService struct {
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
 	toolApprovalGate      approval.MCPApproval
+	userInputRequester    userinput.Requester
+	tenantSkillRepo       interfaces.TenantSkillRepository
 }
 
 // NewAgentService creates a new agent service
@@ -121,6 +128,8 @@ func NewAgentService(
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	toolApprovalGate approval.MCPApproval,
+	userInputRequester userinput.Requester,
+	tenantSkillRepo interfaces.TenantSkillRepository,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -139,6 +148,8 @@ func NewAgentService(
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
 		toolApprovalGate:      toolApprovalGate,
+		userInputRequester:    userInputRequester,
+		tenantSkillRepo:       tenantSkillRepo,
 	}
 }
 
@@ -171,6 +182,7 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
+	s.registerUserInputTool(toolRegistry, config)
 	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
 
 	// 3. Resolve knowledge base and selected document metadata
@@ -224,6 +236,17 @@ func (s *agentService) CreateAgentEngine(
 	}
 
 	return engine, nil
+}
+
+func interactiveUserInputEnabled(channel string) bool {
+	return strings.EqualFold(strings.TrimSpace(channel), "web")
+}
+
+func (s *agentService) registerUserInputTool(registry *tools.ToolRegistry, config *types.AgentConfig) {
+	if registry == nil || config == nil || !config.InteractiveUserInputEnabled || s.userInputRequester == nil {
+		return
+	}
+	registry.RegisterTool(tools.NewAskUserTool(s.userInputRequester))
 }
 
 // registerMCPTools registers MCP tools from enabled services for this tenant.
@@ -381,9 +404,28 @@ func (s *agentService) initializeSkillsManager(
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
-		SkillDirs:     config.SkillDirs,
-		AllowedSkills: config.AllowedSkills,
-		Enabled:       config.SkillsEnabled,
+		SkillDirs:        config.SkillDirs,
+		AllowedSkills:    config.AllowedSkills,
+		AllowedSkillRefs: config.AllowedSkillRefs,
+		Enabled:          config.SkillsEnabled,
+	}
+	if s.tenantSkillRepo != nil && len(config.AllowedSkillRefs) > 0 {
+		root := os.Getenv("WEKNORA_TENANT_SKILLS_DIR")
+		if root == "" {
+			root = "/data/skills"
+		}
+		storage := skillpkg.NewFileStorage(root, skillpkg.NewValidator(skillpkg.DefaultLimits()))
+		preloaded := skills.NewLoader(config.SkillDirs)
+		loader := skills.NewTenantLoader(s.tenantSkillRepo, storage, root, preloaded)
+		var runner skills.TenantRunner
+		runnerURL, credential := os.Getenv("WEKNORA_SKILL_RUNNER_URL"), os.Getenv("WEKNORA_SKILL_RUNNER_CREDENTIAL")
+		if runnerURL != "" && credential != "" {
+			runner = skillrunner.NewClient(runnerURL, credential, time.Duration(sandboxTimeout+5)*time.Second)
+		}
+		skillsConfig.Resolver = skills.NewTenantResolver(loader, s.tenantSkillRepo, runner)
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		userID, _ := types.UserIDFromContext(ctx)
+		skillsConfig.RuntimeScope = skills.RuntimeScope{TenantID: tenantID, UserID: userID, Allowed: config.AllowedSkillRefs}
 	}
 
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
@@ -398,7 +440,7 @@ func (s *agentService) initializeSkillsManager(
 	toolRegistry.RegisterTool(readSkillTool)
 	logger.Infof(ctx, "Registered read_skill tool")
 
-	if sandboxMode != "disabled" {
+	if sandboxMode != "disabled" || len(config.AllowedSkillRefs) > 0 {
 		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
 		toolRegistry.RegisterTool(executeSkillTool)
 		logger.Infof(ctx, "Registered execute_skill_script tool")

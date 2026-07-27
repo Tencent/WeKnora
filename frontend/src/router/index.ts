@@ -185,6 +185,12 @@ const router = createRouter({
           redirect: { path: "/platform/settings", query: { section: "system-global" } },
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
         },
+        {
+          path: "system/collection-profiles",
+          name: "systemAgentCollectionProfiles",
+          redirect: { path: "/platform/settings", query: { section: "agent-collection" } },
+          meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
+        },
       ],
     },
     // Dev-only markdown rendering test page

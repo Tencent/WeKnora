@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -151,6 +152,32 @@ func TestManagerWithExampleSkills(t *testing.T) {
 	}
 
 	t.Logf("Skill info: name=%s, files=%d", info.Name, len(info.Files))
+}
+
+func TestCaseLookupRequiresStructuredIntakeForSparseDismissalQuery(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("Failed to get current file path")
+	}
+
+	skillsDir := filepath.Join(filepath.Dir(filename), "..", "..", "..", "skills", "preloaded")
+	loader := NewLoader([]string{skillsDir})
+	skill, err := loader.LoadSkillInstructions("查案例")
+	if err != nil {
+		t.Fatalf("Failed to load case lookup skill: %v", err)
+	}
+
+	requiredInstructions := []string{
+		"ask_user",
+		"case-lookup-dismissal-intake",
+		"question_total=3",
+		"不得改用普通文本一次性列出问题",
+	}
+	for _, instruction := range requiredInstructions {
+		if !strings.Contains(skill.Instructions, instruction) {
+			t.Errorf("case lookup skill is missing structured intake instruction %q", instruction)
+		}
+	}
 }
 
 func truncate(s string, maxLen int) string {

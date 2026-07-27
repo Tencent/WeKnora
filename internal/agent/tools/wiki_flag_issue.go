@@ -72,7 +72,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
-	
+
 	// Default to first KB ID if multiple (normally there's only one in this context)
 	kbID := t.kbIDs[0]
 

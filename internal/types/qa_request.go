@@ -21,4 +21,5 @@ type QARequest struct {
 	EnableMemory       bool               // Whether memory feature is enabled
 	QuotedContext      string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
 	Attachments        MessageAttachments // File attachments (processed and ready for prompt injection)
+	Channel            string             // Source channel; interactive user input is Web-only
 }

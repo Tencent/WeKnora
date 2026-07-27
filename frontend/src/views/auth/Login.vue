@@ -97,7 +97,7 @@
 
     <!-- Logo - Top Left -->
     <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
-      <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
+      <img src="@/assets/img/weknora.png" alt="君穗律师事务所" class="logo-image" />
     </a>
 
     <!-- Header Links - Top Right -->
@@ -1141,7 +1141,7 @@ onMounted(async () => {
   cursor: pointer;
 
   .logo-image {
-    width: 120px;
+    width: 190px;
     height: auto;
   }
 }
@@ -1593,7 +1593,7 @@ onMounted(async () => {
     left: 40px;
 
     .logo-image {
-      width: 100px;
+      width: 170px;
     }
   }
 
@@ -1641,7 +1641,7 @@ onMounted(async () => {
     left: 30px;
 
     .logo-image {
-      width: 80px;
+      width: 150px;
     }
   }
 
@@ -1701,7 +1701,7 @@ onMounted(async () => {
     left: 20px;
 
     .logo-image {
-      width: 70px;
+      width: 130px;
     }
   }
 
@@ -1767,10 +1767,6 @@ html[theme-mode="dark"] {
 
   .connection-line {
     stroke: rgba(255, 255, 255, 0.25);
-  }
-
-  .header-logo .logo-image {
-    filter: invert(1) hue-rotate(180deg) brightness(1.1);
   }
 
   .header-link {

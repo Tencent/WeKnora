@@ -30,6 +30,9 @@ export function getAgentToolIconName(
   if (toolName === 'todo_write') {
     return 'task'
   }
+  if (toolName === 'ask_user') {
+    return 'chat-bubble-help'
+  }
   if (toolName === 'image_analysis' || toolName === 'query_understand') {
     return 'ai-search'
   }

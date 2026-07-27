@@ -88,7 +88,7 @@ func validateProperty(name string, val any, prop map[string]any) []ValidationErr
 
 	var errs []ValidationError
 
-	targetType, _ := prop["type"].(string)
+	targetType := schemaTargetType(prop)
 
 	// Type check
 	if targetType != "" && !checkType(val, targetType) {
@@ -150,6 +150,21 @@ func validateProperty(name string, val any, prop map[string]any) []ValidationErr
 	}
 
 	return errs
+}
+
+// schemaTargetType selects the concrete type from schemas that also allow null.
+func schemaTargetType(prop map[string]any) string {
+	switch value := prop["type"].(type) {
+	case string:
+		return value
+	case []any:
+		for _, item := range value {
+			if candidate, ok := item.(string); ok && candidate != "null" {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 // checkType verifies that val matches the expected JSON Schema type.

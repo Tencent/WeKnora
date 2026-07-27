@@ -36,8 +36,30 @@ var readSkillTool = BaseTool{
 
 // ReadSkillInput defines the input parameters for the read_skill tool
 type ReadSkillInput struct {
-	SkillName string `json:"skill_name" jsonschema:"Name of the skill to read"`
-	FilePath  string `json:"file_path,omitempty" jsonschema:"Optional relative path to a specific file within the skill directory"`
+	SkillRef  *SkillRefInput `json:"skill_ref,omitempty" jsonschema:"Canonical skill reference"`
+	SkillName string         `json:"skill_name,omitempty" jsonschema:"Legacy preloaded skill name"`
+	FilePath  string         `json:"file_path,omitempty" jsonschema:"Optional relative path to a specific file within the skill directory"`
+}
+
+type SkillRefInput struct {
+	Source  types.SkillSource `json:"source"`
+	SkillID string            `json:"skill_id"`
+}
+
+func canonicalSkillRef(ref *SkillRefInput, legacyName string) (types.SkillReference, error) {
+	if ref != nil {
+		if ref.Source != types.SkillSourcePreloaded && ref.Source != types.SkillSourceTenant {
+			return types.SkillReference{}, fmt.Errorf("invalid skill source")
+		}
+		if ref.SkillID == "" {
+			return types.SkillReference{}, fmt.Errorf("skill_id is required")
+		}
+		return types.SkillReference{Source: ref.Source, SkillID: ref.SkillID}, nil
+	}
+	if legacyName == "" {
+		return types.SkillReference{}, fmt.Errorf("skill_ref or skill_name is required")
+	}
+	return types.SkillReference{Source: types.SkillSourcePreloaded, SkillID: legacyName}, nil
 }
 
 // ReadSkillTool allows the agent to read skill content on demand
@@ -68,11 +90,11 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 
-	// Validate skill name
-	if input.SkillName == "" {
+	ref, refErr := canonicalSkillRef(input.SkillRef, input.SkillName)
+	if refErr != nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "skill_name is required",
+			Error:   refErr.Error(),
 		}, nil
 	}
 
@@ -89,7 +111,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	if input.FilePath != "" {
 		// Read a specific file from the skill directory
-		content, err := t.skillManager.ReadSkillFile(ctx, input.SkillName, input.FilePath)
+		content, err := t.skillManager.ReadSkillFileRef(ctx, ref, input.FilePath)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][ReadSkill] Failed to read skill file: %v", err)
 			return &types.ToolResult{
@@ -98,17 +120,17 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			}, nil
 		}
 
-		builder.WriteString(fmt.Sprintf("=== Skill File: %s/%s ===\n\n", input.SkillName, input.FilePath))
+		builder.WriteString(fmt.Sprintf("=== Skill File: %s/%s ===\n\n", ref.SkillID, input.FilePath))
 		builder.WriteString(content)
 
-		resultData["skill_name"] = input.SkillName
+		resultData["skill_ref"] = ref
 		resultData["file_path"] = input.FilePath
 		resultData["content"] = content
 		resultData["content_length"] = len(content)
 
 	} else {
 		// Read the main skill instructions (SKILL.md)
-		skill, err := t.skillManager.LoadSkill(ctx, input.SkillName)
+		skill, err := t.skillManager.LoadSkillRef(ctx, ref)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][ReadSkill] Failed to load skill: %v", err)
 			return &types.ToolResult{
@@ -118,7 +140,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}
 
 		// List available files in the skill directory
-		files, err := t.skillManager.ListSkillFiles(ctx, input.SkillName)
+		files, err := t.skillManager.ListSkillFilesRef(ctx, ref)
 		if err != nil {
 			files = []string{} // Non-fatal error
 		}
@@ -150,7 +172,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		resultData["files"] = files
 	}
 
-	logger.Infof(ctx, "[Tool][ReadSkill] Successfully read skill: %s", input.SkillName)
+	logger.Infof(ctx, "[Tool][ReadSkill] Successfully read skill: %s/%s", ref.Source, ref.SkillID)
 
 	return &types.ToolResult{
 		Success: true,

@@ -2,6 +2,8 @@ import { get } from "../../utils/request";
 
 // Skill信息
 export interface SkillInfo {
+  source?: 'preloaded' | 'tenant';
+  skill_id?: string;
   name: string;
   description: string;
 }

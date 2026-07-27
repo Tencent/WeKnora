@@ -18,6 +18,7 @@ const (
 	ToolDataSchema          = "data_schema"
 	ToolWebSearch           = "web_search"
 	ToolWebFetch            = "web_fetch"
+	ToolAskUser             = "ask_user"
 	// Skills-related tools (only available when skills are enabled)
 	ToolExecuteSkillScript = "execute_skill_script"
 	ToolReadSkill          = "read_skill"

@@ -1,0 +1,13 @@
+FROM golang:1.26-bookworm AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/skill-runner ./cmd/skill-runner
+COPY internal/skillrunner ./internal/skillrunner
+RUN --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 go build -o /out/skill-runner ./cmd/skill-runner
+
+FROM debian:12.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl docker.io && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/skill-runner /usr/local/bin/skill-runner
+EXPOSE 8091
+ENTRYPOINT ["/usr/local/bin/skill-runner"]

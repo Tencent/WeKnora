@@ -9,7 +9,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func allowLoopbackForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
 
 // mockFileService is a minimal FileService implementation for testing.
 type mockFileService struct {
@@ -43,7 +52,7 @@ func (m *mockFileService) CopyFile(ctx context.Context, srcPath string, tenantID
 
 func TestResolveRemoteImages_NormalDownload(t *testing.T) {
 	// Whitelist localhost for this test so the test server is reachable
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	allowLoopbackForTest(t)
 
 	// Create a test HTTP server that serves a real PNG image.
 	pngData := createTestPNG(200, 200)
@@ -108,7 +117,7 @@ func TestResolveRemoteImages_SSRFBlocked(t *testing.T) {
 
 func TestResolveRemoteImages_NonImageContentType(t *testing.T) {
 	// Whitelist localhost for this test so the test server is reachable
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	allowLoopbackForTest(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -157,7 +166,7 @@ func TestResolveRemoteImages_ProviderSchemeSkipped(t *testing.T) {
 
 func TestResolveRemoteImages_MultipleImages(t *testing.T) {
 	// Whitelist localhost for this test so the test server is reachable
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	allowLoopbackForTest(t)
 
 	pngData := createTestPNG(256, 256)
 	callCount := 0
@@ -212,7 +221,7 @@ func TestResolveRemoteImages_NoImages(t *testing.T) {
 
 func TestResolveRemoteImages_Server404(t *testing.T) {
 	// Whitelist localhost for this test so the test server is reachable
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	allowLoopbackForTest(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

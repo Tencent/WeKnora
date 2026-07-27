@@ -265,3 +265,52 @@ type MCPOAuthResolvedData struct {
 	TimedOut   bool   `json:"timed_out,omitempty"`
 	Canceled   bool   `json:"canceled,omitempty"`
 }
+
+// UserInputOptionData is one validated choice shown in a structured question.
+type UserInputOptionData struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// UserInputRequiredData is emitted when ask_user pauses a live Agent run.
+type UserInputRequiredData struct {
+	PendingID          string                `json:"pending_id"`
+	TenantID           uint64                `json:"tenant_id"`
+	SessionID          string                `json:"session_id"`
+	AssistantMessageID string                `json:"assistant_message_id"`
+	ToolCallID         string                `json:"tool_call_id"`
+	RequestID          string                `json:"request_id,omitempty"`
+	Question           string                `json:"question"`
+	Mode               string                `json:"mode"`
+	FieldKey           string                `json:"field_key,omitempty"`
+	SchemaVersion      int64                 `json:"schema_version,omitempty"`
+	QuestionGroupID    string                `json:"question_group_id"`
+	QuestionIndex      int                   `json:"question_index"`
+	QuestionTotal      int                   `json:"question_total"`
+	CompletedCount     int                   `json:"completed_count,omitempty"`
+	RemainingCount     int                   `json:"remaining_count,omitempty"`
+	Options            []UserInputOptionData `json:"options"`
+	Validation         interface{}           `json:"validation,omitempty"`
+	AllowOther         bool                  `json:"allow_other"`
+	AllowSkip          bool                  `json:"allow_skip"`
+	TimeoutSeconds     int                   `json:"timeout_seconds"`
+	RequestedAtUnix    int64                 `json:"requested_at"`
+}
+
+// UserInputResolvedData updates a persisted question card after resolution.
+type UserInputResolvedData struct {
+	PendingID       string                `json:"pending_id"`
+	Status          string                `json:"status"`
+	FieldKey        string                `json:"field_key,omitempty"`
+	SchemaVersion   int64                 `json:"schema_version,omitempty"`
+	QuestionGroupID string                `json:"question_group_id"`
+	QuestionIndex   int                   `json:"question_index"`
+	QuestionTotal   int                   `json:"question_total"`
+	CompletedCount  int                   `json:"completed_count,omitempty"`
+	RemainingCount  int                   `json:"remaining_count,omitempty"`
+	SelectedOptions []UserInputOptionData `json:"selected_options,omitempty"`
+	OtherText       string                `json:"other_text,omitempty"`
+	Value           interface{}           `json:"value,omitempty"`
+	Reason          string                `json:"reason,omitempty"`
+}

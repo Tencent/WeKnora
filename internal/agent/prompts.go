@@ -247,6 +247,12 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
 
 	builder.WriteString("**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n")
 
+	builder.WriteString("#### Skill and Evidence Boundaries (MANDATORY)\n\n")
+	builder.WriteString("- Skills provide workflows and procedures; selecting a skill does not bind or create a knowledge base.\n")
+	builder.WriteString("- If a loaded skill explicitly permits an offline, non-real-time, or preliminary fallback when KB/Web sources are unavailable, follow that fallback using the user's facts and the skill's framework. This is an explicit exception to retrieval-first behavior for procedural analysis only.\n")
+	builder.WriteString("- Do not refuse solely because no knowledge base is bound or because retrieval tools have no targets. Do not call knowledge-base tools merely because they are listed when the runtime context shows no bound knowledge bases.\n")
+	builder.WriteString("- Clearly disclose the lack of real-time retrieval when it matters. Never invent citations, case names, case numbers, or retrieval results, and never claim that a search occurred when it did not.\n\n")
+
 	builder.WriteString("#### Available Skills\n\n")
 	for i, skill := range skillsMetadata {
 		builder.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, skill.Name))

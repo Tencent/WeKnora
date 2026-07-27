@@ -1013,8 +1013,8 @@
                         <p class="desc">{{ $t('agent.editor.selectSkillsDesc') }}</p>
                       </div>
                       <div class="setting-control setting-control-full">
-                        <t-checkbox-group v-model="formData.config.selected_skills" class="skills-checkbox-group">
-                          <t-checkbox v-for="skill in skillOptions" :key="skill.name" :value="skill.name"
+                        <t-checkbox-group v-model="selectedSkillKeysModel" class="skills-checkbox-group">
+                          <t-checkbox v-for="skill in skillOptions" :key="skillReferenceKey(skill)" :value="skillReferenceKey(skill)"
                             class="skill-checkbox-item">
                             <div class="skill-item-content">
                               <span class="skill-name">{{ skill.name }}</span>
@@ -1357,6 +1357,11 @@
                   </div>
                 </div>
 
+                <div v-show="currentSection === 'collection'" class="section">
+                  <AgentCollectionConfig v-model="formData.config" :read-only="props.readOnly || isBuiltinAgent"
+                    @validity="collectionConfigValid = $event" />
+                </div>
+
                 <!-- 共享管理（仅编辑模式且非内置智能体） -->
                 <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin"
                   v-show="currentSection === 'share'" class="section">
@@ -1420,6 +1425,9 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
+import AgentCollectionConfig from './components/AgentCollectionConfig.vue';
+import { ensureCollectionDefaults } from './agentCollectionConfig';
+import { selectedSkillKeys, skillReferenceKey, skillReferencesFromKeys } from './agentSkillSelection';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
@@ -1487,6 +1495,7 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+const collectionConfigValid = ref(true);
 const contentWrapperRef = ref<HTMLElement | null>(null);
 const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
 let highlightClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1576,7 +1585,7 @@ const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
 const intentPromptTemplates = ref<PromptTemplate[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
-const skillOptions = ref<{ name: string; description: string }[]>([]);
+const skillOptions = ref<SkillInfo[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
 const skillsAvailable = ref(false);
 // 存储引擎可用状态（用于图片存储 provider 选择）
@@ -1633,6 +1642,16 @@ const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
 // Skills 选择模式：all=全部, selected=指定, none=不使用
 const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
+const selectedSkillKeysModel = computed({
+  get: () => selectedSkillKeys(
+    formData.value.config.selected_skill_refs,
+    formData.value.config.selected_skills,
+  ),
+  set: (keys: string[]) => {
+    formData.value.config.selected_skill_refs = skillReferencesFromKeys(keys);
+    formData.value.config.selected_skills = [];
+  },
+});
 
 // 可用工具列表（与后台 internal/agent/tools/definitions.go 保持一致）
 // group 决定 UI 分组：base / rag / wiki_read / wiki_edit / wiki_issue / data
@@ -1942,6 +1961,7 @@ const navItems = computed(() => {
   if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
   }
+  items.push({ key: 'collection', icon: 'form', label: '信息采集' });
   // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
@@ -1968,7 +1988,7 @@ const navGroups = computed(() => {
     {
       key: 'capability',
       label: t('agentEditor.navGroups.capability'),
-      items: pickItems(['multimodal', 'tools', 'mcp', 'skills']),
+      items: pickItems(['multimodal', 'tools', 'mcp', 'skills', 'collection']),
     },
     {
       key: 'integration',
@@ -2007,6 +2027,7 @@ const defaultFormData = {
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
+    selected_skill_refs: [],
     // 知识库设置：新建智能体默认选择 "全部知识库"，
     // 让用户无需先去勾选 KB 即可上手；如有需要可改为 "selected" / "none"。
     kb_selection_mode: 'all' as 'all' | 'selected' | 'none',
@@ -2052,6 +2073,13 @@ const defaultFormData = {
     // 已废弃字段（保留兼容）
     welcome_message: '',
     suggested_prompts: [] as string[],
+    collection_enabled: false,
+    collection_goal: '',
+    collection_schema_version: 1,
+    collection_extract_from_messages: true,
+    collection_extraction_threshold: 0.85,
+    collection_collect_optional_during_intake: false,
+    collection_fields: [],
   }
 };
 
@@ -2566,6 +2594,7 @@ watch(() => props.visible, async (val) => {
 
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      ensureCollectionDefaults(agentData.config);
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
       }
@@ -2580,6 +2609,7 @@ watch(() => props.visible, async (val) => {
         agentData.config.mcp_auth_wait_timeout = 600;
       }
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
+      if (!agentData.config.selected_skill_refs) agentData.config.selected_skill_refs = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
@@ -2711,7 +2741,7 @@ const initSkillsSelectionMode = () => {
   if (formData.value.config.skills_selection_mode) {
     // 如果有保存的模式，直接使用
     skillsSelectionMode.value = formData.value.config.skills_selection_mode;
-  } else if (formData.value.config.selected_skills?.length > 0) {
+  } else if (selectedSkillKeysModel.value.length > 0) {
     // 有指定 Skills
     skillsSelectionMode.value = 'selected';
   } else {
@@ -2786,9 +2816,11 @@ watch(skillsSelectionMode, (mode) => {
   if (mode === 'none') {
     // 不使用 Skills，清空相关配置
     formData.value.config.selected_skills = [];
+    formData.value.config.selected_skill_refs = [];
   } else if (mode === 'all') {
     // 全部 Skills，清空指定列表
     formData.value.config.selected_skills = [];
+    formData.value.config.selected_skill_refs = [];
   }
   // selected 模式保持 selected_skills 不变
 });
@@ -3823,6 +3855,11 @@ const hasPlaceholder = (text: string | undefined, placeholder: string): boolean 
 };
 
 const handleSave = async () => {
+  if (!collectionConfigValid.value) {
+    MessagePlugin.error('请先修正信息采集配置');
+    currentSection.value = 'collection';
+    return;
+  }
   // 验证必填项（内置智能体不验证名称和系统提示词）
   if (!isBuiltinAgent.value) {
     if (!formData.value.name || !formData.value.name.trim()) {
