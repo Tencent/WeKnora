@@ -2,6 +2,10 @@ package service
 
 import (
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSanitizeManualDownloadFilename covers the filename-sanitization logic used
@@ -92,4 +96,100 @@ func TestSanitizeManualDownloadFilename(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newManualKnowledgeService builds a knowledgeService wired to the stub folder
+// service, mirroring the file/URL create-test harness in knowledge_create_test.go.
+// Status defaults to "draft" so the publish/enqueue path is skipped.
+func newManualKnowledgeService(repo *createKnowledgeFileRepoStub) *knowledgeService {
+	return &knowledgeService{
+		repo:          repo,
+		folderService: &createKnowledgeFolderServiceStub{repo: repo},
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       &createKnowledgeFileServiceStub{},
+	}
+}
+
+func TestCreateKnowledgeFromManualAssignsCurrentFolder(t *testing.T) {
+	repo := &createKnowledgeFileRepoStub{}
+	svc := newManualKnowledgeService(repo)
+
+	knowledge, err := svc.CreateKnowledgeFromManual(
+		newCreateKnowledgeFileContext(), "kb-1",
+		&types.ManualKnowledgePayload{Title: "Manual Doc", Content: "Hello world", Status: "draft"},
+		"web", "folder-current",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.Equal(t, "folder-current", knowledge.FolderID)
+	require.Equal(t, "folder-current", repo.createdKnowledge.FolderID)
+}
+
+func TestCreateKnowledgeFromManualAcceptsRootFolder(t *testing.T) {
+	repo := &createKnowledgeFileRepoStub{}
+	svc := newManualKnowledgeService(repo)
+
+	knowledge, err := svc.CreateKnowledgeFromManual(
+		newCreateKnowledgeFileContext(), "kb-1",
+		&types.ManualKnowledgePayload{Title: "Manual Doc", Content: "Hello world", Status: "draft"},
+		"web", types.FolderRootID,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, knowledge)
+	require.Empty(t, knowledge.FolderID)
+	require.Empty(t, repo.createdKnowledge.FolderID)
+}
+
+// TestCreateKnowledgeFromManualRejectsInvalidFolder uses the real folder
+// service harness so the existing folder-validation path (validateTargetFolder
+// inside CreateKnowledgeInFolder) is exercised end-to-end through the manual
+// create entry point.
+func TestCreateKnowledgeFromManualRejectsInvalidFolder(t *testing.T) {
+	folderSvc, ctx, db := newKnowledgeFolderServiceHarness(t)
+	svc := &knowledgeService{
+		repo:          repository.NewKnowledgeRepository(db),
+		folderService: folderSvc,
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       &createKnowledgeFileServiceStub{},
+	}
+
+	_, err := svc.CreateKnowledgeFromManual(
+		ctx, "kb-1",
+		&types.ManualKnowledgePayload{Title: "Manual Doc", Content: "Hello world", Status: "draft"},
+		"web", "missing-folder",
+	)
+
+	require.ErrorIs(t, err, repository.ErrKnowledgeFolderNotFound)
+	var count int64
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("knowledge_base_id = ?", "kb-1").Count(&count).Error)
+	require.Zero(t, count, "invalid folder must not persist a knowledge record")
+}
+
+func TestCreateKnowledgeFromManualRejectsCrossKBFolder(t *testing.T) {
+	folderSvc, ctx, db := newKnowledgeFolderServiceHarness(t)
+	require.NoError(t, db.Exec("INSERT INTO knowledge_bases (id, tenant_id) VALUES ('kb-2', 1)").Error)
+	foreign := &types.KnowledgeFolder{
+		ID: "folder-kb-2", TenantID: 1, KnowledgeBaseID: "kb-2", ParentID: types.FolderRootID,
+		Name: "foreign", Path: "/folder-kb-2", Depth: 1,
+	}
+	require.NoError(t, db.Create(foreign).Error)
+	svc := &knowledgeService{
+		repo:          repository.NewKnowledgeRepository(db),
+		folderService: folderSvc,
+		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:       &createKnowledgeFileServiceStub{},
+	}
+
+	_, err := svc.CreateKnowledgeFromManual(
+		ctx, "kb-1",
+		&types.ManualKnowledgePayload{Title: "Manual Doc", Content: "Hello world", Status: "draft"},
+		"web", foreign.ID,
+	)
+
+	require.ErrorIs(t, err, repository.ErrKnowledgeFolderNotFound)
+	var count int64
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("knowledge_base_id = ?", "kb-1").Count(&count).Error)
+	require.Zero(t, count, "cross-KB folder must not persist a knowledge record")
 }

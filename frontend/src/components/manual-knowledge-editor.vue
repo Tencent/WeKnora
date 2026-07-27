@@ -620,6 +620,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       status: string
       tag_ids?: string[]
       process_config?: KnowledgeProcessOverrides
+      folder_id?: string
     } = {
       title: form.title.trim(),
       content: form.content,
@@ -627,6 +628,9 @@ const handleSave = async (targetStatus: ManualStatus) => {
     }
     if (tagIdsToUpload && tagIdsToUpload.length > 0) {
       payload.tag_ids = tagIdsToUpload
+    }
+    if (mode.value === 'create') {
+      payload.folder_id = uiStore.manualEditorFolderId
     }
 
     if (targetStatus === 'publish') {
@@ -653,6 +657,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
             content: payload.content,
             tagIds: tagIdsToUpload,
           },
+          targetLocationLabel: uiStore.manualEditorTargetLocationLabel,
         })
         payload.process_config = confirmResult.processConfig
       } catch {

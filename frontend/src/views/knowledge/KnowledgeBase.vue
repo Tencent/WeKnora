@@ -31,8 +31,6 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
-  batchDeleteKnowledge,
-  batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
@@ -40,11 +38,13 @@ import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
-import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import FileSystemBatchBar from './components/FileSystemBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import { knowledgeFolderApi } from '@/api/knowledge-base/folders';
+import { buildUploadDirectoryManifest } from './utils/uploadDirectoryManifest';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
@@ -57,6 +57,26 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import useKnowledgeFolders from '@/hooks/useKnowledgeFolders';
+import useFolderEditing from './useFolderEditing';
+import useFolderOperations, { evaluateReparseLimit } from './useFolderOperations';
+import FolderPickerDialog from './components/FolderPickerDialog.vue';
+import FolderDeleteDialog from './components/FolderDeleteDialog.vue';
+import FolderBreadcrumb from './components/FolderBreadcrumb.vue';
+import FolderNavigationPanel from './components/FolderNavigationPanel.vue';
+import FolderGridItems from './components/FolderGridItems.vue';
+import FolderListRows from './components/FolderListRows.vue';
+import type { FolderActionType } from './components/FolderTree.vue';
+import type { FileSystemSelection, KnowledgeFolder } from '@/types/knowledgeFolder';
+import { serializeFolderForBrowse } from '@/types/knowledgeFolder';
+import {
+  createQueryGeneration,
+  formatKnowledgeFolderRouteQuery,
+  parseKnowledgeFolderRouteQuery,
+  shouldCommitQueryResult,
+  stableFiltersSignature,
+} from './queryContext';
+import { buildRenderedSelectionKeys, descendantIds, folderPathItems, searchFolders, sortDirectFolders, selectionCount } from './folderModel';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -303,6 +323,498 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 
+// --- Folder navigation + inline editing ---
+// The folder composable owns direct-folders / tree / breadcrumb data and the
+// refresh helpers. The editing composable owns the page-level inline edit
+// state machine ({ mode, folderId, value, error } | null). Full folder
+// rendering integration (FolderGridItems / FolderListRows / nav shell slots)
+// is wired across the integration; this adds the state machine, entry-point
+// handlers, query-transition cancel, and the Viewer gate.
+const folders = useKnowledgeFolders();
+const folderEditing = useFolderEditing();
+const folderOperations = useFolderOperations();
+// Destructure the refs/computeds the template needs as top-level bindings so
+// Vue auto-unwraps them. `folders` / `folderOperations` are plain objects
+// returned from composables; nested refs on a plain object do NOT auto-unwrap
+// in the template, so binding folders.tree directly would pass the Ref object.
+const {
+  tree: folderTree,
+  index: folderIndex,
+  treeLoading: folderTreeLoading,
+  directFolders: folderDirectFolders,
+  treeVisible: folderTreeVisible,
+  expandedFolderIds: folderExpandedIds,
+  breadcrumb: folderBreadcrumb,
+  directLoading: folderDirectLoading,
+  currentError: folderCurrentError,
+  currentErrorStatus: folderCurrentErrorStatus,
+  treeError: folderTreeError,
+  isFolderNotFoundStatus,
+  setTreeVisible: setFolderTreeVisible,
+  toggleExpanded: toggleFolderExpanded,
+} = folders;
+const { moving: folderMoving, deleting: folderDeleting } = folderOperations;
+// Folder-editing computed views (template auto-unwraps top-level bindings).
+const { renamingFolderId: folderRenamingId, renameError: folderRenameError } = folderEditing;
+
+// Current folder / search derived from the route query (root is "" - the
+// __root__ sentinel is an API-boundary concern only and never surfaces into
+// UI state per queryContext). These drive folder navigation and the
+// query-transition edit-cancel watcher below.
+const routeFolderState = computed(() => parseKnowledgeFolderRouteQuery(route.query));
+const currentFolderId = computed(() => routeFolderState.value.folderId);
+const currentSearchTerm = computed(() => routeFolderState.value.searchTerm);
+
+// Viewer gate: only users who can edit the KB may enter folder edit mode.
+// The folder components also hide their action menus / checkboxes when
+// `editable` is false, so the entry points are not reachable for Viewers.
+const folderEditable = computed(() => canEdit.value);
+
+// --- Query coordinator ---
+// URL `q` is the single source of truth for the search term; `currentSearchTerm`
+// (derived from route `q`) drives both the document request `keyword` and the
+// folder name search. Search mode is active iff `q` is non-empty. In search
+// mode the document request OMITS `folder_id` (whole-KB); in browse mode it
+// sends `__root__` or the real folder UUID (serialization stays at this layer
+// via serializeFolderForBrowse; `__root__` never reaches UI/URL/logs).
+const isSearchMode = computed(() => currentSearchTerm.value.trim().length > 0);
+const currentFolderTargetLabel = computed(() => {
+  if (!currentFolderId.value) return t('knowledgeBase.rootFolder');
+  return folderIndex.value.byId.get(currentFolderId.value)?.name || t('knowledgeBase.rootFolder');
+});
+
+// Folders rendered in the content flow (before documents, same grid/list).
+// Browse mode: direct children of the current folder, name-sorted.
+// Search mode: whole-tree name matches from the tree index — tag/
+// type/status/source/date filters do NOT narrow folder results, only documents.
+const displayedFolders = computed<KnowledgeFolder[]>(() => {
+  if (isSearchMode.value) {
+    return searchFolders(folderIndex.value, currentSearchTerm.value).map((r) => r.folder);
+  }
+  return sortDirectFolders(folderDirectFolders.value);
+});
+
+// True when there is anything to render in the content flow (folders OR docs).
+// Used to gate the document view vs. the empty state.
+const hasContent = computed(
+  () => displayedFolders.value.length > 0 || cardList.value.length > 0,
+);
+
+// Folder selection (checkbox-driven; selection only comes from the checkbox,
+// never from body click). Kept separate from document `selectedIds`; cleared on
+// every query transition. The unified typed selection below bridges the two
+// Sets with the marquee hook and the FileSystemBatchBar.
+const selectedFolderIds = ref<Set<string>>(new Set());
+
+// Typed Shift anchor: stores the last checkbox-selected item as a typed key
+// (`folder:<id>` / `knowledge:<id>`) so Shift+click can compute the range from
+// the rendered order (buildRenderedSelectionKeys) regardless of whether the
+// anchor is a folder or a document. Replaces the old cardList-index anchor.
+let lastSelectedKey: string | null = null;
+
+// Unified FileSystemSelection consumed by FileSystemBatchBar and the
+// useFolderOperations handlers. Built fresh on every access so it always
+// reflects the latest selectedFolderIds + selectedIds.
+const unifiedSelection = computed<FileSystemSelection>(() => ({
+  folderIds: new Set(selectedFolderIds.value),
+  knowledgeIds: new Set(selectedIds.value),
+}));
+
+// Writable bridge between the typed-key marquee path and the two Set sources
+// of truth. Reads merge folder:<id> + knowledge:<id> keys; writes split them
+// back into selectedFolderIds / selectedIds. The marquee hook assigns to
+// .value, which routes through the setter.
+const selectedKeys = computed<Set<string>>({
+  get: () => {
+    const keys = new Set<string>();
+    for (const id of selectedFolderIds.value) keys.add(`folder:${id}`);
+    for (const id of selectedIds.value) keys.add(`knowledge:${id}`);
+    return keys;
+  },
+  set: (next: Set<string>) => {
+    const folders = new Set<string>();
+    const docs = new Set<string>();
+    for (const key of next) {
+      if (key.startsWith('folder:')) folders.add(key.slice(7));
+      else if (key.startsWith('knowledge:')) docs.add(key.slice(10));
+    }
+    selectedFolderIds.value = folders;
+    selectedIds.value = docs;
+  },
+});
+
+// Apply a typed-key range [s, e] from the rendered order to the selection
+// Sets. `add` true adds the range (Shift+check on unselected), false removes
+// (Shift+uncheck on selected). Mutates both Sets in place - Vue 3.5 tracks
+// Set#add/delete natively.
+function applyRenderedKeyRange(keys: string[], s: number, e: number, add: boolean) {
+  for (let i = s; i <= e; i++) {
+    const k = keys[i];
+    if (!k) continue;
+    if (k.startsWith('folder:')) {
+      const id = k.slice(7);
+      if (add) selectedFolderIds.value.add(id);
+      else selectedFolderIds.value.delete(id);
+    } else if (k.startsWith('knowledge:')) {
+      const id = k.slice(10);
+      if (add) selectedIds.value.add(id);
+      else selectedIds.value.delete(id);
+    }
+  }
+}
+
+const onFolderToggleSelection = (folderId: string, checked: boolean, shiftKey?: boolean) => {
+  if (!folderEditable.value) return;
+  const key = `folder:${folderId}`;
+  if (shiftKey && lastSelectedKey && lastSelectedKey !== key) {
+    const renderedKeys = buildRenderedSelectionKeys(displayedFolders.value, cardList.value);
+    const anchorIdx = renderedKeys.indexOf(lastSelectedKey);
+    const currentIdx = renderedKeys.indexOf(key);
+    if (anchorIdx >= 0 && currentIdx >= 0) {
+      const [s, e] = currentIdx < anchorIdx ? [currentIdx, anchorIdx] : [anchorIdx, currentIdx];
+      applyRenderedKeyRange(renderedKeys, s, e, checked);
+    }
+  } else {
+    const next = new Set(selectedFolderIds.value);
+    if (checked) next.add(folderId);
+    else next.delete(folderId);
+    selectedFolderIds.value = next;
+  }
+  lastSelectedKey = key;
+};
+
+// Monotonic query generation: bumped on every folder/q/filter transition so a
+// stale async result from a previous context is dropped. The document list is
+// guarded by useKnowledgeBase's own generation counter (same intent); the
+// folder composable guards direct/tree/breadcrumb. This page-level generation
+// coordinates same-KB transitions and is checked via shouldCommitQueryResult
+// before any page-direct async commit.
+const queryGeneration = createQueryGeneration();
+function nextQueryGeneration() {
+  return queryGeneration.next({
+    kbId: kbId.value,
+    folderId: currentFolderId.value,
+    searchTerm: currentSearchTerm.value,
+    filtersSignature: stableFiltersSignature(filterParams.value),
+  });
+}
+
+// cancelTransientInteraction: on any folder/q/filter change,
+// close menus, cancel inline editing, close non-submitting dialogs, clear
+// selection (docs + folders), clear the Shift anchor, and bump the generation.
+// Viewer never enters selecting/marquee/editing/mutation-dialog flows, so the
+// selection clears are no-ops for them but still safe to run.
+function cancelTransientInteraction() {
+  moveMenuMode.value = 'normal';
+  folderEditing.cancelEdit();
+  // Close dialogs only when idle so an in-flight delete/move is not interrupted.
+  if (!folderDeleting.value) deleteTargetFolderId.value = null;
+  if (!folderMoving.value) moveFlow.value = null;
+  clearSelection();
+  selectedFolderIds.value = new Set();
+  lastSelectedKey = null; // typed Shift anchor (replaces lastSelectedIndex)
+  nextQueryGeneration();
+}
+
+// Delete placeholder: opens FolderDeleteDialog here. This only records the
+// target folder id (recursive delete uses batchDelete).
+const deleteTargetFolderId = ref<string | null>(null);
+
+// Entry-point handlers. These are bound to the folder components' emits when
+// rendered. Each handler is a no-op for Viewers (folderEditable gate) so the
+// editing state can never be entered read-only.
+const handleFolderCreate = (parentId: string) => {
+  if (!folderEditable.value) return;
+  folderEditing.startCreate(parentId);
+};
+const handleFolderRename = (folderId: string) => {
+  if (!folderEditable.value) return;
+  folderEditing.startRename(folderId);
+};
+const handleFolderRenameCommit = (folderId: string, name: string) => {
+  if (!folderEditable.value || !kbId.value) return;
+  void folderEditing.commitRename(kbId.value, folderId, name, () =>
+    folders.refreshAll(kbId.value, currentFolderId.value),
+  );
+};
+const handleFolderRenameCancel = (_folderId: string) => {
+  folderEditing.cancelEdit();
+};
+const handleFolderDelete = (folderId: string) => {
+  if (!folderEditable.value) return;
+  // Ensure the tree is cached so FolderDeleteDialog's recursive impact
+  // (descendant folders + document count from the tree index) is accurate.
+  // ensureTree is a lazy no-op after the first load for a KB.
+  if (kbId.value) void folders.ensureTree(kbId.value);
+  // Opens FolderDeleteDialog. No delete API call is made here - the
+  // dialog submits via useFolderOperations.deleteFolders (batch-delete).
+  deleteTargetFolderId.value = folderId;
+};
+
+// --- Folder delete dialog ---
+// Consumes deleteTargetFolderId: when set, FolderDeleteDialog opens.
+// The dialog shows the recursive impact (descendant folders + documents) and
+// submits via useFolderOperations.deleteFolders -> POST /api/v1/knowledge/
+// batch-delete. On confirm, if the deleted folder IS the current folder (or an ancestor of it), the page navigates to
+// the closest surviving parent BEFORE refreshing so the URL never points at a
+// soon-to-be-gone folder.
+const deleteDialogVisible = computed(() => deleteTargetFolderId.value !== null);
+const deleteTargetFolder = computed(() => {
+  const id = deleteTargetFolderId.value;
+  if (!id) return null;
+  // Tree index is the authoritative source for descendants + recursive counts;
+  // fall back to direct folders (browse context) for the name if the tree is
+  // still loading.
+  return (
+    folderIndex.value.byId.get(id) ??
+    folderDirectFolders.value.find((f) => f.id === id) ??
+    null
+  );
+});
+const deleteFolderName = computed(() => deleteTargetFolder.value?.name ?? '');
+// Descendant folder count (excluding the folder itself). descendantIds includes
+// the folder; subtract one. Returns 0 when the tree is not loaded - the dialog
+// then shows the empty/folder-only impact (the backend still deletes recursively).
+const deleteDescendantFolderCount = computed(() => {
+  const id = deleteTargetFolderId.value;
+  if (!id) return 0;
+  return Math.max(0, descendantIds(folderIndex.value, id).size - 1);
+});
+// Recursive document count from the tree (authoritative). Null when unknown so
+// the dialog shows the folder-only impact line instead of a misleading "0".
+const deleteDocumentCount = computed<number | null>(() => {
+  const folder = deleteTargetFolder.value;
+  if (!folder) return 0;
+  return folder.knowledge_count ?? null;
+});
+
+// Find the closest ancestor of `folderId` that is NOT in the deletion set, via
+// folderPathItems (the breadcrumb chain). Returns '' (root) when no ancestor
+// survives - e.g. deleting a top-level folder while viewing it or one of its
+// descendants. Navigate to the closest surviving parent before refresh.
+function closestSurvivingParent(folderId: string, deletedIds: Set<string>): string {
+  const path = folderPathItems(folderIndex.value, folderId);
+  // folderPathItems is root-first and includes folderId itself; walk from the
+  // nearest ancestor (len-2) up to the root, returning the first survivor.
+  for (let i = path.length - 2; i >= 0; i--) {
+    if (!deletedIds.has(path[i].id)) return path[i].id;
+  }
+  return ''; // root
+}
+
+async function handleFolderDeleteConfirm() {
+  const deletedId = deleteTargetFolderId.value;
+  if (!deletedId || !kbId.value) return;
+  const selection: FileSystemSelection = {
+    knowledgeIds: new Set<string>(),
+    folderIds: new Set([deletedId]),
+  };
+  // The deletion set is the target folder + its whole subtree. If the current
+  // folder is inside that set, the URL must move to the closest surviving
+  // ancestor before refresh so a stale folder is never rendered.
+  const deletedIds = descendantIds(folderIndex.value, deletedId);
+  const needNavigate = deletedIds.has(currentFolderId.value);
+  const targetParent = needNavigate
+    ? closestSurvivingParent(currentFolderId.value, deletedIds)
+    : currentFolderId.value;
+  try {
+    await folderOperations.deleteFolders(kbId.value, selection, async () => {
+      // onDone: navigate BEFORE refresh. router.replace triggers the
+      // query-transition watcher's loadCurrent for the surviving folder; the
+      // subsequent refreshAll force-reloads direct + tree. Generation guards in
+      // useKnowledgeFolders ensure a stale async result from the old folder
+      // never overwrites the new navigation (old generation results don't
+      // mutate the current list).
+      if (needNavigate) {
+        await router.replace({
+          query: formatKnowledgeFolderRouteQuery(targetParent, currentSearchTerm.value),
+        });
+      }
+      await folders.refreshAll(kbId.value, targetParent);
+    });
+    // Submitted, not done: the backend runs the recursive delete async. The
+    // toast says "submitted"; onDone already invalidated the folder caches.
+    MessagePlugin.success(t('knowledgeBase.folderDeleteSubmitted'));
+    deleteTargetFolderId.value = null;
+    // Refresh the document list for the (possibly new) current folder so docs
+    // that lived under the deleted subtree leave the view.
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.folderDeleteFailed'));
+  }
+}
+
+function handleFolderDeleteCancel() {
+  // Cancel keeps the page on the current folder; just close the dialog.
+  deleteTargetFolderId.value = null;
+}
+// Create-commit helper: called by the create input UI on Enter.
+const handleFolderCreateCommit = (name: string) => {
+  if (!folderEditable.value || !kbId.value) return;
+  void folderEditing.commitCreate(kbId.value, name, () =>
+    folders.refreshAll(kbId.value, currentFolderId.value),
+  );
+};
+
+// --- Folder navigation / open ---
+// Body click on a folder (grid card, list row, breadcrumb item, tree node)
+// navigates into it and clears `q`: formatKnowledgeFolderRouteQuery omits `q`
+// when searchTerm is empty, so the URL becomes just `folder_id=<id>`. The route
+// watcher then reloads that folder's direct children + documents (browse mode).
+// In search mode this is the "click folder result -> navigate + clear q" path.
+const handleFolderOpen = (folderId: string) => {
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(route.query)) {
+    if (k === 'folder_id' || k === 'q') continue;
+    if (typeof v === 'string') merged[k] = v;
+  }
+  Object.assign(merged, formatKnowledgeFolderRouteQuery(folderId, ''));
+  router.replace({ query: merged });
+};
+
+// Tree panel action dispatch (FolderNavigationPanel -> FolderTree). The tree's
+// context menu is limited to rename / delete / add-subfolder (FolderActionType).
+// These reuse the existing page handlers; 'add-subfolder' with an empty id
+// creates at root.
+function handleFolderTreeAction(action: FolderActionType, folderId: string) {
+  if (action === 'add-subfolder') {
+    handleFolderCreate(folderId);
+  } else if (action === 'rename') {
+    handleFolderRename(folderId);
+  } else if (action === 'delete') {
+    handleFolderDelete(folderId);
+  }
+}
+
+// Inline folder create input draft (page-owned; the folder card/row components
+// only own the rename input). Seeded empty when create mode starts.
+const folderCreateDraft = ref('');
+const folderCreateInputEl = ref<HTMLInputElement | null>(null);
+const isCreatingFolder = computed(
+  () => folderEditing.isEditing.value && folderEditing.editState.value?.mode === 'create',
+);
+const setFolderCreateInput = (el: any) => {
+  folderCreateInputEl.value = (el as HTMLInputElement | null) || null;
+};
+watch(isCreatingFolder, (active) => {
+  if (active) {
+    folderCreateDraft.value = '';
+    nextTick(() => {
+      folderCreateInputEl.value?.focus();
+    });
+  }
+});
+const commitFolderCreate = () => {
+  if (!isCreatingFolder.value) return;
+  const trimmed = folderCreateDraft.value.trim();
+  if (!trimmed) {
+    folderEditing.cancelEdit();
+    return;
+  }
+  handleFolderCreateCommit(trimmed);
+};
+const cancelFolderCreate = () => {
+  if (!isCreatingFolder.value) return;
+  folderEditing.cancelEdit();
+};
+
+// --- Move-to-folder flow ---
+// Two DISTINCT move operations share this page (do not conflate):
+//   - 移动到文件夹 (same-KB, files AND folders) -> FolderPickerDialog + batchMove
+//   - 转移到其他知识库 (cross-KB, docs only)    -> existing async transfer flow
+// The active flow state records the item key being moved + the flow kind, so
+// the page knows which dialog to render and how to derive the selection. The
+// cross-KB transfer keeps its own inline card-menu sub-flow (moveMenuMode) and
+// is NOT represented here - it stays document-only.
+interface MoveFlowState {
+  kind: 'move-folder' | 'transfer-kb';
+  // Full typed selection being moved. Single-item entry points convert their
+  // `folder:<id>` / `knowledge:<id>` key into a one-element selection via
+  // selectionFromItemKey before storing it here, so the batch-bar move action
+  // (which carries a multi-id selection) and the per-card/per-folder menu
+  // action share the same confirm path.
+  selection: FileSystemSelection;
+  // Current parent of the moved items, used to disable "move to same parent"
+  // in the picker (isMoveTargetDisabled). For a browse-context document/folder
+  // this is currentFolderId; a future folder-action entry point can pass the
+  // folder's real parent_id.
+  currentParentId: string;
+}
+const moveFlow = ref<MoveFlowState | null>(null);
+
+const folderPickerVisible = computed(() => moveFlow.value?.kind === 'move-folder');
+const moveFolderSelectedFolderIds = computed<Set<string>>(() => {
+  if (!moveFlow.value || moveFlow.value.kind !== 'move-folder') return new Set();
+  return moveFlow.value.selection.folderIds;
+});
+const moveFolderCurrentParentId = computed(() => moveFlow.value?.currentParentId ?? '');
+
+// Parse 'knowledge:<id>' / 'folder:<id>' back into a FileSystemSelection. The
+// three cases (file-only / folder-only / mixed) all flow through the same
+// batchMove call - here a single itemKey only ever produces one populated set,
+// but a future batch entry point can build a multi-id selection the same way.
+function selectionFromItemKey(itemKey: string): FileSystemSelection {
+  const sepIdx = itemKey.indexOf(':');
+  const kind = sepIdx >= 0 ? itemKey.slice(0, sepIdx) : '';
+  const id = sepIdx >= 0 ? itemKey.slice(sepIdx + 1) : '';
+  if (kind === 'folder') {
+    return { knowledgeIds: new Set(), folderIds: new Set([id]) };
+  }
+  return { knowledgeIds: new Set([id]), folderIds: new Set() };
+}
+
+// Single-item entry point: per-card / per-folder action menu emits a typed
+// itemKey. Converts to a one-element selection so the confirm path is shared
+// with the batch-bar move action.
+function openMoveFolderFlow(itemKey: string) {
+  openMoveFolderFlowFromSelection(selectionFromItemKey(itemKey));
+}
+
+// Batch-bar entry point: carries the full unified selection (folders + docs).
+function openMoveFolderFlowFromSelection(selection: FileSystemSelection) {
+  if (!canMutateKnowledge.value) return;
+  if (selection.folderIds.size === 0 && selection.knowledgeIds.size === 0) return;
+  // Ensure the tree is cached so the picker has targets to show. ensureTree is
+  // a lazy no-op after the first load for a KB, so this is cheap.
+  if (kbId.value) void folders.ensureTree(kbId.value);
+  moveFlow.value = {
+    kind: 'move-folder',
+    selection,
+    currentParentId: currentFolderId.value,
+  };
+}
+
+function handleFolderPickerVisibleChange(val: boolean) {
+  // Clear flow state when the dialog closes from user action (cancel / overlay
+  // / esc / post-confirm). A move in flight keeps the dialog alive (the dialog
+  // itself blocks close while submitting), so this only fires once idle.
+  if (!val && !folderOperations.moving.value) {
+    moveFlow.value = null;
+  }
+}
+
+async function handleFolderPickerConfirm(targetFolderId: string) {
+  const flow = moveFlow.value;
+  if (!flow || flow.kind !== 'move-folder' || !kbId.value) return;
+  const selection = flow.selection;
+  try {
+    await folderOperations.moveWithinKnowledgeBase(
+      kbId.value,
+      selection,
+      targetFolderId,
+      () => folders.refreshAll(kbId.value, currentFolderId.value),
+    );
+    MessagePlugin.success(t('knowledgeBase.folderMoveSuccess'));
+    moveFlow.value = null; // closes the picker
+    // Refresh the document list so moved docs leave the current view.
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.folderMoveFailed'));
+  }
+}
+
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
     && !isFAQ.value
@@ -404,7 +916,8 @@ watch(viewMode, (v) => {
 // Multi-select state — shared between grid and list views.
 // Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
 const selectedIds = ref<Set<string>>(new Set());
-let lastSelectedIndex = -1;
+// lastSelectedKey is declared above (with selectedFolderIds) - typed anchor
+// shared by document and folder Shift+click range selection.
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
@@ -445,8 +958,33 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
   pendingReparseAck.value.clear();
 };
 
+// Pre-disable the reparse action when the known (filtered) document count
+// exceeds the backend per-request cap (REPARSE_LIMIT). Uses
+// evaluateReparseLimit from useFolderOperations. Reparse is documents-only -
+// folder selections disable the button in FileSystemBatchBar instead.
+const reparseOverLimit = computed(() => {
+  // Filter in-flight docs from the count first - the backend rejects them and
+  // the page skips them, so they should not contribute to the pre-disable.
+  const filteredSelection: FileSystemSelection = {
+    folderIds: new Set(),
+    knowledgeIds: new Set(
+      [...selectedIds.value].filter((id) => {
+        const item = cardList.value.find((c) => c.id === id);
+        return !item || !isParseInFlight(item.parse_status);
+      }),
+    ),
+  };
+  return evaluateReparseLimit(filteredSelection).overLimit;
+});
+
 const confirmBatchReparse = async () => {
-  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
+  if (batchReparsing.value || batchDeleting.value || selectionCount(unifiedSelection.value) === 0) return;
+  if (reparseOverLimit.value) {
+    // Backend 200-limit guard: pre-disable should have blocked the click, but
+    // defend in depth in case the bar was triggered another way.
+    MessagePlugin.warning(t('knowledgeBase.folderReparseLimit'));
+    return;
+  }
   const allIds = Array.from(selectedIds.value);
   const ids = allIds.filter((id) => {
     const item = cardList.value.find((c) => c.id === id);
@@ -462,18 +1000,41 @@ const confirmBatchReparse = async () => {
   }
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
-      clearSelection();
-      batchMode.value = false;
-      scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
-    }
+    // Route through useFolderOperations.reparseSelection so the composable owns
+    // the batch-reparse submit path (knowledge_ids, in-flight filtering,
+    // backend 200-limit error surfacing). The page keeps the optimistic +
+    // reflection polling UX. No task-completion guarantee: the toast says
+    // "submitted". Reparse is documents-only; folder selections disable the
+    // button in FileSystemBatchBar.
+    const selection: FileSystemSelection = {
+      knowledgeIds: new Set(ids),
+      folderIds: new Set(),
+    };
+    const submittedIds = await folderOperations.reparseSelection(
+      kbId.value,
+      selection,
+      () => {
+        // onDone: reparse does not move documents across folders, so folder
+        // caches need no refresh. The document list is refreshed via the
+        // optimistic + reflection poll below.
+        return Promise.resolve();
+      },
+      {
+        isInFlight: (id: string) => {
+          const item = cardList.value.find((c) => c.id === id);
+          return !!item && isParseInFlight(item.parse_status);
+        },
+      },
+    );
+    MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: submittedIds.length }));
+    applyOptimisticBatchReparse(submittedIds);
+    clearSelection();
+    batchMode.value = false;
+    scheduleWikiStatusProbes();
+    void awaitBatchReparseReflection(submittedIds);
   } catch (e: any) {
+    // Includes backend 200-limit rejections (surfaced via reparseSelection's
+    // rethrow) - the message from the server is shown as-is.
     MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
   } finally {
     batchReparsing.value = false;
@@ -505,6 +1066,57 @@ const tagTotal = ref(0);
 let tagSearchDebounce: number | null = null;
 let docSearchDebounce: number | null = null;
 const docSearchKeyword = ref('');
+
+// --- URL `q` coordination ---
+// The URL `q` is the source of truth for the search term. The input writes to
+// the URL with a 300ms debounce; Enter flushes the debounce immediately (no
+// second request - the route watcher fires once); clearing the input removes
+// `q`. The route watcher (below) reloads documents + folders on URL change, so
+// the input never triggers a request directly. `docSearchKeyword` is a pure
+// input mirror, synced from the URL so back/forward reflects in the field.
+const SEARCH_DEBOUNCE_MS = 300;
+function writeSearchToUrl() {
+  const term = docSearchKeyword.value.trim();
+  const merged: Record<string, string> = {};
+  // Preserve unrelated query fragments (tab, slug, knowledge_id, ...); replace
+  // folder_id/q via formatKnowledgeFolderRouteQuery so root stays implicit.
+  for (const [k, v] of Object.entries(route.query)) {
+    if (k === 'folder_id' || k === 'q') continue;
+    if (typeof v === 'string') merged[k] = v;
+  }
+  Object.assign(merged, formatKnowledgeFolderRouteQuery(currentFolderId.value, term));
+  router.replace({ query: merged });
+}
+function scheduleSearchDebounce() {
+  // Skip a redundant write when the input already matches the URL (programmatic
+  // sync from currentSearchTerm) - avoids a no-op replace on back/forward.
+  if (docSearchKeyword.value.trim() === currentSearchTerm.value) return;
+  if (docSearchDebounce !== null) window.clearTimeout(docSearchDebounce);
+  docSearchDebounce = window.setTimeout(() => {
+    docSearchDebounce = null;
+    writeSearchToUrl();
+  }, SEARCH_DEBOUNCE_MS);
+}
+function flushSearchDebounce() {
+  // Enter: flush the pending debounce (if any) so the URL updates immediately.
+  // The route watcher performs the single reload; Enter never fires a second
+  // request on top of the debounce.
+  if (docSearchDebounce !== null) {
+    window.clearTimeout(docSearchDebounce);
+    docSearchDebounce = null;
+  }
+  writeSearchToUrl();
+}
+function clearSearchInput() {
+  // Clear button: empty the field and remove `q` from the URL immediately.
+  // Clearing `q` returns to the URL `folder_id` folder.
+  if (docSearchDebounce !== null) {
+    window.clearTimeout(docSearchDebounce);
+    docSearchDebounce = null;
+  }
+  if (currentSearchTerm.value === '') return; // already browse mode
+  writeSearchToUrl();
+}
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
   { label: t('knowledgeBase.allFileTypes'), value: '' },
@@ -561,9 +1173,15 @@ const updatedTimeRange = ref<string[]>([]);
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
+  // keyword comes from the URL `q` (source of truth); in search mode the
+  // document request OMITS folder_id (whole-KB search), in browse mode it sends
+  // __root__ or the real folder UUID via serializeFolderForBrowse. The
+  // __root__ sentinel is confined to this serialization and never reaches the
+  // UI/URL.
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
-    keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
+    keyword: currentSearchTerm.value.trim() || undefined,
+    folder_id: serializeFolderForBrowse(currentFolderId.value, isSearchMode.value),
     file_type: selectedFileType.value || undefined,
     parse_status: selectedParseStatus.value || undefined,
     source: selectedSource.value || undefined,
@@ -650,6 +1268,11 @@ const getTagName = (tagId?: string | number) => {
 
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
+  // Stamp this load with the current query generation. The finally block only
+  // clears `docListLoading` if this load is still the current context, so a
+  // stale load from a previous folder/q/filter cannot prematurely clear the
+  // flag while a newer load is still in flight.
+  const ctx = nextQueryGeneration();
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
@@ -661,7 +1284,7 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
     },
     kbIdValue,
   ).finally(() => {
-    if (isCurrentKb(kbIdValue) && !isFAQ.value) {
+    if (shouldCommitQueryResult(queryGeneration.current(), ctx) && isCurrentKb(kbIdValue) && !isFAQ.value) {
       docListLoading.value = false;
     }
   });
@@ -881,6 +1504,15 @@ watch(activeKbTab, (tab) => {
   router.replace({ query })
 })
 
+// Clear all document + folder selection and reset the typed Shift anchor.
+// Defined before the kbId watcher below: that watcher is `immediate`, so its
+// first synchronous run needs clearSelection already initialized (const TDZ).
+const clearSelection = () => {
+  selectedIds.value.clear();
+  selectedFolderIds.value = new Set();
+  lastSelectedKey = null;
+};
+
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
     kbInfo.value = null;
@@ -899,15 +1531,115 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     tagSearchQuery.value = '';
     tagPage.value = 1;
     uiStore.clearSelectedTagIds();
+    // Reset folder composable state for the new KB (clears direct folders /
+    // tree / breadcrumb, invalidates in-flight requests, restores tree prefs).
+    // Also cancel any inline folder edit in progress - a KB switch is a query
+    // transition (cancels edit state).
+    folders.resetForKnowledgeBase(newKbId);
+    folderEditing.cancelEdit();
+    deleteTargetFolderId.value = null;
+    // Clear same-KB transient state so a stale folder selection / move flow from
+    // the previous KB cannot survive the switch.
+    selectedFolderIds.value = new Set();
+    moveFlow.value = null;
+    moveMenuMode.value = 'normal';
+    clearSelection();
   }
   loadKnowledgeBaseInfo(newKbId);
+  // Load the current folder's direct children + ensure the tree is cached so
+  // the folder editing flow has data to refresh against after create/rename.
+  // The URL stays on the current folder; loadCurrent does not change the URL.
+  void folders.loadCurrent(newKbId, currentFolderId.value);
+  void folders.ensureTree(newKbId);
+}, { immediate: true });
+
+// Unified reload after a filter change (tag/type/status/source/date). A filter
+// change is a query transition: cancel transient state
+// (menus, inline edit, non-submitting dialogs, selection, Shift anchor), bump
+// the generation, then reset the page and reload documents. Folder search
+// results are unaffected (they come from the tree index, name-only).
+function reloadAfterFilterChange() {
+  if (!kbId.value) return;
+  cancelTransientInteraction();
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+}
+
+// Query-transition watcher: when the user navigates to a different folder or
+// the search term changes (folder_id / q in the route query) WITHOUT a KB
+// switch, cancel transient state, load the new folder's direct children, and
+// reload documents with the new folder/search context. KB switches are handled
+// by the kbId watcher above (which resets folder state and loads docs via
+// loadKnowledgeBaseInfo), so they are skipped here to avoid a double load.
+// Not immediate - the kbId watcher handles the initial load.
+watch(
+  [kbId, currentFolderId, currentSearchTerm],
+  ([newKbId, newFolderId, newSearch], [oldKbId, oldFolderId, oldSearch]) => {
+    if (newKbId !== oldKbId) return; // KB switch handled by kbId watcher
+    if (newFolderId === oldFolderId && newSearch === oldSearch) return;
+    cancelTransientInteraction();
+    if (newKbId) {
+      // Only reload direct folders when the folder actually changed; a search-
+      // only change keeps the current direct folders (they are not rendered in
+      // search mode - search renders tree-index matches instead).
+      if (newFolderId !== oldFolderId) {
+        void folders.loadCurrent(newKbId, newFolderId);
+      }
+      resetPage();
+      loadKnowledgeFiles(newKbId);
+    }
+  },
+);
+
+// Invalid folder_id recovery: when loadCurrent fails with a
+// 404/403 for a non-empty currentFolderId, the URL points at a folder that no
+// longer exists or the user cannot access. Show a brief toast and router.replace
+// to root (folder_id omitted) while preserving `q` via formatKnowledgeFolderRouteQuery.
+// The watcher reuses the composable's isFolderNotFoundStatus helper so the
+// status check stays in sync with the composable's error mapping. Other errors
+// (5xx, network) leave the URL alone and surface as a retry state in the
+// template via folderCurrentError + folderDirectLoading.
+watch(folderCurrentErrorStatus, (status) => {
+  if (!isFolderNotFoundStatus(status)) return;
+  if (currentFolderId.value === '') return; // already at root
+  // The URL pointed at an inaccessible folder; surface a brief message and
+  // replace to root preserving q. The route watcher then reloads root content.
+  MessagePlugin.warning(t('knowledgeBase.folderNotFoundHint'));
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(route.query)) {
+    if (k === 'folder_id' || k === 'q') continue;
+    if (typeof v === 'string') merged[k] = v;
+  }
+  Object.assign(merged, formatKnowledgeFolderRouteQuery('', currentSearchTerm.value));
+  router.replace({ query: merged });
+});
+
+// Retry button for transient folder load failures: re-runs loadCurrent for the
+// current folder. Used by the error-state template branch below.
+function retryFolderLoad() {
+  if (!kbId.value) return;
+  void folders.loadCurrent(kbId.value, currentFolderId.value);
+}
+// Minimal tree retry: treeError surfaces as a non-blocking retry on the tree
+// panel. refreshAll force-reloads both direct and tree; the tree is the
+// relevant half here.
+function retryFolderTree() {
+  if (!kbId.value) return;
+  void folders.refreshAll(kbId.value, currentFolderId.value);
+}
+
+// Keep the search input field in sync with the URL `q` (back/forward/refresh
+// and programmatic clears). Only update when different so an in-progress
+// keystroke cycle is not clobbered.
+watch(currentSearchTerm, (term) => {
+  if (term !== docSearchKeyword.value) {
+    docSearchKeyword.value = term;
+  }
 }, { immediate: true });
 
 watch(selectedTagIds, (newVal, oldVal) => {
   if (oldVal === undefined) return;
-  if (kbId.value) {
-    loadKnowledgeFiles(kbId.value);
-  }
+  reloadAfterFilterChange();
 }, { deep: true });
 
 watch(tagSearchQuery, (newVal, oldVal) => {
@@ -922,36 +1654,24 @@ watch(tagSearchQuery, (newVal, oldVal) => {
   }, 300);
 });
 
-// 监听文档搜索关键词变化
-watch(docSearchKeyword, (newVal, oldVal) => {
-  if (newVal === oldVal) return;
-  if (docSearchDebounce) {
-    window.clearTimeout(docSearchDebounce);
-  }
-  docSearchDebounce = window.setTimeout(() => {
-    if (kbId.value) {
-      resetPage();
-      loadKnowledgeFiles(kbId.value);
-    }
-  }, 300);
+// Search input -> URL `q` (debounced). The input never triggers a request
+// directly; the URL change drives the query-transition watcher above, which
+// performs the single reload. Enter flushes; clear removes `q`.
+watch(docSearchKeyword, () => {
+  scheduleSearchDebounce();
 });
 
 // 监听文件类型筛选变化
 watch(selectedFileType, (newVal, oldVal) => {
   if (newVal === oldVal) return;
-  if (kbId.value) {
-    resetPage();
-    loadKnowledgeFiles(kbId.value);
-  }
+  reloadAfterFilterChange();
 });
 
 // 监听解析状态/来源/更新时间范围筛选变化（与文件类型行为一致）
 watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
-  if (kbId.value) {
-    resetPage();
-    loadKnowledgeFiles(kbId.value);
-  }
+  reloadAfterFilterChange();
 }, { deep: true });
+
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
@@ -1350,15 +2070,6 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
-};
-
 const showUploadResultMessages = (
   successCount: number,
   failCount: number,
@@ -1392,40 +2103,70 @@ const showUploadResultMessages = (
   }
 };
 
+interface StableUploadTarget {
+  kbId: string
+  folderId: string
+  tagIds?: string[]
+}
+
 const executeUploadBatch = async (
   files: File[],
+  target: StableUploadTarget,
   options: { processConfig?: KnowledgeProcessOverrides } = {},
 ) => {
-  const targetKbId = kbId.value;
-  if (!targetKbId || files.length === 0) {
+  if (!target.kbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  let manifest;
+  let folderIdByPath = new Map<string, string>();
+  let foldersMutated = false;
+  try {
+    manifest = buildUploadDirectoryManifest(files);
+    if (manifest.directoryPaths.length > 0) {
+      const resolved = await knowledgeFolderApi.resolvePaths(target.kbId, {
+        current_folder_id: target.folderId,
+        paths: manifest.directoryPaths,
+      });
+      folderIdByPath = new Map(
+        (resolved.paths || []).map((entry) => [entry.relative_path, entry.folder_id]),
+      );
+      for (const path of manifest.directoryPaths) {
+        if (!folderIdByPath.get(path)) {
+          throw new Error(`Folder path was not resolved: ${path}`);
+        }
+      }
+      foldersMutated = true;
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.uploadFailed'));
+    return { successCount: 0, failCount: files.length };
+  }
+
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
-  const hasFolderPaths = files.some((file) => {
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
-  });
+  const isDirectoryBatch = manifest.directoryPaths.length > 0;
 
-  for (const file of files) {
+  for (const entry of manifest.files) {
     try {
       const uploadData: {
         file: File
         tag_ids?: string[]
-        fileName?: string
         process_config?: KnowledgeProcessOverrides
-      } = { file, tag_ids: tagIdsToUpload };
-
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
+        folder_id: string
+      } = {
+        file: entry.file,
+        tag_ids: target.tagIds,
+        folder_id: entry.relativeDirectoryPath
+          ? folderIdByPath.get(entry.relativeDirectoryPath)!
+          : target.folderId,
+      };
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
       }
 
-      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
+      const responseData: any = await uploadKnowledgeFile(target.kbId, uploadData);
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
@@ -1456,32 +2197,44 @@ const executeUploadBatch = async (
     }
   }
 
+  if (foldersMutated && target.kbId === kbId.value) {
+    // Refresh the folder currently being viewed, not the captured upload target:
+    // navigation may have changed while resolution/uploads were in flight.
+    try {
+      await folders.refreshAll(target.kbId, currentFolderId.value);
+    } catch (error: any) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.folderLoadFailed'));
+    }
+  }
   if (successCount > 0) {
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
+      detail: { kbId: target.kbId },
     }));
   }
 
-  showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
+  showUploadResultMessages(successCount, failCount, totalCount, isDirectoryBatch ? 'folder' : 'document');
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
-  const targetKbId = kbId.value;
-  if (!targetKbId) {
+const executeUrlImport = async (
+  url: string,
+  target: StableUploadTarget,
+  processConfig?: KnowledgeProcessOverrides,
+) => {
+  if (!target.kbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
   try {
-    const responseData: any = await createKnowledgeFromURL(targetKbId, {
+    const responseData: any = await createKnowledgeFromURL(target.kbId, {
       url,
-      tag_ids: tagIdsToUpload,
+      tag_ids: target.tagIds,
       process_config: processConfig,
+      folder_id: target.folderId,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
+      detail: { kbId: target.kbId },
     }));
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
@@ -1507,7 +2260,10 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
   }
 };
 
-const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
+const handleUploadConfirmResult = async (
+  result: UploadConfirmResult,
+  target: StableUploadTarget,
+) => {
   if (result.mode === 'manual') {
     return;
   }
@@ -1517,24 +2273,28 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const processConfig = result.processConfig;
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
-    });
+    const hasFolderPaths = files.some((file) =>
+      !!(file as File & { webkitRelativePath?: string }).webkitRelativePath,
+    );
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, target, { processConfig });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, target, processConfig);
   }
 };
 
 const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
   if (!kbInfo.value) return;
   if (files.length === 0 && urls.length === 0) return;
+  const target: StableUploadTarget = {
+    kbId: kbId.value,
+    folderId: currentFolderId.value,
+    tagIds: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined,
+  };
   try {
     const result = await uploadConfirmStore.open({
       mode: 'file',
@@ -1543,8 +2303,10 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
+      includeFolderUpload: true,
+      targetLocationLabel: currentFolderTargetLabel.value,
     });
-    await handleUploadConfirmResult(result);
+    await handleUploadConfirmResult(result, target);
   } catch {
     // cancelled
   }
@@ -1567,6 +2329,8 @@ const handleManualCreate = () => {
     mode: 'create',
     kbId: kbId.value,
     status: 'draft',
+    folderId: currentFolderId.value,
+    targetLocationLabel: currentFolderTargetLabel.value,
     onSuccess: manualEditorSuccess,
   });
 };
@@ -1720,21 +2484,20 @@ const getDoc = (page: number) => {
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
-  const items = cardList.value || [];
-  const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
-  if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
-    const [s, e] = idx < lastSelectedIndex
-      ? [idx, lastSelectedIndex]
-      : [lastSelectedIndex, idx];
-    for (let i = s; i <= e; i++) {
-      if (checked) selectedIds.value.add(items[i].id);
-      else selectedIds.value.delete(items[i].id);
+  const key = `knowledge:${id}`;
+  if (shiftKey && lastSelectedKey && lastSelectedKey !== key) {
+    const renderedKeys = buildRenderedSelectionKeys(displayedFolders.value, cardList.value);
+    const anchorIdx = renderedKeys.indexOf(lastSelectedKey);
+    const currentIdx = renderedKeys.indexOf(key);
+    if (anchorIdx >= 0 && currentIdx >= 0) {
+      const [s, e] = currentIdx < anchorIdx ? [currentIdx, anchorIdx] : [anchorIdx, currentIdx];
+      applyRenderedKeyRange(renderedKeys, s, e, checked);
     }
   } else {
     if (checked) selectedIds.value.add(id);
     else selectedIds.value.delete(id);
   }
-  lastSelectedIndex = idx;
+  lastSelectedKey = key;
 };
 
 const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Event }) => {
@@ -1745,14 +2508,11 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
 const toggleSelectAll = (checked: boolean) => {
   if (checked) {
     for (const item of cardList.value || []) selectedIds.value.add(item.id);
+    for (const folder of displayedFolders.value) selectedFolderIds.value.add(folder.id);
   } else {
     for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+    for (const folder of displayedFolders.value) selectedFolderIds.value.delete(folder.id);
   }
-};
-
-const clearSelection = () => {
-  selectedIds.value.clear();
-  lastSelectedIndex = -1;
 };
 
 // Batch (multi-select) mode mirrors the session list's "批量管理" UX: while off,
@@ -1770,8 +2530,10 @@ const handleBatchCancel = () => {
 };
 // 切到卡片视图时，如果列表视图里已经勾选过文档，需要自动开启批量管理模式，
 // 否则卡片视图默认不渲染 checkbox，会看不到勾选态。
+// 切到卡片视图时，如果列表视图里已经勾选过文档或文件夹，需要自动开启批量管理模式，
+// 否则卡片视图默认不渲染 checkbox，会看不到勾选态。
 watch(viewMode, (mode) => {
-  if (mode === 'grid' && selectedIds.value.size > 0) {
+  if (mode === 'grid' && selectionCount(unifiedSelection.value) > 0) {
     batchMode.value = true;
   }
 });
@@ -1791,10 +2553,18 @@ const {
   shouldSuppressClick: shouldSuppressDocClick,
 } = useMarqueeSelect({
   containerRef: knowledgeScroll,
-  itemSelector: '.knowledge-card[data-select-id], .doc-list-row[data-select-id]',
-  selectedIds,
-  getItemId: (el) => el.dataset.selectId || null,
-  enabled: computed(() => canEdit.value && !isFAQ.value && cardList.value.length > 0),
+  // Typed-key marquee path: include folder cards/rows alongside document
+  // cards/rows. The typed `data-select-key` attribute (folder:<id> /
+  // knowledge:<id>) is what marquee reads back, so folder and document IDs
+  // can never collide. Reads/writes flow through the selectedKeys writable
+  // computed, which splits back into selectedFolderIds / selectedIds.
+  itemSelector:
+    '.knowledge-card[data-select-key], .doc-list-row[data-select-key], .folder-card[data-select-key], .folder-list-row[data-select-key]',
+  selectedKeys,
+  getItemKey: (el) => el.dataset.selectKey || null,
+  enabled: computed(
+    () => canEdit.value && !isFAQ.value && (cardList.value.length > 0 || displayedFolders.value.length > 0),
+  ),
   onSelectionStart: () => {
     batchMode.value = true;
   },
@@ -1816,18 +2586,32 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
 };
 
 const confirmBatchDelete = async () => {
-  if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
+  if (batchDeleting.value || batchReparsing.value || selectionCount(unifiedSelection.value) === 0) return;
+  const selection = unifiedSelection.value;
+  const ids = Array.from(selection.knowledgeIds);
+  const folderIds = Array.from(selection.folderIds);
   const deletedIdSet = new Set(ids);
+  const deletedFolderSet = new Set(folderIds);
+  const totalCount = ids.length + folderIds.length;
   batchDeleting.value = true;
   try {
-    const res: any = await batchDeleteKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
-      clearSelection();
-      batchMode.value = false;
-      resetPage();
-      // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
+    // Route through useFolderOperations.deleteFolders so the same batch-delete
+    // endpoint carries both knowledge_ids and folder_ids (mixed selections are
+    // one request). The backend expands folder_ids to their full descendant
+    // subtrees async; the polling below waits for documents to leave the list.
+    await folderOperations.deleteFolders(kbId.value, selection, async () => {
+      // onDone: refresh folder caches so the deleted folders leave the tree and
+      // direct-folders list. Document list is refreshed via the poll below.
+      if (deletedFolderSet.size > 0 && kbId.value) {
+        await folders.refreshAll(kbId.value, currentFolderId.value);
+      }
+    });
+    MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: totalCount }));
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
+    if (deletedIdSet.size > 0) {
       const maxPolls = 30;
       const delayMs = 400;
       for (let i = 0; i < maxPolls; i++) {
@@ -1836,10 +2620,8 @@ const confirmBatchDelete = async () => {
         if (!stillPresent) break;
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
-      loadTags(kbId.value, true);
-    } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
     }
+    loadTags(kbId.value, true);
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
   } finally {
@@ -1860,7 +2642,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1871,6 +2653,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openMoveFolderFlow(`knowledge:${item.id}`);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1878,7 +2661,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1886,26 +2669,31 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openMoveFolderFlow(`knowledge:${item.id}`);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
 };
 
-// Clear selection on filter/tag/kb change to avoid acting on hidden items.
+// Clear selection on filter/kb change to avoid acting on hidden items. NOTE:
+// `docSearchKeyword` is intentionally NOT watched here - the URL `q` (not the
+// keystroke) is the query transition; selection is cleared by the route
+// watcher's cancelTransientInteraction when `q` actually changes.
 watch(
-  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
   () => {
     clearSelection();
   },
 );
 
-// After cardList reloads: stable keys rely on correct indices for shift-range; clamp anchor index.
+// After cardList reloads: drop stale document selections (deleted items that
+// are no longer visible). The typed Shift anchor (lastSelectedKey) is looked
+// up by key on the next Shift+click via buildRenderedSelectionKeys, so it
+// does not need index-based clamping - if the anchor is no longer rendered
+// the range computation is a no-op.
 watch(cardList, () => {
   const items = cardList.value || [];
   const n = items.length;
-  if (lastSelectedIndex >= n) {
-    lastSelectedIndex = n > 0 ? n - 1 : -1;
-  }
   if (moreIndex.value >= n) {
     moreIndex.value = -1;
   }
@@ -2051,12 +2839,44 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
+          <!-- Folder tree sidebar: sibling of the content area, visible toggled
+               by the breadcrumb's tree-reveal button. No DnD. -->
+          <FolderNavigationPanel
+            :tree="folderTree"
+            :current-folder-id="currentFolderId"
+            :expanded-folder-ids="folderExpandedIds"
+            :editable="folderEditable"
+            :visible="folderTreeVisible"
+            :loading="folderTreeLoading"
+            :error="folderTreeError"
+            @navigate="handleFolderOpen"
+            @toggle-expand="toggleFolderExpanded"
+            @action="handleFolderTreeAction"
+            @toggle="setFolderTreeVisible(!folderTreeVisible)"
+            @retry="retryFolderTree"
+          />
           <div class="tag-content">
             <div class="doc-card-area">
+              <!-- Folder path breadcrumb + search status + tree-reveal button.
+                   Search status overrides the path. -->
+              <FolderBreadcrumb
+                :items="folderBreadcrumb"
+                :tree-visible="folderTreeVisible"
+                :search-term="currentSearchTerm"
+                @navigate="handleFolderOpen"
+                @toggle-tree="setFolderTreeVisible(!folderTreeVisible)"
+              />
+              <!-- Search-mode hint: other filters apply only to documents.
+                   Folder results come from the tree index and are not narrowed
+                   by these filters. -->
+              <div v-if="isSearchMode" class="doc-search-filter-note" role="status">
+                <t-icon name="info-circle" size="14px" aria-hidden="true" />
+                <span>{{ $t('knowledgeBase.searchFiltersApplyOnlyToDocs') }}</span>
+              </div>
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
-                  clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
-                  @enter="loadKnowledgeFiles(kbId)">
+                  clearable class="doc-search-input" @clear="clearSearchInput"
+                  @enter="flushSearchDebounce">
                   <template #prefix-icon>
                     <t-icon name="search" size="16px" />
                   </template>
@@ -2209,7 +3029,7 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
-                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
+                      :supported-file-types="[...supportedFileTypes]" include-manual :include-folder-upload="true" trigger-icon="file-add"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
                       @url="handleUploadSourceUrl" @manual="handleManualCreate" />
@@ -2217,13 +3037,13 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{ 'is-empty': !hasContent && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && !hasContent" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -2238,7 +3058,7 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="hasContent && viewMode === 'grid'">
                   <DocumentCardView
                     :items="cardList"
                     :selected-ids="selectedIds"
@@ -2262,9 +3082,31 @@ async function createNewSession(value: string): Promise<void> {
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
                     @update:move-mode="(mode: any) => moveMode = mode"
-                  />
+                  >
+                    <template #before-items>
+                      <!-- Inline folder create input (page-owned; folder card/row
+                           components only own the rename input). Shown at the top
+                           of the folder area when create mode is active. -->
+                      <div v-if="isCreatingFolder" class="folder-card folder-create-card" @click.stop>
+                        <input :ref="setFolderCreateInput" v-model.trim="folderCreateDraft"
+                          class="folder-card-rename-input folder-create-input" type="text"
+                          :placeholder="$t('knowledgeBase.newFolder')" :aria-label="$t('knowledgeBase.newFolder')"
+                          @click.stop @keydown.enter.prevent="commitFolderCreate"
+                          @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate" />
+                      </div>
+                      <FolderGridItems v-if="displayedFolders.length" :folders="displayedFolders"
+                        :selected-folder-ids="selectedFolderIds" :editable="folderEditable"
+                        :batch-mode="batchMode"
+                        :renaming-folder-id="folderRenamingId" :rename-error="folderRenameError"
+                        @open="handleFolderOpen" @toggle-selection="onFolderToggleSelection"
+                        @create="handleFolderCreate" @rename="handleFolderRename"
+                        @rename-commit="handleFolderRenameCommit" @rename-cancel="handleFolderRenameCancel"
+                        @move-folder="(id: string) => openMoveFolderFlow(`folder:${id}`)"
+                        @delete="handleFolderDelete" />
+                    </template>
+                  </DocumentCardView>
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
+                <template v-else-if="hasContent && viewMode === 'list'">
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
@@ -2282,18 +3124,82 @@ async function createNewSession(value: string): Promise<void> {
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
                     @update:move-mode="(mode: any) => moveMode = mode"
-                    @reset-move-state="moveMenuMode = 'normal'" />
+                    @reset-move-state="moveMenuMode = 'normal'">
+                    <template #before-rows>
+                      <div v-if="isCreatingFolder" class="folder-list-row folder-create-row" role="row" @click.stop>
+                        <div class="cell cell-check"></div>
+                        <div class="cell cell-name">
+                          <span class="row-folder-icon-wrap" aria-hidden="true"><t-icon name="folder-add" /></span>
+                          <div class="row-folder-text">
+                            <input :ref="setFolderCreateInput" v-model.trim="folderCreateDraft"
+                              class="folder-list-rename-input folder-create-input" type="text"
+                              :placeholder="$t('knowledgeBase.newFolder')" :aria-label="$t('knowledgeBase.newFolder')"
+                              @click.stop @keydown.enter.prevent="commitFolderCreate"
+                              @keydown.esc.prevent="cancelFolderCreate" @blur="commitFolderCreate" />
+                          </div>
+                        </div>
+                        <div class="cell cell-tag"><span class="row-muted">--</span></div>
+                        <div class="cell cell-source"><span class="row-muted">--</span></div>
+                        <div class="cell cell-size"><span class="row-muted">--</span></div>
+                        <div class="cell cell-status"><span class="row-muted">--</span></div>
+                        <div class="cell cell-time"></div>
+                        <div class="cell cell-actions"></div>
+                      </div>
+                      <FolderListRows v-if="displayedFolders.length" :folders="displayedFolders"
+                        :selected-folder-ids="selectedFolderIds" :editable="folderEditable"
+                        :renaming-folder-id="folderRenamingId" :rename-error="folderRenameError"
+                        @open="handleFolderOpen" @toggle-selection="onFolderToggleSelection"
+                        @create="handleFolderCreate" @rename="handleFolderRename"
+                        @rename-commit="handleFolderRenameCommit" @rename-cancel="handleFolderRenameCancel"
+                        @move-folder="(id: string) => openMoveFolderFlow(`folder:${id}`)"
+                        @delete="handleFolderDelete" />
+                    </template>
+                  </DocumentListView>
                 </template>
                 <template v-else-if="!docListLoading">
-                  <div class="doc-empty-state">
+                  <!-- Error / empty states:
+                       - folder load failed (non-404/403): error state with retry,
+                         NOT the empty-folder copy. 404/403 are handled by the
+                         folderCurrentErrorStatus watcher (replace to root).
+                       - search mode, no results -> no-results copy (no upload CTA);
+                       - browse root, no content -> EmptyKnowledge upload copy for
+                         editors; viewer gets a plain no-CTA message;
+                       - named folder, nothing inside -> folder-empty copy, NEVER the
+                         upload copy (upload targets root/current folder only). -->
+                  <div v-if="!isSearchMode && folderCurrentError && !hasContent
+                    && !isFolderNotFoundStatus(folderCurrentErrorStatus)"
+                    class="doc-empty-state doc-empty-state--error" role="alert">
+                    <t-icon name="info-circle" size="40px" class="doc-empty-icon" aria-hidden="true" />
+                    <span class="doc-empty-title">{{ $t('knowledgeBase.folderLoadFailed') }}</span>
+                    <t-button theme="primary" variant="outline" size="small"
+                      :loading="folderDirectLoading" @click="retryFolderLoad">
+                      {{ $t('knowledgeBase.folderRetry') }}
+                    </t-button>
+                  </div>
+                  <div v-else-if="isSearchMode" class="doc-empty-state doc-empty-state--no-results">
+                    <t-icon name="search" size="40px" class="doc-empty-icon" aria-hidden="true" />
+                    <span class="doc-empty-title">{{ $t('knowledgeBase.searchNoResults') }}</span>
+                  </div>
+                  <div v-else-if="currentFolderId === '' && canEdit" class="doc-empty-state">
                     <EmptyKnowledge />
+                  </div>
+                  <div v-else class="doc-empty-state doc-empty-state--plain">
+                    <t-icon name="folder-open" size="40px" class="doc-empty-icon" aria-hidden="true" />
+                    <span class="doc-empty-title">
+                      {{ currentFolderId === '' ? $t('knowledgeBase.emptyRootViewer') : $t('knowledgeBase.emptyFolderHint') }}
+                    </span>
                   </div>
                 </template>
               </div>
-              <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+              <div class="doc-batch-bar-anchor"
+                v-show="batchMode || selectionCount(unifiedSelection) > 0">
+                <FileSystemBatchBar :selection="unifiedSelection"
+                  :delete-loading="batchDeleting" :reparse-loading="batchReparsing"
+                  :move-loading="folderMoving" :reparse-over-limit="reparseOverLimit"
+                  :visible="batchMode || selectionCount(unifiedSelection) > 0"
+                  @clear="handleBatchCancel"
+                  @move-folder="openMoveFolderFlowFromSelection(unifiedSelection)"
+                  @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>
@@ -2331,6 +3237,31 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId"
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
+  />
+
+  <!-- 移动到文件夹 (same-KB move picker; distinct from cross-KB transfer) -->
+  <FolderPickerDialog
+    :visible="folderPickerVisible"
+    :tree="folderTree"
+    :index="folderIndex"
+    :selected-folder-ids="moveFolderSelectedFolderIds"
+    :current-parent-id="moveFolderCurrentParentId"
+    :loading="folderTreeLoading"
+    :submitting="folderMoving"
+    @update:visible="handleFolderPickerVisibleChange"
+    @confirm="handleFolderPickerConfirm"
+  />
+
+  <!-- 递归删除文件夹 (batch-delete). Submitted, not done. -->
+  <FolderDeleteDialog
+    :visible="deleteDialogVisible"
+    :folder-name="deleteFolderName"
+    :descendant-folder-count="deleteDescendantFolderCount"
+    :document-count="deleteDocumentCount"
+    :submitting="folderDeleting"
+    @update:visible="(val: boolean) => { if (!val && !folderDeleting) handleFolderDeleteCancel(); }"
+    @confirm="handleFolderDeleteConfirm"
+    @cancel="handleFolderDeleteCancel"
   />
 </template>
 <style>
@@ -2382,7 +3313,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   margin: 0 16px 0 4px;
-  gap: 20px;
+  gap: 12px;
   height: 100%;
   flex: 1;
   width: 100%;
@@ -2676,6 +3607,10 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 0;
   position: relative;
   /* 作为批量工具栏悬浮的定位上下文 */
+}
+
+.doc-card-area > :deep(.folder-breadcrumb) {
+  margin-bottom: 12px;
 }
 
 .doc-filter-bar {
@@ -3410,6 +4345,135 @@ async function createNewSession(value: string): Promise<void> {
   justify-content: center;
   padding: 60px 20px;
   min-height: 100%;
+}
+
+// Search-mode filter hint + plain empty states (no-results / named folder /
+// viewer root). The root-empty editor case keeps <EmptyKnowledge/>.
+.doc-empty-state--no-results,
+.doc-empty-state--plain,
+.doc-empty-state--error {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doc-empty-state--error .doc-empty-icon {
+  color: var(--td-error-color-6);
+}
+
+.doc-empty-icon {
+  color: var(--td-text-color-placeholder);
+}
+
+.doc-empty-title {
+  color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-align: center;
+}
+
+.doc-search-filter-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+// Inline folder create input (page-owned; folder card/row components only own
+// the rename input). Grid variant matches the .folder-card footprint.
+.folder-create-card {
+  min-width: 240px;
+  height: 136px;
+  border: 1px dashed var(--td-brand-color);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  box-sizing: border-box;
+  background: var(--td-brand-color-light);
+}
+
+.folder-create-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  box-sizing: border-box;
+
+  &:focus {
+    box-shadow: 0 0 0 2px var(--td-brand-color-light);
+  }
+}
+
+// List-variant create row mirrors FolderListRows' grid so the input aligns
+// column-for-column with document/folder rows. (.cell base styles are scoped
+// to FolderListRows, so they are re-declared here for the slot content.)
+.folder-create-row {
+  display: grid;
+  grid-template-columns:
+    44px
+    minmax(260px, 2.6fr)
+    minmax(100px, 0.9fr)
+    minmax(96px, 0.8fr)
+    96px
+    minmax(96px, 0.7fr)
+    140px
+    48px;
+  align-items: center;
+  padding: 0 16px;
+  min-height: 60px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  background: var(--td-brand-color-light);
+
+  .cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .cell-name {
+    gap: 10px;
+  }
+
+  .row-folder-icon-wrap {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  .row-folder-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .row-muted {
+    color: var(--td-text-color-disabled, #bbb);
+    font-size: 12px;
+  }
 }
 
 

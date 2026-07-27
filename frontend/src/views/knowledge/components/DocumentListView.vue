@@ -27,7 +27,7 @@ interface KnowledgeItem {
   isMore?: boolean;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
   canEdit: boolean;
@@ -42,13 +42,22 @@ const props = defineProps<{
   moveSelectedTargetName: string;
   moveMode: 'reuse_vectors' | 'reparse';
   moveSubmitting: boolean;
-}>();
+  // External (folder) counts so the header select-all accounts for folders
+  // rendered via the `before-rows` slot without converting document rows.
+  // Defaults preserve existing behavior when no folders are present.
+  externalSelectedCount?: number;
+  externalTotalCount?: number;
+}>(), {
+  loading: false,
+  externalSelectedCount: 0,
+  externalTotalCount: 0,
+});
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
   // Move sub-flow emits
@@ -158,10 +167,14 @@ const statusByRow = computed(() => {
 });
 
 const allSelected = computed(() => {
-  return props.items.length > 0 && props.items.every(i => props.selectedIds.has(i.id));
+  const total = props.items.length + props.externalTotalCount;
+  if (total === 0) return false;
+  // All documents selected AND all external (folder) items selected.
+  return props.items.every(i => props.selectedIds.has(i.id))
+    && props.externalSelectedCount === props.externalTotalCount;
 });
 const someSelected = computed(() => {
-  return props.items.some(i => props.selectedIds.has(i.id)) && !allSelected.value;
+  return (props.items.some(i => props.selectedIds.has(i.id)) || props.externalSelectedCount > 0) && !allSelected.value;
 });
 
 const onHeaderCheckboxChange = (checked: boolean) => {
@@ -204,7 +217,7 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
   // Don't close popup for move — it triggers the move sub-flow
   if (action !== 'move') {
     moreOpen.value = null;
@@ -221,7 +234,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
         <t-checkbox class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
-          :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
+          :disabled="!items.length && !externalTotalCount" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
@@ -233,8 +246,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
+      <!-- Folder rows (and any other pre-document items) slot in here, after
+           the header and before document rows, sharing the same grid. Folders
+           appear once, before documents; only documents participate in
+           pagination/infinite scroll. -->
+      <slot name="before-rows" />
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
+        :data-select-key="`knowledge:${item.id}`"
         role="row" @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
@@ -324,6 +343,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   @reparse="handleAction('reparse', item)"
                   @cancel-parse="handleAction('cancel-parse', item)"
                   @move="handleAction('move', item)"
+                  @move-folder="handleAction('move-folder', item)"
                   @batch-manage="handleAction('batch-manage', item)"
                   @delete="handleAction('delete', item)"
                 />

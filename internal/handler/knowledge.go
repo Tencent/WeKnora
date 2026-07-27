@@ -591,8 +591,17 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
+	folderID := strings.TrimSpace(req.FolderID)
+	if folderID == types.FolderRootFilter {
+		folderID = types.FolderRootID
+	}
+
+	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel, folderID)
 	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeFolderNotFound) {
+			c.Error(errors.NewNotFoundError("knowledge folder not found"))
+			return
+		}
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 			return
@@ -1811,11 +1820,8 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 }
 
 type knowledgeTagBatchRequest struct {
-	Updates      map[string][]string `json:"updates"`
-	KBID         string              `json:"kb_id"`
-	KnowledgeIDs []string            `json:"knowledge_ids"`
-	FolderIDs    []string            `json:"folder_ids"`
-	TagIDs       []string            `json:"tag_ids"`
+	Updates map[string][]string `json:"updates"`
+	KBID    string              `json:"kb_id"`
 }
 
 // UpdateKnowledgeTagBatch godoc
@@ -1836,62 +1842,34 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	// Legacy updates-only payload remains supported. Folder scopes require a KB and common tag_ids.
-	if len(req.FolderIDs) == 0 && len(req.KnowledgeIDs) == 0 {
-		if len(req.Updates) == 0 {
-			c.Error(errors.NewBadRequestError("updates cannot be empty"))
-			return
-		}
-		var firstID string
-		for id := range req.Updates {
-			firstID = id
-			break
-		}
-		knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstID, types.OrgRoleEditor)
-		if err != nil {
-			c.Error(err)
-			return
-		}
-		kbID := req.KBID
-		if kbID == "" {
-			kbID = knowledge.KnowledgeBaseID
-		}
-		if _, _, _, _, err := h.resolveWritableBatchScope(c, kbID, mapKeys(req.Updates), nil); err != nil {
-			c.Error(err)
-			return
-		}
-		if err := h.kgService.UpdateKnowledgeTagBatch(effCtx, kbID, req.Updates); err != nil {
-			c.Error(err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true})
+	// Updates-only payload: each entry maps a knowledge ID to its complete tag ID set.
+	if len(req.Updates) == 0 {
+		c.Error(errors.NewBadRequestError("updates cannot be empty"))
 		return
 	}
-	if strings.TrimSpace(req.KBID) == "" {
-		c.Error(errors.NewBadRequestError("kb_id is required for folder scope"))
-		return
+	var firstID string
+	for id := range req.Updates {
+		firstID = id
+		break
 	}
-	ctx, kbID, _, ids, err := h.resolveWritableBatchScope(c, req.KBID, req.KnowledgeIDs, req.FolderIDs)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstID, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	updates := make(map[string][]string, len(ids)+len(req.Updates))
-	for id, tags := range req.Updates {
-		updates[id] = tags
+	kbID := req.KBID
+	if kbID == "" {
+		kbID = knowledge.KnowledgeBaseID
 	}
-	for _, id := range ids {
-		updates[id] = req.TagIDs
-	}
-	if len(updates) == 0 {
-		c.JSON(http.StatusOK, gin.H{"success": true, "updated_count": 0})
-		return
-	}
-	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, kbID, updates); err != nil {
+	if _, _, _, _, err := h.resolveWritableBatchScope(c, kbID, mapKeys(req.Updates), nil); err != nil {
 		c.Error(err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "updated_count": len(updates)})
+	if err := h.kgService.UpdateKnowledgeTagBatch(effCtx, kbID, req.Updates); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func mapKeys[V any](values map[string]V) []string {
@@ -2458,10 +2436,10 @@ func sliceContains(ss []string, target string) bool {
 }
 
 type batchReparseKnowledgeRequest struct {
-	KBID string   `json:"kb_id" binding:"required"`
-	IDs  []string `json:"ids"`
-	types.BatchFolderScopeRequest
-	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	KBID          string                             `json:"kb_id" binding:"required"`
+	IDs           []string                           `json:"ids"`
+	KnowledgeIDs  []string                           `json:"knowledge_ids"`
+	ProcessConfig *types.KnowledgeProcessOverrides   `json:"process_config,omitempty"`
 }
 
 // BatchReparseKnowledge godoc
@@ -2484,12 +2462,11 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	explicit := mergeKnowledgeScope(req.IDs, req.KnowledgeIDs)
-	folderIDs := normalizeBatchFolderIDs(req.FolderIDs)
-	if len(explicit) == 0 && len(folderIDs) == 0 {
-		c.Error(errors.NewBadRequestError("knowledge_ids or folder_ids cannot be empty"))
+	if len(explicit) == 0 {
+		c.Error(errors.NewBadRequestError("knowledge_ids cannot be empty"))
 		return
 	}
-	ctx, _, effectiveTenantID, ids, err := h.resolveWritableBatchScope(c, req.KBID, explicit, folderIDs)
+	ctx, _, effectiveTenantID, ids, err := h.resolveWritableBatchScope(c, req.KBID, explicit, nil)
 	if err != nil {
 		c.Error(err)
 		return

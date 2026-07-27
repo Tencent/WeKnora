@@ -25,7 +25,6 @@ type KnowledgeFolderRepository interface {
 	UpdateName(context.Context, uint64, string, string, string) error
 	Delete(context.Context, uint64, string, string) error
 	DeleteSubtree(context.Context, uint64, string, []string) error
-	MoveKnowledgeToRoot(context.Context, uint64, string, []string) error
 	CreateKnowledge(context.Context, *types.Knowledge) error
 	GetKnowledgeByIDForUpdate(context.Context, uint64, string) (*types.Knowledge, error)
 	GetKnowledgeBatchForUpdate(context.Context, uint64, []string) ([]*types.Knowledge, error)
@@ -41,11 +40,13 @@ type KnowledgeFolderRepository interface {
 // KnowledgeFolderService manages the folder lifecycle within the current tenant.
 type KnowledgeFolderService interface {
 	CreateFolder(context.Context, string, *types.CreateFolderRequest) (*types.KnowledgeFolder, error)
+	ResolveOrCreatePaths(
+		context.Context, string, *types.ResolveFolderPathsRequest,
+	) (*types.ResolveFolderPathsResponse, error)
 	GetFolder(context.Context, string, string) (*types.KnowledgeFolder, error)
 	ListByParent(context.Context, string, string) ([]*types.KnowledgeFolder, error)
 	GetTree(context.Context, string) ([]*types.KnowledgeFolder, error)
 	UpdateFolder(context.Context, string, string, *types.UpdateFolderRequest) (*types.KnowledgeFolder, error)
-	DeleteFolder(context.Context, string, string, bool) error
 	MoveFolder(context.Context, string, string, *types.MoveFolderRequest) (*types.KnowledgeFolder, error)
 	GetBreadcrumb(context.Context, string, string) ([]*types.KnowledgeFolder, error)
 	ResolveKnowledgeScope(context.Context, string, []string) (*types.FolderKnowledgeScope, error)

@@ -1,5 +1,6 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import { serializeFolderForUpload, type BatchFolderScopeRequest, type BatchReparseFolderRequest, type KnowledgeListQuery } from '@/types/knowledgeFolder';
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
@@ -180,6 +181,7 @@ export function uploadKnowledgeFile(
     file: File
     tag_ids?: string[]
     fileName?: string
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides | string
     [key: string]: any
   } = { file: new File([], '') },
@@ -187,8 +189,11 @@ export function uploadKnowledgeFile(
 ) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
-    const value = data[key];
+    let value = data[key];
     if (value === undefined) return;
+    if (key === 'folder_id') {
+      value = serializeFolderForUpload(String(value));
+    }
     if (key === 'tag_ids' && Array.isArray(value)) {
       formData.append(key, value.join(','));
     } else if (key === 'process_config' && value && typeof value !== 'string') {
@@ -204,13 +209,24 @@ export function uploadKnowledgeFile(
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: {
+    url: string
+    enable_multimodel?: boolean
+    tag_ids?: string[]
+    folder_id?: string
+    process_config?: KnowledgeProcessOverrides
+  },
 ) {
-  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
+  const payload = { ...data }
+  if (payload.folder_id !== undefined) {
+    payload.folder_id = serializeFolderForUpload(payload.folder_id)
+  }
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, payload);
 }
 
 // 手工创建知识
 // data.tag_ids: 可选，指定知识所属的标签 ID
+// data.folder_id: 可选，指定知识所属文件夹 ID；'__root__' 表示根目录
 export function createManualKnowledge(
   kbId: string,
   data: {
@@ -218,29 +234,25 @@ export function createManualKnowledge(
     content: string
     status: string
     tag_ids?: string[]
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides
   },
 ) {
-  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, data);
+  const payload = { ...data }
+  if (payload.folder_id !== undefined) {
+    payload.folder_id = serializeFolderForUpload(payload.folder_id)
+  }
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, payload);
 }
 
 export function listKnowledgeFiles(
   kbId: string,
-  params: {
-    page: number;
-    page_size: number;
-    tag_ids?: string;
-    keyword?: string;
-    file_type?: string;
-    parse_status?: string;
-    source?: string;
-    start_time?: string;
-    end_time?: string;
-  },
+  params: KnowledgeListQuery,
 ) {
   const query = new URLSearchParams();
   query.append('page', String(params.page));
   query.append('page_size', String(params.page_size));
+  if (params.folder_id !== undefined) query.append('folder_id', params.folder_id);
   if (params.tag_ids) query.append('tag_ids', params.tag_ids);
   if (params.keyword) query.append('keyword', params.keyword);
   if (params.file_type) query.append('file_type', params.file_type);
@@ -248,8 +260,7 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
-  const qs = query.toString();
-  return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${query}`);
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
@@ -284,8 +295,10 @@ export function delKnowledgeDetails(id: string) {
 }
 
 // 批量删除（同一知识库内）。后端会校验所有 id 隶属于 kb_id 且具有编辑权限。
-export function batchDeleteKnowledge(kbId: string, ids: string[]) {
-  return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids });
+export function batchDeleteKnowledge(
+  input: BatchFolderScopeRequest,
+) {
+  return post('/api/v1/knowledge/batch-delete', input);
 }
 
 export function downKnowledgeDetails(id: string) {
@@ -497,10 +510,6 @@ export function knowledgeSemanticSearch(data: {
   return post('/api/v1/knowledge-search', data);
 }
 
-export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
-  return post(`/api/v1/knowledge/batch-reparse`, {
-    kb_id: kbId,
-    ids,
-    process_config: processConfig,
-  });
+export function batchReparseKnowledge(input: BatchReparseFolderRequest) {
+  return post('/api/v1/knowledge/batch-reparse', input);
 }

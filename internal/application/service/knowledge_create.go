@@ -724,7 +724,7 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
-	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	kbID string, payload *types.ManualKnowledgePayload, channel string, folderID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
@@ -774,6 +774,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	meta := types.NewManualKnowledgeMetadata(cleanContent, status, 1)
 
 	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		Type:             types.KnowledgeTypeManual,
@@ -805,7 +806,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		}
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+	if err := s.folderService.CreateKnowledgeInFolder(ctx, knowledge, folderID); err != nil {
 		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
 		return nil, err
 	}

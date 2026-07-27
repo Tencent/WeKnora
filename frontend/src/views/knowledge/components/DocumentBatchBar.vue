@@ -5,6 +5,10 @@ defineProps<{
   count: number;
   deleteLoading?: boolean;
   reparseLoading?: boolean;
+  // When true the reparse action is disabled because the known document count
+  // exceeds the backend per-request cap (200). Pre-disable avoids a rejected
+  // round-trip; the button title explains why it is disabled.
+  reparseOverLimit?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
@@ -35,7 +39,10 @@ const { t } = useI18n();
             :confirm-btn="{ content: t('knowledgeBase.confirmBatchReparse'), theme: 'warning' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reparse')">
             <t-button theme="default" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="reparseLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || reparseOverLimit"
+              :loading="reparseLoading"
+              :title="reparseOverLimit ? t('knowledgeBase.folderReparseLimit') : undefined"
+              @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
               {{ t('knowledgeBase.rebuildDocument') }}
             </t-button>

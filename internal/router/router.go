@@ -253,14 +253,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		)
 		folderRead := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
 		folders.POST("", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.CreateFolder)
+		folders.POST("/resolve-paths", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"),
+			params.KnowledgeFolderHandler.ResolveOrCreatePaths)
 		folderRead.GET("", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.ListFolders)
-		// Keep static routes before /:folder_id so /tree cannot be captured as an ID.
+		// Keep static routes before /:folder_id so static names cannot be captured as IDs.
 		folderRead.GET("/tree", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetTree)
 		folderRead.GET("/:folder_id/breadcrumb", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetBreadcrumb)
 		folders.POST("/:folder_id/move", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.MoveFolder)
 		folderRead.GET("/:folder_id", rbacGuards.Viewer(), rbacGuards.KBAccessRead("id"), params.KnowledgeFolderHandler.GetFolder)
 		folders.PUT("/:folder_id", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.UpdateFolder)
-		folders.DELETE("/:folder_id", rbacGuards.OwnedKBOrAdmin(), rbacGuards.KBAccessWrite("id"), params.KnowledgeFolderHandler.DeleteFolder)
 		folderKnowledge := rbacGuards.apiKeyGroup(v1.Group("/knowledges"), apiKeyIngest(apiKeyFullAccess()))
 		folderKnowledge.PUT("/:id/folder", rbacGuards.OwnedKnowledgeKBOrAdmin(), rbacGuards.KBAccessWriteFromKnowledgeIDParam("id"), params.KnowledgeFolderHandler.MoveKnowledgeToFolder)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)

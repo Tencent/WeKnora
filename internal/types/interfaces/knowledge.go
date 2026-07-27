@@ -49,11 +49,14 @@ type KnowledgeService interface {
 	CreateKnowledgeFromPassageSync(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)
 	// CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 	// channel identifies the ingestion channel; empty defaults to "web".
+	// folderID scopes the new knowledge under a folder; "__root__" must be
+	// normalized to types.FolderRootID ("") by the caller before this call.
 	CreateKnowledgeFromManual(
 		ctx context.Context,
 		kbID string,
 		payload *types.ManualKnowledgePayload,
 		channel string,
+		folderID string,
 	) (*types.Knowledge, error)
 	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)

@@ -4,7 +4,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -86,6 +85,41 @@ func (h *KnowledgeFolderHandler) CreateFolder(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, folder)
+}
+
+// ResolveOrCreatePaths godoc
+// @Summary      Resolve or create relative folder paths
+// @Description  Atomically materialize relative directory paths beneath the current folder.
+// @Tags         Knowledge Folders
+// @Accept       json
+// @Produce      json
+// @Param        id      path  string                           true  "Knowledge base ID"
+// @Param        request body  types.ResolveFolderPathsRequest true  "Relative folder paths"
+// @Success      200  {object}  types.ResolveFolderPathsResponse
+// @Failure      400  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/folders/resolve-paths [post]
+func (h *KnowledgeFolderHandler) ResolveOrCreatePaths(c *gin.Context) {
+	kbID, _, ok := knowledgeFolderParams(c)
+	if !ok {
+		return
+	}
+	var req types.ResolveFolderPathsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.CurrentFolderID) == types.FolderRootFilter {
+		req.CurrentFolderID = types.FolderRootID
+	}
+	resolved, err := h.service.ResolveOrCreatePaths(c.Request.Context(), kbID, &req)
+	if err != nil {
+		writeKnowledgeFolderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, resolved)
 }
 
 // ListFolders godoc
@@ -208,45 +242,6 @@ func (h *KnowledgeFolderHandler) UpdateFolder(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, folder)
-}
-
-// DeleteFolder godoc
-// @Summary      Delete a knowledge folder
-// @Description  Delete a folder. A non-empty folder requires force=true.
-// @Tags         Knowledge Folders
-// @Param        id        path   string  true   "Knowledge base ID"
-// @Param        folder_id path   string  true   "Folder ID"
-// @Param        force     query  bool    false  "Move contained knowledge to root and delete the subtree"
-// @Success      204
-// @Failure      400  {object}  errors.AppError
-// @Failure      404  {object}  errors.AppError
-// @Failure      409  {object}  errors.AppError
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /knowledge-bases/{id}/folders/{folder_id} [delete]
-func (h *KnowledgeFolderHandler) DeleteFolder(c *gin.Context) {
-	kbID, folderID, ok := knowledgeFolderParams(c)
-	if !ok {
-		return
-	}
-	if folderID == "" {
-		_ = c.Error(apperrors.NewBadRequestError("folder ID is required"))
-		return
-	}
-	force := false
-	if raw, exists := c.GetQuery("force"); exists {
-		var err error
-		force, err = strconv.ParseBool(raw)
-		if err != nil {
-			_ = c.Error(apperrors.NewBadRequestError("force must be a boolean"))
-			return
-		}
-	}
-	if err := h.service.DeleteFolder(c.Request.Context(), kbID, folderID, force); err != nil {
-		writeKnowledgeFolderError(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
 }
 
 // GetBreadcrumb godoc

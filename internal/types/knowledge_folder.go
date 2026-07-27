@@ -15,9 +15,10 @@ var (
 )
 
 const (
-	FolderRootID     = ""
-	FolderRootFilter = "__root__"
-	MaxFolderDepth   = 10
+	FolderRootID          = ""
+	FolderRootFilter      = "__root__"
+	MaxFolderDepth        = 10
+	MaxResolveFolderPaths = 1000
 )
 
 type KnowledgeFolder struct {
@@ -46,6 +47,20 @@ func (f *KnowledgeFolder) BeforeCreate(tx *gorm.DB) error {
 type CreateFolderRequest struct {
 	ParentID string `json:"parent_id"`
 	Name     string `json:"name" binding:"required"`
+}
+
+type ResolveFolderPathsRequest struct {
+	CurrentFolderID string   `json:"current_folder_id"`
+	Paths           []string `json:"paths" binding:"required"`
+}
+
+type ResolvedFolderPath struct {
+	RelativePath string `json:"relative_path"`
+	FolderID     string `json:"folder_id"`
+}
+
+type ResolveFolderPathsResponse struct {
+	Paths []ResolvedFolderPath `json:"paths"`
 }
 
 type UpdateFolderRequest struct {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -134,6 +135,149 @@ func (s *knowledgeFolderService) CreateFolder(
 	return created, err
 }
 
+const maxRelativeFolderPathBytes = types.MaxFolderDepth*255 + (types.MaxFolderDepth - 1)
+
+func normalizeRelativeFolderPath(path string) (string, []string, error) {
+	if path == "" {
+		return "", nil, nil
+	}
+	driveAbsolute := len(path) >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') ||
+		(path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':' && path[2] == '/'
+	if strings.HasPrefix(path, "/") || driveAbsolute || strings.Contains(path, `\`) ||
+		len(path) > maxRelativeFolderPathBytes {
+		return "", nil, types.ErrInvalidArgument
+	}
+	segments := strings.Split(path, "/")
+	if len(segments) > types.MaxFolderDepth {
+		return "", nil, types.ErrInvalidArgument
+	}
+	for _, segment := range segments {
+		if segment == "" || segment == "." || segment == ".." || len(segment) > 255 {
+			return "", nil, types.ErrInvalidArgument
+		}
+		for _, r := range segment {
+			if unicode.IsControl(r) {
+				return "", nil, types.ErrInvalidArgument
+			}
+		}
+	}
+	return path, segments, nil
+}
+
+type resolvedFolderPathInput struct {
+	original   string
+	normalized string
+	segments   []string
+}
+
+func (s *knowledgeFolderService) ResolveOrCreatePaths(
+	ctx context.Context, kbID string, req *types.ResolveFolderPathsRequest,
+) (*types.ResolveFolderPathsResponse, error) {
+	if req == nil || len(req.Paths) == 0 || len(req.Paths) > types.MaxResolveFolderPaths {
+		return nil, types.ErrInvalidArgument
+	}
+
+	inputs := make([]resolvedFolderPathInput, 0, len(req.Paths))
+	unique := make(map[string][]string, len(req.Paths))
+	for _, original := range req.Paths {
+		normalized, segments, err := normalizeRelativeFolderPath(original)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, resolvedFolderPathInput{
+			original: original, normalized: normalized, segments: segments,
+		})
+		if _, exists := unique[normalized]; !exists {
+			unique[normalized] = segments
+		}
+	}
+
+	paths := make([]string, 0, len(unique))
+	for path := range unique {
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		leftDepth := len(unique[paths[i]])
+		rightDepth := len(unique[paths[j]])
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return paths[i] < paths[j]
+	})
+
+	tenantID, err := s.scope(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	currentFolderID := strings.TrimSpace(req.CurrentFolderID)
+	if currentFolderID == types.FolderRootFilter {
+		currentFolderID = types.FolderRootID
+	}
+
+	folderIDs := make(map[string]string, len(unique)+1)
+	err = s.folders.Transaction(ctx, func(repo interfaces.KnowledgeFolderRepository) error {
+		if err := repo.LockKnowledgeBase(ctx, tenantID, kbID); err != nil {
+			return err
+		}
+		current, nextDepth, err := s.parent(ctx, repo, tenantID, kbID, currentFolderID, true)
+		if err != nil {
+			return err
+		}
+		for _, segments := range unique {
+			if len(segments) > 0 && nextDepth+len(segments)-1 > types.MaxFolderDepth {
+				return types.ErrInvalidArgument
+			}
+		}
+		folderIDs[""] = currentFolderID
+		foldersByPath := map[string]*types.KnowledgeFolder{"": current}
+
+		for _, relativePath := range paths {
+			segments := unique[relativePath]
+			if len(segments) == 0 {
+				continue
+			}
+
+			parentPath := ""
+			for index, name := range segments {
+				path := strings.Join(segments[:index+1], "/")
+				if _, exists := folderIDs[path]; exists {
+					parentPath = path
+					continue
+				}
+				parent := foldersByPath[parentPath]
+				folder := &types.KnowledgeFolder{
+					TenantID: tenantID, KnowledgeBaseID: kbID, ParentID: folderIDs[parentPath],
+					Name: name, Depth: nextDepth + index,
+				}
+				if err := folder.BeforeCreate(nil); err != nil {
+					return err
+				}
+				folder.Path = folderPath(parent, folder.ID)
+				resolved, _, err := repo.CreateIfAbsent(ctx, folder)
+				if err != nil {
+					return err
+				}
+				folderIDs[path] = resolved.ID
+				foldersByPath[path] = resolved
+				parentPath = path
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	response := &types.ResolveFolderPathsResponse{Paths: make([]types.ResolvedFolderPath, 0, len(inputs))}
+	for _, input := range inputs {
+		response.Paths = append(response.Paths, types.ResolvedFolderPath{
+			RelativePath: input.original,
+			FolderID:     folderIDs[input.normalized],
+		})
+	}
+	return response, nil
+}
+
 func (s *knowledgeFolderService) GetFolder(
 	ctx context.Context, kbID, folderID string,
 ) (*types.KnowledgeFolder, error) {
@@ -246,47 +390,6 @@ func (s *knowledgeFolderService) UpdateFolder(
 		return nil
 	})
 	return renamed, err
-}
-
-func (s *knowledgeFolderService) DeleteFolder(
-	ctx context.Context, kbID, folderID string, force bool,
-) error {
-	if folderID == types.FolderRootID {
-		return types.ErrInvalidArgument
-	}
-	tenantID, err := s.scope(ctx, kbID)
-	if err != nil {
-		return err
-	}
-	return s.folders.Transaction(ctx, func(repo interfaces.KnowledgeFolderRepository) error {
-		if err := repo.LockKnowledgeBase(ctx, tenantID, kbID); err != nil {
-			return err
-		}
-		if _, err := repo.GetByIDForUpdate(ctx, tenantID, kbID, folderID); err != nil {
-			return err
-		}
-		ids, err := repo.GetDescendantIDs(ctx, tenantID, kbID, []string{folderID})
-		if err != nil {
-			return err
-		}
-		counts, err := repo.CountKnowledgeByFolder(ctx, tenantID, kbID)
-		if err != nil {
-			return err
-		}
-		nonEmpty := len(ids) > 1
-		for _, id := range ids {
-			nonEmpty = nonEmpty || counts[id] > 0
-		}
-		if nonEmpty && !force {
-			return types.ErrFolderNotEmpty
-		}
-		if force {
-			if err := repo.MoveKnowledgeToRoot(ctx, tenantID, kbID, ids); err != nil {
-				return err
-			}
-		}
-		return repo.DeleteSubtree(ctx, tenantID, kbID, ids)
-	})
 }
 
 func (s *knowledgeFolderService) MoveFolder(

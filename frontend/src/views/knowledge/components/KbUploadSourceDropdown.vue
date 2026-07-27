@@ -9,6 +9,7 @@
       @change="(e) => handleFilesChange(e, false)"
     />
     <input
+      v-if="includeFolderUpload"
       ref="folderInputRef"
       type="file"
       class="hidden-file-input"
@@ -70,6 +71,7 @@ const props = withDefaults(defineProps<{
   acceptFileTypes?: string
   supportedFileTypes?: string[]
   includeManual?: boolean
+  includeFolderUpload?: boolean
   triggerIcon?: string
   triggerClass?: string
   dataGuide?: string
@@ -79,6 +81,7 @@ const props = withDefaults(defineProps<{
   acceptFileTypes: '',
   supportedFileTypes: () => [],
   includeManual: false,
+  includeFolderUpload: true,
   triggerIcon: 'file-add',
   triggerClass: '',
   dataGuide: '',
@@ -108,11 +111,11 @@ const dropdownOptions = computed(() => {
       value: 'upload',
       prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }),
     },
-    {
+    ...(props.includeFolderUpload ? [{
       content: t('upload.uploadFolder'),
       value: 'uploadFolder',
       prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }),
-    },
+    }] : []),
     {
       content: t('knowledgeBase.importURL'),
       value: 'importURL',

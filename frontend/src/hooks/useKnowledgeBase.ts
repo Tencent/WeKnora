@@ -9,6 +9,7 @@ import {
   delKnowledgeDetails,
   getKnowledgeDetailsCon,
 } from "@/api/knowledge-base/index";
+import type { KnowledgeListQuery } from '@/types/knowledgeFolder';
 import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
@@ -40,17 +41,7 @@ export default function (knowledgeBaseId?: string) {
   });
   let knowledgeListGeneration = 0;
   const getKnowled = (
-    query: {
-      page: number;
-      page_size: number;
-      tag_ids?: string;
-      keyword?: string;
-      file_type?: string;
-      parse_status?: string;
-      source?: string;
-      start_time?: string;
-      end_time?: string;
-    } = { page: 1, page_size: 35 },
+    query: KnowledgeListQuery = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
@@ -88,7 +79,9 @@ export default function (knowledgeBaseId?: string) {
         }
         total.value = totalResult;
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (requestGeneration === knowledgeListGeneration) throw error;
+      });
   };
   const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
     cardList.value[index].isMore = false;

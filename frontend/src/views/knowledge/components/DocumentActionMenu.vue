@@ -10,17 +10,29 @@ interface KnowledgeItem {
   parse_status?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   item: KnowledgeItem;
   canMutateKnowledge: boolean;
   traceVisible: boolean;
-}>();
+  // When true, the selection driving this menu includes folders. Folders
+  // cannot be transferred cross-KB (the async transfer is document-only), so
+  // the "转移到其他知识库…" action is hidden. The same-KB "移动到文件夹…"
+  // action stays - it applies to both files and folders. The per-document card
+  // menu passes false (a single document has no folders); a future batch /
+  // mixed-selection context passes true to gate the cross-KB entry.
+  hasFolderSelection?: boolean;
+}>(), {
+  hasFolderSelection: false,
+});
 
 const emit = defineEmits<{
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
   (e: 'cancel-parse'): void;
+  // Same-KB move-to-folder (files AND folders) - opens FolderPickerDialog.
+  (e: 'move-folder'): void;
+  // Cross-KB transfer (documents only) - existing async transfer flow.
   (e: 'move'): void;
   (e: 'batch-manage'): void;
   (e: 'delete'): void;
@@ -80,10 +92,21 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     </div>
   </t-popconfirm>
 
-  <!-- 移动到... -->
-  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move')">
+  <!-- 移动到文件夹… (same-KB move; applies to files AND folders) -->
+  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('move-folder')">
+    <t-icon class="icon" name="folder-move" />
+    <span>{{ $t('knowledgeBase.folderActionMoveTo') }}</span>
+  </div>
+
+  <!-- 转移到其他知识库… (cross-KB async transfer; document-only - hidden when
+       the selection includes folders, since folders cannot transfer cross-KB) -->
+  <div
+    v-if="canMutateKnowledge && !hasFolderSelection"
+    class="doc-action-menu-item"
+    @click.stop="emit('move')"
+  >
     <t-icon class="icon" name="swap" />
-    <span>{{ $t('knowledgeBase.moveDocument') }}</span>
+    <span>{{ $t('knowledgeBase.transferToKnowledgeBase') }}</span>
   </div>
 
   <!-- 批量管理 -->

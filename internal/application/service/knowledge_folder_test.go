@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -54,6 +55,187 @@ func createFolder(
 	folder, err := svc.CreateFolder(ctx, kbID, &types.CreateFolderRequest{ParentID: parentID, Name: name})
 	require.NoError(t, err)
 	return folder
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsRootNamedSharedAndIdempotent(t *testing.T) {
+	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+
+	first, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{"Project/docs/2026", "Project/assets", "Project/docs", ""},
+	})
+	require.NoError(t, err)
+	require.Len(t, first.Paths, 4)
+	byPath := make(map[string]string, len(first.Paths))
+	for _, resolved := range first.Paths {
+		byPath[resolved.RelativePath] = resolved.FolderID
+	}
+	require.NotEmpty(t, byPath["Project/docs/2026"])
+	require.NotEmpty(t, byPath["Project/assets"])
+	require.NotEmpty(t, byPath["Project/docs"])
+	require.Empty(t, byPath[""])
+
+	var projectCount, docsCount int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).
+		Where("tenant_id = 1 AND knowledge_base_id = 'kb-1' AND parent_id = '' AND name = 'Project'").
+		Count(&projectCount).Error)
+	require.Equal(t, int64(1), projectCount, "shared prefixes must be created once")
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).
+		Where("id = ? AND parent_id = ?", byPath["Project/docs/2026"], byPath["Project/docs"]).
+		Count(&docsCount).Error)
+	require.Equal(t, int64(1), docsCount)
+
+	second, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{"Project/docs/2026", "Project/docs"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, byPath["Project/docs/2026"], second.Paths[0].FolderID)
+	require.Equal(t, byPath["Project/docs"], second.Paths[1].FolderID)
+
+	anchor := createFolder(t, svc, ctx, "kb-1", types.FolderRootID, "anchor")
+	named, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		CurrentFolderID: anchor.ID,
+		Paths:           []string{"existing/child", ""},
+	})
+	require.NoError(t, err)
+	require.Len(t, named.Paths, 2)
+	require.Equal(t, anchor.ID, named.Paths[1].FolderID)
+	child, err := svc.GetFolder(ctx, "kb-1", named.Paths[0].FolderID)
+	require.NoError(t, err)
+	require.Equal(t, 3, child.Depth)
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsReusesExistingPrefix(t *testing.T) {
+	svc, ctx, _ := newKnowledgeFolderServiceHarness(t)
+	existing := createFolder(t, svc, ctx, "kb-1", types.FolderRootID, "Project")
+
+	resolved, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{"Project/docs"},
+	})
+	require.NoError(t, err)
+	docs, err := svc.GetFolder(ctx, "kb-1", resolved.Paths[0].FolderID)
+	require.NoError(t, err)
+	require.Equal(t, existing.ID, docs.ParentID)
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsRejectsInvalidBatchWithoutWrites(t *testing.T) {
+	invalidPaths := []string{
+		"/absolute", `Project\docs`, "Project//docs", "Project/./docs", "Project/../docs",
+		"Project/control\x00name", "Project/" + strings.Repeat("x", 256),
+	}
+	for _, invalid := range invalidPaths {
+		t.Run(fmt.Sprintf("%q", invalid), func(t *testing.T) {
+			svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+			_, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+				Paths: []string{"would-be-created", invalid},
+			})
+			require.ErrorIs(t, err, types.ErrInvalidArgument)
+			var count int64
+			require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&count).Error)
+			require.Zero(t, count, "all path syntax must be validated before the transaction writes")
+		})
+	}
+
+	svc, ctx, _ := newKnowledgeFolderServiceHarness(t)
+	_, err := svc.ResolveOrCreatePaths(ctx, "kb-1", nil)
+	require.ErrorIs(t, err, types.ErrInvalidArgument)
+	_, err = svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{})
+	require.ErrorIs(t, err, types.ErrInvalidArgument)
+	_, err = svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: make([]string, types.MaxResolveFolderPaths+1),
+	})
+	require.ErrorIs(t, err, types.ErrInvalidArgument)
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsRejectsPreflightBoundsWithoutWrites(t *testing.T) {
+	tests := map[string]string{
+		"too many segments": strings.Join([]string{
+			"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
+		}, "/"),
+		"whole path too long": strings.Join([]string{
+			strings.Repeat("a", 255), strings.Repeat("b", 255), strings.Repeat("c", 255),
+			strings.Repeat("d", 255), strings.Repeat("e", 255), strings.Repeat("f", 255),
+			strings.Repeat("g", 255), strings.Repeat("h", 255), strings.Repeat("i", 255),
+			strings.Repeat("j", 256),
+		}, "/"),
+	}
+	for name, invalid := range tests {
+		t.Run(name, func(t *testing.T) {
+			svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+			_, err := svc.ResolveOrCreatePaths(ctx, "missing-kb", &types.ResolveFolderPathsRequest{
+				Paths: []string{"would-be-created", invalid},
+			})
+			require.ErrorIs(t, err, types.ErrInvalidArgument)
+			var count int64
+			require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&count).Error)
+			require.Zero(t, count, "path bounds must be rejected during preflight before any folder write")
+		})
+	}
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsRejectsDriveAbsolutePathWithoutWrites(t *testing.T) {
+	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+
+	_, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{"would-be-created", "C:/Project/docs"},
+	})
+	require.ErrorIs(t, err, types.ErrInvalidArgument)
+	var count int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&count).Error)
+	require.Zero(t, count, "drive-style absolute paths must be rejected before any folder write")
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsPreservesSegmentWhitespace(t *testing.T) {
+	svc, ctx, _ := newKnowledgeFolderServiceHarness(t)
+	resolved, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{" Project / docs "},
+	})
+	require.NoError(t, err)
+	leaf, err := svc.GetFolder(ctx, "kb-1", resolved.Paths[0].FolderID)
+	require.NoError(t, err)
+	require.Equal(t, " docs ", leaf.Name)
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsDepthAndAnchorFailuresRollback(t *testing.T) {
+	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+	anchor := createFolder(t, svc, ctx, "kb-1", types.FolderRootID, "anchor")
+	for depth := 2; depth <= 9; depth++ {
+		anchor = createFolder(t, svc, ctx, "kb-1", anchor.ID, fmt.Sprintf("depth-%d", depth))
+	}
+	var before int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&before).Error)
+
+	_, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		CurrentFolderID: anchor.ID,
+		Paths:           []string{"allowed", "too/deep"},
+	})
+	require.ErrorIs(t, err, types.ErrInvalidArgument)
+	var after int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&after).Error)
+	require.Equal(t, before, after, "depth failure must roll back every new folder")
+
+	_, err = svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		CurrentFolderID: "missing",
+		Paths:           []string{"new"},
+	})
+	require.ErrorIs(t, err, repository.ErrKnowledgeFolderNotFound)
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&after).Error)
+	require.Equal(t, before, after)
+}
+
+func TestKnowledgeFolderService_ResolveOrCreatePathsDatabaseFailureRollsBack(t *testing.T) {
+	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER fail_folder_insert BEFORE INSERT ON knowledge_folders
+		WHEN NEW.name = 'fail' BEGIN SELECT RAISE(FAIL, 'forced insert failure'); END;
+	`).Error)
+
+	_, err := svc.ResolveOrCreatePaths(ctx, "kb-1", &types.ResolveFolderPathsRequest{
+		Paths: []string{"created-first", "fail/child"},
+	})
+	require.Error(t, err)
+	var count int64
+	require.NoError(t, db.Model(&types.KnowledgeFolder{}).Count(&count).Error)
+	require.Zero(t, count, "database failure must roll back folders inserted earlier in the batch")
 }
 
 func TestKnowledgeFolderService_ValidatesNamesAndSiblingUniqueness(t *testing.T) {
@@ -146,46 +328,6 @@ func TestKnowledgeFolderService_MoveChecksWholeSubtreeDepth(t *testing.T) {
 	assert.ErrorIs(t, err, types.ErrInvalidArgument)
 }
 
-func TestKnowledgeFolderService_DeleteModesAndTenantIsolation(t *testing.T) {
-	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
-	parent := createFolder(t, svc, ctx, "kb-1", "", "parent")
-	child := createFolder(t, svc, ctx, "kb-1", parent.ID, "child")
-	require.NoError(t, db.Exec(
-		"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, folder_id) VALUES ('doc', 1, 'kb-1', ?)", child.ID,
-	).Error)
-
-	assert.ErrorIs(t, svc.DeleteFolder(ctx, "kb-1", parent.ID, false), types.ErrFolderNotEmpty)
-	require.NoError(t, svc.DeleteFolder(ctx, "kb-1", parent.ID, true))
-	var folderID string
-	require.NoError(t, db.Raw("SELECT folder_id FROM knowledges WHERE id = 'doc'").Scan(&folderID).Error)
-	assert.Empty(t, folderID)
-	_, err := svc.GetFolder(ctx, "kb-1", parent.ID)
-	assert.Error(t, err)
-
-	otherTenant := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(2))
-	_, err = svc.GetFolder(otherTenant, "kb-1", child.ID)
-	assert.Error(t, err)
-}
-
-func TestKnowledgeFolderService_DeleteAllowsSameNameRebuildAndPreservesOtherScopes(t *testing.T) {
-	svc, ctx, db := newKnowledgeFolderServiceHarness(t)
-	victim := createFolder(t, svc, ctx, "kb-1", "", "reusable")
-	require.NoError(t, db.Exec(`
-		INSERT INTO knowledge_folders (id, tenant_id, knowledge_base_id, parent_id, name, path, depth)
-		VALUES ('other-kb', 1, 'kb-2', '', 'reusable', '/other-kb', 1),
-		       ('other-tenant', 2, 'kb-1', '', 'reusable', '/other-tenant', 1)
-	`).Error)
-
-	require.NoError(t, svc.DeleteFolder(ctx, "kb-1", victim.ID, false))
-	rebuilt := createFolder(t, svc, ctx, "kb-1", "", "reusable")
-	assert.NotEqual(t, victim.ID, rebuilt.ID)
-
-	var count int64
-	require.NoError(t, db.Unscoped().Model(&types.KnowledgeFolder{}).
-		Where("id IN ? AND deleted_at IS NULL", []string{"other-kb", "other-tenant"}).Count(&count).Error)
-	assert.Equal(t, int64(2), count)
-}
-
 func TestKnowledgeFolderService_RootBreadcrumbStillValidatesScope(t *testing.T) {
 	svc, _, _ := newKnowledgeFolderServiceHarness(t)
 	otherTenant := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(2))
@@ -226,8 +368,6 @@ func TestKnowledgeFolderService_StructuralWritesAcquireKnowledgeBaseLock(t *test
 	_, err = svc.MoveFolder(ctx, "kb-1", folder.ID, &types.MoveFolderRequest{ParentID: parent.ID})
 	require.NoError(t, err)
 	assert.Equal(t, 4, lockCalls)
-	require.NoError(t, svc.DeleteFolder(ctx, "kb-1", folder.ID, false))
-	assert.Equal(t, 5, lockCalls)
 }
 
 func TestKnowledgeFolderService_RenameAndMoveNoOpsSkipFolderWrites(t *testing.T) {

@@ -136,7 +136,7 @@ type batchRouteCase struct {
 var batchRouteCases = []batchRouteCase{
 	{"delete", http.MethodPost, "/api/v1/knowledge/batch-delete", `{"kb_id":"kb-1","knowledge_ids":["knowledge-1"]}`, true},
 	{"reparse", http.MethodPost, "/api/v1/knowledge/batch-reparse", `{"kb_id":"kb-1","knowledge_ids":["knowledge-1"]}`, false},
-	{"tags", http.MethodPut, "/api/v1/knowledge/tags", `{"kb_id":"kb-1","knowledge_ids":["knowledge-1"],"tag_ids":["tag-1"]}`, false},
+	{"tags", http.MethodPut, "/api/v1/knowledge/tags", `{"updates":{"knowledge-1":["tag-1"]}}`, false},
 	{"move folder", http.MethodPost, "/api/v1/knowledges/batch-move-folder", `{"kb_id":"kb-1","knowledge_ids":["knowledge-1"],"target_folder_id":"folder-2"}`, false},
 }
 

@@ -271,8 +271,8 @@ func TestBatchFolderReparseKnowledgeServeHTTP(t *testing.T) {
 		wantIDs    []string
 		wantTasks  int
 	}{
-		{"empty scope", `{"kb_id":"kb-1","folder_ids":["empty"]}`, nil, 0},
 		{"legacy ids", `{"kb_id":"kb-1","ids":["legacy"]}`, []string{"legacy"}, 1},
+		{"knowledge_ids field", `{"kb_id":"kb-1","knowledge_ids":["explicit"]}`, []string{"explicit"}, 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,34 +295,6 @@ func TestBatchFolderUpdateKnowledgeTagServeHTTP(t *testing.T) {
 			"/knowledge/tags", `{"updates":{"legacy":["old-tag"]}}`)
 		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 		require.Equal(t, []map[string][]string{{"legacy": {"old-tag"}}}, service.tagWrites)
-	})
-
-	t.Run("folder scope forms explicit updates", func(t *testing.T) {
-		service := newBatchHTTPService()
-		rec := serveBatchHTTP(t, newBatchHTTPHandlerEngine(t, service, &batchFolderPayloadEnqueuer{}), http.MethodPut,
-			"/knowledge/tags",
-			`{"kb_id":"kb-1","knowledge_ids":["tag-explicit"],"folder_ids":["tag-folder"],"tag_ids":["new-tag"]}`)
-		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
-		require.Equal(t, []map[string][]string{{
-			"tag-explicit": {"new-tag"}, "tag-folder": {"new-tag"},
-		}}, service.tagWrites)
-	})
-
-	t.Run("empty folder scope does not write", func(t *testing.T) {
-		service := newBatchHTTPService()
-		rec := serveBatchHTTP(t, newBatchHTTPHandlerEngine(t, service, &batchFolderPayloadEnqueuer{}), http.MethodPut,
-			"/knowledge/tags", `{"kb_id":"kb-1","folder_ids":["empty"],"tag_ids":["new-tag"]}`)
-		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
-		require.Empty(t, service.tagWrites)
-	})
-
-	t.Run("cross KB selection rejected", func(t *testing.T) {
-		service := newBatchHTTPService()
-		service.knowledges["foreign"] = &types.Knowledge{ID: "foreign", TenantID: 7, KnowledgeBaseID: "kb-other"}
-		rec := serveBatchHTTP(t, newBatchHTTPHandlerEngine(t, service, &batchFolderPayloadEnqueuer{}), http.MethodPut,
-			"/knowledge/tags", `{"kb_id":"kb-1","knowledge_ids":["foreign"],"tag_ids":["new-tag"]}`)
-		require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
-		require.Empty(t, service.tagWrites)
 	})
 }
 

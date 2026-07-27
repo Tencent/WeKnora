@@ -19,6 +19,7 @@
                     :accept-file-types="acceptFileTypes"
                     :supported-file-types="supportedFileTypes"
                     :tooltip="t('uploadConfirm.continueAdd')"
+                    :include-folder-upload="includeFolderUpload"
                     placement="bottom-left"
                     @files="appendFiles"
                     @url="appendUrl"
@@ -58,7 +59,7 @@
                 <li v-for="(file, index) in localFiles" :key="`${file.name}-${index}`" class="file-item">
                   <t-icon :name="getFileIcon(file.name)" class="file-icon" />
                   <div class="file-meta">
-                    <span class="file-name" :title="file.name">{{ file.name }}</span>
+                    <span class="file-name" :title="getUploadDisplayName(file)">{{ getUploadDisplayName(file) }}</span>
                     <span class="file-size">{{ formatFileSize(file.size) }}</span>
                   </div>
                   <t-button
@@ -81,6 +82,10 @@
                 <template v-if="activeSection === 'overview'">
                   <h2 class="main-title">{{ dialogTitle }}</h2>
                   <p class="main-desc">{{ dialogDesc }}</p>
+                  <div v-if="targetLocationLabel" class="target-location">
+                    <t-icon name="folder" />
+                    <span>{{ targetLocationLabel }}</span>
+                  </div>
                 </template>
                 <template v-else>
                   <button
@@ -317,6 +322,8 @@ const props = withDefaults(defineProps<{
   tagId?: string
   acceptFileTypes?: string
   supportedFileTypes?: string[]
+  includeFolderUpload?: boolean
+  targetLocationLabel?: string
 }>(), {
   mode: 'file',
   files: () => [],
@@ -325,6 +332,8 @@ const props = withDefaults(defineProps<{
   reparsePreview: null,
   acceptFileTypes: '',
   supportedFileTypes: () => [],
+  includeFolderUpload: true,
+  targetLocationLabel: '',
 })
 
 const emit = defineEmits<{
@@ -365,6 +374,10 @@ function getModelName(modelId: string): string {
   if (!modelId) return t('uploadConfirm.notSet')
   const model = allModels.value.find((m: any) => m.id === modelId)
   return model?.name || modelId
+}
+
+function getUploadDisplayName(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
 }
 
 function getFileExt(file: File): string {
@@ -1160,6 +1173,16 @@ const handleConfirm = () => {
   font-size: 13px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.target-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
 }
 
 .back-link {

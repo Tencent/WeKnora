@@ -26,6 +26,20 @@ type stubKnowledgeFolderService struct {
 	moveErr       error
 	movedID       string
 	movedFolderID string
+	resolveKBID   string
+	resolveReq    *types.ResolveFolderPathsRequest
+	resolveResp   *types.ResolveFolderPathsResponse
+	resolveErr    error
+}
+
+func (s *stubKnowledgeFolderService) ResolveOrCreatePaths(
+	_ context.Context, kbID string, req *types.ResolveFolderPathsRequest,
+) (*types.ResolveFolderPathsResponse, error) {
+	s.resolveKBID = kbID
+	copyReq := *req
+	copyReq.Paths = append([]string(nil), req.Paths...)
+	s.resolveReq = &copyReq
+	return s.resolveResp, s.resolveErr
 }
 
 func (s *stubKnowledgeFolderService) GetFolder(
@@ -60,8 +74,52 @@ func newKnowledgeFolderHandlerTestEngine(t *testing.T, svc interfaces.KnowledgeF
 		c.Next()
 	})
 	h := mustKnowledgeFolderHandler(t, svc)
+	r.POST("/knowledge-bases/:id/folders/resolve-paths", h.ResolveOrCreatePaths)
 	r.GET("/knowledge-bases/:id/folders/:folder_id", h.GetFolder)
 	return r
+}
+
+func TestKnowledgeFolderHandlerResolveOrCreatePathsNormalizesRootAndReturnsMapping(t *testing.T) {
+	svc := &stubKnowledgeFolderService{resolveResp: &types.ResolveFolderPathsResponse{Paths: []types.ResolvedFolderPath{
+		{RelativePath: "Project/docs", FolderID: "folder-docs"},
+	}}}
+	r := newKnowledgeFolderHandlerTestEngine(t, svc)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/folders/resolve-paths",
+		strings.NewReader(`{"current_folder_id":"__root__","paths":["Project/docs"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, "kb-1", svc.resolveKBID)
+	require.NotNil(t, svc.resolveReq)
+	require.Equal(t, types.FolderRootID, svc.resolveReq.CurrentFolderID)
+	require.Equal(t, []string{"Project/docs"}, svc.resolveReq.Paths)
+	require.JSONEq(t, `{"paths":[{"relative_path":"Project/docs","folder_id":"folder-docs"}]}`,
+		rec.Body.String())
+}
+
+func TestKnowledgeFolderHandlerResolveOrCreatePathsRejectsInvalidJSONAndMapsErrors(t *testing.T) {
+	t.Run("invalid JSON", func(t *testing.T) {
+		svc := &stubKnowledgeFolderService{}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/folders/resolve-paths",
+			strings.NewReader(`{"paths":`))
+		req.Header.Set("Content-Type", "application/json")
+		newKnowledgeFolderHandlerTestEngine(t, svc).ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+		require.Nil(t, svc.resolveReq)
+	})
+
+	t.Run("service not found", func(t *testing.T) {
+		svc := &stubKnowledgeFolderService{resolveErr: apprepo.ErrKnowledgeFolderNotFound}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/folders/resolve-paths",
+			strings.NewReader(`{"paths":["Project"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		newKnowledgeFolderHandlerTestEngine(t, svc).ServeHTTP(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
+	})
 }
 
 func TestNewKnowledgeFolderHandlerRejectsNilService(t *testing.T) {
@@ -224,6 +282,85 @@ func TestCreateKnowledgeFromURLMapsInvalidFolderToNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/knowledge/url",
 		strings.NewReader(`{"url":"https://example.com/document","folder_id":"missing"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
+}
+
+type createManualFolderServiceStub struct {
+	interfaces.KnowledgeService
+	folderID  string
+	createErr error
+}
+
+func (s *createManualFolderServiceStub) CreateKnowledgeFromManual(
+	_ context.Context, _ string, _ *types.ManualKnowledgePayload, _ string,
+	folderID string,
+) (*types.Knowledge, error) {
+	s.folderID = folderID
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	return &types.Knowledge{ID: "knowledge-1", FolderID: folderID}, nil
+}
+
+func TestCreateManualKnowledgePassesFolder(t *testing.T) {
+	for _, tc := range []struct {
+		name, requested, expected string
+	}{
+		{name: "named folder", requested: "folder-current", expected: "folder-current"},
+		{name: "root sentinel", requested: types.FolderRootFilter, expected: types.FolderRootID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serviceStub := &createManualFolderServiceStub{}
+			h := &KnowledgeHandler{
+				cfg:       &config.Config{},
+				kgService: serviceStub,
+				kbService: &createURLFolderKBStub{},
+			}
+			r := gin.New()
+			r.Use(middleware.ErrorHandler())
+			r.Use(func(c *gin.Context) {
+				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
+				c.Request = c.Request.WithContext(ctx)
+				c.Set(types.TenantIDContextKey.String(), uint64(7))
+				c.Next()
+			})
+			r.POST("/knowledge-bases/:id/knowledge/manual", h.CreateManualKnowledge)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/knowledge/manual",
+				strings.NewReader(`{"title":"Manual","content":"hello","folder_id":"`+tc.requested+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+			require.Equal(t, tc.expected, serviceStub.folderID)
+		})
+	}
+}
+
+func TestCreateManualKnowledgeMapsInvalidFolderToNotFound(t *testing.T) {
+	serviceStub := &createManualFolderServiceStub{createErr: apprepo.ErrKnowledgeFolderNotFound}
+	h := &KnowledgeHandler{
+		cfg:       &config.Config{},
+		kgService: serviceStub,
+		kbService: &createURLFolderKBStub{},
+	}
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
+		c.Request = c.Request.WithContext(ctx)
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		c.Next()
+	})
+	r.POST("/knowledge-bases/:id/knowledge/manual", h.CreateManualKnowledge)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/knowledge/manual",
+		strings.NewReader(`{"title":"Manual","content":"hello","folder_id":"missing"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
 

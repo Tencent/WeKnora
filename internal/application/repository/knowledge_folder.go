@@ -213,17 +213,6 @@ func (r *knowledgeFolderRepository) Delete(ctx context.Context, tenantID uint64,
 	return folderWriteResult(result)
 }
 
-func (r *knowledgeFolderRepository) MoveKnowledgeToRoot(
-	ctx context.Context, tenantID uint64, kbID string, folderIDs []string,
-) error {
-	if len(folderIDs) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND folder_id IN ?", tenantID, kbID, folderIDs).
-		Update("folder_id", types.FolderRootID).Error
-}
-
 func (r *knowledgeFolderRepository) DeleteSubtree(
 	ctx context.Context, tenantID uint64, kbID string, folderIDs []string,
 ) error {

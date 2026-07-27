@@ -20,6 +20,18 @@ const IGNORE_TARGET_SELECTOR = [
   '.row-menu',
   '.row-menu-item',
   '.doc-list-header',
+  // Folder-aware interactive elements: keep the marquee rectangle
+  // from starting when the user clicks a folder checkbox, action menu, or
+  // inline rename input. The generic element selectors above (button/input/
+  // .t-checkbox) already cover most cases; these mirror the document-card
+  // selectors for folder cards/rows so marquee ignores the same affordances.
+  '.folder-checkbox',
+  '.folder-card-menu',
+  '.folder-card-menu-item',
+  '.folder-row-more-btn',
+  '.folder-row-menu',
+  '.folder-row-menu-item',
+  '.folder-inline-input',
 ].join(', ');
 
 const DEFAULT_MIN_DRAG_PX = 6;
@@ -50,23 +62,45 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
 function resolveMarqueeModeFromStart(
   e: MouseEvent,
   itemSelector: string,
-  getItemId: (el: HTMLElement) => string | null,
-  selectedIds: Set<string>,
+  keyOf: (el: HTMLElement) => string | null,
+  selectedKeys: Set<string>,
 ): MarqueeMode {
   const target = e.target;
   if (!(target instanceof Element)) return 'add';
   const itemEl = target.closest<HTMLElement>(itemSelector);
   if (!itemEl) return 'add';
-  const id = getItemId(itemEl);
-  if (!id) return 'add';
-  return selectedIds.has(id) ? 'subtract' : 'add';
+  const key = keyOf(itemEl);
+  if (!key) return 'add';
+  return selectedKeys.has(key) ? 'subtract' : 'add';
 }
 
 export interface UseMarqueeSelectOptions {
   containerRef: Ref<HTMLElement | null>;
   itemSelector: string;
-  selectedIds: Ref<Set<string>>;
-  getItemId: (el: HTMLElement) => string | null;
+  /**
+   * Legacy id-based selection (backward-compatible alias). The id is treated as
+   * the selection key, so existing callers keep working unchanged. Either this
+   * pair or the typed-key pair below must be supplied.
+   */
+  selectedIds?: Ref<Set<string>>;
+  getItemId?: (el: HTMLElement) => string | null;
+  /**
+   * Typed-key selection path (preferred for new file-system callers). Keys use
+   * the `folder:<id>` / `knowledge:<id>` format produced by
+   * `buildRenderedSelectionKeys` (see folderModel.ts), so marquee and
+   * Shift-range share the same rendered order the user sees. Takes precedence
+   * over `selectedIds`/`getItemId` when both are supplied.
+   *
+   * The hook does NOT implement Shift-range itself. The page owns
+   * Shift+checkbox logic: it calls `buildRenderedSelectionKeys(directFolders,
+   * documents)` to obtain folders-then-documents rendered order, finds the
+   * anchor/current indices in that array, and writes the resulting keys into
+   * `selectedKeys`. The hook only requires that keys returned by `getItemKey`
+   * match the keys stored in `selectedKeys` so marquee add/subtract and the
+   * start-mode resolution can compare membership correctly.
+   */
+  selectedKeys?: Ref<Set<string>>;
+  getItemKey?: (el: HTMLElement) => string | null;
   enabled?: Ref<boolean>;
   onSelectionStart?: () => void;
   minDragDistance?: number;
@@ -76,12 +110,25 @@ export function useMarqueeSelect(options: UseMarqueeSelectOptions) {
   const {
     containerRef,
     itemSelector,
+    selectedKeys,
+    getItemKey,
     selectedIds,
     getItemId,
     enabled,
     onSelectionStart,
     minDragDistance = DEFAULT_MIN_DRAG_PX,
   } = options;
+
+  // Resolve the active selection path. The typed-key path is preferred for new
+  // callers; the legacy id path is kept as a backward-compatible alias where
+  // the id IS the key. At least one pair must be supplied.
+  const keysRef: Ref<Set<string>> | undefined = selectedKeys ?? selectedIds;
+  const keyOf: ((el: HTMLElement) => string | null) | undefined = getItemKey ?? getItemId;
+  if (!keysRef || !keyOf) {
+    throw new Error(
+      'useMarqueeSelect: provide either selectedKeys/getItemKey or selectedIds/getItemId',
+    );
+  }
 
   const isActive = ref(false);
   const boxVisible = ref(false);
@@ -112,28 +159,28 @@ export function useMarqueeSelect(options: UseMarqueeSelectOptions) {
     };
   };
 
-  const collectIntersectingIds = (): Set<string> => {
+  const collectIntersectingKeys = (): Set<string> => {
     const container = containerRef.value;
     if (!container) return new Set();
     const box = normalizeRect(startClientX, startClientY, currentClientX, currentClientY);
-    const ids = new Set<string>();
+    const keys = new Set<string>();
     container.querySelectorAll<HTMLElement>(itemSelector).forEach((el) => {
-      const id = getItemId(el);
-      if (!id) return;
-      if (rectsIntersect(box, el.getBoundingClientRect())) ids.add(id);
+      const key = keyOf(el);
+      if (!key) return;
+      if (rectsIntersect(box, el.getBoundingClientRect())) keys.add(key);
     });
-    return ids;
+    return keys;
   };
 
   const applyMarqueeSelection = () => {
-    const hit = collectIntersectingIds();
+    const hit = collectIntersectingKeys();
     const next = new Set(baseSelection);
     if (dragMode === 'subtract') {
-      hit.forEach((id) => next.delete(id));
+      hit.forEach((key) => next.delete(key));
     } else {
-      hit.forEach((id) => next.add(id));
+      hit.forEach((key) => next.add(key));
     }
-    selectedIds.value = next;
+    keysRef.value = next;
   };
 
   const endDrag = () => {
@@ -177,8 +224,8 @@ export function useMarqueeSelect(options: UseMarqueeSelectOptions) {
     const container = containerRef.value;
     if (!container) return;
 
-    dragMode = resolveMarqueeModeFromStart(e, itemSelector, getItemId, selectedIds.value);
-    baseSelection = new Set(selectedIds.value);
+    dragMode = resolveMarqueeModeFromStart(e, itemSelector, keyOf, keysRef.value);
+    baseSelection = new Set(keysRef.value);
 
     isActive.value = true;
     startClientX = e.clientX;

@@ -21,6 +21,7 @@ type folderRouteService struct {
 	interfaces.KnowledgeFolderService
 	treeCalls              int
 	getCalls               int
+	resolveCalls           int
 	movedKnowledgeID       string
 	movedKnowledgeFolderID string
 }
@@ -30,6 +31,15 @@ func (s *folderRouteService) CreateFolder(
 ) (*types.KnowledgeFolder, error) {
 	return &types.KnowledgeFolder{ID: "created", KnowledgeBaseID: kbID, ParentID: req.ParentID, Name: req.Name}, nil
 }
+func (s *folderRouteService) ResolveOrCreatePaths(
+	_ context.Context, _ string, req *types.ResolveFolderPathsRequest,
+) (*types.ResolveFolderPathsResponse, error) {
+	s.resolveCalls++
+	return &types.ResolveFolderPathsResponse{Paths: []types.ResolvedFolderPath{
+		{RelativePath: req.Paths[0], FolderID: "resolved"},
+	}}, nil
+}
+
 func (s *folderRouteService) GetFolder(
 	_ context.Context, kbID, folderID string,
 ) (*types.KnowledgeFolder, error) {
@@ -48,7 +58,6 @@ func (*folderRouteService) UpdateFolder(
 ) (*types.KnowledgeFolder, error) {
 	return &types.KnowledgeFolder{ID: folderID, KnowledgeBaseID: kbID}, nil
 }
-func (*folderRouteService) DeleteFolder(context.Context, string, string, bool) error { return nil }
 func (*folderRouteService) MoveFolder(
 	_ context.Context, kbID, folderID string, _ *types.MoveFolderRequest,
 ) (*types.KnowledgeFolder, error) {
@@ -169,13 +178,13 @@ func newKnowledgeFolderRouteEngine(
 	folders := g.apiKeyGroup(v1.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
 	read := folders.With(apiKeyRetrieve(apiKeyFullAccess()))
 	folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.CreateFolder)
+	folders.POST("/resolve-paths", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.ResolveOrCreatePaths)
 	read.GET("", g.Viewer(), g.KBAccessRead("id"), h.ListFolders)
 	read.GET("/tree", g.Viewer(), g.KBAccessRead("id"), h.GetTree)
 	read.GET("/:folder_id/breadcrumb", g.Viewer(), g.KBAccessRead("id"), h.GetBreadcrumb)
 	folders.POST("/:folder_id/move", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.MoveFolder)
 	read.GET("/:folder_id", g.Viewer(), g.KBAccessRead("id"), h.GetFolder)
 	folders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.UpdateFolder)
-	folders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.DeleteFolder)
 	knowledge := g.apiKeyGroup(v1.Group("/knowledges"), apiKeyIngest(apiKeyFullAccess()))
 	knowledge.PUT("/:id/folder", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), h.MoveKnowledgeToFolder)
 	v1.GET("/undeclared", func(c *gin.Context) { c.Status(http.StatusNoContent) })
@@ -204,6 +213,20 @@ func TestKnowledgeFolderStaticRoutesHitTheirHandlers(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	require.Equal(t, 1, svc.treeCalls)
 	require.Zero(t, svc.getCalls, "/tree must not be captured as :folder_id")
+
+	rec = serveFolderRoute(t, r, http.MethodPost,
+		"/api/v1/knowledge-bases/kb-1/folders/resolve-paths", `{"paths":["Project"]}`)
+	require.Equal(t, http.StatusForbidden, rec.Code, "viewer write guard body=%s", rec.Body.String())
+	require.Zero(t, svc.resolveCalls)
+
+	adminRouter := newKnowledgeFolderRouteEngine(t,
+		folderRoutePrincipal{role: types.TenantRoleAdmin, userID: "admin", tenant: 1},
+		map[string]*types.KnowledgeBase{kb.ID: kb}, nil, nil, svc)
+	rec = serveFolderRoute(t, adminRouter, http.MethodPost,
+		"/api/v1/knowledge-bases/kb-1/folders/resolve-paths", `{"paths":["Project"]}`)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, 1, svc.resolveCalls, "/resolve-paths must hit its static handler")
+	require.Zero(t, svc.getCalls, "/resolve-paths must not be captured as :folder_id")
 }
 
 func TestKnowledgeFolderRouteRBACMatrix(t *testing.T) {
@@ -216,8 +239,8 @@ func TestKnowledgeFolderRouteRBACMatrix(t *testing.T) {
 	}
 	writes := []struct{ name, method, path, body string }{
 		{"create", http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders", `{"name":"x"}`},
+		{"resolve paths", http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders/resolve-paths", `{"paths":["Project"]}`},
 		{"update", http.MethodPut, "/api/v1/knowledge-bases/kb-1/folders/f-1", `{"name":"x"}`},
-		{"delete", http.MethodDelete, "/api/v1/knowledge-bases/kb-1/folders/f-1", ""},
 		{"move", http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders/f-1/move", `{"parent_id":""}`},
 	}
 	principals := []struct {
@@ -248,8 +271,6 @@ func TestKnowledgeFolderRouteRBACMatrix(t *testing.T) {
 					switch route.name {
 					case "create":
 						want = http.StatusCreated
-					case "delete":
-						want = http.StatusNoContent
 					}
 				}
 				require.Equal(t, want, rec.Code, "body=%s", rec.Body.String())
@@ -271,8 +292,8 @@ func TestKnowledgeFolderRouteAPIKeyMatrix(t *testing.T) {
 		success            int
 	}{
 		{http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders", `{"name":"x"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders/resolve-paths", `{"paths":["Project"]}`, http.StatusOK},
 		{http.MethodPut, "/api/v1/knowledge-bases/kb-1/folders/f-1", `{"name":"x"}`, http.StatusOK},
-		{http.MethodDelete, "/api/v1/knowledge-bases/kb-1/folders/f-1", "", http.StatusNoContent},
 		{http.MethodPost, "/api/v1/knowledge-bases/kb-1/folders/f-1/move", `{"parent_id":""}`, http.StatusOK},
 	}
 	keys := []struct {

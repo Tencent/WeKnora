@@ -216,6 +216,7 @@ type ManualKnowledgePayload struct {
 	Status        string                     `json:"status"`
 	TagIDs        []string                   `json:"tag_ids"`
 	Channel       string                     `json:"channel"`
+	FolderID      string                     `json:"folder_id"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
