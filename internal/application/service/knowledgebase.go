@@ -261,14 +261,20 @@ func (s *knowledgeBaseService) validateVectorStoreBinding(
 			"reason":    "cross-tenant or unknown store",
 		}, "[kb.create] vector store not owned by tenant")
 		return apperrors.NewVectorStoreBindingInvalidError("vector store not found")
-	case errors.Is(err, retriever.ErrVectorStoreNotFound):
+	case errors.Is(err, retriever.ErrVectorStoreNotFound),
+		errors.Is(err, retriever.ErrVectorStoreUnavailable):
 		logger.WarnWithFields(ctx, logger.Fields{
 			"tenant_id": tenantID,
 			"store_id":  sanitized,
-			"reason":    "store registered in DB but missing in registry",
+			"reason":    "store recorded in DB but no engine could be resolved",
 		}, "[kb.create] vector store currently unavailable")
 		return apperrors.NewVectorStoreUnavailableError(
 			"vector store is currently unavailable; check its connection configuration")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The caller went away or ran out of time while the binding was being
+		// verified, which can now include rebuilding the store's engine. That
+		// is not a server fault, so it must not be logged and answered as one.
+		return err
 	default:
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -861,6 +867,13 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			errors.Is(err, retriever.ErrVectorStoreNotFound) {
 			logger.Errorf(ctx, "KB delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
 			return asynq.SkipRetry
+		}
+		if errors.Is(err, retriever.ErrVectorStoreUnavailable) {
+			// The store is there but its engine could not be built right now.
+			// Falling through would drop the embeddings this task exists to
+			// remove and report success, so ask for another attempt instead.
+			logger.Errorf(ctx, "KB delete task deferred: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
+			return err
 		}
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)

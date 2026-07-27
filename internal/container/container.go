@@ -1028,8 +1028,12 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 //   - Error if initialization fails
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
+	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
 ) (interfaces.RetrieveEngineRegistry, error) {
-	registry := retriever.NewRetrieveEngineRegistry()
+	// storeRepo and engineFactory let the registry rebuild a store engine that
+	// is absent from this process, which happens when startup skipped it after
+	// a construction failure or when another instance registered it.
+	registry := retriever.NewRetrieveEngineRegistry(storeRepo, engineFactory)
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 	log := logger.GetLogger(context.Background())
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
