@@ -5953,7 +5953,7 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
+    background: var(--td-bg-color-container-hover);
   }
 }
 
