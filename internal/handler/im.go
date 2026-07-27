@@ -376,6 +376,11 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
+		if errors.Is(err, im.ErrChannelDisabled) {
+			logger.Errorf(ctx, "[IM] Channel disabled for callback: %s", channelID)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel is disabled"})
+			return
+		}
 		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
 		return

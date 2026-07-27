@@ -353,6 +353,10 @@ const (
 	defaultRateLimitMaxRequests = 10
 )
 
+// ErrChannelDisabled reports that a channel row exists but is disabled, so
+// callers can tell it apart from a missing channel or a transient failure.
+var ErrChannelDisabled = errors.New("channel is disabled")
+
 // channelState holds runtime state for a running IM channel.
 type channelState struct {
 	Channel      *IMChannel
@@ -1116,6 +1120,20 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 	}
 
 	s.mu.Lock()
+	// Stop() may have drained the channel map while the factory was connecting
+	// above, since the factory runs unlocked. Re-check under the lock, otherwise
+	// this adapter's long connection would outlive process shutdown.
+	if s.stopped.Load() {
+		s.mu.Unlock()
+		if leaderCancel != nil {
+			leaderCancel()
+		}
+		if cancelFn != nil {
+			cancelFn()
+		}
+		s.releaseWSLeader(channel.ID)
+		return fmt.Errorf("im service is stopped")
+	}
 	// Idempotency: another goroutine may have started this channel while
 	// factory was running above (factory is called unlocked). Stop the old
 	// state before overwriting so its adapter / long connection doesn't leak.
@@ -1505,7 +1523,7 @@ func (s *Service) EnsureChannelAdapter(channelID string) (Adapter, *IMChannel, e
 	}
 	if !fresh.Enabled {
 		s.StopChannel(channelID)
-		return nil, fresh, fmt.Errorf("channel is disabled")
+		return nil, fresh, ErrChannelDisabled
 	}
 
 	adapter, cached, ok := s.GetChannelAdapter(channelID)

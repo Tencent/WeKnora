@@ -280,6 +280,50 @@ func TestServiceStopIsIdempotent(t *testing.T) {
 	}
 }
 
+// A factory can block for seconds while dialing, so Stop() may drain the
+// channel map after StartChannel's pre-flight check but before registration.
+// The adapter created in that window must be torn down instead of outliving
+// shutdown with an open connection.
+func TestStartChannelDoesNotLeakAdapterWhenStoppedDuringFactory(t *testing.T) {
+	db := newLifecycleTestDB(t)
+	channel := createLifecycleChannel(t, db, "channel-stop-race", "agent")
+	counters := &lifecycleFactoryCounters{}
+	svc := newLifecycleTestService(db, nil, "instance-one")
+
+	factoryEntered := make(chan struct{})
+	releaseFactory := make(chan struct{})
+	inner := counters.factory()
+	svc.RegisterAdapterFactory("test", func(
+		ctx context.Context,
+		ch *IMChannel,
+		handler func(context.Context, *IncomingMessage) error,
+	) (Adapter, context.CancelFunc, error) {
+		close(factoryEntered)
+		<-releaseFactory
+		return inner(ctx, ch, handler)
+	})
+
+	startErr := make(chan error, 1)
+	go func() { startErr <- svc.StartChannel(channel) }()
+
+	<-factoryEntered
+	svc.Stop()
+	close(releaseFactory)
+
+	if err := <-startErr; err == nil {
+		t.Fatal("StartChannel() succeeded even though the service was stopped")
+	}
+	if _, _, ok := svc.GetChannelAdapter(channel.ID); ok {
+		t.Fatal("adapter was registered after shutdown")
+	}
+	if counters.starts.Load() != 1 {
+		t.Fatalf("factory starts = %d, want 1", counters.starts.Load())
+	}
+	if counters.stops.Load() != 1 {
+		t.Fatalf("cleanup calls = %d, want 1 so the connection is not leaked", counters.stops.Load())
+	}
+}
+
 func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 	now := time.Now()
 	cached := &IMChannel{
