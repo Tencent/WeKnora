@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -318,6 +319,136 @@ func pagePassesWikiScope(
 	return len(matches) > 0, nil
 }
 
+const (
+	// wikiMaxLinkSummaries bounds how many neighbour summaries are inlined per
+	// link section, and wikiLinkSummaryMaxRunes bounds each one. A hub page can
+	// carry dozens of links, and inlining every full summary used to spend more
+	// of the output budget than the page bodies the caller asked for.
+	wikiMaxLinkSummaries    = 20
+	wikiLinkSummaryMaxRunes = 150
+
+	// wikiMinPageBody is the smallest body slice worth rendering. When the
+	// budget cannot give every resolved page at least this much, trailing pages
+	// are named in <omitted_pages> instead of being cut mid-tag: a half-rendered
+	// <wiki_page> is unparseable for the UI and silently misleading to the model.
+	wikiMinPageBody = 400
+
+	// wikiBudgetReserve holds back room for the <errors> and <omitted_pages>
+	// trailers appended after the pages are rendered.
+	wikiBudgetReserve = 600
+)
+
+// pendingWikiPage is a resolved page whose neighbour summaries, sources and
+// body have been gathered but whose rendered size is not yet decided.
+type pendingWikiPage struct {
+	page     *types.WikiPage
+	kbID     string
+	outLinks []string
+	inLinks  []string
+	sources  []string
+	body     string
+}
+
+func (p pendingWikiPage) render(body string) string {
+	return fmt.Sprintf(`<wiki_page>
+<metadata>
+<knowledge_base_id>%s</knowledge_base_id>
+<link>[[%s|%s]]</link>
+<type>%s</type>
+<aliases>%s</aliases>
+</metadata>
+<relationships>
+<links_to>%s</links_to>
+<linked_from>%s</linked_from>
+</relationships>
+<sources>
+%s
+</sources>
+<summary>
+%s
+</summary>
+<content>
+%s
+</content>
+</wiki_page>`,
+		p.kbID,
+		p.page.Slug, p.page.Title, p.page.PageType,
+		strings.Join(p.page.Aliases, ", "),
+		strings.Join(p.outLinks, ", "),
+		strings.Join(p.inLinks, ", "),
+		strings.Join(p.sources, "\n"),
+		p.page.Summary,
+		body,
+	)
+}
+
+// renderWikiPagesWithinBudget renders a batch of pages so that the result fits
+// the tool output ceiling with every page still well-formed. Pages are trimmed
+// by fair-sharing the body budget, and only when even a minimal body no longer
+// fits are trailing pages dropped — by name, so the model knows to re-read them.
+//
+// It returns the joined output plus the slugs whose body was trimmed and the
+// slugs that were not rendered at all.
+func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, []string, []string) {
+	if len(pages) == 0 {
+		return "", nil, nil
+	}
+
+	const separator = "\n\n"
+	separatorCost := utf8.RuneCountInString(separator)
+
+	rendered := make([]string, len(pages))
+	bodySizes := make([]int, len(pages))
+	overheads := make([]int, len(pages))
+	total := separatorCost * (len(pages) - 1)
+	for i, p := range pages {
+		rendered[i] = p.render(p.body)
+		size := utf8.RuneCountInString(rendered[i])
+		bodySizes[i] = utf8.RuneCountInString(p.body)
+		overheads[i] = size - bodySizes[i]
+		total += size
+	}
+
+	usable := budget - wikiBudgetReserve
+	if usable <= 0 || total <= usable {
+		return strings.Join(rendered, separator), nil, nil
+	}
+
+	fixedCost := func(keep int) int {
+		cost := separatorCost * (keep - 1)
+		for i := 0; i < keep; i++ {
+			cost += overheads[i]
+		}
+		return cost
+	}
+
+	keep := len(pages)
+	for keep > 1 && fixedCost(keep)+keep*wikiMinPageBody > usable {
+		keep--
+	}
+	var omitted []string
+	for _, p := range pages[keep:] {
+		omitted = append(omitted, p.page.Slug)
+	}
+
+	caps := splitBudgetFairly(usable-fixedCost(keep), bodySizes[:keep])
+	outputs := make([]string, keep)
+	var truncated []string
+	for i := 0; i < keep; i++ {
+		if caps[i] >= bodySizes[i] {
+			outputs[i] = rendered[i]
+			continue
+		}
+		body := "(body omitted: output budget exhausted)"
+		if caps[i] > 0 {
+			body = TruncateToolOutput(pages[i].body, caps[i])
+		}
+		outputs[i] = pages[i].render(body)
+		truncated = append(truncated, pages[i].page.Slug)
+	}
+	return strings.Join(outputs, separator), truncated, omitted
+}
+
 type wikiReadPageTool struct {
 	BaseTool
 	wikiService      interfaces.WikiPageService
@@ -381,12 +512,15 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	var slugsToFetch []string
 	slugsToFetch = append(slugsToFetch, parseStringOrArray(params.Slugs)...)
 	slugsToFetch = append(slugsToFetch, parseStringOrArray(params.Slug)...)
+	// A slug repeated inside `slugs`, or echoed in both `slug` and `slugs`,
+	// would otherwise be rendered twice and spend budget a distinct page needs.
+	slugsToFetch = dedupNonEmptyStrings(slugsToFetch)
 
 	if len(slugsToFetch) == 0 {
 		return &types.ToolResult{Success: false, Error: "Missing 'slugs' parameter"}, nil
 	}
 
-	var outputs []string
+	var pending []pendingWikiPage
 	var errs []string
 	// Per-slug list of KB IDs where the slug was found. A slug may exist in
 	// multiple KBs when the agent has several wiki KBs in scope.
@@ -394,23 +528,39 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	formatLinks := func(slugs []string, kbID string) []string {
 		var descs []string
+		inlined := 0
 		for _, s := range slugs {
+			if s == "" {
+				continue
+			}
+			// Past the cap the slug alone is enough: the model can always read
+			// a neighbour explicitly, whereas an unbounded link section costs
+			// one query per entry and crowds out the bodies actually requested.
+			if inlined >= wikiMaxLinkSummaries {
+				descs = append(descs, fmt.Sprintf("[[%s]]", s))
+				continue
+			}
+
 			key := seenLinkKey(kbID, s)
 			t.mu.Lock()
 			seen := t.seenLinks[key]
-			t.seenLinks[key] = true
 			t.mu.Unlock()
-
 			if seen {
 				// We already injected the summary for this link in this session (within the same KB)
 				descs = append(descs, fmt.Sprintf("[[%s]] (summary omitted, already seen)", s))
-			} else {
-				if linkPage, err := t.wikiService.GetPageBySlug(ctx, kbID, s); err == nil && linkPage != nil {
-					descs = append(descs, fmt.Sprintf("[[%s]] (%s)", s, linkPage.Summary))
-				} else {
-					descs = append(descs, fmt.Sprintf("[[%s]]", s))
-				}
+				continue
 			}
+
+			linkPage, err := t.wikiService.GetPageBySlug(ctx, kbID, s)
+			if err != nil || linkPage == nil || linkPage.Summary == "" {
+				descs = append(descs, fmt.Sprintf("[[%s]]", s))
+				continue
+			}
+			descs = append(descs, fmt.Sprintf("[[%s]] (%s)", s, truncateRunes(linkPage.Summary, wikiLinkSummaryMaxRunes)))
+			inlined++
+			t.mu.Lock()
+			t.seenLinks[key] = true
+			t.mu.Unlock()
 		}
 		if len(descs) == 0 {
 			return []string{"(none)"}
@@ -418,26 +568,30 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return descs
 	}
 
-	renderPage := func(page *types.WikiPage, kbID string) string {
-		outLinksDesc := formatLinks(page.OutLinks, kbID)
-		inLinksDesc := formatLinks(page.InLinks, kbID)
+	// resolvePage gathers everything needed to render a page except its final
+	// size. Rendering is deferred until every requested slug has been resolved
+	// so the output budget can be shared across the whole batch.
+	resolvePage := func(page *types.WikiPage, kbID string) pendingWikiPage {
+		resolved := pendingWikiPage{
+			page:     page,
+			kbID:     kbID,
+			outLinks: formatLinks(page.OutLinks, kbID),
+			inLinks:  formatLinks(page.InLinks, kbID),
+			body:     page.Content,
+		}
 
-		// Render source refs
-		var sourcesDesc []string
-		if len(page.SourceRefs) > 0 {
-			for _, ref := range page.SourceRefs {
-				// SourceRefs might be "knowledgeID" or "knowledgeID|Title"
-				kid := ref
-				title := ""
-				if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-					kid = ref[:pipeIdx]
-					title = ref[pipeIdx+1:]
-				}
-				if title != "" {
-					sourcesDesc = append(sourcesDesc, fmt.Sprintf(`<source knowledge_id="%s">%s</source>`, kid, title))
-				} else {
-					sourcesDesc = append(sourcesDesc, fmt.Sprintf(`<source knowledge_id="%s"/>`, kid))
-				}
+		for _, ref := range page.SourceRefs {
+			// SourceRefs might be "knowledgeID" or "knowledgeID|Title"
+			kid := ref
+			title := ""
+			if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
+				kid = ref[:pipeIdx]
+				title = ref[pipeIdx+1:]
+			}
+			if title != "" {
+				resolved.sources = append(resolved.sources, fmt.Sprintf(`<source knowledge_id="%s">%s</source>`, kid, title))
+			} else {
+				resolved.sources = append(resolved.sources, fmt.Sprintf(`<source knowledge_id="%s"/>`, kid))
 			}
 		}
 
@@ -449,10 +603,9 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		// top-K overview so the agent still sees the wiki's shape
 		// without overflowing its context window — the explicit hint
 		// steers the model to wiki_search for deeper exploration.
-		contentBody := page.Content
 		if page.PageType == types.WikiPageTypeIndex {
 			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil && overview != nil {
-				contentBody = renderIndexOverviewForAgent(overview)
+				resolved.body = renderIndexOverviewForAgent(overview)
 				for _, group := range overview.Groups {
 					for _, item := range group.Items {
 						t.routes.remember(item.Slug, kbID)
@@ -461,36 +614,7 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			}
 		}
 
-		return fmt.Sprintf(`<wiki_page>
-<metadata>
-<knowledge_base_id>%s</knowledge_base_id>
-<link>[[%s|%s]]</link>
-<type>%s</type>
-<aliases>%s</aliases>
-</metadata>
-<relationships>
-<links_to>%s</links_to>
-<linked_from>%s</linked_from>
-</relationships>
-<sources>
-%s
-</sources>
-<summary>
-%s
-</summary>
-<content>
-%s
-</content>
-</wiki_page>`,
-			kbID,
-			page.Slug, page.Title, page.PageType,
-			strings.Join(page.Aliases, ", "),
-			strings.Join(outLinksDesc, ", "),
-			strings.Join(inLinksDesc, ", "),
-			strings.Join(sourcesDesc, "\n"),
-			page.Summary,
-			contentBody,
-		)
+		return resolved
 	}
 
 	// Track slugs that were found in the raw lookup but filtered out by a
@@ -587,15 +711,23 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		// When routing remains ambiguous, emit every matched page so the model
 		// can use or compare them explicitly.
 		for _, h := range hits {
-			outputs = append(outputs, renderPage(h.page, h.kbID))
+			pending = append(pending, resolvePage(h.page, h.kbID))
 		}
 	}
 
-	if len(outputs) == 0 {
+	if len(pending) == 0 {
 		return &types.ToolResult{Success: false, Error: strings.Join(errs, "; ")}, nil
 	}
 
-	finalOutput := strings.Join(outputs, "\n\n")
+	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
+	if len(omittedSlugs) > 0 {
+		finalOutput += fmt.Sprintf(
+			"\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>"+
+				"\n<hint>These pages were resolved but not rendered. "+
+				"Call wiki_read_page again with fewer slugs to read them.</hint>",
+			strings.Join(omittedSlugs, "\n"),
+		)
+	}
 	if len(errs) > 0 {
 		finalOutput += fmt.Sprintf("\n\n<errors>\n%s\n</errors>", strings.Join(errs, "\n"))
 	}
@@ -615,6 +747,8 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Data: map[string]interface{}{
 			"found_kbs":       foundKBs,
 			"ambiguous_slugs": ambiguous,
+			"truncated_slugs": truncatedSlugs,
+			"omitted_slugs":   omittedSlugs,
 		},
 	}, nil
 }
