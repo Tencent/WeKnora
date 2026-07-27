@@ -204,23 +204,121 @@ const driveFolderToken = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 
-// loadDriveRoot writes the user-supplied folder_token as the root resource_id,
-// then delegates to loadResources so the existing lazy-load tree takes over.
+// extractDriveFolderToken accepts either a bare folder_token or a Feishu Drive
+// folder URL (https://xxx.feishu.cn/drive/folder/<token>?...) and returns the
+// token. Trims surrounding whitespace. Returns "" when nothing usable is found.
+function extractDriveFolderToken(input: string): string {
+  const raw = (input || '').trim()
+  if (!raw) return ''
+  // Bare token: no scheme, no slash - use as-is.
+  if (!raw.includes('://') && !raw.includes('/')) return raw
+  // URL form: extract the segment after /drive/folder/.
+  const match = raw.match(/\/drive\/folder\/([^/?#]+)/)
+  if (match && match[1]) return match[1]
+  // Fallback: last path segment of a URL, or the raw string.
+  try {
+    const u = new URL(raw)
+    const segs = u.pathname.split('/').filter(Boolean)
+    return segs[segs.length - 1] || raw
+  } catch {
+    return raw
+  }
+}
+
+// loadDriveRoot writes the user-supplied folder_token (or the token extracted
+// from a pasted URL) as the root resource_id, then lists the root's children
+// so the lazy-load tree can populate. On failure it classifies the error so the
+// user gets an actionable hint (e.g. share the folder with the app) instead of
+// a raw Feishu error body.
 async function loadDriveRoot() {
-  const token = driveFolderToken.value.trim()
+  const token = extractDriveFolderToken(driveFolderToken.value)
   if (!token) {
     MessagePlugin.warning(t('datasource.drive.folderTokenRequired'))
     return
   }
+  // Normalize the input so the user sees the extracted token, not the full URL.
+  driveFolderToken.value = token
   form.value.config.resource_ids = [token]
   driveRootLoaded.value = false
-  await loadResources()
-  // loadResources populates resources.value; if the root was reachable it now
-  // has at least the synthesized root node. On failure the error toast is shown
-  // by loadResources and we keep driveRootLoaded false so the input stays visible.
-  if (resources.value.length > 0) {
-    driveRootLoaded.value = true
+  loadingResources.value = true
+  try {
+    if (!tempDsId.value) {
+      const res = await createDataSource({
+        ...form.value,
+        knowledge_base_id: props.kbId,
+        status: 'paused',
+      } as any)
+      const created = res?.data || res
+      tempDsId.value = created.id
+    } else {
+      // Edit mode OR a previously-created temp row: persist the new folder_token
+      // so listResources sees the updated config. Previously this branch skipped
+      // updates in edit mode, leaving listResources reading the old folder_token.
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+
+    const res = await listResources(tempDsId.value)
+    resources.value = res?.data || res || []
+    if (resources.value.length > 0) {
+      // Mirror loadResources' tree initialization: index parents that already
+      // arrived with children and auto-expand them.
+      const parentsWithChildren = new Set<string>()
+      for (const r of resources.value) {
+        if (r.parent_id) parentsWithChildren.add(r.parent_id)
+      }
+      loadedChildrenIds.value = parentsWithChildren
+      loadingChildrenIds.value = new Set<string>()
+      treeFullyLoaded.value = parentsWithChildren.size > 0
+      expandedResourceIds.value = new Set(
+        resources.value
+          .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
+          .map(r => r.external_id),
+      )
+      driveRootLoaded.value = true
+      // In edit mode, reveal pre-existing selections that live below the
+      // (not-yet-expanded) tree so they are visible and checked - mirrors
+      // loadResources' behavior for non-Drive connectors.
+      if (isEdit.value && !treeFullyLoaded.value) {
+        const loaded = new Set(resources.value.map(r => r.external_id))
+        const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+        if (hidden.length > 0) void revealExistingSelections(hidden)
+      }
+    }
+  } catch (e: any) {
+    MessagePlugin.error(classifyDriveLoadError(e))
   }
+  loadingResources.value = false
+}
+
+// classifyDriveLoadError turns a raw Drive list error into an actionable i18n
+// message. The Feishu list API returns 403 with code=1061004 when the app has
+// not been shared the target folder; without this the user sees "forbidden"
+// and has no idea what to do.
+function classifyDriveLoadError(e: any): string {
+  const raw = String(e?.message || e?.error || '')
+  const lower = raw.toLowerCase()
+  // 403 / forbidden / 1061004 -> the app lacks access to this specific folder;
+  // the user must share it with the app's group in Feishu Drive.
+  if (
+    lower.includes('status=403') ||
+    lower.includes('forbidden') ||
+    lower.includes('"code":1061004') ||
+    lower.includes('code=1061004')
+  ) {
+    return t('datasource.drive.loadForbiddenHint')
+  }
+  // 401 / auth -> app credentials wrong or app lacks the drive scopes.
+  if (lower.includes('status=401') || lower.includes('auth') || lower.includes('1061005')) {
+    return t('datasource.drive.loadAuthHint')
+  }
+  // Invalid / not-found folder_token.
+  if (lower.includes('1061003') || lower.includes('not found')) {
+    return t('datasource.drive.loadNotFoundHint')
+  }
+  return raw || t('datasource.resourceLoadFailed')
 }
 
 // Shared children/parent indexes — used by tree rendering and selection logic
@@ -839,9 +937,14 @@ async function nextStep() {
   }
   step.value++
   if (step.value === 2) {
-    // Drive connectors need a user-supplied folder_token before listing; skip
-    // the auto-load and let the user fill the input and click "load".
-    if (isDriveConnector(form.value.type) && !driveRootLoaded.value) {
+    // Drive connectors need a user-supplied folder_token before listing.
+    // In edit mode with a saved folder_token, auto-load so the saved tree
+    // (and any pre-existing selections) are revealed without an extra click.
+    // In create mode (no folder_token yet), just show the placeholder.
+    if (isDriveConnector(form.value.type)) {
+      if (!driveRootLoaded.value && driveFolderToken.value.trim()) {
+        void loadDriveRoot()
+      }
       return
     }
     loadResources()
@@ -1384,9 +1487,11 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
 
-      <!-- Drive (云盘) root input: the user supplies a folder_token before the
-           lazy-load tree can start. Other connectors go straight to the tree. -->
-      <div v-if="isDriveConnector(form.type) && !driveRootLoaded" class="drive-folder-input">
+      <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
+           The user supplies a folder_token (or a Drive folder URL) and clicks
+           "load"; the tree below stays as a placeholder until load succeeds.
+           Other connectors skip this and go straight to the tree. -->
+      <div v-if="isDriveConnector(form.type)" class="drive-folder-input">
         <label class="drive-folder-input__label">{{ t('datasource.drive.folderTokenLabel') }}</label>
         <div class="drive-folder-input__row">
           <t-input
@@ -1411,6 +1516,17 @@ const drawerConfirmText = computed(() => {
           :close="false"
           class="drive-folder-input__hint"
         />
+      </div>
+
+      <!-- Drive placeholder before the first load: the tree cannot render until
+           a folder_token is supplied and loaded. Non-Drive connectors never hit
+           this branch. -->
+      <div
+        v-if="isDriveConnector(form.type) && !driveRootLoaded && !loadingResources"
+        class="ds-resource-empty ds-drive-placeholder"
+      >
+        <p class="ds-empty-title">{{ t('datasource.drive.placeholderTitle') }}</p>
+        <p class="ds-empty-desc">{{ t('datasource.drive.placeholderDesc') }}</p>
       </div>
 
       <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
@@ -2061,6 +2177,35 @@ const drawerConfirmText = computed(() => {
 
 .drive-folder-input__hint {
   margin: 0;
+}
+
+/* Drive tree placeholder: shown before the first successful load. */
+.ds-drive-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 120px;
+  padding: 24px 12px;
+  border: 1px dashed var(--td-border-level-2-color);
+  border-radius: 6px;
+  background: var(--td-bg-color-page);
+  text-align: center;
+}
+
+.ds-drive-placeholder .ds-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.ds-drive-placeholder .ds-empty-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
 }
 
 .resource-picker {

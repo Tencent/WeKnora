@@ -94,7 +94,16 @@ func (c *DriveConnector) ListResources(
 			return nil, fmt.Errorf("list feishu drive folder %s: %w", rootFolderToken, err)
 		}
 		_ = files // children returned via the parentID == rootFolderToken branch below
-		return []types.Resource{c.driveFolderToResource(rootFolderToken, "", rootFolderToken)}, nil
+		// Resolve the root folder's human-readable name via the folder meta API.
+		// Best-effort: on failure (no permission / not found) fall back to the
+		// folder_token so the picker still renders something usable.
+		folderName := rootFolderToken
+		if meta, mErr := client.GetDriveFolderMeta(ctx, rootFolderToken); mErr != nil {
+			logger.Warnf(ctx, "[FeishuDrive] resolve root folder name failed: %v (falling back to token)", mErr)
+		} else if meta.Data.Name != "" {
+			folderName = meta.Data.Name
+		}
+		return []types.Resource{c.driveFolderToResource(rootFolderToken, "", rootFolderToken, folderName)}, nil
 	}
 
 	// Lazy load: list only the direct children of the given folder.
@@ -241,7 +250,7 @@ func (c *DriveConnector) FetchAll(
 			if !errors.As(err, &partialErr) {
 				return nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
 			}
-			allItems = appendDriveFileListFailureItems(allItems, resourceID, partialErr.Failures)
+			allItems = appendDriveFileListFailureItems(allItems, resourceID, c.driveChannel(), partialErr.Failures)
 		}
 
 		tally := newFetchTally(len(files))
@@ -317,7 +326,7 @@ func (c *DriveConnector) FetchIncremental(
 			if !errors.As(err, &partialErr) {
 				return nil, nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
 			}
-			changedItems = appendDriveFileListFailureItems(changedItems, resourceID, partialErr.Failures)
+			changedItems = appendDriveFileListFailureItems(changedItems, resourceID, c.driveChannel(), partialErr.Failures)
 		}
 
 		newCursor.FileTimes[resourceID] = make(map[string]string)
@@ -434,7 +443,7 @@ func (c *DriveConnector) FetchStream(
 			if !errors.As(err, &partialErr) {
 				return nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
 			}
-			for _, item := range appendDriveFileListFailureItems(nil, resourceID, partialErr.Failures) {
+			for _, item := range appendDriveFileListFailureItems(nil, resourceID, c.driveChannel(), partialErr.Failures) {
 				if eerr := h.Emit(ctx, item); eerr != nil {
 					return nil, eerr
 				}
@@ -574,12 +583,19 @@ func (c *DriveConnector) fetchDriveFileContent(
 	}
 
 	editTime := parseFeishuTimestamp(file.ModifiedTime)
+	// Channel marks the knowledge "source" label. Drive uses its own channel
+	// (feishu_drive / lark_drive) so Drive docs show "飞书云盘" / "Lark 云盘"
+	// distinct from the wiki connector's "飞书".
+	channel := types.ChannelFeishuDrive
+	if c.region.ConnectorType == types.ConnectorTypeLarkDrive {
+		channel = types.ChannelLarkDrive
+	}
 	baseMeta := map[string]string{
 		"obj_token":    file.Token,
 		"obj_type":     file.Type,
 		"file_token":   file.Token,
 		"folder_token": file.ParentToken,
-		"channel":      types.ChannelFeishu, // reuse ChannelFeishu (ADR-0001 §4.8)
+		"channel":      channel,
 	}
 
 	switch file.Type {
@@ -665,12 +681,20 @@ func driveRootFolderToken(config *types.DataSourceConfig) string {
 }
 
 // driveFolderToResource builds the root Resource for a Drive folder. The root
-// folder's own metadata is not fetched (no single-folder meta API used); we
-// synthesize a minimal Resource so the picker can render and expand it.
-func (c *DriveConnector) driveFolderToResource(rootFolderToken, parentToken, folderToken string) types.Resource {
-	name := folderToken
+// folder's name is resolved via GetDriveFolderMeta by the caller (best-effort,
+// falling back to the token). For sub-folders, use driveFileToResource instead -
+// the list API returns each child folder's Name.
+//
+// The root folder's ExternalID is the bare rootFolderToken (no ":fileToken"
+// suffix) so it matches the resource_id the user saved in
+// form.config.resource_ids = [folderToken]. A "token:token" encoding would
+// break selection matching on edit.
+func (c *DriveConnector) driveFolderToResource(rootFolderToken, parentToken, folderToken, name string) types.Resource {
+	if name == "" {
+		name = folderToken
+	}
 	return types.Resource{
-		ExternalID:  makeDriveResourceID(rootFolderToken, folderToken),
+		ExternalID:  rootFolderToken,
 		Name:        name,
 		Type:        "drive_folder",
 		URL:         c.region.driveFolderURL(folderToken),
@@ -682,6 +706,11 @@ func (c *DriveConnector) driveFolderToResource(rootFolderToken, parentToken, fol
 }
 
 // driveFileToResource converts a driveFile (list result) into a picker Resource.
+// The ParentID must match the parent folder's ExternalID: the root folder's
+// ExternalID is the bare rootFolderToken (see driveFolderToResource), while any
+// sub-folder's ExternalID is "rootFolderToken:folderToken". Direct children of
+// the root have file.ParentToken == rootFolderToken, so their ParentID is the
+// bare rootFolderToken; deeper descendants use the encoded form.
 func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveFile) types.Resource {
 	name := file.Name
 	if name == "" {
@@ -690,12 +719,19 @@ func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveF
 
 	modifiedAt := parseFeishuTimestamp(file.ModifiedTime)
 
+	parentID := makeDriveResourceID(rootFolderToken, file.ParentToken)
+	if file.ParentToken == rootFolderToken || file.ParentToken == "" {
+		// Direct child of the root folder: parent is the root, whose
+		// ExternalID is the bare rootFolderToken (no ":token" suffix).
+		parentID = rootFolderToken
+	}
+
 	return types.Resource{
 		ExternalID:  makeDriveResourceID(rootFolderToken, file.Token),
 		Name:        name,
 		Type:        file.Type,
 		URL:         file.URL,
-		ParentID:    makeDriveResourceID(rootFolderToken, file.ParentToken),
+		ParentID:    parentID,
 		HasChildren: file.Type == "folder",
 		ModifiedAt:  modifiedAt,
 		Metadata: map[string]interface{}{
@@ -706,17 +742,25 @@ func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveF
 	}
 }
 
+// driveChannel returns the knowledge channel for this connector's region.
+func (c *DriveConnector) driveChannel() string {
+	if c.region.ConnectorType == types.ConnectorTypeLarkDrive {
+		return types.ChannelLarkDrive
+	}
+	return types.ChannelFeishuDrive
+}
+
 // appendDriveFileListFailureItems converts Drive listing failures into error
 // FetchedItems so the sync log surfaces which sub-folders could not be listed.
 // Mirrors appendWikiNodeListFailureItems.
-func appendDriveFileListFailureItems(items []types.FetchedItem, resourceID string, failures []driveFileListFailure) []types.FetchedItem {
+func appendDriveFileListFailureItems(items []types.FetchedItem, resourceID, channel string, failures []driveFileListFailure) []types.FetchedItem {
 	for _, failure := range failures {
 		items = append(items, types.FetchedItem{
 			ExternalID:       failure.FolderToken,
 			Title:            failure.FolderToken,
 			SourceResourceID: resourceID,
 			Metadata: feishuErrorItemMeta(failure.Err, map[string]string{
-				"channel":       types.ChannelFeishu,
+				"channel":       channel,
 				"folder_token":  failure.FolderToken,
 				"failure_stage": "list_children",
 			}),

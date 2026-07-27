@@ -235,6 +235,22 @@ type driveFileListResponse struct {
 	} `json:"data"`
 }
 
+// driveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
+// Used to resolve a root folder's human-readable name (the list API only returns
+// the folder's children, not the folder itself).
+type driveFolderMetaResponse struct {
+	apiResponse
+	Data struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Token     string `json:"token"`
+		CreateUid string `json:"createUid"`
+		EditUid   string `json:"editUid"`
+		ParentID  string `json:"parentId"`
+		OwnUid    string `json:"ownUid"`
+	} `json:"data"`
+}
+
 // driveFileListFailure records a single sub-folder listing that failed during a
 // recursive walk. Mirrors wikiNodeListFailure.
 type driveFileListFailure struct {

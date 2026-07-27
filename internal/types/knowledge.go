@@ -25,6 +25,8 @@ const (
 	ChannelWechat           = "wechat"            // WeChat
 	ChannelWecom            = "wecom"             // WeCom (企业微信)
 	ChannelFeishu           = "feishu"            // Feishu / Lark
+	ChannelFeishuDrive      = "feishu_drive"      // Feishu Drive (云盘)
+	ChannelLarkDrive        = "lark_drive"        // Lark Drive (international)
 	ChannelDingtalk         = "dingtalk"          // DingTalk
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel

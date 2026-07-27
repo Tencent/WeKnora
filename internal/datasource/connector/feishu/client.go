@@ -688,6 +688,26 @@ func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken stri
 	return resp.Data.Files, resp.Data.NextPageToken, nil
 }
 
+// GetDriveFolderMeta returns the metadata (name, owner, etc.) of a single Drive
+// folder. Used to resolve a root folder's human-readable name - the list API
+// only returns the folder's children, not the folder itself.
+//
+// GET /open-apis/drive/explorer/v2/folder/:folderToken/meta
+func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (driveFolderMetaResponse, error) {
+	var resp driveFolderMetaResponse
+	if folderToken == "" {
+		return resp, fmt.Errorf("root folder not supported; specify a concrete folder_token")
+	}
+	path := "/open-apis/drive/explorer/v2/folder/" + url.QueryEscape(folderToken) + "/meta"
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return resp, fmt.Errorf("get drive folder meta: %w", err)
+	}
+	if resp.Code != 0 {
+		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return resp, nil
+}
+
 // listDriveFilesAllPages lists every direct child of a folder across all pages.
 func (c *Client) listDriveFilesAllPages(ctx context.Context, folderToken string) ([]driveFile, error) {
 	var all []driveFile
