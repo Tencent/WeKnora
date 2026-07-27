@@ -250,12 +250,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+	payload.Language = wikiContentLanguage()
 
 	// Inject context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if payload.Language != "" {
-		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
-	}
+	ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 
 	// Concurrency model (Phase 3):
 	//
@@ -954,10 +953,9 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("wiki finalize: unmarshal payload: %w", err)
 	}
+	payload.Language = wikiContentLanguage()
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if payload.Language != "" {
-		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
-	}
+	ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	if s.pendingRepo == nil {
 		return nil
 	}
@@ -1197,7 +1195,7 @@ func (s *wikiIngestService) mapOneDocument(
 ) (*docIngestResult, []SlugUpdate, error) {
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
-	lang := types.LanguageLocaleName(op.Language)
+	lang := types.LanguageLocaleName(wikiContentLanguage())
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +

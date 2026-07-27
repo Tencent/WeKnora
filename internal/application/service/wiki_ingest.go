@@ -462,7 +462,7 @@ func EnqueueWikiIngest(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) {
-	lang, _ := types.LanguageFromContext(ctx)
+	lang := wikiContentLanguage()
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
@@ -1022,6 +1022,11 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 				KnowledgeID: r.DedupKey,
 			}
 		}
+		// Wiki is persistent knowledge-base content, so its generation
+		// language must not depend on the browser locale captured when the
+		// task was created. Normalizing at the worker boundary also repairs
+		// legacy pending/dead-letter payloads with a missing or stale language.
+		op.Language = wikiContentLanguage()
 		op.dbID = r.ID
 		all = append(all, op)
 	}
@@ -1053,6 +1058,13 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 		ops = append(ops, reversedUnique[i])
 	}
 	return ops, peekedIDs
+}
+
+// wikiContentLanguage returns the configured language for persistent Wiki
+// content. WEKNORA_LANGUAGE is the single source of truth; DefaultLanguage
+// falls back to zh-CN when it is unset.
+func wikiContentLanguage() string {
+	return types.DefaultLanguage()
 }
 
 // trimPendingList deletes consumed rows from task_pending_ops. Empty
