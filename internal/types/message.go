@@ -258,6 +258,21 @@ type Message struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete timestamp
 	DeletedAt gorm.DeletedAt `json:"deleted_at"            gorm:"index"`
+	// UserFeedback is the current caller's rating of this assistant message,
+	// hydrated by MessageFeedbackService.AttachUserFeedback on load. Empty
+	// when the message is not an assistant message or the caller has not
+	// rated it. Not persisted.
+	UserFeedback *MessageFeedbackView `json:"user_feedback,omitempty" gorm:"-"`
+}
+
+// MessageFeedbackView is the per-message hydration of the caller's rating.
+// Exposed as a flat struct rather than the full MessageFeedback to keep the
+// message JSON compact and to avoid leaking other users' fields.
+type MessageFeedbackView struct {
+	Rating    string          `json:"rating"`
+	Reasons   FeedbackReasons `json:"reasons,omitempty"`
+	Comment   string          `json:"comment,omitempty"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // MessageExecutionContext is a message-level snapshot of the non-secret

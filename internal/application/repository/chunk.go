@@ -109,6 +109,37 @@ func (r *chunkRepository) ListChunksByID(
 	return chunks, nil
 }
 
+// ListChunkRecallWeights returns the stored recall multipliers for the given
+// chunk IDs. We skip rows equal to the neutral 1.0 so the typical "every
+// tenant has not opted in" case stays cheap and the caller can treat absence
+// as "no adjustment". Returning an empty map plus nil on input len=0 keeps
+// this safe to call before the candidate list is finalised.
+func (r *chunkRepository) ListChunkRecallWeights(
+	ctx context.Context, tenantID uint64, ids []string,
+) (map[string]float64, error) {
+	if len(ids) == 0 {
+		return map[string]float64{}, nil
+	}
+	type row struct {
+		ID          string  `gorm:"column:id"`
+		RecallWeight float64 `gorm:"column:recall_weight"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Table("chunks").
+		Select("id, recall_weight").
+		Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Where("recall_weight <> 1").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(rows))
+	for _, row := range rows {
+		out[row.ID] = row.RecallWeight
+	}
+	return out, nil
+}
+
 // ListChunksByIDOnly retrieves multiple chunks by their IDs without tenant filter (for shared KB resolution).
 func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
 	if len(ids) == 0 {
@@ -151,7 +182,10 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
-// ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
+// ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination.
+// The optional feedbackFilter further restricts the result set by feedback-
+// driven metrics (positive rate, needs-optimization). A nil filter disables
+// the feedback-based restriction so existing call sites are unaffected.
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
 	tenantID uint64,
@@ -163,6 +197,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	feedbackFilter *types.ChunkFeedbackFilter,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -219,6 +254,9 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
 				}
 			}
+		}
+		if feedbackFilter != nil {
+			db = applyChunkFeedbackFilter(db, feedbackFilter)
 		}
 		return db
 	}
@@ -1215,4 +1253,32 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	return chunks, nil
+}
+
+// applyChunkFeedbackFilter adds the optional feedback-driven WHERE conditions
+// to a chunk listing query. A nil filter is a no-op. The minimum sample
+// guard is integrated at the SQL level so low-feedback chunks don't pollute
+// the "low quality" surface; callers that want all chunks regardless of
+// counters should leave the filter nil.
+func applyChunkFeedbackFilter(db *gorm.DB, f *types.ChunkFeedbackFilter) *gorm.DB {
+	if f == nil {
+		return db
+	}
+	if f.KnowledgeBaseID != "" {
+		db = db.Where("knowledge_base_id = ?", f.KnowledgeBaseID)
+	}
+	if f.NeedsOptimization != nil {
+		if *f.NeedsOptimization {
+			db = db.Where("(like_count + dislike_count) >= 1 AND needs_optimization = ?", true)
+		} else {
+			db = db.Where("(needs_optimization = ? OR needs_optimization IS NULL)", false)
+		}
+	}
+	if f.MinPositiveRate > 0 {
+		// Surface "low quality" chunks: positive rate at or below the cap.
+		// We require at least one rating so freshly-created chunks with
+		// rate 0 do not appear here.
+		db = db.Where("(like_count + dislike_count) >= 1 AND positive_rate <= ?", f.MinPositiveRate)
+	}
+	return db
 }

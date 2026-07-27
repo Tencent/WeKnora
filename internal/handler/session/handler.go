@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	messageService       interfaces.MessageService // Service for managing messages
 	suggestionService    interfaces.MessageSuggestionService
+	feedbackService      interfaces.MessageFeedbackService // Records answer→chunk references on completion.
 	sessionService       interfaces.SessionService       // Service for managing sessions
 	streamManager        interfaces.StreamManager        // Manager for handling streaming responses
 	config               *config.Config                  // Application configuration
@@ -38,6 +39,7 @@ func NewHandler(
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
 	suggestionService interfaces.MessageSuggestionService,
+	feedbackService interfaces.MessageFeedbackService,
 	streamManager interfaces.StreamManager,
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
@@ -56,6 +58,7 @@ func NewHandler(
 		sessionService:       sessionService,
 		messageService:       messageService,
 		suggestionService:    suggestionService,
+		feedbackService:      feedbackService,
 		streamManager:        streamManager,
 		config:               config,
 		knowledgebaseService: knowledgebaseService,

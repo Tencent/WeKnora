@@ -315,6 +315,12 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		filteredResults = deduplicatedBeforeRerank
 	}
 
+	// Apply the per-chunk recall weight maintained by the answer-feedback
+	// path (#1248) right after rerank so the MMR pass and final sort see
+	// the user-rejection signal. The helper is gated on the tenant's
+	// feedback ranking policy and silently bails out when disabled.
+	t.applyFeedbackWeights(ctx, filteredResults)
+
 	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
 	// Note: composite scoring is already applied inside rerankResults
 	if len(filteredResults) > 0 {
@@ -1173,11 +1179,11 @@ func (t *KnowledgeSearchTool) formatOutput(
 				// total reported here matches what list_knowledge_chunks can page
 				// over. Mismatched filters previously let LLMs compute offsets
 				// against an inflated/deflated total and page past the end.
-				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-					effectiveTenantID, result.KnowledgeID,
-					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
-				)
+			_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
+				effectiveTenantID, result.KnowledgeID,
+				&types.Pagination{Page: 1, PageSize: 1},
+				[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", nil,
+			)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
 					knowledgeTotalMap[result.KnowledgeID] = 0
@@ -1610,4 +1616,103 @@ func extractSnippetForQueries(content string, queries []string) string {
 // jaccard calculates Jaccard similarity between two token sets
 func (t *KnowledgeSearchTool) jaccard(a, b map[string]struct{}) float64 {
 	return searchutil.Jaccard(a, b)
+}
+
+// applyFeedbackWeights multiplies each result's score by the per-chunk recall
+// weight maintained by the answer-feedback path (#1248). The application is
+// gated on the tenant's FeedbackRankingEnabled flag so non-opt-in tenants
+// keep the historical ordering. Failures are isolated: an unavailable chunk
+// repo / context leaves the input list untouched.
+//
+// The plugin does not require the chat pipeline's stage event manager; the
+// agent tool is invoked directly from the agent loop without going through
+// the pipeline. We therefore inline the same operation here so the agent
+// sees the same scoring as the regular chat reply.
+func (t *KnowledgeSearchTool) applyFeedbackWeights(ctx context.Context, results []*searchResultWithMeta) {
+	if len(results) == 0 || t.chunkService == nil {
+		return
+	}
+	tenant, ok := types.TenantInfoFromContext(ctx)
+	if !ok || tenant == nil || tenant.RetrievalConfig == nil ||
+		!tenant.RetrievalConfig.GetEffectiveFeedbackRankingEnabled() {
+		return
+	}
+
+	// Bucket by tenant so a tool call that crosses shared KBs (e.g. an
+	// organization-level agent) honours each owner tenant's recall policy.
+	byTenant := make(map[uint64][]*searchResultWithMeta)
+	for _, r := range results {
+		if r == nil || r.ID == "" {
+			continue
+		}
+		tid := t.searchTargets.GetTenantIDForKB(r.KnowledgeBaseID)
+		if tid == 0 {
+			tid = tenant.ID
+		}
+		byTenant[tid] = append(byTenant[tid], r)
+	}
+
+	repo := t.chunkService.GetRepository()
+	for tid, batch := range byTenant {
+		ids := make([]string, 0, len(batch))
+		seen := make(map[string]struct{}, len(batch))
+		for _, r := range batch {
+			if _, ok := seen[r.ID]; ok {
+				continue
+			}
+			seen[r.ID] = struct{}{}
+			ids = append(ids, r.ID)
+			for _, sub := range r.SubChunkID {
+				if sub == "" {
+					continue
+				}
+				if _, ok := seen[sub]; ok {
+					continue
+				}
+				seen[sub] = struct{}{}
+				ids = append(ids, sub)
+			}
+		}
+		weights, err := repo.ListChunkRecallWeights(ctx, tid, ids)
+		if err != nil {
+			logger.Warnf(ctx, "knowledge_search recall weight lookup failed for tenant %d: %v", tid, err)
+			continue
+		}
+		for _, r := range batch {
+			w := lookupRecallWeightForTool(weights, r.ID, r.SubChunkID)
+			if w == 1.0 {
+				continue
+			}
+			r.Score *= w
+			if r.Metadata == nil {
+				r.Metadata = map[string]string{}
+			}
+			r.Metadata["feedback_weight"] = strconv.FormatFloat(w, 'f', 4, 64)
+		}
+	}
+}
+
+// lookupRecallWeightForTool returns the per-chunk weight, averaging parent
+// and sub-chunk weights when both are present. Absent rows fall back to 1.0
+// (no change) so a chunk with no recorded feedback is never penalised.
+func lookupRecallWeightForTool(weights map[string]float64, primary string, subs []string) float64 {
+	w, ok := weights[primary]
+	if !ok || len(subs) == 0 {
+		if !ok {
+			return 1.0
+		}
+		return w
+	}
+	count := 1
+	sum := w
+	for _, sub := range subs {
+		if v, hit := weights[sub]; hit {
+			count++
+			sum += v
+		}
+	}
+	if count == 1 {
+		return w
+	}
+	return sum / float64(count)
 }

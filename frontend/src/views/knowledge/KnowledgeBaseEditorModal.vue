@@ -409,6 +409,7 @@
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
                     :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
+                    :kb-id="kbId"
                     @update:question-generation="handleQuestionGenerationUpdate"
                     @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />

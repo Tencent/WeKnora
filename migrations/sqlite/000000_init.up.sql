@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     vector_store_id VARCHAR(36),
     storage_backend_id VARCHAR(36),
     creator_id VARCHAR(36),
+    feedback_reset_at DATETIME,
+    feedback_reset_by VARCHAR(64),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -258,6 +260,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     content_hash VARCHAR(64),
     flags INTEGER NOT NULL DEFAULT 1,
     seq_id INTEGER,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0,
+    positive_rate REAL NOT NULL DEFAULT 0,
+    recall_weight REAL NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME

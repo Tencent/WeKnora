@@ -80,3 +80,55 @@ export async function stopSession(session_id: string, message_id: string) {
 export async function clearSessionMessages(session_id: string) {
   return del(`/api/v1/sessions/${session_id}/messages`);
 }
+
+/**
+ * Issue #1248: like / dislike / cancel an assistant message.
+ * `rating="none"` cancels any prior rating. Reasons are an optional
+ * preset-key list, only meaningful when rating="dislike".
+ */
+export async function setMessageFeedback(payload: {
+  session_id: string;
+  message_id: string;
+  rating: "like" | "dislike" | "none";
+  reasons?: string[];
+  comment?: string;
+}) {
+  const { session_id, message_id, ...body } = payload;
+  return put(`/api/v1/sessions/${session_id}/messages/${message_id}/feedback`, body);
+}
+
+export async function getChunkFeedbackStats(params: {
+  kb_id: string;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  low_quality?: boolean;
+  keyword?: string;
+  knowledge_id?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.page_size) search.set("page_size", String(params.page_size));
+  if (params.sort_by) search.set("sort_by", params.sort_by);
+  if (params.low_quality) search.set("low_quality", "true");
+  if (params.keyword) search.set("keyword", params.keyword);
+  if (params.knowledge_id) search.set("knowledge_id", params.knowledge_id);
+  return get(`/api/v1/knowledge-bases/${params.kb_id}/feedback/chunk-stats?${search.toString()}`);
+}
+
+export async function getChunkWeightLogs(params: {
+  kb_id: string;
+  chunk_id?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params.chunk_id) search.set("chunk_id", params.chunk_id);
+  if (params.page) search.set("page", String(params.page));
+  if (params.page_size) search.set("page_size", String(params.page_size));
+  return get(`/api/v1/knowledge-bases/${params.kb_id}/feedback/weight-logs?${search.toString()}`);
+}
+
+export async function resetKnowledgeBaseFeedback(kb_id: string) {
+  return post(`/api/v1/knowledge-bases/${kb_id}/feedback/reset`, {});
+}
