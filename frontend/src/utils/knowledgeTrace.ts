@@ -43,10 +43,94 @@ function nodeEnd(node: KnowledgeTraceNode): number | null {
 
 function aggregateStatus(nodes: KnowledgeTraceNode[]): string {
   if (nodes.some(node => node.status === 'running' || node.status === 'pending')) return 'running'
-  if (nodes.some(node => node.status === 'failed')) return 'failed'
+  const hasSucceeded = nodes.some(node => node.status === 'done' || node.status === 'partial')
+  if (nodes.some(node => node.status === 'failed')) return hasSucceeded ? 'partial' : 'failed'
+  if (nodes.some(node => node.status === 'partial')) return 'partial'
   if (nodes.every(node => node.status === 'skipped')) return 'skipped'
   if (nodes.some(node => node.status === 'cancelled')) return 'cancelled'
   return 'done'
+}
+
+const graphStatisticKeys = [
+  'items_received',
+  'items_rejected',
+  'nodes_extracted',
+  'nodes_valid',
+  'nodes_merged',
+  'nodes_succeeded',
+  'nodes_added',
+  'nodes_failed',
+  'relations_extracted',
+  'relations_valid',
+  'relations_merged',
+  'relations_succeeded',
+  'relations_added',
+  'relations_failed',
+  'validation_failed',
+  'write_failed',
+  'failure_count',
+] as const
+
+function objectOutput(node: KnowledgeTraceNode): Record<string, unknown> | null {
+  return node.output && typeof node.output === 'object' && !Array.isArray(node.output)
+    ? node.output as Record<string, unknown>
+    : null
+}
+
+function aggregateGraphOutput(
+  graphChildren: KnowledgeTraceNode[],
+  counts: Record<string, number>,
+): Record<string, unknown> {
+  const output: Record<string, unknown> = {
+    chunk_count: graphChildren.length,
+    status_counts: counts,
+  }
+  const totals: Record<string, number> = {}
+  const failures: Record<string, unknown>[] = []
+
+  graphChildren.forEach((child) => {
+    const childOutput = objectOutput(child)
+    if (childOutput) {
+      for (const key of graphStatisticKeys) {
+        const value = childOutput[key]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          totals[key] = (totals[key] || 0) + value
+        }
+      }
+    }
+    const chunkMatch = graphChunkName.exec(child.name)
+    const chunkIndex = chunkMatch ? Number(chunkMatch[1]) : undefined
+    const childFailures = childOutput?.failures
+    if (Array.isArray(childFailures)) {
+      for (const failure of childFailures) {
+        if (failures.length >= 50) break
+        if (!failure || typeof failure !== 'object' || Array.isArray(failure)) continue
+        failures.push({
+          ...(failure as Record<string, unknown>),
+          chunk_index: chunkIndex,
+        })
+      }
+    }
+    // A fatal chunk stores its reason on the span rather than in output.
+    // Include it in the virtual group so users do not need to open every
+    // child row to discover which chunk failed and why.
+    if (child.status === 'failed' && (child.error_code || child.error_message)) {
+      totals.failure_count = (totals.failure_count || 0) + 1
+      if (failures.length < 50) {
+        failures.push({
+          stage: 'graph_chunk',
+          kind: 'chunk',
+          chunk_index: chunkIndex,
+          error_code: child.error_code,
+          reason: child.error_message || child.error_code,
+        })
+      }
+    }
+  })
+
+  Object.assign(output, totals)
+  if (failures.length > 0) output.failures = failures
+  return output
 }
 
 /**
@@ -86,7 +170,7 @@ export function groupPostprocessGraphSpans(
     finished_at: end === null ? null : new Date(end).toISOString(),
     duration_ms: start !== null && end !== null ? Math.max(0, end - start) : undefined,
     input: { chunk_count: graphChildren.length },
-    output: { chunk_count: graphChildren.length, status_counts: counts },
+    output: aggregateGraphOutput(graphChildren, counts),
     children: graphChildren,
   }
 

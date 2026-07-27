@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -303,6 +304,11 @@ const (
 	FormatTypeYAML FormatType = "yaml"
 )
 
+// maxGraphIdentifierRunes bounds entity names and relationship types before
+// they reach the graph database. The limit is counted in Unicode code points,
+// not bytes, so Chinese and other multi-byte names are handled consistently.
+const maxGraphIdentifierRunes = 255
+
 const (
 	_FENCE_START   = "```"
 	_LANGUAGE_TAG  = `(?P<lang>[A-Za-z0-9_+-]+)?`
@@ -375,7 +381,18 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 	return formatted, nil
 }
 
-func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]interface{}, error) {
+type parsedGraphItem struct {
+	index int
+	data  map[string]interface{}
+}
+
+type parsedGraphOutput struct {
+	items         []parsedGraphItem
+	itemsReceived int
+	failures      []types.GraphFailureDetail
+}
+
+func (f *Formater) parseOutput(ctx context.Context, text string) (*parsedGraphOutput, error) {
 	if text == "" {
 		return nil, errors.New("empty or invalid input string")
 	}
@@ -406,25 +423,91 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		return nil, fmt.Errorf("expected list or dict, got %T", parsed)
 	}
 
-	itemsList := make([]map[string]interface{}, 0)
-	for _, item := range items {
+	result := &parsedGraphOutput{
+		items:         make([]parsedGraphItem, 0, len(items)),
+		itemsReceived: len(items),
+	}
+	for i, item := range items {
 		if itemMap, ok := item.(map[string]interface{}); ok {
-			itemsList = append(itemsList, itemMap)
+			result.items = append(result.items, parsedGraphItem{index: i, data: itemMap})
 		} else {
-			return nil, fmt.Errorf("each item in the sequence must be a mapping.")
+			// A single malformed extraction must not discard the other valid
+			// nodes and relationships in the same LLM response.
+			logger.Warnf(ctx, "Reject graph item %d: expected object, got %T", i, item)
+			result.failures = append(result.failures, types.GraphFailureDetail{
+				Stage:     "validation",
+				Kind:      "item",
+				ItemIndex: i,
+				Reason:    fmt.Sprintf("expected object, got %T", item),
+			})
 		}
 	}
-	return itemsList, nil
+	return result, nil
+}
+
+// normalizeGraphIdentifier validates the scalar fields that become graph
+// identifiers: entity names, relationship endpoints, and relationship types.
+// It deliberately does not apply the configured relationship allow-list;
+// allow-list validation is a separate policy decision.
+func normalizeGraphIdentifier(value interface{}) (string, string) {
+	s, ok := value.(string)
+	if !ok {
+		return "", fmt.Sprintf("must be a string, got %T", value)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "must not be empty"
+	}
+	if len([]rune(s)) > maxGraphIdentifierRunes {
+		return "", fmt.Sprintf("must not exceed %d characters", maxGraphIdentifierRunes)
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return "", fmt.Sprintf("must not contain control character %U", r)
+		}
+	}
+	return s, ""
+}
+
+// normalizeGraphAttributes keeps only non-empty string attributes and removes
+// duplicates within one node. Invalid attributes do not invalidate an
+// otherwise valid node because attributes are optional enrichment data.
+func normalizeGraphAttributes(value interface{}) []string {
+	raw, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	attributes := make([]string, 0, len(raw))
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, exists := seen[s]; exists {
+			continue
+		}
+		seen[s] = struct{}{}
+		attributes = append(attributes, s)
+	}
+	return attributes
 }
 
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
-	matchData, err := f.parseOutput(ctx, text)
+	parsed, err := f.parseOutput(ctx, text)
 	if err != nil {
 		return nil, err
 	}
-	if len(matchData) == 0 {
-		logger.Debugf(ctx, "received empty extraction data.")
-		return &types.GraphData{}, nil
+	diagnostics := &types.GraphDiagnostics{
+		ItemsReceived: parsed.itemsReceived,
+		ItemsRejected: len(parsed.failures),
+	}
+	for _, failure := range parsed.failures {
+		diagnostics.AddFailure(failure)
 	}
 	// mm, _ := json.Marshal(matchData)
 	// logger.Debugf(ctx, "Parsed graph data: %s", string(mm))
@@ -432,52 +515,133 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 	var nodes []*types.GraphNode
 	var relations []*types.GraphRelation
 
-	for _, group := range matchData {
+	for _, item := range parsed.items {
+		i := item.index
+		group := item.data
+		_, hasNode := group[f.nodePrefix]
+		_, hasRelationSource := group[f.relationSource]
+		_, hasRelationTarget := group[f.relationTarget]
+		_, hasRelationType := group[f.relationPrefix]
+
 		switch {
-		case group[f.nodePrefix] != nil:
-			attributes := make([]string, 0)
-			attributesKey := f.nodePrefix + f.attributeSuffix
-			if attr, ok := group[attributesKey].([]interface{}); ok {
-				for _, v := range attr {
-					attributes = append(attributes, fmt.Sprintf("%v", v))
-				}
+		case hasNode:
+			diagnostics.NodesExtracted++
+			name, reason := normalizeGraphIdentifier(group[f.nodePrefix])
+			if reason != "" {
+				logger.Warnf(ctx, "Reject graph node item %d: entity %s", i, reason)
+				diagnostics.ItemsRejected++
+				diagnostics.NodesRejected++
+				diagnostics.AddFailure(types.GraphFailureDetail{
+					Stage: "validation", Kind: "node", ItemIndex: i, Reason: "entity " + reason,
+				})
+				continue
 			}
+			attributesKey := f.nodePrefix + f.attributeSuffix
 			nodes = append(nodes, &types.GraphNode{
-				Name:       fmt.Sprintf("%v", group[f.nodePrefix]),
-				Attributes: attributes,
+				Name:       name,
+				Attributes: normalizeGraphAttributes(group[attributesKey]),
 			})
-		case group[f.relationSource] != nil && group[f.relationTarget] != nil:
+		case hasRelationSource || hasRelationTarget || hasRelationType:
+			diagnostics.RelationsExtracted++
+			source, sourceReason := normalizeGraphIdentifier(group[f.relationSource])
+			target, targetReason := normalizeGraphIdentifier(group[f.relationTarget])
+			relationType, typeReason := normalizeGraphIdentifier(group[f.relationPrefix])
+			if sourceReason != "" || targetReason != "" || typeReason != "" {
+				logger.Warnf(ctx,
+					"Reject graph relation item %d: entity1 %s; entity2 %s; relation %s",
+					i, validationReason(sourceReason), validationReason(targetReason), validationReason(typeReason))
+				diagnostics.ItemsRejected++
+				diagnostics.RelationsRejected++
+				diagnostics.AddFailure(types.GraphFailureDetail{
+					Stage: "validation", Kind: "relation", ItemIndex: i,
+					Node1: source, Node2: target, Type: relationType,
+					Reason: fmt.Sprintf("entity1 %s; entity2 %s; relation %s",
+						validationReason(sourceReason), validationReason(targetReason), validationReason(typeReason)),
+				})
+				continue
+			}
+			if source == target {
+				logger.Warnf(ctx, "Reject graph relation item %d: self-relation %q", i, source)
+				diagnostics.ItemsRejected++
+				diagnostics.RelationsRejected++
+				diagnostics.AddFailure(types.GraphFailureDetail{
+					Stage: "validation", Kind: "relation", ItemIndex: i,
+					Node1: source, Node2: target, Type: relationType,
+					Reason: "self-relation is not allowed",
+				})
+				continue
+			}
 			relations = append(relations, &types.GraphRelation{
-				Node1: fmt.Sprintf("%v", group[f.relationSource]),
-				Node2: fmt.Sprintf("%v", group[f.relationTarget]),
-				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
+				Node1: source,
+				Node2: target,
+				Type:  relationType,
 			})
 		default:
-			logger.Warnf(ctx, "Unsupported graph group: %v", group)
+			logger.Warnf(ctx, "Reject graph item %d: unsupported fields", i)
+			diagnostics.ItemsRejected++
+			diagnostics.AddFailure(types.GraphFailureDetail{
+				Stage: "validation", Kind: "item", ItemIndex: i, Reason: "unsupported fields",
+			})
 			continue
 		}
 	}
 	graph := &types.GraphData{
-		Node:     nodes,
-		Relation: relations,
+		Node:        nodes,
+		Relation:    relations,
+		Diagnostics: diagnostics,
 	}
-	f.rebuildGraph(ctx, graph)
+	f.rebuildGraph(ctx, graph, diagnostics)
+	diagnostics.NodesAccepted = len(graph.Node)
+	diagnostics.RelationsAccepted = len(graph.Relation)
+	if diagnostics.ItemsRejected > 0 {
+		logger.Warnf(ctx, "Graph validation rejected %d item(s); retained %d node(s) and %d relation(s)",
+			diagnostics.ItemsRejected, len(graph.Node), len(graph.Relation))
+	} else if parsed.itemsReceived == 0 {
+		logger.Debugf(ctx, "received empty extraction data.")
+	}
 	return graph, nil
 }
 
-func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
+func validationReason(reason string) string {
+	if reason == "" {
+		return "valid"
+	}
+	return reason
+}
+
+// mergeGraphNodeAttributes preserves the first-seen attribute order and
+// appends only attributes not already present on the retained node.
+func mergeGraphNodeAttributes(existing, incoming []string) []string {
+	if len(incoming) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	merged := make([]string, 0, len(existing)+len(incoming))
+	for _, attribute := range existing {
+		if _, ok := seen[attribute]; ok {
+			continue
+		}
+		seen[attribute] = struct{}{}
+		merged = append(merged, attribute)
+	}
+	for _, attribute := range incoming {
+		if _, ok := seen[attribute]; ok {
+			continue
+		}
+		seen[attribute] = struct{}{}
+		merged = append(merged, attribute)
+	}
+	return merged
+}
+
+func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData, diagnostics *types.GraphDiagnostics) {
 	nodeMap := make(map[string]*types.GraphNode)
 	nodes := make([]*types.GraphNode, 0, len(graph.Node))
 	for _, node := range graph.Node {
-		if prenode, ok := nodeMap[node.Name]; ok {
-			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
-			// 修复panic：检查Attributes是否为nil
-			if node.Attributes == nil {
-				node.Attributes = make([]string, 0)
-			}
-			if prenode.Attributes != nil {
-				node.Attributes = append(node.Attributes, prenode.Attributes...)
-			}
+		if existingNode, ok := nodeMap[node.Name]; ok {
+			logger.Infof(ctx, "Duplicate node ID: %s, merge attributes", node.Name)
+			existingNode.Attributes = mergeGraphNodeAttributes(existingNode.Attributes, node.Attributes)
+			diagnostics.NodesMerged++
 			continue
 		}
 		nodeMap[node.Name] = node
@@ -485,31 +649,57 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	}
 
 	relations := make([]*types.GraphRelation, 0, len(graph.Relation))
-	for _, relation := range graph.Relation {
+	relationSeen := make(map[string]struct{}, len(graph.Relation))
+	for relationIndex, relation := range graph.Relation {
 		if relation.Node1 == relation.Node2 {
-			logger.Infof(ctx, "Duplicate relation, ignore it")
+			logger.Infof(ctx, "Self-relation %q ignored", relation.Node1)
+			diagnostics.ItemsRejected++
+			diagnostics.RelationsRejected++
+			diagnostics.AddFailure(types.GraphFailureDetail{
+				Stage: "validation", Kind: "relation", ItemIndex: relationIndex,
+				Node1: relation.Node1, Node2: relation.Node2, Type: relation.Type,
+				Reason: "self-relation is not allowed",
+			})
 			continue
 		}
 
-		if _, ok := nodeMap[relation.Node1]; !ok {
-			node := &types.GraphNode{Name: relation.Node1}
-			nodes = append(nodes, node)
-			nodeMap[relation.Node1] = node
-			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1)
+		_, sourceExists := nodeMap[relation.Node1]
+		_, targetExists := nodeMap[relation.Node2]
+		if !sourceExists || !targetExists {
+			reason := ""
+			switch {
+			case !sourceExists && !targetExists:
+				reason = fmt.Sprintf("source %q and target %q are not extracted nodes", relation.Node1, relation.Node2)
+				logger.Warnf(ctx, "Relation ignored: source %q and target %q are not extracted nodes",
+					relation.Node1, relation.Node2)
+			case !sourceExists:
+				reason = fmt.Sprintf("source %q is not an extracted node", relation.Node1)
+				logger.Warnf(ctx, "Relation ignored: source %q is not an extracted node", relation.Node1)
+			default:
+				reason = fmt.Sprintf("target %q is not an extracted node", relation.Node2)
+				logger.Warnf(ctx, "Relation ignored: target %q is not an extracted node", relation.Node2)
+			}
+			diagnostics.ItemsRejected++
+			diagnostics.RelationsRejected++
+			diagnostics.AddFailure(types.GraphFailureDetail{
+				Stage: "validation", Kind: "relation", ItemIndex: relationIndex,
+				Node1: relation.Node1, Node2: relation.Node2, Type: relation.Type, Reason: reason,
+			})
+			continue
 		}
-		if _, ok := nodeMap[relation.Node2]; !ok {
-			node := &types.GraphNode{Name: relation.Node2}
-			nodes = append(nodes, node)
-			nodeMap[relation.Node2] = node
-			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2)
+		relationKey := relation.Node1 + "\x00" + relation.Type + "\x00" + relation.Node2
+		if _, exists := relationSeen[relationKey]; exists {
+			logger.Infof(ctx, "Duplicate relation ignored: %s --[%s]--> %s",
+				relation.Node1, relation.Type, relation.Node2)
+			diagnostics.RelationsMerged++
+			continue
 		}
+		relationSeen[relationKey] = struct{}{}
 
 		relations = append(relations, relation)
 	}
-	*graph = types.GraphData{
-		Node:     nodes,
-		Relation: relations,
-	}
+	graph.Node = nodes
+	graph.Relation = relations
 }
 
 func (f *Formater) extractContent(ctx context.Context, text string) string {

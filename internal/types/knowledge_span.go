@@ -30,6 +30,7 @@ const (
 	SpanStatusPending   = "pending"
 	SpanStatusRunning   = "running"
 	SpanStatusDone      = "done"
+	SpanStatusPartial   = "partial" // completed, but one or more independently recoverable items failed
 	SpanStatusFailed    = "failed"
 	SpanStatusSkipped   = "skipped"   // intentionally not run (e.g. multimodal on a text-only doc)
 	SpanStatusCancelled = "cancelled" // not run because an upstream span failed

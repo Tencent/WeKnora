@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -138,6 +139,158 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 				t.Errorf("relations: got %d, want %d (graph=%+v)", got, tc.wantRels, graph)
 			}
 		})
+	}
+}
+
+func TestFormater_ParseGraph_RejectsInvalidItemsIndividually(t *testing.T) {
+	items := []interface{}{
+		map[string]interface{}{"entity": " Alice ", "entity_attributes": []interface{}{" person ", "person", "", 7}},
+		map[string]interface{}{"entity": " Bob "},
+		"model explanation",
+		42,
+		map[string]interface{}{"entity": "   "},
+		map[string]interface{}{"entity": 123},
+		map[string]interface{}{"entity": "Bad\nName"},
+		map[string]interface{}{"entity1": " Alice ", "entity2": " Bob ", "relation": " knows "},
+		map[string]interface{}{"entity1": "Alice", "entity2": "Bob", "relation": "knows"},
+		map[string]interface{}{"entity1": "", "entity2": "Bob", "relation": "knows"},
+		map[string]interface{}{"entity1": "Alice", "entity2": "Bob", "relation": ""},
+		map[string]interface{}{"entity1": "Alice", "entity2": " Alice ", "relation": "knows"},
+		map[string]interface{}{"unexpected": "field"},
+	}
+	payload, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal test payload: %v", err)
+	}
+
+	graph, err := NewFormater().ParseGraph(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("one invalid item must not fail the whole graph: %v", err)
+	}
+	if len(graph.Node) != 2 {
+		t.Fatalf("nodes = %#v, want extracted Alice and Bob", graph.Node)
+	}
+	if graph.Node[0].Name != "Alice" || graph.Node[1].Name != "Bob" {
+		t.Fatalf("node names = [%q, %q], want [Alice, Bob]", graph.Node[0].Name, graph.Node[1].Name)
+	}
+	if got := graph.Node[0].Attributes; len(got) != 1 || got[0] != "person" {
+		t.Fatalf("Alice attributes = %#v, want [person]", got)
+	}
+	if len(graph.Relation) != 1 {
+		t.Fatalf("relations = %#v, want one normalized and deduplicated relation", graph.Relation)
+	}
+	relation := graph.Relation[0]
+	if relation.Node1 != "Alice" || relation.Node2 != "Bob" || relation.Type != "knows" {
+		t.Fatalf("relation = %+v, want Alice --[knows]--> Bob", relation)
+	}
+	diagnostics := graph.Diagnostics
+	if diagnostics == nil {
+		t.Fatal("expected graph validation diagnostics")
+	}
+	if diagnostics.ItemsReceived != 13 || diagnostics.ItemsRejected != 9 {
+		t.Fatalf("item diagnostics = %+v, want 13 received and 9 rejected", diagnostics)
+	}
+	if diagnostics.NodesExtracted != 5 || diagnostics.NodesAccepted != 2 || diagnostics.NodesRejected != 3 {
+		t.Fatalf("node diagnostics = %+v, want 5 extracted, 2 accepted, 3 rejected", diagnostics)
+	}
+	if diagnostics.RelationsExtracted != 5 || diagnostics.RelationsAccepted != 1 ||
+		diagnostics.RelationsRejected != 3 || diagnostics.RelationsMerged != 1 {
+		t.Fatalf("relation diagnostics = %+v", diagnostics)
+	}
+	if len(diagnostics.Failures) != 9 {
+		t.Fatalf("failure details = %+v, want all 9 rejected items", diagnostics.Failures)
+	}
+}
+
+func TestFormater_ParseGraph_RejectsOverlongIdentifiers(t *testing.T) {
+	longName := strings.Repeat("甲", maxGraphIdentifierRunes+1)
+	items := []interface{}{
+		map[string]interface{}{"entity": longName},
+		map[string]interface{}{"entity": "Valid"},
+		map[string]interface{}{"entity": "Target"},
+		map[string]interface{}{"entity1": "Valid", "entity2": "Target", "relation": longName},
+		map[string]interface{}{"entity1": "Valid", "entity2": "Target", "relation": "related"},
+	}
+	payload, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal test payload: %v", err)
+	}
+
+	graph, err := NewFormater().ParseGraph(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("overlong item must be rejected without failing valid items: %v", err)
+	}
+	if len(graph.Node) != 2 || len(graph.Relation) != 1 {
+		t.Fatalf("graph = %+v, want two valid nodes and one valid relation", graph)
+	}
+}
+
+func TestFormater_ParseGraph_RejectsRelationsWithUnknownEndpoints(t *testing.T) {
+	items := []interface{}{
+		map[string]interface{}{"entity1": "Alice", "entity2": "Bob", "relation": "knows"},
+		map[string]interface{}{"entity1": "Alice", "entity2": "Charlie", "relation": "knows"},
+		map[string]interface{}{"entity1": "Dave", "entity2": "Bob", "relation": "knows"},
+		map[string]interface{}{"entity1": "Eve", "entity2": "Frank", "relation": "knows"},
+		map[string]interface{}{"entity": "Alice"},
+		map[string]interface{}{"entity": "Bob"},
+	}
+	payload, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal test payload: %v", err)
+	}
+
+	graph, err := NewFormater().ParseGraph(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("unknown relation endpoints must not fail the whole graph: %v", err)
+	}
+	if len(graph.Node) != 2 {
+		t.Fatalf("nodes = %#v, want only explicitly extracted Alice and Bob", graph.Node)
+	}
+	if len(graph.Relation) != 1 {
+		t.Fatalf("relations = %#v, want only Alice --[knows]--> Bob", graph.Relation)
+	}
+	if graph.Diagnostics == nil || graph.Diagnostics.RelationsRejected != 3 ||
+		graph.Diagnostics.RelationsAccepted != 1 {
+		t.Fatalf("diagnostics = %+v, want three unknown-endpoint failures", graph.Diagnostics)
+	}
+}
+
+func TestFormater_ParseGraph_MergesDuplicateNodeAttributes(t *testing.T) {
+	items := []interface{}{
+		map[string]interface{}{
+			"entity":            "Alice",
+			"entity_attributes": []interface{}{"person", "founder"},
+		},
+		map[string]interface{}{
+			"entity":            " Alice ",
+			"entity_attributes": []interface{}{"founder", "engineer"},
+		},
+		map[string]interface{}{"entity": "Alice"},
+	}
+	payload, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal test payload: %v", err)
+	}
+
+	graph, err := NewFormater().ParseGraph(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("duplicate nodes must merge without failing: %v", err)
+	}
+	if len(graph.Node) != 1 {
+		t.Fatalf("nodes = %#v, want one merged Alice node", graph.Node)
+	}
+	want := []string{"person", "founder", "engineer"}
+	got := graph.Node[0].Attributes
+	if len(got) != len(want) {
+		t.Fatalf("attributes = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("attributes = %#v, want %#v", got, want)
+		}
+	}
+	if graph.Diagnostics == nil || graph.Diagnostics.NodesMerged != 2 || graph.Diagnostics.ItemsRejected != 0 {
+		t.Fatalf("diagnostics = %+v, duplicate-node merge must not count as failure", graph.Diagnostics)
 	}
 }
 
