@@ -806,7 +806,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
@@ -818,6 +818,7 @@ import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/securi
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
@@ -1265,18 +1266,55 @@ const hasContentPages = computed(() => {
   return false
 })
 
-// Parse source refs in "id|title" format
+// Pipeline ingest stores source_refs as bare knowledge IDs (see wiki_ingest_batch)
+// so filenames do not leak into LLM citation strings. Resolve titles for display.
+const sourceRefTitleCache = reactive<Record<string, string>>({})
+let sourceRefTitleRequestSeq = 0
+
+function parseSourceRefEntry(ref: string): { id: string; title: string } {
+  const pipeIdx = ref.indexOf('|')
+  if (pipeIdx > 0) {
+    return { id: ref.substring(0, pipeIdx), title: ref.substring(pipeIdx + 1) }
+  }
+  const cached = sourceRefTitleCache[ref]
+  if (cached) {
+    return { id: ref, title: cached }
+  }
+  return {
+    id: ref,
+    title: ref.length > 20 ? ref.substring(0, 8) + '...' : ref,
+  }
+}
+
 const parsedSourceRefs = computed(() => {
   if (!selectedPage.value?.source_refs?.length) return []
-  return selectedPage.value.source_refs.map(ref => {
-    const pipeIdx = ref.indexOf('|')
-    if (pipeIdx > 0) {
-      return { id: ref.substring(0, pipeIdx), title: ref.substring(pipeIdx + 1) }
-    }
-    // Fallback: show raw ref (backwards compat with old data)
-    return { id: ref, title: ref.length > 20 ? ref.substring(0, 8) + '...' : ref }
-  })
+  return selectedPage.value.source_refs.map(parseSourceRefEntry)
 })
+
+async function hydrateSourceRefTitles(refs: string[]) {
+  const ids = refs.filter((ref) => ref.indexOf('|') < 0 && !sourceRefTitleCache[ref])
+  if (!ids.length) return
+  const seq = ++sourceRefTitleRequestSeq
+  for (const id of ids) {
+    try {
+      const res = await getKnowledgeDetails(id)
+      if (seq !== sourceRefTitleRequestSeq) return
+      const data = (res as any)?.data ?? res
+      const title = data?.title || data?.file_name || data?.fileName
+      if (title) sourceRefTitleCache[id] = title
+    } catch {
+      // Keep truncated-ID fallback when the doc was deleted or is inaccessible.
+    }
+  }
+}
+
+watch(
+  () => selectedPage.value?.source_refs,
+  (refs) => {
+    if (refs?.length) hydrateSourceRefTitles(refs)
+  },
+  { immediate: true },
+)
 
 // Rendered content for graph drawer
 const graphDrawerContent = computed(() => {
