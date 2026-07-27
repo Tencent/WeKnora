@@ -306,6 +306,73 @@ func TestListByTypeLight_EmptyType_ReturnsZero(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestListBySourceRef_SQLiteMatchesExactAndTitledRefs(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	exact := makeWikiPage("kb-src", "summary/exact", types.WikiPageTypeSummary, types.WikiPageStatusPublished)
+	exact.SourceRefs = types.StringArray{"knowledge-1"}
+	titled := makeWikiPage("kb-src", "entity/titled", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titled.SourceRefs = types.StringArray{"knowledge-1|Doc title"}
+	otherKB := makeWikiPage("kb-other", "entity/leaked", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.SourceRefs = types.StringArray{"knowledge-1"}
+	prefixOnly := makeWikiPage("kb-src", "entity/prefix-only", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	prefixOnly.SourceRefs = types.StringArray{"knowledge-10|Different"}
+	escapedLike := makeWikiPage("kb-src", "entity/escaped-like", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	escapedLike.SourceRefs = types.StringArray{"knowledge_2|Doc title"}
+	likeNeighbor := makeWikiPage("kb-src", "entity/like-neighbor", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	likeNeighbor.SourceRefs = types.StringArray{"knowledgeX2|Different"}
+
+	for _, p := range []*types.WikiPage{exact, titled, otherKB, prefixOnly, escapedLike, likeNeighbor} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.ListBySourceRef(ctx, "kb-src", "knowledge-1")
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	assert.ElementsMatch(t, []string{"summary/exact", "entity/titled"}, []string{pages[0].Slug, pages[1].Slug})
+
+	slugs, err := repo.ListSlugsBySourceRef(ctx, "kb-src", "knowledge-1")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"summary/exact", "entity/titled"}, slugs)
+
+	escapedPages, err := repo.ListBySourceRef(ctx, "kb-src", "knowledge_2")
+	require.NoError(t, err)
+	require.Len(t, escapedPages, 1)
+	assert.Equal(t, "entity/escaped-like", escapedPages[0].Slug)
+}
+
+func TestListSummariesByKnowledgeIDs_SQLiteMatchesSourceRefs(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	exact := makeWikiPage("kb-src", "summary/exact", types.WikiPageTypeSummary, types.WikiPageStatusPublished)
+	exact.Content = "exact summary"
+	exact.SourceRefs = types.StringArray{"knowledge-1"}
+	titled := makeWikiPage("kb-src", "summary/titled", types.WikiPageTypeSummary, types.WikiPageStatusPublished)
+	titled.Content = "titled summary"
+	titled.SourceRefs = types.StringArray{"knowledge-2|Doc title"}
+	entity := makeWikiPage("kb-src", "entity/not-summary", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	entity.SourceRefs = types.StringArray{"knowledge-1"}
+	archived := makeWikiPage("kb-src", "summary/archived", types.WikiPageTypeSummary, types.WikiPageStatusArchived)
+	archived.SourceRefs = types.StringArray{"knowledge-3"}
+	otherKB := makeWikiPage("kb-other", "summary/leaked", types.WikiPageTypeSummary, types.WikiPageStatusPublished)
+	otherKB.SourceRefs = types.StringArray{"knowledge-1"}
+
+	for _, p := range []*types.WikiPage{exact, titled, entity, archived, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, err := repo.ListSummariesByKnowledgeIDs(ctx, "kb-src", []string{"knowledge-1", "knowledge-2", "knowledge-3"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"knowledge-1": "exact summary",
+		"knowledge-2": "titled summary",
+	}, got)
+}
+
 // TestListByTypeLight_ClampsLimit verifies the [1, 200] clamp. We don't
 // want a client passing limit=100000 and forcing the DB to return a
 // multi-MB response.
@@ -356,4 +423,39 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	got, err := repo.CountOrphans(ctx, "kb-orphans")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), got)
+}
+
+func TestSearch_SQLiteRanksMatchesAndExcludesArchived(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	titleHit := makeWikiPage("kb-search", "entity/title-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "Alpha topic"
+	slugHit := makeWikiPage("kb-search", "entity/alpha-slug", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	slugHit.Title = "Slug page"
+	summaryHit := makeWikiPage("kb-search", "entity/summary-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	summaryHit.Title = "Summary page"
+	summaryHit.Summary = "Mentions alpha in summary"
+	contentHit := makeWikiPage("kb-search", "entity/content-hit", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "Content page"
+	contentHit.Content = "Mentions alpha in body"
+	archived := makeWikiPage("kb-search", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "Alpha archived"
+	otherKB := makeWikiPage("kb-other", "entity/leaked", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.Title = "Alpha leaked"
+
+	for _, p := range []*types.WikiPage{contentHit, summaryHit, slugHit, titleHit, archived, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, err := repo.Search(ctx, "kb-search", "alpha", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	assert.Equal(t, []string{
+		"entity/title-hit",
+		"entity/alpha-slug",
+		"entity/summary-hit",
+		"entity/content-hit",
+	}, []string{got[0].Slug, got[1].Slug, got[2].Slug, got[3].Slug})
 }

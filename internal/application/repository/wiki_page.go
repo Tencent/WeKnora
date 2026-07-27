@@ -43,6 +43,40 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
 }
 
+func (r *wikiPageRepository) wikiSourceRefPredicate(sourceKnowledgeID string) (string, []interface{}, error) {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return `EXISTS (
+			SELECT 1 FROM json_each(wiki_pages.source_refs) AS source_ref
+			WHERE source_ref.value = ? OR source_ref.value LIKE ? ESCAPE '\'
+		)`, []interface{}{sourceKnowledgeID, escapeLikePattern(sourceKnowledgeID+"|") + "%"}, nil
+	}
+
+	// Build the JSON needle safely so arbitrary IDs cannot break out of the
+	// quoted string (e.g. ids containing quotes or backslashes).
+	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal source ref needle: %w", err)
+	}
+
+	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
+	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
+	prefix, err := json.Marshal(sourceKnowledgeID + "|")
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal source ref prefix: %w", err)
+	}
+	// prefix is a JSON string including the surrounding quotes; e.g. "abc|".
+	// We strip the trailing quote so LIKE can continue into the title portion.
+	prefixStr := string(prefix)
+	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
+		prefixStr = prefixStr[:len(prefixStr)-1]
+	}
+	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
+	// with %...% to match anywhere in the serialized JSON array.
+	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+
+	return "source_refs @> ?::jsonb OR source_refs::text LIKE ? ESCAPE '\\'", []interface{}{string(needle), likePattern}, nil
+}
+
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
@@ -318,36 +352,15 @@ func (r *wikiPageRepository) ListByTypeLight(
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
-	// Build the JSON needle safely so arbitrary IDs cannot break out of the
-	// quoted string (e.g. ids containing quotes or backslashes).
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	predicate, args, err := r.wikiSourceRefPredicate(sourceKnowledgeID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return nil, err
 	}
-
-	// For the "knowledgeID|title" prefix form, match against the JSON-encoded
-	// value: json.Marshal escapes special chars so the LIKE pattern is safe.
-	prefix, err := json.Marshal(sourceKnowledgeID + "|")
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
-	}
-	// prefix is a JSON string including the surrounding quotes; e.g. "abc|".
-	// We strip the trailing quote so LIKE can continue into the title portion.
-	prefixStr := string(prefix)
-	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-		prefixStr = prefixStr[:len(prefixStr)-1]
-	}
-	// Escape LIKE metacharacters in the already-JSON-escaped prefix, then wrap
-	// with %…% to match anywhere in the serialized JSON array.
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where("("+predicate+")", args...).
 		Find(&pages).Error; err != nil {
 		return nil, err
 	}
@@ -364,28 +377,16 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // containment branch and idx_wiki_pages_source_refs_text for the legacy
 // text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
-	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	predicate, args, err := r.wikiSourceRefPredicate(sourceKnowledgeID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+		return nil, err
 	}
-	prefix, err := json.Marshal(sourceKnowledgeID + "|")
-	if err != nil {
-		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
-	}
-	prefixStr := string(prefix)
-	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-		prefixStr = prefixStr[:len(prefixStr)-1]
-	}
-	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where("("+predicate+")", args...).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
 	}
@@ -654,10 +655,9 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		return nil, nil
 	}
 
-	// Build a JSONB containment-OR with one needle per knowledge id,
-	// plus a single text-LIKE OR over the legacy prefix forms. The
-	// containment branches each get their own GIN index probe; the
-	// LIKE branch falls back to the text fulltext GIN.
+	// Build a dialect-aware source_refs OR with one predicate per knowledge id.
+	// PostgreSQL uses JSONB containment plus the legacy text prefix match;
+	// SQLite uses json_each over the stored JSON array.
 	type row struct {
 		Content    string            `gorm:"column:content"`
 		SourceRefs types.StringArray `gorm:"column:source_refs"`
@@ -678,23 +678,12 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if kid == "" {
 			continue
 		}
-		needle, err := json.Marshal([]string{kid})
+		predicate, predicateArgs, err := r.wikiSourceRefPredicate(kid)
 		if err != nil {
-			return nil, fmt.Errorf("marshal kid needle: %w", err)
+			return nil, err
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
-
-		prefix, err := json.Marshal(kid + "|")
-		if err != nil {
-			return nil, fmt.Errorf("marshal kid prefix: %w", err)
-		}
-		prefixStr := string(prefix)
-		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
-			prefixStr = prefixStr[:len(prefixStr)-1]
-		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		clauses = append(clauses, "("+predicate+")")
+		args = append(args, predicateArgs...)
 	}
 	if len(clauses) == 0 {
 		return nil, nil
@@ -990,8 +979,10 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+// Search performs case-insensitive search on wiki pages within a knowledge base.
+// PostgreSQL interprets the query as a POSIX regular expression (via ~*);
+// SQLite falls back to a literal substring match because it has no built-in
+// equivalent regex operator.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -1013,22 +1004,13 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
-	// CASE expression is evaluated per-row during SELECT; we order by the
-	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
-	// arg rewriting quirks.
-	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
-		"ELSE 0 END AS match_rank"
+	rankExpr, rankArgs, whereExpr, whereArgs := r.wikiSearchExpressions(query)
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, rankArgs...).
+		Where("knowledge_base_id = ?", kbID).
+		Where(whereExpr, whereArgs...).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
@@ -1036,6 +1018,35 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		return nil, err
 	}
 	return pages, nil
+}
+
+func (r *wikiPageRepository) wikiSearchExpressions(query string) (string, []interface{}, string, []interface{}) {
+	// CASE expression is evaluated per-row during SELECT; we order by the
+	// alias so the DB only computes the rank once. Parameterized four
+	// times with the same pattern to avoid coupling to GORM's positional
+	// arg rewriting quirks.
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		pattern := "%" + escapeLikePattern(strings.ToLower(query)) + "%"
+		args := []interface{}{pattern, pattern, pattern, pattern}
+		rankExpr := "CASE " +
+			"WHEN LOWER(title) LIKE ? ESCAPE '\\' THEN 4 " +
+			"WHEN LOWER(slug) LIKE ? ESCAPE '\\' THEN 3 " +
+			"WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 2 " +
+			"WHEN LOWER(content) LIKE ? ESCAPE '\\' THEN 1 " +
+			"ELSE 0 END AS match_rank"
+		whereExpr := "(LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(slug) LIKE ? ESCAPE '\\')"
+		return rankExpr, args, whereExpr, args
+	}
+
+	args := []interface{}{query, query, query, query}
+	rankExpr := "CASE " +
+		"WHEN title ~* ? THEN 4 " +
+		"WHEN slug ~* ? THEN 3 " +
+		"WHEN summary ~* ? THEN 2 " +
+		"WHEN content ~* ? THEN 1 " +
+		"ELSE 0 END AS match_rank"
+	whereExpr := "(title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)"
+	return rankExpr, args, whereExpr, args
 }
 
 // CountByType returns page counts grouped by type for a knowledge base
