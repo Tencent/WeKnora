@@ -83,6 +83,8 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Version == 0 {
 		page.Version = 1
 	}
+	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
+	page.LastEditorID, _ = types.UserIDFromContext(ctx)
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
@@ -134,6 +136,10 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		existing.Status != page.Status ||
 		!slices.Equal(existing.Aliases, page.Aliases)
 
+	// Keep an unmutated copy of the version being replaced: it becomes the
+	// revision snapshot when this turns out to be a real content change.
+	prev := *existing
+
 	existing.Title = page.Title
 	existing.Content = page.Content
 	existing.Summary = page.Summary
@@ -161,15 +167,19 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
-		if err := s.repo.Update(ctx, existing); err != nil {
+		// The new version is authored by whoever is driving this write.
+		existing.LastEditSource = types.WikiEditSourceFromContext(ctx)
+		existing.LastEditorID, _ = types.UserIDFromContext(ctx)
+
+		// Snapshot the superseded version and write the new one atomically,
+		// so the content of every past version is preserved and a failed
+		// update leaves no snapshot behind.
+		if err := s.repo.UpdateWithRevision(ctx, existing, revisionFromPage(&prev)); err != nil {
 			return nil, fmt.Errorf("update wiki page: %w", err)
 		}
-		// GORM's struct Updates path skips zero values, so persist hierarchy
-		// metadata through the explicit map path as well. This keeps clearing
-		// parent/category fields deterministic without changing version again.
-		if err := s.repo.UpdateMeta(ctx, existing); err != nil {
-			return nil, fmt.Errorf("update wiki page hierarchy meta: %w", err)
-		}
+		// Bound per-page history; best-effort — a failed prune only means
+		// slightly more storage until the next content change.
+		s.pruneRevisions(ctx, existing.ID, existing.Version)
 	} else {
 		// No user-visible change — persist bookkeeping fields but preserve
 		// the version so downstream consumers can rely on it.
@@ -218,6 +228,117 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
 
 	return nil
+}
+
+// revisionFromPage builds the immutable snapshot row for the given page
+// state. EditSource on the snapshot is the author of THAT version — the
+// page's provenance columns as they stood while the version was current —
+// not whoever is performing the write that supersedes it.
+func revisionFromPage(p *types.WikiPage) *types.WikiPageRevision {
+	return &types.WikiPageRevision{
+		ID:              uuid.New().String(),
+		TenantID:        p.TenantID,
+		KnowledgeBaseID: p.KnowledgeBaseID,
+		PageID:          p.ID,
+		Slug:            p.Slug,
+		Version:         p.Version,
+		Title:           p.Title,
+		PageType:        p.PageType,
+		Status:          p.Status,
+		Content:         p.Content,
+		Summary:         p.Summary,
+		Aliases:         append(types.StringArray(nil), p.Aliases...),
+		EditSource:      types.NormalizeWikiEditSource(p.LastEditSource),
+		EditorID:        p.LastEditorID,
+		EditedAt:        p.UpdatedAt,
+		CreatedAt:       time.Now(),
+	}
+}
+
+// pruneRevisions bounds one page's snapshot history after it advanced to
+// currentVersion. Machine-authored snapshots are dropped once they fall out
+// of the recent window; human/agent/revert ones survive until the hard cap,
+// so pipeline churn on a hot page cannot evict the edits users care about.
+func (s *wikiPageService) pruneRevisions(ctx context.Context, pageID string, currentVersion int) {
+	req := types.WikiRevisionPruneRequest{
+		PageID:              pageID,
+		KeepFromVersion:     currentVersion - types.WikiMaxRevisionsPerPage,
+		PrunableSources:     types.WikiPrunableEditSources,
+		HardKeepFromVersion: currentVersion - types.WikiMaxRevisionsHardCap,
+	}
+	if req.KeepFromVersion <= 0 && req.HardKeepFromVersion <= 0 {
+		return
+	}
+	if err := s.repo.PruneRevisions(ctx, req); err != nil {
+		logger.Warnf(ctx, "prune wiki page revisions for %s failed: %v", pageID, err)
+	}
+}
+
+// ErrWikiRevertToCurrentVersion is returned when a revert targets the version
+// the page is already on — a client-side mistake (usually a stale history
+// list), not a server fault, so handlers map it to 400.
+var ErrWikiRevertToCurrentVersion = errors.New("cannot revert to the current version")
+
+// ListRevisions returns the stored historical snapshots for a page (newest
+// first, content omitted) plus the page's current version.
+func (s *wikiPageService) ListRevisions(
+	ctx context.Context, kbID string, slug string, limit int, offset int,
+) (*types.WikiPageRevisionListResponse, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	revs, total, err := s.repo.ListRevisions(ctx, kbID, page.ID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list wiki page revisions: %w", err)
+	}
+	return &types.WikiPageRevisionListResponse{
+		Revisions:      revs,
+		Total:          total,
+		CurrentVersion: page.Version,
+	}, nil
+}
+
+// GetRevision returns one historical snapshot with content.
+func (s *wikiPageService) GetRevision(
+	ctx context.Context, kbID string, slug string, version int,
+) (*types.WikiPageRevision, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetRevision(ctx, kbID, page.ID, version)
+}
+
+// RevertPageToVersion rolls the page back to a stored revision by applying
+// that revision's content fields as a regular edit: the pre-revert state is
+// snapshotted, version advances, links are re-parsed. Placement (folder,
+// sort order) and provenance refs keep their current values — a revert is
+// about content, not about undoing directory moves.
+func (s *wikiPageService) RevertPageToVersion(
+	ctx context.Context, kbID string, slug string, version int,
+) (*types.WikiPage, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if version == page.Version {
+		return nil, ErrWikiRevertToCurrentVersion
+	}
+	rev, err := s.repo.GetRevision(ctx, kbID, page.ID, version)
+	if err != nil {
+		return nil, err
+	}
+
+	target := *page
+	target.Title = rev.Title
+	target.Content = rev.Content
+	target.Summary = rev.Summary
+	target.PageType = rev.PageType
+	target.Status = rev.Status
+	target.Aliases = append(types.StringArray(nil), rev.Aliases...)
+
+	return s.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceRevert), &target)
 }
 
 // GetPageBySlug retrieves a wiki page by its slug
@@ -286,6 +407,13 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 	// Delete the page
 	if err := s.repo.Delete(ctx, kbID, slug); err != nil {
 		return err
+	}
+
+	// Drop the snapshot history too: the page is gone from every read path,
+	// so its revisions are unreachable rows holding full content bodies.
+	// Best-effort — the page is already deleted and cannot be rolled back.
+	if err := s.repo.DeleteRevisionsByPage(ctx, page.ID); err != nil {
+		logger.Warnf(ctx, "delete wiki page revisions for %s failed: %v", page.ID, err)
 	}
 
 	// Delete synced chunk
@@ -1101,8 +1229,13 @@ func (s *wikiPageService) removeInLinks(ctx context.Context, kbID string, source
 	}
 }
 
-// deleteChunkForPage removes the synced chunk for a wiki page
+// deleteChunkForPage removes the synced chunk for a wiki page. Chunk sync is
+// optional wiring, so a service built without a chunk repository just skips
+// it rather than taking the delete down with it.
 func (s *wikiPageService) deleteChunkForPage(ctx context.Context, page *types.WikiPage) {
+	if s.chunkRepo == nil {
+		return
+	}
 	chunkID := "wp-" + page.ID
 	if err := s.chunkRepo.DeleteChunk(ctx, page.TenantID, chunkID); err != nil {
 		logger.Warnf(ctx, "wiki: failed to delete chunk for page %s: %v", page.Slug, err)
