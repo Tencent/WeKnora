@@ -255,7 +255,7 @@ func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 }
 
 func TestModelOutputWebSearchRetainsContentOnlyEvidence(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -274,8 +274,27 @@ func TestModelOutputWebSearchRetainsContentOnlyEvidence(t *testing.T) {
 	require.Contains(t, output, `<evidence type="search_summary" verified="false" />`)
 }
 
+func TestModelOutputWebSearchLimitsProviderContent(t *testing.T) {
+	registry := newSourceRegistry()
+	content := strings.Repeat("provider evidence ", 1000)
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_search_results",
+			"results": []map[string]interface{}{{
+				"title":   "Long provider result",
+				"url":     "https://example.com/long",
+				"content": content,
+			}},
+		},
+	})
+
+	require.Contains(t, output, `<content truncated="true">`)
+	require.NotContains(t, output, content)
+}
+
 func TestModelOutputWebFetchPreservesPartialFailureStatus(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	registry.RegisterWeb("https://example.com/verified", "Verified")
 	registry.RegisterWeb("https://example.com/forbidden", "Forbidden")
 
@@ -309,7 +328,7 @@ func TestModelOutputWebFetchPreservesPartialFailureStatus(t *testing.T) {
 }
 
 func TestModelOutputWebFetchAllFailuresIncludeSearchFallback(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -332,7 +351,7 @@ func TestModelOutputWebFetchAllFailuresIncludeSearchFallback(t *testing.T) {
 }
 
 func TestModelOutputWebFetchKeepsContentWhenSummaryFails(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -352,6 +371,24 @@ func TestModelOutputWebFetchKeepsContentWhenSummaryFails(t *testing.T) {
 
 	require.Contains(t, output, `<summary_error code="summary_failed">model unavailable</summary_error>`)
 	require.Contains(t, output, `<content>official specifications</content>`)
+}
+
+func TestModelOutputWebFetchLimitsRawContentAcrossPages(t *testing.T) {
+	registry := newSourceRegistry()
+	pageContent := strings.Repeat("verified page content ", 1000)
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "web_fetch_results",
+			"results": []map[string]interface{}{
+				{"url": "https://example.com/one", "status": "success", "raw_content": pageContent},
+				{"url": "https://example.com/two", "status": "success", "raw_content": pageContent},
+			},
+		},
+	})
+
+	require.Contains(t, output, `truncated="true"`)
+	require.Less(t, len([]rune(output)), modelWebFetchTotalMaxRunes+3000)
 }
 
 func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
