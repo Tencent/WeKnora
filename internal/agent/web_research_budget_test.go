@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,6 +14,134 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWebResearchBudgetRetriesRetryableFetchFailureBeforeFinalizing(t *testing.T) {
+	maxRetries := 1
+	budget := newWebResearchBudget(&types.AgentConfig{WebFetchMaxRetries: &maxRetries})
+	args := map[string]interface{}{
+		"items": []interface{}{map[string]interface{}{
+			"url":    "https://example.com/transient",
+			"prompt": "extract facts",
+		}},
+	}
+	_, allowed := budget.beforeToolCall(agenttools.ToolWebFetch, args)
+	require.True(t, allowed)
+
+	budget.afterToolCall(agenttools.ToolWebFetch, failedFetchResult(true))
+	finalize, _, _ := budget.finalizationState()
+	assert.False(t, finalize, "retryable failures must use the configured retry")
+
+	_, allowed = budget.beforeToolCall(agenttools.ToolWebFetch, args)
+	require.True(t, allowed)
+	budget.afterToolCall(agenttools.ToolWebFetch, failedFetchResult(true))
+
+	finalize, reason, _ := budget.finalizationState()
+	assert.True(t, finalize)
+	assert.Equal(t, "all_web_fetches_failed", reason)
+}
+
+func TestWebResearchBudgetFinalizesMixedFailuresAfterRetriesExhausted(t *testing.T) {
+	maxRetries := 0
+	budget := newWebResearchBudget(&types.AgentConfig{WebFetchMaxRetries: &maxRetries})
+	args := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"url": "https://example.com/ok", "prompt": "extract facts"},
+			map[string]interface{}{"url": "https://example.com/forbidden", "prompt": "extract facts"},
+		},
+	}
+	_, allowed := budget.beforeToolCall(agenttools.ToolWebFetch, args)
+	require.True(t, allowed)
+
+	budget.afterToolCall(agenttools.ToolWebFetch, &types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"all_failed": false,
+			"results": []map[string]interface{}{
+				{"url": "https://example.com/ok", "status": "success"},
+				{"url": "https://example.com/forbidden", "status": "failed", "retryable": false},
+			},
+		},
+	})
+
+	finalize, reason, _ := budget.finalizationState()
+	assert.True(t, finalize)
+	assert.Equal(t, "web_fetch_retries_exhausted", reason)
+}
+
+func TestWebResearchBudgetRetriesLegacyPartialFetchFailure(t *testing.T) {
+	maxRetries := 1
+	budget := newWebResearchBudget(&types.AgentConfig{WebFetchMaxRetries: &maxRetries})
+	args := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"url": "https://example.com/ok", "prompt": "extract facts"},
+			map[string]interface{}{"url": "https://example.com/transient", "prompt": "extract facts"},
+		},
+	}
+	_, allowed := budget.beforeToolCall(agenttools.ToolWebFetch, args)
+	require.True(t, allowed)
+
+	budget.afterToolCall(agenttools.ToolWebFetch, &types.ToolResult{
+		Success: false,
+		Data: map[string]interface{}{
+			"results": []map[string]interface{}{
+				{"url": "https://example.com/ok", "raw_content": "verified content"},
+				{"url": "https://example.com/transient", "error": "request timed out"},
+			},
+		},
+	})
+
+	finalize, _, _ := budget.finalizationState()
+	assert.False(t, finalize)
+	_, allowed = budget.beforeToolCall(agenttools.ToolWebFetch, map[string]interface{}{
+		"items": []interface{}{map[string]interface{}{
+			"url": "https://example.com/transient", "prompt": "extract facts",
+		}},
+	})
+	assert.True(t, allowed)
+}
+
+func failedFetchResult(retryable bool) *types.ToolResult {
+	return &types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"all_failed": true,
+			"results": []map[string]interface{}{{
+				"url":        "https://example.com/transient",
+				"status":     "failed",
+				"retryable":  retryable,
+				"error_code": "connection_timeout",
+			}},
+		},
+	}
+}
+
+func TestWebResearchFinalizationInstructionDoesNotBecomeCurrentUserQuery(t *testing.T) {
+	messages := []chat.Message{
+		{Role: "system", Content: "agent system prompt"},
+		{Role: "user", Content: "original research question"},
+		{Role: "assistant", Content: "searching"},
+		{Role: "tool", Content: "web evidence"},
+	}
+	appendWebResearchFinalizationInstruction(&messages, "all_web_fetches_failed")
+
+	assert.Equal(t, "system", messages[0].Role)
+	assert.Contains(t, messages[0].Content, "Web research must stop now")
+	assert.Equal(t, "original research question", messages[1].Content)
+
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+	compressed := agenttoken.CompressContext(messages, estimator, 20, estimator.EstimateMessages(messages))
+	assert.Contains(t, messageContents(compressed), "original research question")
+	assert.Contains(t, messageContents(compressed), "web evidence")
+}
+
+func messageContents(messages []chat.Message) string {
+	var contents []string
+	for _, message := range messages {
+		contents = append(contents, message.Content)
+	}
+	return strings.Join(contents, "\n")
+}
 
 func TestWebResearchBudgetDeduplicatesEquivalentSearchQueries(t *testing.T) {
 	budget := newWebResearchBudget(&types.AgentConfig{})
@@ -137,8 +266,55 @@ func TestExecuteLoopFinalizesAfterAllWebFetchesFail(t *testing.T) {
 	assert.True(t, containsResearchFinalizationDirective(model.calls[1]))
 }
 
+func TestExecuteLoopUsesRetryableFetchBudgetBeforeFinalizing(t *testing.T) {
+	toolCall := types.LLMToolCall{
+		ID:   "fetch-retry",
+		Type: "function",
+		Function: types.FunctionCall{
+			Name:      agenttools.ToolWebFetch,
+			Arguments: `{"items":[{"url":"https://example.com/transient","prompt":"verify facts"}]}`,
+		},
+	}
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, FinishReason: "tool_calls", Done: true, ToolCalls: []types.LLMToolCall{toolCall}}}},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, FinishReason: "tool_calls", Done: true, ToolCalls: []types.LLMToolCall{toolCall}}}},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Content: "Final answer after the configured retry.", FinishReason: "stop", Done: true}}},
+	}}
+	registry := agenttools.NewToolRegistry()
+	failedTool := &retryableFailedWebFetchTool{}
+	registry.RegisterTool(failedTool)
+	engine := newTestEngine(t, model)
+	engine.toolRegistry = registry
+	state := &types.AgentState{}
+	toolDefinition := chat.Tool{
+		Type: "function",
+		Function: chat.FunctionDef{
+			Name:       failedTool.Name(),
+			Parameters: failedTool.Parameters(),
+		},
+	}
+
+	_, err := engine.executeLoop(context.Background(), state, "research question", emptyMessages(), []chat.Tool{toolDefinition}, "sess-1", "msg-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, failedTool.calls)
+	assert.Equal(t, 3, model.callCount)
+	assert.Equal(t, "Final answer after the configured retry.", state.FinalAnswer)
+	assert.False(t, containsResearchFinalizationDirective(model.calls[1]))
+	assert.True(t, containsResearchFinalizationDirective(model.calls[2]))
+}
+
 type allFailedWebFetchTool struct {
 	calls int
+}
+
+type retryableFailedWebFetchTool struct {
+	allFailedWebFetchTool
+}
+
+func (tool *retryableFailedWebFetchTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	tool.calls++
+	return failedFetchResult(true), nil
 }
 
 func (tool *allFailedWebFetchTool) Name() string {

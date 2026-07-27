@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -149,30 +150,54 @@ func (budget *webResearchBudget) afterToolCall(name string, result *types.ToolRe
 	if name != agenttools.ToolWebFetch {
 		return
 	}
-	if result == nil || !result.Success {
+	if result == nil {
 		budget.setFinalizeLocked("web_fetch_tool_failed")
 		return
 	}
-	budget.observeFetchResultsLocked(result.Data["results"])
-	if allFailed, _ := result.Data["all_failed"].(bool); allFailed {
-		budget.setFinalizeLocked("all_web_fetches_failed")
+	hasFailure := budget.observeFetchResultsLocked(result.Data["results"])
+	if !result.Success && !hasFailure {
+		budget.setFinalizeLocked("web_fetch_tool_failed")
+		return
+	}
+	if hasFailure && !budget.hasRemainingFetchRetryLocked() {
+		if allFailed, _ := result.Data["all_failed"].(bool); allFailed {
+			budget.setFinalizeLocked("all_web_fetches_failed")
+		} else {
+			budget.setFinalizeLocked("web_fetch_retries_exhausted")
+		}
 	} else if budget.totalFetchAttempts >= budget.maxFetchURLs {
 		budget.setFinalizeLocked("web_fetch_budget_exhausted")
 	}
 }
 
-func (budget *webResearchBudget) observeFetchResultsLocked(rawResults interface{}) {
+func (budget *webResearchBudget) observeFetchResultsLocked(rawResults interface{}) bool {
+	hasFailure := false
 	visit := func(result map[string]interface{}) {
 		rawURL, _ := result["url"].(string)
 		canonicalURL := canonicalResearchURL(rawURL)
 		status, _ := result["status"].(string)
+		if status == "" {
+			if rawContent, _ := result["raw_content"].(string); rawContent != "" {
+				budget.successfulURLs[canonicalURL] = true
+				return
+			}
+			if errorMessage, _ := result["error"].(string); errorMessage != "" {
+				hasFailure = true
+				return
+			}
+		}
 		if status == "success" {
 			budget.successfulURLs[canonicalURL] = true
+			return
+		}
+		if status == "skipped" {
+			budget.nonRetryableURLs[canonicalURL] = true
 			return
 		}
 		if status != "failed" {
 			return
 		}
+		hasFailure = true
 		retryable, _ := result["retryable"].(bool)
 		if !retryable {
 			budget.nonRetryableURLs[canonicalURL] = true
@@ -190,6 +215,19 @@ func (budget *webResearchBudget) observeFetchResultsLocked(rawResults interface{
 			}
 		}
 	}
+	return hasFailure
+}
+
+func (budget *webResearchBudget) hasRemainingFetchRetryLocked() bool {
+	for canonicalURL, attempts := range budget.fetchAttempts {
+		if budget.successfulURLs[canonicalURL] || budget.nonRetryableURLs[canonicalURL] {
+			continue
+		}
+		if attempts < 1+budget.maxFetchRetries {
+			return true
+		}
+	}
+	return false
 }
 
 func (budget *webResearchBudget) blockLocked(reason, message string) *types.ToolResult {
@@ -333,4 +371,17 @@ func runeNgrams(value string, size int) map[string]struct{} {
 
 func webResearchFinalizationInstruction(reason string) string {
 	return fmt.Sprintf(`Web research must stop now (reason: %s). Produce the final answer in this round without calling any tools. Use existing web_search titles, URLs, snippets, and any successful fetched content. Clearly label claims supported only by search summaries as not page-verified, and qualify prices, inventory, specifications, or other dynamic facts that could not be verified. Do not invent missing facts.`, reason)
+}
+
+func appendWebResearchFinalizationInstruction(messagesPtr *[]chat.Message, reason string) {
+	directive := webResearchFinalizationInstruction(reason)
+	if len(*messagesPtr) == 0 {
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "system", Content: directive})
+		return
+	}
+	if (*messagesPtr)[0].Role == "system" {
+		(*messagesPtr)[0].Content += "\n\n" + directive
+		return
+	}
+	*messagesPtr = append([]chat.Message{{Role: "system", Content: directive}}, (*messagesPtr)...)
 }

@@ -518,10 +518,7 @@ func (e *AgentEngine) runReActIteration(
 	if finalize, reason, injectDirective := e.webResearch.finalizationState(); finalize {
 		availableTools = nil
 		if injectDirective {
-			*messagesPtr = append(*messagesPtr, chat.Message{
-				Role:    "user",
-				Content: webResearchFinalizationInstruction(reason),
-			})
+			appendWebResearchFinalizationInstruction(messagesPtr, reason)
 			logger.Infof(ctx, "[Agent][Round-%d] Web research stopped (%s); forcing final answer", round, reason)
 		}
 	}
