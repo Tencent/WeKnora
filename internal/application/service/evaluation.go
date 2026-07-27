@@ -352,13 +352,13 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	passages := getPassageList(dataset)
 	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
 
-	// Create knowledge base from passages
-	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassage(ctx, knowledgeBaseID, passages, "")
+	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
+	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
 		return err
 	}
-	logger.Infof(ctx, "Knowledge created successfully, ID: %s", knowledge.ID)
+	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
 
 	// Setup cleanup of temporary resources
 	defer func() {
