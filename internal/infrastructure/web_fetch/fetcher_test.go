@@ -112,6 +112,30 @@ func TestFetcherRejectsEmptyContent(t *testing.T) {
 	assert.False(t, retryable)
 }
 
+func TestFetcherUsesBrowserFallbackForClientRenderedPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`<html><body><div id="app">Loading...</div><script>render()</script></body></html>`))
+	}))
+	defer server.Close()
+
+	fetcher := newTestFetcher(server.Client())
+	fetcher.resolveIPs = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	fetcher.renderBrowser = func(context.Context, pinnedTarget) (string, error) {
+		return `<html><body><main>rendered product specifications</main></body></html>`, nil
+	}
+
+	content, err := fetcher.Fetch(context.Background(), server.URL)
+
+	require.NoError(t, err)
+	assert.Contains(t, content, "rendered product specifications")
+}
+
+func TestNewFetcherKeepsAgentCompatibleTimeout(t *testing.T) {
+	assert.Equal(t, 60*time.Second, NewFetcher().timeout)
+}
+
 func TestFetcherClassifiesInvalidAndSSRFURLs(t *testing.T) {
 	fetcher := NewFetcher()
 	_, invalidErr := fetcher.Fetch(context.Background(), "not-a-url")
@@ -123,6 +147,64 @@ func TestFetcherClassifiesInvalidAndSSRFURLs(t *testing.T) {
 	ssrfCode, ssrfRetryable, _ := ErrorDetails(ssrfErr)
 	assert.Equal(t, ErrorSSRFRejected, ssrfCode)
 	assert.False(t, ssrfRetryable)
+}
+
+func TestPinnedDialUsesValidatedIPAndPreservesPort(t *testing.T) {
+	var dialedAddress string
+	fetcher := &Fetcher{
+		resolveIPs: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		},
+		dialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+			dialedAddress = address
+			return nil, errors.New("stop dial")
+		},
+	}
+
+	_, err := fetcher.pinnedDialContext()(context.Background(), "tcp", "example.com:443")
+
+	assert.Equal(t, "93.184.216.34:443", dialedAddress)
+	assert.EqualError(t, err, "stop dial")
+}
+
+func TestPinnedDialRejectsRebindingToRestrictedIP(t *testing.T) {
+	dialCalled := false
+	fetcher := &Fetcher{
+		resolveIPs: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("127.0.0.1")}, nil
+		},
+		dialContext: func(context.Context, string, string) (net.Conn, error) {
+			dialCalled = true
+			return nil, nil
+		},
+	}
+
+	_, err := fetcher.pinnedDialContext()(context.Background(), "tcp", "example.com:443")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection blocked")
+	assert.False(t, dialCalled)
+}
+
+func TestFetcherKeepsOriginalHostForTLSAndHTTPRouting(t *testing.T) {
+	var requestURL string
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestURL = request.URL.Host
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       http.NoBody,
+			Request:    request,
+		}, nil
+	})}
+	fetcher := newTestFetcher(client)
+	fetcher.validateURL = func(string) error { return nil }
+
+	_, err := fetcher.Fetch(context.Background(), "https://example.com/specs")
+
+	require.Error(t, err)
+	assert.Equal(t, "example.com", requestURL)
+	assert.Contains(t, err.Error(), "no readable text")
 }
 
 func newTestFetcher(client *http.Client) *Fetcher {

@@ -9,6 +9,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+const (
+	modelWebSearchEvidenceMaxRunes = 500
+	modelWebFetchSummaryMaxRunes   = 4000
+	modelWebFetchContentMaxRunes   = 8000
+	modelWebFetchTotalMaxRunes     = 16000
+)
+
 // ModelOutput returns a compact, source-centric representation for the LLM.
 // The canonical ToolResult.Output remains untouched for UI, logs and storage.
 func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
@@ -350,10 +357,10 @@ func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fal
 		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", handle, escapeAttr(stringValue(row, "title")))
 		b.WriteString("    <evidence type=\"search_summary\" verified=\"false\" />\n")
 		if snippet := stringValue(row, "snippet"); snippet != "" {
-			fmt.Fprintf(&b, "    <match>%s</match>\n", escapeText(snippet))
+			writeLimitedWebEvidence(&b, "match", snippet, modelWebSearchEvidenceMaxRunes, nil)
 		}
 		if content := stringValue(row, "content"); content != "" && content != stringValue(row, "snippet") {
-			fmt.Fprintf(&b, "    <content>%s</content>\n", escapeText(content))
+			writeLimitedWebEvidence(&b, "content", content, modelWebSearchEvidenceMaxRunes, nil)
 		}
 		if published := stringValue(row, "published_at"); published != "" {
 			fmt.Fprintf(&b, "    <published>%s</published>\n", escapeText(published))
@@ -375,6 +382,7 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 	var b strings.Builder
 	b.WriteString("<retrieval type=\"web\" mode=\"fetch\">\n")
 	count, successCount, failedCount := 0, 0, 0
+	remainingEvidence := modelWebFetchTotalMaxRunes
 	for _, row := range rows {
 		rawURL := stringValue(row, "url")
 		if rawURL == "" {
@@ -394,14 +402,14 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 			b.WriteString(" view=\"full\">\n")
 			successCount++
 			if summary := stringValue(row, "summary"); summary != "" {
-				fmt.Fprintf(&b, "    <summary>%s</summary>\n", escapeText(summary))
+				writeLimitedWebEvidence(&b, "summary", summary, modelWebFetchSummaryMaxRunes, &remainingEvidence)
 			}
 			if summaryStatus := stringValue(row, "summary_status"); summaryStatus == "failed" {
 				fmt.Fprintf(&b, "    <summary_error code=\"%s\">%s</summary_error>\n",
 					escapeAttr(stringValue(row, "summary_error_code")), escapeText(stringValue(row, "summary_error_message")))
 			}
 			if content := stringValue(row, "raw_content"); content != "" {
-				fmt.Fprintf(&b, "    <content>%s</content>\n", escapeText(content))
+				writeLimitedWebEvidence(&b, "content", content, modelWebFetchContentMaxRunes, &remainingEvidence)
 			}
 		} else {
 			fmt.Fprintf(&b, " retryable=\"%t\"", boolValue(row, "retryable"))
@@ -434,6 +442,39 @@ func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fall
 		}
 	}
 	return b.String()
+}
+
+func writeLimitedWebEvidence(builder *strings.Builder, tag, value string, maxRunes int, remaining *int) {
+	if value == "" {
+		return
+	}
+	limit := maxRunes
+	if remaining != nil && *remaining < limit {
+		limit = *remaining
+	}
+	limited, truncated := truncateModelEvidence(value, limit)
+	if remaining != nil {
+		*remaining -= len([]rune(limited))
+		if *remaining < 0 {
+			*remaining = 0
+		}
+	}
+	fmt.Fprintf(builder, "    <%s", tag)
+	if truncated {
+		builder.WriteString(" truncated=\"true\"")
+	}
+	fmt.Fprintf(builder, ">%s</%s>\n", escapeText(limited), tag)
+}
+
+func truncateModelEvidence(value string, maxRunes int) (string, bool) {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value, false
+	}
+	if maxRunes <= 0 {
+		return "", true
+	}
+	return string(runes[:maxRunes]), true
 }
 
 func mapsValue(value interface{}) []map[string]interface{} {
