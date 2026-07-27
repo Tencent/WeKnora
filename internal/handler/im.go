@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // validIMPlatforms is the set of supported IM platforms.
@@ -364,29 +366,18 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	ctx := c.Request.Context()
 	channelID := c.Param("channel_id")
 
-	adapter, channel, ok := h.imService.GetChannelAdapter(channelID)
-	if !ok {
-		// Try loading from DB
-		ch, err := h.imService.GetChannelByID(channelID)
-		if err != nil {
+	// Always validate the durable row before using a cached webhook adapter.
+	// This is the correctness fallback when a replica missed Redis invalidation
+	// while disconnected, and prevents stale credentials/config from being used.
+	adapter, channel, err := h.imService.EnsureChannelAdapter(channelID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Errorf(ctx, "[IM] Channel not found for callback: %s", channelID)
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
-		if err := h.imService.StartChannel(ch); err != nil {
-			logger.Errorf(ctx, "[IM] Failed to start channel for callback: %v", err)
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
-			return
-		}
-		adapter, channel, ok = h.imService.GetChannelAdapter(channelID)
-		if !ok {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
-			return
-		}
-	}
-
-	if !channel.Enabled {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel is disabled"})
+		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
 		return
 	}
 
