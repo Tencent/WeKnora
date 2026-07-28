@@ -547,6 +547,7 @@ export default {
     generateSummary: 'Generate summary',
     noDocumentSummary: 'No document summary',
     summaryRefreshed: 'Summary refreshed',
+    summaryRefreshQueued: 'Summary refresh queued; it will update automatically when ready',
     indexFailed: 'Index sync failed',
     retryIndex: 'Retry index',
     indexRetrySuccess: 'Index synchronized',

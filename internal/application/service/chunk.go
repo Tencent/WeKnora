@@ -373,10 +373,11 @@ func (s *chunkService) ListChunkByParentID(
 	return chunks, nil
 }
 
-// UpdateDocumentChunk applies an optimistic, versioned edit. Retrieval
-// questions are invalidated when the body changes because they describe the
-// previous revision. The current row remains saved when reindexing fails and
-// exposes index_status=failed so the UI never presents a false success state.
+// UpdateDocumentChunk applies an optimistic, versioned edit. Generated
+// retrieval questions remain indexed across content edits; the UI marks them as
+// stale when their revision no longer matches the current body. The current row
+// remains saved when reindexing fails and exposes index_status=failed so the
+// UI never presents a false success state.
 func (s *chunkService) UpdateDocumentChunk(
 	ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int,
 ) (*types.Chunk, error) {

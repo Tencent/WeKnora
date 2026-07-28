@@ -557,6 +557,7 @@ export default {
     generateSummary: "요약 생성",
     noDocumentSummary: "문서 요약 없음",
     summaryRefreshed: "요약이 업데이트되었습니다",
+    summaryRefreshQueued: "요약 새로고침이 대기열에 추가되었으며 완료되면 자동으로 업데이트됩니다",
     indexFailed: "인덱스 동기화 실패",
     retryIndex: "인덱스 재시도",
     indexRetrySuccess: "인덱스가 동기화되었습니다",

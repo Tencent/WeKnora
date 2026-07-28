@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,44 @@ import (
 
 type summaryKnowledgeBaseReader interface {
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
+}
+
+// ErrSummaryRefreshStale means the source chunks or metadata changed while a
+// summary refresh was running. The caller should discard the result and leave
+// the current summary_status untouched so a newer refresh can finish.
+var ErrSummaryRefreshStale = errors.New("summary refresh superseded")
+
+// summarySourceChanged reports whether chunk bodies or document metadata changed
+// after a summary job captured its inputs. Database lookup failures are
+// returned separately so callers do not treat transient read errors as stale
+// work that can be silently discarded.
+func summarySourceChanged(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	chunkRepo interfaces.ChunkRepository,
+	tenantID uint64,
+	knowledgeID string,
+	metadataVersion string,
+	sourceChunks []*types.Chunk,
+) (bool, error) {
+	latestKnowledge, err := repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return false, err
+	}
+	if string(latestKnowledge.CustomMetadata) != metadataVersion {
+		return true, nil
+	}
+	for _, sourceChunk := range sourceChunks {
+		latestChunk, getErr := chunkRepo.GetChunkByID(ctx, tenantID, sourceChunk.ID)
+		if getErr != nil {
+			return false, getErr
+		}
+		if latestChunk.ContentRevision != sourceChunk.ContentRevision ||
+			latestChunk.IsEnabled != sourceChunk.IsEnabled {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // restoreSummaryRefreshTenantInfo rebuilds the tenant context normally added
@@ -96,4 +135,17 @@ func enqueueSummaryRefresh(
 		return err
 	}
 	return nil
+}
+
+// RequestKnowledgeSummaryRefresh enqueues an async summary refresh for
+// documents that already have summary enrichment enabled.
+func (s *knowledgeService) RequestKnowledgeSummaryRefresh(
+	ctx context.Context, knowledgeID string,
+) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	return enqueueSummaryRefresh(ctx, s.repo, s.task, s.kbService, s.tracker(), knowledge)
 }

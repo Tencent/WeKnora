@@ -1591,7 +1591,20 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	knowledge, err := h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	knowledge, err := h.kgService.GetKnowledgeByID(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
+		knowledge, err = h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	} else {
+		err = h.kgService.RequestKnowledgeSummaryRefresh(effCtx, id)
+		if err == nil {
+			knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id)
+		}
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewBadRequestError(err.Error()))

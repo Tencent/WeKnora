@@ -734,6 +734,31 @@ func checkSufficientSummaryContent(ctx context.Context, knowledgeID, content str
 	return nil
 }
 
+// sortChunksForSummary orders chunks for document reconstruction. Parser
+// StartAt offsets stay authoritative until any chunk has been manually edited;
+// after that ChunkIndex is the safer reading order.
+func sortChunksForSummary(chunks []*types.Chunk) []*types.Chunk {
+	sorted := make([]*types.Chunk, len(chunks))
+	copy(sorted, chunks)
+	edited := false
+	for _, chunk := range sorted {
+		if chunk.ContentRevision > 0 {
+			edited = true
+			break
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if edited {
+			if sorted[i].ChunkIndex != sorted[j].ChunkIndex {
+				return sorted[i].ChunkIndex < sorted[j].ChunkIndex
+			}
+			return sorted[i].ID < sorted[j].ID
+		}
+		return sorted[i].StartAt < sorted[j].StartAt
+	})
+	return sorted
+}
+
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
@@ -749,12 +774,9 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		maxInputChars = s.config.Conversation.Summary.MaxInputChars
 	}
 
-	// Sort chunks by StartAt for proper concatenation
-	sortedChunks := make([]*types.Chunk, len(chunks))
-	copy(sortedChunks, chunks)
-	sort.Slice(sortedChunks, func(i, j int) bool {
-		return sortedChunks[i].StartAt < sortedChunks[j].StartAt
-	})
+	// Sort chunks for reconstruction. Parser offsets remain authoritative until
+	// any chunk has been manually edited; after that ChunkIndex is safer.
+	sortedChunks := sortChunksForSummary(chunks)
 
 	// Concatenate original chunk contents by StartAt offset to reconstruct the
 	// document, then enrich with image info in a second pass. Enrichment must
@@ -949,12 +971,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			_, err = s.RegenerateKnowledgeSummary(ctx, payload.KnowledgeID)
 		}
 		if err != nil {
-			// A retry will move the row back to processing. Keeping failed here
-			// ensures both Redis workers and the Lite executor have a terminal,
-			// non-pending state if every retry is exhausted.
+			if errors.Is(err, ErrSummaryRefreshStale) {
+				logger.Infof(ctx, "Discarding stale summary refresh for knowledge %s", payload.KnowledgeID)
+				return nil
+			}
+			logger.Warnf(ctx, "Summary refresh failed for knowledge %s: %v", payload.KnowledgeID, err)
 			_ = s.repo.UpdateKnowledgeColumn(ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed)
 		}
-		return err
+		return nil
 	}
 
 	// Open a subspan under the parent attempt's postprocess stage so the
@@ -1129,16 +1153,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 	// Do not publish an answer derived from a superseded chunk or metadata
 	// version. A user can explicitly refresh again from the latest revision.
-	latestKnowledge, latestErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
-	staleSummary := latestErr != nil || string(latestKnowledge.CustomMetadata) != summaryMetadataVersion
-	if !staleSummary {
-		for _, sourceChunk := range textChunks {
-			latestChunk, getErr := s.chunkRepo.GetChunkByID(ctx, payload.TenantID, sourceChunk.ID)
-			if getErr != nil || latestChunk.ContentRevision != sourceChunk.ContentRevision || latestChunk.IsEnabled != sourceChunk.IsEnabled {
-				staleSummary = true
-				break
-			}
-		}
+	staleSummary, staleErr := summarySourceChanged(
+		ctx, s.repo, s.chunkRepo, payload.TenantID, payload.KnowledgeID, summaryMetadataVersion, textChunks,
+	)
+	if staleErr != nil {
+		logger.Errorf(ctx, "Failed to verify summary freshness for knowledge %s: %v", payload.KnowledgeID, staleErr)
+		markSummaryFailed()
+		summaryErr = staleErr
+		return fmt.Errorf("verify summary freshness: %w", staleErr)
 	}
 	if staleSummary {
 		logger.Infof(ctx, "Discarding stale summary for knowledge %s", payload.KnowledgeID)
@@ -2173,17 +2195,15 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		_ = s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil, err
 	}
-	latestKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
-	if err != nil || string(latestKnowledge.CustomMetadata) != metadataVersion {
-		_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusFailed)
-		return nil, ErrChunkRevisionConflict
+	stale, err := summarySourceChanged(
+		ctx, s.repo, s.chunkRepo, tenantID, knowledgeID, metadataVersion, textChunks,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("verify summary freshness: %w", err)
 	}
-	for _, sourceChunk := range textChunks {
-		latestChunk, getErr := s.chunkRepo.GetChunkByID(ctx, tenantID, sourceChunk.ID)
-		if getErr != nil || latestChunk.ContentRevision != sourceChunk.ContentRevision || latestChunk.IsEnabled != sourceChunk.IsEnabled {
-			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusFailed)
-			return nil, ErrChunkRevisionConflict
-		}
+	if stale {
+		logger.Infof(ctx, "Discarding stale summary refresh for knowledge %s", knowledgeID)
+		return nil, ErrSummaryRefreshStale
 	}
 	knowledge.Description = summary
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
