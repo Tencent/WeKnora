@@ -33,9 +33,11 @@ import {
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
+  batchReparseFilteredKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
+import type { BatchReparseKnowledgeFilter, BatchReparseKnowledgeResult } from '@/api/knowledge-base';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
@@ -417,6 +419,10 @@ watch(viewMode, (v) => {
 // Multi-select state — shared between grid and list views.
 // Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
 const selectedIds = ref<Set<string>>(new Set());
+const selectedAllFiltered = ref(false);
+const selectedDocumentCount = computed(() => selectedAllFiltered.value ? total.value : selectedIds.value.size);
+const hasBatchSelection = computed(() => selectedDocumentCount.value > 0);
+const batchReparseSelectionLimit = 1000;
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
@@ -459,30 +465,60 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
 };
 
 const confirmBatchReparse = async () => {
-  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
-  const allIds = Array.from(selectedIds.value);
+  if (batchReparsing.value || batchDeleting.value || !hasBatchSelection.value) return;
+  if (selectedDocumentCount.value > batchReparseSelectionLimit) {
+    MessagePlugin.warning(t('knowledgeBase.batchReparseLimitExceeded', { count: batchReparseSelectionLimit }));
+    return;
+  }
+  const allFiltered = selectedAllFiltered.value;
+  const allIds = allFiltered ? [] : Array.from(selectedIds.value);
   const ids = allIds.filter((id) => {
     const item = cardList.value.find((c) => c.id === id);
     return !item || !isParseInFlight(item.parse_status);
   });
-  const skipped = allIds.length - ids.length;
-  if (ids.length === 0) {
+  const clientSkipped = allIds.length - ids.length;
+  if (!allFiltered && ids.length === 0) {
     MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
     return;
   }
-  if (skipped > 0) {
-    MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
-  }
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
+    const res: any = allFiltered
+      ? await batchReparseFilteredKnowledge(kbId.value, batchReparseFilter.value)
+      : await batchReparseKnowledge(kbId.value, ids);
     if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
-      applyOptimisticBatchReparse(ids);
+      const result = (res.data || {}) as Partial<BatchReparseKnowledgeResult>;
+      const submittedCount = Number(result.submitted_count ?? result.reparse_count ?? ids.length);
+      const skippedCount = clientSkipped + Number(result.skipped_in_flight_count || 0);
+      const enqueueFailedCount = Number(result.enqueue_failed_count || 0);
+      const optimisticIds = allFiltered
+        ? cardList.value.filter((card) => !isParseInFlight(card.parse_status)).map((card) => card.id)
+        : ids;
+
+      if (submittedCount > 0) {
+        MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: submittedCount }));
+      } else {
+        MessagePlugin.info(t('knowledgeBase.batchReparseNoEligibleDocuments'));
+      }
+      if (skippedCount > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skippedCount }));
+      }
+      if (enqueueFailedCount > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchReparsePartial', {
+          submitted: submittedCount,
+          failed: enqueueFailedCount,
+        }));
+      }
+
+      applyOptimisticBatchReparse(optimisticIds);
       clearSelection();
       batchMode.value = false;
       scheduleWikiStatusProbes();
-      void awaitBatchReparseReflection(ids);
+      if (allFiltered) {
+        void loadKnowledgeFiles(kbId.value);
+      } else {
+        void awaitBatchReparseReflection(optimisticIds);
+      }
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
     }
@@ -584,6 +620,25 @@ const filterParams = computed(() => {
     end_time: end ? `${end} 23:59:59` : undefined,
   };
 });
+
+const batchReparseFilter = computed<BatchReparseKnowledgeFilter>(() => ({
+  tag_ids: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined,
+  keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
+  file_type: selectedFileType.value || undefined,
+  parse_status: selectedParseStatus.value || undefined,
+  source: selectedSource.value || undefined,
+  start_time: filterParams.value.start_time,
+  end_time: filterParams.value.end_time,
+}));
+
+const hasActiveDocumentFilter = computed(() =>
+  selectedTagIds.value.length > 0 ||
+  !!docSearchKeyword.value.trim() ||
+  !!selectedFileType.value ||
+  !!selectedParseStatus.value ||
+  !!selectedSource.value ||
+  updatedTimeRange.value.length > 0,
+);
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -1753,6 +1808,7 @@ const getDoc = (page: number) => {
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
+  if (selectedAllFiltered.value) clearSelection();
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
   if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
@@ -1776,6 +1832,7 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
 };
 
 const toggleSelectAll = (checked: boolean) => {
+  if (selectedAllFiltered.value) clearSelection();
   if (checked) {
     for (const item of cardList.value || []) selectedIds.value.add(item.id);
   } else {
@@ -1785,7 +1842,15 @@ const toggleSelectAll = (checked: boolean) => {
 
 const clearSelection = () => {
   selectedIds.value.clear();
+  selectedAllFiltered.value = false;
   lastSelectedIndex = -1;
+};
+
+const selectAllFilteredDocuments = () => {
+  if (total.value <= 0 || !hasActiveDocumentFilter.value) return;
+  clearSelection();
+  selectedAllFiltered.value = true;
+  batchMode.value = true;
 };
 
 // Batch (multi-select) mode mirrors the session list's "批量管理" UX: while off,
@@ -1804,7 +1869,7 @@ const handleBatchCancel = () => {
 // 切到卡片视图时，如果列表视图里已经勾选过文档，需要自动开启批量管理模式，
 // 否则卡片视图默认不渲染 checkbox，会看不到勾选态。
 watch(viewMode, (mode) => {
-  if (mode === 'grid' && selectedIds.value.size > 0) {
+  if (mode === 'grid' && hasBatchSelection.value) {
     batchMode.value = true;
   }
 });
@@ -1829,6 +1894,7 @@ const {
   getItemId: (el) => el.dataset.selectId || null,
   enabled: computed(() => canEdit.value && !isFAQ.value && cardList.value.length > 0),
   onSelectionStart: () => {
+    if (selectedAllFiltered.value) clearSelection();
     batchMode.value = true;
   },
 });
@@ -2323,10 +2389,12 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </template>
               </div>
-              <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+              <div v-if="canEdit" class="doc-batch-bar-anchor" v-show="batchMode || hasBatchSelection">
+                <DocumentBatchBar :count="selectedDocumentCount" :delete-loading="batchDeleting"
+                  :reparse-loading="batchReparsing" :all-matching-count="hasActiveDocumentFilter ? total : undefined"
+                  :all-matching-selected="selectedAllFiltered" :delete-disabled="selectedAllFiltered"
+                  :visible="batchMode || hasBatchSelection" @cancel="handleBatchCancel" @delete="confirmBatchDelete"
+                  @reparse="confirmBatchReparse" @select-all-matching="selectAllFilteredDocuments" />
               </div>
             </div>
           </div>

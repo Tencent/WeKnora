@@ -268,13 +268,14 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 // enqueueKnowledgeListReparse enqueues an async batch-reparse task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
-	ctx context.Context, tenantID uint64, ids []string, processConfig *types.KnowledgeProcessOverrides,
+	ctx context.Context, tenantID uint64, kbID string, ids []string, processConfig *types.KnowledgeProcessOverrides,
 ) (string, error) {
 	payload := types.KnowledgeListReparsePayload{
-		TenantID:      tenantID,
-		KnowledgeIDs:  ids,
-		ProcessConfig: processConfig,
-		Initiator:     types.TaskInitiatorFromContext(ctx),
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeIDs:    ids,
+		ProcessConfig:   processConfig,
+		Initiator:       types.TaskInitiatorFromContext(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -2383,10 +2384,149 @@ func sliceContains(ss []string, target string) bool {
 	return false
 }
 
+const (
+	// Keep an individual maintenance task small enough that one large rebuild
+	// cannot monopolize the worker pool. An operation may enqueue several tasks.
+	batchReparseTaskSize      = 200
+	batchReparseOperationSize = 1000
+)
+
+// batchReparseKnowledgeFilter mirrors the document-list filters that are safe
+// to resolve server-side for an all-results batch rebuild.
+type batchReparseKnowledgeFilter struct {
+	TagIDs      []string `json:"tag_ids,omitempty"`
+	Keyword     string   `json:"keyword,omitempty"`
+	FileType    string   `json:"file_type,omitempty"`
+	ParseStatus string   `json:"parse_status,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	StartTime   string   `json:"start_time,omitempty"`
+	EndTime     string   `json:"end_time,omitempty"`
+}
+
 type batchReparseKnowledgeRequest struct {
 	KBID          string                           `json:"kb_id" binding:"required"`
-	IDs           []string                         `json:"ids" binding:"required"`
+	IDs           []string                         `json:"ids,omitempty"`
+	Filter        *batchReparseKnowledgeFilter     `json:"filter,omitempty"`
 	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+}
+
+func normalizeBatchReparseIDs(rawIDs []string) []string {
+	seen := make(map[string]struct{}, len(rawIDs))
+	ids := make([]string, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (f *batchReparseKnowledgeFilter) toKnowledgeListFilter() (types.KnowledgeListFilter, error) {
+	filter := types.KnowledgeListFilter{
+		TagIDs:      normalizeBatchReparseIDs(f.TagIDs),
+		Keyword:     strings.TrimSpace(f.Keyword),
+		FileType:    strings.TrimSpace(f.FileType),
+		ParseStatus: strings.TrimSpace(f.ParseStatus),
+		Source:      strings.TrimSpace(f.Source),
+	}
+
+	var err error
+	if filter.UpdatedFrom, err = parseFilterTime(f.StartTime); err != nil {
+		return types.KnowledgeListFilter{}, fmt.Errorf("invalid start_time: %w", err)
+	}
+	if filter.UpdatedTo, err = parseFilterTime(f.EndTime); err != nil {
+		return types.KnowledgeListFilter{}, fmt.Errorf("invalid end_time: %w", err)
+	}
+	return filter, nil
+}
+
+func isEmptyKnowledgeListFilter(filter types.KnowledgeListFilter) bool {
+	return len(filter.TagIDs) == 0 &&
+		filter.Keyword == "" &&
+		filter.FileType == "" &&
+		filter.ParseStatus == "" &&
+		filter.Source == "" &&
+		filter.UpdatedFrom.IsZero() &&
+		filter.UpdatedTo.IsZero()
+}
+
+func isKnowledgeReparseInFlight(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	default:
+		return false
+	}
+}
+
+func splitBatchReparseIDs(ids []string) [][]string {
+	batches := make([][]string, 0, (len(ids)+batchReparseTaskSize-1)/batchReparseTaskSize)
+	for start := 0; start < len(ids); start += batchReparseTaskSize {
+		end := start + batchReparseTaskSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batches = append(batches, ids[start:end])
+	}
+	return batches
+}
+
+func (h *KnowledgeHandler) resolveBatchReparseIDs(
+	ctx context.Context,
+	kbID string,
+	req batchReparseKnowledgeRequest,
+) ([]string, error) {
+	if len(req.IDs) > 0 && req.Filter != nil {
+		return nil, errors.NewBadRequestError("provide either ids or filter for batch reparse, not both")
+	}
+	if len(req.IDs) > 0 {
+		ids := normalizeBatchReparseIDs(req.IDs)
+		if len(ids) == 0 {
+			return nil, errors.NewBadRequestError("no knowledge IDs provided for batch reparse")
+		}
+		if len(ids) > batchReparseOperationSize {
+			return nil, errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per operation)", batchReparseOperationSize))
+		}
+		return ids, nil
+	}
+	if req.Filter == nil {
+		return nil, errors.NewBadRequestError("provide knowledge ids or a filter for batch reparse")
+	}
+
+	filter, err := req.Filter.toKnowledgeListFilter()
+	if err != nil {
+		return nil, errors.NewBadRequestError(err.Error())
+	}
+	if isEmptyKnowledgeListFilter(filter) {
+		return nil, errors.NewBadRequestError("batch reparse filter cannot be empty")
+	}
+
+	page := &types.Pagination{Page: 1, PageSize: batchReparseOperationSize}
+	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, page, filter)
+	if err != nil {
+		return nil, err
+	}
+	if result.Total == 0 {
+		return nil, errors.NewBadRequestError("no knowledge matches the batch reparse filter")
+	}
+	if result.Total > batchReparseOperationSize {
+		return nil, errors.NewBadRequestError(fmt.Sprintf("too many matching documents (max %d per operation)", batchReparseOperationSize))
+	}
+	knowledges, ok := result.Data.([]*types.Knowledge)
+	if !ok {
+		return nil, fmt.Errorf("unexpected knowledge list result type %T", result.Data)
+	}
+	ids := make([]string, 0, len(knowledges))
+	for _, knowledge := range knowledges {
+		ids = append(ids, knowledge.ID)
+	}
+	return ids, nil
 }
 
 // BatchReparseKnowledge godoc
@@ -2412,30 +2552,6 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 
-	seen := make(map[string]struct{}, len(req.IDs))
-	ids := make([]string, 0, len(req.IDs))
-	for _, raw := range req.IDs {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
-		return
-	}
-	const maxBatch = 200
-	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
-		return
-	}
-
 	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
 	if err != nil {
 		c.Error(err)
@@ -2446,6 +2562,11 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	ids, err := h.resolveBatchReparseIDs(ctx, kbID, req)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 
 	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
 	if err != nil {
@@ -2457,6 +2578,8 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
 		return
 	}
+	eligibleIDs := make([]string, 0, len(knowledgeList))
+	skippedInFlight := 0
 	for _, k := range knowledgeList {
 		if k.KnowledgeBaseID != kbID {
 			c.Error(errors.NewBadRequestError(
@@ -2464,26 +2587,53 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
 			return
 		}
+		if isKnowledgeReparseInFlight(k.ParseStatus) {
+			skippedInFlight++
+			continue
+		}
+		eligibleIDs = append(eligibleIDs, k.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
-		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
+	taskIDs := make([]string, 0, (len(eligibleIDs)+batchReparseTaskSize-1)/batchReparseTaskSize)
+	submittedCount := 0
+	enqueueFailedCount := 0
+	for _, batch := range splitBatchReparseIDs(eligibleIDs) {
+		taskID, enqueueErr := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, batch, req.ProcessConfig)
+		if enqueueErr != nil {
+			logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", enqueueErr)
+			enqueueFailedCount += len(batch)
+			continue
+		}
+		taskIDs = append(taskIDs, taskID)
+		submittedCount += len(batch)
+	}
+
+	if submittedCount == 0 && len(eligibleIDs) > 0 {
+		c.Error(errors.NewInternalServerError("failed to enqueue batch reparse task"))
 		return
 	}
 
-	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+	logger.Infof(ctx, "Batch knowledge reparse submitted, kb_id: %s, submitted=%d skipped_in_flight=%d enqueue_failed=%d",
+		secutils.SanitizeForLog(kbID), submittedCount, skippedInFlight, enqueueFailedCount)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Batch reparse task submitted",
 		"data": gin.H{
-			"task_id":       taskID,
-			"reparse_count": len(ids),
+			"task_id":                 firstOrEmpty(taskIDs),
+			"task_ids":                taskIDs,
+			"reparse_count":           submittedCount,
+			"submitted_count":         submittedCount,
+			"skipped_in_flight_count": skippedInFlight,
+			"enqueue_failed_count":    enqueueFailedCount,
 		},
 	})
+}
+
+func firstOrEmpty(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {

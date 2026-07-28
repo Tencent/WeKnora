@@ -5,6 +5,9 @@ defineProps<{
   count: number;
   deleteLoading?: boolean;
   reparseLoading?: boolean;
+  allMatchingCount?: number;
+  allMatchingSelected?: boolean;
+  deleteDisabled?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
@@ -14,6 +17,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
   (e: 'reparse'): void;
+  (e: 'select-all-matching'): void;
 }>();
 
 const { t } = useI18n();
@@ -26,6 +30,14 @@ const { t } = useI18n();
       <div class="batch-bar-inner">
         <div class="batch-bar-left">
           <span class="batch-bar-count">{{ t('knowledgeBase.selectedCount', { count }) }}</span>
+          <t-button v-if="allMatchingCount && !allMatchingSelected && allMatchingCount > count" variant="text"
+            theme="primary" size="small" class="batch-bar-select-all" :disabled="reparseLoading || deleteLoading"
+            @click="emit('select-all-matching')">
+            {{ t('knowledgeBase.selectAllFilteredDocuments', { count: allMatchingCount }) }}
+          </t-button>
+          <span v-else-if="allMatchingSelected" class="batch-bar-all-selected">
+            {{ t('knowledgeBase.allFilteredDocumentsSelected', { count }) }}
+          </span>
           <t-button variant="text" theme="default" size="small" class="batch-bar-clear" @click="emit('cancel')">
             {{ t('knowledgeBase.clearSelection') }}
           </t-button>
@@ -45,7 +57,7 @@ const { t } = useI18n();
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
             <t-button theme="danger" variant="outline" size="small"
-              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="deleteLoading" @click.stop>
+              :disabled="count === 0 || deleteLoading || reparseLoading || deleteDisabled" :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeBase.batchDelete') }}
             </t-button>
@@ -106,6 +118,21 @@ const { t } = useI18n();
   }
 }
 
+.batch-bar-select-all {
+  min-width: 0;
+  padding: 0 6px !important;
+  height: 28px !important;
+  font-size: 12px;
+  white-space: normal;
+  text-align: left;
+}
+
+.batch-bar-all-selected {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
 .batch-bar-actions {
   flex-shrink: 0;
   display: flex;
@@ -122,5 +149,20 @@ const { t } = useI18n();
 .batch-bar-fade-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+@media (max-width: 480px) {
+  .batch-bar-inner {
+    flex-wrap: wrap;
+  }
+
+  .batch-bar-left {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+
+  .batch-bar-actions {
+    margin-left: auto;
+  }
 }
 </style>

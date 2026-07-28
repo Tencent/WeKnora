@@ -151,6 +151,7 @@ const (
 	AuditActionKnowledgeUpdated        AuditAction = "knowledge.updated"
 	AuditActionKnowledgeDeleted        AuditAction = "knowledge.deleted"
 	AuditActionKnowledgeBatchDeleted   AuditAction = "knowledge.batch_deleted"
+	AuditActionKnowledgeBatchReparsed  AuditAction = "knowledge.batch_reparsed"
 	AuditActionKnowledgeReparseStarted AuditAction = "knowledge.reparse_started"
 	AuditActionKnowledgeParseCanceled  AuditAction = "knowledge.parse_canceled"
 	AuditActionKnowledgeMoveStarted    AuditAction = "knowledge.move_started"

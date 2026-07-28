@@ -3435,8 +3435,9 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
 	var failed int
+	processCtx := withKBActivitySuppressed(ctx)
 	for _, id := range payload.KnowledgeIDs {
-		if _, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig); err != nil {
+		if _, err := s.ReparseKnowledge(processCtx, id, payload.ProcessConfig); err != nil {
 			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
 			failed++
 		}
@@ -3447,5 +3448,17 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	}
 	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
 		len(payload.KnowledgeIDs)-failed, failed)
+	if payload.KnowledgeBaseID != "" {
+		outcome := types.AuditOutcomeSuccess
+		if failed > 0 {
+			outcome = types.AuditOutcomePartial
+		}
+		recordKBActivity(ctx, s.audit, payload.TenantID, payload.KnowledgeBaseID,
+			types.AuditActionKnowledgeBatchReparsed, "knowledge_batch", taskID, outcome,
+			map[string]any{
+				"count":  len(payload.KnowledgeIDs),
+				"failed": failed,
+			})
+	}
 	return nil
 }

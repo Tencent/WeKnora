@@ -523,10 +523,41 @@ export function knowledgeSemanticSearch(data: {
   return post('/api/v1/knowledge-search', data);
 }
 
+export interface BatchReparseKnowledgeFilter {
+  tag_ids?: string[]
+  keyword?: string
+  file_type?: string
+  parse_status?: string
+  source?: string
+  start_time?: string
+  end_time?: string
+}
+
+export interface BatchReparseKnowledgeResult {
+  task_id: string
+  task_ids: string[]
+  reparse_count: number
+  submitted_count: number
+  skipped_in_flight_count: number
+  enqueue_failed_count: number
+}
+
 export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
   return post(`/api/v1/knowledge/batch-reparse`, {
     kb_id: kbId,
     ids,
+    process_config: processConfig,
+  });
+}
+
+export function batchReparseFilteredKnowledge(
+  kbId: string,
+  filter: BatchReparseKnowledgeFilter,
+  processConfig?: KnowledgeProcessOverrides,
+) {
+  return post(`/api/v1/knowledge/batch-reparse`, {
+    kb_id: kbId,
+    filter,
     process_config: processConfig,
   });
 }
