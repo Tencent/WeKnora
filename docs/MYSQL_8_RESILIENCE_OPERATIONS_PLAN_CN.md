@@ -1,6 +1,8 @@
 # WeKnora MySQL 8 运行保障与灾备方案
 
-> 状态：方案评审中，**尚未实施**。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
+**中文版本** | [English version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_EN.md)
+
+> 状态：实施中，已完成第 1 至第 8 项能力。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
 
 ## 1. 要解决的问题
 

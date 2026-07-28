@@ -1,5 +1,7 @@
 # MySQL 8 Deployment
 
+[Chinese version](DEPLOY_MYSQL_CN.md) | **English version**
+
 WeKnora can use MySQL 8 as its application metadata database with
 `DB_DRIVER=mysql`. This is a fresh-deployment path only. Existing PostgreSQL
 or SQLite databases are not migrated or modified.
@@ -216,13 +218,14 @@ It builds a temporary MySQL source database, produces a manifest-compatible
 gzip dump containing representative records, verifies that dump through the
 isolated profile, and removes every temporary container and file afterward.
 
-## 定时备份 / Scheduled Backups
+## Scheduled Backups
 
-定时备份是 opt-in 功能：只有同时设置 `BACKUP_ENABLED=true` 和有效的
-`BACKUP_SCHEDULE` 后才会启动。仅设置 Cron 表达式不会意外开启备份，空值
-保持禁用。This is intentionally different from the manual-backup endpoint: a
-scheduled run has no operator-supplied reason and uses `trigger=scheduled` in
-its manifest and audit record.
+Scheduled backups are opt-in: they start only when both `BACKUP_ENABLED=true`
+and a valid `BACKUP_SCHEDULE` are set. A Cron expression alone cannot enable
+backups accidentally, and an empty value keeps scheduling disabled. This is
+intentionally different from the manual-backup endpoint: a scheduled run has
+no operator-supplied reason and uses `trigger=scheduled` in its manifest and
+audit record.
 
 For a personal or small-team deployment, the following is a reasonable starting
 point. `BACKUP_SCHEDULE` uses the standard five-field Cron format: `minute
@@ -232,25 +235,26 @@ different timezone. Verify the container time with `docker compose exec app
 date` before choosing a production schedule.
 
 ```env
-# Enable manual and scheduled MySQL backups / 启用 MySQL 手动与定时备份
+# Enable manual and scheduled MySQL backups
 BACKUP_ENABLED=true
 
-# Every day at 03:30 / 每天 03:30
+# Every day at 03:30
 BACKUP_SCHEDULE=30 3 * * *
 
-# Keep backups for seven days / 保留 7 天
+# Keep backups for seven days
 BACKUP_RETENTION_DAYS=7
 
-# Skip scheduled runs when fewer than 5 GiB are free / 低于 5 GiB 时跳过自动备份
+# Skip scheduled runs when fewer than 5 GiB are free
 BACKUP_MIN_FREE_GB=5
 ```
 
 After every **successful scheduled backup**, the retention sweep removes only
 expired, valid archive-and-manifest pairs. It never removes the newest valid
 backup, even if that backup is older than the configured horizon. Set
-`BACKUP_RETENTION_DAYS=0` to disable automatic deletion entirely. 手动备份与
-失败的备份不会触发删除；如果备份盘已满，请先确认最近一份可恢复备份，再由
-operator 手工释放空间或调整 retention policy。
+`BACKUP_RETENTION_DAYS=0` to disable automatic deletion entirely. Manual and
+failed backups do not trigger deletion. When the backup disk is full, confirm
+the newest recoverable backup first, then free space manually or adjust the
+retention policy.
 
 Before creating an automatic archive, the scheduler checks the free space of
 `BACKUP_LOCAL_DIR`. A value below `BACKUP_MIN_FREE_GB`, an unavailable MySQL
@@ -263,8 +267,9 @@ SQLite do not start this scheduler.
 state, and `/metrics` exposes schedule enabled, last success, last failure,
 and retention-failure gauges. When SMTP alerts are enabled, a scheduled backup
 failure or retention cleanup failure sends one deduplicated email; a later
-successful run sends the normal recovery notification. 所有告警、状态和审计记录
-均不包含 password、DSN、absolute path 或 `mysqldump` 原始输出。
+successful run sends the normal recovery notification. Alerts, status, and
+audit records never include passwords, DSNs, absolute paths, or raw
+`mysqldump` output.
 
 ## Schema Check
 

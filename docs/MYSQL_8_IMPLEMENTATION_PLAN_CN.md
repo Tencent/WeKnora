@@ -1,5 +1,7 @@
 # WeKnora MySQL 8 实施方案
 
+**中文版本** | [English version](MYSQL_8_IMPLEMENTATION_PLAN_EN.md)
+
 ## 1. 目标
 
 让 MySQL 8 成为与 PostgreSQL、SQLite 同级的**可选应用数据库后端**。
@@ -95,48 +97,15 @@ migrations/mysql/000074_baseline.up.sql
 6. 验证 `docker-compose.mysql.yml` 可被 Docker Compose 解析。
 7. 对改动的 Go 文件执行 `gofmt`。
 
-## 6. 下一步
+## 6. 后续要求
 
-### 第一步：恢复 Go 依赖网络后完成编译
+初始 MySQL 8 后端已完成。后续变更必须遵守以下要求：
 
-当前 `go test ./internal/database ./internal/application/repository` 被网络阻断，原因是容器无法访问 `proxy.golang.org`，并非已发现的编译报错。
-
-网络恢复后执行：
-
-```bash
-go mod tidy
-go test ./internal/database ./internal/application/repository
-go test ./internal/application/service
-```
-
-这一步会补全 `go.sum` 中 `gorm.io/driver/mysql` 的校验记录，并验证新增 Go 代码。
-
-### 第二步：端到端启动验证
-
-使用独立 MySQL compose 启动应用：
-
-```bash
-docker compose --env-file .env.mysql -f docker-compose.mysql.yml up -d
-```
-
-在启动完整应用前，可先独立验证 MySQL 基线：
-
-```bash
-sh scripts/test_mysql_schema.sh
-```
-
-验收点：
-
-- 应用健康检查成功。
-- `schema_migrations` 记录版本 `74` 且不是 dirty 状态。
-- 能完成工作区、知识库、会话和消息的基本创建、查询、删除流程。
-- 使用 Qdrant 完成一次文档入库和检索。
-
-### 第三步：回归与提交
-
-- 使用 PostgreSQL 默认 compose 回归启动。
-- 使用 SQLite Lite 配置回归启动。
-- 将改动迁入可用的 Git fork 工作树，创建独立分支、提交并推送。
+1. 每一个适用于 MySQL 的 schema 变更，均需增加对应的 MySQL migration。
+2. MySQL 专属行为需有针对性测试，且不得改变 PostgreSQL 或 SQLite 的执行路径。
+3. 修改部署配置后，应验证 MySQL Compose 配置。
+4. 运行保障能力按 `MYSQL_8_RESILIENCE_OPERATIONS_PLAN_CN.md` 的顺序，每项功能
+   使用独立分支实现、验证和提交。
 
 ## 7. 验收标准
 
