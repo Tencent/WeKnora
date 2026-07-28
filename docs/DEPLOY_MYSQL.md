@@ -167,7 +167,54 @@ failure category in its manifest and audit event.
 
 Do not put secrets in the operator reason: it is recorded in the manifest and
 the system audit log. Restore is intentionally not available from this API; the
-next restore-verification task restores only into an isolated MySQL instance.
+restore-verification workflow below restores only into an isolated MySQL
+instance.
+
+## Isolated Restore Verification
+
+Before relying on a backup, restore it into a new temporary MySQL 8 container
+and verify it. This is an operational drill, not a production restore command:
+it never starts, stops, connects to, or overwrites the normal `mysql` Compose
+service. The temporary service has no published ports, no persistent MySQL
+volume, a read-only backup mount, and its own internal Docker network. It is
+removed automatically when verification finishes.
+
+Run this from PowerShell at the repository root, replacing the backup ID with
+the value returned by the manual-backup API:
+
+```powershell
+.\scripts\verify_mysql_restore.ps1 `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups `
+  -EnvFile .env.mysql
+```
+
+The script checks the adjacent JSON manifest, archive byte size, SHA-256, and
+gzip stream before importing. It then checks that exactly one restored
+application database contains `schema_migrations`, confirms a clean migration
+state and (when recorded) the manifest migration version, reports exact counts
+for key tables, and shows only record IDs and timestamps for a small sample.
+It does not print database passwords, DSNs, file paths from the manifest, or
+business-content fields.
+
+The script creates a random restore-only root password in its process
+environment and writes a temporary MySQL client option file through container
+standard input, rather than putting that password in a host command line. Use
+`-KeepContainer` only when investigating a failed drill; clean it up with the
+project name printed by the script. A successful verification provides a
+measured restore duration for the current backup size and host, but it does not
+authorize a production database replacement. A real production cutover remains
+a separate, reviewed break-glass operation.
+
+Run the repeatable integration drill after changing this workflow:
+
+```powershell
+.\scripts\test_mysql_restore_verify.ps1
+```
+
+It builds a temporary MySQL source database, produces a manifest-compatible
+gzip dump containing representative records, verifies that dump through the
+isolated profile, and removes every temporary container and file afterward.
 
 ## Schema Check
 
