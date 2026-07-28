@@ -304,6 +304,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	enqueuedQuestionCount := 0
 	if willSpawnSummary {
 		enqueuedSummary = s.enqueueSummaryGenerationTask(ctx, payload, attempt)
+		if !enqueuedSummary {
+			_ = s.knowledgeRepo.UpdateKnowledgeColumn(
+				ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed,
+			)
+		}
 		if willSpawnQuestion {
 			// Create the postprocess.question grouping span up front so the
 			// per-batch subspans (enqueued just below, run later in their own

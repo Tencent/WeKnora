@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,6 +67,31 @@ type metadataUpdateChunkRepo struct {
 	listCalls int
 }
 
+type metadataUpdateKBService struct {
+	interfaces.KnowledgeBaseService
+}
+
+func (metadataUpdateKBService) GetKnowledgeBaseByID(
+	_ context.Context, id string,
+) (*types.KnowledgeBase, error) {
+	return &types.KnowledgeBase{ID: id, SummaryModelID: "summary-model"}, nil
+}
+
+type metadataUpdateTaskEnqueuer struct {
+	tasks []*asynq.Task
+	err   error
+}
+
+func (e *metadataUpdateTaskEnqueuer) Enqueue(
+	task *asynq.Task, _ ...asynq.Option,
+) (*asynq.TaskInfo, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+	e.tasks = append(e.tasks, task)
+	return nil, nil
+}
+
 func (r *metadataUpdateChunkRepo) ListChunksByKnowledgeID(
 	_ context.Context, _ uint64, _ string,
 ) ([]*types.Chunk, error) {
@@ -74,13 +102,17 @@ func (r *metadataUpdateChunkRepo) ListChunksByKnowledgeID(
 func TestUpdateKnowledgeMetadataDoesNotReindexChunks(t *testing.T) {
 	t.Parallel()
 	repo := &metadataUpdateKnowledgeRepo{knowledge: &types.Knowledge{
-		ID:             "knowledge-1",
-		TenantID:       7,
-		SummaryStatus:  types.SummaryStatusCompleted,
-		CustomMetadata: types.JSON(`{"region":"Beijing"}`),
+		ID:              "knowledge-1",
+		TenantID:        7,
+		KnowledgeBaseID: "kb-1",
+		SummaryStatus:   types.SummaryStatusCompleted,
+		CustomMetadata:  types.JSON(`{"region":"Beijing"}`),
 	}}
 	chunkRepo := &metadataUpdateChunkRepo{}
-	service := &knowledgeService{repo: repo, chunkRepo: chunkRepo}
+	taskEnqueuer := &metadataUpdateTaskEnqueuer{}
+	service := &knowledgeService{
+		repo: repo, chunkRepo: chunkRepo, kbService: metadataUpdateKBService{}, task: taskEnqueuer,
+	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	err := service.UpdateKnowledge(ctx, &types.Knowledge{
@@ -92,4 +124,49 @@ func TestUpdateKnowledgeMetadataDoesNotReindexChunks(t *testing.T) {
 	require.JSONEq(t, `{"region":"Shanghai"}`, string(repo.knowledge.CustomMetadata))
 	require.Zero(t, chunkRepo.listCalls)
 	require.Equal(t, types.SummaryStatusPending, repo.summaryStatusUpdate)
+	require.Len(t, taskEnqueuer.tasks, 1)
+	require.Equal(t, types.TypeSummaryGeneration, taskEnqueuer.tasks[0].Type())
+	var payload types.SummaryGenerationPayload
+	require.NoError(t, json.Unmarshal(taskEnqueuer.tasks[0].Payload(), &payload))
+	require.True(t, payload.Refresh)
+	require.Equal(t, "knowledge-1", payload.KnowledgeID)
+}
+
+func TestUpdateKnowledgeMetadataDoesNotLeaveTasklessPendingStatus(t *testing.T) {
+	t.Parallel()
+	repo := &metadataUpdateKnowledgeRepo{knowledge: &types.Knowledge{
+		ID: "knowledge-1", TenantID: 7, KnowledgeBaseID: "kb-1",
+		SummaryStatus: types.SummaryStatusCompleted,
+	}}
+	service := &knowledgeService{
+		repo: repo, chunkRepo: &metadataUpdateChunkRepo{}, kbService: metadataUpdateKBService{},
+		task: &metadataUpdateTaskEnqueuer{err: errors.New("queue unavailable")},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	require.NoError(t, service.UpdateKnowledge(ctx, &types.Knowledge{
+		ID: "knowledge-1", CustomMetadata: types.JSON(`{"region":"Shanghai"}`),
+	}))
+	require.Equal(t, types.SummaryStatusFailed, repo.summaryStatusUpdate)
+}
+
+func TestUpdateKnowledgeUnchangedMetadataDoesNotRefreshSummary(t *testing.T) {
+	t.Parallel()
+	repo := &metadataUpdateKnowledgeRepo{knowledge: &types.Knowledge{
+		ID: "knowledge-1", TenantID: 7, KnowledgeBaseID: "kb-1",
+		SummaryStatus:  types.SummaryStatusCompleted,
+		CustomMetadata: types.JSON(`{"department":"R&D","region":"Shanghai"}`),
+	}}
+	taskEnqueuer := &metadataUpdateTaskEnqueuer{}
+	service := &knowledgeService{
+		repo: repo, chunkRepo: &metadataUpdateChunkRepo{}, kbService: metadataUpdateKBService{}, task: taskEnqueuer,
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	require.NoError(t, service.UpdateKnowledge(ctx, &types.Knowledge{
+		ID:             "knowledge-1",
+		CustomMetadata: types.JSON(`{"region":"Shanghai","department":"R&D"}`),
+	}))
+	require.Empty(t, taskEnqueuer.tasks)
+	require.Nil(t, repo.summaryStatusUpdate)
 }

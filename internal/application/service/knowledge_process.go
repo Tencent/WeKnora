@@ -942,6 +942,16 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			payload.Attempt, payload.KnowledgeID)
 		return nil
 	}
+	if payload.Refresh {
+		_, err := s.RegenerateKnowledgeSummary(ctx, payload.KnowledgeID)
+		if err != nil {
+			// A retry will move the row back to processing. Keeping failed here
+			// ensures both Redis workers and the Lite executor have a terminal,
+			// non-pending state if every retry is exhausted.
+			_ = s.repo.UpdateKnowledgeColumn(ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed)
+		}
+		return err
+	}
 
 	// Open a subspan under the parent attempt's postprocess stage so the
 	// trace surface shows the real summary-generation duration (LLM call
@@ -991,6 +1001,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
+		_ = s.repo.UpdateKnowledgeColumn(ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed)
 		summaryOut["skipped"] = "no_summary_model"
 		return nil
 	}
@@ -1127,7 +1138,6 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 	if staleSummary {
 		logger.Infof(ctx, "Discarding stale summary for knowledge %s", payload.KnowledgeID)
-		_ = s.repo.UpdateKnowledgeColumn(ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusPending)
 		summaryOut["skipped"] = "content_revision_changed"
 		return nil
 	}
@@ -2107,8 +2117,8 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 }
 
 // RegenerateKnowledgeSummary refreshes both the knowledge description and the
-// summary chunk(s), then reindexes all retrieval artifacts with current
-// custom metadata. It is intentionally idempotent.
+// summary chunk(s), then reindexes only those summary chunks. It is
+// intentionally idempotent.
 func (s *knowledgeService) RegenerateKnowledgeSummary(
 	ctx context.Context, knowledgeID string,
 ) (*types.Knowledge, error) {
@@ -2154,13 +2164,13 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	}
 	latestKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil || string(latestKnowledge.CustomMetadata) != metadataVersion {
-		_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusPending)
+		_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusFailed)
 		return nil, ErrChunkRevisionConflict
 	}
 	for _, sourceChunk := range textChunks {
 		latestChunk, getErr := s.chunkRepo.GetChunkByID(ctx, tenantID, sourceChunk.ID)
 		if getErr != nil || latestChunk.ContentRevision != sourceChunk.ContentRevision || latestChunk.IsEnabled != sourceChunk.IsEnabled {
-			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusPending)
+			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledgeID, "summary_status", types.SummaryStatusFailed)
 			return nil, ErrChunkRevisionConflict
 		}
 	}
@@ -2173,6 +2183,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	if kb.NeedsEmbeddingModel() {
 		found := false
 		maxIndex := 0
+		summaryChunks := make([]*types.Chunk, 0, 1)
 		for _, chunk := range allChunks {
 			if chunk.ChunkIndex > maxIndex {
 				maxIndex = chunk.ChunkIndex
@@ -2185,6 +2196,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 					return nil, err
 				}
+				summaryChunks = append(summaryChunks, chunk)
 				found = true
 			}
 		}
@@ -2198,9 +2210,9 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 			if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 				return nil, err
 			}
-			allChunks = append(allChunks, summaryChunk)
+			summaryChunks = append(summaryChunks, summaryChunk)
 		}
-		if err := s.updateChunkVector(ctx, knowledge.KnowledgeBaseID, allChunks); err != nil {
+		if err := s.updateChunkVector(ctx, knowledge.KnowledgeBaseID, summaryChunks); err != nil {
 			return nil, err
 		}
 	}

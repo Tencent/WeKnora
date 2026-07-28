@@ -1565,11 +1565,16 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	updated, getErr := h.kgService.GetKnowledgeByID(effCtx, id)
+	if getErr != nil {
+		logger.Warnf(ctx, "Knowledge updated but failed to reload status for %s: %v", id, getErr)
+	}
 
 	logger.Infof(ctx, "Knowledge updated successfully, knowledge ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Knowledge chunk updated successfully",
+		"message": "Knowledge updated successfully",
+		"data":    updated,
 	})
 }
 

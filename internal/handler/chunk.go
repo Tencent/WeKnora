@@ -237,10 +237,16 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 
 	logger.Infof(ctx, "Knowledge chunk updated successfully, knowledge ID: %s, chunk ID: %s",
 		secutils.SanitizeForLog(knowledgeID), secutils.SanitizeForLog(chunk.ID))
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    chunk,
-	})
+	knowledge, getErr := h.kgService.GetKnowledgeByID(ctx, knowledgeID)
+	if getErr != nil {
+		logger.Warnf(ctx, "Chunk updated but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": chunk}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
@@ -263,7 +269,7 @@ type RevertChunkRequest struct {
 }
 
 func (h *ChunkHandler) RevertChunk(c *gin.Context) {
-	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -286,7 +292,16 @@ func (h *ChunkHandler) RevertChunk(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": updated})
+	knowledge, getErr := h.kgService.GetKnowledgeByID(c.Request.Context(), knowledgeID)
+	if getErr != nil {
+		logger.Warnf(c.Request.Context(), "Chunk reverted but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": updated}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 type UpsertGeneratedQuestionRequest struct {
