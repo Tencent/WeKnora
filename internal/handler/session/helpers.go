@@ -152,6 +152,21 @@ func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []strin
 	return append(scopes, types.TagScope{KnowledgeBaseID: kbID, TagIDs: dedupRequestStrings(orphan)})
 }
 
+// folderScopesFromRequestIDs attaches bare folder_ids to the sole selected
+// knowledge base. Folder scoping mirrors the bare-tag rule: with zero or
+// multiple KBs selected the folder cannot be attributed, so the request is
+// rejected rather than silently widened.
+func folderScopesFromRequestIDs(folderIDs, kbIDs []string) ([]types.FolderScope, error) {
+	deduped := dedupRequestStrings(folderIDs)
+	if len(deduped) == 0 {
+		return nil, nil
+	}
+	if len(kbIDs) != 1 {
+		return nil, fmt.Errorf("folder_ids requires exactly one knowledge_base_id")
+	}
+	return []types.FolderScope{{KnowledgeBaseID: kbIDs[0], FolderIDs: deduped}}, nil
+}
+
 func mentionedIDsByType(items []MentionedItemRequest, itemType string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0)

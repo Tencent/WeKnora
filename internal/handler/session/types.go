@@ -52,6 +52,7 @@ type CreateKnowledgeQARequest struct {
 	MCPServiceIDs         []string                     `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
 	SkillNames            []string                     `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs                []string                     `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
+	FolderIDs             []string                     `json:"folder_ids"`                            // Folder scope: restrict retrieval to these folders' subtrees (requires exactly one KB)
 	MentionedItems        []MentionedItemRequest       `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle          bool                         `json:"disable_title"`                         // Whether to disable auto title generation
 	Images                []ImageAttachment            `json:"images"`                                // Attached images for multimodal chat
@@ -75,6 +76,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
+	FolderIDs        []string               `json:"folder_ids"`                            // Folder scope within a single KB (subtrees included)
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 }
 

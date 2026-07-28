@@ -52,3 +52,29 @@ func TestValidateUnscopedTagIDs(t *testing.T) {
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1", "kb-2"}))
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, nil))
 }
+
+func TestFolderScopesFromRequestIDs_SingleKB(t *testing.T) {
+	scopes, err := folderScopesFromRequestIDs([]string{"f-1", "f-1", "f-2"}, []string{"kb-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(scopes) != 1 || scopes[0].KnowledgeBaseID != "kb-1" || len(scopes[0].FolderIDs) != 2 {
+		t.Fatalf("unexpected scopes: %+v", scopes)
+	}
+}
+
+func TestFolderScopesFromRequestIDs_Empty(t *testing.T) {
+	scopes, err := folderScopesFromRequestIDs(nil, nil)
+	if err != nil || scopes != nil {
+		t.Fatalf("empty folder ids must be a no-op, got scopes=%+v err=%v", scopes, err)
+	}
+}
+
+func TestFolderScopesFromRequestIDs_AmbiguousKBRejected(t *testing.T) {
+	if _, err := folderScopesFromRequestIDs([]string{"f-1"}, []string{"kb-1", "kb-2"}); err == nil {
+		t.Fatal("folder ids with multiple KBs must be rejected")
+	}
+	if _, err := folderScopesFromRequestIDs([]string{"f-1"}, nil); err == nil {
+		t.Fatal("folder ids with no KB must be rejected")
+	}
+}

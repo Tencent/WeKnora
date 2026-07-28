@@ -160,6 +160,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -181,6 +182,7 @@ func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *te
 		nil,
 		[]string{"doc-1"},
 		nil,
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -199,6 +201,7 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 		[]string{"doc-kb"},
 		[]string{"doc-2", "doc-3"},
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -218,6 +221,7 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 		[]string{"faq-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -238,6 +242,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -267,6 +272,7 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -323,6 +329,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.Error(t, err)

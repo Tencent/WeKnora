@@ -12,6 +12,7 @@ type QARequest struct {
 	KnowledgeBaseIDs   []string           // Knowledge base IDs to search (from request + @mentions)
 	KnowledgeIDs       []string           // Specific knowledge (file) IDs to search
 	TagScopes          []TagScope         // Tag-constrained KB scopes from @mentions
+	FolderScopes       []FolderScope      // Folder-constrained KB scopes (subtrees resolve to knowledge IDs)
 	MCPServiceIDs      []string           // Per-request MCP service IDs from @mentions
 	SkillNames         []string           // Per-request preloaded skill names from @mentions
 	ImageURLs          []string           // Image URLs for multimodal input
