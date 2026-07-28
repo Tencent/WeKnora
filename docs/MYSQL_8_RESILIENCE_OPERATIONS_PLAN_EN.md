@@ -236,7 +236,7 @@ reviewable and reversible:
 | 9 | `feature/mysql-8-file-backup` | Local file archive and consistency boundaries | Complete |
 | 10 | `feature/mysql-8-qdrant-snapshot` | Optional Qdrant snapshot and restore | Complete |
 | 11 | `feature/mysql-8-rollback-cli` | Deployment/config rollback and break-glass recovery | Complete |
-| 12 | `feature/mysql-8-ops-admin-ui` | Read-only status and controlled manual backup UI | Planned |
+| 12 | `feature/mysql-8-ops-admin-ui` | Read-only status and controlled manual backup UI | Complete |
 
 ## 11. Quality Gates
 
@@ -255,6 +255,9 @@ Every feature branch must:
 
 The administrator UI may show health state, recent alerts, disk state, backup
 inventory, and a controlled manual-backup action with confirmation and audit.
+The completed operations console is SystemAdmin-only and presents sanitized
+status with a 30-second refresh. Its only write control is manual MySQL backup,
+which requires a reason and confirmation and calls the existing audited API.
 Destructive or high-impact operations such as restoring into a new instance,
 switching databases, deleting archives, changing encryption keys, and rollback
 belong to a reviewed CLI or operational procedure. Automated work is limited to

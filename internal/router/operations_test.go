@@ -85,6 +85,9 @@ func TestOperationsStatusReportsSanitizedRuntimeState(t *testing.T) {
 	if response.Status != "ready" || response.Dependencies["database"] != "ok" || response.Dependencies["redis"] != "disabled" {
 		t.Fatalf("unexpected status response: %#v", response)
 	}
+	if response.Database.Driver != "sqlite" {
+		t.Fatalf("database driver = %q, want sqlite", response.Database.Driver)
+	}
 	if strings.Contains(recorder.Body.String(), "file_path") || strings.Contains(recorder.Body.String(), "password") {
 		t.Fatalf("status response exposed sensitive runtime data: %s", recorder.Body.String())
 	}
@@ -108,6 +111,13 @@ func TestOperationsStatusRequiresSystemAdmin(t *testing.T) {
 	r.ServeHTTP(allowedRecorder, request)
 	if allowedRecorder.Code != http.StatusOK {
 		t.Fatalf("system-admin status = %d, want %d", allowedRecorder.Code, http.StatusOK)
+	}
+	var response operationsStatusResponse
+	if err := json.Unmarshal(allowedRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if response.Database.Driver != "unknown" {
+		t.Fatalf("database driver = %q, want unknown when database is unavailable", response.Database.Driver)
 	}
 }
 

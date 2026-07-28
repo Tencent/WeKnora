@@ -89,6 +89,27 @@ system administrators. It reports dependency states, connection-pool values,
 file-log storage values, and migration state, but never filesystem paths, DSNs,
 passwords, or raw dependency errors.
 
+## Operations Console
+
+System administrators can open **Settings -> System Administration ->
+Operations** (or `/platform/system/operations`) to view the protected runtime
+status without exposing it through a public route. The page refreshes every 30
+seconds while it is open and also has a manual refresh control. It presents
+dependency reachability, the database driver and pool state, migration state,
+application file-log disk state, and the scheduled-backup/retention state.
+
+For a MySQL deployment with a reachable database and a clean migration state,
+the page also provides **Create backup**. The operator must enter a reason and
+confirm the action. It calls the existing system-admin-only manual backup API,
+so the same MySQL advisory lock, manifest/checksum generation, error handling,
+and audit event apply. The result shows only safe backup identifiers and
+relative artifact names. Do not put passwords, tokens, or business-sensitive
+content in the reason because the reason is an audit record.
+
+The page does not provide restore, database replacement, configuration rollback,
+image rollback, or backup deletion controls. Those higher-risk operations remain
+in the reviewed PowerShell CLI and break-glass procedures.
+
 ## Email Alerts
 
 SMTP alerts are opt-in and are intended for deployment operators, not every

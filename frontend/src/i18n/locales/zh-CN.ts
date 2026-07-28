@@ -7067,6 +7067,38 @@ export default {
       generic: "操作失败，请稍后重试。",
     },
   },
+  operations: {
+    title: '运维状态',
+    description: '查看运行状态，并创建带审计记录的 MySQL 备份。',
+    refresh: '刷新', retry: '重试', updatedAt: '更新于 {value}', enabled: '已启用', disabled: '未启用', unknown: '未知', cancel: '取消', close: '关闭',
+    overview: {
+      uptime: '运行时长', database: '数据库', migration: '迁移状态', ready: '运行正常', notReady: '需要处理',
+      readyDescription: '已配置的依赖当前均可连接。', notReadyDescription: '一个或多个必要依赖需要排查。',
+      uptimeDays: '{days}天 {hours}小时', uptimeHours: '{hours}小时 {minutes}分钟', uptimeMinutes: '{minutes}分钟',
+    },
+    dependencies: {
+      title: '依赖状态', description: '来自当前应用实例的实时连通性检查。', database: '数据库', redis: 'Redis',
+      states: { ok: '可用', disabled: '未配置', failed: '不可用', unknown: '未知' },
+    },
+    database: {
+      title: '数据库与 Schema', connections: '正在使用的连接', waits: '连接池等待次数', schema: 'Schema 状态',
+      drivers: { mysql: 'MySQL', postgres: 'PostgreSQL', sqlite: 'SQLite', unknown: '未知' },
+      migrationClean: 'v{version} · 正常', migrationDirty: 'v{version} · 脏状态',
+    },
+    storage: {
+      title: '应用日志存储', fileLog: '文件日志', logSize: '当前日志大小', freeSpace: '可用空间',
+      states: { normal: '正常', warning: '空间不足', critical: '严重不足', disabled: '未启用' },
+    },
+    backups: {
+      title: 'MySQL 备份', description: '创建带审计记录的逻辑备份。恢复和回滚仍只能通过 CLI 执行。', create: '创建备份',
+      schedule: '计划', lastSuccess: '最近成功', lastFailure: '最近问题', retention: '保留策略',
+      mysqlOnly: '手动备份仅适用于 MySQL 部署。', databaseUnavailable: '数据库可用后才能创建备份。', migrationDirty: '请先处理迁移脏状态，再创建备份。',
+      notScheduled: '未设置计划', scheduled: '已计划', retentionValue: '保留 {days} 天', retentionDisabled: '未启用', configurationError: '配置错误', retentionFailure: '保留清理失败', failed: '备份失败', none: '无',
+      dialogTitle: '创建手动备份', dialogDescription: '请填写运维原因。不要包含 password、token 等密钥；该原因会被写入审计记录。', reasonPlaceholder: '例如：升级应用镜像之前',
+      confirm: '现在创建这份备份吗？此操作会写入审计记录，可能需要数分钟。', confirmAction: '创建备份', resultTitle: '备份已创建', success: '备份已成功完成。',
+      backupId: '备份 ID', archive: '归档文件', manifest: '清单文件', size: '大小', migration: '迁移版本', requestFailed: '无法创建备份。',
+    },
+  },
   platformApiKeys: {
     title: "平台 API Key",
     description: "为跨空间自动化创建平台级凭据；调用空间接口时通过 X-Tenant-ID 指定目标空间。",

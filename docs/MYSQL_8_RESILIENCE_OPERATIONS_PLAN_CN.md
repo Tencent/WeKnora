@@ -367,7 +367,7 @@ RPO 是“最多允许丢失多久的数据”，RTO 是“从故障到恢复服
 | 9 | `feature/mysql-8-file-backup` | 已完成：本地 `/data/files` 归档和一致性边界 | 文件清单、缺失文件、维护模式下恢复演练 |
 | 10 | `feature/mysql-8-qdrant-snapshot` | 已完成：可选 Qdrant 快照、隔离恢复演练与重新索引回退路径 | 快照、恢复、重新索引回退路径 |
 | 11 | `feature/mysql-8-rollback-cli` | 发布/配置回退与 break-glass 恢复编排 | 已完成：兼容性阻止、不兼容时指向恢复流程、完整审计 |
-| 12 | `feature/mysql-8-ops-admin-ui` | 只读状态页与受控手动备份界面 | RBAC、二次确认、审计、无恢复一键按钮 |
+| 12 | `feature/mysql-8-ops-admin-ui` | 只读状态页与受控手动备份界面 | 已完成：RBAC、二次确认、审计、无恢复一键按钮 |
 
 每个功能分支都遵守同一质量门槛：
 

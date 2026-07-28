@@ -61,9 +61,10 @@ type operationsStatusResponse struct {
 }
 
 type operationsDatabaseStatus struct {
-	OpenConnections  int   `json:"open_connections"`
-	InUseConnections int   `json:"in_use_connections"`
-	WaitCount        int64 `json:"wait_count"`
+	Driver           string `json:"driver"`
+	OpenConnections  int    `json:"open_connections"`
+	InUseConnections int    `json:"in_use_connections"`
+	WaitCount        int64  `json:"wait_count"`
 }
 
 type operationsFileLogStatus struct {
@@ -302,7 +303,11 @@ func (o *operationsObserver) collectDatabaseMetrics() operationsDatabaseStatus {
 		o.dbOpenConnections.Set(0)
 		o.dbInUseConnections.Set(0)
 		o.dbWaitCount.Set(0)
-		return operationsDatabaseStatus{}
+		return operationsDatabaseStatus{Driver: "unknown"}
+	}
+	driver := o.db.Dialector.Name()
+	if driver != "mysql" && driver != "postgres" && driver != "sqlite" {
+		driver = "unknown"
 	}
 
 	sqlDB, err := o.db.DB()
@@ -310,7 +315,7 @@ func (o *operationsObserver) collectDatabaseMetrics() operationsDatabaseStatus {
 		o.dbOpenConnections.Set(0)
 		o.dbInUseConnections.Set(0)
 		o.dbWaitCount.Set(0)
-		return operationsDatabaseStatus{}
+		return operationsDatabaseStatus{Driver: driver}
 	}
 
 	stats := sqlDB.Stats()
@@ -318,6 +323,7 @@ func (o *operationsObserver) collectDatabaseMetrics() operationsDatabaseStatus {
 	o.dbInUseConnections.Set(float64(stats.InUse))
 	o.dbWaitCount.Set(float64(stats.WaitCount))
 	return operationsDatabaseStatus{
+		Driver:           driver,
 		OpenConnections:  stats.OpenConnections,
 		InUseConnections: stats.InUse,
 		WaitCount:        int64(stats.WaitCount),
