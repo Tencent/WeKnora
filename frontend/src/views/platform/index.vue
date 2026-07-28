@@ -33,7 +33,6 @@
             <RouterView />
         </div>
         <div class="upload-mask" v-show="ismask">
-            <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.epub,.mhtml,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
@@ -51,8 +50,6 @@
 import Menu from '@/components/menu.vue'
 import { ref, computed, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
-import { MenuIcon } from 'tdesign-icons-vue-next'
-import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
@@ -66,13 +63,11 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { isTablet as isTabletRef, isMobile as isMobileRef } from '@/composables/useBreakpoint'
 
-let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
 let ismask = ref(false)
-let uploadInput = ref();
 const { t } = useI18n();
 
 // 响应式断点
@@ -255,7 +250,9 @@ const handleGlobalDrop = async (event: DragEvent) => {
         return;
     }
 
-    droppedFiles.forEach(file => requestMethod(file, uploadInput));
+    window.dispatchEvent(new CustomEvent('weknora:knowledge-file-drop', {
+        detail: { kbId: getCurrentKbId(), files: droppedFiles }
+    }));
 }
 
 // 组件挂载时添加全局事件监听器

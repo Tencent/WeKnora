@@ -1,4 +1,4 @@
-package llmreference
+package modelcontext
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 
 // ModelOutput returns a compact, source-centric representation for the LLM.
 // The canonical ToolResult.Output remains untouched for UI, logs and storage.
-func (r *Registry) ModelOutput(result *types.ToolResult) string {
+func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	if result == nil {
 		return ""
 	}
@@ -37,13 +37,53 @@ func (r *Registry) ModelOutput(result *types.ToolResult) string {
 		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "web_fetch_results":
 		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
+	case "database_query":
+		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:
 		r.registerLabeledReferences(result.Output)
+		r.registerStructuredReferences(result.Output)
 		return r.CompactKnownText(result.Output)
 	}
 }
 
-func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {
+// registerStructuredReferences registers durable IDs found under explicitly
+// labeled keys of a JSON tool result, using the same key dispatch as tool
+// arguments. Non-JSON output is a no-op.
+func (r *sourceRegistry) registerStructuredReferences(raw string) {
+	var value interface{}
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return
+	}
+	var walk func(string, interface{})
+	walk = func(key string, value interface{}) {
+		switch typed := value.(type) {
+		case string:
+			r.registerSourceIDByKey(key, typed)
+		case []interface{}:
+			for _, item := range typed {
+				walk(key, item)
+			}
+		case map[string]interface{}:
+			for childKey, item := range typed {
+				walk(childKey, item)
+			}
+		}
+	}
+	walk("", value)
+}
+
+func (r *sourceRegistry) modelDatabaseQueryOutput(rows []map[string]interface{}, fallback string) string {
+	for _, row := range rows {
+		for key, raw := range row {
+			if value, ok := raw.(string); ok {
+				r.registerSourceIDByKey(key, value)
+			}
+		}
+	}
+	return r.CompactKnownText(fallback)
+}
+
+func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
@@ -52,21 +92,21 @@ func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallba
 	count := 0
 	for _, row := range rows {
 		knowledgeID := stringValue(row, "knowledge_id")
-		docAlias := r.RegisterDocument(knowledgeID)
+		docHandle := r.RegisterDocument(knowledgeID)
 		if boolValue(row, "is_faq") {
 			chunkID := stringValue(row, "faq_id")
 			if chunkID == "" {
 				continue
 			}
 			title := firstNonEmpty(stringValue(row, "faq_question"), stringValue(row, "title"))
-			chunkAlias := r.RegisterChunk(ChunkReference{
+			chunkHandle := r.RegisterChunk(ChunkReference{
 				ChunkID:       chunkID,
 				KnowledgeID:   knowledgeID,
 				DocumentTitle: title,
 				ChunkType:     "faq",
 			})
-			fmt.Fprintf(&b, "  <document id=\"%s\" type=\"faq\">\n", escapeAttr(docAlias))
-			fmt.Fprintf(&b, "    <chunk id=\"%s\" type=\"faq\">\n", escapeAttr(chunkAlias))
+			fmt.Fprintf(&b, "  <document id=\"%s\" type=\"faq\">\n", escapeAttr(docHandle))
+			fmt.Fprintf(&b, "    <chunk id=\"%s\" type=\"faq\">\n", escapeAttr(chunkHandle))
 			if title != "" {
 				fmt.Fprintf(&b, "      <question>%s</question>\n", escapeText(title))
 			}
@@ -78,10 +118,10 @@ func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallba
 			continue
 		}
 
-		if docAlias == "" {
+		if docHandle == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "  <document id=\"%s\"", escapeAttr(docAlias))
+		fmt.Fprintf(&b, "  <document id=\"%s\"", escapeAttr(docHandle))
 		if title := stringValue(row, "title"); title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}
@@ -106,9 +146,9 @@ func (r *Registry) modelDocumentInfoOutput(rows []map[string]interface{}, fallba
 }
 
 type modelChunk struct {
-	alias      string
-	docAlias   string
-	kbAlias    string
+	handle     string
+	docHandle  string
+	kbHandle   string
 	title      string
 	chunkType  string
 	index      int
@@ -124,7 +164,7 @@ type modelChunk struct {
 	inputOrder int
 }
 
-func (r *Registry) modelKnowledgeOutput(mode string, rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]interface{}, fallback string) string {
 	chunks := make([]modelChunk, 0, len(rows))
 	for idx, row := range rows {
 		chunkID := firstNonEmpty(stringValue(row, "chunk_id"), stringValue(row, "faq_id"), stringValue(row, "id"))
@@ -142,7 +182,7 @@ func (r *Registry) modelKnowledgeOutput(mode string, rows []map[string]interface
 		if chunkIndex == 0 {
 			chunkIndex = intValue(row, "index")
 		}
-		chunkAlias := r.RegisterChunk(ChunkReference{
+		chunkHandle := r.RegisterChunk(ChunkReference{
 			ChunkID:         chunkID,
 			KnowledgeID:     knowledgeID,
 			KnowledgeBaseID: kbID,
@@ -151,9 +191,9 @@ func (r *Registry) modelKnowledgeOutput(mode string, rows []map[string]interface
 			ChunkType:       chunkType,
 		})
 		chunks = append(chunks, modelChunk{
-			alias:      chunkAlias,
-			docAlias:   r.RegisterDocument(knowledgeID),
-			kbAlias:    r.RegisterKnowledgeBase(kbID),
+			handle:     chunkHandle,
+			docHandle:  r.RegisterDocument(knowledgeID),
+			kbHandle:   r.RegisterKnowledgeBase(kbID),
 			title:      title,
 			chunkType:  chunkType,
 			index:      chunkIndex,
@@ -185,7 +225,7 @@ func viewForRow(row map[string]interface{}, mode string) string {
 	return "match"
 }
 
-func (r *Registry) modelKnowledgeChunksOutput(data map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{}, fallback string) string {
 	rows := mapsValue(data["chunks"])
 	title := stringValue(data, "knowledge_title")
 	knowledgeID := stringValue(data, "knowledge_id")
@@ -212,22 +252,22 @@ func (r *Registry) modelKnowledgeChunksOutput(data map[string]interface{}, fallb
 
 func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	type docGroup struct {
-		alias   string
-		kbAlias string
-		title   string
-		chunks  []modelChunk
-		order   int
+		handle   string
+		kbHandle string
+		title    string
+		chunks   []modelChunk
+		order    int
 	}
 	groupsByKey := make(map[string]*docGroup)
 	var groups []*docGroup
 	for _, chunk := range chunks {
-		key := chunk.docAlias
+		key := chunk.docHandle
 		if key == "" {
-			key = "chunk:" + chunk.alias
+			key = "chunk:" + chunk.handle
 		}
 		group := groupsByKey[key]
 		if group == nil {
-			group = &docGroup{alias: chunk.docAlias, kbAlias: chunk.kbAlias, title: chunk.title, order: chunk.inputOrder}
+			group = &docGroup{handle: chunk.docHandle, kbHandle: chunk.kbHandle, title: chunk.title, order: chunk.inputOrder}
 			groupsByKey[key] = group
 			groups = append(groups, group)
 		}
@@ -239,18 +279,18 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	fmt.Fprintf(&b, "<retrieval type=\"knowledge\" mode=\"%s\">\n", escapeAttr(mode))
 	for _, group := range groups {
 		b.WriteString("  <document")
-		if group.alias != "" {
-			fmt.Fprintf(&b, " id=\"%s\"", escapeAttr(group.alias))
+		if group.handle != "" {
+			fmt.Fprintf(&b, " id=\"%s\"", escapeAttr(group.handle))
 		}
-		if group.kbAlias != "" {
-			fmt.Fprintf(&b, " kb=\"%s\"", escapeAttr(group.kbAlias))
+		if group.kbHandle != "" {
+			fmt.Fprintf(&b, " kb=\"%s\"", escapeAttr(group.kbHandle))
 		}
 		if group.title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(group.title))
 		}
 		b.WriteString(">\n")
 		for _, chunk := range group.chunks {
-			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.alias, chunk.index, chunk.view)
+			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.handle, chunk.index, chunk.view)
 			if chunk.chunkType != "" {
 				fmt.Fprintf(&b, " type=\"%s\"", escapeAttr(chunk.chunkType))
 			}
@@ -283,7 +323,7 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 	return b.String()
 }
 
-func (r *Registry) modelWebSearchOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
@@ -295,8 +335,8 @@ func (r *Registry) modelWebSearchOutput(rows []map[string]interface{}, fallback 
 		if rawURL == "" {
 			continue
 		}
-		alias := r.RegisterWeb(rawURL, stringValue(row, "title"))
-		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", alias, escapeAttr(stringValue(row, "title")))
+		handle := r.RegisterWeb(rawURL, stringValue(row, "title"))
+		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", handle, escapeAttr(stringValue(row, "title")))
 		if snippet := stringValue(row, "snippet"); snippet != "" {
 			fmt.Fprintf(&b, "    <match>%s</match>\n", escapeText(snippet))
 		}
@@ -313,7 +353,7 @@ func (r *Registry) modelWebSearchOutput(rows []map[string]interface{}, fallback 
 	return b.String()
 }
 
-func (r *Registry) modelWebFetchOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fallback string) string {
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
@@ -326,8 +366,8 @@ func (r *Registry) modelWebFetchOutput(rows []map[string]interface{}, fallback s
 			continue
 		}
 		title := stringValue(row, "title")
-		alias := r.RegisterWeb(rawURL, title)
-		fmt.Fprintf(&b, "  <page id=\"%s\"", alias)
+		handle := r.RegisterWeb(rawURL, title)
+		fmt.Fprintf(&b, "  <page id=\"%s\"", handle)
 		if title != "" {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
 		}

@@ -47,6 +47,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	})
 	for _, q := range expansions {
 		for _, target := range chatManage.SearchTargets {
+			if target == nil || target.KnowledgeBaseID == "" {
+				continue
+			}
 			wgExp.Add(1)
 			go func(q string, t *types.SearchTarget) {
 				defer wgExp.Done()

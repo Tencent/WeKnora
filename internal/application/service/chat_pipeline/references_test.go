@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPrepareMessagesWithReferencesUsesChunkCentricContext(t *testing.T) {
+func TestPrepareMessagesWithModelContextUsesChunkCentricContext(t *testing.T) {
 	rendered := `<context id="1">first content</context><context id="2">second content</context>`
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -28,7 +28,7 @@ func TestPrepareMessagesWithReferencesUsesChunkCentricContext(t *testing.T) {
 		},
 	}
 
-	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Len(t, messages, 2)
 	require.Contains(t, messages[0].Content, "Source handling protocol")
 	require.Contains(t, messages[1].Content, `<document id="d1" kb="b1" title="Doc">`)
@@ -37,11 +37,11 @@ func TestPrepareMessagesWithReferencesUsesChunkCentricContext(t *testing.T) {
 	require.False(t, strings.Contains(messages[1].Content, "chunk-1"))
 	require.Equal(t,
 		`<kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`,
-		refs.ExpandText(`<ref id="c1"/>`),
+		refs.DecodeOutputText(`<ref id="c1"/>`),
 	)
 }
 
-func TestPrepareMessagesWithReferencesReplacesSystemPromptContextAndHistoryCitations(t *testing.T) {
+func TestPrepareMessagesWithModelContextReplacesSystemPromptContextAndHistoryCitations(t *testing.T) {
 	rendered := `<context id="1">first content</context>`
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -63,7 +63,7 @@ func TestPrepareMessagesWithReferencesReplacesSystemPromptContextAndHistoryCitat
 		},
 	}
 
-	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	messages = refs.EncodeMessages(messages)
 	require.NotContains(t, messages[0].Content, rendered)
 	require.Contains(t, messages[0].Content, `<chunk id="c1"`)
@@ -71,7 +71,7 @@ func TestPrepareMessagesWithReferencesReplacesSystemPromptContextAndHistoryCitat
 	require.NotContains(t, messages[2].Content, "old-chunk")
 }
 
-func TestPrepareMessagesWithReferencesKeepsWebSeparateFromChunks(t *testing.T) {
+func TestPrepareMessagesWithModelContextKeepsWebSeparateFromChunks(t *testing.T) {
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{Query: "question", SummaryConfig: types.SummaryConfig{Prompt: "system"}},
 		PipelineState: types.PipelineState{
@@ -86,17 +86,17 @@ func TestPrepareMessagesWithReferencesKeepsWebSeparateFromChunks(t *testing.T) {
 		},
 	}
 
-	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Contains(t, messages[1].Content, `<retrieval type="web" mode="search">`)
 	require.Contains(t, messages[1].Content, `<page id="w1" title="Example">`)
 	require.NotContains(t, messages[1].Content, `<chunk id="c1"`)
 	require.Equal(t,
 		`<web url="https://example.com/page" title="Example" />`,
-		refs.ExpandText(`<ref id="w1"/>`),
+		refs.DecodeOutputText(`<ref id="w1"/>`),
 	)
 }
 
-func TestPrepareMessagesWithReferencesCompactsHistoryWithoutCurrentRetrieval(t *testing.T) {
+func TestPrepareMessagesWithModelContextCompactsHistoryWithoutCurrentRetrieval(t *testing.T) {
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{Query: "follow-up", SummaryConfig: types.SummaryConfig{Prompt: "system"}},
 		PipelineState: types.PipelineState{
@@ -108,14 +108,14 @@ func TestPrepareMessagesWithReferencesCompactsHistoryWithoutCurrentRetrieval(t *
 		},
 	}
 
-	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	messages = refs.EncodeMessages(messages)
 	require.Contains(t, messages[0].Content, "Source handling protocol")
 	require.Contains(t, messages[2].Content, `<ref id="w1"/>`)
 	require.NotContains(t, messages[2].Content, "https://example.com/old")
 }
 
-func TestPrepareMessagesWithReferencesSuppressesCitationsWhenDisabled(t *testing.T) {
+func TestPrepareMessagesWithModelContextSuppressesCitationsWhenDisabled(t *testing.T) {
 	disabled := false
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -131,9 +131,9 @@ func TestPrepareMessagesWithReferencesSuppressesCitationsWhenDisabled(t *testing
 		},
 	}
 
-	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Contains(t, messages[0].Content, "Source citations are disabled")
 	require.Contains(t, messages[1].Content, `<chunk id="c1"`)
 	require.NotContains(t, messages[1].Content, "chunk-1")
-	require.Equal(t, "answer ", refs.ExpandText(`answer <ref id="c1"/>`))
+	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="c1"/>`))
 }
