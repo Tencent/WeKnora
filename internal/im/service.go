@@ -1247,8 +1247,8 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			result, err := script.Run(ctx, s.redis, []string{key}, s.instanceID, wsLeaderTTL.Milliseconds()).Int64()
 			if err != nil || result == 0 {
 				logger.Warnf(context.Background(),
-					"[IM] Lost leadership for channel %s, stopping adapter", channelID)
-				s.StopChannel(channelID)
+					"[IM] Lost leadership for channel %s, stopping adapter and scheduling recovery", channelID)
+				s.handleWSLeadershipLoss(channelID)
 				return
 			}
 			// Still the leader — verify the channel is still active. A
@@ -1296,6 +1296,23 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			return
 		}
 	}
+}
+
+// handleWSLeadershipLoss tears down the adapter that no longer owns its lease
+// and puts the enabled channel back into the existing takeover loop. The retry
+// loop re-reads the durable channel row before reconnecting, so a concurrent
+// delete, disable, or config update cannot resurrect a stale runtime.
+func (s *Service) handleWSLeadershipLoss(channelID string) {
+	_, channel, running := s.GetChannelAdapter(channelID)
+	if !running || channel == nil {
+		return
+	}
+
+	s.StopChannel(channelID)
+	if s.stopped.Load() {
+		return
+	}
+	s.scheduleWSLeaderRetry(channel)
 }
 
 func (s *Service) scheduleWSLeaderRetry(channel *IMChannel) {
