@@ -141,9 +141,14 @@ const refreshSummary = async () => {
   try {
     const result: any = await regenerateKnowledgeSummary(props.details.id);
     if (result?.data) {
-      applySummaryState(result.data.summary_status || 'completed', result.data.description || '');
+      applySummaryState(result.data.summary_status, result.data.description);
     }
-    MessagePlugin.success(t('knowledgeBase.summaryRefreshed'));
+    const status = result?.data?.summary_status;
+    if (status === 'pending' || status === 'processing') {
+      MessagePlugin.success(t('knowledgeBase.summaryRefreshQueued'));
+    } else {
+      MessagePlugin.success(t('knowledgeBase.summaryRefreshed'));
+    }
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
   } finally {

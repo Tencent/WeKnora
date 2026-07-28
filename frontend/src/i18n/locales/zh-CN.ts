@@ -546,6 +546,7 @@ export default {
     generateSummary: "生成摘要",
     noDocumentSummary: "暂无文档摘要",
     summaryRefreshed: "摘要已更新",
+    summaryRefreshQueued: "摘要刷新已提交，完成后会自动更新",
     indexFailed: "索引同步失败",
     retryIndex: "重试索引",
     indexRetrySuccess: "索引已同步",

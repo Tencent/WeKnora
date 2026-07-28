@@ -482,6 +482,7 @@ export default {
     generateSummary: 'Создать сводку',
     noDocumentSummary: 'Нет сводки документа',
     summaryRefreshed: 'Сводка обновлена',
+    summaryRefreshQueued: 'Обновление сводки поставлено в очередь и обновится автоматически после завершения',
     indexFailed: 'Ошибка синхронизации индекса',
     retryIndex: 'Повторить индексацию',
     indexRetrySuccess: 'Индекс синхронизирован',

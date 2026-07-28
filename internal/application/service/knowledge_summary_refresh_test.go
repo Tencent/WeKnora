@@ -58,3 +58,12 @@ func TestRestoreSummaryRefreshTenantInfoRejectsMissingTenant(t *testing.T) {
 		})
 	}
 }
+
+func TestErrSummaryRefreshStaleIsDistinct(t *testing.T) {
+	if ErrSummaryRefreshStale == nil {
+		t.Fatal("expected stale refresh sentinel")
+	}
+	if ErrSummaryRefreshStale.Error() == "" {
+		t.Fatal("expected non-empty stale refresh message")
+	}
+}
