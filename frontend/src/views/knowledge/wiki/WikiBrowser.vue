@@ -210,15 +210,7 @@
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
 
-            <!-- Log feed (pinned). Events live in wiki_log_entries and
-                 are loaded lazily when the user clicks this entry. -->
-            <div v-if="logAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
-              @click="openLogView">
-              <t-icon name="history" class="wiki-nav-icon" />
-              <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
-            </div>
-
-            <div class="wiki-sidebar-divider" v-if="indexAvailable || logAvailable"></div>
+            <div class="wiki-sidebar-divider" v-if="indexAvailable"></div>
 
             <!-- Tab bar + tree share one horizontal inset so the "new folder"
                  action lines up with the folder rows below. -->
@@ -328,7 +320,7 @@
                       <t-loading v-if="item.loading" size="small" />
                       <template v-else>
                         <t-icon name="chevron-down" />
-                        <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
+                        <span>{{ $t('knowledgeEditor.wikiBrowser.loadMoreShort') }}</span>
                       </template>
                     </div>
                     <div v-else
@@ -606,57 +598,19 @@
                 </div>
               </div>
               <div v-if="indexLoading && !indexMarkdown" class="wiki-reader-empty">
-                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.logLoading') }}</p>
+                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.loading') }}</p>
               </div>
               <template v-else-if="indexMarkdown">
                 <div ref="indexBodyRef" class="wiki-reader-body wiki-index-body" v-html="renderedIndexMarkdown"
                   @click="handleContentClick"></div>
                 <div v-if="indexHasMore" ref="indexSentinelRef" class="wiki-index-sentinel">
                   <span v-if="indexLoading" class="wiki-index-loading">
-                    {{ $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                    {{ $t('knowledgeEditor.wikiBrowser.loading') }}
                   </span>
                 </div>
               </template>
               <div v-else-if="!indexLoading" class="wiki-reader-empty">
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.indexEmpty') }}</p>
-              </div>
-            </template>
-
-            <!-- System view: log feed. Mutually exclusive with selectedPage. -->
-            <template v-else-if="activeSystemView === 'log'">
-              <div class="wiki-reader-header">
-                <h2 class="wiki-reader-title">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</h2>
-                <div class="wiki-reader-meta">
-                  <t-tag size="small" theme="default" variant="light-outline">
-                    {{ $t('knowledgeEditor.wikiBrowser.logFeedTag') }}
-                  </t-tag>
-                </div>
-              </div>
-              <div class="wiki-log-feed">
-                <div v-if="logEntries.length === 0 && logInitialized" class="wiki-log-empty">
-                  {{ $t('knowledgeEditor.wikiBrowser.logEmpty') }}
-                </div>
-                <div v-for="entry in logEntries" :key="entry.id" class="wiki-log-entry">
-                  <div class="wiki-log-entry-header">
-                    <t-tag size="small" :theme="logActionTheme(entry.action)" variant="light">
-                      {{ logActionLabel(entry.action) }}
-                    </t-tag>
-                    <span class="wiki-log-entry-title">{{ entry.doc_title || entry.knowledge_id || '—' }}</span>
-                    <span class="wiki-log-entry-time">{{ formatDate(entry.created_at) }}</span>
-                  </div>
-                  <div v-if="entry.summary" class="wiki-log-entry-summary">{{ entry.summary }}</div>
-                  <div v-if="entry.pages_affected && entry.pages_affected.length" class="wiki-log-entry-pages">
-                    <a v-for="ref in entry.pages_affected" :key="entry.id + ':' + ref.slug" href="#"
-                      class="wiki-log-entry-page" :title="ref.slug" @click.prevent="navigateToSlug(ref.slug)">{{
-                        ref.title || ref.slug }}</a>
-                  </div>
-                </div>
-                <div v-if="logNextCursor || !logInitialized" class="wiki-log-load-more">
-                  <t-button size="small" variant="outline" theme="default" :loading="logLoading" @click="loadMoreLog">
-                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') :
-                      $t('knowledgeEditor.wikiBrowser.logLoading') }}
-                  </t-button>
-                </div>
               </div>
             </template>
 
@@ -833,7 +787,6 @@ import {
   deleteWikiPage,
   getWikiPage,
   getWikiIndex,
-  getWikiLog,
   getWikiGraph,
   getWikiStats,
   searchWikiPages,
@@ -844,7 +797,6 @@ import {
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
-  type WikiLogEntry,
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
@@ -972,27 +924,10 @@ const INDEX_SECTION_ORDER = [
   'synthesis',
   'comparison',
 ] as const
-// logAvailable is a flag: the sidebar "Log" entry is always shown once a
-// KB exists, because the backing wiki_log_entries table is KB-independent
-// and `GET /wiki/log` returns an empty entries list when nothing has been
-// logged yet. We don't need a full WikiPage object anymore — selecting
-// Log swaps the reader into a dedicated feed view below.
-const logAvailable = ref(true)
-
-// activeSystemView lets the reader toggle between a regular wiki page
-// (selectedPage) and a "virtual" system view — index overview and log
-// feed. These modes are mutually exclusive: entering a system view
-// clears selectedPage, and picking a page clears the system view flag.
-const activeSystemView = ref<'' | 'index' | 'log'>('')
-
-// Paginated state for the log view. `entries` grows as the user scrolls;
-// `nextCursor` is the opaque cursor returned by the backend and empty
-// signals end-of-feed. `loading` is the guard that prevents overlapping
-// loadMore calls while a request is in flight.
-const logEntries = ref<WikiLogEntry[]>([])
-const logNextCursor = ref('')
-const logLoading = ref(false)
-const logInitialized = ref(false)
+// activeSystemView lets the reader toggle between a regular wiki page and the
+// virtual index overview. Entering the index clears the selected page, and
+// picking a page clears the system view flag.
+const activeSystemView = ref<'' | 'index'>('')
 
 // When the user types into the search box we leave pagination mode and
 // show a flat result list instead. Bucketed state is preserved behind
@@ -1017,7 +952,7 @@ const graphReady = ref(false)
 const showArrows = ref(true)
 
 // Graph filtering
-const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']))
+const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
 
 // Graph slicing state. The backend caps an overview fetch at 500 nodes —
 // tens-of-thousands-page wikis would otherwise crash the browser trying to
@@ -1161,17 +1096,13 @@ function fitGraphToView() {
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
 const navHistory = ref<WikiPage[]>([])
-// navFromSystemView remembers which system view (Index / Log) the user
-// was viewing when they clicked into a slug, so goBack can restore it
+// navFromSystemView remembers that the user was viewing the Index when they
+// clicked into a slug, so goBack can restore it
 // once the page-level history stack is empty. We keep this parallel to
 // navHistory rather than widening its element type — navHistory is
 // consumed everywhere as `WikiPage[]` and that contract stays cleaner
 // if the system-view sentinel lives in its own ref.
-const navFromSystemView = ref<'' | 'index' | 'log'>('')
-// Index and log pages are now state refs (loaded by their own endpoints
-// at startup) rather than computed over the full page list. The old
-// computed implementation required pulling every page into memory just
-// to pluck two system pages.
+const navFromSystemView = ref<'' | 'index'>('')
 
 // typeOrder drives the order of groups in the sidebar. Keep in sync
 // with WIKI_PAGE_TYPES on the backend; unknown types fall through to
@@ -1249,7 +1180,7 @@ const groupedPages = computed(() => {
   // order so the sidebar doesn't suddenly hide a future tab.
   for (const tab of Object.keys(pagesByType.value)) {
     if (seen.has(tab)) continue
-    if (tab === 'index' || tab === 'log') continue
+    if (tab === 'index') continue
     push(tab)
   }
   return out
@@ -1980,7 +1911,7 @@ watch([activeTreeRows, treeListRef], () => {
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
     summary: 'primary', entity: 'success', concept: 'warning',
-    synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
+    synthesis: 'primary', comparison: 'danger', index: 'default',
   }
   return map[type] || 'default'
 }
@@ -1994,7 +1925,6 @@ function getTypeLabel(type: string): string {
     synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
     comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
     index: 'Index',
-    log: 'Log',
   }
   return map[type] || type
 }
@@ -2019,7 +1949,7 @@ const renderedContent = computed(() => {
 
 // Label shown next to the back arrow on page headers. Prefers the
 // nearest page-history entry when available so the user sees where
-// they'll land; falls back to the Index/Log label when the current
+// they'll land; falls back to the Index label when the current
 // page was opened directly from a system view.
 const backLabel = computed(() => {
   if (navHistory.value.length > 0) {
@@ -2027,9 +1957,6 @@ const backLabel = computed(() => {
   }
   if (navFromSystemView.value === 'index') {
     return t('knowledgeEditor.wikiBrowser.indexTitle')
-  }
-  if (navFromSystemView.value === 'log') {
-    return t('knowledgeEditor.wikiBrowser.logTitle')
   }
   return ''
 })
@@ -2573,17 +2500,11 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
   await nextTick()
 }
 
-// loadIndexAndLog probes the wiki index so the sidebar knows to show
-// the pinned Index/Log entries. We ask the backend for intro only (zero
+// loadIndex probes the wiki index so the sidebar knows to show the pinned
+// Index entry. We ask the backend for intro only (zero
 // group types) — a bounded response regardless of KB size. Sections are
 // fetched lazily after the user actually opens the Index view; see
 // loadMoreIndexSection.
-//
-// The log "page" is no longer stored in wiki_pages — it lives in the
-// dedicated wiki_log_entries table. We don't need to pre-fetch anything
-// here to decide whether to render the sidebar Log entry; the flag is
-// always on, and the actual feed is fetched lazily when the user clicks
-// the entry (see openLogView / loadMoreLog).
 // stripLegacyIndexDirectory removes the inline "## Summary (N)\n[[...]]
 // ..." directory listing from a legacy index row. Old wiki_pages rows
 // stored "intro + directory markdown" in content; after the refactor
@@ -2599,7 +2520,7 @@ function stripLegacyIndexDirectory(intro: string): string {
   return intro.slice(0, idx).trim()
 }
 
-async function loadIndexAndLog() {
+async function loadIndex() {
   try {
     // We only need intro on the initial probe — the directory groups
     // are fetched lazily once the user opens the Index view. Passing
@@ -2614,7 +2535,6 @@ async function loadIndexAndLog() {
     indexAvailable.value = true
     indexSections.value = {}
     indexSectionIdx.value = 0
-    logAvailable.value = true
   } catch (e) {
     console.error('Failed to load wiki index:', e)
   }
@@ -2629,7 +2549,7 @@ async function openIndexView() {
   if (!indexMarkdown.value) {
     indexLoading.value = true
     try {
-      await loadIndexAndLog()
+      await loadIndex()
     } finally {
       indexLoading.value = false
     }
@@ -2787,44 +2707,6 @@ onUnmounted(() => {
   }
 })
 
-// openLogView switches the reader into the log feed and (re)loads the
-// first page. Called when the user clicks the sidebar Log entry.
-async function openLogView() {
-  selectedPage.value = null
-  activeSystemView.value = 'log'
-  logEntries.value = []
-  logNextCursor.value = ''
-  logInitialized.value = false
-  await loadMoreLog()
-}
-
-// loadMoreLog appends the next page of log entries using the cursor from
-// the previous response. Guarded so overlapping scroll events don't fire
-// multiple requests and double-append entries.
-async function loadMoreLog() {
-  if (logLoading.value) return
-  // Once a previous request reported end-of-feed (empty next_cursor), we
-  // stop — but only after the first fetch, so a fresh KB still runs the
-  // initial empty request to populate logInitialized.
-  if (logInitialized.value && !logNextCursor.value) return
-  logLoading.value = true
-  try {
-    const res = await getWikiLog(props.knowledgeBaseId, {
-      cursor: logNextCursor.value || undefined,
-      limit: 50,
-    })
-    const body: any = (res as any).data || res
-    const entries: WikiLogEntry[] = body?.entries || []
-    logEntries.value.push(...entries)
-    logNextCursor.value = body?.next_cursor || ''
-    logInitialized.value = true
-  } catch (e) {
-    console.error('Failed to load wiki log:', e)
-  } finally {
-    logLoading.value = false
-  }
-}
-
 // loadPages is the sidebar's top-level initialization. It wires up the
 // empty buckets (so groupedPages produces stable group slots even
 // before any fetch completes), pulls the pinned system pages, and then
@@ -2840,7 +2722,7 @@ async function loadPages() {
   try {
     searchResults.value = null
     for (const tab of CONTENT_TABS) ensureBucket(tab)
-    await loadIndexAndLog()
+    await loadIndex()
     await Promise.all(CONTENT_TABS.map(async tab => {
       await loadPagesForType(tab, { reset: true })
       await loadCategoriesForType(tab, { reset: true })
@@ -3100,36 +2982,6 @@ function updateSidebarPageTitle(slug: string, title: string) {
   }
 }
 
-// Log actions written by the manual editing paths. Pipeline actions keep
-// their raw tag (they are already short English verbs the log has always
-// shown); these four are new and would otherwise read as snake_case.
-const MANUAL_LOG_ACTION_KEYS: Record<string, string> = {
-  manual_create: 'logActionManualCreate',
-  manual_edit: 'logActionManualEdit',
-  manual_delete: 'logActionManualDelete',
-  revert: 'logActionRevert',
-}
-
-function logActionLabel(action: string): string {
-  const key = MANUAL_LOG_ACTION_KEYS[action]
-  return key ? t(`knowledgeEditor.wikiBrowser.${key}`) : action
-}
-
-function logActionTheme(action: string): 'primary' | 'danger' | 'warning' | 'success' {
-  switch (action) {
-    case 'retract':
-    case 'manual_delete':
-      return 'danger'
-    case 'revert':
-      return 'warning'
-    case 'manual_create':
-    case 'manual_edit':
-      return 'success'
-    default:
-      return 'primary'
-  }
-}
-
 function editSourceVisible(source?: string): boolean {
   return source === 'user' || source === 'agent' || source === 'revert'
 }
@@ -3181,7 +3033,7 @@ async function refreshSelectedPage() {
 // there (empty == no filter == return everything, the opposite of what
 // the user meant).
 function graphFilterTypesToArray(): string[] | undefined {
-  const all = ['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']
+  const all = ['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']
   if (all.every(t => graphFilterTypes.value.has(t))) {
     return undefined
   }
@@ -3454,7 +3306,7 @@ const GROW_FRONTIER_CONCURRENCY = 6
 // interesting neighborhood"). We keep them visible and individually
 // expandable (double-click / shift-click / ⊕ all still work), but they
 // don't participate in batch expansion.
-const GRAPH_SYSTEM_PAGE_TYPES = new Set(['index', 'log'])
+const GRAPH_SYSTEM_PAGE_TYPES = new Set(['index'])
 
 function isFrontierCandidate(
   node: { slug: string; page_type: string; link_count: number },
@@ -3622,11 +3474,7 @@ function goBack() {
     const view = navFromSystemView.value
     navFromSystemView.value = ''
     selectedPage.value = null
-    if (view === 'index') {
-      openIndexView()
-    } else if (view === 'log') {
-      openLogView()
-    }
+    if (view === 'index') openIndexView()
   }
 }
 
@@ -3775,7 +3623,7 @@ const graphSelectedSlug = ref<string | null>(null)
 // Color map for node types
 const nodeColorMap: Record<string, string> = {
   summary: '#0052d9', entity: '#2ba471', concept: '#e37318',
-  synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c', log: '#8c8c8c',
+  synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c',
 }
 
 // RenderGraphOpts tweaks how renderGraph initializes node positions when
@@ -5968,17 +5816,6 @@ onUnmounted(() => {
   text-align: center;
 }
 
-// ── Log feed (system view) ──
-// Rendered when activeSystemView === 'log'. Sits where the markdown body
-// would be for a regular wiki page — so the header/meta rules above
-// already apply. We just style the feed list itself.
-.wiki-log-feed {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-}
-
 // ── Index overview (system view) ──
 // The index view renders as markdown through the same pipeline as a
 // normal wiki page, so it inherits .wiki-reader-body styling automatically.
@@ -5996,78 +5833,6 @@ onUnmounted(() => {
 
 .wiki-index-loading {
   opacity: 0.7;
-}
-
-.wiki-log-empty {
-  color: var(--td-text-color-placeholder);
-  text-align: center;
-  padding: 40px 0;
-  font-size: 13px;
-}
-
-.wiki-log-entry {
-  border-radius: var(--wiki-list-row-radius);
-  padding: 10px 10px 10px var(--wiki-list-inset-x);
-  background: transparent;
-  transition: background 0.15s ease;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-}
-
-.wiki-log-entry-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.wiki-log-entry-title {
-  font-weight: 400;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.wiki-log-entry-time {
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.wiki-log-entry-summary {
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  margin: 4px 0;
-}
-
-.wiki-log-entry-pages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
-}
-
-.wiki-log-entry-page {
-  color: var(--td-brand-color);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.wiki-log-entry-page:hover {
-  text-decoration: underline;
-}
-
-.wiki-log-load-more {
-  display: flex;
-  justify-content: center;
-  padding: 12px 0;
 }
 
 .wiki-empty-icon {

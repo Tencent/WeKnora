@@ -26,9 +26,8 @@ func NewAuditLogHandler(auditService interfaces.AuditLogService) *AuditLogHandle
 	return &AuditLogHandler{auditService: auditService}
 }
 
-// auditLogListResponse is the response envelope for ListTenantAuditLog.
-// Mirrors wiki_log_entries' shape: data array + an opaque cursor (here
-// the integer id of the last entry, or 0 if no more rows).
+// auditLogListResponse is the response envelope for ListTenantAuditLog. The
+// cursor is the integer id of the last entry, or 0 if no more rows remain.
 type auditLogListResponse struct {
 	Success    bool              `json:"success"`
 	Data       []*types.AuditLog `json:"data"`
