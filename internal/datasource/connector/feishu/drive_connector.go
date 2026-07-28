@@ -250,7 +250,7 @@ func (c *DriveConnector) FetchAll(
 
 		tally := newFetchTally(len(files))
 		for i, file := range files {
-			item, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID)
+			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
 				tally.fail()
 				allItems = append(allItems, types.FetchedItem{
@@ -261,9 +261,11 @@ func (c *DriveConnector) FetchAll(
 				})
 				continue
 			}
-			if item != nil {
+			if len(items) > 0 {
 				tally.fetch()
-				allItems = append(allItems, *item)
+				for _, it := range items {
+					allItems = append(allItems, *it)
+				}
 			} else {
 				tally.skip(file.Type)
 			}
@@ -347,7 +349,7 @@ func (c *DriveConnector) FetchIncremental(
 				}
 			}
 
-			item, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID)
+			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
 				changedItems = append(changedItems, types.FetchedItem{
 					ExternalID:       file.Token,
@@ -357,8 +359,8 @@ func (c *DriveConnector) FetchIncremental(
 				})
 				continue
 			}
-			if item != nil {
-				changedItems = append(changedItems, *item)
+			for _, it := range items {
+				changedItems = append(changedItems, *it)
 			}
 		}
 
@@ -468,7 +470,7 @@ func (c *DriveConnector) FetchStream(
 				continue
 			}
 
-			item, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID)
+			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
 				tally.fail()
 				// Do NOT advance the cursor: the content was never fetched.
@@ -490,10 +492,12 @@ func (c *DriveConnector) FetchStream(
 				// Fetched, or an unsupported type (nothing to fetch): record the
 				// current modify time so the file is not re-processed next run.
 				newCursor.FileTimes[resourceID][file.Token] = modifyTimeStr
-				if item != nil {
+				if len(items) > 0 {
 					tally.fetch()
-					if eerr := h.Emit(ctx, *item); eerr != nil {
-						return nil, eerr
+					for _, it := range items {
+						if eerr := h.Emit(ctx, *it); eerr != nil {
+							return nil, eerr
+						}
 					}
 				} else {
 					// Unsupported type (mindnote/slides/…): no item.
@@ -553,16 +557,17 @@ func (fc feishuDriveCursor) toSyncCursor() *types.SyncCursor {
 }
 
 // fetchDriveFileContent fetches the content of a single Drive file and converts
-// it to FetchedItem. Dispatches by file.Type, mirroring the wiki
+// it to FetchedItems. Dispatches by file.Type, mirroring the wiki
 // fetchNodeContent. Shortcuts have already been expanded to their target by
 // ListDriveFilesRecursiveFrom, so this only sees the target type.
 //
-//   - docx/doc/sheet/bitable -> ExportAndDownload -> docx/xlsx
+//   - docx                   -> blocks API (Markdown) with export fallback; may return attachments/images
+//   - doc/sheet/bitable      -> ExportAndDownload -> docx/xlsx
 //   - file                   -> DownloadDriveFile -> original file
 //   - mindnote/slides/board  -> skip (no API), returns (nil, nil)
 func (c *DriveConnector) fetchDriveFileContent(
-	ctx context.Context, client *Client, file driveFile, resourceID string,
-) (*types.FetchedItem, error) {
+	ctx context.Context, client *Client, file driveFile, resourceID string, multimodalEnabled bool,
+) ([]*types.FetchedItem, error) {
 	if !isSupportedDocType(file.Type) {
 		return nil, nil
 	}
@@ -584,7 +589,19 @@ func (c *DriveConnector) fetchDriveFileContent(
 	}
 
 	switch file.Type {
-	case "docx", "doc", "sheet", "bitable":
+	case "docx":
+		return fetchDocxWithBlocks(ctx, client, docxFetchInput{
+			docToken:          file.Token,
+			objToken:          file.Token,
+			title:             file.Name,
+			url:               file.URL,
+			resourceID:        resourceID,
+			editTime:          editTime,
+			baseMeta:          baseMeta,
+			multimodalEnabled: multimodalEnabled,
+		})
+
+	case "doc", "sheet", "bitable":
 		data, fileName, err := client.ExportAndDownload(ctx, file.Token, file.Type)
 		if err != nil {
 			return nil, fmt.Errorf("export %s (%s): %w", file.Name, file.Type, err)
@@ -597,17 +614,19 @@ func (c *DriveConnector) fetchDriveFileContent(
 			fileName = sanitizeFileName(fileName) + ext
 		}
 
-		return &types.FetchedItem{
-			ExternalID:       file.Token, // Drive uses file token as external_id
-			Title:            file.Name,
-			Content:          data,
-			ContentType:      "application/octet-stream",
-			FileName:         fileName,
-			URL:              file.URL, // list API returns the absolute url
+		return []*types.FetchedItem{{
+			// Drive uses file token as external_id
+			ExternalID:  file.Token,
+			Title:       file.Name,
+			Content:     data,
+			ContentType: "application/octet-stream",
+			FileName:    fileName,
+			// list API returns the absolute url
+			URL:              file.URL,
 			UpdatedAt:        editTime,
 			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
-		}, nil
+		}}, nil
 
 	case "file":
 		data, err := client.DownloadDriveFile(ctx, file.Token)
@@ -620,7 +639,7 @@ func (c *DriveConnector) fetchDriveFileContent(
 			fileName = file.Token
 		}
 
-		return &types.FetchedItem{
+		return []*types.FetchedItem{{
 			ExternalID:       file.Token,
 			Title:            file.Name,
 			Content:          data,
@@ -630,7 +649,7 @@ func (c *DriveConnector) fetchDriveFileContent(
 			UpdatedAt:        editTime,
 			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
-		}, nil
+		}}, nil
 
 	default:
 		return nil, nil

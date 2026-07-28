@@ -71,7 +71,9 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		writeJSON(w, exportTaskCreateResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data:        struct{ Ticket string `json:"ticket"` }{Ticket: body.Token},
+			Data: struct {
+				Ticket string `json:"ticket"`
+			}{Ticket: body.Token},
 		})
 	})
 	// Export status poll: /open-apis/drive/v1/export_tasks/<ticket>?token=<objToken>

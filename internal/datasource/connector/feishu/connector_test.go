@@ -1516,7 +1516,16 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 		"space_id":   "space1",
 		"channel":    types.ChannelFeishu,
 	}
-	items, err := conn.fetchDocxWithBlocks(ctx, client, nodes[0], "space1:nt-docx-fail", parseFeishuTimestamp("1711468800"), baseMeta, true)
+	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
+		docToken:          nodeToken,
+		objToken:          objToken,
+		title:             "Doc With Bad Attachment",
+		url:               conn.region.wikiURL(nodeToken),
+		resourceID:        "space1:nt-docx-fail",
+		editTime:          parseFeishuTimestamp("1711468800"),
+		baseMeta:          baseMeta,
+		multimodalEnabled: true,
+	})
 	if err != nil {
 		t.Fatalf("a failed attachment must not fail the whole node, got error: %v", err)
 	}
@@ -1620,7 +1629,16 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	imgChildID := nodeToken + "#image#" + imgToken
 
 	// multimodal ON → image emitted as a sub-item and kept.
-	items, err := conn.fetchDocxWithBlocks(ctx, client, node, "space1:"+nodeToken, parseFeishuTimestamp("1711468800"), baseMeta, true)
+	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
+		docToken:          node.NodeToken,
+		objToken:          node.ObjToken,
+		title:             node.Title,
+		url:               conn.region.wikiURL(node.NodeToken),
+		resourceID:        "space1:" + nodeToken,
+		editTime:          parseFeishuTimestamp("1711468800"),
+		baseMeta:          baseMeta,
+		multimodalEnabled: true,
+	})
 	if err != nil {
 		t.Fatalf("fetchDocxWithBlocks (multimodal on): %v", err)
 	}
@@ -1656,7 +1674,16 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	}
 
 	// multimodal OFF → no image sub-item, but the id is still kept (not swept).
-	itemsOff, err := conn.fetchDocxWithBlocks(ctx, client, node, "space1:"+nodeToken, parseFeishuTimestamp("1711468800"), baseMeta, false)
+	itemsOff, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
+		docToken:          node.NodeToken,
+		objToken:          node.ObjToken,
+		title:             node.Title,
+		url:               conn.region.wikiURL(node.NodeToken),
+		resourceID:        "space1:" + nodeToken,
+		editTime:          parseFeishuTimestamp("1711468800"),
+		baseMeta:          baseMeta,
+		multimodalEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("fetchDocxWithBlocks (multimodal off): %v", err)
 	}
@@ -1727,7 +1754,16 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 	imgChildID := nodeToken + "#image#" + imgToken
 
 	// multimodal ON → the download is attempted and fails → a visible error item.
-	items, err := conn.fetchDocxWithBlocks(ctx, client, node, "space1:"+nodeToken, parseFeishuTimestamp("1711468800"), baseMeta, true)
+	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
+		docToken:          node.NodeToken,
+		objToken:          node.ObjToken,
+		title:             node.Title,
+		url:               conn.region.wikiURL(node.NodeToken),
+		resourceID:        "space1:" + nodeToken,
+		editTime:          parseFeishuTimestamp("1711468800"),
+		baseMeta:          baseMeta,
+		multimodalEnabled: true,
+	})
 	if err != nil {
 		t.Fatalf("a failed image download must not fail the whole node, got error: %v", err)
 	}
@@ -1762,7 +1798,16 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 
 	// multimodal OFF → the download is never attempted, so no error item, but the
 	// id is still kept (not swept).
-	itemsOff, err := conn.fetchDocxWithBlocks(ctx, client, node, "space1:"+nodeToken, parseFeishuTimestamp("1711468800"), baseMeta, false)
+	itemsOff, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
+		docToken:          node.NodeToken,
+		objToken:          node.ObjToken,
+		title:             node.Title,
+		url:               conn.region.wikiURL(node.NodeToken),
+		resourceID:        "space1:" + nodeToken,
+		editTime:          parseFeishuTimestamp("1711468800"),
+		baseMeta:          baseMeta,
+		multimodalEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("fetchDocxWithBlocks (multimodal off): %v", err)
 	}
