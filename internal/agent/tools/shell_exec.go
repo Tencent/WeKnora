@@ -34,6 +34,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -280,6 +281,17 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if workDir == "" {
 		workDir = defaultShellExecWorkDir
 	}
+	cleanWorkDir := path.Clean(workDir)
+	if !isUnderRoot(cleanWorkDir, defaultShellExecWorkDir) {
+		return &types.ToolResult{
+			Success: false,
+			Error: fmt.Sprintf(
+				"work_dir %q is outside the sandbox workspace %q",
+				input.WorkDir, defaultShellExecWorkDir,
+			),
+		}, nil
+	}
+	workDir = cleanWorkDir
 
 	timeout := defaultShellExecTimeout
 	if input.TimeoutSec > 0 {

@@ -104,7 +104,7 @@ func buildCubeManager(
 		logger.Warnf(ctx, "Failed to build Cube sandbox client: %v (falling back to disabled)", err)
 		return sandbox.NewDisabledManager()
 	}
-	store, storeKind, err := selectSessionBindingStore(redisClient)
+	store, storeKind, err := selectSessionBindingStore(redisClient, true)
 	if err != nil {
 		logger.Errorf(ctx, "Refusing to start Cube sandbox: %v", err)
 		return sandbox.NewDisabledManager()
@@ -137,7 +137,7 @@ func buildE2BManager(
 		logger.Warnf(ctx, "Failed to build E2B sandbox client: %v (falling back to disabled)", err)
 		return sandbox.NewDisabledManager()
 	}
-	store, storeKind, err := selectSessionBindingStore(redisClient)
+	store, storeKind, err := selectSessionBindingStore(redisClient, true)
 	if err != nil {
 		logger.Errorf(ctx, "Refusing to start E2B sandbox: %v", err)
 		return sandbox.NewDisabledManager()
@@ -161,6 +161,7 @@ func buildE2BManager(
 
 func selectSessionBindingStore(
 	redisClient *redis.Client,
+	requireRedis bool,
 ) (sandbox.SessionSandboxBindingStore, string, error) {
 	namespace := strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_REDIS_NAMESPACE"))
 	if namespace == "" {
@@ -176,9 +177,19 @@ func selectSessionBindingStore(
 		}
 		return store, "redis", nil
 	}
+	if requireRedis && !allowMemorySandboxBinding() {
+		return nil, "", errors.New(
+			"remote sandbox modes (cube/e2b) require Redis for session binding; " +
+				"set WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING=true only for single-instance dev",
+		)
+	}
 	logger.Warnf(context.Background(),
 		"[sandbox] No Redis configured, using in-memory binding store (single-instance)")
 	return sandbox.NewMemorySessionSandboxBindingStore(), "memory", nil
+}
+
+func allowMemorySandboxBinding() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING")), "true")
 }
 
 // sessionExistenceLookup is the narrow slice of SessionRepository the
@@ -235,7 +246,9 @@ func (c *repositorySessionExistenceChecker) SessionExists(
 func buildCubeSandboxConfig() *sandbox.Config {
 	cfg := sandbox.DefaultConfig()
 	cfg.Type = sandbox.SandboxTypeCube
-	cfg.FallbackEnabled = true
+	// Remote sandboxes must not fall back to LocalSandbox: skill scripts would
+	// execute on the WeKnora host while session-scoped tools stay disabled.
+	cfg.FallbackEnabled = false
 
 	if v := os.Getenv("WEKNORA_SANDBOX_CUBE_API_URL"); v != "" {
 		cfg.CubeAPIURL = v
