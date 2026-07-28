@@ -2,9 +2,11 @@
 
 [Chinese version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_CN.md) | **English version**
 
-> Status: implementation is in progress. Capabilities 1 through 10 are
-> complete. This plan builds on `feature/mysql-8-backend` and does not change
-> the existing PostgreSQL or SQLite deployment paths.
+> Status: all twelve planned capabilities are complete as of 2026-07-28. SMTP
+> alerts and scheduled backups remain opt-in, while external monitoring and
+> host startup policy remain deployment responsibilities. This plan builds on
+> `feature/mysql-8-backend` and does not change the existing PostgreSQL or
+> SQLite deployment paths.
 
 ## 1. Problem Statement
 
@@ -23,8 +25,8 @@ recovery, restart and self-healing, and controlled rollback.
 | Container restart | MySQL Compose services use `restart: unless-stopped` | Host-level boot and restart escalation remain deployment-owned |
 | Log rotation | Application file logs and Docker service logs have bounded rotation | Operators must select storage capacity appropriate to retention |
 | MySQL migration | A fresh MySQL 8 database creates the complete schema at version 74 | No migration of historical PostgreSQL or SQLite data |
-| Operations visibility | Status endpoint, Prometheus metrics, and SMTP alerts are available | Operator-facing administration UI remains planned |
-| MySQL backups | Manual backup, isolated restore verification, scheduling, and retention are available | File and vector-store backup remain planned |
+| Operations visibility | Status endpoint, Prometheus metrics, SMTP alerts, and a SystemAdmin-only operations console are available | External whole-stack monitoring remains deployment-owned |
+| MySQL backups | Manual and scheduled logical backups, local file archives, optional Qdrant snapshots, retention, and isolated restore drills are available | Encryption, remote replication, and production database replacement remain operator-controlled procedures |
 
 ## 3. Design Principles
 
@@ -56,7 +58,7 @@ flowchart LR
     Ready --> Redis[(Redis)]
     Ready --> Vector[Vector store]
     Metrics --> Monitor[Independent monitor]
-    Monitor --> Alert[Email or webhook]
+    Monitor --> Alert[Email; webhook is a future extension]
     Logs --> DockerLog[Docker log rotation]
     Backup --> BackupStore[Backup destination]
     BackupStore --> Restore[Isolated restore verification]
@@ -253,11 +255,11 @@ Every feature branch must:
 
 ## 12. Interface Boundaries
 
-The administrator UI may show health state, recent alerts, disk state, backup
-inventory, and a controlled manual-backup action with confirmation and audit.
-The completed operations console is SystemAdmin-only and presents sanitized
-status with a 30-second refresh. Its only write control is manual MySQL backup,
-which requires a reason and confirmation and calls the existing audited API.
+Future administrator UI work may add a backup inventory or other safe read-only
+views. The completed operations console is SystemAdmin-only and presents
+sanitized status with a 30-second refresh. Its only write control is manual
+MySQL backup, which requires a reason and confirmation and calls the existing
+audited API; it does not edit retention settings or expose destructive actions.
 Destructive or high-impact operations such as restoring into a new instance,
 switching databases, deleting archives, changing encryption keys, and rollback
 belong to a reviewed CLI or operational procedure. Automated work is limited to

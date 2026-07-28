@@ -83,7 +83,8 @@ migrations/mysql/000074_baseline.up.sql
 
 - 新增 `docker-compose.mysql.yml`：独立启动 MySQL、Qdrant、Redis、docreader、应用和前端。
 - 新增 `.env.mysql.example`。
-- 新增 `docs/DEPLOY_MYSQL.md`，说明部署方式、版本要求和后续迁移规则。
+- 新增 `docs/DEPLOY_MYSQL.md` 与 `docs/DEPLOY_MYSQL_CN.md`，分别说明英文和中文的
+  部署方式、版本要求和后续迁移规则。
 
 ## 5. 已完成验证
 

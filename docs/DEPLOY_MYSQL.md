@@ -63,10 +63,11 @@ LOG_FILE_COMPRESS=true
 ```
 
 Invalid zero, negative, or malformed values fall back to these defaults so an
-accidental configuration error cannot disable rotation. On startup and logger
-configuration reload, the application checks the filesystem that contains
-`LOG_PATH`. It writes a warning to stderr below 20% free space and a critical
-signal below 10% or 5 GB free. The thresholds can be adjusted with
+accidental configuration error cannot disable rotation. At startup, and whenever
+the status, metrics, or alert collector evaluates file logging, the application
+checks the filesystem that contains `LOG_PATH`. It writes a warning to stderr
+below 20% free space and a critical signal below 10% or 5 GB free. The
+thresholds can be adjusted with
 `LOG_DISK_WARNING_FREE_PERCENT`, `LOG_DISK_CRITICAL_FREE_PERCENT`, and
 `LOG_DISK_MIN_FREE_GB`.
 
@@ -149,10 +150,10 @@ cannot run at all.
 
 ## Manual Backups
 
-The first backup phase is deliberately limited to an operator-triggered MySQL
-logical backup. It is only available to system administrators, requires a
-reason, and is disabled by default. PostgreSQL and SQLite never enter this
-MySQL-specific path.
+The MySQL logical backup is deliberately limited to an operator-triggered
+operation. It is only available to system administrators, requires a reason,
+and is disabled by default. PostgreSQL and SQLite never enter this MySQL-specific
+path.
 
 For Docker Desktop on Windows, keep the backup directory on a host data drive
 rather than inside Docker's virtual disk or a container layer:
@@ -166,9 +167,9 @@ BACKUP_MYSQLDUMP_PATH=mysqldump
 ```
 
 The Compose file mounts `BACKUP_HOST_DIR` into the app at `/data/backups`.
-Choose a directory that only the deployment operator can read. This phase does
-not encrypt archives yet, so filesystem access control and an off-host copy are
-important until the later encrypted-destination feature is added.
+Choose a directory that only the deployment operator can read. Archives are not
+encrypted by this implementation, so filesystem access control and an encrypted
+off-host copy are required when the backup contents need encryption at rest.
 
 Create a backup by waiting for the protected request to complete:
 

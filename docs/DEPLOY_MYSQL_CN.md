@@ -60,8 +60,8 @@ LOG_FILE_COMPRESS=true
 ```
 
 零、负数或格式错误的配置会回退到这些默认值，避免错误配置关闭轮转。应用启动
-及重新加载日志配置时，会检查 `LOG_PATH` 所在文件系统：剩余空间低于 20% 时向
-stderr 写入 warning，低于 10% 或 5 GB 时写入 critical 信号。阈值可通过
+以及状态、指标或告警收集器检查文件日志时，会检查 `LOG_PATH` 所在文件系统：剩余空间
+低于 20% 时向 stderr 写入 warning，低于 10% 或 5 GB 时写入 critical 信号。阈值可通过
 `LOG_DISK_WARNING_FREE_PERCENT`、`LOG_DISK_CRITICAL_FREE_PERCENT` 与
 `LOG_DISK_MIN_FREE_GB` 调整。
 
@@ -130,9 +130,8 @@ SMTP_FROM=weknora-alerts@example.com
 
 ## 手动备份
 
-第一阶段备份功能有意限制为由操作者触发的 MySQL logical backup。它仅对系统管理员
-开放，必须填写操作原因，默认禁用。PostgreSQL 与 SQLite 永远不会进入这一
-MySQL 专属代码路径。
+MySQL logical backup 有意限制为由操作者触发的操作。它仅对系统管理员开放，必须填写
+操作原因，默认禁用。PostgreSQL 与 SQLite 永远不会进入这一 MySQL 专属代码路径。
 
 对于 Windows 上的 Docker Desktop，请将备份目录放在宿主机的数据盘，不要放在
 Docker 虚拟磁盘或容器 layer 中：
@@ -146,8 +145,8 @@ BACKUP_MYSQLDUMP_PATH=mysqldump
 ```
 
 Compose 会将 `BACKUP_HOST_DIR` 挂载到应用容器内的 `/data/backups`。请选择仅供
-部署操作者读取的目录。当前阶段不会加密 archive，因此在加密目标功能完成前，
-文件系统访问控制和 off-host 副本非常重要。
+部署操作者读取的目录。当前实现不会加密 archive；如需静态加密，应依赖文件系统访问
+控制和加密的 off-host 副本。
 
 等待受保护请求执行完成，即可创建备份：
 
