@@ -131,27 +131,12 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			chunk, err := t.chunkService.GetChunkByIDOnly(ctx, id)
-			if err != nil || chunk == nil {
+			chunk, err := authorizeChunkInSearchTargets(
+				ctx, t.searchTargets, id, t.chunkService, t.knowledgeService,
+			)
+			if err != nil {
 				mu.Lock()
-				results["faq:"+id] = &docInfo{err: fmt.Errorf("faq entry not found: %v", err)}
-				mu.Unlock()
-				return
-			}
-			if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
-				mu.Lock()
-				results["faq:"+id] = &docInfo{err: fmt.Errorf("knowledge base %s is not accessible", chunk.KnowledgeBaseID)}
-				mu.Unlock()
-				return
-			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
-			if scopeErr != nil || !allowed {
-				mu.Lock()
-				if scopeErr != nil {
-					results["faq:"+id] = &docInfo{err: fmt.Errorf("failed to validate FAQ scope: %v", scopeErr)}
-				} else {
-					results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry %s is not within the current @mention scope", id)}
-				}
+				results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry is not accessible: %v", err)}
 				mu.Unlock()
 				return
 			}
@@ -170,33 +155,13 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		go func(id string) {
 			defer wg.Done()
 
-			// Get knowledge metadata without tenant filter to support shared KB
-			knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, id)
+			knowledge, err := authorizeKnowledgeInSearchTargets(
+				ctx, t.searchTargets, id, t.knowledgeService,
+			)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
 					err: fmt.Errorf("failed to get document info: %v", err),
-				}
-				mu.Unlock()
-				return
-			}
-
-			// Verify the knowledge's KB is in searchTargets (permission check)
-			if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
-				mu.Lock()
-				results[id] = &docInfo{
-					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
-				}
-				mu.Unlock()
-				return
-			}
-			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
-			if scopeErr != nil || !allowed {
-				mu.Lock()
-				if scopeErr != nil {
-					results[id] = &docInfo{err: fmt.Errorf("failed to validate document scope: %v", scopeErr)}
-				} else {
-					results[id] = &docInfo{err: fmt.Errorf("document %s is not within the current @mention scope", knowledge.ID)}
 				}
 				mu.Unlock()
 				return

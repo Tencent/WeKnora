@@ -1,4 +1,4 @@
-package llmreference
+package modelcontext
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	first := registry.RegisterChunk(ChunkReference{
 		ChunkID:         "chunk-uuid-1",
 		KnowledgeID:     "knowledge-uuid-1",
@@ -32,37 +32,32 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	)
 }
 
-func TestCompactKnownTextPreservesWikiSummarySlug(t *testing.T) {
-	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
-	const kbID = "250368ff-f5a2-4e9e-868a-07bc9b857c44"
+func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
+	r := newSourceRegistry()
+	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))
+	require.Equal(t, "d1", r.RegisterDocument("doc-real"))
+	require.Equal(t, "b1", r.RegisterKnowledgeBase("kb-real"))
+	require.Equal(t, "w1", r.RegisterWeb("https://example.com", "Example"))
 
-	registry := NewRegistry()
-	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
-	require.Equal(t, "b1", registry.RegisterKnowledgeBase(kbID))
-
-	// A wiki_search result: the summary slug embeds the document UUID, and the
-	// same UUID also appears as a standalone <knowledge_id> label.
-	in := "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
-		"<link>[[summary/" + knowledgeID + "|Doc - Summary]]</link>\n" +
-		"<knowledge_id>" + knowledgeID + "</knowledge_id>"
-
-	got := registry.CompactKnownText(in)
-
-	// The slug-embedded UUID must survive verbatim — no summary/d1 mangling.
-	require.Contains(t, got, "[[summary/"+knowledgeID+"|Doc - Summary]]")
-	require.NotContains(t, got, "summary/d1")
-	// The standalone label and the KB id still compact normally.
-	require.Contains(t, got, "<knowledge_id>d1</knowledge_id>")
-	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
+	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "c1"}))
+	require.Equal(t, "d1", r.RegisterDocument("d1"))
+	require.Equal(t, "b1", r.RegisterKnowledgeBase("b1"))
+	require.Equal(t, "w1", r.RegisterWeb("w1", ""))
+	require.Empty(t, r.RegisterDocument("d99"))
+	require.Empty(t, r.RegisterDocument("c1"), "a chunk handle must not be accepted as a document identity")
+	require.Equal(t, 1, r.chunks.size())
+	require.Equal(t, 1, r.docs.size())
+	require.Equal(t, 1, r.kbs.size())
+	require.Equal(t, 1, r.webs.size())
 }
 
 func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
-	registry := NewRegistry(false)
+	registry := newSourceRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
 	registry.RegisterWeb("https://example.com", "Example")
 
-	require.Contains(t, ProtocolPrompt(false), "Source citations are disabled")
-	require.NotContains(t, ProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
+	require.Contains(t, sourceProtocolPrompt(false), "Source citations are disabled")
+	require.NotContains(t, sourceProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
 	require.Equal(t, "knowledge  web ", registry.ExpandText(
 		`knowledge <ref id="c1"/> web <ref id="w1"/>`,
 	))
@@ -72,49 +67,50 @@ func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 }
 
 func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistry(true)
 	registry.RegisterDocument("knowledge-uuid-1")
-	registry.RegisterKnowledgeBase("kb-uuid-1")
-	registry.RegisterWeb("https://example.com/page", "Example")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
 
+	// Handles nested inside arrays and objects must decode as long as the key
+	// belongs to the named tool's declared source contract.
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
-			Arguments: `{"knowledge_id":"d1","knowledge_base_ids":["b1"],"url":"w1","chunk_id":"c1"}`,
+			Name:      "list_knowledge_chunks",
+			Arguments: `{"knowledge_id":"d1","filters":{"chunk_id":"c1","faq_id":["c1"]}}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_ids":["kb-uuid-1"],"url":"https://example.com/page","chunk_id":"chunk-uuid-1"}`,
+		`{"knowledge_id":"knowledge-uuid-1","filters":{"chunk_id":"chunk-uuid-1","faq_id":["chunk-uuid-1"]}}`,
 		calls[0].Function.Arguments,
 	)
 }
 
 func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
-	registry := NewRegistry()
-	registry.RegisterDocument("knowledge-uuid-1")
-	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
+	registry := NewRegistry(true)
+	registry.RegisterKnowledgeBase("kb-uuid-1")
 
-	// A free-text field (query) whose value coincidentally equals an alias must
-	// be preserved verbatim, while ID-bearing keys still resolve to real IDs.
+	// A free-text field (query) whose value coincidentally equals a handle must
+	// be preserved verbatim, while declared ID-bearing keys resolve to real IDs.
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
-			Arguments: `{"query":"d1","knowledge_id":"d1","content":"see c1 for details","chunk_id":"c1"}`,
+			Name:      "knowledge_search",
+			Arguments: `{"query":"b1","content":"see b1 for details","knowledge_base_ids":["b1"]}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"query":"d1","knowledge_id":"knowledge-uuid-1","content":"see c1 for details","chunk_id":"chunk-uuid-1"}`,
+		`{"query":"b1","content":"see b1 for details","knowledge_base_ids":["kb-uuid-1"]}`,
 		calls[0].Function.Arguments,
 	)
 }
 
 func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
-	expander := NewStreamExpander(registry)
+	expander := newCitationStreamExpander(registry)
 
 	require.Equal(t, "before ", expander.Feed(`before <ref id="`))
 	require.Equal(t, `<kb doc="Doc" chunk_id="chunk-1" /> after`, expander.Feed(`c1"/> after`))
@@ -129,14 +125,14 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 }
 
 func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{{
 		Role: "assistant",
 		Content: `Knowledge <kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" />; ` +
 			`web <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
 	}}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Content)
 	require.NotContains(t, encoded[0].Content, "chunk-real")
 	require.NotContains(t, encoded[0].Content, "https://example.com")
@@ -147,7 +143,7 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 }
 
 func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{
 		{
 			Role: "assistant",
@@ -170,7 +166,7 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 		},
 	}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.JSONEq(t, `{"knowledge_base_ids":["b1"],"knowledge_ids":["d1"]}`,
 		encoded[0].ToolCalls[0].Function.Arguments)
 	require.Contains(t, encoded[1].Content, `chunk_id="c1"`)
@@ -184,19 +180,19 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 }
 
 func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	messages := []chat.Message{{
 		Role:    "system",
 		Content: `Old rule: cite <kb doc="..." chunk_id="..." />`,
 	}}
 
-	encoded := registry.EncodeMessages(messages)
+	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.Equal(t, messages[0].Content, encoded[0].Content)
 	require.Zero(t, registry.Count())
 }
 
 func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	search := &types.ToolResult{
 		Success: true,
 		Output:  "raw UUID output",
@@ -239,7 +235,7 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 }
 
 func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -258,7 +254,7 @@ func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 }
 
 func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	result := &types.ToolResult{
 		Success: true,
 		Output:  "raw IDs must not be used",
@@ -293,7 +289,7 @@ func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
 }
 
 func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	result := &types.ToolResult{
 		Success: true,
 		Output: `<wiki_page>
@@ -308,13 +304,17 @@ func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
 	require.Contains(t, output, `<knowledge_base_id>b1</knowledge_base_id>`)
 	require.Contains(t, output, `knowledge_id="d1"`)
 
-	toolCalls := []types.LLMToolCall{{Function: types.FunctionCall{Arguments: `{"knowledge_id":"d1","knowledge_base_id":"b1"}`}}}
-	registry.DecodeToolCalls(toolCalls)
-	require.JSONEq(t, `{"knowledge_id":"doc-real-id","knowledge_base_id":"kb-real-id"}`, toolCalls[0].Function.Arguments)
+	toolCalls := []types.LLMToolCall{
+		{Function: types.FunctionCall{Name: "wiki_read_source_doc", Arguments: `{"knowledge_id":"d1"}`}},
+		{Function: types.FunctionCall{Name: "wiki_search", Arguments: `{"knowledge_base_id":"b1"}`}},
+	}
+	registry.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
+	require.JSONEq(t, `{"knowledge_id":"doc-real-id"}`, toolCalls[0].Function.Arguments)
+	require.JSONEq(t, `{"knowledge_base_id":"kb-real-id"}`, toolCalls[1].Function.Arguments)
 }
 
 func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
-	registry := NewRegistry()
+	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -336,5 +336,29 @@ func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
 	require.Equal(t,
 		`<kb doc="Graph Source" chunk_id="graph-chunk-real" kb_id="graph-kb-real" />`,
 		registry.ExpandText(`<ref id="c1"/>`),
+	)
+}
+
+func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
+	registry := newSourceRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Output:  `{"url":"res://0001","knowledge_id":"doc-real-id"}`,
+	})
+
+	// An internal handle in a url-labeled field must never enter the web
+	// handle space, where CompactKnownText would rewrite it a second time.
+	require.Contains(t, output, "res://0001")
+	require.NotContains(t, output, "w1")
+	require.Contains(t, output, "d1")
+	require.NotContains(t, output, "doc-real-id")
+
+	registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Output:  `{"url":"https://example.com/page"}`,
+	})
+	require.Equal(t,
+		`<web url="https://example.com/page" title="" />`,
+		registry.ExpandText(`<ref id="w1"/>`),
 	)
 }

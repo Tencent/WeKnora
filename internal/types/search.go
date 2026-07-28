@@ -77,7 +77,26 @@ func HasKnowledgeRetrievalScope(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 ) bool {
-	return len(searchTargets) > 0 || len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	for _, id := range knowledgeBaseIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, id := range knowledgeIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, target := range searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets
@@ -85,6 +104,9 @@ func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 	seen := make(map[string]bool)
 	var result []string
 	for _, t := range st {
+		if t == nil || t.KnowledgeBaseID == "" {
+			continue
+		}
 		if !seen[t.KnowledgeBaseID] {
 			seen[t.KnowledgeBaseID] = true
 			result = append(result, t.KnowledgeBaseID)
@@ -97,7 +119,7 @@ func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
 	result := make(map[string]uint64)
 	for _, t := range st {
-		if t.KnowledgeBaseID != "" {
+		if t != nil && t.KnowledgeBaseID != "" {
 			result[t.KnowledgeBaseID] = t.TenantID
 		}
 	}
@@ -108,7 +130,7 @@ func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
 // Returns 0 if not found
 func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
 	for _, t := range st {
-		if t.KnowledgeBaseID == kbID {
+		if t != nil && t.KnowledgeBaseID == kbID {
 			return t.TenantID
 		}
 	}
@@ -118,7 +140,7 @@ func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
 // ContainsKB checks if the search targets contain a given knowledge base ID
 func (st SearchTargets) ContainsKB(kbID string) bool {
 	for _, t := range st {
-		if t.KnowledgeBaseID == kbID {
+		if t != nil && t.KnowledgeBaseID == kbID {
 			return true
 		}
 	}
