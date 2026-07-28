@@ -553,6 +553,8 @@ export default {
     currentVersion: "当前版本",
     noChunkHistory: "暂无编辑历史",
     compareRevisionWithCurrent: "v{revision} 与当前 v{current} 的内容差异",
+    diffAddedInCurrent: "当前版本新增",
+    diffRemovedFromCurrent: "当前版本删除",
     noContentChanges: "内容没有变化，该版本仅包含状态变更",
     revertRevision: "回滚版本",
     revertRevisionConfirm: "确定回滚到 v{revision} 吗？回滚后会生成一个新版本。",

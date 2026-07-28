@@ -489,6 +489,8 @@ export default {
     currentVersion: 'Текущая версия',
     noChunkHistory: 'История изменений пуста',
     compareRevisionWithCurrent: 'Изменения содержимого от v{revision} до текущей v{current}',
+    diffAddedInCurrent: 'Добавлено в текущей версии',
+    diffRemovedFromCurrent: 'Удалено в текущей версии',
     noContentChanges: 'Содержимое не изменилось; версия содержит только смену статуса',
     revertRevision: 'Откатить версию',
     revertRevisionConfirm: 'Откатить к v{revision}? Будет создана новая версия.',

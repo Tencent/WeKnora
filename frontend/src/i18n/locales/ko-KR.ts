@@ -564,6 +564,8 @@ export default {
     currentVersion: "현재 버전",
     noChunkHistory: "편집 기록 없음",
     compareRevisionWithCurrent: "v{revision}과 현재 v{current}의 내용 차이",
+    diffAddedInCurrent: "현재 버전에 추가됨",
+    diffRemovedFromCurrent: "현재 버전에서 삭제됨",
     noContentChanges: "내용 변경이 없으며 상태만 변경된 버전입니다",
     revertRevision: "버전 되돌리기",
     revertRevisionConfirm: "v{revision}(으)로 되돌리시겠습니까? 새 버전이 생성됩니다.",
