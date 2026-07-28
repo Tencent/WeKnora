@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -407,6 +408,12 @@ func (s *chunkService) UpdateDocumentChunk(
 	}
 	if newContent == chunk.Content && newEnabled == chunk.IsEnabled {
 		if chunk.IndexStatus == "failed" {
+			if chunk.ParentChunkID != "" && chunk.ContentRevision > 0 {
+				if err := s.rebuildParentContent(ctx, chunk); err != nil {
+					logger.Warnf(ctx, "Failed to rebuild parent chunk while retrying edit: %v", err)
+					return chunk, nil
+				}
+			}
 			chunk.IndexStatus = "processing"
 			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
 			if err := s.syncChunkIndex(ctx, chunk); err != nil {
@@ -420,6 +427,15 @@ func (s *chunkService) UpdateDocumentChunk(
 			}
 		}
 		return chunk, nil
+	}
+	if content != nil {
+		sourceContent := chunk.SourceContent
+		if sourceContent == "" {
+			sourceContent = chunk.Content
+		}
+		if err := validateEditedChunkImages(sourceContent, newContent); err != nil {
+			return nil, err
+		}
 	}
 
 	actorID, _ := types.UserIDFromContext(ctx)
@@ -442,18 +458,6 @@ func (s *chunkService) UpdateDocumentChunk(
 	chunk.LastEditorID = actorID
 	chunk.IndexStatus = "processing"
 	chunk.UpdatedAt = now
-	if bodyChanged {
-		meta, metaErr := chunk.DocumentMetadata()
-		if metaErr != nil {
-			return nil, fmt.Errorf("parse chunk metadata: %w", metaErr)
-		}
-		if meta != nil {
-			meta.GeneratedQuestions = nil
-			if err := chunk.SetDocumentMetadata(meta); err != nil {
-				return nil, err
-			}
-		}
-	}
 	if err := s.chunkRepository.SaveChunkRevision(ctx, chunk, revision, oldRevision); err != nil {
 		return nil, err
 	}
@@ -461,6 +465,17 @@ func (s *chunkService) UpdateDocumentChunk(
 	if bodyChanged && chunk.ParentChunkID != "" {
 		if err := s.rebuildParentContent(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to rebuild parent chunk after edit: %v", err)
+			chunk.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			return chunk, nil
+		}
+	}
+	if bodyChanged || newEnabled != revision.IsEnabled {
+		if err := s.syncEditedChunkImages(ctx, chunk); err != nil {
+			logger.Warnf(ctx, "Failed to synchronize image children after chunk edit: %v", err)
+			chunk.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			return chunk, nil
 		}
 	}
 	if bodyChanged || newEnabled != revision.IsEnabled {
@@ -484,6 +499,61 @@ func (s *chunkService) UpdateDocumentChunk(
 		return nil, err
 	}
 	return chunk, nil
+}
+
+func validateEditedChunkImages(sourceContent, editedContent string) error {
+	allowed := searchutil.ImageURLsInContent(sourceContent)
+	for url := range searchutil.ImageURLsInContent(editedContent) {
+		if !allowed[url] {
+			return fmt.Errorf("adding images to an existing chunk is not supported: %s", url)
+		}
+	}
+	return nil
+}
+
+func imageChildMatchesContent(child *types.Chunk, contentURLs map[string]bool) bool {
+	for url := range searchutil.ImageURLsFromInfo(child.ImageInfo) {
+		if contentURLs[url] {
+			return true
+		}
+	}
+	return false
+}
+
+// syncEditedChunkImages removes image OCR/caption children from retrieval
+// when their Markdown image was deleted. Rows are disabled rather than hard
+// deleted so reverting to a historical chunk revision can re-enable them.
+func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.Chunk) error {
+	children, err := s.chunkRepository.ListChunkByParentID(ctx, chunk.TenantID, chunk.ID)
+	if err != nil {
+		return err
+	}
+	contentURLs := searchutil.ImageURLsInContent(chunk.Content)
+	for _, child := range children {
+		if child.ChunkType != types.ChunkTypeImageOCR && child.ChunkType != types.ChunkTypeImageCaption {
+			continue
+		}
+		desiredEnabled := chunk.IsEnabled && imageChildMatchesContent(child, contentURLs)
+		if child.IsEnabled == desiredEnabled && child.IndexStatus == "ready" {
+			continue
+		}
+		child.IsEnabled = desiredEnabled
+		child.IndexStatus = "processing"
+		child.UpdatedAt = time.Now()
+		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+			return err
+		}
+		if err := s.syncChunkIndex(ctx, child); err != nil {
+			child.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, child)
+			return err
+		}
+		child.IndexStatus = "ready"
+		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *chunkService) ListChunkRevisions(ctx context.Context, chunkID string) ([]*types.ChunkRevision, error) {
@@ -535,11 +605,13 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 			replacements = append(replacements, replacement{start, end, child.Content, child.UpdatedAt})
 		}
 	}
-	// Overlapping child windows cannot both be projected after arbitrary text
-	// replacement. Keep the most recently edited window and ignore older
-	// overlaps so the parent remains deterministic.
+	// Overlapping arbitrary replacements cannot both occupy the same source
+	// interval. Keep the latest edit in place, then append every conflicting
+	// current body that is not already represented. Retrieval must prefer a
+	// small amount of duplication over silently losing an accepted edit.
 	sort.Slice(replacements, func(i, j int) bool { return replacements[i].updatedAt.After(replacements[j].updatedAt) })
 	selected := make([]replacement, 0, len(replacements))
+	conflicts := make([]replacement, 0)
 	for _, candidate := range replacements {
 		overlaps := false
 		for _, existing := range selected {
@@ -550,6 +622,8 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 		}
 		if !overlaps {
 			selected = append(selected, candidate)
+		} else {
+			conflicts = append(conflicts, candidate)
 		}
 	}
 	replacements = selected
@@ -558,6 +632,9 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 		baseRunes = append(append(append([]rune{}, baseRunes[:repl.start]...), []rune(repl.content)...), baseRunes[repl.end:]...)
 	}
 	parent.Content = string(baseRunes)
+	for _, conflict := range conflicts {
+		parent.Content = searchutil.JoinChunkContent(parent.Content, conflict.content, "\n\n")
+	}
 	parent.UpdatedAt = time.Now()
 	return s.chunkRepository.UpdateChunk(ctx, parent)
 }
@@ -600,7 +677,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	}
 	if meta != nil {
 		for _, question := range meta.GeneratedQuestions {
-			if strings.TrimSpace(question.Question) == "" {
+			if strings.TrimSpace(question.Question) == "" || !meta.IsQuestionCurrent(question, chunk.ContentRevision) {
 				continue
 			}
 			items = append(items, &types.IndexInfo{
@@ -632,15 +709,18 @@ func (s *chunkService) UpsertGeneratedQuestion(
 	if meta == nil {
 		meta = &types.DocumentChunkMetadata{}
 	}
-	meta.GeneratedQuestionsRevision = chunk.ContentRevision
+	currentRevision := chunk.ContentRevision
 	if questionID == "" {
 		questionID = uuid.NewString()
-		meta.GeneratedQuestions = append(meta.GeneratedQuestions, types.GeneratedQuestion{ID: questionID, Question: question})
+		meta.GeneratedQuestions = append(meta.GeneratedQuestions, types.GeneratedQuestion{
+			ID: questionID, Question: question, ContentRevision: &currentRevision,
+		})
 	} else {
 		found := false
 		for i := range meta.GeneratedQuestions {
 			if meta.GeneratedQuestions[i].ID == questionID {
 				meta.GeneratedQuestions[i].Question = question
+				meta.GeneratedQuestions[i].ContentRevision = &currentRevision
 				found = true
 				break
 			}

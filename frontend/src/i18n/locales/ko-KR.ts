@@ -581,6 +581,7 @@ export default {
     editGeneratedQuestion: "검색 보조 질문 편집",
     regenerateQuestions: "질문 다시 생성",
     questionsRegenerated: "검색 질문이 업데이트되었습니다",
+    staleGeneratedQuestions: "콘텐츠가 변경되어 이전 질문은 검색에서 제외됩니다",
     noGeneratedQuestions: "검색 보조 질문 없음",
     docActionUnsupported: "현재 지식베이스 유형은 이 작업을 지원하지 않습니다",
     notInitialized:

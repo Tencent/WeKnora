@@ -570,6 +570,7 @@ export default {
     editGeneratedQuestion: "编辑辅助召回问题",
     regenerateQuestions: "重新生成问题",
     questionsRegenerated: "辅助召回问题已更新",
+    staleGeneratedQuestions: "内容已变更，旧问题暂不参与召回",
     noGeneratedQuestions: "暂无辅助召回问题",
     docActionUnsupported: "当前知识库类型不支持该操作",
     notInitialized:

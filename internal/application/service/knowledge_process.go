@@ -1583,11 +1583,13 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+		questionRevision := chunk.ContentRevision
 		for j, question := range questions {
 			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       questionID,
-				Question: question,
+				ID:              questionID,
+				Question:        question,
+				ContentRevision: &questionRevision,
 			}
 		}
 		meta := &types.DocumentChunkMetadata{
@@ -1918,10 +1920,12 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+		questionRevision := chunk.ContentRevision
 		for j, question := range questions {
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
-				Question: question,
+				ID:              fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
+				Question:        question,
+				ContentRevision: &questionRevision,
 			}
 		}
 		meta := &types.DocumentChunkMetadata{
@@ -2102,8 +2106,11 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	}
 	chunk = latestChunk
 	generated := make([]types.GeneratedQuestion, 0, len(questions))
+	questionRevision := chunk.ContentRevision
 	for _, question := range questions {
-		generated = append(generated, types.GeneratedQuestion{ID: uuid.NewString(), Question: question})
+		generated = append(generated, types.GeneratedQuestion{
+			ID: uuid.NewString(), Question: question, ContentRevision: &questionRevision,
+		})
 	}
 	meta := &types.DocumentChunkMetadata{
 		GeneratedQuestions: generated, GeneratedQuestionsRevision: chunk.ContentRevision,
@@ -2689,7 +2696,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 		}
 		if meta != nil {
 			for _, q := range meta.GeneratedQuestions {
-				if strings.TrimSpace(q.Question) != "" {
+				if strings.TrimSpace(q.Question) != "" && meta.IsQuestionCurrent(q, chunk.ContentRevision) {
 					indexInfo = append(indexInfo, &types.IndexInfo{
 						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,

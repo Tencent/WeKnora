@@ -226,6 +226,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 						Content:              getString(refMap, "content"),
 						KnowledgeID:          getString(refMap, "knowledge_id"),
 						ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
+						ContentRevision:      int(getFloat64(refMap, "content_revision")),
 						KnowledgeTitle:       getString(refMap, "knowledge_title"),
 						StartAt:              int(getFloat64(refMap, "start_at")),
 						EndAt:                int(getFloat64(refMap, "end_at")),

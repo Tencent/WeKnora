@@ -397,6 +397,7 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 					KnowledgeID:          getString(refMap, "knowledge_id"),
 					KnowledgeTitle:       getString(refMap, "knowledge_title"),
 					ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
+					ContentRevision:      int(getFloat64(refMap, "content_revision")),
 					KnowledgeDescription: getString(refMap, "knowledge_description"),
 					KnowledgeBaseID:      getString(refMap, "knowledge_base_id"),
 				}

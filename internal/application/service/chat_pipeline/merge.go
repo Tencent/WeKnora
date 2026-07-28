@@ -36,10 +36,10 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //  2. Deduplicate by ID and content signature
 //  3. Inject relevant history references
 //  4. Resolve parent chunks (child → parent content)
-//  5. Group by knowledge source + chunk type, merge overlapping ranges
+//  5. Group by knowledge source + chunk type, merge sequential current bodies
 //  6. Populate FAQ answers
 //  7. Expand short contexts with neighboring chunks
-//     7.5. Re-merge overlapping ranges introduced by expansion
+//     7.5. Re-merge sequential or contained bodies introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
@@ -77,7 +77,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	searchResult = p.resolveParentChunks(ctx, chatManage, searchResult)
 
 	// Step 5: Group by knowledge/chunkType and merge overlapping ranges
-	mergedChunks := p.groupAndMergeOverlapping(ctx, searchResult)
+	mergedChunks := p.groupAndMergeCurrentContent(ctx, searchResult)
 
 	// Step 6: Populate FAQ answers
 	mergedChunks = p.populateFAQAnswers(ctx, chatManage, mergedChunks)
@@ -86,7 +86,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks = p.expandShortContextWithNeighbors(ctx, chatManage, mergedChunks)
 
 	// Step 7.5: Re-merge overlapping ranges introduced by expansion
-	mergedChunks = p.groupAndMergeOverlapping(ctx, mergedChunks)
+	mergedChunks = p.groupAndMergeCurrentContent(ctx, mergedChunks)
 
 	// Step 8: Final dedup — catches exact duplicates plus partial content overlaps
 	mergedChunks = p.dedup(ctx, "final_dedup", mergedChunks)
@@ -144,9 +144,9 @@ func (p *PluginMerge) injectHistoryResults(
 	return removeDuplicateResults(combined)
 }
 
-// groupAndMergeOverlapping groups chunks by KnowledgeID + ChunkType, then merges
-// overlapping ranges within each group using mergeOverlappingChunks.
-func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*types.SearchResult) []*types.SearchResult {
+// groupAndMergeCurrentContent groups chunks by KnowledgeID + ChunkType, then joins
+// sequential current bodies without consulting source character offsets.
+func (p *PluginMerge) groupAndMergeCurrentContent(ctx context.Context, results []*types.SearchResult) []*types.SearchResult {
 	// Group by KnowledgeID → ChunkType
 	knowledgeGroup := make(map[string]map[string][]*types.SearchResult)
 	for _, chunk := range results {
@@ -181,13 +181,13 @@ func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*t
 		})
 
 		sort.Slice(u.chunks, func(i, j int) bool {
-			if u.chunks[i].StartAt == u.chunks[j].StartAt {
-				return u.chunks[i].EndAt < u.chunks[j].EndAt
+			if u.chunks[i].ChunkIndex == u.chunks[j].ChunkIndex {
+				return u.chunks[i].ID < u.chunks[j].ID
 			}
-			return u.chunks[i].StartAt < u.chunks[j].StartAt
+			return u.chunks[i].ChunkIndex < u.chunks[j].ChunkIndex
 		})
 
-		grouped := p.mergeOverlappingChunks(ctx, u.knowledgeID, u.chunks)
+		grouped := p.mergeSequentialChunks(ctx, u.knowledgeID, u.chunks)
 
 		pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
 			"knowledge_id":  u.knowledgeID,
@@ -266,40 +266,6 @@ func (p *PluginMerge) resolveParentChunks(
 		parentMap[c.ID] = c
 	}
 
-	// Check if any results are image chunks; only then do we need
-	// grandparent resolution and the extra DB round-trip.
-	hasImageResults := false
-	for _, r := range results {
-		if r.ChunkType == string(types.ChunkTypeImageOCR) || r.ChunkType == string(types.ChunkTypeImageCaption) {
-			hasImageResults = true
-			break
-		}
-	}
-
-	var grandparentIDs []string
-	if hasImageResults {
-		// Fetch grandparent chunks for the image → text → parent_text chain.
-		for _, pc := range parentChunks {
-			if pc.ParentChunkID != "" && pc.ChunkType == types.ChunkTypeText {
-				if _, already := parentMap[pc.ParentChunkID]; !already {
-					grandparentIDs = append(grandparentIDs, pc.ParentChunkID)
-				}
-			}
-		}
-		if len(grandparentIDs) > 0 {
-			gpChunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, grandparentIDs)
-			if err != nil {
-				pipelineWarn(ctx, "Merge", "grandparent_fetch_failed", map[string]interface{}{
-					"error": err.Error(),
-				})
-			} else {
-				for _, c := range gpChunks {
-					parentMap[c.ID] = c
-				}
-			}
-		}
-	}
-
 	// Batch-fetch image_info scoped to matched text children only.
 	textChildIDs := collectScopedTextChildIDs(results, parentMap)
 	var scopedImageInfo map[string]string
@@ -321,7 +287,6 @@ func (p *PluginMerge) resolveParentChunks(
 			if !ok || parent.Content == "" || parent.ChunkType != types.ChunkTypeParentText {
 				continue
 			}
-			matchStart, matchEnd := r.StartAt, r.EndAt
 			pipelineInfo(ctx, "Merge", "parent_resolve", map[string]interface{}{
 				"child_id":   r.ID,
 				"parent_id":  r.ParentChunkID,
@@ -329,17 +294,9 @@ func (p *PluginMerge) resolveParentChunks(
 				"parent_len": runeLen(parent.Content),
 				"scoped_img": true,
 			})
-			r.Content = searchutil.PruneMarkdownImagesOutsideRange(
-				parent.Content, parent.StartAt, matchStart, matchEnd,
-			)
-			r.StartAt = parent.StartAt
-			r.EndAt = parent.EndAt
 			assignScopedImageInfo(r, scopedImageInfo, r.ID)
-			if r.ImageInfo != "" {
-				r.ImageInfo = searchutil.FilterImageInfoByMatchRange(
-					parent.Content, parent.StartAt, matchStart, matchEnd, r.ImageInfo,
-				)
-			}
+			parentContent := searchutil.PruneMarkdownImagesByImageInfo(parent.Content, r.ImageInfo)
+			r.Content = searchutil.JoinChunkContent(parentContent, r.Content, "\n\n")
 			if !containsID(r.SubChunkID, r.ID) {
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
@@ -350,39 +307,22 @@ func (p *PluginMerge) resolveParentChunks(
 				continue
 			}
 			hitImageInfo := r.ImageInfo
-			contentSource := textParent
-			if textParent.ParentChunkID != "" {
-				if gp, gpOK := parentMap[textParent.ParentChunkID]; gpOK &&
-					gp.ChunkType == types.ChunkTypeParentText && gp.Content != "" {
-					contentSource = gp
-				}
-			}
-			matchStart := textParent.StartAt
-			matchEnd := textParent.EndAt
-			sliced := searchutil.SliceContentByDocumentRange(
-				contentSource.Content, contentSource.StartAt, matchStart, matchEnd,
-			)
-			if sliced == "" {
-				sliced = textParent.Content
-				matchStart = textParent.StartAt
-				matchEnd = textParent.EndAt
-			}
 			pipelineInfo(ctx, "Merge", "image_parent_resolve", map[string]interface{}{
 				"child_id":   r.ID,
 				"child_type": r.ChunkType,
 				"text_id":    textParent.ID,
-				"parent_id":  contentSource.ID,
-				"match_len":  runeLen(sliced),
-				"parent_len": runeLen(contentSource.Content),
+				"parent_id":  textParent.ID,
+				"match_len":  runeLen(textParent.Content),
+				"parent_len": runeLen(textParent.Content),
 				"scoped":     true,
 			})
-			r.Content = sliced
-			r.StartAt = matchStart
-			r.EndAt = matchEnd
+			r.Content = textParent.Content
+			r.ChunkIndex = textParent.ChunkIndex
 			assignScopedImageInfo(r, scopedImageInfo, textParent.ID)
 			if r.ImageInfo == "" && hitImageInfo != "" {
 				r.ImageInfo = searchutil.FilterImageInfoByContentURLs(r.Content, hitImageInfo)
 			}
+			r.Content = searchutil.PruneMarkdownImagesByImageInfo(r.Content, r.ImageInfo)
 			if !containsID(r.SubChunkID, r.ID) {
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
