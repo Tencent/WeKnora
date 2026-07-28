@@ -529,6 +529,7 @@ export default {
     confirmDeleteQuestion: "确定要删除这个问题吗？删除后将同时移除对应的向量索引。",
     legacyQuestionCannotDelete: "旧格式问题无法删除，请重新生成问题",
     customMetadata: "自定义元数据",
+    metadataCapabilityHint: "用于辅助索引召回、文档总结、知识库问答和智能体检索",
     noCustomMetadata: "暂无自定义元数据",
     metadataObjectRequired: "元数据必须是 JSON 对象",
     addMetadataField: "添加元数据字段",

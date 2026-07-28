@@ -530,6 +530,7 @@ export default {
     confirmDeleteQuestion: 'Are you sure you want to delete this question? The corresponding vector index will also be removed.',
     legacyQuestionCannotDelete: 'Legacy format questions cannot be deleted. Please regenerate questions.',
     customMetadata: 'Custom metadata',
+    metadataCapabilityHint: 'Used to support indexing and retrieval, document summaries, knowledge-base answers, and agent search',
     noCustomMetadata: 'No custom metadata',
     metadataObjectRequired: 'Metadata must be a JSON object',
     addMetadataField: 'Add metadata field',
