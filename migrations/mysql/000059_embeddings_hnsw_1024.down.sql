@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000059_embeddings_hnsw_1024.up.sql is intentionally unsupported.

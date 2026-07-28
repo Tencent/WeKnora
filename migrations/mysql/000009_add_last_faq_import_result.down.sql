@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000009_add_last_faq_import_result.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000048_tenant_invitations.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000027_message_rendered_content.up.sql is intentionally unsupported.

@@ -31,15 +31,25 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	if r.db != nil && r.db.Dialector != nil {
+		switch r.db.Dialector.Name() {
+		case "sqlite":
+			return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+		case "mysql":
+			return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+		}
 	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
 func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
+	if r.db != nil && r.db.Dialector != nil {
+		switch r.db.Dialector.Name() {
+		case "sqlite":
+			return "(in_links IS NULL OR json_array_length(in_links) = 0)"
+		case "mysql":
+			return "(in_links IS NULL OR JSON_LENGTH(in_links) = 0)"
+		}
 	}
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
 }

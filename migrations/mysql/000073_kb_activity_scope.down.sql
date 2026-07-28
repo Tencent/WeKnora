@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000073_kb_activity_scope.up.sql is intentionally unsupported.

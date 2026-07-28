@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000007_embeddings_tag_id.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

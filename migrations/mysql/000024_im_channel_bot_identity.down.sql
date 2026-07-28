@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000024_im_channel_bot_identity.up.sql is intentionally unsupported.

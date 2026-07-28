@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000051_custom_agents_creator_backfill.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

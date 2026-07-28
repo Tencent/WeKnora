@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000054_invitation_tokens.up.sql is intentionally unsupported.

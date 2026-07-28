@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000029_datasource_tables.up.sql is intentionally unsupported.

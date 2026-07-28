@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000069_resource_registry.up.sql is intentionally unsupported.

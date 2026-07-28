@@ -1,0 +1,2 @@
+-- MySQL 8 translation of 000057_models_display_name.up.sql.
+-- PostgreSQL-only procedural/data steps are intentionally omitted.

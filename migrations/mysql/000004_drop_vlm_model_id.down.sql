@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000004_drop_vlm_model_id.up.sql is intentionally unsupported.

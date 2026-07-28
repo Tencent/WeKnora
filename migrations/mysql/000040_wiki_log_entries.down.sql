@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000040_wiki_log_entries.up.sql is intentionally unsupported.

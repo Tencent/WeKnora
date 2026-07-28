@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000070_temporary_documents.up.sql is intentionally unsupported.

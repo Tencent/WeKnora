@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000064_principal_model.up.sql is intentionally unsupported.

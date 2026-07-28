@@ -1,0 +1,2 @@
+ALTER TABLE chunks
+    ALTER COLUMN flags DROP DEFAULT;

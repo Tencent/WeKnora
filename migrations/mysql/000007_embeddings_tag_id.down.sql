@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000007_embeddings_tag_id.up.sql is intentionally unsupported.

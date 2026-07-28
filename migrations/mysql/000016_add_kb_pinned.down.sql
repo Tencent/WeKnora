@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000016_add_kb_pinned.up.sql is intentionally unsupported.

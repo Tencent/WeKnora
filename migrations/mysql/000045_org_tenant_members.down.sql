@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000045_org_tenant_members.up.sql is intentionally unsupported.

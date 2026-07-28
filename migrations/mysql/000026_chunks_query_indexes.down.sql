@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000026_chunks_query_indexes.up.sql is intentionally unsupported.

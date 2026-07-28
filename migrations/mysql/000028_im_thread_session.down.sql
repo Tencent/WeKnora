@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000028_im_thread_session.up.sql is intentionally unsupported.

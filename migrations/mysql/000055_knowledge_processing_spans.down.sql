@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000055_knowledge_processing_spans.up.sql is intentionally unsupported.

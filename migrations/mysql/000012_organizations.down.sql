@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000012_organizations.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000060_embed_channels.up.sql is intentionally unsupported.

@@ -11,6 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -26,6 +28,12 @@ const (
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 )
+
+// isMissingCollection reports the idempotent-delete case where a knowledge
+// has no vectors because its dimension-specific collection was never created.
+func isMissingCollection(err error) bool {
+	return status.Code(err) == codes.NotFound
+}
 
 // NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
@@ -291,6 +299,10 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 		}),
 	})
 	if err != nil {
+		if isMissingCollection(err) {
+			log.Infof("[Qdrant] Collection %s does not exist; no chunk vectors to delete", collectionName)
+			return nil
+		}
 		log.Errorf("[Qdrant] Failed to delete by chunk IDs: %v", err)
 		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
 	}
@@ -321,6 +333,10 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		}),
 	})
 	if err != nil {
+		if isMissingCollection(err) {
+			log.Infof("[Qdrant] Collection %s does not exist; no knowledge vectors to delete", collectionName)
+			return nil
+		}
 		log.Errorf("[Qdrant] Failed to delete by knowledge IDs: %v", err)
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
 	}
@@ -351,6 +367,10 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 		}),
 	})
 	if err != nil {
+		if isMissingCollection(err) {
+			log.Infof("[Qdrant] Collection %s does not exist; no source vectors to delete", collectionName)
+			return nil
+		}
 		log.Errorf("[Qdrant] Failed to delete by source IDs: %v", err)
 		return fmt.Errorf("failed to delete by source IDs: %w", err)
 	}

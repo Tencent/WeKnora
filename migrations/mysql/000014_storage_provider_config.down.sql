@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000014_storage_provider_config.up.sql is intentionally unsupported.

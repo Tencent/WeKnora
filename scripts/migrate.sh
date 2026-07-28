@@ -14,38 +14,49 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 # Database connection details (can be overridden by environment variables)
+DB_DRIVER=${DB_DRIVER:-postgres}
 DB_HOST=${DB_HOST:-localhost}
-DB_PORT=${DB_PORT:-5432}
+if [ "$DB_DRIVER" = "mysql" ]; then
+    DB_PORT=${DB_PORT:-3306}
+else
+    DB_PORT=${DB_PORT:-5432}
+fi
 DB_USER=${DB_USER:-postgres}
 DB_PASSWORD=${DB_PASSWORD:-postgres}
 DB_NAME=${DB_NAME:-WeKnora}
 
-# Use versioned migrations directory
-MIGRATIONS_DIR="${MIGRATIONS_DIR:-migrations/versioned}"
+# Select the same migration family used by the server at startup. MySQL has a
+# dialect-specific schema snapshot plus forward-only compatibility migrations;
+# PostgreSQL keeps the historical versioned chain.
+if [ -z "${MIGRATIONS_DIR:-}" ]; then
+    if [ "$DB_DRIVER" = "mysql" ]; then
+        MIGRATIONS_DIR="migrations/mysql"
+    else
+        MIGRATIONS_DIR="migrations/versioned"
+    fi
+fi
 
 # Check if migrate tool is installed
 if ! command -v migrate &> /dev/null; then
     echo "Error: migrate tool is not installed"
-    echo "Install it with: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"
+    echo "Install it with: go install -tags 'postgres,mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"
     exit 1
 fi
 
-# Construct the database URL
-# If DB_URL is already set in .env, use it but ensure sslmode=disable is set
-# Otherwise, construct it from individual components
+# Construct the database URL. PostgreSQL local development uses sslmode=disable;
+# MySQL URLs must not receive that PostgreSQL-specific parameter.
 if [ -n "$DB_URL" ]; then
-    # If DB_URL already exists, ensure sslmode=disable is set (unless sslmode is already specified)
-    if [[ "$DB_URL" != *"sslmode="* ]]; then
-        # Add sslmode=disable if not present
-        if [[ "$DB_URL" == *"?"* ]]; then
-            DB_URL="${DB_URL}&sslmode=disable"
-        else
-            DB_URL="${DB_URL}?sslmode=disable"
+    if [ "$DB_DRIVER" = "postgres" ]; then
+        if [[ "$DB_URL" != *"sslmode="* ]]; then
+            if [[ "$DB_URL" == *"?"* ]]; then
+                DB_URL="${DB_URL}&sslmode=disable"
+            else
+                DB_URL="${DB_URL}?sslmode=disable"
+            fi
+        elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
+            DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
+            DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
         fi
-    elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
-        # Replace sslmode=require/prefer with sslmode=disable for local dev
-        DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
-        DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
     fi
 else
     # Use Python to properly URL encode password if it contains special characters
@@ -56,7 +67,11 @@ else
         # Fallback: try to use printf for basic encoding (may not work for all special chars)
         ENCODED_PASSWORD="$DB_PASSWORD"
     fi
-    DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable"
+    if [ "$DB_DRIVER" = "mysql" ]; then
+        DB_URL="mysql://${DB_USER}:${ENCODED_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${DB_NAME}?charset=utf8mb4&parseTime=true"
+    else
+        DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable"
+    fi
 fi
 
 # Execute migration based on command
@@ -65,7 +80,6 @@ case "$1" in
         echo "Running migrations up..."
         echo "DB_URL: ${DB_URL}"
         echo "DB_USER: ${DB_USER}"
-        echo "DB_PASSWORD: ${DB_PASSWORD}"
         echo "DB_HOST: ${DB_HOST}"
         echo "DB_PORT: ${DB_PORT}"
         echo "DB_NAME: ${DB_NAME}"
@@ -119,4 +133,4 @@ case "$1" in
         ;;
 esac
 
-echo "Migration command completed successfully" 
+echo "Migration command completed successfully"

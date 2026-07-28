@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000067_question_suggestions.up.sql is intentionally unsupported.

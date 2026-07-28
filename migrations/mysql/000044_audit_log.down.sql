@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000044_audit_log.up.sql is intentionally unsupported.

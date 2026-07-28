@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000013_engine_configs.up.sql is intentionally unsupported.

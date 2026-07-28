@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000019_add_agent_duration_ms.up.sql is intentionally unsupported.

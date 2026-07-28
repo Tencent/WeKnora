@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000030_web_search_providers.up.sql is intentionally unsupported.

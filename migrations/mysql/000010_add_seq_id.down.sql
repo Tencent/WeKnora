@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000010_add_seq_id.up.sql is intentionally unsupported.

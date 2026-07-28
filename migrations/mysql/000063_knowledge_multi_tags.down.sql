@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000063_knowledge_multi_tags.up.sql is intentionally unsupported.

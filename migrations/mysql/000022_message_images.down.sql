@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000022_message_images.up.sql is intentionally unsupported.

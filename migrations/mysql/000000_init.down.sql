@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000000_init.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000034_add_attachments.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000052_models_managed_by.up.sql is intentionally unsupported.

@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000043_tenant_rbac.up.sql is intentionally unsupported.

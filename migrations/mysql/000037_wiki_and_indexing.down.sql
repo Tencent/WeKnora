@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000037_wiki_and_indexing.up.sql is intentionally unsupported.

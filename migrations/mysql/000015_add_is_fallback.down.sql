@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000015_add_is_fallback.up.sql is intentionally unsupported.

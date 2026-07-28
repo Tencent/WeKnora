@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000006_custom_agents.up.sql is intentionally unsupported.

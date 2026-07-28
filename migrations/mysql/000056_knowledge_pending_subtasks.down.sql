@@ -1,0 +1,1 @@
+-- MySQL alpha: reverse migration for 000056_knowledge_pending_subtasks.up.sql is intentionally unsupported.
