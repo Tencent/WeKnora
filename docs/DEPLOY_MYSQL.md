@@ -343,6 +343,124 @@ successful run sends the normal recovery notification. Alerts, status, and
 audit records never include passwords, DSNs, absolute paths, or raw
 `mysqldump` output.
 
+## Controlled Rollback CLI
+
+`scripts/rollback_mysql_deployment.ps1` is a MySQL-only, operator-run rollback
+tool for Windows and Docker Desktop. It does not load PostgreSQL or SQLite
+configuration and never changes either deployment path. Store its audit output
+in an access-controlled directory on a host data drive, separate from the
+repository and Docker Desktop's virtual disk:
+
+```powershell
+New-Item -ItemType Directory -Force D:\WeKnoraOpsAudit
+```
+
+Each invocation writes one new JSON audit record with the action, outcome,
+repository revision, configuration SHA-256 values, migration version, and
+approved image digests. It records only file names, never passwords, DSNs,
+secret values, raw environment-file contents, or absolute backup paths.
+Protect this directory as operational evidence; the script does not edit
+existing audit records.
+
+### Application Image Rollback
+
+An image rollback is permitted only when all of these conditions hold:
+
+- The target uses a fixed, non-`latest` version tag.
+- The operator supplies approved SHA-256 repository digests for the app, UI,
+  and docreader images. The script pulls each image and rejects a digest
+  mismatch before recreating anything.
+- The operator supplies the target's known MySQL migration version, and it is
+  exactly equal to the clean `schema_migrations` version of the running MySQL
+  database. A lower or higher version is refused because it is not a proven
+  compatible rollback.
+- The active `.env.mysql` produces a valid bundled MySQL Compose definition.
+
+The command recreates only `app`, `frontend`, and `docreader` with `--no-build`
+and `--no-deps`; it does not recreate `mysql`, `redis`, Qdrant, or persistent
+volumes. It temporarily starts the rolled-back application with
+`AUTO_MIGRATE=false`, then requires the application container health check to
+pass. This prevents a rollback from unexpectedly applying a forward migration.
+
+Obtain the three digests from the reviewed release record, not from a mutable
+tag copied from an unreviewed command. For a release known to use migration
+version `74`, the invocation shape is:
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Deployment `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -EnvFile .env.mysql `
+  -ImageTag <reviewed-version> `
+  -TargetMigrationVersion 74 `
+  -ExpectedAppImageDigest sha256:<64-lowercase-hex-characters> `
+  -ExpectedFrontendImageDigest sha256:<64-lowercase-hex-characters> `
+  -ExpectedDocreaderImageDigest sha256:<64-lowercase-hex-characters> `
+  -ConfirmRollback
+```
+
+The tool cannot prove a migration version embedded in an arbitrary historical
+image. Treat the release record and its tested migration version as a required
+change-control input. If the image does not use the current schema exactly,
+use a compatible forward fix or the break-glass recovery procedure instead.
+
+### Configuration Rollback
+
+Configuration rollback is deliberately a staging operation, not an automatic
+container restart. This prevents a historical file from silently changing
+database credentials, ports, or topology on a running stack. Keep reviewed
+environment revisions in an access-controlled directory that is not Git when
+they contain secrets. The candidate must be inside that approved directory;
+the script validates MySQL compatibility and `docker compose config` before it
+copies the candidate over `.env.mysql`. It also requires a new, non-existing
+path to preserve the current environment file before the change.
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Config `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -EnvFile .env.mysql `
+  -ApprovedConfigDirectory D:\WeKnoraConfigHistory `
+  -ConfigFile D:\WeKnoraConfigHistory\.env.mysql.20260728 `
+  -CurrentConfigBackupPath D:\WeKnoraConfigHistory\.env.mysql.before-rollback `
+  -ConfirmRollback
+```
+
+After staging, compare the rendered Compose configuration and recreate only
+the services whose reviewed settings should change during a maintenance
+window. Do not use this operation as a shortcut for changing MySQL credentials
+or replacing the database volume.
+
+### Break-Glass Database Recovery
+
+The CLI has no command that imports into, stops, connects to, or overwrites the
+live MySQL service. Its `Database` mode records the recovery intent and prints
+the next isolated-verification step:
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Database `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups
+```
+
+Run `verify_mysql_restore.ps1` for that backup first. Only after its manifest,
+checksum, migration state, table counts, and measured restore time have been
+reviewed should an operator enter a maintenance window, take a new recovery
+point, restore to a separate MySQL instance, validate it, and perform a
+reviewed connection cutover. There is intentionally no one-command production
+database replacement.
+
+Run the lightweight CLI safety check after changing the rollback script:
+
+```powershell
+.\scripts\test_mysql_rollback_cli.ps1 -IncludeConfigStaging
+```
+
+The optional configuration-staging check uses only temporary environment files
+and `docker compose config`; it does not start containers or alter `.env.mysql`.
+
 ## Schema Check
 
 Run the repeatable schema validation before publishing a MySQL-related change:

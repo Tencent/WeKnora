@@ -298,6 +298,108 @@ schedule enabled、last success、last failure 与 retention failure gauges。SM
 发送通常的 recovery notification。告警、状态和审计记录均不包含 password、DSN、
 absolute path 或原始 `mysqldump` 输出。
 
+## 受控回滚 CLI
+
+`scripts/rollback_mysql_deployment.ps1` 是面向 Windows 与 Docker Desktop 的、由
+运维人员手动运行的 MySQL 专用回滚工具。它不会读取 PostgreSQL 或 SQLite 配置，也
+不会改动这两条部署路径。请将审计输出放在宿主机数据盘中、仓库和 Docker Desktop
+虚拟磁盘之外的受访问控制目录：
+
+```powershell
+New-Item -ItemType Directory -Force D:\WeKnoraOpsAudit
+```
+
+每次调用都会新建一份 JSON 审计记录，记录操作类型、结果、仓库版本、配置
+SHA-256、迁移版本和已批准的镜像 digest。它只记录文件名，不记录 password、DSN、
+secret value、原始环境文件内容或绝对备份路径。该目录应作为运维证据妥善保护；
+脚本不会修改已有审计记录。
+
+### 应用镜像回退
+
+只有同时满足以下条件时，才允许回退镜像：
+
+- 目标使用固定版本 tag，不能使用 `latest`。
+- 操作者必须为 app、UI 和 docreader 三个镜像提供已批准的 SHA-256 repository
+  digest。脚本会先 pull 三个镜像，digest 不匹配时不会重建任何服务。
+- 操作者提供目标镜像已知的 MySQL migration version，且它必须与运行中 MySQL 的
+  干净 `schema_migrations` 版本完全相同。版本更低或更高都不代表已证明兼容，
+  因此会被拒绝。
+- 当前 `.env.mysql` 必须能生成有效的随附 MySQL Compose 配置。
+
+该命令只会使用 `--no-build` 与 `--no-deps` 重建 `app`、`frontend`、`docreader`，
+不会重建 `mysql`、`redis`、Qdrant 或任何持久卷。回退后的应用会临时以
+`AUTO_MIGRATE=false` 启动，并且必须通过应用容器 health check。这可以防止回退时
+意外执行 forward migration。
+
+应从审核过的 release record 中取得三个 digest，不能从未经审核的可变 tag 或命令
+输出中直接复制。以下示例适用于已确认使用 migration version `74` 的 release：
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Deployment `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -EnvFile .env.mysql `
+  -ImageTag <reviewed-version> `
+  -TargetMigrationVersion 74 `
+  -ExpectedAppImageDigest sha256:<64-lowercase-hex-characters> `
+  -ExpectedFrontendImageDigest sha256:<64-lowercase-hex-characters> `
+  -ExpectedDocreaderImageDigest sha256:<64-lowercase-hex-characters> `
+  -ConfirmRollback
+```
+
+工具无法自行证明任意历史镜像中包含的迁移版本，因此 release record 与经过测试的
+migration version 是必须提供的变更控制依据。只要目标镜像不能与当前 schema 完全
+匹配，就应选择兼容的 forward fix 或下面的 break-glass 恢复流程。
+
+### 配置回退
+
+配置回退被刻意设计为“暂存”，不会自动重启容器。这样可以避免历史文件在运行中的
+服务上悄悄改变数据库凭据、端口或拓扑。包含密钥的已审核环境版本应放在受访问控制
+且不提交到 Git 的目录中。候选文件必须位于该已批准目录内；脚本会先验证 MySQL
+兼容性和 `docker compose config`，再将候选文件复制到 `.env.mysql`。同时还必须指定
+一个不存在的新路径，以先保存当前环境文件。
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Config `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -EnvFile .env.mysql `
+  -ApprovedConfigDirectory D:\WeKnoraConfigHistory `
+  -ConfigFile D:\WeKnoraConfigHistory\.env.mysql.20260728 `
+  -CurrentConfigBackupPath D:\WeKnoraConfigHistory\.env.mysql.before-rollback `
+  -ConfirmRollback
+```
+
+暂存完成后，应先比较渲染出的 Compose 配置，再在维护窗口中只重建确实需要变更的
+服务。不要把它作为修改 MySQL 凭据或替换数据库 volume 的捷径。
+
+### Break-Glass 数据库恢复
+
+CLI 没有任何会导入、停止、连接或覆盖运行中 MySQL 服务的命令。`Database` 模式会
+记录恢复意图，并输出下一步的隔离验证提示：
+
+```powershell
+.\scripts\rollback_mysql_deployment.ps1 `
+  -Action Database `
+  -AuditDirectory D:\WeKnoraOpsAudit `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups
+```
+
+必须先对该备份运行 `verify_mysql_restore.ps1`。只有在审阅 manifest、checksum、
+migration state、table count 和实测恢复耗时之后，操作者才能进入 maintenance window、
+创建新的 recovery point、恢复到独立 MySQL 实例并验证，然后执行经审核的 connection
+cutover。这里刻意不提供一条命令替换生产数据库的能力。
+
+修改回滚脚本后，请运行轻量级 CLI 安全检查：
+
+```powershell
+.\scripts\test_mysql_rollback_cli.ps1 -IncludeConfigStaging
+```
+
+可选的 configuration-staging 检查只使用临时环境文件和 `docker compose config`，不会
+启动容器，也不会修改 `.env.mysql`。
+
 ## Schema 检查
 
 发布 MySQL 相关改动前，请执行可重复的 schema validation：

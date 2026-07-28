@@ -255,6 +255,13 @@ Docker 的健康检查本身不会因“unhealthy”自动重启容器。因此�
 
 所有回滚入口必须满足：系统管理员权限、二次确认、关联备份 ID、维护模式、操作审计、完成后 `/readyz` 验证以及恢复结果通知。
 
+已实现的 rollback CLI 为每次调用新建一份脱敏 JSON 审计记录，并拒绝含糊或不兼容的
+操作。镜像回退只接受非 `latest` tag、已批准的 app/UI/docreader repository digest，且
+目标 migration version 必须与当前干净 MySQL migration state 完全一致；它只重建应用
+侧服务，关闭自动迁移后等待应用健康。配置回退会验证并暂存已审核文件，但不会自动
+重启服务。数据库模式只记录意图并指向隔离恢复验证演练，刻意没有覆盖运行中数据库
+的命令。
+
 ## 10. 推荐实施顺序
 
 ### P0：先降低事故概率
@@ -359,7 +366,7 @@ RPO 是“最多允许丢失多久的数据”，RTO 是“从故障到恢复服
 | 8 | `feature/mysql-8-backup-schedule` | 可选定时备份、保留策略、备份锁 | 重复触发、失败告警、过期清理、不会删除最新可用备份 |
 | 9 | `feature/mysql-8-file-backup` | 已完成：本地 `/data/files` 归档和一致性边界 | 文件清单、缺失文件、维护模式下恢复演练 |
 | 10 | `feature/mysql-8-qdrant-snapshot` | 已完成：可选 Qdrant 快照、隔离恢复演练与重新索引回退路径 | 快照、恢复、重新索引回退路径 |
-| 11 | `feature/mysql-8-rollback-cli` | 发布/配置回退与 break-glass 恢复编排 | 兼容性阻止、不兼容时指向恢复流程、完整审计 |
+| 11 | `feature/mysql-8-rollback-cli` | 发布/配置回退与 break-glass 恢复编排 | 已完成：兼容性阻止、不兼容时指向恢复流程、完整审计 |
 | 12 | `feature/mysql-8-ops-admin-ui` | 只读状态页与受控手动备份界面 | RBAC、二次确认、审计、无恢复一键按钮 |
 
 每个功能分支都遵守同一质量门槛：

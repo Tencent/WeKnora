@@ -207,9 +207,16 @@ Use separate procedures for each rollback type:
    cutover. Never expose this as a one-click web action.
 
 When a migration is irreversible, an application rollback may require a
-compatible forward fix or a database restore instead. The rollback CLI planned
-below must refuse ambiguous or incompatible operations and create a complete
-audit event.
+compatible forward fix or a database restore instead. The rollback CLI refuses
+ambiguous or incompatible operations and writes one new, sanitized JSON audit
+record per invocation. It permits an image rollback only for a non-`latest`
+tag with approved app/UI/docreader repository digests and a target migration
+version exactly equal to the current clean MySQL migration state. It recreates
+only application-facing services with automatic migration disabled, then waits
+for application health. Configuration rollback validates and stages a reviewed
+file but does not restart services automatically. Database mode is instruction
+and audit only: it directs the operator to the isolated restore-verification
+drill and deliberately has no live-database overwrite command.
 
 ## 10. Recommended Implementation Order
 
@@ -228,7 +235,7 @@ reviewable and reversible:
 | 8 | `feature/mysql-8-backup-schedule` | Scheduling, retention, backup locking | Complete |
 | 9 | `feature/mysql-8-file-backup` | Local file archive and consistency boundaries | Complete |
 | 10 | `feature/mysql-8-qdrant-snapshot` | Optional Qdrant snapshot and restore | Complete |
-| 11 | `feature/mysql-8-rollback-cli` | Deployment/config rollback and break-glass recovery | Planned |
+| 11 | `feature/mysql-8-rollback-cli` | Deployment/config rollback and break-glass recovery | Complete |
 | 12 | `feature/mysql-8-ops-admin-ui` | Read-only status and controlled manual backup UI | Planned |
 
 ## 11. Quality Gates

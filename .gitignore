@@ -27,6 +27,7 @@ tmp/
 temp/
 logs/
 *.pid
+rollback-audit/
 
 WeKnora
 WeKnora-lite
