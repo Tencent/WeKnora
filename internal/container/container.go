@@ -703,6 +703,16 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
+	// Schema self-healing: ensure critical DDL invariants are met regardless of
+	// migration tracking state. Uses IF NOT EXISTS guards so it is a cheap no-op
+	// when the schema is already up-to-date.
+	if os.Getenv("SCHEMA_REPAIR") != "false" {
+		if err := database.EnsureSchemaRepaired(db); err != nil {
+			logger.Warnf(context.Background(), "Schema repair failed: %v", err)
+			logger.Warnf(context.Background(), "Some database columns may be missing. Run migrations manually if you encounter errors.")
+		}
+	}
+
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()
 	if err != nil {
