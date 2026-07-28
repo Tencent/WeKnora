@@ -578,15 +578,8 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
-	prefix := ""
-	if knowledge.Title != "" {
-		prefix = strings.TrimSpace(knowledge.Title) + "\n"
-	}
-	if metadata := knowledge.CustomMetadataText(); metadata != "" {
-		prefix += "Metadata:\n" + metadata + "\n"
-	}
 	items := []*types.IndexInfo{{
-		Content: prefix + chunk.EmbeddingContent(), SourceID: chunk.ID,
+		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
 		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 		KnowledgeType: kb.Type, IsEnabled: true,
@@ -601,7 +594,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 				continue
 			}
 			items = append(items, &types.IndexInfo{
-				Content: prefix + question.Question, SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
+				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
 				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType: kb.Type, IsEnabled: true,

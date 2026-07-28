@@ -175,8 +175,9 @@ type Knowledge struct {
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
 }
 
-// CustomMetadataText returns stable human-readable metadata for retrieval and
-// model context. Internal ingestion metadata is intentionally excluded.
+// CustomMetadataText returns stable human-readable metadata for summaries and
+// document-scoped model context. Internal ingestion metadata is intentionally
+// excluded.
 func (k *Knowledge) CustomMetadataText() string {
 	if k == nil || len(k.CustomMetadata) == 0 {
 		return ""

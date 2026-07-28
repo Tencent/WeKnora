@@ -529,18 +529,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Prepend the document title to improve semantic alignment between
 		// question-style queries and statement-style chunk content.
 		indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
-		titlePrefix := ""
-		if t := strings.TrimSpace(knowledge.Title); t != "" {
-			titlePrefix = t + "\n"
-		}
-		if metadata := knowledge.CustomMetadataText(); metadata != "" {
-			titlePrefix += "Metadata:\n" + metadata + "\n"
-		}
 		for _, chunk := range textChunks {
 			// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
 			// when the chunker populated it during Tier-1 splitting; falls back
-			// to plain Content otherwise. Title prefix sits outermost.
-			indexContent := titlePrefix + chunk.EmbeddingContent()
+			// to plain Content otherwise. The document title sits outermost;
+			// custom metadata remains document-scoped model context.
+			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         indexContent,
 				SourceID:        chunk.ID,
@@ -1602,7 +1596,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		for _, gq := range generatedQuestions {
 			sourceID := types.GeneratedQuestionSourceID(chunk.ID, gq.ID)
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
+				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
 				SourceID:        sourceID,
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -1929,7 +1923,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 		for _, gq := range generatedQuestions {
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
+				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
 				SourceID:        types.GeneratedQuestionSourceID(chunk.ID, gq.ID),
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -2663,15 +2657,8 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			}
 			knowledgeCache[chunk.KnowledgeID] = knowledge
 		}
-		prefix := ""
-		if title := strings.TrimSpace(knowledge.Title); title != "" {
-			prefix = title + "\n"
-		}
-		if metadata := knowledge.CustomMetadataText(); metadata != "" {
-			prefix += "Metadata:\n" + metadata + "\n"
-		}
 		indexInfo = append(indexInfo, &types.IndexInfo{
-			Content:         prefix + chunk.EmbeddingContent(),
+			Content:         buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()),
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
 			ChunkID:         chunk.ID,
@@ -2688,7 +2675,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			for _, q := range meta.GeneratedQuestions {
 				if strings.TrimSpace(q.Question) != "" {
 					indexInfo = append(indexInfo, &types.IndexInfo{
-						Content: prefix + q.Question, SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
+						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 						KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 						KnowledgeType: sourceKB.Type, IsEnabled: true,
