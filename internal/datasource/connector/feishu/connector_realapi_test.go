@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -145,9 +146,18 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	if n == 0 {
 		t.Fatalf("pass 1 ingested 0 documents — create a few docs in the space, or check app scopes (wiki/docx/drive read)")
 	}
-	// Every ingested node must be recorded in the cursor.
+	// Every ingested *node* must be recorded in the cursor. A multi-item node (a
+	// docx that fans out into a main document plus attachment/image sub-items)
+	// also ingests child items whose external_id is "<node>#file#..." or
+	// "<node>#image#...". Those are not wiki nodes: they ride their parent node's
+	// edit-time and intentionally carry no independent cursor entry (the parent's
+	// edit-time gates re-fetch of the whole subtree). Only node-level ids are
+	// required to be present.
 	nt1 := nodeTimes(t, cur1)[spaceID]
 	for _, id := range h1.ingested {
+		if strings.Contains(id, "#") {
+			continue // attachment/image sub-item, not a top-level cursor node
+		}
 		if _, ok := nt1[id]; !ok {
 			t.Errorf("pass 1 cursor missing edit time for ingested node %s", id)
 		}

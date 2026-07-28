@@ -1,11 +1,13 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -253,7 +255,7 @@ func TestFetchStream_CheckpointsOnElapsedTime(t *testing.T) {
 	prevN := feishuStreamCheckpointInterval
 	prevT := feishuStreamCheckpointMaxInterval
 	feishuStreamCheckpointInterval = 1 << 30 // never fires by count
-	feishuStreamCheckpointMaxInterval = 0     // fires by elapsed time every node
+	feishuStreamCheckpointMaxInterval = 0    // fires by elapsed time every node
 	defer func() {
 		feishuStreamCheckpointInterval = prevN
 		feishuStreamCheckpointMaxInterval = prevT
@@ -296,5 +298,222 @@ func TestFetchStream_EmitErrorAborts(t *testing.T) {
 	}
 	if len(h.emitted) != 0 {
 		t.Errorf("emitted %d items, want 0 (aborted on first emit)", len(h.emitted))
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Stream integration: docx blocks fan-out (multi-item) through FetchStream
+// ──────────────────────────────────────────────────────────────────────
+
+// TestFetchStream_DocxMultiItem is a stream-level integration test proving that a
+// docx node fans out to a main Markdown item + an attachment item through the real
+// FetchStream → fetchNodeContent → fetchDocxWithBlocks path. The fake server
+// serves the blocks API (one text block + one file block) and the drive download;
+// no export endpoint is registered, so any accidental fall-through to the export
+// path would 404 and surface as a fetch error.
+func TestFetchStream_DocxMultiItem(t *testing.T) {
+	const (
+		nodeToken = "nt-blocks"
+		objToken  = "obj-blocks"
+		attToken  = "ft-stream-att"
+		attName   = "slides.pdf"
+	)
+	// Attachment content must exceed minAttachmentBytes (2 KiB).
+	attContent := bytes.Repeat([]byte("a"), minAttachmentBytes+1)
+
+	nodes := []wikiNode{{
+		NodeToken:   nodeToken,
+		ObjToken:    objToken,
+		ObjType:     "docx",
+		Title:       "Stream Blocks Doc",
+		ObjEditTime: "500",
+	}}
+	ts, cfg := fakeFeishuWithBlocks(nodes, objToken, attToken, attName, attContent)
+	defer ts.Close()
+
+	c := NewConnector(RegionFeishu)
+	h := &recordingHandler{}
+	_, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
+	if err != nil {
+		t.Fatalf("FetchStream() error: %v", err)
+	}
+
+	if len(h.emitted) != 2 {
+		t.Fatalf("expected 2 emitted items (main doc + attachment), got %d: %+v", len(h.emitted), h.emitted)
+	}
+
+	main := h.emitted[0]
+	if main.ExternalID != nodeToken {
+		t.Errorf("items[0].ExternalID = %q, want %q", main.ExternalID, nodeToken)
+	}
+	if main.ContentType != "text/markdown" {
+		t.Errorf("items[0].ContentType = %q, want text/markdown", main.ContentType)
+	}
+	if !main.ReplacesSubtree {
+		t.Errorf("items[0].ReplacesSubtree = false, want true")
+	}
+
+	att := h.emitted[1]
+	wantAttID := nodeToken + "#file#" + attToken
+	if att.ExternalID != wantAttID {
+		t.Errorf("items[1].ExternalID = %q, want %q", att.ExternalID, wantAttID)
+	}
+	if att.Metadata["attachment"] != "true" {
+		t.Errorf("items[1].Metadata[attachment] = %q, want \"true\"", att.Metadata["attachment"])
+	}
+}
+
+// fakeFeishuWithBlocksFallback returns a server where the blocks API returns HTTP 500
+// (simulating a permission/scope error) and the export task path returns success.
+// This wires the fallback path: fetchDocxWithBlocks → blocks error → fetchViaExport.
+func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.Server, *Config) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, tokenResponse{
+			apiResponse:       apiResponse{Code: 0},
+			TenantAccessToken: "fake-token",
+			Expire:            7200,
+		})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, wikiSpaceListResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Items     []wikiSpace `json:"items"`
+				HasMore   bool        `json:"has_more"`
+				PageToken string      `json:"page_token"`
+			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, wikiNodeListResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Items     []wikiNode `json:"items"`
+				HasMore   bool       `json:"has_more"`
+				PageToken string     `json:"page_token"`
+			}{Items: nodes},
+		})
+	})
+
+	// Blocks API — always returns HTTP 500 (missing scope / permission denied).
+	blocksPath := "/open-apis/docx/v1/documents/" + docToken + "/blocks"
+	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":99991400,"msg":"insufficient scope"}`))
+	})
+
+	// Export task creation → returns ticket.
+	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			writeJSON(w, exportTaskCreateResponse{
+				apiResponse: apiResponse{Code: 0},
+				Data: struct {
+					Ticket string `json:"ticket"`
+				}{Ticket: "ticket-fb"},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	})
+	// Export task status polling.
+	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-fb", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, exportTaskStatusResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Result struct {
+					FileToken   string `json:"file_token"`
+					FileSize    int64  `json:"file_size"`
+					JobStatus   int    `json:"job_status"`
+					JobErrorMsg string `json:"job_error_msg"`
+					FileName    string `json:"file_name"`
+				} `json:"result"`
+			}{
+				Result: struct {
+					FileToken   string `json:"file_token"`
+					FileSize    int64  `json:"file_size"`
+					JobStatus   int    `json:"job_status"`
+					JobErrorMsg string `json:"job_error_msg"`
+					FileName    string `json:"file_name"`
+				}{
+					FileToken: "ft-export-fallback",
+					FileSize:  512,
+					JobStatus: 0, // done
+					FileName:  "fallback.docx",
+				},
+			},
+		})
+	})
+	// Export file download.
+	mux.HandleFunc("/open-apis/drive/v1/export_tasks/file/ft-export-fallback/download", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("fake-exported-fallback-binary"))
+	})
+	// Drive file download endpoint (not expected to be called in the fallback path,
+	// but registered to avoid 404 panic if the mux catches a stray request).
+	mux.HandleFunc("/open-apis/drive/v1/files/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/download") {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("should-not-be-called"))
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	ts := httptest.NewServer(mux)
+	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+}
+
+// TestFetchStream_DocxBlocksFallback proves that when the blocks API returns HTTP 500
+// (e.g. missing docx:document:readonly scope), the connector automatically falls back
+// to the export-API path and emits exactly one item with ContentType
+// "application/octet-stream", not "text/markdown". No hard failure occurs —
+// the sync completes successfully with the exported binary.
+func TestFetchStream_DocxBlocksFallback(t *testing.T) {
+	const (
+		nodeToken = "nt-fallback"
+		objToken  = "obj-fallback"
+	)
+	nodes := []wikiNode{{
+		NodeToken:   nodeToken,
+		ObjToken:    objToken,
+		ObjType:     "docx",
+		Title:       "Fallback Doc",
+		ObjEditTime: "600",
+	}}
+	ts, cfg := fakeFeishuWithBlocksFallback(nodes, objToken)
+	defer ts.Close()
+
+	c := NewConnector(RegionFeishu)
+	h := &recordingHandler{}
+	_, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
+	if err != nil {
+		t.Fatalf("FetchStream() error: %v", err)
+	}
+
+	// The fallback path must emit exactly one item (exported binary, not multi-item).
+	if len(h.emitted) != 1 {
+		t.Fatalf("expected 1 emitted item (export fallback), got %d: %+v", len(h.emitted), h.emitted)
+	}
+	item := h.emitted[0]
+	if item.ExternalID != nodeToken {
+		t.Errorf("item.ExternalID = %q, want %q", item.ExternalID, nodeToken)
+	}
+	if item.ContentType == "text/markdown" {
+		t.Errorf("item.ContentType = %q; want application/octet-stream (export fallback, not blocks path)", item.ContentType)
+	}
+	if item.ContentType != "application/octet-stream" {
+		t.Errorf("item.ContentType = %q, want application/octet-stream", item.ContentType)
+	}
+	if item.Metadata["error"] != "" {
+		t.Errorf("fallback item should have no error metadata, got %q", item.Metadata["error"])
+	}
+	// The export fallback cannot re-enumerate the doc's attachments, so it must
+	// NOT set ReplacesSubtree — otherwise a transient blocks-API failure would
+	// sweep and permanently delete the good attachment children from the prior
+	// blocks-path sync with nothing to replace them.
+	if item.ReplacesSubtree {
+		t.Error("export-fallback item must not set ReplacesSubtree (would delete good prior attachments on a transient failure)")
 	}
 }
