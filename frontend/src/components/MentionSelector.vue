@@ -15,7 +15,7 @@
             <t-icon :name="group.icon" />
           </span>
           <span class="mention-group-entry__label">{{ group.label }}</span>
-          <span class="mention-group-entry__count">{{ formatGroupCount(group) }}</span>
+          <span v-if="group.type !== 'folder'" class="mention-group-entry__count">{{ formatGroupCount(group) }}</span>
           <t-icon class="mention-group-entry__arrow" name="chevron-right" />
         </button>
         <div v-if="groupRows.length === 0 && !loading" class="empty">
