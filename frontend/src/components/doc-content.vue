@@ -122,10 +122,13 @@ const saveMetadata = async () => {
       value[key] = parseMetadataValue(row);
     }
     metadataSaving.value = true;
-    await updateKnowledgeMetadata(props.details.id, value);
+    const result: any = await updateKnowledgeMetadata(props.details.id, value);
     props.details.custom_metadata = value;
     metadataEditing.value = false;
-    props.details.summary_status = props.details.description ? 'pending' : props.details.summary_status;
+    if (result?.data) {
+      props.details.summary_status = result.data.summary_status || props.details.summary_status;
+      props.details.description = result.data.description ?? props.details.description;
+    }
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.saveFailed'));
@@ -1026,7 +1029,8 @@ const saveChunkEdit = async (item: any) => {
     });
     Object.assign(item, result.data);
     editingChunkId.value = '';
-    props.details.summary_status = props.details.description ? 'pending' : props.details.summary_status;
+    props.details.summary_status = result.summary_status || props.details.summary_status;
+    props.details.description = result.description ?? props.details.description;
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.saveFailed'));
@@ -1043,6 +1047,8 @@ const toggleChunkEnabled = async (item: any, isEnabled: boolean) => {
       expected_revision: item.content_revision || 0,
     });
     Object.assign(item, result.data);
+    props.details.summary_status = result.summary_status || props.details.summary_status;
+    props.details.description = result.description ?? props.details.description;
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
   } finally {
@@ -1142,6 +1148,8 @@ const revertChunk = async (item: any, revision: number) => {
   try {
     const result: any = await revertDocumentChunk(props.details.id, item.id, revision, item.content_revision || 0);
     Object.assign(item, result.data);
+    props.details.summary_status = result.summary_status || props.details.summary_status;
+    props.details.description = result.description ?? props.details.description;
     delete chunkHistories.value[item.id];
     const historyResult: any = await listChunkRevisions(props.details.id, item.id);
     chunkHistories.value[item.id] = historyResult?.data || [];

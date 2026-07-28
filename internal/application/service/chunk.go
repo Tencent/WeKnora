@@ -31,6 +31,8 @@ type chunkService struct {
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
+	task            interfaces.TaskEnqueuer
+	spanTracker     SpanTracker
 }
 
 // NewChunkService creates a new chunk service
@@ -47,6 +49,8 @@ func NewChunkService(
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
+	task interfaces.TaskEnqueuer,
+	spanTracker SpanTracker,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
@@ -55,6 +59,8 @@ func NewChunkService(
 		modelService:    modelService,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
+		task:            task,
+		spanTracker:     spanTracker,
 	}
 }
 
@@ -457,10 +463,14 @@ func (s *chunkService) UpdateDocumentChunk(
 			logger.Warnf(ctx, "Failed to rebuild parent chunk after edit: %v", err)
 		}
 	}
-	if bodyChanged {
+	if bodyChanged || newEnabled != revision.IsEnabled {
 		knowledge, getErr := s.knowledgeRepo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
-		if getErr == nil && knowledge.SummaryStatus == types.SummaryStatusCompleted {
-			_ = s.knowledgeRepo.UpdateKnowledgeColumn(ctx, knowledge.ID, "summary_status", types.SummaryStatusPending)
+		if getErr == nil {
+			if err := enqueueSummaryRefresh(
+				ctx, s.knowledgeRepo, s.task, s.kbRepository, s.spanTracker, knowledge,
+			); err != nil {
+				logger.Warnf(ctx, "Chunk saved but summary refresh enqueue failed for %s: %v", knowledge.ID, err)
+			}
 		}
 	}
 	if err := s.syncChunkIndex(ctx, chunk); err != nil {
