@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +80,9 @@ type MySQLConfig struct {
 	ApplicationVersion string
 	FilesEnabled       bool
 	FilesDir           string
+	QdrantEnabled      bool
+	QdrantURL          string
+	QdrantAPIKey       string
 }
 
 // MigrationState is a snapshot captured in a backup manifest so restore
@@ -102,32 +106,34 @@ type Archive struct {
 // Manifest is written next to each backup. It contains no absolute paths,
 // connection details, credentials, or command output.
 type Manifest struct {
-	FormatVersion      int            `json:"format_version"`
-	BackupID           string         `json:"backup_id"`
-	Result             string         `json:"result"`
-	Trigger            string         `json:"trigger"`
-	Reason             string         `json:"reason"`
-	StartedAt          time.Time      `json:"started_at"`
-	CompletedAt        time.Time      `json:"completed_at"`
-	ApplicationVersion string         `json:"application_version"`
-	Migration          MigrationState `json:"migration"`
-	Archive            *Archive       `json:"archive,omitempty"`
-	Files              *FileArchive   `json:"files,omitempty"`
-	FailureKind        ErrorKind      `json:"failure_kind,omitempty"`
+	FormatVersion      int              `json:"format_version"`
+	BackupID           string           `json:"backup_id"`
+	Result             string           `json:"result"`
+	Trigger            string           `json:"trigger"`
+	Reason             string           `json:"reason"`
+	StartedAt          time.Time        `json:"started_at"`
+	CompletedAt        time.Time        `json:"completed_at"`
+	ApplicationVersion string           `json:"application_version"`
+	Migration          MigrationState   `json:"migration"`
+	Archive            *Archive         `json:"archive,omitempty"`
+	Files              *FileArchive     `json:"files,omitempty"`
+	Qdrant             []QdrantSnapshot `json:"qdrant,omitempty"`
+	FailureKind        ErrorKind        `json:"failure_kind,omitempty"`
 }
 
 // Result is the safe projection returned to an administrator after a manual
 // backup. File names are relative to BACKUP_LOCAL_DIR.
 type Result struct {
-	BackupID           string    `json:"backup_id"`
-	CreatedAt          time.Time `json:"created_at"`
-	ArchiveFile        string    `json:"archive_file,omitempty"`
-	ManifestFile       string    `json:"manifest_file,omitempty"`
-	SizeBytes          int64     `json:"size_bytes,omitempty"`
-	SHA256             string    `json:"sha256,omitempty"`
-	FilesArchiveFile   string    `json:"files_archive_file,omitempty"`
-	FilesInventoryFile string    `json:"files_inventory_file,omitempty"`
-	FilesCount         int       `json:"files_count,omitempty"`
+	BackupID            string    `json:"backup_id"`
+	CreatedAt           time.Time `json:"created_at"`
+	ArchiveFile         string    `json:"archive_file,omitempty"`
+	ManifestFile        string    `json:"manifest_file,omitempty"`
+	SizeBytes           int64     `json:"size_bytes,omitempty"`
+	SHA256              string    `json:"sha256,omitempty"`
+	FilesArchiveFile    string    `json:"files_archive_file,omitempty"`
+	FilesInventoryFile  string    `json:"files_inventory_file,omitempty"`
+	FilesCount          int       `json:"files_count,omitempty"`
+	QdrantSnapshotCount int       `json:"qdrant_snapshot_count,omitempty"`
 }
 
 type dumpExecutor interface {
@@ -150,6 +156,7 @@ type MySQLManager struct {
 	now         func() time.Time
 	newBackupID func(time.Time) (string, error)
 	migration   func() MigrationState
+	qdrant      qdrantSnapshotter
 }
 
 // NewMySQLManager builds the production manager from deployment environment
@@ -174,6 +181,7 @@ func NewMySQLManager(db *gorm.DB) *MySQLManager {
 			version, dirty, known := database.CachedMigrationVersion()
 			return MigrationState{Known: known, Version: version, Dirty: dirty}
 		},
+		qdrant: qdrantHTTPClient{now: time.Now},
 	}
 }
 
@@ -239,6 +247,32 @@ func LoadMySQLConfigFromEnv() (MySQLConfig, error) {
 		}
 		config.FilesDir = strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 		if !filepath.IsAbs(config.FilesDir) || filepath.Clean(config.FilesDir) == string(filepath.Separator) || pathsOverlap(config.FilesDir, config.LocalDir) {
+			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+		}
+	}
+	config.QdrantEnabled, err = parseBoolEnv("BACKUP_QDRANT_ENABLED", false)
+	if err != nil {
+		return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+	}
+	if config.QdrantEnabled {
+		if strings.ToLower(strings.TrimSpace(os.Getenv("RETRIEVE_DRIVER"))) != "qdrant" {
+			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+		}
+		config.QdrantURL = strings.TrimSpace(os.Getenv("BACKUP_QDRANT_URL"))
+		if config.QdrantURL == "" {
+			host := strings.TrimSpace(os.Getenv("QDRANT_HOST"))
+			if host == "" || strings.ContainsAny(host, "/\\?&#\r\n\x00") {
+				return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+			}
+			config.QdrantURL = "http://" + host + ":" + defaultQdrantSnapshotPort
+		}
+		parsed, parseErr := url.Parse(config.QdrantURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+		}
+		config.QdrantURL = strings.TrimRight(config.QdrantURL, "/")
+		config.QdrantAPIKey = os.Getenv("QDRANT_API_KEY")
+		if strings.ContainsAny(config.QdrantAPIKey, "\r\n\x00") {
 			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
 		}
 	}
@@ -319,6 +353,23 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 		result.FilesInventoryFile = files.InventoryFile
 		result.FilesCount = files.FileCount
 	}
+	if m.config.QdrantEnabled {
+		if m.qdrant == nil {
+			removeFileArchive(m.config.LocalDir, manifest.Files)
+			manifest.Files = nil
+			result.FilesArchiveFile, result.FilesInventoryFile, result.FilesCount = "", "", 0
+			return m.writeFailureManifest(result, manifest, ErrorConfiguration)
+		}
+		snapshots, snapshotErr := m.qdrant.Create(operationCtx, m.config, backupID)
+		if snapshotErr != nil {
+			removeFileArchive(m.config.LocalDir, manifest.Files)
+			manifest.Files = nil
+			result.FilesArchiveFile, result.FilesInventoryFile, result.FilesCount = "", "", 0
+			return m.writeFailureManifest(result, manifest, ErrorStorage)
+		}
+		manifest.Qdrant = snapshots
+		result.QdrantSnapshotCount = len(snapshots)
+	}
 
 	archiveFile := backupID + ".sql.gz"
 	archivePath := filepath.Join(m.config.LocalDir, archiveFile)
@@ -332,10 +383,13 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 		manifest.Result = "failed"
 		manifest.FailureKind = failureKind
 		removeFileArchive(m.config.LocalDir, manifest.Files)
+		removeQdrantSnapshots(m.config.LocalDir, manifest.Qdrant)
 		manifest.Files = nil
+		manifest.Qdrant = nil
 		result.FilesArchiveFile = ""
 		result.FilesInventoryFile = ""
 		result.FilesCount = 0
+		result.QdrantSnapshotCount = 0
 		manifestPath, err := writeManifest(m.config.LocalDir, manifest)
 		if err == nil {
 			result.ManifestFile = filepath.Base(manifestPath)
@@ -357,6 +411,7 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 	if err != nil {
 		_ = os.Remove(archivePath)
 		removeFileArchive(m.config.LocalDir, manifest.Files)
+		removeQdrantSnapshots(m.config.LocalDir, manifest.Qdrant)
 		return result, &Error{Kind: ErrorStorage}
 	}
 	result.ArchiveFile = archiveFile
@@ -364,6 +419,20 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 	result.SizeBytes = size
 	result.SHA256 = checksum
 	return result, nil
+}
+
+func (m *MySQLManager) writeFailureManifest(result Result, manifest Manifest, kind ErrorKind) (Result, error) {
+	manifest.Result = "failed"
+	manifest.FailureKind = kind
+	manifest.CompletedAt = m.now().UTC()
+	manifestPath, err := writeManifest(m.config.LocalDir, manifest)
+	if err == nil {
+		result.ManifestFile = filepath.Base(manifestPath)
+	}
+	if err != nil {
+		return result, &Error{Kind: ErrorStorage}
+	}
+	return result, &Error{Kind: kind}
 }
 
 func (m *MySQLManager) isMySQL() bool {
@@ -394,7 +463,17 @@ func (m *MySQLManager) VerifyResult(result Result) error {
 		if result.FilesArchiveFile != manifest.Files.File || result.FilesInventoryFile != manifest.Files.InventoryFile {
 			return &Error{Kind: ErrorStorage}
 		}
-		return VerifyFileArchive(filepath.Join(m.config.LocalDir, manifest.Files.File), filepath.Join(m.config.LocalDir, manifest.Files.InventoryFile), *manifest.Files)
+		if err := VerifyFileArchive(filepath.Join(m.config.LocalDir, manifest.Files.File), filepath.Join(m.config.LocalDir, manifest.Files.InventoryFile), *manifest.Files); err != nil {
+			return err
+		}
+	}
+	if len(manifest.Qdrant) != result.QdrantSnapshotCount {
+		return &Error{Kind: ErrorStorage}
+	}
+	for _, snapshot := range manifest.Qdrant {
+		if err := VerifyQdrantSnapshot(filepath.Join(m.config.LocalDir, snapshot.File), snapshot); err != nil {
+			return err
+		}
 	}
 	return nil
 }

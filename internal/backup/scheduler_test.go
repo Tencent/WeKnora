@@ -158,6 +158,24 @@ func TestPruneExpiredBackupsRemovesAssociatedFileArchive(t *testing.T) {
 	}
 }
 
+func TestPruneExpiredBackupsRemovesAssociatedQdrantSnapshot(t *testing.T) {
+	directory := t.TempDir()
+	oldID := "weknora-mysql-20260701T000000Z-000000000000000000000001"
+	newID := "weknora-mysql-20260727T000000Z-000000000000000000000002"
+	oldSnapshot := writeRetentionBackupWithQdrant(t, directory, oldID, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	newSnapshot := writeRetentionBackupWithQdrant(t, directory, newID, time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC))
+	deleted, err := pruneExpiredBackups(directory, time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC))
+	if err != nil || deleted != 1 {
+		t.Fatalf("prune = %d, %v; want 1, nil", deleted, err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, oldSnapshot)); !os.IsNotExist(err) {
+		t.Fatalf("expired Qdrant snapshot still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, newSnapshot)); err != nil {
+		t.Fatalf("newest Qdrant snapshot removed: %v", err)
+	}
+}
+
 func TestMySQLSchedulerDisablesRetentionWhenConfiguredAsZero(t *testing.T) {
 	directory := t.TempDir()
 	now := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
@@ -226,4 +244,31 @@ func writeRetentionBackupWithFiles(t *testing.T, directory, backupID string, com
 	if err := os.WriteFile(manifestPath, contents, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+}
+
+func writeRetentionBackupWithQdrant(t *testing.T, directory, backupID string, completedAt time.Time) string {
+	t.Helper()
+	writeRetentionBackup(t, directory, backupID, completedAt)
+	snapshotFile := qdrantSnapshotFileName(backupID, "weknora")
+	if err := os.WriteFile(filepath.Join(directory, snapshotFile), []byte("qdrant snapshot"), 0o600); err != nil {
+		t.Fatalf("write Qdrant snapshot: %v", err)
+	}
+	manifestPath := filepath.Join(directory, backupID+".manifest.json")
+	contents, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(contents, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	manifest.Qdrant = []QdrantSnapshot{{Collection: "weknora", File: snapshotFile, SizeBytes: 15, SHA256: "checksum"}}
+	contents, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, contents, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return snapshotFile
 }

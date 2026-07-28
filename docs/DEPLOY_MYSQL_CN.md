@@ -186,6 +186,34 @@ maintenance window 中暂停上传和写入，再创建备份。不要将文件 
   -DestinationDirectory D:\WeKnoraRestoreDrill\files
 ```
 
+## Qdrant 原生快照
+
+Qdrant snapshot 是加快向量索引恢复的可选能力，不是唯一恢复路径。恢复 MySQL 与
+本地文件后，WeKnora 可以从源数据重新构建 Qdrant index。只有在
+`RETRIEVE_DRIVER=qdrant` 时才可启用原生 snapshot；其他 retriever 不会进入该路径。
+
+```env
+BACKUP_QDRANT_ENABLED=true
+# 留空时，在 Compose network 中使用 http://QDRANT_HOST:6333。
+BACKUP_QDRANT_URL=
+```
+
+对于每个 collection，备份会调用 Qdrant native snapshot API，将返回的 snapshot
+复制到 `BACKUP_LOCAL_DIR`，计算 SHA-256 后删除 Qdrant 服务端临时 snapshot。主
+manifest 记录 collection、相对的 opaque filename、大小、checksum 与时间范围，但
+不记录 endpoint 或 API key。任意 collection 失败都不会留下成功的组合备份；retention
+会将快照与 SQL、文件 archive、inventory 和主 manifest 一起清理。
+
+snapshot 与 MySQL dump 不是原子 point-in-time image。需要严格 recovery point 时
+请使用 maintenance window。下列 drill 会先校验 snapshot，再启动一个新的临时 Qdrant
+容器，仅向该容器上传并恢复 snapshot；它不会连接正在运行的 Compose 服务：
+
+```powershell
+.\scripts\verify_qdrant_snapshots.ps1 `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups
+```
+
 ## 隔离恢复验证
 
 在依赖备份进行恢复前，请先将其恢复到一个新的临时 MySQL 8 容器并验证。这是

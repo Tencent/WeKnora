@@ -2,7 +2,7 @@
 
 [Chinese version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_CN.md) | **English version**
 
-> Status: implementation is in progress. Capabilities 1 through 9 are
+> Status: implementation is in progress. Capabilities 1 through 10 are
 > complete. This plan builds on `feature/mysql-8-backend` and does not change
 > the existing PostgreSQL or SQLite deployment paths.
 
@@ -141,8 +141,8 @@ valid archive-manifest pairs and retains the newest valid backup.
 | Tier | Data | Current direction |
 | --- | --- | --- |
 | L1 | MySQL business data | Manual and scheduled logical backup with checksum and manifest |
-| L2 | Local uploaded files under `/data/files` | Planned file inventory and recovery workflow |
-| L3 | Vector-store data such as Qdrant | Planned optional snapshot, restore, and reindex fallback |
+| L2 | Local uploaded files under `/data/files` | Complete optional local archive with inventory and restore drill |
+| L3 | Qdrant vector-store data | Complete optional native snapshot, isolated restore drill, and reindex fallback |
 
 Redis is not treated as the sole source of business truth. It can rebuild caches
 and queues after recovery.
@@ -227,7 +227,7 @@ reviewable and reversible:
 | 7 | `feature/mysql-8-restore-verify` | Isolated restore verification | Complete |
 | 8 | `feature/mysql-8-backup-schedule` | Scheduling, retention, backup locking | Complete |
 | 9 | `feature/mysql-8-file-backup` | Local file archive and consistency boundaries | Complete |
-| 10 | `feature/mysql-8-qdrant-snapshot` | Optional Qdrant snapshot and restore | Planned |
+| 10 | `feature/mysql-8-qdrant-snapshot` | Optional Qdrant snapshot and restore | Complete |
 | 11 | `feature/mysql-8-rollback-cli` | Deployment/config rollback and break-glass recovery | Planned |
 | 12 | `feature/mysql-8-ops-admin-ui` | Read-only status and controlled manual backup UI | Planned |
 

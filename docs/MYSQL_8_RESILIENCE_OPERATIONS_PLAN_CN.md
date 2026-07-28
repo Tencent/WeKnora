@@ -2,7 +2,7 @@
 
 **中文版本** | [English version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_EN.md)
 
-> 状态：实施中，已完成第 1 至第 9 项能力。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
+> 状态：实施中，已完成第 1 至第 10 项能力。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
 
 ## 1. 要解决的问题
 
@@ -168,10 +168,10 @@ logging:
 | 级别 | 内容 | 首期是否实现 |
 | --- | --- | --- |
 | L1：MySQL 元数据 | MySQL 业务库、迁移记录、校验清单 | 是，首期核心能力 |
-| L2：检索数据 | Qdrant 快照或其他向量库的原生快照 | 可选，默认关闭；可由原始文件重新构建 |
-| L3：文件与配置 | 本地 `/data/files`、关键配置清单、技能文件清单 | 本地文件存储时应纳入推荐备份；密钥不明文导出 |
+| L2：检索数据 | Qdrant 原生快照 | 已实现，可选且默认关闭；可由原始文件重新构建 |
+| L3：文件与配置 | 本地 `/data/files`、关键配置清单、技能文件清单 | 本地文件归档已实现；密钥不明文导出 |
 
-对于当前以本机 Docker Compose 运行、默认本地文件存储的环境，推荐备份 **MySQL + `/data/files`**。这样可以恢复用户上传的原始文件，并在需要时重新构建 Qdrant 索引。Qdrant 快照先做成可选项：它能缩短恢复后的重新索引时间，但增加了不同向量引擎的实现与存储成本。Redis 缓存不纳入备份，任务由应用的重试和死信机制处理。
+对于当前以本机 Docker Compose 运行、默认本地文件存储的环境，推荐备份 **MySQL + `/data/files`**。这样可以恢复用户上传的原始文件，并在需要时重新构建 Qdrant 索引。Qdrant 快照已作为可选功能实现：它能缩短恢复后的重新索引时间，但会增加存储成本；其他向量引擎不进入 Qdrant 专属快照路径。Redis 缓存不纳入备份，任务由应用的重试和死信机制处理。
 
 ### 7.2 触发方式
 
@@ -358,7 +358,7 @@ RPO 是“最多允许丢失多久的数据”，RTO 是“从故障到恢复服
 | 7 | `feature/mysql-8-restore-verify` | 隔离恢复验证 CLI/运维流程 | 从备份恢复到新 MySQL、版本/数据抽样检查 |
 | 8 | `feature/mysql-8-backup-schedule` | 可选定时备份、保留策略、备份锁 | 重复触发、失败告警、过期清理、不会删除最新可用备份 |
 | 9 | `feature/mysql-8-file-backup` | 已完成：本地 `/data/files` 归档和一致性边界 | 文件清单、缺失文件、维护模式下恢复演练 |
-| 10 | `feature/mysql-8-qdrant-snapshot` | 可选 Qdrant 快照与恢复 | 快照、恢复、重新索引回退路径 |
+| 10 | `feature/mysql-8-qdrant-snapshot` | 已完成：可选 Qdrant 快照、隔离恢复演练与重新索引回退路径 | 快照、恢复、重新索引回退路径 |
 | 11 | `feature/mysql-8-rollback-cli` | 发布/配置回退与 break-glass 恢复编排 | 兼容性阻止、不兼容时指向恢复流程、完整审计 |
 | 12 | `feature/mysql-8-ops-admin-ui` | 只读状态页与受控手动备份界面 | RBAC、二次确认、审计、无恢复一键按钮 |
 

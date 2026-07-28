@@ -109,6 +109,7 @@ func (o *operationsObserver) emitScheduledBackupAudit(run backup.ScheduledRun) {
 		details["files_archive_file"] = run.Result.FilesArchiveFile
 		details["files_inventory_file"] = run.Result.FilesInventoryFile
 		details["files_count"] = run.Result.FilesCount
+		details["qdrant_snapshot_count"] = run.Result.QdrantSnapshotCount
 		details["retention_failed"] = run.RetentionFailed
 	}
 	detailsJSON, err := json.Marshal(details)
@@ -148,6 +149,7 @@ func (o *operationsObserver) emitManualBackupAudit(c *gin.Context, result backup
 		details["files_archive_file"] = result.FilesArchiveFile
 		details["files_inventory_file"] = result.FilesInventoryFile
 		details["files_count"] = result.FilesCount
+		details["qdrant_snapshot_count"] = result.QdrantSnapshotCount
 	}
 	detailsJSON, err := json.Marshal(details)
 	if err != nil {

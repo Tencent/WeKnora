@@ -211,6 +211,39 @@ inventory and does not contact Docker or overwrite application data:
   -DestinationDirectory D:\WeKnoraRestoreDrill\files
 ```
 
+## Qdrant Native Snapshots
+
+Qdrant snapshots are optional acceleration for vector-index recovery, not the
+only recovery path. When the database and local files are restored, WeKnora can
+rebuild Qdrant indexes from source data. Enable native snapshots only when
+`RETRIEVE_DRIVER=qdrant`; other retrievers do not enter this path.
+
+```env
+BACKUP_QDRANT_ENABLED=true
+# Empty uses http://QDRANT_HOST:6333 inside the Compose network.
+BACKUP_QDRANT_URL=
+```
+
+For each collection, the backup requests Qdrant's native snapshot API, copies
+the returned snapshot into `BACKUP_LOCAL_DIR`, calculates its SHA-256, then
+deletes the temporary server-side snapshot. The main manifest records the
+collection, a relative opaque filename, size, checksum, and time range, but no
+endpoint or API key. A failure in any collection leaves no successful combined
+backup. Retention removes these snapshots together with the SQL, file, and
+manifest artifacts.
+
+Snapshots and the MySQL dump are not an atomic point-in-time image. Use a
+maintenance window when a strict recovery point is required. To validate and
+restore snapshots, the following drill starts a new disposable Qdrant container
+and uploads the snapshots only to that container. It does not connect to the
+live Compose service:
+
+```powershell
+.\scripts\verify_qdrant_snapshots.ps1 `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups
+```
+
 ## Isolated Restore Verification
 
 Before relying on a backup, restore it into a new temporary MySQL 8 container

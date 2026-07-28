@@ -372,6 +372,12 @@ func pruneExpiredBackups(directory string, cutoff time.Time) (int, error) {
 			}
 			paths = append(paths, filepath.Join(directory, manifest.Files.File), filepath.Join(directory, manifest.Files.InventoryFile))
 		}
+		if !validRetentionQdrantSnapshots(manifest) {
+			continue
+		}
+		for _, snapshot := range manifest.Qdrant {
+			paths = append(paths, filepath.Join(directory, snapshot.File))
+		}
 		valid := true
 		for _, path := range paths {
 			if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
@@ -425,6 +431,20 @@ func validRetentionFileArchive(manifest Manifest) bool {
 		files.InventoryFile == manifest.BackupID+".files.json" &&
 		files.Compression == "gzip" &&
 		files.FileCount >= 0 && files.ContentBytes >= 0 && files.SizeBytes >= 0 && files.SHA256 != ""
+}
+
+func validRetentionQdrantSnapshots(manifest Manifest) bool {
+	seen := make(map[string]bool, len(manifest.Qdrant))
+	for _, snapshot := range manifest.Qdrant {
+		if !validQdrantName(snapshot.Collection) ||
+			filepath.Base(snapshot.File) != snapshot.File ||
+			snapshot.File != qdrantSnapshotFileName(manifest.BackupID, snapshot.Collection) ||
+			snapshot.SizeBytes <= 0 || snapshot.SHA256 == "" || seen[snapshot.File] {
+			return false
+		}
+		seen[snapshot.File] = true
+	}
+	return true
 }
 
 func removeBackupPair(candidate backupCandidate) error {
