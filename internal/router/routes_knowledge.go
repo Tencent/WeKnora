@@ -274,6 +274,30 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	}
 }
 
+// RegisterKnowledgeFolderRoutes 注册知识库多级文件夹相关路由（#1311）。
+//
+// Folders are KB content organization, exactly like tags: Viewer reads via
+// KBAccessRead; mutations follow the KB主体 "creator OR Admin+" matrix so a
+// non-owner Contributor cannot reshape someone else's directory tree.
+func RegisterKnowledgeFolderRoutes(r *gin.RouterGroup, folderHandler *handler.KnowledgeFolderHandler, g *rbacGuards) {
+	if folderHandler == nil {
+		return
+	}
+	kbFolders := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	kbFoldersRead := kbFolders.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kbFoldersRead.GET("", g.Viewer(), g.KBAccessRead("id"), folderHandler.ListFolders)
+		kbFolders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.CreateFolder)
+		kbFolders.POST("/organize-by-path", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.OrganizeByPath)
+		kbFolders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.UpdateFolder)
+		kbFolders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.DeleteFolder)
+	}
+	// Batch document filing sits under the KB knowledge scope with the same
+	// write guard as folder mutations.
+	kbMove := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
+	kbMove.POST("/move-to-folder", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), folderHandler.MoveKnowledgeToFolder)
+}
+
 // RegisterWikiPageRoutes registers wiki page related routes.
 //
 // Wiki pages are KB content (wiki mode): reads are Viewer+ and gated by
