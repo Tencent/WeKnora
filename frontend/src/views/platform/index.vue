@@ -50,6 +50,7 @@
 import Menu from '@/components/menu.vue'
 import { ref, computed, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
+import { MenuIcon } from 'tdesign-icons-vue-next'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
