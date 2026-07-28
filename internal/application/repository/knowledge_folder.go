@@ -256,6 +256,14 @@ func (r *knowledgeFolderRepository) MoveKnowledgeBetweenFolders(
 	return result.RowsAffected, result.Error
 }
 
+func (r *knowledgeFolderRepository) ResetKnowledgeFolders(ctx context.Context, kbID string) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("knowledge_base_id = ? AND folder_id <> ?", kbID, types.KnowledgeFolderRootID).
+		Update("folder_id", types.KnowledgeFolderRootID)
+	return result.RowsAffected, result.Error
+}
+
 func (r *knowledgeFolderRepository) ListPathedRootKnowledge(
 	ctx context.Context, kbID string, limit int,
 ) ([]*types.Knowledge, error) {

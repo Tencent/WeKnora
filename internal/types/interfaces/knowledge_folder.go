@@ -49,8 +49,9 @@ type KnowledgeFolderService interface {
 	// ExpandFolderSubtrees returns the given folder IDs plus all their live
 	// descendants, for recursive list filtering.
 	ExpandFolderSubtrees(ctx context.Context, kbID string, folderIDs []string) ([]string, error)
-	// DeleteFoldersByKnowledgeBase removes every folder of a KB (cascade for
-	// KB deletion / clear-contents).
+	// DeleteFoldersByKnowledgeBase removes every folder of a KB and resets all
+	// document placements back to the root (used by clear-contents so a doc
+	// whose async delete fails cannot end up pointing at a dead folder).
 	DeleteFoldersByKnowledgeBase(ctx context.Context, kbID string) error
 }
 
@@ -88,4 +89,6 @@ type KnowledgeFolderRepository interface {
 	// file_name contains a "/" (organize-by-path work queue). Only ID and
 	// FileName are populated.
 	ListPathedRootKnowledge(ctx context.Context, kbID string, limit int) ([]*types.Knowledge, error)
+	// ResetKnowledgeFolders moves every document of the KB back to the root.
+	ResetKnowledgeFolders(ctx context.Context, kbID string) (int64, error)
 }
