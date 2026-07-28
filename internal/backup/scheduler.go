@@ -336,7 +336,7 @@ func parseScheduleNonNegativeInt(name string, defaultValue, maximum int) (int, e
 
 type backupCandidate struct {
 	manifestPath string
-	archivePath  string
+	paths        []string
 	completedAt  time.Time
 }
 
@@ -365,13 +365,26 @@ func pruneExpiredBackups(directory string, cutoff time.Time) (int, error) {
 		if entry.Name() != manifest.BackupID+".manifest.json" {
 			continue
 		}
-		archivePath := filepath.Join(directory, manifest.Archive.File)
-		if _, statErr := os.Stat(archivePath); statErr != nil {
+		paths := []string{filepath.Join(directory, manifest.Archive.File)}
+		if manifest.Files != nil {
+			if !validRetentionFileArchive(manifest) {
+				continue
+			}
+			paths = append(paths, filepath.Join(directory, manifest.Files.File), filepath.Join(directory, manifest.Files.InventoryFile))
+		}
+		valid := true
+		for _, path := range paths {
+			if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
+				valid = false
+				break
+			}
+		}
+		if !valid {
 			continue
 		}
 		candidates = append(candidates, backupCandidate{
 			manifestPath: manifestPath,
-			archivePath:  archivePath,
+			paths:        paths,
 			completedAt:  manifest.CompletedAt,
 		})
 	}
@@ -403,18 +416,33 @@ func validRetentionManifest(manifest Manifest) bool {
 		manifest.Archive.Compression == "gzip"
 }
 
+func validRetentionFileArchive(manifest Manifest) bool {
+	files := manifest.Files
+	return files != nil &&
+		filepath.Base(files.File) == files.File &&
+		filepath.Base(files.InventoryFile) == files.InventoryFile &&
+		files.File == manifest.BackupID+".files.tar.gz" &&
+		files.InventoryFile == manifest.BackupID+".files.json" &&
+		files.Compression == "gzip" &&
+		files.FileCount >= 0 && files.ContentBytes >= 0 && files.SizeBytes >= 0 && files.SHA256 != ""
+}
+
 func removeBackupPair(candidate backupCandidate) error {
-	archiveStaging := candidate.archivePath + ".purging"
-	manifestStaging := candidate.manifestPath + ".purging"
-	if err := os.Rename(candidate.archivePath, archiveStaging); err != nil {
-		return err
+	staged := make([][2]string, 0, len(candidate.paths)+1)
+	for _, path := range append(candidate.paths, candidate.manifestPath) {
+		purging := path + ".purging"
+		if err := os.Rename(path, purging); err != nil {
+			for index := len(staged) - 1; index >= 0; index-- {
+				_ = os.Rename(staged[index][1], staged[index][0])
+			}
+			return err
+		}
+		staged = append(staged, [2]string{path, purging})
 	}
-	if err := os.Rename(candidate.manifestPath, manifestStaging); err != nil {
-		_ = os.Rename(archiveStaging, candidate.archivePath)
-		return err
+	for _, pair := range staged {
+		if err := os.Remove(pair[1]); err != nil {
+			return err
+		}
 	}
-	if err := os.Remove(archiveStaging); err != nil {
-		return err
-	}
-	return os.Remove(manifestStaging)
+	return nil
 }

@@ -77,6 +77,8 @@ type MySQLConfig struct {
 	Password           string
 	Database           string
 	ApplicationVersion string
+	FilesEnabled       bool
+	FilesDir           string
 }
 
 // MigrationState is a snapshot captured in a backup manifest so restore
@@ -110,18 +112,22 @@ type Manifest struct {
 	ApplicationVersion string         `json:"application_version"`
 	Migration          MigrationState `json:"migration"`
 	Archive            *Archive       `json:"archive,omitempty"`
+	Files              *FileArchive   `json:"files,omitempty"`
 	FailureKind        ErrorKind      `json:"failure_kind,omitempty"`
 }
 
 // Result is the safe projection returned to an administrator after a manual
 // backup. File names are relative to BACKUP_LOCAL_DIR.
 type Result struct {
-	BackupID     string    `json:"backup_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	ArchiveFile  string    `json:"archive_file,omitempty"`
-	ManifestFile string    `json:"manifest_file,omitempty"`
-	SizeBytes    int64     `json:"size_bytes,omitempty"`
-	SHA256       string    `json:"sha256,omitempty"`
+	BackupID           string    `json:"backup_id"`
+	CreatedAt          time.Time `json:"created_at"`
+	ArchiveFile        string    `json:"archive_file,omitempty"`
+	ManifestFile       string    `json:"manifest_file,omitempty"`
+	SizeBytes          int64     `json:"size_bytes,omitempty"`
+	SHA256             string    `json:"sha256,omitempty"`
+	FilesArchiveFile   string    `json:"files_archive_file,omitempty"`
+	FilesInventoryFile string    `json:"files_inventory_file,omitempty"`
+	FilesCount         int       `json:"files_count,omitempty"`
 }
 
 type dumpExecutor interface {
@@ -223,6 +229,19 @@ func LoadMySQLConfigFromEnv() (MySQLConfig, error) {
 	if err != nil {
 		return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
 	}
+	config.FilesEnabled, err = parseBoolEnv("BACKUP_FILES_ENABLED", false)
+	if err != nil {
+		return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+	}
+	if config.FilesEnabled {
+		if storageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE"))); storageType != "" && storageType != "local" {
+			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+		}
+		config.FilesDir = strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		if !filepath.IsAbs(config.FilesDir) || filepath.Clean(config.FilesDir) == string(filepath.Separator) || pathsOverlap(config.FilesDir, config.LocalDir) {
+			return MySQLConfig{}, &Error{Kind: ErrorConfiguration}
+		}
+	}
 	return config, nil
 }
 
@@ -280,6 +299,26 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 		ApplicationVersion: m.config.ApplicationVersion,
 		Migration:          m.migration(),
 	}
+	if m.config.FilesEnabled {
+		files, filesErr := m.writeFilesArchive(operationCtx, backupID, startedAt)
+		manifest.CompletedAt = m.now().UTC()
+		if filesErr != nil {
+			manifest.Result = "failed"
+			manifest.FailureKind = ErrorStorage
+			manifestPath, err := writeManifest(m.config.LocalDir, manifest)
+			if err == nil {
+				result.ManifestFile = filepath.Base(manifestPath)
+			}
+			if err != nil {
+				return result, &Error{Kind: ErrorStorage}
+			}
+			return result, &Error{Kind: ErrorStorage}
+		}
+		manifest.Files = files
+		result.FilesArchiveFile = files.File
+		result.FilesInventoryFile = files.InventoryFile
+		result.FilesCount = files.FileCount
+	}
 
 	archiveFile := backupID + ".sql.gz"
 	archivePath := filepath.Join(m.config.LocalDir, archiveFile)
@@ -292,6 +331,11 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 		}
 		manifest.Result = "failed"
 		manifest.FailureKind = failureKind
+		removeFileArchive(m.config.LocalDir, manifest.Files)
+		manifest.Files = nil
+		result.FilesArchiveFile = ""
+		result.FilesInventoryFile = ""
+		result.FilesCount = 0
 		manifestPath, err := writeManifest(m.config.LocalDir, manifest)
 		if err == nil {
 			result.ManifestFile = filepath.Base(manifestPath)
@@ -312,6 +356,7 @@ func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Resu
 	manifestPath, err := writeManifest(m.config.LocalDir, manifest)
 	if err != nil {
 		_ = os.Remove(archivePath)
+		removeFileArchive(m.config.LocalDir, manifest.Files)
 		return result, &Error{Kind: ErrorStorage}
 	}
 	result.ArchiveFile = archiveFile
@@ -342,7 +387,24 @@ func (m *MySQLManager) VerifyResult(result Result) error {
 	if manifest.Result != "success" || manifest.Archive == nil || manifest.BackupID != result.BackupID || manifest.Archive.File != result.ArchiveFile {
 		return &Error{Kind: ErrorStorage}
 	}
-	return VerifyArchive(filepath.Join(m.config.LocalDir, result.ArchiveFile), *manifest.Archive)
+	if err := VerifyArchive(filepath.Join(m.config.LocalDir, result.ArchiveFile), *manifest.Archive); err != nil {
+		return err
+	}
+	if manifest.Files != nil {
+		if result.FilesArchiveFile != manifest.Files.File || result.FilesInventoryFile != manifest.Files.InventoryFile {
+			return &Error{Kind: ErrorStorage}
+		}
+		return VerifyFileArchive(filepath.Join(m.config.LocalDir, manifest.Files.File), filepath.Join(m.config.LocalDir, manifest.Files.InventoryFile), *manifest.Files)
+	}
+	return nil
+}
+
+func removeFileArchive(directory string, archive *FileArchive) {
+	if archive == nil {
+		return
+	}
+	_ = os.Remove(filepath.Join(directory, archive.File))
+	_ = os.Remove(filepath.Join(directory, archive.InventoryFile))
 }
 
 // VerifyArchive compares the archive's current byte count and SHA-256 sum to

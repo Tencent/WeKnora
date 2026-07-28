@@ -172,6 +172,45 @@ the system audit log. Restore is intentionally not available from this API; the
 restore-verification workflow below restores only into an isolated MySQL
 instance.
 
+## Local File Archives
+
+When `STORAGE_TYPE=local`, set `BACKUP_FILES_ENABLED=true` to pair every
+successful manual or scheduled MySQL backup with a `tar.gz` archive of
+`LOCAL_STORAGE_BASE_DIR` (normally `/data/files`). Each file archive has an
+adjacent inventory with relative file names, sizes, and SHA-256 checksums. The
+main backup manifest records only relative archive and inventory names, summary
+checksums, and the start/end timestamps. It never records the local storage
+absolute path.
+
+```env
+STORAGE_TYPE=local
+LOCAL_STORAGE_BASE_DIR=/data/files
+BACKUP_FILES_ENABLED=true
+```
+
+This setting is rejected for object-storage providers and when the files and
+backup directories overlap. The backup destination must be on an
+access-controlled host data drive, outside Docker's container layer. Retention
+removes the SQL archive, file archive, inventory, and main manifest together;
+the newest complete backup remains protected.
+
+The database dump and file archive are deliberately **not** described as an
+atomic point-in-time snapshot. Their separate start and completion timestamps
+make this boundary visible. For a strict recovery point, pause uploads and
+writes in a maintenance window before creating the backup. Do not restore the
+file archive over a live `/data/files` directory.
+
+Verify a file archive by extracting it only into a new, empty directory. This
+PowerShell drill checks the outer archive plus each extracted file against its
+inventory and does not contact Docker or overwrite application data:
+
+```powershell
+.\scripts\verify_local_file_backup.ps1 `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups `
+  -DestinationDirectory D:\WeKnoraRestoreDrill\files
+```
+
 ## Isolated Restore Verification
 
 Before relying on a backup, restore it into a new temporary MySQL 8 container

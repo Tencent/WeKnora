@@ -138,6 +138,26 @@ func TestPruneExpiredBackupsNeverDeletesOnlyRecoverableBackup(t *testing.T) {
 	}
 }
 
+func TestPruneExpiredBackupsRemovesAssociatedFileArchive(t *testing.T) {
+	directory := t.TempDir()
+	oldID := "weknora-mysql-20260701T000000Z-000000000000000000000001"
+	newID := "weknora-mysql-20260727T000000Z-000000000000000000000002"
+	writeRetentionBackupWithFiles(t, directory, oldID, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	writeRetentionBackupWithFiles(t, directory, newID, time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC))
+	deleted, err := pruneExpiredBackups(directory, time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC))
+	if err != nil || deleted != 1 {
+		t.Fatalf("prune = %d, %v; want 1, nil", deleted, err)
+	}
+	for _, name := range []string{oldID + ".sql.gz", oldID + ".files.tar.gz", oldID + ".files.json", oldID + ".manifest.json"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
+			t.Fatalf("expired associated file still exists: %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, newID+".files.tar.gz")); err != nil {
+		t.Fatalf("newest file archive removed: %v", err)
+	}
+}
+
 func TestMySQLSchedulerDisablesRetentionWhenConfiguredAsZero(t *testing.T) {
 	directory := t.TempDir()
 	now := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
@@ -177,6 +197,33 @@ func writeRetentionBackup(t *testing.T, directory, backupID string, completedAt 
 		t.Fatalf("marshal manifest: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, backupID+".manifest.json"), contents, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+func writeRetentionBackupWithFiles(t *testing.T, directory, backupID string, completedAt time.Time) {
+	t.Helper()
+	writeRetentionBackup(t, directory, backupID, completedAt)
+	for _, name := range []string{backupID + ".files.tar.gz", backupID + ".files.json"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("file backup"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	manifestPath := filepath.Join(directory, backupID+".manifest.json")
+	contents, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(contents, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	manifest.Files = &FileArchive{File: backupID + ".files.tar.gz", InventoryFile: backupID + ".files.json", SizeBytes: 11, SHA256: "checksum", Compression: "gzip"}
+	contents, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, contents, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 }

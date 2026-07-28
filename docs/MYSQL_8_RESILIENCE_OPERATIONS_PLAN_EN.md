@@ -2,7 +2,7 @@
 
 [Chinese version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_CN.md) | **English version**
 
-> Status: implementation is in progress. Capabilities 1 through 8 are
+> Status: implementation is in progress. Capabilities 1 through 9 are
 > complete. This plan builds on `feature/mysql-8-backend` and does not change
 > the existing PostgreSQL or SQLite deployment paths.
 
@@ -226,7 +226,7 @@ reviewable and reversible:
 | 6 | `feature/mysql-8-backup-manual` | Manual MySQL backup, manifest, audit | Complete |
 | 7 | `feature/mysql-8-restore-verify` | Isolated restore verification | Complete |
 | 8 | `feature/mysql-8-backup-schedule` | Scheduling, retention, backup locking | Complete |
-| 9 | `feature/mysql-8-file-backup` | Local file archive and consistency boundaries | Planned |
+| 9 | `feature/mysql-8-file-backup` | Local file archive and consistency boundaries | Complete |
 | 10 | `feature/mysql-8-qdrant-snapshot` | Optional Qdrant snapshot and restore | Planned |
 | 11 | `feature/mysql-8-rollback-cli` | Deployment/config rollback and break-glass recovery | Planned |
 | 12 | `feature/mysql-8-ops-admin-ui` | Read-only status and controlled manual backup UI | Planned |

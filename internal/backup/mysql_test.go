@@ -143,6 +143,62 @@ func TestMySQLManagerCreateScheduledWritesScheduledManifest(t *testing.T) {
 	}
 }
 
+func TestMySQLManagerCreateManualIncludesVerifiableLocalFiles(t *testing.T) {
+	backupDirectory := t.TempDir()
+	filesDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(filesDirectory, "42", "knowledge"), 0o700); err != nil {
+		t.Fatalf("create source directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(filesDirectory, "42", "knowledge", "document.txt"), []byte("file backup payload"), 0o600); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+	manager := newTestMySQLManager(backupDirectory, fakeDumpExecutor{payload: []byte("database backup")}, &fakeBackupLocker{})
+	manager.config.FilesEnabled = true
+	manager.config.FilesDir = filesDirectory
+
+	result, err := manager.CreateManual(context.Background(), "before file restore drill")
+	if err != nil {
+		t.Fatalf("CreateManual returned error: %v", err)
+	}
+	if result.FilesArchiveFile == "" || result.FilesInventoryFile == "" || result.FilesCount != 1 {
+		t.Fatalf("unexpected file result: %#v", result)
+	}
+	if err := manager.VerifyResult(result); err != nil {
+		t.Fatalf("VerifyResult returned error: %v", err)
+	}
+	manifestContents, err := os.ReadFile(filepath.Join(backupDirectory, result.ManifestFile))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if strings.Contains(string(manifestContents), filesDirectory) || !strings.Contains(string(manifestContents), `"files":`) {
+		t.Fatalf("manifest leaked source path or omitted file archive: %s", manifestContents)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(manifestContents, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	inventoryPath := filepath.Join(backupDirectory, result.FilesInventoryFile)
+	inventoryContents, err := os.ReadFile(inventoryPath)
+	if err != nil {
+		t.Fatalf("read inventory: %v", err)
+	}
+	var inventory fileInventory
+	if err := json.Unmarshal(inventoryContents, &inventory); err != nil {
+		t.Fatalf("unmarshal inventory: %v", err)
+	}
+	inventory.Files = nil
+	inventoryContents, err = json.Marshal(inventory)
+	if err != nil {
+		t.Fatalf("marshal inventory: %v", err)
+	}
+	if err := os.WriteFile(inventoryPath, inventoryContents, 0o600); err != nil {
+		t.Fatalf("write incomplete inventory: %v", err)
+	}
+	if err := manager.VerifyResult(result); !IsErrorKind(err, ErrorIntegrity) {
+		t.Fatalf("VerifyResult after missing inventory entry = %v, want integrity error", err)
+	}
+}
+
 func TestMySQLManagerCreateManualRecordsFailureWithoutArchive(t *testing.T) {
 	directory := t.TempDir()
 	manager := newTestMySQLManager(directory, fakeDumpExecutor{err: errors.New("mysqldump exit 1")}, &fakeBackupLocker{})

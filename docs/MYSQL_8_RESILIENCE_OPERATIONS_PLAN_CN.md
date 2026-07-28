@@ -2,7 +2,7 @@
 
 **中文版本** | [English version](MYSQL_8_RESILIENCE_OPERATIONS_PLAN_EN.md)
 
-> 状态：实施中，已完成第 1 至第 8 项能力。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
+> 状态：实施中，已完成第 1 至第 9 项能力。本方案以 `feature/mysql-8-backend` 的 MySQL 8 支持为基础，不改变 PostgreSQL、SQLite 的既有部署路径。
 
 ## 1. 要解决的问题
 
@@ -357,7 +357,7 @@ RPO 是“最多允许丢失多久的数据”，RTO 是“从故障到恢复服
 | 6 | `feature/mysql-8-backup-manual` | MySQL 手动备份、清单、哈希、权限与审计 | 空库与有数据备份、校验失败、权限测试 |
 | 7 | `feature/mysql-8-restore-verify` | 隔离恢复验证 CLI/运维流程 | 从备份恢复到新 MySQL、版本/数据抽样检查 |
 | 8 | `feature/mysql-8-backup-schedule` | 可选定时备份、保留策略、备份锁 | 重复触发、失败告警、过期清理、不会删除最新可用备份 |
-| 9 | `feature/mysql-8-file-backup` | 本地 `/data/files` 归档和一致性边界 | 文件清单、缺失文件、维护模式下恢复演练 |
+| 9 | `feature/mysql-8-file-backup` | 已完成：本地 `/data/files` 归档和一致性边界 | 文件清单、缺失文件、维护模式下恢复演练 |
 | 10 | `feature/mysql-8-qdrant-snapshot` | 可选 Qdrant 快照与恢复 | 快照、恢复、重新索引回退路径 |
 | 11 | `feature/mysql-8-rollback-cli` | 发布/配置回退与 break-glass 恢复编排 | 兼容性阻止、不兼容时指向恢复流程、完整审计 |
 | 12 | `feature/mysql-8-ops-admin-ui` | 只读状态页与受控手动备份界面 | RBAC、二次确认、审计、无恢复一键按钮 |

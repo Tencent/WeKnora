@@ -152,6 +152,40 @@ partial archive，只在 manifest 与审计事件中保留安全的失败类别�
 不要在操作原因中写入 secret，因为它会被写入 manifest 和系统审计日志。此 API
 不提供恢复操作；下述恢复验证流程只会恢复到隔离的 MySQL 实例。
 
+## 本地文件归档
+
+当 `STORAGE_TYPE=local` 时，设置 `BACKUP_FILES_ENABLED=true` 可让每一次成功的
+手动或定时 MySQL 备份同时归档 `LOCAL_STORAGE_BASE_DIR`（通常是 `/data/files`）。
+每个文件 archive 均有相邻 inventory，记录相对文件名、大小和 SHA-256。主 backup
+manifest 只记录相对的 archive/inventory 文件名、汇总 checksum 和开始/结束时间，
+不记录本地文件存储的 absolute path。
+
+```env
+STORAGE_TYPE=local
+LOCAL_STORAGE_BASE_DIR=/data/files
+BACKUP_FILES_ENABLED=true
+```
+
+该配置不能用于 object-storage provider，也不能让文件目录与备份目录重叠。备份目标应
+位于访问受控的宿主机数据盘，并且在 Docker container layer 之外。retention 会将
+SQL archive、文件 archive、inventory 和主 manifest 一起删除，同时始终保护最新的
+完整备份。
+
+数据库 dump 与文件 archive 被刻意标记为**非原子 point-in-time snapshot**。各自的
+开始和结束时间会写入清单，明确这一边界。如需严格 recovery point，请先在
+maintenance window 中暂停上传和写入，再创建备份。不要将文件 archive 直接恢复到
+正在运行的 `/data/files` 目录。
+
+只能解压到一个新的空目录来验证文件 archive。该 PowerShell drill 会校验外层 archive
+以及每一个解压文件与 inventory 的一致性，不会连接 Docker，也不会覆盖应用数据：
+
+```powershell
+.\scripts\verify_local_file_backup.ps1 `
+  -BackupId weknora-mysql-YYYYMMDDTHHMMSSZ-<24-lowercase-hex-characters> `
+  -BackupDirectory D:\WeKnoraBackups `
+  -DestinationDirectory D:\WeKnoraRestoreDrill\files
+```
+
 ## 隔离恢复验证
 
 在依赖备份进行恢复前，请先将其恢复到一个新的临时 MySQL 8 容器并验证。这是
