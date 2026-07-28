@@ -46,6 +46,10 @@ import (
 // file storage. Generated artifacts must remain under /workspace/output.
 const SessionInputRoot = "/workspace/input"
 
+// SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
+// shell_exec work_dir must stay underneath this path.
+const SessionWorkspaceRoot = "/workspace"
+
 // sessionLifecycleCleanupTimeout bounds the lifecycle coordinator's own
 // bookkeeping deletions (loser cleanup, orphan cleanup after session
 // disappearance).
@@ -244,6 +248,12 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	}
 
 	if fallback != nil {
+		if strings.TrimSpace(cfg.SessionID) != "" {
+			return nil, fmt.Errorf(
+				"sandbox: session-scoped execution requires the remote provider (current mode: %s)",
+				m.fallback.Type(),
+			)
+		}
 		return fallback.Execute(ctx, cfg)
 	}
 	if strings.TrimSpace(cfg.SessionID) == "" {
@@ -424,6 +434,15 @@ func (m *SessionBoundManager) ExecShellCommand(
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
+	}
+
+	workDir = strings.TrimSpace(workDir)
+	if workDir != "" {
+		cleanWorkDir, err := cleanSessionWorkDir(workDir)
+		if err != nil {
+			return nil, err
+		}
+		workDir = cleanWorkDir
 	}
 
 	handle, err := m.resolveSession(ctx, sessionID)
@@ -636,6 +655,17 @@ func cleanSessionInputPath(filePath string) (string, error) {
 	return "", fmt.Errorf(
 		"sandbox: session input path %q is outside %s",
 		filePath, SessionInputRoot,
+	)
+}
+
+func cleanSessionWorkDir(workDir string) (string, error) {
+	clean := path.Clean(strings.TrimSpace(workDir))
+	if clean == SessionWorkspaceRoot || strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
+		return clean, nil
+	}
+	return "", fmt.Errorf(
+		"sandbox: work dir %q is outside %s",
+		workDir, SessionWorkspaceRoot,
 	)
 }
 
