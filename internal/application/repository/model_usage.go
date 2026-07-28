@@ -17,6 +17,16 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 			modelID, modelID, modelID, modelID, modelID, modelID,
 		)
 	}
+	if db.Dialector.Name() == "mysql" {
+		return db.Where(
+			"embedding_model_id = ? OR summary_model_id = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(image_processing_config, '$.model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(vlm_config, '$.model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(asr_config, '$.model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(wiki_config, '$.synthesis_model_id')) = ?",
+			modelID, modelID, modelID, modelID, modelID, modelID,
+		)
+	}
 	return db.Where(
 		"embedding_model_id = ? OR summary_model_id = ? OR "+
 			"json_extract(image_processing_config, '$.model_id') = ? OR "+
@@ -36,6 +46,17 @@ func scopeCustomAgentsByModelID(db *gorm.DB, modelID string) *gorm.DB {
 				"config->>'vlm_model_id' = ? OR config->>'asr_model_id' = ? OR "+
 				"config->>'query_understand_model_id' = ? OR "+
 				"config->'question_suggestions'->'follow_ups'->>'model_id' = ?",
+			modelID, modelID, modelID, modelID, modelID, modelID,
+		)
+	}
+	if db.Dialector.Name() == "mysql" {
+		return db.Where(
+			"JSON_UNQUOTE(JSON_EXTRACT(config, '$.model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.rerank_model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.vlm_model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.asr_model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.query_understand_model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.question_suggestions.follow_ups.model_id')) = ?",
 			modelID, modelID, modelID, modelID, modelID, modelID,
 		)
 	}

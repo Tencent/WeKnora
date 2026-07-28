@@ -147,6 +147,8 @@ func (r *sessionRepository) QueryPaged(
 	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
 	if isPostgres {
 		titleLikeExpr = "s.title ILIKE ?"
+	} else if r.db.Dialector.Name() == "mysql" {
+		titleLikeExpr = "s.title LIKE ?"
 	}
 	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
 	// nulls ordering puts NULLs first for DESC, which is actually what we want

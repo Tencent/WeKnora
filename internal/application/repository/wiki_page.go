@@ -33,6 +33,9 @@ func (r *wikiPageRepository) wikiCategoryRankOrder() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "mysql" {
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
 	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 }
 
@@ -40,7 +43,17 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "mysql" {
+		return "(in_links IS NULL OR JSON_LENGTH(in_links) = 0)"
+	}
 	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+}
+
+func (r *wikiPageRepository) wikiSourceRefPredicate() string {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "mysql" {
+		return "(JSON_CONTAINS(source_refs, ?) OR CAST(source_refs AS CHAR) LIKE ?)"
+	}
+	return "(source_refs @> ?::jsonb OR source_refs::text LIKE ?)"
 }
 
 // Create inserts a new wiki page record
@@ -173,12 +186,19 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		if r.db.Dialector.Name() == "mysql" {
+			query = query.Where(
+				"(title LIKE ? OR content LIKE ? OR CAST(aliases AS CHAR) LIKE ?)",
+				"%"+req.Query+"%", "%"+req.Query+"%", "%"+req.Query+"%",
+			)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				"%"+req.Query+"%",
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -342,7 +362,7 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND "+r.wikiSourceRefPredicate(),
 			kbID,
 			string(needle),
 			likePattern,
@@ -380,7 +400,7 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND "+r.wikiSourceRefPredicate(),
 			kbID,
 			string(needle),
 			likePattern,
@@ -681,7 +701,11 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
+		if r.db.Dialector.Name() == "mysql" {
+			clauses = append(clauses, "JSON_CONTAINS(source_refs, ?)")
+		} else {
+			clauses = append(clauses, "source_refs @> ?::jsonb")
+		}
 		args = append(args, string(needle))
 
 		prefix, err := json.Marshal(kid + "|")
@@ -692,7 +716,11 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		if r.db.Dialector.Name() == "mysql" {
+			clauses = append(clauses, "CAST(source_refs AS CHAR) LIKE ?")
+		} else {
+			clauses = append(clauses, "source_refs::text LIKE ?")
+		}
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {
@@ -891,6 +919,27 @@ func (r *wikiPageRepository) FindSimilarPages(
 	q := strings.ToLower(strings.TrimSpace(query))
 
 	var rows []types.WikiPageLite
+	if r.db.Dialector.Name() == "mysql" {
+		// MySQL 8 has no pg_trgm equivalent. Keep the candidate set bounded and
+		// rank exact titles above substring matches; the caller only uses these
+		// as merge candidates and still performs its normal validation.
+		if err := r.db.WithContext(ctx).
+			Model(&types.WikiPage{}).
+			Select("slug, title, page_type, status, aliases, out_links, CASE WHEN LOWER(title) = ? THEN 1.0 ELSE 0.5 END AS sim", q).
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND LOWER(title) LIKE ?",
+				kbID, pageTypes, types.WikiPageStatusArchived, "%"+q+"%").
+			Order("sim DESC, title ASC").
+			Limit(limit).
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]*types.WikiPageLite, len(rows))
+		for i := range rows {
+			row := rows[i]
+			out[i] = &row
+		}
+		return out, nil
+	}
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
