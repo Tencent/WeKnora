@@ -1697,17 +1697,28 @@ onMounted(async () => {
 }
 
 @media (max-width: 480px) {
+  .login-layout {
+    min-height: var(--app-viewport-height, 100dvh);
+    overflow-x: hidden;
+  }
+
   .animated-bg {
     display: none;
   }
 
   .showcase-section {
-    padding: 32px 20px;
+    min-height: auto;
+    align-items: stretch;
+    padding: calc(78px + env(safe-area-inset-top)) 20px 28px;
+  }
+
+  .showcase-content {
+    margin-bottom: 0;
   }
 
   .header-logo {
-    top: 18px;
-    left: 20px;
+    top: calc(14px + env(safe-area-inset-top));
+    left: max(16px, env(safe-area-inset-left));
 
     .logo-image {
       width: 70px;
@@ -1724,17 +1735,30 @@ onMounted(async () => {
   }
 
   .form-section {
-    padding: 20px;
+    padding: 20px max(16px, env(safe-area-inset-right))
+      calc(20px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
 
   .header-links {
-    top: 14px;
-    right: 14px;
+    top: calc(10px + env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
     gap: 6px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 
-    .header-link {
-      padding: 7px 10px;
+    > .header-link {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      justify-content: center;
+
+      .link-text {
+        display: none;
+      }
+    }
+
+    .language-switch .header-link {
+      min-height: 40px;
+      padding: 0 10px;
       font-size: 11px;
     }
   }
@@ -1745,6 +1769,54 @@ onMounted(async () => {
 
   .form-header {
     margin-bottom: 24px;
+  }
+}
+
+@media (max-width: 900px) and (max-height: 520px) {
+  .login-layout {
+    min-height: var(--app-viewport-height, 100dvh);
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  .showcase-section {
+    display: none;
+  }
+
+  .header-logo {
+    top: calc(12px + env(safe-area-inset-top));
+    left: max(16px, env(safe-area-inset-left));
+
+    .logo-image {
+      width: 76px;
+    }
+  }
+
+  .header-links {
+    top: calc(8px + env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    gap: 6px;
+
+    .header-link {
+      min-height: 40px;
+      padding: 0 10px;
+      font-size: 11px;
+    }
+  }
+
+  .form-section {
+    flex: 0 0 auto;
+    min-height: var(--app-viewport-height, 100dvh);
+    align-items: flex-start;
+    padding: calc(64px + env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      calc(16px + env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+
+  .form-panel {
+    max-width: 520px;
+    margin-bottom: 0;
   }
 }
 

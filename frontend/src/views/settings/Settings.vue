@@ -3,6 +3,19 @@
     <Transition name="modal">
       <div v-if="visible" class="settings-overlay">
         <div class="settings-modal">
+          <div class="mobile-settings-header">
+            <button type="button" class="mobile-settings-nav-btn" :aria-expanded="mobileNavOpen"
+              :aria-label="$t('general.settings')" @click="mobileNavOpen = !mobileNavOpen">
+              <t-icon name="menu-fold" size="20px" />
+            </button>
+            <div class="mobile-settings-heading">
+              <span class="mobile-settings-kicker">{{ $t('general.settings') }}</span>
+              <span class="mobile-settings-current">{{ currentNavLabel }}</span>
+            </div>
+            <button type="button" class="mobile-settings-close" @click="handleClose" :aria-label="$t('general.close')">
+              <t-icon name="close" size="20px" />
+            </button>
+          </div>
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -11,8 +24,10 @@
           </button>
 
           <div class="settings-container">
+            <button v-if="mobileNavOpen" type="button" class="mobile-settings-backdrop"
+              :aria-label="$t('general.close')" @click="mobileNavOpen = false" />
             <!-- 左侧导航 -->
-            <div class="settings-sidebar">
+            <div class="settings-sidebar" :class="{ 'settings-sidebar--mobile-open': mobileNavOpen }">
               <div class="sidebar-header">
                 <h2 class="sidebar-title">{{ $t('general.settings') }}</h2>
               </div>
@@ -193,6 +208,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -228,6 +245,9 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const { t } = useI18n()
+const { isCompact } = useResponsiveViewport()
+const SETTINGS_SCROLL_LOCK = 'settings-surface'
+const mobileNavOpen = ref(false)
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -407,6 +427,12 @@ const navGroups = computed<NavGroup[]>(() => {
   ].filter((group) => group.items.length > 0)
 })
 
+const currentNavLabel = computed(() => {
+  const item = navItems.value.find((entry) => entry.key === currentSection.value)
+  const child = item?.children?.find((entry) => entry.key === currentSubSection.value)
+  return child?.label || item?.label || t('general.settings')
+})
+
 // 导航项点击处理
 const handleNavClick = (item: any) => {
   if (item.children && item.children.length > 0) {
@@ -441,6 +467,7 @@ const handleNavClick = (item: any) => {
       query: { ...query, section: item.key },
     })
   }
+  if (isCompact.value) mobileNavOpen.value = false
 }
 
 // 子菜单点击处理
@@ -455,12 +482,18 @@ const handleSubMenuClick = (parentKey: string, childKey: string) => {
       element.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, 100)
+  if (isCompact.value) mobileNavOpen.value = false
 }
 
 // 控制弹窗显示
 const visible = computed(() => {
   return route.path === '/platform/settings' || uiStore.showSettingsModal
 })
+
+watch([visible, isCompact], ([open, compact]) => {
+  setBodyScrollLock(SETTINGS_SCROLL_LOCK, open && compact)
+  if (!open || !compact) mobileNavOpen.value = false
+}, { immediate: true })
 
 // 关闭弹窗
 const handleClose = () => {
@@ -553,10 +586,12 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('settings-nav', handleSettingsNav as EventListener)
+  releaseBodyScrollLock(SETTINGS_SCROLL_LOCK)
 })
 </script>
 
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 /* 遮罩层 */
 .settings-overlay {
   position: fixed;
@@ -898,4 +933,160 @@ onUnmounted(() => {
     line-height: 1.6;
   }
 }
+
+
+.mobile-settings-header,
+.mobile-settings-backdrop {
+  display: none;
+}
+
+.compact({
+  .settings-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    background: var(--td-bg-color-container);
+    backdrop-filter: none;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-width: none;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .close-btn {
+    display: none;
+  }
+
+  .mobile-settings-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
+    flex-shrink: 0;
+    z-index: 30;
+  }
+
+  .mobile-settings-nav-btn,
+  .mobile-settings-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--td-text-color-primary);
+  }
+
+  .mobile-settings-heading {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .mobile-settings-kicker {
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .mobile-settings-current {
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-container {
+    position: relative;
+    min-height: 0;
+  }
+
+  .mobile-settings-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 19;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.42);
+  }
+
+  .settings-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    width: min(84vw, 320px);
+    max-width: 100%;
+    border-right: 1px solid var(--td-component-stroke);
+    box-shadow: 12px 0 30px rgba(0, 0, 0, 0.14);
+    transform: translateX(-104%);
+    transition: transform 180ms ease;
+
+    &.settings-sidebar--mobile-open {
+      transform: translateX(0);
+    }
+  }
+
+  .sidebar-header {
+    padding: 14px 14px 10px;
+  }
+
+  .settings-nav {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .nav-item,
+  .submenu-item {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .settings-content {
+    min-width: 0;
+    width: 100%;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .content-wrapper,
+  .content-wrapper--wide,
+  .content-wrapper--full {
+    width: 100%;
+    max-width: none;
+    padding: 18px max(14px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    box-sizing: border-box;
+  }
+
+  .role-denied {
+    min-height: 180px;
+    padding: 40px 16px;
+  }
+
+  .modal-enter-from .settings-modal,
+  .modal-leave-to .settings-modal {
+    transform: translateY(12px);
+  }
+});
 </style>

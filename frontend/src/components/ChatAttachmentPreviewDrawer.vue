@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import DocumentPreview from '@/components/document-preview.vue'
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 
 const drawer = useChatAttachmentPreviewDrawer()
+const { layoutWidth, isCompact } = useResponsiveViewport()
 
 const MAIN_DRAWER_WIDTH_KEY = 'weknora-chat-attachment-drawer-width'
 const MAIN_DRAWER_DEFAULT_WIDTH = 654
 const MAIN_DRAWER_MIN_WIDTH = 480
+const ATTACHMENT_DRAWER_SCROLL_LOCK = 'chat-attachment-preview'
 
 const mainDrawerWidth = ref(MAIN_DRAWER_DEFAULT_WIDTH)
 const mainDrawerResizing = ref(false)
@@ -17,9 +21,10 @@ let mainResizeStartWidth = 0
 
 const visible = computed(() => drawer?.visible.value ?? false)
 const target = computed(() => drawer?.target.value ?? null)
+const drawerSize = computed(() => isCompact.value ? '100%' : `${mainDrawerWidth.value}px`)
 
 function mainDrawerMaxWidth() {
-  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.95)))
+  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(layoutWidth.value * 0.95)))
 }
 
 function clampMainDrawerWidth(width: number) {
@@ -39,6 +44,7 @@ function loadMainDrawerWidth() {
 }
 
 function onMainDrawerResizeStart(e: MouseEvent) {
+  if (isCompact.value) return
   mainDrawerResizing.value = true
   mainResizeStartX = e.clientX
   mainResizeStartWidth = mainDrawerWidth.value
@@ -82,6 +88,11 @@ function close() {
   drawer?.close()
 }
 
+watch([visible, isCompact], ([open, compact]) => {
+  setBodyScrollLock(ATTACHMENT_DRAWER_SCROLL_LOCK, open && compact)
+  if ((!open || compact) && mainDrawerResizing.value) cleanupMainDrawerResize()
+}, { immediate: true })
+
 onMounted(() => {
   loadMainDrawerWidth()
   window.addEventListener('resize', onWindowResize)
@@ -90,6 +101,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', onWindowResize)
   cleanupMainDrawerResize()
+  releaseBodyScrollLock(ATTACHMENT_DRAWER_SCROLL_LOCK)
 })
 </script>
 
@@ -101,7 +113,7 @@ onUnmounted(() => {
       aria-hidden="true"
     />
     <div
-      v-if="visible"
+      v-if="visible && !isCompact"
       class="chat-attachment-drawer-resize-handle"
       :class="{ 'chat-attachment-drawer-resize-handle--active': mainDrawerResizing }"
       :style="{ right: `${mainDrawerWidth}px` }"
@@ -116,11 +128,14 @@ onUnmounted(() => {
   <t-drawer
     :visible="visible"
     :z-index="2000"
-    :size="`${mainDrawerWidth}px`"
+    :size="drawerSize"
     attach="body"
     :close-btn="true"
     :footer="false"
-    :class="['chat-attachment-preview-drawer', { 'chat-attachment-preview-drawer--resizing': mainDrawerResizing }]"
+    :class="['chat-attachment-preview-drawer', {
+      'chat-attachment-preview-drawer--resizing': mainDrawerResizing,
+      'chat-attachment-preview-drawer--compact': isCompact,
+    }]"
     @close="close"
   >
     <template #header>
@@ -148,6 +163,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 :deep(.t-drawer__header) {
   font-weight: normal;
 }
@@ -233,6 +249,7 @@ onUnmounted(() => {
 </style>
 
 <style lang="less">
+@import '@/assets/responsive.less';
 .t-drawer.chat-attachment-preview-drawer {
   .t-drawer__content-wrapper,
   .t-drawer__content {
@@ -252,6 +269,24 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+}
+
+.t-drawer.chat-attachment-preview-drawer--compact {
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    width: 100% !important;
+    max-width: 100%;
+    height: var(--app-viewport-height, 100dvh);
+  }
+
+  .t-drawer__header {
+    min-height: 52px;
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  }
+
+  .t-drawer__body {
+    padding: 8px max(8px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   }
 }
 

@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
+    <div v-if="drawerVisible && resizable && !isCompact" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
       :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
@@ -57,8 +57,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
+import { ref, computed, useAttrs, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 
 interface Props {
   visible: boolean
@@ -117,6 +119,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const attrs = useAttrs()
+const { isCompact } = useResponsiveViewport()
+const SETTING_DRAWER_SCROLL_LOCK = 'shared-setting-drawer'
 
 const drawerPassthroughAttrs = computed(() => {
   const { class: _class, ...rest } = attrs
@@ -162,7 +166,7 @@ const loadStoredWidth = (): number | null => {
 const userWidthPx = ref<number | null>(loadStoredWidth())
 
 const effectiveWidth = computed(() =>
-  userWidthPx.value != null ? `${userWidthPx.value}px` : props.width
+  isCompact.value ? '100%' : (userWidthPx.value != null ? `${userWidthPx.value}px` : props.width)
 )
 
 const drawerWidthPx = computed(() =>
@@ -186,13 +190,17 @@ const drawerResizing = ref(false)
 const drawerClass = computed(() => [
   'setting-drawer',
   attrs.class,
-  { 'setting-drawer--resizing': drawerResizing.value },
+  {
+    'setting-drawer--resizing': drawerResizing.value,
+    'setting-drawer--compact': isCompact.value,
+  },
 ])
 
 let resizeStartX = 0
 let resizeStartWidth = 0
 
 function onResizeStart(e: MouseEvent) {
+  if (isCompact.value) return
   drawerResizing.value = true
   resizeStartX = e.clientX
   resizeStartWidth = drawerWidthPx.value
@@ -230,6 +238,11 @@ function onWindowResize() {
   }
 }
 
+watch([drawerVisible, isCompact], ([visible, compact]) => {
+  setBodyScrollLock(SETTING_DRAWER_SCROLL_LOCK, visible && compact)
+  if ((!visible || compact) && drawerResizing.value) cleanupResize()
+}, { immediate: true })
+
 onMounted(() => {
   window.addEventListener('resize', onWindowResize, { passive: true })
 })
@@ -237,6 +250,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', onWindowResize)
   cleanupResize()
+  releaseBodyScrollLock(SETTING_DRAWER_SCROLL_LOCK)
 })
 
 const handleConfirm = () => emit('confirm')
@@ -247,6 +261,7 @@ const handleCancel = () => {
 </script>
 
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 /* ---------- Header ---------- */
 .setting-drawer__header {
   display: flex;
@@ -401,6 +416,48 @@ const handleCancel = () => {
   gap: 12px;
   flex-shrink: 0;
 }
+
+
+.compact({
+  .setting-drawer__header {
+    gap: 8px;
+    padding-right: 34px;
+  }
+
+  .setting-drawer__header-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .setting-drawer__title {
+    font-size: 15px;
+  }
+
+  .setting-drawer__subtitle {
+    display: none;
+  }
+
+  .setting-drawer__footer {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .setting-drawer__footer-left:empty {
+    display: none;
+  }
+
+  .setting-drawer__footer-right {
+    width: 100%;
+    gap: 8px;
+
+    :deep(.t-button) {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 40px;
+    }
+  }
+});
 </style>
 
 <!--
@@ -424,6 +481,36 @@ const handleCancel = () => {
     padding: 10px 18px;
     border-top: 1px solid var(--td-component-stroke);
     box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
+  }
+}
+
+
+.setting-drawer.setting-drawer--compact {
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    width: 100% !important;
+    max-width: 100%;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+  }
+
+  .t-drawer__content {
+    border-radius: 0;
+  }
+
+  .t-drawer__header {
+    min-height: 52px;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  }
+
+  .t-drawer__body {
+    padding: 12px max(12px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .t-drawer__footer {
+    padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
 }
 

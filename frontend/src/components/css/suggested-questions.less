@@ -1,3 +1,4 @@
+@import (reference) '@/assets/responsive.less';
 @suggested-ease: cubic-bezier(0.16, 1, 0.3, 1);
 
 // Shared hover for starter / follow-up suggestion chips.
@@ -202,3 +203,18 @@
     color: var(--td-brand-color);
 }
 
+.compact({
+    .suggested-questions-container {
+        padding: 10px 8px;
+    }
+
+    .suggested-questions-grid {
+        gap: 8px;
+    }
+
+    .suggested-question-card {
+        width: 100%;
+        justify-content: space-between;
+        padding: 8px 10px;
+    }
+});

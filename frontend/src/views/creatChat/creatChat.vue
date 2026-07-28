@@ -55,7 +55,7 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
@@ -179,6 +179,14 @@ watch(
 
 onMounted(() => { fetchSuggestedQuestions(); });
 
+onUnmounted(() => {
+    suggestedQuestionsFetchId += 1;
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+    }
+});
+
 const inputFieldRef = ref();
 
 const handleSuggestedQuestionClick = (question: string) => {
@@ -243,12 +251,19 @@ const handleKBEditorSuccess = (kbId: string) => {
 
 </script>
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 .dialogue-wrap {
     flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
-    // position: relative;
+    min-width: 0;
+    min-height: 0;
+    padding: 32px clamp(16px, 4vw, 48px);
+    box-sizing: border-box;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .dialogue-answers {
@@ -257,11 +272,14 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     gap: 24px;
+    box-sizing: border-box;
 
     :deep(.answers-input) {
         position: static;
-        transform: translateX(0);
+        width: 100%;
+        transform: none;
     }
 }
 
@@ -308,6 +326,8 @@ const handleKBEditorSuccess = (kbId: string) => {
     max-width: 960px;
     margin: 0;
     padding: 0 16px;
+    width: 100%;
+    box-sizing: border-box;
     transition: height 0.35s @suggested-ease;
 }
 
@@ -363,44 +383,67 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
+.compact({
+    .dialogue-wrap {
+        justify-content: flex-start;
+        padding: 20px 8px max(16px, env(safe-area-inset-bottom));
     }
 
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
+    .dialogue-answers {
+        gap: 16px;
     }
+
+    .dialogue-title {
+        font-size: 22px;
+        line-height: 1.3;
+        text-align: center;
+    }
+
+    .suggested-questions-container {
+        padding: 0;
+    }
+});
+
+.phone({
+    .dialogue-wrap {
+        padding-inline: 6px;
+    }
+
+    .dialogue-title {
+        font-size: 20px;
+    }
+});
+
+.phone-landscape({
+    .dialogue-wrap {
+        padding-block: 8px;
+    }
+
+    .dialogue-title,
+    .suggested-questions-container {
+        display: none;
+    }
+
+    .dialogue-answers {
+        gap: 8px;
+        justify-content: center;
+        min-height: 100%;
+    }
+});
+
+:global(html.app-keyboard-open .dialogue-wrap) {
+    padding-top: 6px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
 }
 
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
+:global(html.app-keyboard-open .dialogue-title),
+:global(html.app-keyboard-open .suggested-questions-container) {
+    display: none;
 }
 
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
-    }
+:global(html.app-keyboard-open .dialogue-answers) {
+    justify-content: flex-end;
+    gap: 6px;
 }
 </style>
 <style lang="less">

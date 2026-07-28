@@ -1787,6 +1787,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 </script>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 .kb-list-container {
   margin: 0;
   height: 100%;
@@ -2857,10 +2858,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-:deep(.t-dialog__position.t-dialog--top) {
-  padding-top: 40vh !important;
-}
-
 .circle-wrap {
   .dialog-header {
     display: flex;
@@ -2922,6 +2919,55 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
   }
 }
+
+
+.compact({
+  .kb-list-content {
+    padding: 12px 0 0 12px;
+  }
+
+  .header {
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-right: 12px;
+
+    h2 {
+      font-size: 20px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .header-action-btn {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    border-radius: 10px !important;
+  }
+
+  .kb-list-main {
+    padding-right: 12px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kb-card-wrap {
+    gap: 10px;
+  }
+
+  .kb-card {
+    min-width: 0;
+  }
+
+  .empty-state {
+    padding: 36px 16px;
+  }
+});
 </style>
 
 <style lang="less">

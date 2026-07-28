@@ -184,6 +184,7 @@ const closePreImg = () => {
 };
 </script>
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 @import '../../../components/css/chat-resource-chips.less';
 
 .user_msg_container {
@@ -354,5 +355,35 @@ html[theme-mode="dark"] {
         background: var(--td-bg-color-secondarycontainer);
         color: var(--td-text-color-primary);
     }
+}
+
+.compact({
+  .user_msg {
+    max-width: min(90%, 820px);
+    font-size: 15px;
+    line-height: 1.55;
+    padding: 8px 10px;
+  }
+
+  .user_attachments {
+    width: 100%;
+  }
+
+  .user_attachment_card {
+    width: min(280px, 92%);
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .user_image_thumb {
+    width: clamp(84px, 28vw, 112px);
+    height: clamp(84px, 28vw, 112px);
+  }
+});
+
+@media screen and (max-width: 360px) {
+  .user_msg {
+    max-width: 94%;
+  }
 }
 </style>

@@ -22,9 +22,13 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport';
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
+const { layoutWidth, isCompact } = useResponsiveViewport();
+const DOC_DRAWER_SCROLL_LOCK = 'knowledge-document-detail';
 
 // canDeleteGeneratedQuestion 对应后端 DELETE /chunks/by-id/:id/questions
 // 的 OwnedChunkKBOrAdminFromChunkID 守卫——KB 创建者或空间 Admin+
@@ -320,7 +324,8 @@ let traceResizeStartX = 0;
 let traceResizeStartWidth = 0;
 
 function traceDrawerMaxWidth() {
-  return Math.min(1400, Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.92)));
+  const availableWidth = layoutWidth.value || window.innerWidth;
+  return Math.min(1400, Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(availableWidth * 0.92)));
 }
 
 function clampTraceDrawerWidth(width: number) {
@@ -340,6 +345,7 @@ function loadTraceDrawerWidth() {
 }
 
 function onTraceDrawerResizeStart(e: MouseEvent) {
+  if (isCompact.value) return;
   timelineDrawerResizing.value = true;
   traceResizeStartX = e.clientX;
   traceResizeStartWidth = timelineDrawerWidth.value;
@@ -387,12 +393,15 @@ const MAIN_DRAWER_MIN_WIDTH = 480;
 
 const mainDrawerWidth = ref(MAIN_DRAWER_DEFAULT_WIDTH);
 const mainDrawerResizing = ref(false);
+const mainDrawerSize = computed(() => isCompact.value ? '100%' : `${mainDrawerWidth.value}px`);
+const timelineDrawerSize = computed(() => isCompact.value ? '100%' : `${timelineDrawerWidth.value}px`);
 
 let mainResizeStartX = 0;
 let mainResizeStartWidth = 0;
 
 function mainDrawerMaxWidth() {
-  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.95)));
+  const availableWidth = layoutWidth.value || window.innerWidth;
+  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(availableWidth * 0.95)));
 }
 
 function clampMainDrawerWidth(width: number) {
@@ -412,6 +421,7 @@ function loadMainDrawerWidth() {
 }
 
 function onMainDrawerResizeStart(e: MouseEvent) {
+  if (isCompact.value) return;
   mainDrawerResizing.value = true;
   mainResizeStartX = e.clientX;
   mainResizeStartWidth = mainDrawerWidth.value;
@@ -619,9 +629,16 @@ watch(() => props.visible, (visible) => {
       maybeLoadMoreChunks();
     });
   } else {
+    timelineDrawerVisible.value = false;
     unbindDrawerScroll();
   }
 });
+
+watch([() => props.visible, isCompact], ([visible, compact]) => {
+  setBodyScrollLock(DOC_DRAWER_SCROLL_LOCK, visible && compact);
+  if ((!visible || compact) && mainDrawerResizing.value) cleanupMainDrawerResize();
+  if ((!visible || compact) && timelineDrawerResizing.value) cleanupTraceDrawerResize();
+}, { immediate: true });
 watch(() => props.details?.id, () => {
   page = 1;
   loadingChunks = false;
@@ -652,6 +669,7 @@ onUnmounted(() => {
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
   unbindDrawerScroll();
+  releaseBodyScrollLock(DOC_DRAWER_SCROLL_LOCK);
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
@@ -1599,13 +1617,13 @@ const handleDetailsScroll = () => {
 <template>
   <div class="doc_content" ref="mdContentWrap">
     <teleport to="body">
-      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
+      <div v-if="visible && !isCompact" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
         aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
-      :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
+    <t-drawer :visible="visible" :zIndex="2000" :size="mainDrawerSize" attach="body" :closeBtn="true"
+      :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing, 'doc-main-drawer--compact': isCompact }]"
       @close="handleClose">
       <template #header>
         <div class="doc-drawer-header">
@@ -1644,16 +1662,16 @@ const handleDetailsScroll = () => {
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
       <teleport to="body">
-        <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
+        <div v-if="timelineDrawerVisible && !isCompact" class="trace-drawer-resize-handle"
           :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
           :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
           @mousedown.prevent="onTraceDrawerResizeStart">
           <div class="trace-drawer-resize-line" />
         </div>
       </teleport>
-      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="timelineDrawerSize" attach="body"
         :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
-        placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
+        placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing, 'kp-secondary-drawer--compact': isCompact }]"
         @close="closeTimeline">
         <div class="kp-drawer-shell" :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }">
           <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
@@ -2130,6 +2148,7 @@ const handleDetailsScroll = () => {
 </template>
 <style scoped lang="less">
 @import "./css/markdown.less";
+@import '@/assets/responsive.less';
 
 .section-title-actions,
 .metadata-actions,
@@ -3174,6 +3193,166 @@ const handleDetailsScroll = () => {
   color: var(--td-text-color-primary);
 }
 
+
+.doc-markdown-root,
+.md-content,
+.chunk-list,
+.chunk-item,
+.parent-context-content,
+.question-item {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+
+.md-content {
+  :deep(img),
+  :deep(video),
+  :deep(canvas),
+  :deep(svg) {
+    max-width: 100%;
+    height: auto;
+  }
+
+  :deep(table) {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :deep(pre),
+  :deep(.code-block-wrapper) {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+.compact({
+  .doc-drawer-header {
+    gap: 8px;
+    padding-right: 44px;
+  }
+
+  .doc-drawer-header-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+
+  .doc-drawer-header-title {
+    font-size: 15px;
+  }
+
+  .header-actions {
+    gap: 0;
+  }
+
+  .header-action-btn {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .doc-drawer-body {
+    gap: 0;
+  }
+
+  .doc-drawer-body .setting-drawer__section {
+    padding: 14px 0;
+    gap: 12px;
+  }
+
+  .doc-detail-row {
+    gap: 8px;
+  }
+
+  .doc-detail-label {
+    flex-basis: 64px;
+  }
+
+  .doc-content-section {
+    min-width: 0;
+  }
+
+  .doc-content-section-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    margin: 0 -12px;
+    padding: 10px 12px 8px;
+    background: var(--td-bg-color-container);
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .doc-content-section-head-left {
+    width: 100%;
+  }
+
+  .view-mode-buttons {
+    width: 100%;
+    min-width: 0;
+    padding: 3px;
+    gap: 3px;
+    box-sizing: border-box;
+    border-radius: 11px;
+    background: var(--td-bg-color-secondarycontainer);
+
+    .view-mode-btn {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 38px;
+      border: 0;
+      border-radius: 8px;
+    }
+  }
+
+  .audio-player-section {
+    padding: 10px 12px;
+  }
+
+  .chunk-list {
+    gap: 10px;
+  }
+
+  .chunk-item {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .chunk-header {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .chunk-header-right {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .questions-list {
+    padding-left: 0;
+  }
+
+  .question-item {
+    padding: 8px;
+  }
+
+  .delete-question-btn {
+    opacity: 1 !important;
+  }
+});
+
 // 保留旧样式作为兼容（已被chunk-item替代）
 .content {
   word-break: break-word;
@@ -3204,6 +3383,67 @@ const handleDetailsScroll = () => {
 
 /* 主抽屉宽度可调：拖拽手柄通过 teleport 挂到 body，不受 scoped 影响，
    故样式写在非 scoped 块里。手柄贴在抽屉面板左缘（right = 抽屉宽度）。 */
+
+.t-drawer.doc-main-drawer--compact {
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    width: 100% !important;
+    max-width: 100%;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+  }
+
+  .t-drawer__content {
+    border-radius: 0;
+  }
+
+  .t-drawer__header {
+    min-height: 52px;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+    flex-shrink: 0;
+  }
+
+  .t-drawer__close-btn {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(6px, env(safe-area-inset-right));
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .t-drawer__body {
+    min-width: 0;
+    min-height: 0;
+    padding: 0 max(12px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-top: 92px;
+  }
+}
+
+.t-drawer.kp-secondary-drawer--compact {
+  .t-drawer__content-wrapper,
+  .t-drawer__content {
+    width: 100% !important;
+    max-width: 100%;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+  }
+
+  .t-drawer__content {
+    border-radius: 0;
+  }
+
+  .t-drawer__body {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+}
+
 .doc-drawer-resize-handle {
   position: fixed;
   top: 0;

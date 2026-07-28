@@ -1639,6 +1639,8 @@ import {
   markContextualGuideDone,
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport';
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
@@ -1690,6 +1692,8 @@ const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
 
 const { t, locale: i18nLocale } = useI18n();
+const { isCompact } = useResponsiveViewport();
+const AGENT_EDITOR_SCROLL_LOCK = 'agent-editor';
 
 const props = defineProps<{
   visible: boolean;
@@ -1817,6 +1821,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+  releaseBodyScrollLock(AGENT_EDITOR_SCROLL_LOCK)
 })
 
 const saving = ref(false);
@@ -2893,6 +2898,10 @@ const needsRerankModel = computed(() => {
 });
 
 // 监听可见性变化，重置表单
+watch([() => props.visible, isCompact], ([visible, compact]) => {
+  setBodyScrollLock(AGENT_EDITOR_SCROLL_LOCK, visible && compact);
+}, { immediate: true });
+
 watch(() => props.visible, async (val) => {
   if (val) {
     savedAgent.value = null;
@@ -4283,6 +4292,7 @@ const handleSave = async () => {
 </script>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 // 复用创建知识库的样式
 .settings-overlay {
   position: fixed;
@@ -5900,6 +5910,196 @@ const handleSave = async () => {
   background: rgba(0, 180, 42, 0.1);
 }
 
+
+
+.compact({
+  .settings-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    background: var(--td-bg-color-container);
+    backdrop-filter: none;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-width: none;
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .close-btn {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .settings-container {
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    max-width: none;
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    min-height: 52px;
+    padding: max(12px, env(safe-area-inset-top)) 56px 8px max(14px, env(safe-area-inset-left));
+    box-sizing: border-box;
+  }
+
+  .sidebar-title {
+    overflow: hidden;
+    font-size: 16px;
+    line-height: 32px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 0;
+    padding: 6px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    min-height: 40px;
+    margin: 0;
+    padding: 8px 12px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    box-sizing: border-box;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 10px;
+
+    &.active {
+      border-color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
+    }
+  }
+
+  .settings-content {
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .content-wrapper,
+  .content-wrapper--prompts {
+    padding: 18px max(14px, env(safe-area-inset-right)) 24px max(14px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .content-wrapper--prompts {
+    padding-bottom: 16px;
+  }
+
+  .section-header {
+    margin-bottom: 14px;
+
+    h2 {
+      font-size: 18px;
+      line-height: 1.35;
+    }
+  }
+
+  .setting-row {
+    gap: 14px;
+  }
+
+  .setting-info {
+    flex-basis: 46%;
+    max-width: 46%;
+  }
+
+  .setting-control {
+    flex-basis: 54%;
+    max-width: 54%;
+  }
+
+  .settings-footer {
+    padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    gap: 8px;
+
+    :deep(.t-button) {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 40px;
+    }
+  }
+
+  .modal-enter-from .settings-modal,
+  .modal-leave-to .settings-modal {
+    transform: translateY(12px);
+  }
+});
+
+.phone({
+  .setting-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info,
+  .setting-control {
+    width: 100%;
+    max-width: none;
+    flex-basis: auto;
+  }
+
+  .setting-control {
+    align-items: stretch;
+
+    :deep(.t-input),
+    :deep(.t-select),
+    :deep(.t-select-input),
+    :deep(.t-input-number),
+    :deep(.t-textarea) {
+      width: 100% !important;
+      max-width: 100%;
+    }
+  }
+
+  .prompts-outline {
+    gap: 6px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    &__pill {
+      flex: 0 0 auto;
+    }
+  }
+});
 </style>
 
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so

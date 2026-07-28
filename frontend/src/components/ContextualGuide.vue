@@ -13,6 +13,7 @@ import {
   type ContextualGuideTourConfig,
   type ContextualGuideTourId,
 } from '@/config/contextualGuides'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
 
 const props = defineProps<{
   tour: ContextualGuideTourId
@@ -22,6 +23,23 @@ const props = defineProps<{
 
 const config: ContextualGuideTourConfig = CONTEXTUAL_GUIDE_TOURS[props.tour]
 const active = ref(false)
+const { isCompact } = useResponsiveViewport()
+const COMPACT_EXIT_DEBOUNCE_MS = 300
+let compactExiting = false
+let compactExitTimer: number | null = null
+
+const clearCompactExitTimer = () => {
+  if (compactExitTimer !== null) {
+    window.clearTimeout(compactExitTimer)
+    compactExitTimer = null
+  }
+}
+
+const canOpen = () => {
+  if (!props.when) return false
+  if (isCompact.value) return false
+  return !compactExiting
+}
 
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let waitGlobalTimer: ReturnType<typeof setTimeout> | null = null
@@ -35,23 +53,24 @@ const clearTimers = () => {
     clearTimeout(waitGlobalTimer)
     waitGlobalTimer = null
   }
+  clearCompactExitTimer()
 }
 
 const tryOpen = () => {
   if (active.value) return
-  if (!props.when) return
+  if (!canOpen()) return
   if (isContextualGuideDone(props.tour)) return
   if (!isGlobalUserGuideDone()) return
 
   openTimer = setTimeout(() => {
-    if (!props.when || isContextualGuideDone(props.tour) || active.value) return
+    if (!canOpen() || isContextualGuideDone(props.tour) || active.value) return
     active.value = true
   }, config.openDelayMs)
 }
 
 const scheduleOpen = () => {
   clearTimers()
-  if (!props.when || isContextualGuideDone(props.tour)) return
+  if (!canOpen() || isContextualGuideDone(props.tour)) return
 
   if (isGlobalUserGuideDone()) {
     tryOpen()
@@ -60,7 +79,7 @@ const scheduleOpen = () => {
 
   // 等待全局新手引导结束后再展示情境引导，避免两层遮罩叠加
   const poll = () => {
-    if (!props.when || isContextualGuideDone(props.tour)) {
+    if (!canOpen() || isContextualGuideDone(props.tour)) {
       clearTimers()
       return
     }
@@ -82,14 +101,27 @@ const onFinish = () => {
 }
 
 watch(
-  () => props.when,
-  (val) => {
-    if (val) {
-      scheduleOpen()
-    } else {
+  [() => props.when, isCompact],
+  ([when, compact]) => {
+    if (compact) {
       clearTimers()
       active.value = false
+      compactExiting = false
+      clearCompactExitTimer()
+      return
     }
+    if (!when) {
+      clearTimers()
+      active.value = false
+      return
+    }
+    clearCompactExitTimer()
+    compactExiting = true
+    compactExitTimer = window.setTimeout(() => {
+      compactExitTimer = null
+      compactExiting = false
+      if (!isCompact.value && props.when) scheduleOpen()
+    }, COMPACT_EXIT_DEBOUNCE_MS)
   },
   { immediate: true },
 )

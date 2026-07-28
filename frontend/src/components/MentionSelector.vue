@@ -818,6 +818,19 @@ const scrollToItem = (index: number) => {
   justify-content: center;
   padding: 8px 12px;
 }
+
+@media screen and (max-width: 767px) {
+  .mention-menu {
+    max-width: calc(var(--app-viewport-width, 100vw) - 16px);
+    border-radius: 12px;
+  }
+
+  .mention-group-entry,
+  .mention-back-row,
+  .mention-item {
+    min-height: 40px;
+  }
+}
 </style>
 
 <style>
@@ -960,5 +973,11 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-value.clickable:hover {
   color: var(--td-brand-color, #07c05f);
   text-decoration-color: var(--td-brand-color, #07c05f);
+}
+
+html.app-compact-viewport .mention-detail-popup-wrap.t-popup__content {
+  min-width: 0;
+  width: min(320px, calc(var(--app-viewport-width, 100vw) - 16px));
+  max-width: calc(var(--app-viewport-width, 100vw) - 16px);
 }
 </style>

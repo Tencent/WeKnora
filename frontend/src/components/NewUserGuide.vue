@@ -1,17 +1,20 @@
 <template>
   <SpotlightGuide v-model:active="active" :steps="steps" step-i18n-prefix="newUserGuide.steps"
-    labels-prefix="newUserGuide" @finish="onFinish" @step-change="onStepChange" />
+    labels-prefix="newUserGuide" @finish="onFinish" @dismiss="onFinish" @step-change="onStepChange" />
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SpotlightGuide from '@/components/SpotlightGuide.vue'
 import { GLOBAL_USER_GUIDE_KEY, OPEN_NEW_USER_GUIDE_EVENT } from '@/config/contextualGuides'
 import { useUIStore } from '@/stores/ui'
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
 
 const uiStore = useUIStore()
+const { isCompact } = useResponsiveViewport()
 let settingsOpenedByGuide = false
+let autoOpenTimer: number | null = null
 
 const steps = computed<SpotlightGuideStep[]>(() => [
   { key: 'welcome' },
@@ -72,8 +75,25 @@ const onStepChange = ({ toKey }: { toKey: string }) => {
   }
 }
 
+const clearAutoOpenTimer = () => {
+  if (autoOpenTimer) {
+    clearTimeout(autoOpenTimer)
+    autoOpenTimer = null
+  }
+}
+
 const open = () => {
+  if (isCompact.value) return
   active.value = true
+}
+
+const scheduleAutoOpen = () => {
+  clearAutoOpenTimer()
+  if (isCompact.value || localStorage.getItem(GLOBAL_USER_GUIDE_KEY) === '1') return
+  autoOpenTimer = window.setTimeout(() => {
+    autoOpenTimer = null
+    if (!isCompact.value && localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') open()
+  }, 700)
 }
 
 const handleOpenEvent = () => {
@@ -83,17 +103,22 @@ const handleOpenEvent = () => {
 
 onMounted(() => {
   window.addEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
-  if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
-    window.setTimeout(() => {
-      if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
-        open()
-      }
-    }, 700)
+  scheduleAutoOpen()
+})
+
+watch(isCompact, (compact) => {
+  if (compact) {
+    clearAutoOpenTimer()
+    active.value = false
+    closeGuideSettings()
+  } else {
+    scheduleAutoOpen()
   }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
+  clearAutoOpenTimer()
   closeGuideSettings()
 })
 </script>

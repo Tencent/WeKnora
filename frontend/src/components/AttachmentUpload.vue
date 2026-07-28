@@ -66,7 +66,7 @@ onMounted(async () => {
       .flatMap(engine => engine.FileTypes || [])
       .filter(type => type && type.toLowerCase() !== 'url')
       .map(type => `.${type.replace(/^\./, '').toLowerCase()}`);
-    supportedTypes.value = [...new Set([...supportedTypes.value, ...discovered])];
+    if (!disposed) supportedTypes.value = [...new Set([...supportedTypes.value, ...discovered])];
   } catch {
     // The static baseline remains available when engine discovery is offline.
   }
@@ -141,6 +141,7 @@ const uploadAttachment = async (attachment: AttachmentFile) => {
       props.agentId,
       'auto',
       (progress) => {
+        if (disposed || !attachments.value.some(item => item.id === attachment.id)) return;
         attachment.progress = progress;
         emitFiles();
       },
@@ -157,6 +158,7 @@ const uploadAttachment = async (attachment: AttachmentFile) => {
       scheduleStatusPoll(attachment);
     }
   } catch (error: any) {
+    if (disposed || !attachments.value.some(item => item.id === attachment.id)) return;
     attachment.status = 'failed';
     attachment.error = error?.message || t('chat.attachmentUploadFailed');
     emitFiles();
@@ -169,14 +171,16 @@ const scheduleStatusPoll = (attachment: AttachmentFile) => {
 };
 
 const pollStatus = async (attachment: AttachmentFile) => {
-  if (!props.sessionId || !attachment.documentId || !attachments.value.some(item => item.id === attachment.id)) return;
+  if (disposed || !props.sessionId || !attachment.documentId || !attachments.value.some(item => item.id === attachment.id)) return;
   try {
     const response = await getTemporaryAttachment(props.sessionId, attachment.documentId);
+    if (disposed || !attachments.value.some(item => item.id === attachment.id)) return;
     attachment.status = response.data.status;
     attachment.error = response.data.error_message;
     emitFiles();
     if (attachment.status !== 'ready' && attachment.status !== 'failed') scheduleStatusPoll(attachment);
   } catch (error: any) {
+    if (disposed || !attachments.value.some(item => item.id === attachment.id)) return;
     attachment.status = 'failed';
     attachment.error = error?.message || t('chat.attachmentParseFailed');
     emitFiles();
@@ -299,6 +303,7 @@ defineExpose({
 </template>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 .attachment-upload {
   width: 100%;
 }
@@ -402,4 +407,29 @@ defineExpose({
 @keyframes attachment-spin {
   to { transform: rotate(360deg); }
 }
+
+.compact({
+  .attachment-preview-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+
+  .attachment-preview-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .attachment-preview-item {
+    flex: 0 0 min(240px, calc(var(--app-viewport-width, 100vw) - 48px));
+    min-width: 0;
+    max-width: calc(var(--app-viewport-width, 100vw) - 48px);
+  }
+
+  .attachment-preview-remove {
+    width: 24px !important;
+    height: 24px !important;
+  }
+});
 </style>

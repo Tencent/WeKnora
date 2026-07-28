@@ -16,6 +16,14 @@ import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
+import { PHONE_MAX_WIDTH, useResponsiveViewport } from '@/composables/useResponsiveViewport';
+import {
+  DEFAULT_POPOVER_EDGE_GAP,
+  clampPopoverLeft,
+  clampPopoverWidth,
+  computeAnchoredPopoverLayout,
+} from '@/utils/popoverPosition';
+import { observeViewportChanges } from '@/utils/viewportChangeObserver';
 import { type ModelConfig } from '@/api/model';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
@@ -51,6 +59,7 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const { isCompact } = useResponsiveViewport();
 const {
   agents,
   disabledOwnAgentIds,
@@ -146,7 +155,6 @@ const triggerImageUpload = () => {
 const atButtonRef = ref<HTMLElement>();
 const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
-const agentModeDropdownStyle = ref<Record<string, string>>({});
 
 const selectedAgentId = computed({
   get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
@@ -221,8 +229,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
-// 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
+// Keep knowledge-base selection aligned when the active agent changes.
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
   if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
@@ -275,8 +282,7 @@ const isWebSearchDisabledByAgent = computed(() => {
 });
 
 // 知识库选择是否被智能体锁定
-// 1. 如果智能体配置了 kb_selection_mode = 'none' → 完全禁用知识库
-// 其他情况用户都可以在允许的范围内通过 @ 选择知识库
+// kb_selection_mode='none' disables knowledge-base mentions; other modes allow selection within the agent scope.
 const isKnowledgeBaseLockedByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
   // 只有禁用了知识库才锁定
@@ -378,8 +384,7 @@ watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newA
   }
 });
 
-// 从 KB 对象里抽能力位，优先用 backend 显式的 capabilities 字段；否则回退到 indexing_strategy，
-// 最后拿 kb.type === 'faq' 兜底。shared / owned / agent-scope 三路的 KB 响应结构一致。
+// Normalize KB capabilities from explicit metadata, indexing strategy, or the FAQ type fallback.
 const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
   if (kb?.capabilities) {
     return {
@@ -400,8 +405,7 @@ const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
   };
 };
 
-// 当前智能体的 agent_mode（quick-answer / smart-reasoning），用于把
-// "RAG-only 模式不能 @ wiki-only 知识库"这种隐式约束带进 KB 过滤。
+// Apply agent-mode capability constraints so incompatible knowledge bases are not offered.
 const agentMode = computed(() => {
   if (!hasAgentConfig.value) return '';
   return currentAgentConfig.value?.agent_mode || '';
@@ -463,8 +467,7 @@ const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
 const mentionHasMore = ref(false);
 const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
-// 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
-// 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
+// Reuse the compatible KB id set for paginated file loading; null means unrestricted.
 const mentionAllowedKbIds = ref<Set<string> | null>(null);
 const mentionLoading = ref(false);
 const mentionOffset = ref(0);
@@ -580,8 +583,7 @@ const selectedMCPItems = computed<MentionItem[]>(() => {
     });
 });
 
-// 合并所有选中项（用于输入框内显示）
-// 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
+// Build the input chips from selected resources kept in the settings store.
 const allSelectedItems = computed(() => {
   // 获取智能体预配置的知识库 IDs（用于标记和排序）
   const agentKbIds = agentKnowledgeBases.value;
@@ -594,7 +596,7 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: agentKbIds.includes(kb.id)
   }));
 
-  // 用户选择的文件（根据 fileIdToKbId + 共享列表/共享智能体补全 org_name，用于角标）
+  // Enrich selected files with their knowledge-base and shared-space metadata.
   const sharedKbOrgMap: Record<string, string> = {};
   (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
     if (s.knowledge_base?.id != null && s.org_name) {
@@ -832,10 +834,8 @@ const loadAgents = async (force = false) => {
   }
 };
 
-// 默认选中的 builtin（builtin-quick-answer）也可能被当前空间管理员停用。
-// 列表加载完后做一次纠偏：若当前选中的是本空间停用的 agent（仅限「我的/builtin」，
-// 共享智能体由源空间决定，本地停用列表不适用），按 智能推理 → 快速问答 →
-// 第一个可用 的顺序兜底切换。全部都被停用时保持原选择不动（极端场景，UI 仍会
+// Reconcile a disabled default builtin agent after the agent list has loaded.
+// Shared agents follow their source tenant; otherwise fall back to the first enabled local agent.
 // 在 enabledAgents 过滤后显示空，由用户在智能体页恢复任意一个）。
 const ensureSelectedAgentNotDisabled = () => {
   if (settingsStore.selectedAgentSourceTenantId) return
@@ -856,8 +856,7 @@ const ensureSelectedAgentNotDisabled = () => {
   if (!fallback) return
 
   settingsStore.selectAgent(fallback.id)
-  // selectAgent 内部仅对两个 builtin 常量自动切 isAgentEnabled；自定义 agent 兜底时
-  // 需要按其 agent_mode 显式同步一次，保证模式徽标与对话行为一致。
+  // Keep the mode badge and chat behavior in sync for custom agents as well as builtins.
   if (fallback.id !== BUILTIN_QUICK_ANSWER_ID && fallback.id !== BUILTIN_SMART_REASONING_ID) {
     settingsStore.toggleAgent(fallback.config?.agent_mode === 'smart-reasoning')
   }
@@ -946,10 +945,8 @@ const ensureModelSelection = () => {
   }
 };
 
-// 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
-// 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
-// 覆盖共享智能体绑定的源空间 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
-// 但若用户在本页手动改过模型（lastPick 与 agent 默认不同且当前选中即为 lastPick），
+// Resync the configured agent model after route restoration overrides it with the last local choice.
+// Preserve a deliberate user model choice while repairing stale route-restored state.
 // 则保留用户选择，避免 creatChat → chat 跳转后把模型 B 冲回智能体默认 A。
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
@@ -1038,111 +1035,22 @@ const modelDisplayName = (model: ModelConfig) => {
 
 const updateModelDropdownPosition = () => {
   const anchor = modelButtonRef.value;
-  if (!anchor) {
-    modelDropdownStyle.value = {
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-    };
-    return;
-  }
+  if (!anchor) return;
 
-  // Normalize coordinates to CSS pixels so they are interpreted the same way
-  // the browser will render them under the root `zoom` (see utils/zoom.ts).
   const zoom = getRootZoom();
   const rect = rectToCssPx(anchor.getBoundingClientRect(), zoom);
-  console.log('[Model Dropdown] Button rect:', {
-    top: rect.top,
-    bottom: rect.bottom,
-    left: rect.left,
-    right: rect.right,
-    width: rect.width,
-    height: rect.height
+  const viewport = cssViewportSize(zoom);
+  const layout = computeAnchoredPopoverLayout(rect, viewport, {
+    preferredWidth: viewport.width <= PHONE_MAX_WIDTH
+      ? viewport.width - DEFAULT_POPOVER_EDGE_GAP * 2
+      : 280,
+    preferredHeight: viewport.width <= PHONE_MAX_WIDTH ? 360 : 280,
+    minSpaceBelow: 200,
+    maxHeightRatio: 0.58,
+    offsetY: 8,
   });
 
-  const dropdownWidth = 280;
-  const offsetY = 8;
-  const { width: vw, height: vh } = cssViewportSize(zoom);
-
-  // 左对齐到触发元素的左边缘
-  // 使用 Math.floor 而不是 Math.round，避免像素对齐问题
-  let left = Math.floor(rect.left);
-
-  // 边界处理：不超出视口左右（留 16px margin）
-  const minLeft = 16;
-  const maxLeft = Math.max(16, vw - dropdownWidth - 16);
-  left = Math.max(minLeft, Math.min(maxLeft, left));
-
-  // 垂直定位：紧贴按钮，使用合理的高度避免空白
-  const preferredDropdownHeight = 280; // 优选高度（紧凑且够用）
-  const maxDropdownHeight = 360; // 最大高度
-  const minDropdownHeight = 200; // 最小高度
-  const topMargin = 20; // 顶部留白
-  const spaceBelow = vh - rect.bottom; // 下方剩余空间
-  const spaceAbove = rect.top; // 上方剩余空间
-
-  console.log('[Model Dropdown] Space check:', {
-    spaceBelow,
-    spaceAbove,
-    windowHeight: vh
-  });
-
-  let actualHeight: number;
-  let shouldOpenBelow: boolean;
-
-  // 优先考虑下方空间
-  if (spaceBelow >= minDropdownHeight + offsetY) {
-    // 下方有足够空间，向下弹出
-    actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
-    shouldOpenBelow = true;
-    console.log('[Model Dropdown] Position: below button', { actualHeight });
-  } else {
-    // 向上弹出，优先使用 preferredHeight，必要时才扩展到 maxHeight
-    const availableHeight = spaceAbove - offsetY - topMargin;
-    if (availableHeight >= preferredDropdownHeight) {
-      // 有足够空间显示优选高度
-      actualHeight = preferredDropdownHeight;
-    } else {
-      // 空间不够，使用可用空间（但不小于最小高度）
-      actualHeight = Math.max(minDropdownHeight, availableHeight);
-    }
-    shouldOpenBelow = false;
-    console.log('[Model Dropdown] Position: above button', { actualHeight });
-  }
-
-  // 根据弹出方向使用不同的定位方式
-  if (shouldOpenBelow) {
-    // 向下弹出：使用 top 定位，左对齐
-    const top = Math.floor(rect.bottom + offsetY);
-    console.log('[Model Dropdown] Opening below, top:', top);
-    modelDropdownStyle.value = {
-      position: 'fixed !important',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      top: `${top}px`,
-      maxHeight: `${actualHeight}px`,
-      transform: 'none !important',
-      margin: '0 !important',
-      padding: '0 !important'
-    };
-  } else {
-    // 向上弹出：使用 bottom 定位，左对齐
-    const bottom = vh - rect.top + offsetY;
-    console.log('[Model Dropdown] Opening above, bottom:', bottom);
-    modelDropdownStyle.value = {
-      position: 'fixed !important',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      bottom: `${bottom}px`,
-      maxHeight: `${actualHeight}px`,
-      transform: 'none !important',
-      margin: '0 !important',
-      padding: '0 !important'
-    };
-  }
-
-  console.log('[Model Dropdown] Applied style:', modelDropdownStyle.value);
+  modelDropdownStyle.value = layout.style;
 };
 
 // Mention Logic
@@ -1165,7 +1073,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const agentId = selectedAgentId.value;
     if (sourceTenantId && agentId) {
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
-      try {
+    try {
         const list = await chatResources.ensureAgentKnowledgeBases(agentId);
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
@@ -1219,8 +1127,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (hasAgentConfig.value) {
       const kbMode = agentKBSelectionMode.value;
       // 共享智能体路径：`availableKbs` 已经来自 `listKnowledgeBases({agent_id})`,
-      // 后端按 kb_selection_mode + allowed_tools 做过权威过滤；前端不再重复一遍。
-      // 本人智能体路径：走 own KBs + user-shared KBs 合并，后端拿不到 agent 上下文，
+      // Shared-agent responses are backend-filtered; local agents still need client-side compatibility filtering.
       // 所以 'selected' 要收敛到配置集合，'all' 要按工具派生的能力过滤。
       const isSharedAgent = !!(sourceTenantId && agentId);
       if (kbMode === 'none') {
@@ -1335,8 +1242,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
   const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
 
-  // 空关键词时显式请求最近文件；有关键词时返回匹配文件。
-  // `recent=true` 只用于浏览态，避免其他搜索调用漏传关键词时静默退化为最近列表。
+  // Use recent-file browsing only for an empty query; non-empty queries remain explicit searches.
   const fileSearchKeyword = q.trim();
   if (shouldLoadFiles) {
     mentionLoading.value = true;
@@ -1360,11 +1266,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         let files = res.data;
         const rawTotal = typeof res.total === 'number' ? res.total : undefined;
         const apiPageSize = res.data.length;
-        // 按当前 @ 会话的兼容 KB 集合过滤：
-        //   - 非智能体场景：`mentionAllowedKbIds` 为 null，跳过；
-        //   - 智能体场景（含 shared agent）：'selected' 会把 ID 收敛到用户勾的 KB，
-        //     'all' 会收敛到"兼容"的 KB，'none' 根本走不到这里（shouldLoadFiles=false）。
-        //   这样分页 append 也能用同一份集合，不再只兜住 'selected' + 非共享的分支。
+        // Apply the current mention-session KB scope before appending files.
+        // Agent modes narrow files to selected or compatible KBs; none skips file loading entirely.
         if (mentionAllowedKbIds.value) {
           const allowed = mentionAllowedKbIds.value;
           files = files.filter((f: any) => {
@@ -1514,40 +1417,27 @@ const onInput = (val: string | InputEvent) => {
       // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
       const zoom = getRootZoom();
       const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
-      const { width: vw, height: vh } = cssViewportSize(zoom);
+      const { width: viewportWidth, height: viewportHeight } = cssViewportSize(zoom);
       const scrollTop = textarea.scrollTop;
-      const menuHeight = 320; // 预估最大高度
+      const menuWidth = clampPopoverWidth(viewportWidth <= PHONE_MAX_WIDTH ? 340 : 220, viewportWidth);
+      const left = clampPopoverLeft(rect.left + coords.left, menuWidth, viewportWidth);
 
-      let left = rect.left + coords.left;
-      // Prevent menu from going off-screen horizontally
-      if (left + 300 > vw) {
-        left = vw - 300 - 10;
-      }
-
-      // 光标相对于视口的实际 top 位置（CSS 像素）
+      // VisualViewport height shrinks with the Android keyboard, so caret popovers must use it.
       const cursorAbsoluteTop = rect.top + coords.top - scrollTop;
-      const lineHeight = coords.height; // 光标高度
+      const lineHeight = coords.height;
+      const availableBelow = Math.max(0, viewportHeight - cursorAbsoluteTop - lineHeight - DEFAULT_POPOVER_EDGE_GAP);
+      const availableAbove = Math.max(0, cursorAbsoluteTop - DEFAULT_POPOVER_EDGE_GAP);
+      const openAbove = availableBelow < 160 && availableAbove > availableBelow;
+      const maxHeight = Math.min(320, openAbove ? availableAbove : availableBelow);
 
-      // Check vertical space below cursor
-      const spaceBelow = vh - (cursorAbsoluteTop + lineHeight);
-
-      if (spaceBelow < menuHeight && cursorAbsoluteTop > menuHeight) {
-        // Show above cursor (using bottom positioning)
-        const bottom = vh - cursorAbsoluteTop;
-        mentionStyle.value = {
-          left: `${left}px`,
-          bottom: `${bottom}px`,
-          top: 'auto'
-        };
-      } else {
-        // Show below cursor (using top positioning)
-        const top = cursorAbsoluteTop + lineHeight;
-        mentionStyle.value = {
-          left: `${left}px`,
-          top: `${top}px`,
-          bottom: 'auto'
-        };
-      }
+      mentionStyle.value = {
+        width: `${menuWidth}px`,
+        maxHeight: `${maxHeight}px`,
+        left: `${left}px`,
+        ...(openAbove
+          ? { bottom: `${Math.floor(viewportHeight - cursorAbsoluteTop)}px`, top: 'auto' }
+          : { top: `${Math.floor(cursorAbsoluteTop + lineHeight)}px`, bottom: 'auto' }),
+      };
 
       loadMentionItems("");
     }
@@ -1561,15 +1451,23 @@ const onCompositionStart = () => {
 const onCompositionEnd = (e: CompositionEvent) => {
   isComposing.value = false;
   // 手动触发 onInput 逻辑
-  // 注意：在 compositionend 时，v-model 可能还没更新，或者已经更新但我们需要用最新值
-  // TDesign textarea 可能需要 nextTick
+  // Wait for v-model and the TDesign textarea to settle after IME composition.
   nextTick(() => {
     onInput(query.value);
   });
 };
 
+const releaseChatInputFocus = () => {
+  const textarea = getTextareaEl();
+  if (textarea && document.activeElement === textarea) textarea.blur();
+
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement && activeElement.closest('.answers-input')) {
+    activeElement.blur();
+  }
+};
+
 const triggerMention = () => {
-  // 如果当前没有任何可提及资源，不允许打开选择器
   if (isMentionDisabled.value) {
     const msgKey = isKnowledgeBaseDisabledByAgent.value ? 'input.kbDisabledByAgent' : 'input.kbLockedByAgent';
     MessagePlugin.warning(t(msgKey));
@@ -1579,13 +1477,33 @@ const triggerMention = () => {
   const textarea = getTextareaEl();
   if (!textarea) return;
 
-  // 关闭其他选择器
   showAgentModeSelector.value = false;
   showModelSelector.value = false;
 
+  // Desktop mention search intentionally uses the chat textarea as its filter.
+  // On compact touch screens that behavior opens the software keyboard and
+  // mixes filter text into the actual question, so use the independent KB
+  // picker and keep the chat textarea unfocused.
+  if (isCompact.value) {
+    showMention.value = false;
+    isMentionTriggeredByButton.value = false;
+    mentionQuery.value = "";
+
+    const nextVisible = !showKbSelector.value;
+    if (nextVisible) releaseChatInputFocus();
+    showKbSelector.value = nextVisible;
+
+    if (nextVisible) {
+      nextTick(() => {
+        if (showKbSelector.value) releaseChatInputFocus();
+      });
+    }
+    return;
+  }
+
+  showKbSelector.value = false;
   textarea.focus();
 
-  // 直接显示菜单，不插入 @
   showMention.value = true;
   isMentionTriggeredByButton.value = true;
   mentionQuery.value = "";
@@ -1594,29 +1512,22 @@ const triggerMention = () => {
   // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
   const zoom = getRootZoom();
   const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
-  const { height: vh } = cssViewportSize(zoom);
-  const menuHeight = 320;
+  const { width: viewportWidth, height: viewportHeight } = cssViewportSize(zoom);
+  const menuWidth = clampPopoverWidth(viewportWidth <= PHONE_MAX_WIDTH ? 340 : 220, viewportWidth);
+  const left = clampPopoverLeft(rect.left, menuWidth, viewportWidth);
+  const availableAbove = Math.max(0, rect.top - DEFAULT_POPOVER_EDGE_GAP);
+  const availableBelow = Math.max(0, viewportHeight - rect.bottom - DEFAULT_POPOVER_EDGE_GAP);
+  const openAbove = availableAbove > availableBelow;
+  const maxHeight = Math.min(320, openAbove ? availableAbove : availableBelow);
 
-  // 判断输入框上方空间
-  const spaceAbove = rect.top;
-  const spaceBelow = vh - rect.bottom;
-
-  // 优先显示在上方，除非上方空间不足且下方空间充足
-  if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
-    // Show above textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      bottom: `${vh - rect.top + 8}px`, // 8px padding
-      top: 'auto'
-    };
-  } else {
-    // Show below textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      top: `${rect.bottom + 8}px`,
-      bottom: 'auto'
-    };
-  }
+  mentionStyle.value = {
+    width: `${menuWidth}px`,
+    maxHeight: `${maxHeight}px`,
+    left: `${left}px`,
+    ...(openAbove
+      ? { bottom: `${Math.floor(viewportHeight - rect.top + 8)}px`, top: 'auto' }
+      : { top: `${Math.floor(rect.bottom + 8)}px`, bottom: 'auto' }),
+  };
 
   loadMentionItems("");
 };
@@ -1685,34 +1596,24 @@ const removeFile = (id: string) => {
 };
 
 const toggleModelSelector = () => {
-  // 如果智能体锁定了模型，不允许打开选择器
   if (isModelLockedByAgent.value) {
     MessagePlugin.warning(t('input.modelLockedByAgent'));
     return;
   }
 
-  // 互斥：关闭其他
+  // Keep floating selectors mutually exclusive.
   showMention.value = false;
   showAgentModeSelector.value = false;
 
   showModelSelector.value = !showModelSelector.value;
   if (showModelSelector.value) {
-    if (!availableModels.value.length) {
-      loadChatModels();
-    }
-    // 多次更新位置确保准确
+    if (!availableModels.value.length) loadChatModels();
     nextTick(() => {
       updateModelDropdownPosition();
-      requestAnimationFrame(() => {
-        updateModelDropdownPosition();
-        setTimeout(() => {
-          updateModelDropdownPosition();
-        }, 50);
-      });
+      requestAnimationFrame(updateModelDropdownPosition);
     });
   }
 };
-
 const closeModelSelector = () => {
   showModelSelector.value = false;
 };
@@ -1731,12 +1632,30 @@ const closeMentionSelector = (e: MouseEvent) => {
   showMention.value = false;
 };
 
-// 窗口事件处理器
-let resizeHandler: (() => void) | null = null;
-let scrollHandler: (() => void) | null = null;
+const closeFloatingSelectorsOnEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return;
+  showMention.value = false;
+  showAgentModeSelector.value = false;
+  showModelSelector.value = false;
+};
 
+// 窗口事件处理器
+let stopViewportObserver: (() => void) | null = null;
+
+const handleViewportChange = () => {
+  if (showModelSelector.value) updateModelDropdownPosition();
+  // Caret-relative mention geometry becomes stale after any viewport movement.
+  if (showMention.value) showMention.value = false;
+};
 onMounted(() => {
-  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
+  window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
+  document.addEventListener('click', closeAgentModeSelector);
+  document.addEventListener('click', closeModelSelector);
+  document.addEventListener('click', closeMentionSelector);
+  document.addEventListener('keydown', closeFloatingSelectorsOnEscape);
+  stopViewportObserver = observeViewportChanges(handleViewportChange);
+
+  // Embed channels receive agent/KB state from the host and must not call JWT platform APIs.
   if (props.embeddedMode) return;
 
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
@@ -1748,7 +1667,6 @@ onMounted(() => {
     loadAgents(),
     loadMCPServices(),
   ]);
-  window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
   const persisted = settingsStore.settings.selectedFileKbMap;
@@ -1776,31 +1694,7 @@ onMounted(() => {
     });
   }
 
-  // 监听点击外部关闭下拉菜单
-  document.addEventListener('click', closeAgentModeSelector);
-  document.addEventListener('click', closeModelSelector);
-  document.addEventListener('click', closeMentionSelector);
 
-  // 监听窗口大小变化和滚动，重新计算位置
-  resizeHandler = () => {
-    if (showModelSelector.value) {
-      updateModelDropdownPosition();
-    }
-    if (showAgentModeSelector.value) {
-      updateAgentModeDropdownPosition();
-    }
-  };
-  scrollHandler = () => {
-    if (showModelSelector.value) {
-      updateModelDropdownPosition();
-    }
-    if (showAgentModeSelector.value) {
-      updateAgentModeDropdownPosition();
-    }
-  };
-
-  window.addEventListener('resize', resizeHandler, { passive: true });
-  window.addEventListener('scroll', scrollHandler, { passive: true, capture: true });
 });
 
 onUnmounted(() => {
@@ -1808,12 +1702,9 @@ onUnmounted(() => {
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
   document.removeEventListener('click', closeMentionSelector);
-  if (resizeHandler) {
-    window.removeEventListener('resize', resizeHandler);
-  }
-  if (scrollHandler) {
-    window.removeEventListener('scroll', scrollHandler, { capture: true });
-  }
+  document.removeEventListener('keydown', closeFloatingSelectorsOnEscape);
+  stopViewportObserver?.();
+  stopViewportObserver = null;
 });
 
 // 监听路由变化
@@ -1949,110 +1840,14 @@ const createSession = async (val: string) => {
   clearvalue();
 }
 
-const updateAgentModeDropdownPosition = () => {
-  const anchor = agentModeButtonRef.value;
-
-  if (!anchor) {
-    agentModeDropdownStyle.value = {
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)'
-    };
-    return;
-  }
-
-  // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
-  const zoom = getRootZoom();
-  const rect = rectToCssPx(anchor.getBoundingClientRect(), zoom);
-  const dropdownWidth = 200;
-  const offsetY = 8;
-  const { width: vw, height: vh } = cssViewportSize(zoom);
-
-  // 水平位置：左对齐
-  let left = Math.floor(rect.left);
-  const minLeft = 16;
-  const maxLeft = Math.max(16, vw - dropdownWidth - 16);
-  left = Math.max(minLeft, Math.min(maxLeft, left));
-
-  // 垂直位置：紧贴按钮，使用合理的高度避免空白
-  const preferredDropdownHeight = 140; // Agent 模式选择器内容较少，用更小的优选高度
-  const maxDropdownHeight = 150;
-  const minDropdownHeight = 100;
-  const topMargin = 20;
-  const spaceBelow = vh - rect.bottom;
-  const spaceAbove = rect.top;
-
-  console.log('[Agent Dropdown] Space check:', {
-    spaceBelow,
-    spaceAbove,
-    windowHeight: vh
-  });
-
-  let actualHeight: number;
-
-  // 优先考虑下方空间
-  if (spaceBelow >= minDropdownHeight + offsetY) {
-    // 下方有足够空间，向下弹出
-    actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
-    const top = Math.floor(rect.bottom + offsetY);
-
-    agentModeDropdownStyle.value = {
-      position: 'fixed !important',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      top: `${top}px`,
-      maxHeight: `${actualHeight}px`,
-      transform: 'none !important',
-      margin: '0 !important',
-      padding: '0 !important',
-    };
-    console.log('[Agent Dropdown] Position: below button', { actualHeight });
-  } else {
-    // 向上弹出，使用 bottom 定位确保紧贴按钮
-    const availableHeight = spaceAbove - offsetY - topMargin;
-    if (availableHeight >= preferredDropdownHeight) {
-      actualHeight = preferredDropdownHeight;
-    } else {
-      actualHeight = Math.max(minDropdownHeight, availableHeight);
-    }
-
-    const bottom = vh - rect.top + offsetY;
-
-    agentModeDropdownStyle.value = {
-      position: 'fixed !important',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      bottom: `${bottom}px`, // 使用 bottom 定位，确保紧贴按钮
-      maxHeight: `${actualHeight}px`,
-      transform: 'none !important',
-      margin: '0 !important',
-      padding: '0 !important',
-    };
-    console.log('[Agent Dropdown] Position: above button', { actualHeight, bottom });
-  }
-};
-
 const toggleAgentModeSelector = () => {
   // 互斥
   showMention.value = false;
   showModelSelector.value = false;
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
-  if (showAgentModeSelector.value) {
-    if (!chatResources.isFresh('agents')) {
-      void loadAgents(true);
-    }
-    // 多次更新位置确保准确
-    nextTick(() => {
-      updateAgentModeDropdownPosition();
-      requestAnimationFrame(() => {
-        updateAgentModeDropdownPosition();
-        setTimeout(() => {
-          updateAgentModeDropdownPosition();
-        }, 50);
-      });
-    });
+  if (showAgentModeSelector.value && !chatResources.isFresh('agents')) {
+    void loadAgents(true);
   }
 }
 
@@ -2124,8 +1919,7 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
   settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
 
-  // 同步模型（选中的对话模型随智能体切换，含共享智能体）。
-  // 网络搜索已由 selectAgent 重置为关闭，智能体配置只控制该开关是否可用。
+  // Follow the selected agent model while leaving web-search enablement under explicit user control.
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
@@ -2413,10 +2207,6 @@ const toggleWebSearch = () => {
   MessagePlugin.success(newValue ? t('input.messages.webSearchEnabled') : t('input.messages.webSearchDisabled'));
 };
 
-const toggleKbSelector = () => {
-  showKbSelector.value = !showKbSelector.value;
-}
-
 const removeKb = (kbId: string) => {
   settingsStore.removeKnowledgeBase(kbId);
 }
@@ -2628,21 +2418,6 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- 模型显示 -->
-          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
-            :disabled="!isModelLockedByAgent">
-            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
-                <span class="model-selector-name">
-                  {{ selectedModelDisplayName }}
-                </span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
-                  :class="{ 'rotate': showModelSelector }">
-                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
-                </svg>
-              </div>
-            </div>
-          </t-tooltip>
         </div>
 
         <Teleport to="body">
@@ -2678,20 +2453,36 @@ defineExpose({
 
         <!-- 右侧控制按钮组 -->
         <div class="control-right">
-          <!-- 停止按钮（仅在回复中时显示） -->
-          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
-            <div @click="handleStop" class="control-btn stop-btn">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <rect x="5" y="5" width="6" height="6" rx="1" />
-              </svg>
+          <!-- Keep model and send/stop controls pinned while auxiliary tools scroll. -->
+          <t-tooltip v-if="!embeddedMode" :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+            :disabled="!isModelLockedByAgent">
+            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
+              <button ref="modelButtonRef" type="button" class="model-selector-trigger"
+                :disabled="isModelLockedByAgent" aria-haspopup="listbox" :aria-expanded="showModelSelector"
+                @click.stop="toggleModelSelector">
+                <span class="model-selector-name">{{ selectedModelDisplayName }}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                  :class="{ 'rotate': showModelSelector }" aria-hidden="true">
+                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+                </svg>
+              </button>
             </div>
           </t-tooltip>
 
+          <!-- 停止按钮（仅在回复中时显示） -->
+          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
+            <button type="button" @click="handleStop" class="control-btn stop-btn" :aria-label="$t('input.stopGeneration')">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="5" y="5" width="6" height="6" rx="1" />
+              </svg>
+            </button>
+          </t-tooltip>
+
           <!-- 发送按钮 -->
-          <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-            :class="{ 'disabled': !query.length }">
-            <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
-          </div>
+          <button v-if="!isReplying" type="button" @click="createSession(query)" class="control-btn send-btn"
+            data-guide="chat-send" :disabled="!query.trim()" :aria-label="$t('input.send')">
+            <img src="../assets/img/sending-aircraft.svg" alt="" aria-hidden="true" />
+          </button>
         </div>
       </div>
     </div>
@@ -2715,6 +2506,7 @@ const getImgSrc = (url: string) => {
 }
 </script>
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 @import './css/chat-resource-chips.less';
 
 .answers-input {
@@ -2724,6 +2516,8 @@ const getImgSrc = (url: string) => {
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   display: flex;
   justify-content: center;
 
@@ -2745,6 +2539,8 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 960px;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
@@ -2994,12 +2790,20 @@ const getImgSrc = (url: string) => {
   transition: background 0.12s, color 0.12s;
   user-select: none;
   flex-shrink: 0;
+  border: 0;
+  font: inherit;
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
   }
 
-  &.disabled {
+  &.disabled,
+  &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 
@@ -3403,7 +3207,7 @@ const getImgSrc = (url: string) => {
 .model-display {
   display: flex;
   align-items: center;
-  margin-left: auto;
+  margin-left: 0;
   flex-shrink: 0;
 
   &.agent-controlled {
@@ -3425,12 +3229,15 @@ const getImgSrc = (url: string) => {
   border: .5px solid var(--td-component-border, #e7e7e7);
   transition: background 0.12s, border-color 0.12s;
   cursor: pointer;
+  background: transparent;
+  font: inherit;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
   }
 
-  &.disabled {
+  &.disabled,
+  &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 
@@ -3471,7 +3278,8 @@ const getImgSrc = (url: string) => {
   inset: 0;
   z-index: 9999;
   background: transparent;
-  touch-action: none;
+  touch-action: manipulation;
+  overscroll-behavior: contain;
 }
 
 .model-selector-dropdown {
@@ -3522,6 +3330,7 @@ const getImgSrc = (url: string) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 6px 8px;
 }
 
@@ -3745,4 +3554,156 @@ const getImgSrc = (url: string) => {
     text-decoration: underline;
   }
 }
+
+.compact({
+  .answers-input {
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 104px !important;
+    max-height: min(180px, calc(var(--app-viewport-height, 100dvh) * 0.36)) !important;
+    padding: 12px 10px 58px !important;
+    font-size: 16px !important;
+  }
+
+  .rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
+    padding-top: 12px !important;
+  }
+
+  .selected-tags-inline {
+    max-height: 74px;
+    padding: 6px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .mention-chip__name {
+    max-width: 88px;
+  }
+
+  .image-preview-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+
+  .image-preview-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .control-bar {
+    right: 8px;
+    bottom: 6px;
+    left: 8px;
+    gap: 4px;
+    max-height: none;
+    flex-wrap: nowrap;
+    padding-top: 6px;
+  }
+
+  .control-left {
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .control-left > * {
+    scroll-snap-align: start;
+  }
+
+  .control-left::-webkit-scrollbar {
+    display: none;
+  }
+
+  .agent-mode-btn {
+    max-width: 116px;
+    min-height: 36px;
+    padding-inline: 8px;
+  }
+
+  .agent-mode-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .websearch-btn,
+  .image-upload-btn,
+  .attachment-upload-btn,
+  .kb-btn {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+  }
+
+  .model-selector-trigger {
+    min-width: 76px;
+    max-width: 108px;
+    height: 36px;
+  }
+
+  .control-right {
+    flex-shrink: 0;
+    gap: 4px;
+    padding-left: 4px;
+    background: var(--td-bg-color-container);
+  }
+
+  .send-btn,
+  .stop-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .model-selector-dropdown {
+    max-width: calc(var(--app-viewport-width, 100vw) - 16px);
+  }
+});
+
+.phone({
+  .mention-chip__name {
+    max-width: 72px;
+  }
+});
+
+@media screen and (max-width: 360px) {
+  .model-selector-trigger {
+    min-width: 64px;
+    max-width: 76px;
+    padding-inline: 6px;
+  }
+
+  .agent-mode-btn {
+    max-width: 96px;
+  }
+}
+
+.phone-landscape({
+  :deep(.t-textarea__inner) {
+    min-height: 84px !important;
+    max-height: min(120px, calc(var(--app-viewport-height, 100dvh) * 0.42)) !important;
+    padding-bottom: 52px !important;
+  }
+
+  .control-bar {
+    bottom: 4px;
+  }
+});
+
+:global(html.app-keyboard-open .answers-input) {
+  padding-bottom: 0;
+}
+
+:global(html.app-keyboard-open .answers-input .t-textarea__inner) {
+  max-height: min(132px, calc(var(--app-viewport-height, 100dvh) * 0.42)) !important;
+}
+
 </style>

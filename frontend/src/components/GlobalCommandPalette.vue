@@ -647,6 +647,7 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 .cmdk {
   display: flex;
   flex-direction: column;
@@ -838,6 +839,40 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   border-radius: 3px;
 }
+
+
+.compact({
+  .cmdk {
+    min-height: 0;
+    height: min(68vh, calc(var(--app-viewport-height, 100dvh) - 24px));
+    max-height: calc(var(--app-viewport-height, 100dvh) - 24px);
+  }
+
+  .cmdk__input-row {
+    gap: 4px;
+    padding: 10px;
+  }
+
+  .cmdk__scope-chip {
+    max-width: 110px;
+  }
+
+  .cmdk__icon-btn {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .cmdk__results {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cmdk__footer {
+    display: none;
+  }
+});
 </style>
 
 <style lang="less">
@@ -856,6 +891,20 @@ onUnmounted(() => {
 .cmdk-retrieval-drawer {
   .section-header {
     font-weight: 600;
+  }
+}
+
+
+@media screen and (max-width: 899px),
+  screen and (max-height: 520px) and (pointer: coarse) {
+  .cmdk-dialog .t-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    border-radius: 14px;
+  }
+
+  .cmdk-dialog .t-dialog__body {
+    max-height: none !important;
   }
 }
 </style>

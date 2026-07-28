@@ -1,7 +1,15 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" ref="dropzone" :class="{
+        'is-compact-viewport': isCompact,
+        'is-keyboard-open': isKeyboardOpen,
+    }">
         <Menu></Menu>
-        <div v-if="isRouterAlive" class="platform-route-outlet">
+        <button v-if="uiStore.compactViewport && uiStore.mobileSidebarOpen" type="button"
+            class="mobile-sidebar-backdrop" :aria-label="t('menu.collapseSidebar')"
+            @click="closeMobileSidebar(true)" />
+        <div v-if="isRouterAlive" class="platform-route-outlet"
+            :inert="uiStore.compactViewport && uiStore.mobileSidebarOpen"
+            :aria-hidden="uiStore.compactViewport && uiStore.mobileSidebarOpen ? 'true' : undefined">
             <RouterView />
         </div>
         <div class="upload-mask" v-show="ismask">
@@ -29,13 +37,19 @@ import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
+import { focusFirstElement, trapTabKey } from '@/utils/focusTrap'
 
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
+const { isCompact, isKeyboardOpen } = useResponsiveViewport();
 let ismask = ref(false)
 const { t } = useI18n();
 
@@ -199,12 +213,39 @@ const handleGlobalDrop = async (event: DragEvent) => {
     }));
 }
 
-// 组件挂载时添加全局事件监听器
+// 移动端侧栏交互由共享 viewport / scroll-lock / focus-trap 基础设施驱动。
+const MOBILE_SIDEBAR_LOCK = 'platform-mobile-sidebar'
+const getSidebarElement = () => document.getElementById('platform-sidebar')
+
+const focusSidebarToggle = () => {
+    nextTick(() => {
+        document.querySelector<HTMLElement>('[data-sidebar-open]')?.focus({ preventScroll: true });
+    });
+};
+
+const closeMobileSidebar = (restoreFocus = false) => {
+    if (!uiStore.mobileSidebarOpen) return;
+    uiStore.closeMobileSidebar();
+    if (restoreFocus) focusSidebarToggle();
+};
+
+const handleMobileSidebarKeyDown = (event: KeyboardEvent) => {
+    if (!uiStore.compactViewport || !uiStore.mobileSidebarOpen) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMobileSidebar(true);
+        return;
+    }
+    const sidebar = getSidebarElement();
+    if (sidebar) trapTabKey(event, sidebar);
+};
+
 onMounted(() => {
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
     document.addEventListener('drop', handleGlobalDrop, true);
+    window.addEventListener('keydown', handleMobileSidebarKeyDown);
     if (isWailsDesktop) {
         window.addEventListener('keydown', handleGlobalKeyDown);
         // @ts-ignore
@@ -223,6 +264,24 @@ onMounted(() => {
 watch(() => route.query.cmdk, () => {
     maybeOpenCmdkFromRoute()
 })
+
+watch(isCompact, (compact) => {
+    uiStore.setCompactViewport(compact);
+}, { immediate: true })
+
+watch(() => route.fullPath, () => {
+    if (uiStore.compactViewport) closeMobileSidebar();
+})
+
+watch(() => uiStore.compactViewport && uiStore.mobileSidebarOpen, (open) => {
+    setBodyScrollLock(MOBILE_SIDEBAR_LOCK, open);
+    if (open) {
+        nextTick(() => {
+            const sidebar = getSidebarElement();
+            if (sidebar) focusFirstElement(sidebar, '[data-sidebar-close]');
+        });
+    }
+}, { immediate: true })
 
 function maybeOpenCmdkFromRoute() {
     if (!('cmdk' in route.query)) return
@@ -248,6 +307,8 @@ onUnmounted(() => {
             window.runtime.EventsOff('app:reload')
         }
     }
+    window.removeEventListener('keydown', handleMobileSidebarKeyDown);
+    releaseBodyScrollLock(MOBILE_SIDEBAR_LOCK);
     dragCounter = 0;
 });
 </script>
@@ -257,8 +318,9 @@ onUnmounted(() => {
     align-items: stretch;
     width: 100%;
     height: 100%;
-    min-width: 600px;
+    min-width: 0;
     min-height: 0;
+    overflow: hidden;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
 }
@@ -271,6 +333,20 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+.mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 910;
+    padding: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.28);
+    touch-action: none;
+}
+
+.main.is-compact-viewport {
+    height: var(--app-viewport-height, 100dvh);
 }
 
 .upload-mask {

@@ -1,7 +1,13 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <div id="platform-sidebar" class="aside_box" :class="{
+        'aside_box--collapsed': sidebarCollapsed,
+        'aside_box--mobile-open': uiStore.compactViewport && uiStore.mobileSidebarOpen,
+        'aside_box--compact-viewport': uiStore.compactViewport,
+    }" :role="uiStore.compactViewport && uiStore.mobileSidebarOpen ? 'dialog' : 'navigation'"
+        :aria-modal="uiStore.compactViewport && uiStore.mobileSidebarOpen ? true : undefined"
+        :aria-label="uiStore.compactViewport && uiStore.mobileSidebarOpen ? t('menu.collapseSidebar') : undefined">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
-        <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
+        <div class="logo_row" v-if="!sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
@@ -19,19 +25,22 @@
                         <img class="header-icon-img" :src="getImgSrc('search.svg')" alt="">
                     </div>
                 </t-tooltip>
-                <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
+                <button type="button" class="sidebar-toggle" data-sidebar-toggle data-sidebar-close @click="uiStore.toggleSidebar"
+                    :title="t('menu.collapseSidebar')" :aria-label="t('menu.collapseSidebar')"
+                    aria-controls="platform-sidebar" :aria-expanded="!sidebarCollapsed">
                     <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
                         <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
                         <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
                             stroke-linecap="round" />
                     </svg>
-                </div>
+                </button>
             </div>
         </div>
         <!-- 折叠时：展开按钮 -->
         <t-tooltip v-else :content="t('menu.expandSidebar')" placement="right">
-            <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
+            <button type="button" class="menu_item sidebar-toggle-item" data-sidebar-toggle data-sidebar-open @click="uiStore.toggleSidebar"
+                :aria-label="t('menu.expandSidebar')" aria-controls="platform-sidebar" :aria-expanded="!sidebarCollapsed">
                 <div class="menu_item-box">
                     <div class="menu_icon">
                         <svg class="icon" viewBox="0 0 20 20" width="20" height="20" fill="none"
@@ -46,20 +55,20 @@
                         </svg>
                     </div>
                 </div>
-            </div>
+            </button>
         </t-tooltip>
 
         <!-- 空间选择器：仅在用户可切换空间时显示 -->
-        <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
+        <TenantSelector v-if="canAccessAllTenants && !sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <div v-if="sidebarCollapsed && !uiStore.compactViewport" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
-            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+            <div class="menu_box menu_box--cmdk" v-if="sidebarCollapsed">
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -76,9 +85,9 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
+            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
-                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                <t-tooltip :content="item.title" placement="right" :disabled="!sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
@@ -88,7 +97,7 @@
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
-                            <template v-if="!uiStore.sidebarCollapsed">
+                            <template v-if="!sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
                                 <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0"
                                     class="menu-pending-badge"
@@ -101,7 +110,7 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-if="!sidebarCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -170,7 +179,7 @@
         </div>
 
         <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
-        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+        <div v-if="batchMode && !sidebarCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
                     @change="toggleBatchSelectAll">
@@ -288,6 +297,7 @@ const usemenuStore = useMenuStore();
 const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
+const sidebarCollapsed = computed(() => uiStore.effectiveSidebarCollapsed);
 const commandPaletteStore = useCommandPaletteStore();
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
@@ -1081,6 +1091,7 @@ const handleMenuClick = async (path: string) => {
     } else {
         gotopage(path)
     }
+    if (uiStore.compactViewport) uiStore.closeMobileSidebar()
 }
 
 // 处理退出登录确认
@@ -1126,6 +1137,7 @@ const gotopage = async (path: string) => {
         }
     }
     getIcon(path)
+    if (uiStore.compactViewport) uiStore.closeMobileSidebar()
 }
 
 const getImgSrc = (url: string) => {
@@ -1160,6 +1172,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 </script>
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 .aside_box {
     // 侧栏水平栅格：图标列与文案列统一对齐（Logo / 菜单 / 会话分组 / 会话行）
     --sidebar-inset-x: 14px;
@@ -1242,6 +1255,15 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         border-radius: 4px;
         transition: background-color 0.2s ease;
         box-sizing: border-box;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font: inherit;
+
+        &:focus-visible {
+            outline: 2px solid var(--td-brand-color);
+            outline-offset: 2px;
+        }
 
         &:hover {
             background: var(--td-bg-color-container-hover);
@@ -1885,6 +1907,79 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 .menu_box {
     position: relative;
 }
+
+.sidebar-toggle-item {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    appearance: none;
+}
+
+.aside_box--compact-viewport.aside_box--collapsed {
+    min-width: 44px;
+    width: 44px;
+    padding: 6px 2px;
+    overflow: hidden;
+
+    /* On phones the closed sidebar is only an opener. Rendering the whole
+       desktop navigation inside a 44px rail made labels wrap vertically and
+       consumed valuable reading width. */
+    .menu_top,
+    .menu_bottom {
+        display: none;
+    }
+
+    .sidebar-toggle-item {
+        width: 40px;
+        min-width: 40px;
+        min-height: 40px;
+        height: 40px;
+        margin: 0;
+        padding: 0;
+        border-radius: 10px;
+    }
+
+    .sidebar-toggle-item .menu_item-box {
+        width: 40px;
+        height: 40px;
+        justify-content: center;
+    }
+}
+
+.aside_box--mobile-open {
+    position: fixed;
+    inset: var(--app-viewport-offset-top, 0) auto auto 0;
+    z-index: 920;
+    width: min(320px, 88vw);
+    min-width: min(320px, 88vw);
+    height: var(--app-viewport-height, 100dvh);
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    overflow: hidden;
+    border-right: 1px solid var(--td-component-stroke);
+    box-shadow: 8px 0 28px rgba(0, 0, 0, 0.2);
+    transition: none;
+
+    .menu_item {
+        min-height: 44px;
+        height: auto;
+        padding-block: 10px;
+    }
+
+    .sidebar-toggle {
+        width: 40px;
+        height: 40px;
+    }
+}
+
+.reduced-motion({
+    .aside_box {
+        transition: none;
+    }
+});
 </style>
 <style lang="less">
 // Dark mode: invert dark logo to light

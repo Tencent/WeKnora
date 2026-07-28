@@ -12,6 +12,7 @@ import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -24,6 +25,9 @@ const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+
+// Keep one application-wide viewport observer alive across auth/platform routes.
+useResponsiveViewport()
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -268,6 +272,10 @@ onUnmounted(() => {
 </template>
 <style>
 html {
+  /* The application root must remain renderable in every viewport mode.
+     A malformed scoped :global(...) descendant selector once compiled into
+     html.app-coarse-pointer { display: none }, hiding the routed DOM on phones. */
+  display: block !important;
   /* 提示 UA 使用对应配色绘制滚动条等，减少主题切换时的额外重绘 */
   color-scheme: light dark;
 }
@@ -292,5 +300,76 @@ html,
   isolation: isolate;
   transform: translateZ(0);
   backface-visibility: hidden;
+}
+
+
+/* Compact safety net for teleported TDesign surfaces. Desktop widths remain
+   useful defaults, but dialogs and drawers must never escape a phone viewport. */
+@media screen and (max-width: 899px),
+  screen and (max-height: 520px) and (pointer: coarse) {
+  html.app-compact-viewport {
+    --app-font-family: "TencentSans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+
+  html.app-compact-viewport .t-dialog__ctx .t-dialog__position {
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    align-items: center;
+  }
+
+  html.app-compact-viewport .t-dialog__ctx .t-dialog__position.t-dialog--top {
+    padding-top: max(12px, env(safe-area-inset-top)) !important;
+    align-items: center;
+  }
+
+  html.app-compact-viewport .t-dialog__ctx .t-dialog:not(.t-dialog--fullscreen) {
+    width: min(100%, 560px) !important;
+    max-width: 100% !important;
+    max-height: calc(var(--app-viewport-height, 100dvh) - max(24px, env(safe-area-inset-top)) - max(24px, env(safe-area-inset-bottom)));
+    margin: 0;
+    overflow: hidden;
+  }
+
+  html.app-compact-viewport .t-dialog__ctx .t-dialog__body {
+    max-height: calc(var(--app-viewport-height, 100dvh) - 180px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html.app-compact-viewport .t-drawer .t-drawer__content-wrapper--right,
+  html.app-compact-viewport .t-drawer .t-drawer__content-wrapper--left {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  html.app-compact-viewport .t-drawer .t-drawer__content-wrapper,
+  html.app-compact-viewport .t-drawer .t-drawer__content {
+    max-height: var(--app-viewport-height, 100dvh);
+  }
+
+  html.app-compact-viewport .t-drawer .t-drawer__header {
+    min-height: 52px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-right: max(52px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    flex-shrink: 0;
+  }
+
+  html.app-compact-viewport .t-drawer .t-drawer__close-btn {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(6px, env(safe-area-inset-right));
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  html.app-compact-viewport .t-drawer .t-drawer__body {
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 </style>

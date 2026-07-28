@@ -180,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { Icon as TIcon, Tooltip as TTooltip } from 'tdesign-vue-next';
@@ -190,6 +190,9 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { SharedAgentInfo } from '@/api/organization';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
+import { PHONE_MAX_WIDTH } from '@/composables/useResponsiveViewport';
+import { computeAnchoredPopoverLayout } from '@/utils/popoverPosition';
+import { observeViewportChanges } from '@/utils/viewportChangeObserver';
 import { type ModelConfig } from '@/api/model';
 import {
   getAgentNotReadyReasonKeys,
@@ -541,65 +544,55 @@ const updateDropdownPosition = () => {
 
   const zoom = getRootZoom();
   const rect = rectToCssPx(props.anchorEl.getBoundingClientRect(), zoom);
-  const { width: vw, height: vh } = cssViewportSize(zoom);
+  const viewport = cssViewportSize(zoom);
+  const layout = computeAnchoredPopoverLayout(rect, viewport, {
+    preferredWidth: viewport.width <= PHONE_MAX_WIDTH ? 360 : 220,
+    preferredHeight: viewport.width <= PHONE_MAX_WIDTH ? 380 : 280,
+    minSpaceBelow: 100,
+    maxHeightRatio: 0.62,
+    offsetY: 6,
+  });
 
-  const dropdownWidth = 220;
-  const offsetY = 6;
+  dropdownStyle.value = {
+    ...layout.style,
+    zIndex: '10001',
+  };
+};
 
-  let left = Math.floor(rect.left);
-  const minLeft = 16;
-  const maxLeft = Math.max(16, vw - dropdownWidth - 16);
-  left = Math.max(minLeft, Math.min(maxLeft, left));
+let stopViewportObserver: (() => void) | null = null;
 
-  const preferredDropdownHeight = 280;
-  const minDropdownHeight = 100;
-  const topMargin = 20;
-  const spaceBelow = vh - rect.bottom;
-  const spaceAbove = rect.top;
+const stopViewportListeners = () => {
+  stopViewportObserver?.();
+  stopViewportObserver = null;
+};
 
-  let actualHeight: number;
-
-  if (spaceBelow >= minDropdownHeight + offsetY) {
-    actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
-    dropdownStyle.value = {
-      position: 'fixed',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      top: `${Math.floor(rect.bottom + offsetY)}px`,
-      maxHeight: `${actualHeight}px`,
-      zIndex: '10001',
-    };
-  } else {
-    const availableHeight = spaceAbove - offsetY - topMargin;
-    actualHeight = availableHeight >= preferredDropdownHeight
-      ? preferredDropdownHeight
-      : Math.max(minDropdownHeight, availableHeight);
-
-    dropdownStyle.value = {
-      position: 'fixed',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      bottom: `${vh - rect.top + offsetY}px`,
-      maxHeight: `${actualHeight}px`,
-      zIndex: '10001',
-    };
-  }
+const startViewportListeners = () => {
+  stopViewportListeners();
+  stopViewportObserver = observeViewportChanges(() => {
+    if (!props.visible) return;
+    updateDropdownPosition();
+    hideDetailPanel();
+  });
 };
 
 watch(() => props.visible, (newVal) => {
   if (newVal) {
+    startViewportListeners();
     nextTick(() => updateDropdownPosition());
     chatResources.ensureWebSearchProviders();
   } else {
+    stopViewportListeners();
     hideDetailPanel();
   }
-});
+}, { immediate: true });
 
 watch(activeDetail, (detail) => {
   if (detail) {
     scheduleDetailPanelPosition();
   }
 });
+
+onUnmounted(stopViewportListeners);
 </script>
 
 <style scoped lang="less">
@@ -615,7 +608,8 @@ watch(activeDetail, (detail) => {
   inset: 0;
   z-index: 10000;
   background: transparent;
-  touch-action: none;
+  touch-action: manipulation;
+  overscroll-behavior: contain;
 }
 
 .agent-selector-dropdown {
@@ -684,6 +678,7 @@ watch(activeDetail, (detail) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 6px 4px 8px;
 }
 
@@ -1128,5 +1123,15 @@ watch(activeDetail, (detail) => {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+}
+
+/* Keep the complete descendant selector inside :global(). Scoped SFC CSS
+   drops descendants that are placed outside the global wrapper. */
+:global(html.app-coarse-pointer .agent-detail-panel) {
+  display: none;
+}
+
+:global(html.app-compact-viewport .agent-selector-dropdown) {
+  border-radius: 12px;
 }
 </style>

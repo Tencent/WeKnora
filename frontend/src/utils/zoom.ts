@@ -62,14 +62,15 @@ export function rectToCssPx(
 }
 
 /**
- * Viewport size in CSS pixels (i.e., the coordinate system used by CSS
- * lengths under the root zoom). `window.innerWidth/innerHeight` are visual
- * pixels, so divide by zoom.
+ * Visible viewport size in CSS pixels (i.e., the coordinate system used by CSS
+ * lengths under the root zoom). Prefer VisualViewport so Android's on-screen
+ * keyboard and browser chrome are excluded from the available popup area.
  */
 export function cssViewportSize(zoom: number = getRootZoom()): { width: number; height: number } {
   if (typeof window === 'undefined') return { width: 0, height: 0 }
+  const viewport = window.visualViewport
   return {
-    width: window.innerWidth / zoom,
-    height: window.innerHeight / zoom,
+    width: (viewport?.width ?? window.innerWidth) / zoom,
+    height: (viewport?.height ?? window.innerHeight) / zoom,
   }
 }

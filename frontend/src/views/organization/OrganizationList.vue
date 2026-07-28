@@ -1144,6 +1144,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 .org-list-container {
   margin: 0 16px 0 0;
   height: 100%;
@@ -1885,10 +1886,6 @@ onUnmounted(() => {
   }
 }
 
-:deep(.t-dialog__position.t-dialog--top) {
-  padding-top: 40vh !important;
-}
-
 .circle-wrap {
   .dialog-header {
     display: flex;
@@ -1950,6 +1947,100 @@ onUnmounted(() => {
     }
   }
 }
+
+
+.compact({
+  .org-list-content {
+    padding: 12px 0 0 12px;
+  }
+
+  .header {
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-right: 12px;
+    flex-wrap: wrap;
+
+    h2 {
+      font-size: 20px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+
+    :deep(.t-button) {
+      width: 100%;
+      min-width: 0;
+      height: 40px;
+    }
+  }
+
+  .header-action-btn {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    border-radius: 10px !important;
+  }
+
+  .org-list-main {
+    padding-right: 12px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .org-tabs {
+    gap: 22px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-item {
+      min-height: 44px;
+      padding: 12px 0;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+  }
+
+  .org-card-wrap {
+    gap: 10px;
+  }
+
+  .org-card {
+    min-width: 0;
+  }
+
+  .empty-state {
+    padding: 36px 16px;
+
+    .empty-state-actions {
+      width: 100%;
+      flex-direction: column;
+
+      :deep(.t-button) {
+        width: 100%;
+        height: 40px;
+      }
+    }
+  }
+});
 </style>
 
 <style lang="less">

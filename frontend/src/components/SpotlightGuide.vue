@@ -14,7 +14,7 @@
         <div v-if="hole" class="guide__ring" :style="ringStyle" aria-hidden="true" />
 
         <div ref="cardRef" class="guide__card" :class="{ 'guide__card--center': !hole }" :style="cardStyle">
-          <button type="button" class="guide__close" :aria-label="t(`${labelsPrefix}.skip`)" @click="dismiss">
+          <button type="button" class="guide__close" :aria-label="safeT(`${labelsPrefix}.skip`)" @click="dismiss">
             <t-icon name="close" size="18px" />
           </button>
 
@@ -23,23 +23,23 @@
               :class="{ 'is-active': i === index, 'is-done': i < index }" />
           </div>
 
-          <p class="guide__step-label">{{ t(`${labelsPrefix}.stepOf`, { current: index + 1, total: steps.length }) }}
+          <p class="guide__step-label">{{ safeT(`${labelsPrefix}.stepOf`, { current: index + 1, total: steps.length }) }}
           </p>
           <h3 class="guide__title">{{ stepTitle }}</h3>
           <p class="guide__desc">{{ stepDesc }}</p>
-          <p v-if="step.interact" class="guide__interact-hint">{{ t(`${labelsPrefix}.interactHint`) }}</p>
+          <p v-if="step.interact" class="guide__interact-hint">{{ safeT(`${labelsPrefix}.interactHint`) }}</p>
 
           <div class="guide__actions">
-            <button type="button" class="guide__skip" @click="dismiss">{{ t(`${labelsPrefix}.skip`) }}</button>
+            <button type="button" class="guide__skip" @click="dismiss">{{ safeT(`${labelsPrefix}.skip`) }}</button>
             <div v-if="!step.interact" class="guide__actions-main">
               <t-button v-if="index > 0" size="small" variant="outline" @click="prev">
-                {{ t(`${labelsPrefix}.prev`) }}
+                {{ safeT(`${labelsPrefix}.prev`) }}
               </t-button>
               <t-button v-if="!isLast" size="small" theme="primary" @click="next">
-                {{ t(`${labelsPrefix}.next`) }}
+                {{ safeT(`${labelsPrefix}.next`) }}
               </t-button>
               <t-button v-else size="small" theme="primary" @click="finish">
-                {{ t(`${labelsPrefix}.done`) }}
+                {{ safeT(`${labelsPrefix}.done`) }}
               </t-button>
             </div>
           </div>
@@ -53,6 +53,9 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
+import { observeViewportChanges } from '@/utils/viewportChangeObserver'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 
 const CARD_WIDTH = 340
 const GAP = 16
@@ -60,6 +63,7 @@ const EDGE = 16
 const PAD = 8
 const holeRadius = 8
 const BACKDROP_COLOR = 'rgba(15, 18, 22, 0.58)'
+const EMPTY_GUIDE_STEP: SpotlightGuideStep = { key: 'unavailable' }
 
 const props = withDefaults(
   defineProps<{
@@ -86,27 +90,43 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const reportedI18nFailures = new Set<string>()
 
+const safeT = (key: string, params?: Record<string, string | number>) => {
+  try {
+    return params ? t(key, params) : t(key)
+  } catch (error) {
+    if (!reportedI18nFailures.has(key)) {
+      reportedI18nFailures.add(key)
+      console.error(`[WeKnora] Failed to render guide translation: ${key}`, error)
+    }
+    // 情境引导属于辅助功能。翻译异常时保留可诊断信息，但不能拖垮核心页面。
+    return key
+  }
+}
+
+const initialViewport = cssViewportSize()
 const index = ref(0)
-const vw = ref(window.innerWidth)
-const vh = ref(window.innerHeight)
-const targetRect = ref<DOMRect | null>(null)
+const vw = ref(initialViewport.width)
+const vh = ref(initialViewport.height)
+const targetRect = ref<ReturnType<typeof rectToCssPx> | null>(null)
 const targetEl = ref<HTMLElement | null>(null)
 const cardSize = ref({ width: CARD_WIDTH, height: 220 })
 
 type HoleRect = { x: number; y: number; width: number; height: number }
 
-const measureNeighborGap = (el: HTMLElement, r: DOMRect) => {
+const measureNeighborGap = (el: HTMLElement, r: ReturnType<typeof rectToCssPx>) => {
+  const zoom = getRootZoom()
   let above = PAD
   const prev = el.previousElementSibling
   if (prev) {
-    above = Math.max(0, r.top - prev.getBoundingClientRect().bottom)
+    above = Math.max(0, r.top - rectToCssPx(prev.getBoundingClientRect(), zoom).bottom)
   }
 
   let below = PAD
   const next = el.nextElementSibling
   if (next) {
-    below = Math.max(0, next.getBoundingClientRect().top - r.bottom)
+    below = Math.max(0, rectToCssPx(next.getBoundingClientRect(), zoom).top - r.bottom)
   } else {
     const mb = parseFloat(getComputedStyle(el).marginBottom) || 0
     below = Math.max(0, PAD - mb)
@@ -115,7 +135,7 @@ const measureNeighborGap = (el: HTMLElement, r: DOMRect) => {
   return { above, below }
 }
 
-const computeHighlightHole = (el: HTMLElement, r: DOMRect): HoleRect => {
+const computeHighlightHole = (el: HTMLElement, r: ReturnType<typeof rectToCssPx>): HoleRect => {
   const { above, below } = measureNeighborGap(el, r)
   const inset = Math.min(PAD, above, below)
 
@@ -147,12 +167,12 @@ const computeHighlightHole = (el: HTMLElement, r: DOMRect): HoleRect => {
 const rootRef = ref<HTMLElement | null>(null)
 const cardRef = ref<HTMLElement | null>(null)
 
-let retryTimer: ReturnType<typeof setTimeout> | null = null
+let retryTimer: number | null = null
 
-const step = computed(() => props.steps[index.value] ?? props.steps[0])
-const isLast = computed(() => index.value === props.steps.length - 1)
-const stepTitle = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.title`))
-const stepDesc = computed(() => t(`${props.stepI18nPrefix}.${step.value.key}.desc`))
+const step = computed(() => props.steps[index.value] ?? props.steps[0] ?? EMPTY_GUIDE_STEP)
+const isLast = computed(() => props.steps.length === 0 || index.value === props.steps.length - 1)
+const stepTitle = computed(() => safeT(`${props.stepI18nPrefix}.${step.value.key}.title`))
+const stepDesc = computed(() => safeT(`${props.stepI18nPrefix}.${step.value.key}.desc`))
 
 const hole = computed(() => {
   const el = targetEl.value
@@ -208,7 +228,7 @@ const overlaps = (
 ) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)
 
 const cardStyle = computed(() => {
-  const w = Math.min(CARD_WIDTH, vw.value - EDGE * 2)
+  const w = Math.max(0, Math.min(CARD_WIDTH, vw.value - EDGE * 2))
   const h = cardSize.value.height
   const h0 = hole.value
 
@@ -263,6 +283,7 @@ const queryTarget = (selector?: string): HTMLElement | null => {
 
 const measureCard = async () => {
   await nextTick()
+  if (!props.active) return
   if (cardRef.value) {
     cardSize.value = {
       width: cardRef.value.offsetWidth,
@@ -272,8 +293,12 @@ const measureCard = async () => {
 }
 
 const locate = async (retry = 0) => {
-  vw.value = window.innerWidth
-  vh.value = window.innerHeight
+  if (!props.active) return
+
+  const zoom = getRootZoom()
+  const viewport = cssViewportSize(zoom)
+  vw.value = viewport.width
+  vh.value = viewport.height
 
   const cur = step.value
   if (!cur.target) {
@@ -287,7 +312,11 @@ const locate = async (retry = 0) => {
   if (!el) {
     if (retry < 12) {
       if (retryTimer) clearTimeout(retryTimer)
-      retryTimer = setTimeout(() => locate(retry + 1), 120)
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null
+        if (!props.active) return
+        void locate(retry + 1)
+      }, 120)
       return
     }
     if (cur.optional) {
@@ -302,12 +331,12 @@ const locate = async (retry = 0) => {
 
   el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   targetEl.value = el
-  targetRect.value = el.getBoundingClientRect()
+  targetRect.value = rectToCssPx(el.getBoundingClientRect(), zoom)
   await measureCard()
 }
 
 const goTo = async (i: number) => {
-  if (i < 0 || i >= props.steps.length) return
+  if (!props.active || i < 0 || i >= props.steps.length) return
   if (retryTimer) {
     clearTimeout(retryTimer)
     retryTimer = null
@@ -316,13 +345,16 @@ const goTo = async (i: number) => {
   index.value = i
   emit('step-change', { fromKey, toKey: step.value.key, index: i })
   await step.value.before?.()
+  if (!props.active) return
   const delay = step.value.before ? props.beforeDelayMs : 0
   if (delay > 0) {
     await new Promise((r) => setTimeout(r, delay))
+    if (!props.active) return
   }
   await locate()
+  if (!props.active) return
   await nextTick()
-  rootRef.value?.focus()
+  if (props.active) rootRef.value?.focus()
 }
 
 const next = () => goTo(index.value + 1)
@@ -345,7 +377,7 @@ const finish = () => {
 
 const dismiss = () => {
   emit('dismiss')
-  finish()
+  close()
 }
 
 const onViewportChange = () => {
@@ -354,6 +386,10 @@ const onViewportChange = () => {
 }
 
 const open = async () => {
+  if (props.steps.length === 0) {
+    emit('update:active', false)
+    return
+  }
   index.value = 0
   emit('update:active', true)
   await nextTick()
@@ -372,27 +408,35 @@ watch(
       }
     }
   },
+  { immediate: true },
 )
 
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', onViewportChange)
-  window.removeEventListener('scroll', onViewportChange, true)
-  if (retryTimer) clearTimeout(retryTimer)
-})
+const GUIDE_SCROLL_LOCK = `spotlight-guide:${props.stepI18nPrefix}`
+let stopViewportObserver: (() => void) | null = null
+
+const stopViewportListeners = () => {
+  stopViewportObserver?.()
+  stopViewportObserver = null
+}
 
 watch(
   () => props.active,
   (val) => {
-    if (val) {
-      window.addEventListener('resize', onViewportChange)
-      window.addEventListener('scroll', onViewportChange, true)
-    } else {
-      window.removeEventListener('resize', onViewportChange)
-      window.removeEventListener('scroll', onViewportChange, true)
-    }
+    setBodyScrollLock(GUIDE_SCROLL_LOCK, val)
+    stopViewportListeners()
+    if (val) stopViewportObserver = observeViewportChanges(onViewportChange)
   },
   { immediate: true },
 )
+
+onBeforeUnmount(() => {
+  stopViewportListeners()
+  releaseBodyScrollLock(GUIDE_SCROLL_LOCK)
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+})
 
 defineExpose({ open, close })
 </script>
@@ -464,7 +508,7 @@ defineExpose({ open, close })
   border: 1px solid var(--td-component-stroke);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.18);
   color: var(--td-text-color-primary);
-  max-height: calc(100vh - 32px);
+  max-height: calc(var(--app-viewport-height, 100dvh) - 32px);
   overflow-y: auto;
   transition:
     top 0.28s cubic-bezier(0.4, 0, 0.2, 1),

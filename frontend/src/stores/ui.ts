@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { matchesCompactLayout } from '@/composables/useResponsiveViewport'
 
 export const useUIStore = defineStore('ui', {
   state: () => ({
@@ -20,8 +21,16 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
+    compactViewport: matchesCompactLayout(),
+    mobileSidebarOpen: false
   }),
+
+  getters: {
+    effectiveSidebarCollapsed: (state) => state.compactViewport
+      ? !state.mobileSidebarOpen
+      : state.sidebarCollapsed
+  },
 
   actions: {
     openSettings(section?: string, subSection?: string) {
@@ -121,18 +130,40 @@ export const useUIStore = defineStore('ui', {
     },
 
     toggleSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = !this.mobileSidebarOpen
+        return
+      }
       this.sidebarCollapsed = !this.sidebarCollapsed
       localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
     },
 
     collapseSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = false
+        return
+      }
       this.sidebarCollapsed = true
       localStorage.setItem('sidebar_collapsed', 'true')
     },
 
     expandSidebar() {
+      if (this.compactViewport) {
+        this.mobileSidebarOpen = true
+        return
+      }
       this.sidebarCollapsed = false
       localStorage.setItem('sidebar_collapsed', 'false')
+    },
+
+    setCompactViewport(compact: boolean) {
+      if (this.compactViewport === compact) return
+      this.compactViewport = compact
+      this.mobileSidebarOpen = false
+    },
+
+    closeMobileSidebar() {
+      this.mobileSidebarOpen = false
     }
   }
 })

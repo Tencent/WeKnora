@@ -327,6 +327,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 @import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
 @import '../../../components/css/chat-citations.less';
@@ -443,4 +444,29 @@ onBeforeUnmount(() => {
     background: conic-gradient(from 90deg at 50% 50%, #fff 0deg, #676767 360deg) !important;
 
 }
+
+.compact({
+  .bot_msg {
+    width: 100%;
+    max-width: 100%;
+    font-size: 15px;
+  }
+
+  .content-wrapper {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ai-markdown-img {
+    max-width: 100%;
+    max-height: min(320px, calc(var(--app-viewport-height, 100dvh) * 0.48));
+    margin-inline: 0;
+  }
+
+  .img_loading {
+    width: min(230px, 76vw);
+    height: min(230px, 76vw);
+    margin-left: 0;
+  }
+});
 </style>

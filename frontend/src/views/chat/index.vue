@@ -1,7 +1,7 @@
 <template>
     <div class="chat" :class="{
         'is-embedded': embeddedMode,
-        'is-sidebar-collapsed': uiStore.sidebarCollapsed,
+        'is-sidebar-collapsed': uiStore.effectiveSidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
     }">
         <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
@@ -1016,6 +1016,7 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 </script>
 <style lang="less" scoped>
+@import '@/assets/responsive.less';
 .chat {
     font-size: 20px;
     // 右侧不留 padding，滚动条贴到内容区最右缘
@@ -1031,11 +1032,12 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     align-items: center;
-    max-width: calc(100vw - 260px);
-    min-width: 400px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
-        max-width: calc(100vw - 60px);
+        max-width: 100%;
     }
 
     &.is-embedded {
@@ -1110,7 +1112,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 // 深色模式下 theme.css 对 * 做了 webkit 滚动条着色，这里恢复为系统默认
-:global(:root[theme-mode="dark"]) .chat_scroll_box {
+:global(:root[theme-mode="dark"] .chat_scroll_box) {
     &::-webkit-scrollbar-thumb {
         background-color: initial !important;
     }
@@ -1204,6 +1206,7 @@ onBeforeRouteUpdate((to, from, next) => {
     margin: 0 auto;
     width: 100%;
     max-width: 960px;
+    min-width: 0;
     box-sizing: border-box;
     position: relative;
 
@@ -1223,9 +1226,11 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     gap: 16px;
     max-width: 960px;
+    min-width: 0;
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    box-sizing: border-box;
 
     /*
       给每条消息加 layout/style containment：
@@ -1298,4 +1303,66 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-leave-to {
     opacity: 0;
 }
+
+.compact({
+    .chat:not(.is-embedded) {
+        padding: 0 0 max(8px, env(safe-area-inset-bottom));
+        overflow: hidden;
+    }
+
+    .chat:not(.is-embedded) .chat_scroll_box {
+        padding: 8px max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+        scroll-padding-top: 8px;
+        scroll-padding-bottom: 16px;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
+    }
+
+    .msg_list,
+    .msg-skeleton-list {
+        gap: 12px;
+        max-width: 100%;
+    }
+
+    .input-container:not(.is-embedded) {
+        min-height: 104px;
+        max-width: 100%;
+    }
+
+    .scroll-to-bottom-btn {
+        bottom: calc(112px + env(safe-area-inset-bottom));
+        width: 40px;
+        height: 40px;
+    }
+});
+
+.phone({
+    .chat:not(.is-embedded) .chat_scroll_box {
+        padding-inline: max(6px, env(safe-area-inset-left));
+    }
+});
+
+.phone-landscape({
+    .chat:not(.is-embedded) {
+        padding-bottom: 4px;
+    }
+
+    .chat:not(.is-embedded) .chat_scroll_box {
+        padding-top: 4px;
+    }
+
+    .input-container:not(.is-embedded) {
+        min-height: 92px;
+    }
+});
+
+:global(html.app-keyboard-open .chat:not(.is-embedded)) {
+    padding-bottom: 2px;
+}
+
+:global(html.app-keyboard-open .scroll-to-bottom-btn) {
+    bottom: 104px;
+}
+
 </style>

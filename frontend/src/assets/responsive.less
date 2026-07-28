@@ -1,0 +1,31 @@
+// Shared responsive contract for the web UI. Keep these values in sync with
+// composables/useResponsiveViewport.ts. Components should use the semantic
+// mixins instead of introducing one-off breakpoint numbers.
+@phone-max: 767px;
+@compact-max: 899px;
+@tablet-max: 1199px;
+
+.phone(@rules) {
+  @media screen and (max-width: @phone-max) { @rules(); }
+}
+
+.compact(@rules) {
+  @media screen and (max-width: @compact-max),
+    screen and (max-height: 520px) and (pointer: coarse) { @rules(); }
+}
+
+.tablet(@rules) {
+  @media screen and (min-width: 768px) and (max-width: @tablet-max) { @rules(); }
+}
+
+.phone-landscape(@rules) {
+  @media screen and (max-height: 520px) and (pointer: coarse) and (orientation: landscape) { @rules(); }
+}
+
+.touch(@rules) {
+  @media (hover: none) and (pointer: coarse) { @rules(); }
+}
+
+.reduced-motion(@rules) {
+  @media (prefers-reduced-motion: reduce) { @rules(); }
+}

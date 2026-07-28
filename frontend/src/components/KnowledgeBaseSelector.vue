@@ -68,6 +68,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { useI18n } from 'vue-i18n'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
+import { PHONE_MAX_WIDTH, useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import {
+  DEFAULT_POPOVER_EDGE_GAP,
+  clampPopoverWidth,
+  computeAnchoredPopoverLayout,
+} from '@/utils/popoverPosition'
+import { observeViewportChanges } from '@/utils/viewportChangeObserver'
 
 interface KnowledgeBase {
   id: string
@@ -91,6 +98,7 @@ const props = defineProps<{
 const emit = defineEmits(['close', 'update:visible'])
 
 const settingsStore = useSettingsStore()
+const { isCompact } = useResponsiveViewport()
 
 // 本地状态
 const searchQuery = ref('')
@@ -137,6 +145,9 @@ const isSelected = (id: string) => selectedKbIds.value.includes(id)
 
 const toggleKb = (id: string) => {
   isSelected(id) ? settingsStore.removeKnowledgeBase(id) : settingsStore.addKnowledgeBase(id)
+  // Keep the optional picker search separate from the chat input. Once a
+  // mobile user taps a result, hide the keyboard so it cannot cover the list.
+  if (isCompact.value) searchInput.value?.blur()
 }
 
 const toggleSelection = () => {
@@ -158,6 +169,7 @@ const selectAll = () => settingsStore.selectKnowledgeBases(filteredKnowledgeBase
 const clearAll = () => settingsStore.clearKnowledgeBases()
 
 const close = () => {
+  searchInput.value?.blur()
   emit('update:visible', false)
   emit('close')
 }
@@ -171,46 +183,43 @@ const loadKnowledgeBases = async () => {
   }
 }
 
-// 计算下拉位置：水平居中对齐到按钮中点，处理视口边界
+// 计算下拉位置：按当前可视视口约束，避免被 Android 键盘或屏幕边缘遮挡
 const updateDropdownPosition = () => {
   const anchor = resolveAnchorEl()
-  
-  // Cache root zoom for this update. Both fallback and rect-anchored paths
-  // need to convert visual measurements to CSS pixels (see utils/zoom.ts).
   const zoom = getRootZoom()
-  const { width: vwFallback, height: vhFallback } = cssViewportSize(zoom)
+  const { width: viewportWidth, height: viewportHeight } = cssViewportSize(zoom)
+  const edgeGap = DEFAULT_POPOVER_EDGE_GAP
+  const preferredWidth = viewportWidth <= PHONE_MAX_WIDTH ? viewportWidth - edgeGap * 2 : dropdownWidth
+  const width = clampPopoverWidth(preferredWidth, viewportWidth, edgeGap)
 
-  // fallback 函数
   const applyFallback = () => {
-    const topFallback = Math.max(80, vhFallback / 2 - 160);
     dropdownStyle.value = {
       position: 'fixed',
-      width: `${dropdownWidth}px`,
-      left: `${Math.round((vwFallback - dropdownWidth) / 2)}px`,
-      top: `${Math.round(topFallback)}px`,
+      width: `${width}px`,
+      left: `${Math.max(edgeGap, Math.round((viewportWidth - width) / 2))}px`,
+      top: `${Math.max(edgeGap, Math.round((viewportHeight - 280) / 2))}px`,
+      maxHeight: `${Math.max(0, viewportHeight - edgeGap * 2)}px`,
       transform: 'none',
       margin: '0',
       padding: '0',
-    };
-  };
-  
+    }
+  }
+
   if (!anchor) {
     applyFallback()
     return
   }
 
-  // 获取 anchor 的 bounding rect（相对于视口）
   let rawRect: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null = null
   try {
     if (typeof anchor.getBoundingClientRect === 'function') {
-      const r = anchor.getBoundingClientRect()
-      rawRect = { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
+      const rect = anchor.getBoundingClientRect()
+      rawRect = { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }
     } else if (anchor.width !== undefined && anchor.left !== undefined) {
-      // Already a DOMRect-like
       rawRect = anchor as DOMRect
     }
-  } catch (e) {
-    console.error('[KnowledgeBaseSelector] Error getting bounding rect:', e)
+  } catch (error) {
+    console.error('[KnowledgeBaseSelector] Error getting bounding rect:', error)
   }
 
   if (!rawRect || rawRect.width === 0 || rawRect.height === 0) {
@@ -218,132 +227,60 @@ const updateDropdownPosition = () => {
     return
   }
 
-  // Convert to CSS pixels so subsequent comparisons against the dropdown's
-  // own width/height stay in one coordinate system.
   const rect = rectToCssPx(rawRect, zoom)
-  console.log('[KB Selector] Button rect (css px):', rect)
-  const vw = vwFallback
-  const vh = vhFallback
-  
-  // 左对齐到触发元素的左边缘
-  // 使用 Math.floor 而不是 Math.round，避免像素对齐问题
-  let left = Math.floor(rect.left)
-  
-  // 边界处理：不超出视口左右（留 16px margin）
-  const minLeft = 16
-  const maxLeft = Math.max(16, vw - dropdownWidth - 16)
-  left = Math.max(minLeft, Math.min(maxLeft, left))
-
-  // 垂直定位：紧贴按钮，使用合理的高度避免空白
-  const preferredDropdownHeight = 280 // 优选高度（紧凑且够用）
-  const maxDropdownHeight = 360 // 最大高度
-  const minDropdownHeight = 200 // 最小高度
-  const topMargin = 20 // 顶部留白
-  const spaceBelow = vh - rect.bottom // 下方剩余空间
-  const spaceAbove = rect.top // 上方剩余空间
-  
-  console.log('[KB Selector] Space check:', {
-    spaceBelow,
-    spaceAbove,
-    windowHeight: vh
+  const layout = computeAnchoredPopoverLayout(rect, {
+    width: viewportWidth,
+    height: viewportHeight,
+  }, {
+    preferredWidth,
+    preferredHeight: viewportWidth <= PHONE_MAX_WIDTH ? 380 : 280,
+    minSpaceBelow: 160,
+    maxHeightRatio: 0.62,
+    edgeGap,
+    offsetY,
   })
-  
-  let actualHeight: number
-  let shouldOpenBelow: boolean
-  
-  // 优先考虑下方空间
-  if (spaceBelow >= minDropdownHeight + offsetY) {
-    // 下方有足够空间，向下弹出
-    actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16)
-    shouldOpenBelow = true
-    console.log('[KB Selector] Position: below button', { actualHeight })
-  } else {
-    // 向上弹出，优先使用 preferredHeight，必要时才扩展到 maxHeight
-    const availableHeight = spaceAbove - offsetY - topMargin
-    if (availableHeight >= preferredDropdownHeight) {
-      // 有足够空间显示优选高度
-      actualHeight = preferredDropdownHeight
-    } else {
-      // 空间不够，使用可用空间（但不小于最小高度）
-      actualHeight = Math.max(minDropdownHeight, availableHeight)
-    }
-    shouldOpenBelow = false
-    console.log('[KB Selector] Position: above button', { actualHeight })
-  }
-  
-  // 根据弹出方向使用不同的定位方式
-  if (shouldOpenBelow) {
-    // 向下弹出：使用 top 定位
-    const top = Math.floor(rect.bottom + offsetY)
-    console.log('[KB Selector] Opening below, top:', top)
-    dropdownStyle.value = {
-      position: 'fixed',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      top: `${top}px`,
-      maxHeight: `${actualHeight}px`,
-      transform: 'none',
-      margin: '0',
-      padding: '0'
-    }
-  } else {
-    // 向上弹出：使用 bottom 定位
-    const bottom = vh - rect.top + offsetY
-    console.log('[KB Selector] Opening above, bottom:', bottom)
-    dropdownStyle.value = {
-      position: 'fixed',
-      width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      bottom: `${bottom}px`,
-      maxHeight: `${actualHeight}px`,
-      transform: 'none',
-      margin: '0',
-      padding: '0'
-    }
+
+  dropdownStyle.value = {
+    ...layout.style,
+    transform: 'none',
+    margin: '0',
+    padding: '0',
   }
 }
+watch(() => props.visible, async (visible, _previous, onCleanup) => {
+  let cancelled = false
+  let settleFrame: number | null = null
+  let stopViewportObserver: (() => void) | null = null
 
-// 事件监听器引用，用于清理
-let resizeHandler: (() => void) | null = null
-let scrollHandler: (() => void) | null = null
+  onCleanup(() => {
+    cancelled = true
+    stopViewportObserver?.()
+    if (settleFrame !== null) cancelAnimationFrame(settleFrame)
+  })
 
-// 当 visible 变化时处理
-watch(() => props.visible, async (v) => {
-  if (v) {
-    await loadKnowledgeBases();
-    // 等 DOM 渲染完再计算位置
-    await nextTick();
-    // 多次更新位置确保准确
-    requestAnimationFrame(() => {
-      updateDropdownPosition();
-      requestAnimationFrame(() => {
-        updateDropdownPosition();
-        setTimeout(() => {
-          updateDropdownPosition();
-        }, 50);
-      });
-    });
-    // 确保 focus
-    nextTick(() => searchInput.value?.focus());
-    // 监听 resize/scroll 做微调（使用 passive 提高性能）
-    resizeHandler = () => updateDropdownPosition();
-    scrollHandler = () => updateDropdownPosition();
-    window.addEventListener('resize', resizeHandler, { passive: true });
-    window.addEventListener('scroll', scrollHandler, { passive: true, capture: true });
-  } else {
-    searchQuery.value = '';
-    highlightedIndex.value = 0;
-    // 清理事件监听器
-    if (resizeHandler) {
-      window.removeEventListener('resize', resizeHandler);
-      resizeHandler = null;
-    }
-    if (scrollHandler) {
-      window.removeEventListener('scroll', scrollHandler, { capture: true });
-      scrollHandler = null;
-    }
+  if (!visible) {
+    searchQuery.value = ''
+    highlightedIndex.value = 0
+    return
   }
-});
+
+  await loadKnowledgeBases()
+  if (cancelled || !props.visible) return
+
+  await nextTick()
+  if (cancelled || !props.visible) return
+
+  updateDropdownPosition()
+  settleFrame = requestAnimationFrame(() => {
+    settleFrame = null
+    if (!cancelled && props.visible) updateDropdownPosition()
+  })
+  stopViewportObserver = observeViewportChanges(() => {
+    if (!cancelled && props.visible) updateDropdownPosition()
+  })
+  // Do not summon the software keyboard merely by opening the picker.
+  if (!isCompact.value) searchInput.value?.focus({ preventScroll: true })
+}, { immediate: true })
 </script>
 
 <style scoped lang="less">
@@ -360,8 +297,9 @@ watch(() => props.visible, async (v) => {
   inset: 0;
   z-index: 9999;
   background: transparent;
-  /* 不阻止点击穿透，但防止触摸滚动 */
-  touch-action: none;
+  /* 遮罩自身不滚动，但允许下拉列表进行纵向触摸滚动 */
+  touch-action: manipulation;
+  overscroll-behavior: contain;
 }
 
 /* 下拉面板使用 fixed 定位，相对于视口 */
@@ -410,6 +348,7 @@ watch(() => props.visible, async (v) => {
   /* 确保滚动限制在此容器内 */
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .kb-item {

@@ -135,10 +135,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { useResponsiveViewport } from '@/composables/useResponsiveViewport'
+import { setBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 import {
   buildReferenceSections,
   formatReferenceSnippet,
@@ -154,6 +156,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const drawer = useChatReferencesDrawer()
+const { layoutWidth, isCompact } = useResponsiveViewport()
 
 const listElement = ref<HTMLElement | null>(null)
 const itemElements = new Map<string, HTMLElement>()
@@ -167,8 +170,8 @@ const highlight = computed(() => drawer?.highlight.value ?? null)
 
 const useOverlay = computed(() => {
   if (props.embeddedMode) return true
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < (props.overlayBreakpoint ?? 960)
+  const width = layoutWidth.value
+  return width > 0 ? width < (props.overlayBreakpoint ?? 960) : isCompact.value
 })
 
 const sections = computed(() => buildReferenceSections(references.value))
@@ -317,6 +320,21 @@ watch(highlight, () => {
   void scrollToHighlight()
 })
 
+const REFERENCES_SCROLL_LOCK = 'chat-references-overlay'
+const handleEscape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && visible.value && useOverlay.value) close()
+}
+
+watch(() => visible.value && useOverlay.value, (locked) => {
+  setBodyScrollLock(REFERENCES_SCROLL_LOCK, locked)
+}, { immediate: true })
+
+onMounted(() => window.addEventListener('keydown', handleEscape))
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleEscape)
+  releaseBodyScrollLock(REFERENCES_SCROLL_LOCK)
+})
+
 watch(visible, (open) => {
   if (!open) {
     panelEntered.value = false
@@ -327,6 +345,7 @@ watch(visible, (open) => {
 </script>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 .chat-references-panel__backdrop {
   position: fixed;
   inset: 0;
@@ -601,4 +620,30 @@ watch(visible, (open) => {
 .references-backdrop-leave-to {
   opacity: 0;
 }
+
+.compact({
+  .chat-references-panel {
+    width: 100%;
+    max-width: none;
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .chat-references-panel__header {
+    min-height: 52px;
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  }
+
+  .chat-references-panel__body {
+    padding: 4px max(10px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .chat-references-panel__close {
+    width: 40px;
+    height: 40px;
+  }
+});
 </style>

@@ -366,6 +366,7 @@ function handleMenuClick(data: { value: string }): void {
 </script>
 
 <style scoped lang="less">
+@import '@/assets/responsive.less';
 .chat-header {
   position: absolute;
   top: 10px;
@@ -516,9 +517,53 @@ function handleMenuClick(data: { value: string }): void {
     transform: rotate(360deg);
   }
 }
+
+.compact({
+  .chat-header {
+    position: relative;
+    top: auto;
+    left: auto;
+    align-self: stretch;
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    min-height: 48px;
+    padding: 6px max(8px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
+    border-radius: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+
+    &.is-editing {
+      max-width: none;
+      padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
+    }
+  }
+
+  .chat-header__title {
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .chat-header__edit {
+    width: auto;
+  }
+
+  .chat-header__edit-input {
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .chat-header__menu-btn {
+    width: 36px;
+    height: 36px;
+  }
+});
 </style>
 
 <style lang="less">
+@import '@/assets/responsive.less';
 .chat-header-menu-popup {
   z-index: 99 !important;
 
@@ -665,5 +710,23 @@ function handleMenuClick(data: { value: string }): void {
   box-shadow:
     0 0 0 0.5px rgba(255, 255, 255, 0.05),
     0 2px 6px rgba(0, 0, 0, 0.2) !important;
+}
+
+html.app-compact-viewport .chat-header-menu-popup .t-popup__content {
+  max-width: calc(var(--app-viewport-width, 100vw) - 16px) !important;
+}
+
+html.app-compact-viewport .chat-header-menu-popup.is-confirm .t-popup__content {
+  width: min(320px, calc(var(--app-viewport-width, 100vw) - 16px)) !important;
+  min-width: 0 !important;
+}
+
+html.app-compact-viewport .chat-header-confirm {
+  width: auto;
+  max-width: 100%;
+}
+
+html.app-coarse-pointer .chat-header-menu__item {
+  min-height: 44px;
 }
 </style>
