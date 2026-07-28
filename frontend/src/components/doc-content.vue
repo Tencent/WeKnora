@@ -8,7 +8,11 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import {
+  downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
+  updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
+  regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions,
+} from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
@@ -30,6 +34,49 @@ const canDeleteGeneratedQuestion = computed(() => {
   if (props.canEditKB === true) return true;
   return authStore.hasRole('admin');
 });
+const canEditContent = canDeleteGeneratedQuestion;
+
+const metadataEditing = ref(false);
+const metadataDraft = ref('{}');
+const metadataSaving = ref(false);
+const summaryRefreshing = ref(false);
+
+const syncMetadataDraft = () => {
+  metadataDraft.value = JSON.stringify(props.details?.custom_metadata || {}, null, 2);
+};
+
+const saveMetadata = async () => {
+  try {
+    const value = JSON.parse(metadataDraft.value || '{}');
+    if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error(t('knowledgeBase.metadataObjectRequired'));
+    metadataSaving.value = true;
+    await updateKnowledgeMetadata(props.details.id, value);
+    props.details.custom_metadata = value;
+    metadataEditing.value = false;
+    props.details.summary_status = props.details.description ? 'pending' : props.details.summary_status;
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.saveFailed'));
+  } finally {
+    metadataSaving.value = false;
+  }
+};
+
+const refreshSummary = async () => {
+  summaryRefreshing.value = true;
+  try {
+    const result: any = await regenerateKnowledgeSummary(props.details.id);
+    if (result?.data) {
+      props.details.description = result.data.description || '';
+      props.details.summary_status = result.data.summary_status || 'completed';
+    }
+    MessagePlugin.success(t('knowledgeBase.summaryRefreshed'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    summaryRefreshing.value = false;
+  }
+};
 
 const detailTags = computed(() => {
   const tags = props.details?.tags;
@@ -86,6 +133,7 @@ mermaid.initialize({
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+watch(() => props.details?.id, syncMetadataDraft, { immediate: true });
 
 const hasTimelineSpans = ref(false);
 const timelineDrawerVisible = ref(false);
@@ -892,6 +940,149 @@ const toggleQuestions = (index: number) => {
 
 const isExpanded = (index: number) => expandedChunks.value.has(index);
 
+const editingChunkId = ref('');
+const chunkDraft = ref('');
+const savingChunkId = ref('');
+
+const startChunkEdit = (item: any) => {
+  editingChunkId.value = item.id;
+  chunkDraft.value = item.content || '';
+};
+
+const saveChunkEdit = async (item: any) => {
+  if (!chunkDraft.value.trim()) {
+    MessagePlugin.warning(t('knowledgeBase.chunkContentRequired'));
+    return;
+  }
+  savingChunkId.value = item.id;
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      content: chunkDraft.value,
+      expected_revision: item.content_revision || 0,
+    });
+    Object.assign(item, result.data);
+    editingChunkId.value = '';
+    props.details.summary_status = props.details.description ? 'pending' : props.details.summary_status;
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.saveFailed'));
+  } finally {
+    savingChunkId.value = '';
+  }
+};
+
+const toggleChunkEnabled = async (item: any) => {
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      is_enabled: !item.is_enabled,
+      expected_revision: item.content_revision || 0,
+    });
+    Object.assign(item, result.data);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+const retryChunkIndex = async (item: any) => {
+  try {
+    const result: any = await updateDocumentChunk(props.details.id, item.id, {
+      expected_revision: item.content_revision || 0,
+    });
+    Object.assign(item, result.data);
+    if (item.index_status === 'failed') throw new Error(t('knowledgeBase.indexFailed'));
+    MessagePlugin.success(t('knowledgeBase.indexRetrySuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+const showChunkHistory = async (item: any) => {
+  try {
+    const result: any = await listChunkRevisions(props.details.id, item.id);
+    const revisions = result?.data || [];
+    const body = revisions.length
+      ? revisions.map((r: any) => `v${r.revision} · ${new Date(r.edited_at).toLocaleString()}\n${r.content.slice(0, 240)}`).join('\n\n')
+      : t('knowledgeBase.noChunkHistory');
+    if (!revisions.length) {
+      DialogPlugin.alert({ header: t('knowledgeBase.chunkHistory'), body });
+      return;
+    }
+    const dialog = DialogPlugin.confirm({
+      header: t('knowledgeBase.chunkHistory'), body,
+      confirmBtn: t('knowledgeBase.revertRevision'), cancelBtn: t('common.close'),
+      onConfirm: async () => {
+        const value = window.prompt(t('knowledgeBase.enterRevision'), String(revisions[0].revision));
+        if (value !== null && Number.isInteger(Number(value))) await revertChunk(item, Number(value));
+        dialog.hide();
+      },
+      onClose: () => dialog.hide(),
+    });
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+const revertChunk = async (item: any, revision: number) => {
+  try {
+    const result: any = await revertDocumentChunk(props.details.id, item.id, revision, item.content_revision || 0);
+    Object.assign(item, result.data);
+    MessagePlugin.success(t('knowledgeBase.chunkReverted'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+const questionDrafts = ref<Record<string, string>>({});
+const savingQuestionChunk = ref('');
+const regeneratingQuestionChunk = ref('');
+
+const addQuestion = async (item: any) => {
+  const question = (questionDrafts.value[item.id] || '').trim();
+  if (!question) return;
+  savingQuestionChunk.value = item.id;
+  try {
+    const result: any = await upsertGeneratedQuestion(item.id, question);
+    questionDrafts.value[item.id] = '';
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
+    metadata.generated_questions = [...(metadata.generated_questions || []), result.data];
+    metadata.generated_questions_revision = item.content_revision || 0;
+    item.metadata = metadata;
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    savingQuestionChunk.value = '';
+  }
+};
+
+const editQuestion = async (item: any, question: GeneratedQuestion) => {
+  const value = window.prompt(t('knowledgeBase.editGeneratedQuestion'), question.question);
+  if (!value || value.trim() === question.question) return;
+  try {
+    await upsertGeneratedQuestion(item.id, value.trim(), question.id);
+    question.question = value.trim();
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  }
+};
+
+const regenerateQuestions = async (item: any) => {
+  regeneratingQuestionChunk.value = item.id;
+  try {
+    const result: any = await regenerateGeneratedQuestions(item.id);
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
+    metadata.generated_questions = result?.data || [];
+    metadata.generated_questions_revision = item.content_revision || 0;
+    item.metadata = metadata;
+    MessagePlugin.success(t('knowledgeBase.questionsRegenerated'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    regeneratingQuestionChunk.value = '';
+  }
+};
+
 // 删除中的状态
 const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(null);
 
@@ -1174,6 +1365,27 @@ const handleDetailsScroll = () => {
                 </t-tag>
               </span>
             </div>
+            <div class="doc-detail-row doc-metadata-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.customMetadata') }}</span>
+              <span class="doc-detail-value metadata-value">
+                <template v-if="!metadataEditing">
+                  <span v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-preview">
+                    {{ Object.entries(details.custom_metadata || {}).map(([key, value]) => `${key}: ${value}`).join(' · ') }}
+                  </span>
+                  <span v-else class="metadata-empty">{{ $t('knowledgeBase.noCustomMetadata') }}</span>
+                  <t-button v-if="canEditContent" size="small" variant="text" @click="metadataEditing = true; syncMetadataDraft()">
+                    {{ $t('common.edit') }}
+                  </t-button>
+                </template>
+                <template v-else>
+                  <t-textarea v-model="metadataDraft" :autosize="{ minRows: 3, maxRows: 8 }" placeholder='{"department":"R&D"}' />
+                  <div class="metadata-actions">
+                    <t-button size="small" theme="primary" :loading="metadataSaving" @click="saveMetadata">{{ $t('common.save') }}</t-button>
+                    <t-button size="small" variant="text" @click="metadataEditing = false">{{ $t('common.cancel') }}</t-button>
+                  </div>
+                </template>
+              </span>
+            </div>
           </div>
         </section>
 
@@ -1190,7 +1402,12 @@ const handleDetailsScroll = () => {
         </section>
 
         <section v-if="showSummarySection" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+          <div class="section-title-actions">
+            <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+            <t-button v-if="canEditContent" size="small" variant="text" :loading="summaryRefreshing" @click="refreshSummary">
+              {{ $t('knowledgeBase.regenerateSummary') }}
+            </t-button>
+          </div>
           <div v-if="details.description" class="summary_wrapper"
             :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
             @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
@@ -1267,9 +1484,24 @@ const handleDetailsScroll = () => {
                       {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
                     </t-tag>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
+                    <t-button v-if="chunk.original.index_status === 'failed' && canEditContent" size="small" theme="danger" variant="text" @click="retryChunkIndex(chunk.original)">{{ $t('knowledgeBase.retryIndex') }}</t-button>
+                    <template v-if="canEditContent">
+                      <t-button size="small" variant="text" @click="startChunkEdit(chunk.original)">{{ $t('common.edit') }}</t-button>
+                      <t-button size="small" variant="text" @click="showChunkHistory(chunk.original)">{{ $t('knowledgeBase.history') }}</t-button>
+                      <t-button size="small" variant="text" @click="toggleChunkEnabled(chunk.original)">
+                        {{ chunk.original.is_enabled ? $t('knowledgeBase.disableChunk') : $t('knowledgeBase.enableChunk') }}
+                      </t-button>
+                    </template>
                   </div>
                 </div>
-                <div class="md-content" v-html="chunk.processedContent"></div>
+                <div v-if="editingChunkId === chunk.original.id" class="chunk-editor">
+                  <t-textarea v-model="chunkDraft" :autosize="{ minRows: 6, maxRows: 20 }" />
+                  <div class="chunk-editor-actions">
+                    <t-button size="small" theme="primary" :loading="savingChunkId === chunk.original.id" @click="saveChunkEdit(chunk.original)">{{ $t('common.save') }}</t-button>
+                    <t-button size="small" variant="text" @click="editingChunkId = ''">{{ $t('common.cancel') }}</t-button>
+                  </div>
+                </div>
+                <div v-else class="md-content" :class="{ 'chunk-disabled': !chunk.original.is_enabled }" v-html="chunk.processedContent"></div>
 
                 <!-- 父 Chunk 上下文展开 -->
                 <div v-if="chunk.hasParent" class="parent-context-section">
@@ -1294,6 +1526,10 @@ const handleDetailsScroll = () => {
                     <div v-for="question in chunk.questions" :key="question.id" class="question-item">
                       <t-icon name="help-circle" size="14px" class="question-icon" />
                       <span class="question-text">{{ question.question }}</span>
+                      <t-button v-if="canEditContent && !question.id.startsWith('legacy-')" theme="default" variant="text" size="small"
+                        @click.stop="editQuestion(chunk.original, question)">
+                        <template #icon><t-icon name="edit" size="14px" /></template>
+                      </t-button>
                       <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
                         class="delete-question-btn" :loading="isDeleting(index, question.id)"
                         @click.stop="handleDeleteQuestion(chunk.original, index, question)">
@@ -1302,6 +1538,18 @@ const handleDetailsScroll = () => {
                         </template>
                       </t-button>
                     </div>
+                    <div v-if="canEditContent" class="question-add-row">
+                      <t-input v-model="questionDrafts[chunk.original.id]" :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
+                      <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id" @click="addQuestion(chunk.original)">{{ $t('common.add') }}</t-button>
+                      <t-button size="small" variant="outline" :loading="regeneratingQuestionChunk === chunk.original.id" @click="regenerateQuestions(chunk.original)">{{ $t('knowledgeBase.regenerateQuestions') }}</t-button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="canEditContent" class="questions-section empty-questions">
+                  <div class="question-add-row">
+                    <t-input v-model="questionDrafts[chunk.original.id]" :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
+                    <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id" @click="addQuestion(chunk.original)">{{ $t('common.add') }}</t-button>
+                    <t-button size="small" variant="outline" :loading="regeneratingQuestionChunk === chunk.original.id" @click="regenerateQuestions(chunk.original)">{{ $t('knowledgeBase.regenerateQuestions') }}</t-button>
                   </div>
                 </div>
               </div>
@@ -1321,6 +1569,25 @@ const handleDetailsScroll = () => {
 </template>
 <style scoped lang="less">
 @import "./css/markdown.less";
+
+.section-title-actions,
+.metadata-actions,
+.chunk-editor-actions,
+.question-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title-actions { justify-content: space-between; }
+.metadata-value { flex: 1; min-width: 0; }
+.metadata-preview { color: var(--td-text-color-secondary); word-break: break-word; }
+.metadata-empty { color: var(--td-text-color-placeholder); }
+.metadata-actions, .chunk-editor-actions { margin-top: 8px; justify-content: flex-end; }
+.chunk-editor { margin: 8px 0; }
+.chunk-disabled { opacity: .5; }
+.question-add-row { margin-top: 8px; }
+.question-add-row :deep(.t-input__wrap) { flex: 1; }
 
 /* Drawer widths are now driven by the `:size` prop on each <t-drawer>
    (see mainDrawerSize / timelineDrawerSize in <script>). CSS rules with

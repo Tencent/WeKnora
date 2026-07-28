@@ -1573,6 +1573,28 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	})
 }
 
+// RegenerateKnowledgeSummary refreshes a stale summary after chunk or metadata edits.
+func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
+}
+
 // UpdateManualKnowledge godoc
 // @Summary      更新手工知识
 // @Description  更新手工录入的Markdown知识内容

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -609,11 +610,44 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	if knowledge.Description != "" {
 		record.Description = knowledge.Description
 	}
+	metadataChanged := knowledge.CustomMetadata != nil
+	if metadataChanged {
+		var custom map[string]interface{}
+		if err := json.Unmarshal(knowledge.CustomMetadata, &custom); err != nil {
+			return fmt.Errorf("custom_metadata must be a JSON object: %w", err)
+		}
+		if len(custom) > 20 {
+			return fmt.Errorf("custom_metadata supports at most 20 fields")
+		}
+		for key, value := range custom {
+			if len(strings.TrimSpace(key)) == 0 || len(key) > 64 || len(fmt.Sprint(value)) > 1000 {
+				return fmt.Errorf("invalid custom_metadata field %q", key)
+			}
+			switch value.(type) {
+			case string, float64, bool, nil:
+			default:
+				return fmt.Errorf("custom_metadata field %q must be a string, number, boolean, or null", key)
+			}
+		}
+		record.CustomMetadata = knowledge.CustomMetadata
+	}
 
 	// Update knowledge record in the repository
 	if err := s.repo.UpdateKnowledge(ctx, record); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge: %v", err)
 		return err
+	}
+	if metadataChanged {
+		chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, record.TenantID, record.ID)
+		if err != nil {
+			return fmt.Errorf("list chunks for metadata reindex: %w", err)
+		}
+		if err := s.updateChunkVector(ctx, record.KnowledgeBaseID, chunks); err != nil {
+			return fmt.Errorf("metadata saved but reindex failed: %w", err)
+		}
+		if record.SummaryStatus == types.SummaryStatusCompleted {
+			_ = s.repo.UpdateKnowledgeColumn(ctx, record.ID, "summary_status", types.SummaryStatusPending)
+		}
 	}
 	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
 	return nil
