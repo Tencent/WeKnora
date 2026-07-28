@@ -1,12 +1,56 @@
 package chatpipeline
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestResolveParentChunksUsesCurrentContentAndImageURLs(t *testing.T) {
+	parent := &types.Chunk{
+		ID: "parent", ChunkType: types.ChunkTypeParentText, ChunkIndex: 7,
+		Content: "manually inserted prefix\n\n![one](u1)\n\nparent body\n\n![two](u2)",
+	}
+	imageInfo, err := json.Marshal([]types.ImageInfo{{URL: "u2", OCRText: "two"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &expandChunkRepo{
+		chunks: map[string]*types.Chunk{"parent": parent},
+		children: map[string][]*types.Chunk{
+			"child": {
+				{
+					ID: "image", ParentChunkID: "child", ChunkType: types.ChunkTypeImageOCR,
+					ImageInfo: string(imageInfo),
+				},
+			},
+		},
+	}
+	plugin := &PluginMerge{chunkRepo: repo}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	result := &types.SearchResult{
+		ID: "child", KnowledgeID: "doc", ChunkType: string(types.ChunkTypeText),
+		ParentChunkID: "parent", Content: "current edited child body", StartAt: 999, EndAt: 1001,
+	}
+
+	got := plugin.resolveParentChunks(ctx, &types.ChatManage{}, []*types.SearchResult{result})
+	if len(got) != 1 {
+		t.Fatalf("result count = %d, want 1", len(got))
+	}
+	if !strings.Contains(got[0].Content, "current edited child body") {
+		t.Fatalf("edited child content was lost: %q", got[0].Content)
+	}
+	if strings.Contains(got[0].Content, "u1") || !strings.Contains(got[0].Content, "u2") {
+		t.Fatalf("parent images were not scoped by URL: %q", got[0].Content)
+	}
+	if got[0].StartAt != 999 || got[0].EndAt != 1001 {
+		t.Fatalf("source coordinates changed to [%d,%d)", got[0].StartAt, got[0].EndAt)
+	}
+}
 
 func TestCollectScopedTextChildIDs(t *testing.T) {
 	parentMap := map[string]*types.Chunk{

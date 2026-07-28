@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// groupAndMergeOverlapping groups results by KnowledgeID and ChunkType
+// groupAndMergeCurrentContent groups results by KnowledgeID and ChunkType
 // using two levels of Go maps. Map iteration order is non-deterministic,
 // so the concatenated output can appear in arbitrary order. This test
 // verifies that the post-merge sort restores deterministic ordering
@@ -25,7 +25,7 @@ func TestGroupAndMergeOverlapping_DeterministicOrdering(t *testing.T) {
 			{ID: "high", KnowledgeID: "kb-001", ChunkType: "summary", StartAt: 200, EndAt: 300, Score: 0.9},
 			{ID: "mid", KnowledgeID: "kb-001", ChunkType: "parent_text", StartAt: 400, EndAt: 500, Score: 0.6},
 		}
-		results := plugin.groupAndMergeOverlapping(context.Background(), chunks)
+		results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
 
 		require.Len(t, results, 3)
 		assert.Equal(t, "high", results[0].ID, "highest score (0.9) must be first")
@@ -40,7 +40,7 @@ func TestGroupAndMergeOverlapping_DeterministicOrdering(t *testing.T) {
 			{ID: "ab", KnowledgeID: "kb-ab", ChunkType: "text", StartAt: 0, EndAt: 50, Score: 0.8},
 			{ID: "aa", KnowledgeID: "kb-aa", ChunkType: "text", StartAt: 0, EndAt: 50, Score: 0.8},
 		}
-		results := plugin.groupAndMergeOverlapping(context.Background(), chunks)
+		results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
 		require.Len(t, results, 2)
 		assert.Equal(t, "aa", results[0].ID, "same score, kb-aa < kb-ab")
 	})
@@ -50,11 +50,11 @@ func TestGroupAndMergeOverlapping_DeterministicOrdering(t *testing.T) {
 		// then the merged result competes with a higher-scored summary chunk
 		// across the inner-map boundary.
 		chunks := []*types.SearchResult{
-			{ID: "low-a", KnowledgeID: "kb-001", ChunkType: "text", StartAt: 0, EndAt: 50, Score: 0.5},
-			{ID: "low-b", KnowledgeID: "kb-001", ChunkType: "text", StartAt: 30, EndAt: 80, Score: 0.7},
+			{ID: "low-a", KnowledgeID: "kb-001", ChunkType: "text", ChunkIndex: 1, Content: "first body", StartAt: 0, EndAt: 50, Score: 0.5},
+			{ID: "low-b", KnowledgeID: "kb-001", ChunkType: "text", ChunkIndex: 2, Content: "second body", StartAt: 30, EndAt: 80, Score: 0.7},
 			{ID: "high", KnowledgeID: "kb-001", ChunkType: "summary", StartAt: 200, EndAt: 300, Score: 0.9},
 		}
-		results := plugin.groupAndMergeOverlapping(context.Background(), chunks)
+		results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
 		require.Len(t, results, 2, "two text chunks merged into one, plus one summary")
 		assert.Equal(t, "high", results[0].ID, "summary (0.9) beats merged text (0.7)")
 	})
@@ -66,10 +66,41 @@ func TestGroupAndMergeOverlapping_DeterministicOrdering(t *testing.T) {
 			{ID: "txt", KnowledgeID: "kb-x", ChunkType: "text", StartAt: 0, EndAt: 50, Score: 0.8},
 			{ID: "sum", KnowledgeID: "kb-x", ChunkType: "summary", StartAt: 100, EndAt: 150, Score: 0.8},
 		}
-		results := plugin.groupAndMergeOverlapping(context.Background(), chunks)
+		results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
 		require.Len(t, results, 2)
 		assert.Equal(t, "sum", results[0].ID, "same kb+score, 'summary' < 'text'")
 	})
+}
+
+func TestGroupAndMergeOverlapping_IgnoresStaleEditedRanges(t *testing.T) {
+	plugin := &PluginMerge{}
+	chunks := []*types.SearchResult{
+		{
+			ID: "edited-outer", KnowledgeID: "doc", ChunkType: "text", ChunkIndex: 1,
+			StartAt: 0, EndAt: 200, Content: "completely rewritten outer content", Score: 0.4,
+		},
+		{
+			ID: "edited-inner", KnowledgeID: "doc", ChunkType: "text", ChunkIndex: 2,
+			StartAt: 50, EndAt: 100, Content: "independent current inner content", Score: 0.9,
+		},
+	}
+
+	results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Content, chunks[0].Content)
+	assert.Contains(t, results[0].Content, chunks[1].Content)
+	assert.Equal(t, 0.9, results[0].Score)
+}
+
+func TestGroupAndMergeOverlapping_DoesNotMergeNonSequentialChunksFromCoordinates(t *testing.T) {
+	plugin := &PluginMerge{}
+	chunks := []*types.SearchResult{
+		{ID: "one", KnowledgeID: "doc", ChunkType: "text", ChunkIndex: 1, StartAt: 0, EndAt: 200, Content: "one"},
+		{ID: "three", KnowledgeID: "doc", ChunkType: "text", ChunkIndex: 3, StartAt: 50, EndAt: 100, Content: "three"},
+	}
+
+	results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
+	require.Len(t, results, 2)
 }
 
 // TestGroupAndMergeOverlapping_CrossKnowledgePreservesMergeLogic verifies
@@ -81,7 +112,7 @@ func TestGroupAndMergeOverlapping_CrossKnowledgePreservesMergeLogic(t *testing.T
 		{ID: "a-1", KnowledgeID: "kb-a", ChunkType: "text", StartAt: 0, EndAt: 100, Score: 0.9},
 		{ID: "b-1", KnowledgeID: "kb-b", ChunkType: "text", StartAt: 0, EndAt: 100, Score: 0.5},
 	}
-	results := plugin.groupAndMergeOverlapping(context.Background(), chunks)
+	results := plugin.groupAndMergeCurrentContent(context.Background(), chunks)
 
 	require.Len(t, results, 2, "chunks from different KBs must not merge")
 	assert.Equal(t, "a-1", results[0].ID, "higher score from kb-a first")

@@ -444,12 +444,7 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 	default:
 		sourceWeight = 1.0
 	}
-	positionPrior := 1.0
-	if sr.StartAt >= 0 {
-		positionPrior += searchutil.ClampFloat(1.0-float64(sr.StartAt)/float64(sr.EndAt+1), -0.05, 0.05)
-	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
 	if composite < 0 {
 		composite = 0
 	}
@@ -680,7 +675,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 			pipelineWarn(ctx, "Rerank", "chunk_metadata_parse", map[string]interface{}{
 				"error": err.Error(),
 			})
-		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
+		} else if questionStrings := docMeta.GetCurrentQuestionStrings(result.ContentRevision); len(questionStrings) > 0 {
 			enrichments = append(enrichments, strings.Join(questionStrings, "; "))
 		}
 	}

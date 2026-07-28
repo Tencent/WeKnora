@@ -26,8 +26,9 @@ type FAQChunkMetadata struct {
 
 // GeneratedQuestion 表示AI生成的单个问题
 type GeneratedQuestion struct {
-	ID       string `json:"id"`       // 唯一标识，用于构造 source_id
-	Question string `json:"question"` // 问题内容
+	ID              string `json:"id"`                         // 唯一标识，用于构造 source_id
+	Question        string `json:"question"`                   // 问题内容
+	ContentRevision *int   `json:"content_revision,omitempty"` // 该问题对应的 Chunk 内容版本
 }
 
 const maxGeneratedQuestionSourceIDLength = 64
@@ -58,6 +59,17 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
 }
 
+// IsQuestionCurrent reports whether a generated question belongs to the
+// current chunk body. Per-question revisions allow stale questions to remain
+// visible after an edit without letting them affect retrieval. Legacy rows
+// fall back to the metadata-level revision.
+func (m *DocumentChunkMetadata) IsQuestionCurrent(question GeneratedQuestion, chunkRevision int) bool {
+	if question.ContentRevision != nil {
+		return *question.ContentRevision == chunkRevision
+	}
+	return m != nil && m.GeneratedQuestionsRevision == chunkRevision
+}
+
 // GetQuestionStrings 返回问题内容字符串列表（兼容旧代码）
 func (m *DocumentChunkMetadata) GetQuestionStrings() []string {
 	if m == nil || len(m.GeneratedQuestions) == 0 {
@@ -66,6 +78,20 @@ func (m *DocumentChunkMetadata) GetQuestionStrings() []string {
 	result := make([]string, len(m.GeneratedQuestions))
 	for i, q := range m.GeneratedQuestions {
 		result[i] = q.Question
+	}
+	return result
+}
+
+// GetCurrentQuestionStrings returns only questions tied to chunkRevision.
+func (m *DocumentChunkMetadata) GetCurrentQuestionStrings(chunkRevision int) []string {
+	if m == nil || len(m.GeneratedQuestions) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(m.GeneratedQuestions))
+	for _, question := range m.GeneratedQuestions {
+		if m.IsQuestionCurrent(question, chunkRevision) {
+			result = append(result, question.Question)
+		}
 	}
 	return result
 }

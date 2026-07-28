@@ -980,6 +980,7 @@ const getChunkMeta = (item: any) => {
 interface GeneratedQuestion {
   id: string;
   question: string;
+  content_revision?: number;
 }
 
 // 解析生成的问题
@@ -998,6 +999,19 @@ const getGeneratedQuestions = (item: any): GeneratedQuestion[] => {
     });
   } catch {
     return [];
+  }
+};
+
+const hasStaleGeneratedQuestions = (item: any) => {
+  const questions = getGeneratedQuestions(item);
+  if (!questions.length) return false;
+  try {
+    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
+    const fallbackRevision = metadata.generated_questions_revision || 0;
+    const currentRevision = item.content_revision || 0;
+    return questions.some((question) => (question.content_revision ?? fallbackRevision) !== currentRevision);
+  } catch {
+    return false;
   }
 };
 
@@ -1212,7 +1226,6 @@ const addQuestion = async (item: any) => {
     questionComposerChunk.value = '';
     const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
     metadata.generated_questions = [...(metadata.generated_questions || []), result.data];
-    metadata.generated_questions_revision = item.content_revision || 0;
     item.metadata = metadata;
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
@@ -1241,8 +1254,9 @@ const saveQuestionEdit = async (item: any, question: GeneratedQuestion) => {
   }
   savingQuestionKey.value = `${item.id}:${question.id}`;
   try {
-    await upsertGeneratedQuestion(item.id, value, question.id);
+    const result: any = await upsertGeneratedQuestion(item.id, value, question.id);
     question.question = value;
+    question.content_revision = result?.data?.content_revision ?? (item.content_revision || 0);
     cancelQuestionEdit();
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
@@ -1757,6 +1771,9 @@ const handleDetailsScroll = () => {
                               <t-icon name="help-circle" size="15px" />
                               <span>{{ $t('knowledgeBase.generatedQuestions') }}</span>
                               <span class="chunk-popup-count">{{ chunk.questions.length }}</span>
+                              <span v-if="hasStaleGeneratedQuestions(chunk.original)" class="chunk-question-stale-hint">
+                                {{ $t('knowledgeBase.staleGeneratedQuestions') }}
+                              </span>
                             </div>
                             <div v-if="canEditContent" class="chunk-popup-actions">
                               <t-tooltip :content="$t('knowledgeBase.addGeneratedQuestion')" placement="top">
@@ -2846,6 +2863,12 @@ const handleDetailsScroll = () => {
 
 .chunk-popup-count {
   color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chunk-question-stale-hint {
+  color: var(--td-warning-color);
   font-size: 11px;
   font-weight: 400;
 }
