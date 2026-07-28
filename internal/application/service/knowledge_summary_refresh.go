@@ -16,6 +16,28 @@ type summaryKnowledgeBaseReader interface {
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
 }
 
+// restoreSummaryRefreshTenantInfo rebuilds the tenant context normally added
+// by the HTTP authentication middleware. Summary refreshes run in an Asynq
+// worker, and the retrieve-engine factory needs the full tenant configuration,
+// not only TenantIDContextKey, when it reindexes the summary chunk.
+func restoreSummaryRefreshTenantInfo(
+	ctx context.Context,
+	tenantRepo interfaces.TenantRepository,
+	tenantID uint64,
+) (context.Context, error) {
+	if tenantRepo == nil {
+		return ctx, fmt.Errorf("tenant repository is unavailable")
+	}
+	tenant, err := tenantRepo.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return ctx, fmt.Errorf("get tenant %d for summary refresh: %w", tenantID, err)
+	}
+	if tenant == nil {
+		return ctx, fmt.Errorf("tenant %d not found for summary refresh", tenantID)
+	}
+	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), nil
+}
+
 // enqueueSummaryRefresh marks an existing summary as queued and enqueues an
 // independent refresh task. The pending status is written before Enqueue
 // because the Lite executor may run the task synchronously inside Enqueue.
