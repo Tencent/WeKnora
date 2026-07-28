@@ -1045,6 +1045,7 @@ const saveChunkEdit = async (item: any) => {
     editingChunkId.value = '';
     props.details.summary_status = result.summary_status || props.details.summary_status;
     props.details.description = result.description ?? props.details.description;
+    void refreshChunkHistoryAfterMutation(item);
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.saveFailed'));
@@ -1063,6 +1064,7 @@ const toggleChunkEnabled = async (item: any, isEnabled: boolean) => {
     Object.assign(item, result.data);
     props.details.summary_status = result.summary_status || props.details.summary_status;
     props.details.description = result.description ?? props.details.description;
+    void refreshChunkHistoryAfterMutation(item);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
   } finally {
@@ -1089,18 +1091,41 @@ const chunkHistoryPopup = ref('');
 const chunkHistoryLoading = ref('');
 const chunkHistories = ref<Record<string, any[]>>({});
 const selectedChunkRevision = ref<Record<string, number | null>>({});
+const chunkHistoryRequestSequence = ref<Record<string, number>>({});
 const revertingRevision = ref('');
 
-const showChunkHistory = async (item: any) => {
-  if (chunkHistories.value[item.id]) return;
+const loadChunkHistory = async (item: any, force = false, silent = false) => {
+  if (!force && Object.prototype.hasOwnProperty.call(chunkHistories.value, item.id)) return;
 
+  const requestSequence = (chunkHistoryRequestSequence.value[item.id] || 0) + 1;
+  chunkHistoryRequestSequence.value[item.id] = requestSequence;
   chunkHistoryLoading.value = item.id;
   try {
     const result: any = await listChunkRevisions(props.details.id, item.id);
-    chunkHistories.value[item.id] = result?.data || [];
+    if (chunkHistoryRequestSequence.value[item.id] === requestSequence) {
+      chunkHistories.value[item.id] = result?.data || [];
+    }
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.error'));
+    if (!silent) MessagePlugin.error(error?.message || t('common.error'));
   } finally {
+    if (chunkHistoryRequestSequence.value[item.id] === requestSequence) {
+      chunkHistoryLoading.value = '';
+    }
+  }
+};
+
+const showChunkHistory = async (item: any) => loadChunkHistory(item);
+
+const refreshChunkHistoryAfterMutation = async (item: any) => {
+  const wasLoaded = Object.prototype.hasOwnProperty.call(chunkHistories.value, item.id);
+  const shouldReload = wasLoaded || chunkHistoryPopup.value === item.id;
+  // Invalidate both the cached list and any older request still in flight.
+  chunkHistoryRequestSequence.value[item.id] = (chunkHistoryRequestSequence.value[item.id] || 0) + 1;
+  delete chunkHistories.value[item.id];
+  selectedChunkRevision.value[item.id] = null;
+  if (shouldReload) {
+    await loadChunkHistory(item, true, true);
+  } else if (chunkHistoryLoading.value === item.id) {
     chunkHistoryLoading.value = '';
   }
 };
@@ -1164,10 +1189,7 @@ const revertChunk = async (item: any, revision: number) => {
     Object.assign(item, result.data);
     props.details.summary_status = result.summary_status || props.details.summary_status;
     props.details.description = result.description ?? props.details.description;
-    delete chunkHistories.value[item.id];
-    const historyResult: any = await listChunkRevisions(props.details.id, item.id);
-    chunkHistories.value[item.id] = historyResult?.data || [];
-    selectedChunkRevision.value[item.id] = null;
+    await refreshChunkHistoryAfterMutation(item);
     MessagePlugin.success(t('knowledgeBase.chunkReverted'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
@@ -1189,6 +1211,10 @@ watch(() => props.details?.id, () => {
   metadataEditing.value = false;
   editingChunkId.value = '';
   chunkHistoryPopup.value = '';
+  chunkHistoryLoading.value = '';
+  chunkHistories.value = {};
+  selectedChunkRevision.value = {};
+  chunkHistoryRequestSequence.value = {};
   parentContextPopup.value = '';
   questionPopupChunk.value = '';
   questionComposerChunk.value = '';
@@ -1554,65 +1580,68 @@ const handleDetailsScroll = () => {
                 </t-tag>
               </span>
             </div>
-            <div class="doc-detail-row doc-metadata-row">
-              <div class="metadata-card-head">
-                <div class="metadata-card-title">
-                  <t-icon name="tag" size="15px" />
-                  <span>{{ $t('knowledgeBase.customMetadata') }}</span>
-                  <span v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-count">
-                    {{ Object.keys(details.custom_metadata || {}).length }}/20
-                  </span>
-                </div>
-                <t-tooltip v-if="canEditContent && !metadataEditing" :content="$t('common.edit')" placement="top">
-                  <t-button class="icon-action-btn" size="small" variant="text" shape="square" @click="startMetadataEdit">
-                    <template #icon><t-icon name="edit" size="15px" /></template>
-                  </t-button>
-                </t-tooltip>
-              </div>
+          </div>
+        </section>
 
-              <div v-if="!metadataEditing" class="metadata-display">
-                <div v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-grid">
-                  <div v-for="(value, key) in (details.custom_metadata || {})" :key="key" class="metadata-item">
-                    <span class="metadata-item-key">{{ key }}</span>
-                    <span class="metadata-item-value">{{ formatMetadataValue(value) }}</span>
-                  </div>
-                </div>
-                <button v-else-if="canEditContent" type="button" class="metadata-empty-action" @click="startMetadataEdit">
-                  <t-icon name="add" size="15px" />
-                  <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
-                </button>
-                <span v-else class="metadata-empty">{{ $t('knowledgeBase.noCustomMetadata') }}</span>
-              </div>
+        <section v-if="details.id" class="setting-drawer__section metadata-section">
+          <div class="section-title-actions">
+            <h4 class="setting-drawer__section-title">
+              <span>{{ $t('knowledgeBase.customMetadata') }}</span>
+              <t-tooltip :content="$t('knowledgeBase.metadataCapabilityHint')" placement="top">
+                <t-icon name="info-circle" size="14px" class="metadata-capability-icon" />
+              </t-tooltip>
+              <span v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-count">
+                {{ Object.keys(details.custom_metadata || {}).length }}/20
+              </span>
+            </h4>
+            <t-tooltip v-if="canEditContent && !metadataEditing" :content="$t('common.edit')" placement="top">
+              <t-button class="icon-action-btn" size="small" variant="text" shape="square" @click="startMetadataEdit">
+                <template #icon><t-icon name="edit" size="15px" /></template>
+              </t-button>
+            </t-tooltip>
+          </div>
 
-              <div v-else class="metadata-editor">
-                <div v-for="row in metadataDraft" :key="row.id" class="metadata-editor-row">
-                  <t-input v-model="row.key" class="metadata-key-input" :placeholder="$t('knowledgeBase.metadataKeyPlaceholder')" />
-                  <t-select v-model="row.type" class="metadata-type-select" :options="metadataTypeOptions" />
-                  <t-select v-if="row.type === 'boolean'" v-model="row.value" class="metadata-value-input"
-                    :options="[{ label: 'true', value: 'true' }, { label: 'false', value: 'false' }]" />
-                  <t-input v-else-if="row.type !== 'null'" v-model="row.value" class="metadata-value-input"
-                    :placeholder="$t('knowledgeBase.metadataValuePlaceholder')" />
-                  <div v-else class="metadata-null-value">null</div>
-                  <t-tooltip :content="$t('common.delete')" placement="top">
-                    <t-button class="icon-action-btn metadata-remove-btn" size="small" variant="text" shape="square"
-                      @click="removeMetadataRow(row.id)">
-                      <template #icon><t-icon name="delete" size="15px" /></template>
-                    </t-button>
-                  </t-tooltip>
-                </div>
-                <button v-if="metadataDraft.length < 20" type="button" class="metadata-add-row" @click="addMetadataRow">
-                  <t-icon name="add" size="15px" />
-                  <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
-                </button>
-                <div class="metadata-actions">
-                  <t-button size="small" variant="outline" :disabled="metadataSaving" @click="metadataEditing = false; syncMetadataDraft()">
-                    {{ $t('common.cancel') }}
-                  </t-button>
-                  <t-button size="small" theme="primary" :loading="metadataSaving" @click="saveMetadata">
-                    {{ $t('common.save') }}
-                  </t-button>
-                </div>
+          <div v-if="!metadataEditing" class="metadata-display">
+            <div v-if="Object.keys(details.custom_metadata || {}).length" class="metadata-grid">
+              <div v-for="(value, key) in (details.custom_metadata || {})" :key="key" class="metadata-item">
+                <span class="metadata-item-key">{{ key }}</span>
+                <span class="metadata-item-value">{{ formatMetadataValue(value) }}</span>
               </div>
+            </div>
+            <button v-else-if="canEditContent" type="button" class="metadata-empty-action" @click="startMetadataEdit">
+              <t-icon name="add" size="15px" />
+              <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
+            </button>
+            <span v-else class="metadata-empty">{{ $t('knowledgeBase.noCustomMetadata') }}</span>
+          </div>
+
+          <div v-else class="metadata-editor">
+            <div v-for="row in metadataDraft" :key="row.id" class="metadata-editor-row">
+              <t-input v-model="row.key" class="metadata-key-input" :placeholder="$t('knowledgeBase.metadataKeyPlaceholder')" />
+              <t-select v-model="row.type" class="metadata-type-select" :options="metadataTypeOptions" />
+              <t-select v-if="row.type === 'boolean'" v-model="row.value" class="metadata-value-input"
+                :options="[{ label: 'true', value: 'true' }, { label: 'false', value: 'false' }]" />
+              <t-input v-else-if="row.type !== 'null'" v-model="row.value" class="metadata-value-input"
+                :placeholder="$t('knowledgeBase.metadataValuePlaceholder')" />
+              <div v-else class="metadata-null-value">null</div>
+              <t-tooltip :content="$t('common.delete')" placement="top">
+                <t-button class="icon-action-btn metadata-remove-btn" size="small" variant="text" shape="square"
+                  @click="removeMetadataRow(row.id)">
+                  <template #icon><t-icon name="delete" size="15px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
+            <button v-if="metadataDraft.length < 20" type="button" class="metadata-add-row" @click="addMetadataRow">
+              <t-icon name="add" size="15px" />
+              <span>{{ $t('knowledgeBase.addMetadataField') }}</span>
+            </button>
+            <div class="metadata-actions">
+              <t-button size="small" variant="outline" :disabled="metadataSaving" @click="metadataEditing = false; syncMetadataDraft()">
+                {{ $t('common.cancel') }}
+              </t-button>
+              <t-button size="small" theme="primary" :loading="metadataSaving" @click="saveMetadata">
+                {{ $t('common.save') }}
+              </t-button>
             </div>
           </div>
         </section>
@@ -2170,34 +2199,15 @@ const handleDetailsScroll = () => {
   word-break: break-word;
 }
 
-.doc-metadata-row {
-  display: block;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--td-component-stroke);
-}
-
-.metadata-card-head,
-.metadata-card-title,
 .metadata-editor-row {
   display: flex;
   align-items: center;
 }
 
-.metadata-card-head {
-  justify-content: space-between;
-  min-height: 28px;
-}
-
-.metadata-card-title {
-  gap: 7px;
-  color: var(--td-text-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-
-  > .t-icon {
-    color: var(--td-text-color-secondary);
-  }
+.metadata-capability-icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
 }
 
 .metadata-count {
@@ -2206,9 +2216,8 @@ const handleDetailsScroll = () => {
   font-weight: 400;
 }
 
-.metadata-display,
-.metadata-editor {
-  margin-top: 10px;
+.metadata-display {
+  min-width: 0;
 }
 
 .metadata-grid {
