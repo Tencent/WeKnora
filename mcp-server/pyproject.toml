@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weknora-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
 readme = "README.md"
 license = {text = "MIT"}
@@ -60,7 +60,7 @@ weknora-mcp-server = "main:sync_main"
 weknora-server = "run_server:main"
 
 [tool.setuptools]
-py-modules = ["weknora_mcp_server", "main", "run_server", "run", "test_module"]
+py-modules = ["weknora_mcp_server", "upload_paths", "main", "run_server", "run", "test_module"]
 include-package-data = true
 
 [tool.setuptools.package-data]
