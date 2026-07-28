@@ -675,7 +675,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 			pipelineWarn(ctx, "Rerank", "chunk_metadata_parse", map[string]interface{}{
 				"error": err.Error(),
 			})
-		} else if questionStrings := docMeta.GetCurrentQuestionStrings(result.ContentRevision); len(questionStrings) > 0 {
+		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
 			enrichments = append(enrichments, strings.Join(questionStrings, "; "))
 		}
 	}

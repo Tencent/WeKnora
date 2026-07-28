@@ -213,7 +213,6 @@ func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.S
 		Content:           chunk.Content,
 		KnowledgeID:       chunk.KnowledgeID,
 		ChunkIndex:        chunk.ChunkIndex,
-		ContentRevision:   chunk.ContentRevision,
 		KnowledgeTitle:    knowledge.Title,
 		StartAt:           chunk.StartAt,
 		EndAt:             chunk.EndAt,

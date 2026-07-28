@@ -13,11 +13,14 @@ func TestDocumentChunkMetadataQuestionRevision(t *testing.T) {
 		},
 	}
 
-	questions := meta.GetCurrentQuestionStrings(currentRevision)
-	if len(questions) != 1 || questions[0] != "current question" {
-		t.Fatalf("current questions = %v", questions)
+	questions := meta.GetQuestionStrings()
+	if len(questions) != 2 {
+		t.Fatalf("all retrieval questions should remain available, got %v", questions)
 	}
 	if !meta.IsQuestionCurrent(meta.GeneratedQuestions[0], oldRevision) {
 		t.Fatal("legacy question should use the metadata-level revision")
+	}
+	if meta.IsQuestionCurrent(meta.GeneratedQuestions[0], currentRevision) {
+		t.Fatal("legacy question should still be identifiable as based on an older revision")
 	}
 }

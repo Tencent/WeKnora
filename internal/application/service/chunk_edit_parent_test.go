@@ -145,7 +145,7 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 	}
 }
 
-func TestUpdateDocumentChunkPreservesGeneratedQuestionsAsStale(t *testing.T) {
+func TestUpdateDocumentChunkPreservesGeneratedQuestionsAcrossRevision(t *testing.T) {
 	metadata := &types.DocumentChunkMetadata{
 		GeneratedQuestions:         []types.GeneratedQuestion{{ID: "q1", Question: "old question"}},
 		GeneratedQuestionsRevision: 0,
@@ -179,7 +179,7 @@ func TestUpdateDocumentChunkPreservesGeneratedQuestionsAsStale(t *testing.T) {
 		t.Fatalf("generated questions were cleared: %+v", updatedMetadata.GeneratedQuestions)
 	}
 	if updatedMetadata.IsQuestionCurrent(updatedMetadata.GeneratedQuestions[0], updated.ContentRevision) {
-		t.Fatal("question from the previous content revision should be stale")
+		t.Fatal("question should remain identifiable as based on the previous content revision")
 	}
 }
 

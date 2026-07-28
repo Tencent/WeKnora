@@ -157,8 +157,6 @@ type SearchResult struct {
 	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id"`
 	// Chunk index
 	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index"`
-	// Current editable content revision
-	ContentRevision int `json:"content_revision"`
 	// Knowledge title
 	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title"`
 	// Start at

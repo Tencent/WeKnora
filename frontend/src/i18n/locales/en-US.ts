@@ -571,7 +571,7 @@ export default {
     editGeneratedQuestion: 'Edit retrieval question',
     regenerateQuestions: 'Regenerate questions',
     questionsRegenerated: 'Retrieval questions refreshed',
-    staleGeneratedQuestions: 'Content changed; old questions are excluded from retrieval',
+    staleGeneratedQuestions: 'Generated from an earlier version; regenerate if needed',
     noGeneratedQuestions: 'No retrieval questions',
     notInitialized: 'Knowledge base is not initialized. Please configure models in settings before uploading files',
     missingStorageEngine: 'This knowledge base has no storage engine selected. Please configure a storage engine in settings before uploading content.',

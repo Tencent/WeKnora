@@ -2696,7 +2696,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 		}
 		if meta != nil {
 			for _, q := range meta.GeneratedQuestions {
-				if strings.TrimSpace(q.Question) != "" && meta.IsQuestionCurrent(q, chunk.ContentRevision) {
+				if strings.TrimSpace(q.Question) != "" {
 					indexInfo = append(indexInfo, &types.IndexInfo{
 						Content: buildKnowledgeIndexContent(knowledge, q.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
