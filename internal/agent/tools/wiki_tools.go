@@ -223,20 +223,14 @@ func extractSourceKnowledgeIDs(page *types.WikiPage) []string {
 	return ids
 }
 
-// isStructuralPage reports whether a page is a wiki-level structural/meta
-// page (index, log) rather than a content page tied to specific source
-// documents. Structural pages are never filtered by knowledge_ids scope —
-// they describe wiki topology (TOC, operation log) and must remain reachable
-// even when the user has pinned specific documents.
+// isStructuralPage reports whether a page is the wiki-level index rather than
+// a content page tied to specific source documents. The index is never
+// filtered by knowledge_ids scope because it describes wiki topology.
 func isStructuralPage(page *types.WikiPage) bool {
 	if page == nil {
 		return false
 	}
-	switch page.PageType {
-	case types.WikiPageTypeIndex, types.WikiPageTypeLog:
-		return true
-	}
-	return false
+	return page.PageType == types.WikiPageTypeIndex
 }
 
 // registerLinkedSlugs records the KB that owns this page for every slug the

@@ -308,7 +308,6 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 
 		// Special pages
 		wikiRead.GET("/index", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetIndex)
-		wikiRead.GET("/log", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetLog)
 
 		// Graph and stats
 		wikiRead.GET("/graph", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetGraph)

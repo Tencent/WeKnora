@@ -444,13 +444,6 @@ const WikiIndexIntroUpdatePrompt = `You are a wiki editor. Update the introducti
 
 Output ONLY the updated title and introduction paragraph. Do NOT generate any directory listings or page links.`
 
-// WikiLogEntryTemplate is a simple template for log entries (not LLM-generated).
-const WikiLogEntryTemplate = `## [{{.Date}}] {{.Operation}} | {{.Title}}
-- **Source**: {{.SourceInfo}}
-- **Pages affected**: {{.PagesAffected}}
-- **Summary**: {{.Summary}}
-`
-
 // WikiDeduplicationPrompt asks the LLM to identify duplicate entities/concepts
 // between newly extracted items and existing wiki pages.
 const WikiDeduplicationPrompt = `You are a strict deduplication system. You are given a list of newly extracted items. Each item carries its OWN short list of existing wiki pages that are surface-similar to it (its <candidates>). For each item, decide whether it refers to the **exact same** real-world entity or concept as ONE of its own candidates.
