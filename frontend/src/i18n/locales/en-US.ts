@@ -898,8 +898,10 @@ export default {
     head: {
       duration: 'Duration',
       stages: 'Stages',
-      stagesDone: 'Stages completed',
+      stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
+      postprocessTasks: 'Postprocess: {running} running / {failed} failed / {completed} completed',
+      completedWithActiveTrace: 'Processing completed, but {n} trace task(s) remain active',
       stage: 'Stage',
       status: 'Status',
       attempt: 'Attempt',

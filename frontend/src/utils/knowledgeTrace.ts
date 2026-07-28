@@ -23,6 +23,14 @@ export interface KnowledgeTraceNode {
   children?: KnowledgeTraceNode[]
 }
 
+export interface PostprocessTaskSummary {
+  running: number
+  failed: number
+  completed: number
+  other: number
+  total: number
+}
+
 const graphChunkName = /^postprocess\.graph\.chunk\[(\d+)\]$/
 
 function timestamp(value?: string | null): number | null {
@@ -104,4 +112,56 @@ export function groupPostprocessGraphSpans(
   }
 
   return { ...stage, children: groupedChildren }
+}
+
+/**
+ * Counts leaf postprocess spans so the UI can distinguish the five main
+ * pipeline stages from asynchronous enrichment work.
+ */
+export function summarizePostprocessTasks(
+  trace?: KnowledgeTraceNode,
+): PostprocessTaskSummary {
+  const summary: PostprocessTaskSummary = {
+    running: 0,
+    failed: 0,
+    completed: 0,
+    other: 0,
+    total: 0,
+  }
+  if (!trace) return summary
+
+  const postprocess = trace.name === 'postprocess'
+    ? trace
+    : (trace.children || []).find(child => child.name === 'postprocess')
+  if (!postprocess) return summary
+
+  const countLeaves = (node: KnowledgeTraceNode) => {
+    const children = node.children || []
+    if (children.length > 0) {
+      children.forEach(countLeaves)
+      return
+    }
+
+    summary.total++
+    switch (node.status) {
+      case 'running':
+      case 'pending':
+      case 'processing':
+      case 'finalizing':
+        summary.running++
+        break
+      case 'failed':
+        summary.failed++
+        break
+      case 'done':
+      case 'completed':
+        summary.completed++
+        break
+      default:
+        summary.other++
+    }
+  }
+
+  ;(postprocess.children || []).forEach(countLeaves)
+  return summary
 }
