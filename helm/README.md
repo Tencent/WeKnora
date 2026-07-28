@@ -140,6 +140,28 @@ helm install weknora ./helm \
   -f values-production.yaml
 ```
 
+### External MySQL
+
+MySQL 8.0.16+ can be used for the business database. It does not store
+embeddings, so configure an external vector-capable retrieval driver such as
+Qdrant, Milvus, Elasticsearch v8, OpenSearch, Weaviate, or Doris.
+
+```bash
+helm install weknora ./helm \
+  --namespace weknora \
+  --create-namespace \
+  --set database.driver=mysql \
+  --set database.host=mysql.example.internal \
+  --set database.port=3306 \
+  --set postgresql.enabled=false \
+  --set app.env.RETRIEVE_DRIVER=qdrant \
+  --set secrets.dbUser=weknora \
+  --set secrets.dbPassword=secure-password \
+  --set secrets.dbName=weknora \
+  --set secrets.redisPassword=secure-password \
+  --set secrets.jwtSecret=$(openssl rand -base64 32)
+```
+
 ## Configuration
 
 ### Global Parameters
@@ -170,6 +192,14 @@ helm install weknora ./helm \
 | `app.resources` | Resource limits | See values.yaml |
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
+
+### Business Database
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `database.driver` | Business database driver (`postgres` or `mysql`) | `postgres` |
+| `database.host` | Database service hostname | `postgres` |
+| `database.port` | Database service port | `5432` |
 
 ### Frontend
 

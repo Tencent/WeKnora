@@ -2547,6 +2547,8 @@ export default {
     uptimeHours: "{n}시간",
     uptimeMinutes: "{n}분",
     uptimeSeconds: "{n}초",
+    databaseDriverLabel: "비즈니스 데이터베이스 드라이버",
+    databaseDriverDescription: "비즈니스 메타데이터 저장에 연결된 관계형 데이터베이스",
     dbVersionLabel: "데이터베이스 버전",
     dbVersionDescription: "현재 데이터베이스 마이그레이션 버전",
     dbMigrationFailedTag: "마이그레이션 실패",

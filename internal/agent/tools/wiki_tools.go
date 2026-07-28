@@ -777,7 +777,7 @@ func NewWikiSearchTool(
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
-			`Search wiki pages using PostgreSQL POSIX regular expressions (~* operator, case-insensitive).
+			`Search wiki pages using case-insensitive regular expressions supported by the configured database.
 STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
 Returns matching pages with titles, slugs, and summaries (each tagged with its short bN knowledge_base_id).
 Examples:

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -49,6 +50,9 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
+	if op.EnqueuedAt.IsZero() {
+		op.EnqueuedAt = time.Now().UTC()
+	}
 	return nil
 }
 
@@ -74,7 +78,7 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
 		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		if database.SupportsRowLock(dialector.Name()) {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -142,13 +146,13 @@ func (r *taskPendingOpsRepository) PeekBatch(
 // (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
 // runs in one transaction:
 //
-//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//   - PostgreSQL/MySQL: we lock the ANCHOR row (earliest eligible id) of each
 //     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
 //     uniquely represents its key, SKIP LOCKED hands concurrent claimers
 //     DISJOINT key sets — a key whose anchor is already locked by another
 //     in-flight claim is skipped entirely rather than half-claimed. We then
 //     stamp every eligible row of the chosen keys and read them back.
-//   - Other dialects (SQLite, used by unit tests / Lite mode): writes are
+//   - SQLite (used by unit tests / Lite mode): writes are
 //     serialized by the single-writer engine, so a plain grouped SELECT +
 //     UPDATE is already race-free.
 //
@@ -174,7 +178,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if database.SupportsRowLock(tx.Dialector.Name()) {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
@@ -297,6 +301,21 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
+	if r.db.Dialector.Name() != "postgres" {
+		var count int
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				UpdateColumn("fail_count", gorm.Expr("fail_count + 1")).Error; err != nil {
+				return err
+			}
+			return tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				Select("fail_count").
+				Scan(&count).Error
+		})
+		return count, err
+	}
 	var newCount int
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
@@ -376,6 +395,9 @@ func (r *taskDeadLetterRepository) Insert(ctx context.Context, dl *types.TaskDea
 	}
 	if len(dl.Payload) == 0 {
 		dl.Payload = []byte("{}")
+	}
+	if dl.FailedAt.IsZero() {
+		dl.FailedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(dl).Error
 }

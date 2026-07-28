@@ -235,7 +235,19 @@ docreader:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# Business Database
+# -----------------------------------------------------------------------------
+database:
+  # -- Business database driver: postgres or mysql
+  driver: postgres
+  # -- Database service hostname. Set an external MySQL hostname when driver=mysql.
+  host: postgres
+  # -- Database service port
+  port: 5432
+
+# -----------------------------------------------------------------------------
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
+# Disable this component when database.driver=mysql.
 # -----------------------------------------------------------------------------
 postgresql:
   # -- Enable PostgreSQL

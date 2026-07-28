@@ -31,6 +31,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"gorm.io/gorm"
 )
 
 type runtimeKnowledgeCanceller interface {
@@ -40,6 +41,7 @@ type runtimeKnowledgeCanceller interface {
 // SystemHandler handles system-related requests
 type SystemHandler struct {
 	cfg              *config.Config
+	db               *gorm.DB
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
 	tenantSvc        interfaces.TenantService
@@ -68,6 +70,7 @@ type SystemHandler struct {
 
 // NewSystemHandler creates a new system handler
 func NewSystemHandler(cfg *config.Config,
+	db *gorm.DB,
 	neo4jDriver neo4j.Driver,
 	documentReader interfaces.DocumentReader,
 	tenantSvc interfaces.TenantService,
@@ -81,6 +84,7 @@ func NewSystemHandler(cfg *config.Config,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:                cfg,
+		db:                 db,
 		neo4jDriver:        neo4jDriver,
 		documentReader:     documentReader,
 		tenantSvc:          tenantSvc,
@@ -283,7 +287,10 @@ type GetSystemInfoResponse struct {
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	// DatabaseDriver is the GORM dialect of the initialized business database.
+	// It is derived from the live database handle rather than the environment.
+	DatabaseDriver string `json:"database_driver,omitempty"`
+	DBVersion      string `json:"db_version,omitempty"`
 	// DBMigrationError carries the human-readable error message recorded when
 	// the most recent startup migration attempt failed. Empty when migrations
 	// succeeded; non-empty values let the frontend surface a troubleshooting
@@ -361,6 +368,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		VectorStoreEngine:   vectorStoreEngine,
 		GraphDatabaseEngine: graphDatabaseEngine,
 		MinioEnabled:        minioEnabled,
+		DatabaseDriver:      h.getDatabaseDriver(),
 		DBVersion:           dbVersion,
 		DBMigrationError:    dbMigrationErr,
 		StartedAt:           startedAt,
@@ -609,6 +617,15 @@ func (h *SystemHandler) getGraphDatabaseEngine() string {
 		return "Not Enabled"
 	}
 	return "Neo4j"
+}
+
+// getDatabaseDriver returns the dialect of the database handle that completed
+// application startup. This avoids reporting an unverified DB_DRIVER value.
+func (h *SystemHandler) getDatabaseDriver() string {
+	if h.db == nil || h.db.Dialector == nil {
+		return ""
+	}
+	return h.db.Dialector.Name()
 }
 
 // supportsRetrieverType checks if a driver supports a specific retriever type

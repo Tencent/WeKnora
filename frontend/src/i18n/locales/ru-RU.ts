@@ -2235,6 +2235,8 @@ export default {
     uptimeHours: '{n} ч',
     uptimeMinutes: '{n} мин',
     uptimeSeconds: '{n} с',
+    databaseDriverLabel: 'Драйвер бизнес-базы данных',
+    databaseDriverDescription: 'Реляционная база данных, подключённая для хранения бизнес-метаданных',
     dbVersionLabel: 'Версия базы данных',
     dbVersionDescription: 'Текущая версия миграции базы данных',
     dbMigrationFailedTag: 'Миграция не удалась',

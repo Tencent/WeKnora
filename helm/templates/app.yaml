@@ -5,6 +5,12 @@ SPDX-License-Identifier: MIT
 WeKnora Backend API Server Deployment and Service.
 */}}
 {{- if .Values.app.enabled }}
+{{- if not (has .Values.database.driver (list "postgres" "mysql")) }}
+{{- fail "database.driver must be postgres or mysql" }}
+{{- end }}
+{{- if and (eq .Values.database.driver "mysql") .Values.postgresql.enabled }}
+{{- fail "postgresql.enabled must be false when database.driver=mysql" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,11 +59,11 @@ spec:
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ .Values.database.driver | quote }}
             - name: DB_HOST
-              value: "postgres"
+              value: {{ .Values.database.host | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ .Values.database.port | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:

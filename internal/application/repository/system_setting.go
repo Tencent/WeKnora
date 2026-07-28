@@ -30,7 +30,7 @@ func NewSystemSettingRepository(db *gorm.DB) interfaces.SystemSettingRepository 
 // not an error. Real DB errors (connection lost, etc.) surface up.
 func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.SystemSetting, error) {
 	var s types.SystemSetting
-	err := r.db.WithContext(ctx).Where("key = ?", key).First(&s).Error
+	err := r.db.WithContext(ctx).Where(&types.SystemSetting{Key: key}).First(&s).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -44,7 +44,12 @@ func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.S
 // for stable management-UI rendering. No pagination — see type comment.
 func (r *systemSettingRepository) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	var rows []*types.SystemSetting
-	err := r.db.WithContext(ctx).Order("category ASC, key ASC").Find(&rows).Error
+	err := r.db.WithContext(ctx).Clauses(clause.OrderBy{
+		Columns: []clause.OrderByColumn{
+			{Column: clause.Column{Name: "category"}},
+			{Column: clause.Column{Name: "key"}},
+		},
+	}).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +87,7 @@ func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSet
 // rather than translating to gorm.ErrRecordNotFound so the caller's
 // happy path is a single nil check on err.
 func (r *systemSettingRepository) Delete(ctx context.Context, key string) (bool, error) {
-	res := r.db.WithContext(ctx).Where("key = ?", key).Delete(&types.SystemSetting{})
+	res := r.db.WithContext(ctx).Where(&types.SystemSetting{Key: key}).Delete(&types.SystemSetting{})
 	if res.Error != nil {
 		return false, res.Error
 	}

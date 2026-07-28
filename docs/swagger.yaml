@@ -4585,6 +4585,11 @@ definitions:
         type: string
       commit_id:
         type: string
+      database_driver:
+        description: |-
+          DatabaseDriver is the GORM dialect of the initialized business database.
+          It is derived from the live database handle rather than the environment.
+        type: string
       db_migration_error:
         description: |-
           DBMigrationError carries the human-readable error message recorded when
