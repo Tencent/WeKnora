@@ -17,6 +17,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
@@ -1077,22 +1078,15 @@ const retryChunkIndex = async (item: any) => {
   }
 };
 
-const chunkHistoryOpen = ref<Set<string>>(new Set());
+type ChunkDiffLine = WikiDiffLine | { type: 'skip'; text: string };
+
+const chunkHistoryPopup = ref('');
 const chunkHistoryLoading = ref('');
 const chunkHistories = ref<Record<string, any[]>>({});
+const selectedChunkRevision = ref<Record<string, number | null>>({});
 const revertingRevision = ref('');
 
-const isChunkHistoryOpen = (chunkID: string) => chunkHistoryOpen.value.has(chunkID);
-
 const showChunkHistory = async (item: any) => {
-  if (chunkHistoryOpen.value.has(item.id)) {
-    chunkHistoryOpen.value.delete(item.id);
-    chunkHistoryOpen.value = new Set(chunkHistoryOpen.value);
-    return;
-  }
-
-  chunkHistoryOpen.value.add(item.id);
-  chunkHistoryOpen.value = new Set(chunkHistoryOpen.value);
   if (chunkHistories.value[item.id]) return;
 
   chunkHistoryLoading.value = item.id;
@@ -1106,6 +1100,54 @@ const showChunkHistory = async (item: any) => {
   }
 };
 
+const setChunkHistoryPopupVisible = (item: any, visible: boolean) => {
+  chunkHistoryPopup.value = visible ? item.id : '';
+  if (visible) showChunkHistory(item);
+};
+
+const selectChunkRevision = (item: any, revision: number) => {
+  selectedChunkRevision.value[item.id] = selectedChunkRevision.value[item.id] === revision ? null : revision;
+};
+
+const getSelectedChunkRevision = (item: any) => {
+  const revision = selectedChunkRevision.value[item.id];
+  return (chunkHistories.value[item.id] || []).find((entry: any) => entry.revision === revision) || null;
+};
+
+const compactChunkDiff = (item: any): ChunkDiffLine[] => {
+  const revision = getSelectedChunkRevision(item);
+  if (!revision) return [];
+  const lines = diffWikiLines(revision.content || '', item.content || '');
+  const changed = new Set<number>();
+  lines.forEach((line, index) => {
+    if (line.type !== 'same') {
+      for (let i = Math.max(0, index - 2); i <= Math.min(lines.length - 1, index + 2); i++) changed.add(i);
+    }
+  });
+  if (!changed.size) return [];
+
+  const compact: ChunkDiffLine[] = [];
+  let lastIndex = -2;
+  [...changed].sort((a, b) => a - b).forEach((index) => {
+    if (index > lastIndex + 1) compact.push({ type: 'skip', text: '…' });
+    compact.push(lines[index]);
+    lastIndex = index;
+  });
+  return compact;
+};
+
+const diffLinePrefix = (type: ChunkDiffLine['type']) => {
+  if (type === 'add') return '+ ';
+  if (type === 'del') return '- ';
+  return type === 'same' ? '  ' : '';
+};
+
+const revisionStatusChanged = (item: any, revisionIndex: number) => {
+  const revisions = chunkHistories.value[item.id] || [];
+  const newerEnabled = revisionIndex === 0 ? item.is_enabled : revisions[revisionIndex - 1]?.is_enabled;
+  return revisions[revisionIndex]?.is_enabled !== newerEnabled;
+};
+
 const revertChunk = async (item: any, revision: number) => {
   revertingRevision.value = `${item.id}:${revision}`;
   try {
@@ -1114,6 +1156,7 @@ const revertChunk = async (item: any, revision: number) => {
     delete chunkHistories.value[item.id];
     const historyResult: any = await listChunkRevisions(props.details.id, item.id);
     chunkHistories.value[item.id] = historyResult?.data || [];
+    selectedChunkRevision.value[item.id] = null;
     MessagePlugin.success(t('knowledgeBase.chunkReverted'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
@@ -1133,7 +1176,7 @@ const savingQuestionKey = ref('');
 watch(() => props.details?.id, () => {
   metadataEditing.value = false;
   editingChunkId.value = '';
-  chunkHistoryOpen.value = new Set();
+  chunkHistoryPopup.value = '';
   questionComposerChunk.value = '';
   editingQuestionKey.value = '';
 });
@@ -1679,12 +1722,79 @@ const handleDetailsScroll = () => {
                           <template #icon><t-icon name="edit" size="15px" /></template>
                         </t-button>
                       </t-tooltip>
-                      <t-tooltip :content="$t('knowledgeBase.chunkHistory')" placement="top">
-                        <t-button class="icon-action-btn" :class="{ 'is-active': isChunkHistoryOpen(chunk.original.id) }"
-                          size="small" variant="text" shape="square" @click="showChunkHistory(chunk.original)">
+                      <t-popup :visible="chunkHistoryPopup === chunk.original.id" trigger="click" placement="bottom-right"
+                        :show-arrow="true" destroy-on-close :overlay-inner-style="{ padding: 0 }"
+                        overlay-class-name="chunk-history-popup-overlay"
+                        @visible-change="(visible: boolean) => setChunkHistoryPopupVisible(chunk.original, visible)">
+                        <t-button class="icon-action-btn" :class="{ 'is-active': chunkHistoryPopup === chunk.original.id }"
+                          size="small" variant="text" shape="square" :title="$t('knowledgeBase.chunkHistory')">
                           <template #icon><t-icon name="history" size="15px" /></template>
                         </t-button>
-                      </t-tooltip>
+                        <template #content>
+                          <div class="chunk-history-popup" @click.stop>
+                            <div class="chunk-history-popup-head">
+                              <div>
+                                <div class="chunk-history-popup-title">
+                                  <t-icon name="history" size="15px" />
+                                  <span>{{ $t('knowledgeBase.chunkHistory') }}</span>
+                                </div>
+                                <div class="chunk-history-current">
+                                  v{{ chunk.original.content_revision || 0 }} · {{ $t('knowledgeBase.currentVersion') }} ·
+                                  {{ chunk.original.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
+                                </div>
+                              </div>
+                            </div>
+                            <div v-if="chunkHistoryLoading === chunk.original.id" class="chunk-history-popup-state">
+                              <t-loading size="small" />
+                              <span>{{ $t('common.loading') }}</span>
+                            </div>
+                            <div v-else-if="!(chunkHistories[chunk.original.id] || []).length" class="chunk-history-popup-state">
+                              {{ $t('knowledgeBase.noChunkHistory') }}
+                            </div>
+                            <div v-else class="chunk-history-popup-list">
+                              <div v-for="(revision, revisionIndex) in chunkHistories[chunk.original.id]" :key="revision.id"
+                                class="chunk-history-popup-item"
+                                :class="{ 'is-selected': selectedChunkRevision[chunk.original.id] === revision.revision }">
+                                <button type="button" class="chunk-history-version-row"
+                                  @click="selectChunkRevision(chunk.original, revision.revision)">
+                                  <span class="chunk-history-version">v{{ revision.revision }}</span>
+                                  <span class="chunk-history-time">{{ new Date(revision.edited_at).toLocaleString() }}</span>
+                                  <span v-if="revisionStatusChanged(chunk.original, revisionIndex)" class="chunk-history-status-change">
+                                    <t-icon :name="revision.is_enabled ? 'play-circle' : 'stop-circle'" size="13px" />
+                                    {{ revision.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
+                                  </span>
+                                  <t-icon :name="selectedChunkRevision[chunk.original.id] === revision.revision ? 'chevron-up' : 'chevron-down'"
+                                    size="14px" class="chunk-history-row-chevron" />
+                                </button>
+                                <div v-if="selectedChunkRevision[chunk.original.id] === revision.revision" class="chunk-history-diff">
+                                  <div class="chunk-history-diff-head">
+                                    <span>{{ $t('knowledgeBase.compareRevisionWithCurrent', {
+                                      revision: revision.revision,
+                                      current: chunk.original.content_revision || 0,
+                                    }) }}</span>
+                                    <t-popconfirm theme="warning"
+                                      :content="$t('knowledgeBase.revertRevisionConfirm', { revision: revision.revision })"
+                                      @confirm="revertChunk(chunk.original, revision.revision)">
+                                      <t-button size="small" variant="text"
+                                        :loading="revertingRevision === `${chunk.original.id}:${revision.revision}`">
+                                        <template #icon><t-icon name="rollback" size="14px" /></template>
+                                        {{ $t('knowledgeBase.revertRevision') }}
+                                      </t-button>
+                                    </t-popconfirm>
+                                  </div>
+                                  <div v-if="!compactChunkDiff(chunk.original).length" class="chunk-history-no-diff">
+                                    {{ $t('knowledgeBase.noContentChanges') }}
+                                  </div>
+                                  <pre v-else class="chunk-history-diff-body"><span
+                                    v-for="(line, lineIndex) in compactChunkDiff(chunk.original)" :key="lineIndex"
+                                    :class="['chunk-history-diff-line', `chunk-history-diff-line--${line.type}`]">{{ diffLinePrefix(line.type) }}{{ line.text }}
+</span></pre>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </t-popup>
                       <span class="chunk-toolbar-divider" />
                       <t-tooltip
                         :content="chunk.original.is_enabled ? $t('knowledgeBase.disableChunk') : $t('knowledgeBase.enableChunk')"
@@ -1712,57 +1822,16 @@ const handleDetailsScroll = () => {
                 </div>
                 <div v-else class="md-content" :class="{ 'chunk-disabled': !chunk.original.is_enabled }" v-html="chunk.processedContent"></div>
 
-                <div v-if="isChunkHistoryOpen(chunk.original.id)" class="chunk-history-panel">
-                  <div class="chunk-subsection-head">
-                    <div class="chunk-subsection-title">
-                      <t-icon name="history" size="15px" />
-                      <span>{{ $t('knowledgeBase.chunkHistory') }}</span>
-                    </div>
-                    <t-button class="icon-action-btn" size="small" variant="text" shape="square"
-                      @click="showChunkHistory(chunk.original)">
-                      <template #icon><t-icon name="close" size="14px" /></template>
-                    </t-button>
-                  </div>
-                  <div v-if="chunkHistoryLoading === chunk.original.id" class="chunk-subsection-loading">
-                    <t-loading size="small" />
-                    <span>{{ $t('common.loading') }}</span>
-                  </div>
-                  <div v-else-if="!(chunkHistories[chunk.original.id] || []).length" class="chunk-subsection-empty">
-                    {{ $t('knowledgeBase.noChunkHistory') }}
-                  </div>
-                  <div v-else class="chunk-history-list">
-                    <div v-for="revision in chunkHistories[chunk.original.id]" :key="revision.id" class="chunk-history-item">
-                      <div class="chunk-history-marker" />
-                      <div class="chunk-history-main">
-                        <div class="chunk-history-meta">
-                          <strong>v{{ revision.revision }}</strong>
-                          <span>{{ new Date(revision.edited_at).toLocaleString() }}</span>
-                          <t-tag size="small" variant="light" theme="default">
-                            {{ revision.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
-                          </t-tag>
-                        </div>
-                        <div class="chunk-history-preview">{{ revision.content }}</div>
-                      </div>
-                      <t-popconfirm theme="warning" :content="$t('knowledgeBase.revertRevisionConfirm', { revision: revision.revision })"
-                        @confirm="revertChunk(chunk.original, revision.revision)">
-                        <t-button size="small" variant="text"
-                          :loading="revertingRevision === `${chunk.original.id}:${revision.revision}`">
-                          <template #icon><t-icon name="rollback" size="14px" /></template>
-                          {{ $t('knowledgeBase.revertRevision') }}
-                        </t-button>
-                      </t-popconfirm>
-                    </div>
-                  </div>
-                </div>
-
                 <!-- 父 Chunk 上下文展开 -->
                 <div v-if="chunk.hasParent" class="parent-context-section">
-                  <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                    <t-icon v-if="!parentContextLoading.has(index)"
-                      :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                    <t-loading v-else size="small" style="width: 14px; height: 14px;" />
-                    <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
-                  </div>
+                  <button type="button" class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
+                    <span class="parent-context-toggle-label">
+                      <t-icon name="git-branch" size="14px" />
+                      <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+                    </span>
+                    <t-loading v-if="parentContextLoading.has(index)" size="small" />
+                    <t-icon v-else :name="isParentExpanded(index) ? 'chevron-up' : 'chevron-down'" size="14px" />
+                  </button>
                   <div v-show="isParentExpanded(index)" class="parent-context-content">
                     <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
                   </div>
@@ -2057,11 +2126,9 @@ const handleDetailsScroll = () => {
 
 .doc-metadata-row {
   display: block;
-  margin-top: 2px;
-  padding: 12px;
-  border: 1px solid var(--td-component-border);
-  border-radius: 6px;
-  background: var(--td-bg-color-container);
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .metadata-card-head,
@@ -2099,16 +2166,17 @@ const handleDetailsScroll = () => {
 }
 
 .metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 18px;
 }
 
 .metadata-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   min-width: 0;
-  padding: 8px 10px;
-  border-radius: 4px;
-  background: var(--td-bg-color-container-hover);
 }
 
 .metadata-item-key,
@@ -2120,9 +2188,12 @@ const handleDetailsScroll = () => {
 }
 
 .metadata-item-key {
-  margin-bottom: 2px;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: 12px;
+
+  &::after {
+    content: ':';
+  }
 }
 
 .metadata-item-value {
@@ -2134,11 +2205,12 @@ const handleDetailsScroll = () => {
 .metadata-add-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 34px;
-  border: 1px dashed var(--td-component-border);
+  justify-content: flex-start;
+  gap: 5px;
+  width: fit-content;
+  min-height: 28px;
+  padding: 0 4px;
+  border: none;
   border-radius: 4px;
   color: var(--td-text-color-secondary);
   background: transparent;
@@ -2148,7 +2220,6 @@ const handleDetailsScroll = () => {
 
   &:hover {
     color: var(--td-brand-color);
-    border-color: var(--td-brand-color);
     background: var(--td-brand-color-light);
   }
 }
@@ -2195,10 +2266,6 @@ const handleDetailsScroll = () => {
 }
 
 @media (max-width: 720px) {
-  .metadata-grid {
-    grid-template-columns: 1fr;
-  }
-
   .metadata-editor-row {
     flex-wrap: wrap;
   }
@@ -2449,11 +2516,6 @@ const handleDetailsScroll = () => {
   padding: 12px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-border);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-
-  &:hover {
-    border-color: var(--td-text-color-disabled);
-  }
 
   &.chunk-item--disabled {
     background: var(--td-bg-color-secondarycontainer);
@@ -2530,120 +2592,210 @@ const handleDetailsScroll = () => {
   font-weight: 500;
 }
 
-.chunk-history-panel {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--td-component-border);
-  border-radius: 5px;
-  background: var(--td-bg-color-secondarycontainer);
+.chunk-history-popup {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
 }
 
-.chunk-subsection-head,
-.chunk-subsection-title,
-.chunk-subsection-loading,
-.chunk-history-item,
-.chunk-history-meta {
+.chunk-history-popup-head {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.chunk-history-popup-title {
   display: flex;
   align-items: center;
-}
-
-.chunk-subsection-head {
-  justify-content: space-between;
-  min-height: 28px;
-}
-
-.chunk-subsection-title {
   gap: 6px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chunk-history-current {
+  margin-top: 4px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-popup-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.chunk-history-popup-list {
+  max-height: min(520px, calc(100vh - 180px));
+  overflow-y: auto;
+}
+
+.chunk-history-popup-item {
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.is-selected {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.chunk-history-version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: none;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+}
+
+.chunk-history-version {
+  min-width: 32px;
   color: var(--td-text-color-primary);
   font-size: 12px;
   font-weight: 600;
 }
 
-.chunk-subsection-loading,
-.chunk-subsection-empty {
-  justify-content: center;
-  gap: 8px;
-  padding: 18px 0;
+.chunk-history-time {
   color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-status-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+}
+
+.chunk-history-row-chevron {
+  margin-left: auto;
+  color: var(--td-text-color-placeholder);
+}
+
+.chunk-history-status-change + .chunk-history-row-chevron {
+  margin-left: 0;
+}
+
+.chunk-history-diff {
+  padding: 0 14px 12px;
+}
+
+.chunk-history-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+}
+
+.chunk-history-no-diff {
+  padding: 12px;
+  border-radius: 4px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-container);
   text-align: center;
   font-size: 12px;
 }
 
-.chunk-history-list {
-  margin-top: 6px;
-}
-
-.chunk-history-item {
-  position: relative;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 0;
-  border-top: 1px solid var(--td-component-stroke);
-}
-
-.chunk-history-marker {
-  width: 6px;
-  height: 6px;
-  margin-top: 7px;
-  border: 1px solid var(--td-text-color-placeholder);
-  border-radius: 50%;
+.chunk-history-diff-body {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 0;
+  overflow: auto;
+  border: 1px solid var(--td-component-border);
+  border-radius: 4px;
   background: var(--td-bg-color-container);
-  flex-shrink: 0;
-}
-
-.chunk-history-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.chunk-history-meta {
-  gap: 8px;
-  color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family-mono);
   font-size: 11px;
-
-  strong {
-    color: var(--td-text-color-secondary);
-    font-size: 12px;
-  }
-}
-
-.chunk-history-preview {
-  display: -webkit-box;
-  margin-top: 5px;
-  overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+}
+
+.chunk-history-diff-line {
+  display: block;
+  min-height: 17px;
+  padding: 0 10px;
+
+  &--add {
+    color: var(--td-success-color-active);
+    background: var(--td-success-color-light);
+  }
+
+  &--del {
+    color: var(--td-error-color-active);
+    background: var(--td-error-color-light);
+  }
+
+  &--same {
+    color: var(--td-text-color-secondary);
+  }
+
+  &--skip {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 // 父 Chunk 上下文样式
 .parent-context-section {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--td-component-stroke);
+  margin-top: 12px;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .parent-context-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 2px;
+  border: none;
   cursor: pointer;
-  color: var(--td-brand-color);
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  font: inherit;
   font-size: 12px;
   font-weight: 500;
-  padding: 4px 0;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+}
+
+.parent-context-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .parent-context-content {
-  margin-top: 8px;
+  margin-bottom: 4px;
   padding: 10px 12px;
-  background: var(--td-brand-color-light);
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
-  border-left: 3px solid var(--td-brand-color);
 
   .md-content {
     color: var(--td-text-color-secondary);
@@ -2654,10 +2806,8 @@ const handleDetailsScroll = () => {
 // 辅助召回问题：沿用中性容器样式，避免使用成功态绿色作为列表背景。
 .questions-section {
   margin-top: 12px;
-  border: 1px solid var(--td-component-border);
-  border-radius: 5px;
-  overflow: hidden;
-  background: var(--td-bg-color-container);
+  padding-top: 4px;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .questions-head,
@@ -2674,7 +2824,7 @@ const handleDetailsScroll = () => {
 .questions-head {
   justify-content: space-between;
   min-height: 38px;
-  padding: 4px 8px 4px 10px;
+  padding: 4px 0;
 }
 
 .questions-toggle {
@@ -2696,10 +2846,7 @@ const handleDetailsScroll = () => {
 
 .questions-count {
   min-width: 20px;
-  padding: 1px 6px;
-  border-radius: 999px;
   color: var(--td-text-color-placeholder);
-  background: var(--td-bg-color-container-hover);
   text-align: center;
   font-size: 11px;
   font-weight: 400;
@@ -2714,8 +2861,7 @@ const handleDetailsScroll = () => {
 }
 
 .questions-body {
-  padding: 0 10px 10px;
-  border-top: 1px solid var(--td-component-stroke);
+  padding-bottom: 4px;
 }
 
 .questions-list {
@@ -2761,12 +2907,10 @@ const handleDetailsScroll = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: 18px;
   height: 24px;
   margin-top: -1px;
-  border-radius: 4px;
   color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-container-hover);
   flex-shrink: 0;
 }
 
