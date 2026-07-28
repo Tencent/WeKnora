@@ -30,6 +30,9 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllChunksByKnowledgeID lists every active base and generated chunk.
+	// Reconciliation uses this to avoid broad delete-by-knowledge operations.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior

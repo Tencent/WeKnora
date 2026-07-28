@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -105,15 +106,65 @@ func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.Knowled
 }
 
 func (r *knowledgeSpanRepository) NextAttempt(ctx context.Context, knowledgeID string) (int, error) {
-	var max int
-	err := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
-		Where("knowledge_id = ?", knowledgeID).
-		Select("COALESCE(MAX(attempt), 0)").
-		Row().Scan(&max)
-	if err != nil {
-		return 0, err
+	if knowledgeID == "" {
+		return 0, errors.New("knowledgeSpanRepository.NextAttempt: knowledge_id required")
 	}
-	return max + 1, nil
+	var attempt int
+	var err error
+	for retry := 0; retry < 5; retry++ {
+		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var max int
+			if scanErr := tx.Model(&types.KnowledgeProcessingSpan{}).
+				Where("knowledge_id = ?", knowledgeID).
+				Select("COALESCE(MAX(attempt), 0)").
+				Row().Scan(&max); scanErr != nil {
+				return scanErr
+			}
+
+			// The insert is intentionally the first write in the transaction.
+			// PostgreSQL/MySQL wait on the unique-key conflict; SQLite takes its
+			// write lock here, before the read-modify-write below.
+			if createErr := tx.Clauses(clause.OnConflict{DoNothing: true}).
+				Create(&types.KnowledgeAttemptCounter{
+					KnowledgeID: knowledgeID,
+					LastAttempt: max,
+				}).Error; createErr != nil {
+				return createErr
+			}
+
+			var counter types.KnowledgeAttemptCounter
+			if readErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("knowledge_id = ?", knowledgeID).
+				Take(&counter).Error; readErr != nil {
+				return readErr
+			}
+			if counter.LastAttempt < max {
+				counter.LastAttempt = max
+			}
+			counter.LastAttempt++
+			if updateErr := tx.Model(&types.KnowledgeAttemptCounter{}).
+				Where("knowledge_id = ?", knowledgeID).
+				Update("last_attempt", counter.LastAttempt).Error; updateErr != nil {
+				return updateErr
+			}
+			attempt = counter.LastAttempt
+			return nil
+		})
+		if err == nil || !isSQLiteBusy(err) {
+			return attempt, err
+		}
+		time.Sleep(time.Duration(retry+1) * time.Millisecond)
+	}
+	return 0, err
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database table is locked")
 }
 
 func (r *knowledgeSpanRepository) LatestAttempt(ctx context.Context, knowledgeID string) (int, error) {

@@ -198,6 +198,73 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	return err
 }
 
+func (r *knowledgeRepository) UpdateKnowledgeIfAttemptCurrent(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	attempt int,
+) (bool, error) {
+	if knowledge == nil {
+		return false, errors.New("knowledge must not be nil")
+	}
+	if attempt <= 0 {
+		return true, r.UpdateKnowledge(ctx, knowledge)
+	}
+	newerAttempt := r.db.
+		Table(types.KnowledgeProcessingSpan{}.TableName()).
+		Select("1").
+		Where("knowledge_id = ? AND kind = ? AND attempt > ?",
+			knowledge.ID,
+			types.SpanKindRoot,
+			attempt,
+		)
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ?", knowledge.TenantID, knowledge.ID).
+		Where("NOT EXISTS (?)", newerAttempt).
+		Select("*").
+		Omit(omitFieldsOnUpdate...).
+		Updates(knowledge)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeColumnsIfAttemptCurrent(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	attempt int,
+	values map[string]interface{},
+) (bool, error) {
+	if tenantID == 0 || knowledgeID == "" {
+		return false, errors.New("tenant and knowledge IDs must not be empty")
+	}
+	if len(values) == 0 {
+		return false, errors.New("knowledge update values must not be empty")
+	}
+	query := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ?", tenantID, knowledgeID)
+	if attempt > 0 {
+		newerAttempt := r.db.
+			Table(types.KnowledgeProcessingSpan{}.TableName()).
+			Select("1").
+			Where(
+				"knowledge_id = ? AND kind = ? AND attempt > ?",
+				knowledgeID,
+				types.SpanKindRoot,
+				attempt,
+			)
+		query = query.Where("NOT EXISTS (?)", newerAttempt)
+	}
+	result := query.Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // UpdateKnowledgeBatch updates knowledge items in batch
 func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error {
 	if len(knowledgeList) == 0 {

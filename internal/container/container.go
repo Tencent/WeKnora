@@ -50,6 +50,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -146,6 +147,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
+	must(container.Provide(repository.NewProcessingArtifactRepository))
+	must(container.Provide(func(
+		repo interfaces.ProcessingArtifactRepository,
+		redisClient *redis.Client,
+	) *artifact.Runtime {
+		runtime := artifact.NewRuntime(repo, nil)
+		runtime.ConfigureLease(artifact.NewRedisLease(redisClient))
+		return runtime
+	}))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
@@ -196,6 +206,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
+	must(container.Invoke(service.ConfigureModelArtifactCache))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))

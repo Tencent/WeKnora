@@ -15,3 +15,23 @@ type RetrieveGraphRepository interface {
 	// SearchNode searches for nodes in the repository
 	SearchNode(ctx context.Context, namespace types.NameSpace, nodes []string) (*types.GraphData, error)
 }
+
+// GraphContributionRepository is the desired-state graph publishing extension.
+// A contribution belongs to one stable chunk and one attempt. Implementations
+// must ignore a replace/delete from an attempt older than the latest marker for
+// that contribution.
+type GraphContributionRepository interface {
+	ReplaceGraphContribution(
+		ctx context.Context,
+		namespace types.NameSpace,
+		chunkID string,
+		attempt int,
+		graph *types.GraphData,
+	) (applied bool, err error)
+	DeleteGraphContributions(
+		ctx context.Context,
+		namespace types.NameSpace,
+		chunkIDs []string,
+		attempt int,
+	) error
+}

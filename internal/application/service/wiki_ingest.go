@@ -2477,6 +2477,9 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 	}
 	ctx = types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
+	if artifactStage, cacheable := wikiMapArtifactStage(purpose); cacheable {
+		ctx = chat.WithArtifactStage(ctx, artifactStage)
+	}
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
 	requestJSON, _ := json.Marshal(struct {
@@ -2553,6 +2556,46 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 		content, _ := result.Val.(string)
 		return unmaskImageURLs(content, urlMap), nil
+	}
+}
+
+func wikiMapArtifactStage(purpose string) (chat.ArtifactStage, bool) {
+	jsonOutput := func(content string) error {
+		cleaned := strings.TrimSpace(cleanLLMJSON(content))
+		if cleaned == "" {
+			return errors.New("wiki map output is empty")
+		}
+		if !json.Valid([]byte(cleaned)) {
+			return errors.New("wiki map output is not valid JSON")
+		}
+		return nil
+	}
+	nonEmpty := func(content string) error {
+		if strings.TrimSpace(content) == "" {
+			return errors.New("wiki map output is empty")
+		}
+		return nil
+	}
+
+	stage := chat.ArtifactStage{
+		Stage:        "wiki_map",
+		OutputSchema: "wiki-map." + purpose + ".v1",
+	}
+	switch purpose {
+	case "wiki_knowledge_extract",
+		"wiki_candidate_slug",
+		"wiki_chunk_citation",
+		"wiki_taxonomy_plan":
+		stage.Validate = jsonOutput
+		return stage, true
+	case "wiki_summary":
+		stage.Validate = nonEmpty
+		return stage, true
+	default:
+		// Page modification, deduplication and index introduction are reduce
+		// operations over mutable live state. They deliberately bypass
+		// immutable map-artifact reuse.
+		return chat.ArtifactStage{}, false
 	}
 }
 

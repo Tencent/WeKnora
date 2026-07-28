@@ -109,6 +109,19 @@ func (KnowledgeProcessingSpan) TableName() string {
 	return "knowledge_processing_spans"
 }
 
+// KnowledgeAttemptCounter allocates monotonically increasing processing
+// attempt numbers independently from span insertion. Keeping the allocation in
+// one locked row closes the MAX(attempt)+1 race between concurrent reparses.
+type KnowledgeAttemptCounter struct {
+	KnowledgeID string    `gorm:"column:knowledge_id;primaryKey;size:64"`
+	LastAttempt int       `gorm:"column:last_attempt;not null"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (KnowledgeAttemptCounter) TableName() string {
+	return "knowledge_attempt_counters"
+}
+
 // SpanTreeNode is the API-only tree projection. The repo returns flat
 // rows; the handler/tracker assembles SpanTreeNode for the response.
 type SpanTreeNode struct {

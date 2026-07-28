@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -80,6 +82,8 @@ Please output in the following format (one paragraph per column):
 - Write descriptions in the same language as the data content`
 )
 
+var errTableSummarySuperseded = errors.New("table summary attempt superseded")
+
 // NewChunkExtractTask creates a new chunk extract task. It returns
 // (enqueued, err): enqueued is true only when a task was actually placed on
 // the queue. When NEO4J is disabled the call is a no-op and returns
@@ -132,12 +136,14 @@ func NewDataTableSummaryTask(
 	knowledgeID string,
 	summaryModel string,
 	embeddingModel string,
+	attempt int,
 ) error {
 	taskPayload := DataTableSummaryPayload{
 		TenantID:       tenantID,
 		KnowledgeID:    knowledgeID,
 		SummaryModel:   summaryModel,
 		EmbeddingModel: embeddingModel,
+		Attempt:        attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -164,6 +170,7 @@ func enqueueDataTableSummaryIfNeeded(
 	tenantID uint64,
 	knowledgeID string,
 	fileName, fileType, summaryModelID, embeddingModelID string,
+	attempt int,
 ) {
 	ft := normalizeFileExtension(fileType)
 	if ft == "" && fileName != "" {
@@ -172,7 +179,15 @@ func enqueueDataTableSummaryIfNeeded(
 	if !isDataTableFileType(ft) {
 		return
 	}
-	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+	if err := NewDataTableSummaryTask(
+		ctx,
+		client,
+		tenantID,
+		knowledgeID,
+		summaryModelID,
+		embeddingModelID,
+		attempt,
+	); err != nil {
 		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
 	}
 }
@@ -259,6 +274,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 	var handleErr error
+	superseded := false
 	graphOut := types.JSONMap{}
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit so a
@@ -267,7 +283,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// payload field; legacy in-flight tasks without it are skipped.
 		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
 			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
-			handleErr, false, isFinalAsynqAttempt(ctx))
+			handleErr, superseded, isFinalAsynqAttempt(ctx))
 		if gSpan == nil {
 			return
 		}
@@ -356,6 +372,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
+	if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
+		superseded = true
+		graphOut["skipped"] = "superseded_after_provider"
+		return nil
+	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
@@ -367,13 +388,43 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
-	if err = s.graphEngine.AddGraph(ctx,
-		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
-		[]*types.GraphData{graph},
-	); err != nil {
+	namespace := types.NameSpace{
+		KnowledgeBase: chunk.KnowledgeBaseID,
+		Knowledge:     chunk.KnowledgeID,
+	}
+	if publisher, ok := s.graphEngine.(interfaces.GraphContributionRepository); ok {
+		var applied bool
+		applied, err = publisher.ReplaceGraphContribution(
+			ctx,
+			namespace,
+			chunk.ID,
+			p.Attempt,
+			graph,
+		)
+		if err == nil && !applied {
+			superseded = true
+			graphOut["skipped"] = "newer_graph_contribution"
+			return nil
+		}
+	} else {
+		// Compatibility fallback for graph backends that have not implemented
+		// contribution replacement yet. Fence immediately before the append.
+		if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
+			superseded = true
+			graphOut["skipped"] = "superseded_before_graph_publish"
+			return nil
+		}
+		err = s.graphEngine.AddGraph(ctx, namespace, []*types.GraphData{graph})
+	}
+	if err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err
 		return err
+	}
+	if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
+		superseded = true
+		graphOut["status"] = "superseded_after_graph_publish"
+		return nil
 	}
 	graphOut["nodes_added"] = len(graph.Node)
 	graphOut["relations_added"] = len(graph.Relation)
@@ -413,6 +464,7 @@ type DataTableSummaryPayload struct {
 	KnowledgeID    string `json:"knowledge_id"`
 	SummaryModel   string `json:"summary_model"`
 	EmbeddingModel string `json:"embedding_model"`
+	Attempt        int    `json:"attempt,omitempty"`
 }
 
 // DataTableSummaryService is a service for extracting tables
@@ -427,6 +479,7 @@ type DataTableSummaryService struct {
 	ownership            retriever.TenantStoreOwnership
 	sqlDB                *sql.DB
 	storageResolver      interfaces.StorageBackendResolver
+	spanTracker          SpanTracker
 }
 
 // NewDataTableSummaryService creates a new DataTableSummaryService
@@ -441,6 +494,7 @@ func NewDataTableSummaryService(
 	ownership retriever.TenantStoreOwnership,
 	sqlDB *sql.DB,
 	storageResolver interfaces.StorageBackendResolver,
+	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
 		modelService:         modelService,
@@ -453,6 +507,7 @@ func NewDataTableSummaryService(
 		ownership:            ownership,
 		sqlDB:                sqlDB,
 		storageResolver:      storageResolver,
+		spanTracker:          spanTracker,
 	}
 }
 
@@ -471,11 +526,29 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
+	if attemptSuperseded(ctx, s.spanTracker, payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(
+			ctx,
+			"Table extraction attempt %d superseded for %s",
+			payload.Attempt,
+			payload.KnowledgeID,
+		)
+		return nil
+	}
 
 	// 2. 准备所有必需的资源（知识、模型、引擎等）
 	resources, err := s.prepareResources(ctx, payload)
 	if err != nil {
 		return err
+	}
+	if attemptSuperseded(ctx, s.spanTracker, payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(
+			ctx,
+			"Table extraction attempt %d superseded after provider work for %s",
+			payload.Attempt,
+			payload.KnowledgeID,
+		)
+		return nil
 	}
 
 	// 3. 加载表格数据并生成摘要
@@ -485,8 +558,18 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	}
 
 	// 4. 索引到向量数据库
-	if err := s.indexToVectorDB(ctx, chunks, resources.retrieveEngine, resources.embeddingModel); err != nil {
-		s.cleanupOnFailure(ctx, resources, chunks, err)
+	added, err := s.indexToVectorDB(
+		ctx,
+		chunks,
+		resources.retrieveEngine,
+		resources.embeddingModel,
+		payload.Attempt,
+	)
+	if err != nil {
+		if errors.Is(err, errTableSummarySuperseded) {
+			return nil
+		}
+		s.cleanupOnFailure(ctx, resources, added, err)
 		return err
 	}
 
@@ -677,18 +760,35 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	logger.Debugf(ctx, "column describe of knowledge %s: %s", resources.knowledge.ID, columnDescription)
 
 	// 构建chunks：一个表格摘要chunk + 多个列描述chunks
-	chunks := s.buildChunks(resources, tableDescription, columnDescription)
+	chunks, err := s.buildChunks(resources, tableDescription, columnDescription)
+	if err != nil {
+		return nil, err
+	}
 	return chunks, nil
 }
 
 // buildChunks 构建chunk对象
 // tableDescription和columnDescriptions分别生成一个chunk
-func (s *DataTableSummaryService) buildChunks(resources *extractionResources, tableDescription string, columnDescription string) []*types.Chunk {
+func (s *DataTableSummaryService) buildChunks(
+	resources *extractionResources,
+	tableDescription string,
+	columnDescription string,
+) ([]*types.Chunk, error) {
 	chunks := make([]*types.Chunk, 0, 2)
+	summaryIdentity, err := artifact.StableEntityIdentity(artifact.EntityIdentityInput{
+		KnowledgeID:  resources.knowledge.ID,
+		IDVersion:    artifact.StableEntityIDVersion,
+		EntityType:   string(types.ChunkTypeTableSummary),
+		SourceAnchor: "table-summary",
+		Content:      tableDescription,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build table summary identity: %w", err)
+	}
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              summaryIdentity.ID,
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -700,9 +800,20 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 	}
 	chunks = append(chunks, summaryChunk)
 
+	columnIdentity, err := artifact.StableEntityIdentity(artifact.EntityIdentityInput{
+		KnowledgeID:      resources.knowledge.ID,
+		IDVersion:        artifact.StableEntityIDVersion,
+		EntityType:       string(types.ChunkTypeTableColumn),
+		ParentSemanticID: summaryIdentity.SemanticKey,
+		SourceAnchor:     "table-columns",
+		Content:          columnDescription,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build table column identity: %w", err)
+	}
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              columnIdentity.ID,
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -718,7 +829,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 	summaryChunk.NextChunkID = columnChunk.ID
 	columnChunk.PreChunkID = summaryChunk.ID
 
-	return chunks
+	return chunks, nil
 }
 
 // indexToVectorDB 将chunks索引到向量数据库
@@ -728,7 +839,14 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	chunks []*types.Chunk,
 	engine *retriever.CompositeRetrieveEngine,
 	embedder embedding.Embedder,
-) error {
+	attempt int,
+) ([]*types.Chunk, error) {
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	if attemptSuperseded(ctx, s.spanTracker, chunks[0].KnowledgeID, attempt) {
+		return nil, errTableSummarySuperseded
+	}
 	// 构建索引信息列表
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
@@ -743,17 +861,63 @@ func (s *DataTableSummaryService) indexToVectorDB(
 		})
 	}
 
-	// 保存到数据库
-	if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
-		logger.Errorf(ctx, "failed to create chunks: %v", err)
-		return err
+	existing, err := s.chunkService.ListChunksByKnowledgeID(
+		ctx,
+		chunks[0].KnowledgeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list table summary chunks: %w", err)
+	}
+	existingByID := make(map[string]*types.Chunk, len(existing))
+	desiredIDs := make(map[string]struct{}, len(chunks))
+	for _, chunk := range existing {
+		existingByID[chunk.ID] = chunk
+	}
+	added := make([]*types.Chunk, 0, len(chunks))
+	updated := make([]*types.Chunk, 0, len(chunks))
+	for _, desired := range chunks {
+		desiredIDs[desired.ID] = struct{}{}
+		if live := existingByID[desired.ID]; live != nil {
+			desired.CreatedAt = live.CreatedAt
+			updated = append(updated, desired)
+		} else {
+			added = append(added, desired)
+		}
+	}
+	stale := make([]*types.Chunk, 0)
+	for _, live := range existing {
+		if live.ChunkType != types.ChunkTypeTableSummary &&
+			live.ChunkType != types.ChunkTypeTableColumn {
+			continue
+		}
+		if _, keep := desiredIDs[live.ID]; !keep {
+			stale = append(stale, live)
+		}
+	}
+
+	// Materialize desired rows before indexing; retries update the stable IDs
+	// instead of inserting duplicates.
+	if len(added) > 0 {
+		if err := s.chunkService.CreateChunks(ctx, added); err != nil {
+			logger.Errorf(ctx, "failed to create chunks: %v", err)
+			return nil, err
+		}
+	}
+	if len(updated) > 0 {
+		if err := s.chunkService.UpdateChunks(ctx, updated); err != nil {
+			logger.Errorf(ctx, "failed to update chunks: %v", err)
+			return added, err
+		}
 	}
 	logger.Infof(ctx, "Created %d chunks for data table", len(chunks))
 
 	// 批量索引
 	if err := engine.BatchIndex(ctx, embedder, indexInfoList); err != nil {
 		logger.Errorf(ctx, "failed to index chunks: %v", err)
-		return err
+		return added, err
+	}
+	if attemptSuperseded(ctx, s.spanTracker, chunks[0].KnowledgeID, attempt) {
+		return added, errTableSummarySuperseded
 	}
 
 	// 更新chunk状态为已索引
@@ -762,10 +926,25 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	}
 	if err := s.chunkService.UpdateChunks(ctx, chunks); err != nil {
 		logger.Errorf(ctx, "failed to update chunk status: %v", err)
-		return err
+		return added, err
 	}
 
-	return nil
+	// Desired state is live. Exact stale table-summary contributions are
+	// cleaned last and never trigger rollback of the new generation.
+	staleIDs := chunkIDList(stale)
+	if len(staleIDs) > 0 {
+		if err := engine.DeleteByChunkIDList(
+			ctx,
+			staleIDs,
+			embedder.GetDimensions(),
+			types.KnowledgeBaseTypeDocument,
+		); err != nil {
+			logger.Warnf(ctx, "failed to delete stale table vectors: %v", err)
+		} else if err := s.chunkService.DeleteChunks(ctx, staleIDs); err != nil {
+			logger.Warnf(ctx, "failed to delete stale table chunks: %v", err)
+		}
+	}
+	return added, nil
 }
 
 // cleanupOnFailure 索引失败时的清理工作
@@ -820,7 +999,11 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	modelCtx := chat.WithArtifactStage(ctx, chat.ArtifactStage{
+		Stage:        "summary.table",
+		OutputSchema: "table-summary.text.v1",
+	})
+	response, err := chatModel.Chat(modelCtx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,
@@ -845,7 +1028,11 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 
 	// Call LLM once for all columns
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	modelCtx := chat.WithArtifactStage(ctx, chat.ArtifactStage{
+		Stage:        "summary.table_columns",
+		OutputSchema: "table-columns.text.v1",
+	})
+	response, err := chatModel.Chat(modelCtx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,

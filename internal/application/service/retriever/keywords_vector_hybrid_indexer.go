@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
+	embeddingmodel "github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -67,13 +67,21 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context
 // Index creates embeddings for the content and saves it to the repository
 // if vector retrieval is enabled in the retriever types
 func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
-	embedder embedding.Embedder, indexInfo *types.IndexInfo, retrieverTypes []types.RetrieverType,
+	embedder embeddingmodel.Embedder, indexInfo *types.IndexInfo, retrieverTypes []types.RetrieverType,
 ) error {
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		embedCtx := context.WithValue(ctx, types.EmbedDocumentContextKey, true)
+		embedding, err := embedder.Embed(embedCtx, sanitizeForEmbedding(ctx, indexInfo.Content))
 		if err != nil {
+			return err
+		}
+		if err := embeddingmodel.ValidateEmbeddingBatch(
+			[][]float32{embedding},
+			1,
+			embedder.GetDimensions(),
+		); err != nil {
 			return err
 		}
 		embeddingMap[indexInfo.SourceID] = embedding
@@ -85,7 +93,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 // BatchIndex creates embeddings for multiple content items and saves them to the repository
 // in batches for efficiency. Uses concurrent batch saving to improve performance.
 func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Context,
-	embedder embedding.Embedder, indexInfoList []*types.IndexInfo, retrieverTypes []types.RetrieverType,
+	embedder embeddingmodel.Embedder, indexInfoList []*types.IndexInfo, retrieverTypes []types.RetrieverType,
 ) error {
 	if len(indexInfoList) == 0 {
 		return nil
@@ -96,8 +104,16 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		embedCtx := context.WithValue(ctx, types.EmbedDocumentContextKey, true)
+		embeddings, err := batchEmbedWithBackoff(embedCtx, embedder, contentList)
 		if err != nil {
+			return err
+		}
+		if err := embeddingmodel.ValidateEmbeddingBatch(
+			embeddings,
+			len(contentList),
+			embedder.GetDimensions(),
+		); err != nil {
 			return err
 		}
 
@@ -128,7 +144,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
 // transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
 // embedding result on success or the last error if every attempt failed.
-func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
+func batchEmbedWithBackoff(ctx context.Context, embedder embeddingmodel.Embedder, contentList []string) ([][]float32, error) {
 	delay := embedRetryBaseDelay
 	var (
 		embeddings [][]float32
@@ -297,7 +313,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Support() []types.RetrieverT
 // EstimateStorageSize estimates the storage space needed for the provided index information
 func (v *KeywordsVectorHybridRetrieveEngineService) EstimateStorageSize(
 	ctx context.Context,
-	embedder embedding.Embedder,
+	embedder embeddingmodel.Embedder,
 	indexInfoList []*types.IndexInfo,
 	retrieverTypes []types.RetrieverType,
 ) int64 {

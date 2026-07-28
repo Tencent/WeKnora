@@ -60,6 +60,14 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 				mu.Unlock()
 				return
 			}
+			if err := ValidateEmbeddingBatch(embedding, len(texts), model.GetDimensions()); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
 			mu.Lock()
 			for i, text := range texts {
 				if text == nil {

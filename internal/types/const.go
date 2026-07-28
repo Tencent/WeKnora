@@ -33,6 +33,9 @@ const (
 	// page write (user / agent / revert). Absent means the wiki ingest
 	// pipeline. See types.WithWikiEditSource.
 	WikiEditSourceContextKey ContextKey = "WikiEditSource"
+	// EmbedDocumentContextKey marks exact, already-sanitized document inputs
+	// that are eligible for durable processing artifact reuse.
+	EmbedDocumentContextKey ContextKey = "EmbedDocument"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.

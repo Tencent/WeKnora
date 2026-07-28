@@ -120,7 +120,15 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 
 	// Call LLM to extract entities
 	log.Debug("Calling LLM to extract entities")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	entityCtx := chat.WithArtifactStage(ctx, chat.ArtifactStage{
+		Stage:        "graph_extract.entities",
+		OutputSchema: "graph.entities.v1",
+		Validate: func(content string) error {
+			var value []*types.Entity
+			return common.ParseLLMJsonResponse(content, &value)
+		},
+	})
+	resp, err := b.chatModel.Chat(entityCtx, messages, &chat.ChatOptions{
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})
@@ -203,7 +211,26 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	}
 
 	// Serialize entities to build prompt
-	entitiesJSON, err := json.Marshal(entities)
+	canonicalEntities := make([]struct {
+		Title       string `json:"title"`
+		Type        string `json:"type"`
+		Description string `json:"description"`
+	}, 0, len(entities))
+	for _, entity := range entities {
+		if entity == nil {
+			continue
+		}
+		canonicalEntities = append(canonicalEntities, struct {
+			Title       string `json:"title"`
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		}{
+			Title:       entity.Title,
+			Type:        entity.Type,
+			Description: entity.Description,
+		})
+	}
+	entitiesJSON, err := json.Marshal(canonicalEntities)
 	if err != nil {
 		log.WithError(err).Error("Failed to serialize entities to JSON")
 		return fmt.Errorf("failed to serialize entities: %w", err)
@@ -231,7 +258,15 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 
 	// Call LLM to extract relationships
 	log.Debug("Calling LLM to extract relationships")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+	relationCtx := chat.WithArtifactStage(ctx, chat.ArtifactStage{
+		Stage:        "graph_extract.relationships",
+		OutputSchema: "graph.relationships.v1",
+		Validate: func(content string) error {
+			var value []*types.Relationship
+			return common.ParseLLMJsonResponse(content, &value)
+		},
+	})
+	resp, err := b.chatModel.Chat(relationCtx, messages, &chat.ChatOptions{
 		Temperature: DefaultLLMTemperature,
 		Thinking:    &thinking,
 	})

@@ -611,3 +611,27 @@ func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
 ) error {
 	return nil
 }
+
+func TestWikiMapArtifactStageExcludesLiveReduceOperations(t *testing.T) {
+	for _, purpose := range []string{
+		"wiki_knowledge_extract",
+		"wiki_candidate_slug",
+		"wiki_chunk_citation",
+		"wiki_taxonomy_plan",
+		"wiki_summary",
+	} {
+		stage, ok := wikiMapArtifactStage(purpose)
+		if !ok || stage.Stage != "wiki_map" || stage.OutputSchema == "" {
+			t.Fatalf("purpose %q was not classified as wiki map: %#v, %v", purpose, stage, ok)
+		}
+	}
+	for _, purpose := range []string{
+		"wiki_page_modify",
+		"wiki_deduplication",
+		"wiki_index_intro",
+	} {
+		if stage, ok := wikiMapArtifactStage(purpose); ok {
+			t.Fatalf("live reduce purpose %q must not be cached: %#v", purpose, stage)
+		}
+	}
+}

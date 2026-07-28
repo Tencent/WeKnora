@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/artifact"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
@@ -24,12 +25,27 @@ var ErrModelNotFound = errors.New("model not found")
 
 // modelService implements the model service interface
 type modelService struct {
-	repo          interfaces.ModelRepository
-	kbRepo        interfaces.KnowledgeBaseRepository
-	agentRepo     interfaces.CustomAgentRepository
-	ollamaService *ollama.OllamaService
-	pooler        embedding.EmbedderPooler
-	tenantService interfaces.TenantService
+	repo            interfaces.ModelRepository
+	kbRepo          interfaces.KnowledgeBaseRepository
+	agentRepo       interfaces.CustomAgentRepository
+	ollamaService   *ollama.OllamaService
+	pooler          embedding.EmbedderPooler
+	tenantService   interfaces.TenantService
+	artifactRuntime *artifact.Runtime
+}
+
+// ConfigureModelArtifactCache attaches the shared fail-open artifact runtime
+// after dependency injection constructs the model service. Keeping the public
+// constructor stable avoids forcing artifact storage into lightweight tests.
+func ConfigureModelArtifactCache(
+	service interfaces.ModelService,
+	runtime *artifact.Runtime,
+) {
+	models, ok := service.(*modelService)
+	if !ok || runtime == nil {
+		return
+	}
+	models.artifactRuntime = runtime
 }
 
 // NewModelService creates a new model service instance
@@ -431,6 +447,12 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		})
 		return nil, err
 	}
+	if config, cacheable := embedding.ArtifactCacheConfigFromModel(
+		model,
+		types.MustTenantIDFromContext(ctx),
+	); cacheable {
+		embedder = embedding.NewArtifactCachedEmbedder(embedder, s.artifactRuntime, config)
+	}
 
 	logger.Info(ctx, "Embedding model initialized successfully")
 	return embedder, nil
@@ -478,6 +500,9 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 			"tenant_id":  tenantID,
 		})
 		return nil, err
+	}
+	if config, cacheable := embedding.ArtifactCacheConfigFromModel(model, tenantID); cacheable {
+		embedder = embedding.NewArtifactCachedEmbedder(embedder, s.artifactRuntime, config)
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
@@ -551,6 +576,9 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		})
 		return nil, err
 	}
+	if config, cacheable := chat.ArtifactCacheConfigFromModel(model, tenantID); cacheable {
+		chatModel = chat.NewArtifactCachedChat(chatModel, s.artifactRuntime, config)
+	}
 
 	return chatModel, nil
 }
@@ -587,6 +615,9 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 			"model_name": model.Name,
 		})
 		return nil, err
+	}
+	if config, cacheable := vlm.ArtifactCacheConfigFromModel(model, tenantID); cacheable {
+		vlmModel = vlm.NewArtifactCachedVLM(vlmModel, s.artifactRuntime, config)
 	}
 
 	return vlmModel, nil

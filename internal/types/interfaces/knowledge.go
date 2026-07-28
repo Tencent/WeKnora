@@ -226,6 +226,25 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgeIfAttemptCurrent performs the final publish as one
+	// conditional statement. It returns false when a newer root attempt already
+	// exists, closing the race between an application-level fence check and the
+	// database write.
+	UpdateKnowledgeIfAttemptCurrent(
+		ctx context.Context,
+		knowledge *types.Knowledge,
+		attempt int,
+	) (bool, error)
+	// UpdateKnowledgeColumnsIfAttemptCurrent conditionally updates orchestration
+	// columns that full-row updates intentionally omit (for example the
+	// pending-subtask counter).
+	UpdateKnowledgeColumnsIfAttemptCurrent(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		attempt int,
+		values map[string]interface{},
+	) (bool, error)
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error

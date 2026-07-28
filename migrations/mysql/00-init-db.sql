@@ -227,3 +227,40 @@ CREATE TABLE chunk_revisions (
     UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
     KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE processing_artifacts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    key_version INTEGER UNSIGNED NOT NULL,
+    artifact_key CHAR(64) NOT NULL,
+    processor_digest CHAR(64) NOT NULL,
+    output_digest CHAR(64) NOT NULL,
+    output_schema VARCHAR(64) NOT NULL,
+    codec VARCHAR(32) NOT NULL,
+    inline_payload BOOLEAN NOT NULL DEFAULT TRUE,
+    payload LONGBLOB,
+    object_ref TEXT NOT NULL,
+    payload_checksum CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    hit_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    last_hit_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_processing_artifacts_key
+        (tenant_id, stage, key_version, artifact_key),
+    KEY idx_processing_artifacts_tenant_created (tenant_id, created_at),
+    CONSTRAINT ck_processing_artifacts_payload
+        CHECK (
+            (inline_payload = TRUE AND payload IS NOT NULL AND object_ref = '')
+            OR
+            (inline_payload = FALSE AND payload IS NULL AND object_ref <> '')
+        ),
+    CONSTRAINT ck_processing_artifacts_size CHECK (size_bytes >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE knowledge_attempt_counters (
+    knowledge_id VARCHAR(64) PRIMARY KEY,
+    last_attempt INTEGER UNSIGNED NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

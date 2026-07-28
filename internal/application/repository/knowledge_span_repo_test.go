@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +42,11 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (knowledge_id, attempt, span_id)
+);
+CREATE TABLE IF NOT EXISTS knowledge_attempt_counters (
+    knowledge_id VARCHAR(64) PRIMARY KEY,
+    last_attempt INTEGER NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `
 
@@ -111,6 +119,43 @@ func TestKnowledgeSpanRepo_NextAttempt(t *testing.T) {
 	other, err := repo.NextAttempt(ctx, "kid-other")
 	require.NoError(t, err)
 	assert.Equal(t, 1, other, "NextAttempt must scope to the knowledge_id")
+}
+
+func TestKnowledgeSpanRepo_NextAttemptConcurrent(t *testing.T) {
+	dsn := fmt.Sprintf(
+		"file:attempt-counter-%d?mode=memory&cache=shared&_busy_timeout=5000",
+		time.Now().UnixNano(),
+	)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(spansTestDDL).Error)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(16)
+
+	repo := NewKnowledgeSpanRepository(db)
+	const workers = 12
+	attempts := make([]int, workers)
+	errorsByWorker := make([]error, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			attempts[index], errorsByWorker[index] = repo.NextAttempt(
+				context.Background(),
+				"concurrent-knowledge",
+			)
+		}(i)
+	}
+	wg.Wait()
+	for _, allocateErr := range errorsByWorker {
+		require.NoError(t, allocateErr)
+	}
+	sort.Ints(attempts)
+	for index, attempt := range attempts {
+		assert.Equal(t, index+1, attempt)
+	}
 }
 
 // TestKnowledgeSpanRepo_CancelDescendants verifies the cascade walk:
