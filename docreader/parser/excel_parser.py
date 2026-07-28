@@ -142,24 +142,15 @@ def _read_sheet_dataframe(
     """Read a worksheet into a DataFrame with stable column labels."""
     from openpyxl.utils import get_column_letter
 
-    # XLSX keeps row 1 as data by default. Users can explicitly restore the
-    # historical behavior where row 1 supplies semantic labels for every row.
-    if excel_file.engine == "openpyxl":
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        if xlsx_first_row_as_header and len(df.index) >= 2:
-            df.columns = _stable_header_labels(df.iloc[0].tolist())
-            return df.iloc[1:].copy()
+    # Keep row 1 as data by default for both XLSX and legacy XLS. Users can
+    # explicitly restore the historical behavior where row 1 supplies semantic
+    # labels for every row.
+    df = excel_file.parse(sheet_name=sheet_name, header=None)
+    if xlsx_first_row_as_header and len(df.index) >= 2:
+        df.columns = _stable_header_labels(df.iloc[0].tolist())
+        return df.iloc[1:].copy()
 
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
-        return df
-
-    df = excel_file.parse(sheet_name=sheet_name, header=0)
-    if df.empty:
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
-    elif any(str(col).startswith("Unnamed:") for col in df.columns):
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
+    df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
     return df
 
 

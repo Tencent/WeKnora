@@ -179,6 +179,60 @@ func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
 	}
 }
 
+func TestApplyParserRuleOverrides_XLSFileType(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx", "xls"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xls")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_NormalizesFileTypeCase(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, ".XLSX")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_SkipsNonBuiltinEngine(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "markitdown",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xlsx")
+
+	require.NotContains(t, overrides, xlsxFirstRowAsHeaderOverride)
+}
+
 func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
 	t.Parallel()
 
