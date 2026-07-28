@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -154,6 +156,9 @@ type Knowledge struct {
 	StorageSize int64 `json:"storage_size"`
 	// Metadata of the knowledge
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	// CustomMetadata is user-authored descriptive metadata. It is deliberately
+	// separate from Metadata, which contains internal ingestion state and IDs.
+	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
@@ -168,6 +173,35 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+}
+
+// CustomMetadataText returns stable human-readable metadata for summaries and
+// document-scoped model context. Internal ingestion metadata is intentionally
+// excluded.
+func (k *Knowledge) CustomMetadataText() string {
+	if k == nil || len(k.CustomMetadata) == 0 {
+		return ""
+	}
+	var values map[string]interface{}
+	if err := json.Unmarshal(k.CustomMetadata, &values); err != nil || len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if values[key] == nil {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(values[key]))
+		if strings.TrimSpace(key) != "" && value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", strings.TrimSpace(key), value))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // GetMetadata returns the metadata as a map[string]string.

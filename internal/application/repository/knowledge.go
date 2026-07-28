@@ -188,7 +188,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	omit := omitFieldsOnUpdate
+	// Legacy/unit-test schemas created before custom_metadata should continue
+	// to support unrelated updates when the caller did not provide the field.
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
 

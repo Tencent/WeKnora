@@ -1752,6 +1752,18 @@ const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
 
+const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {
+  if (!state?.id) return;
+  const card = cardList.value.find((item: KnowledgeCard) => item.id === state.id);
+  if (!card) return;
+  if (typeof state.summary_status === 'string' && state.summary_status) {
+    card.summary_status = state.summary_status;
+  }
+  if (typeof state.description === 'string') {
+    card.description = state.description;
+  }
+};
+
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
@@ -2336,7 +2348,7 @@ async function createNewSession(value: string): Promise<void> {
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
         :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
   </template>

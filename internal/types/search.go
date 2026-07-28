@@ -202,6 +202,9 @@ type SearchResult struct {
 	// KnowledgeDescription is the description of the knowledge document
 	KnowledgeDescription string `json:"knowledge_description,omitempty"`
 
+	// KnowledgeCustomMetadata is user-authored context safe to expose to models.
+	KnowledgeCustomMetadata string `json:"knowledge_custom_metadata,omitempty"`
+
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }

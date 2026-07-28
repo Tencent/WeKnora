@@ -1318,7 +1318,7 @@ def _init_options() -> InitializationOptions:
     """Build MCP InitializationOptions (shared across all transports)"""
     return InitializationOptions(
         server_name="weknora-server",
-        server_version="1.0.0",
+        server_version="1.0.1",
         capabilities=app.get_capabilities(
             notification_options=NotificationOptions(),
             experimental_capabilities={},
@@ -1357,8 +1357,8 @@ async def run_sse(host: str, port: int):
 
     starlette_app = Starlette(
         routes=[
+            Mount("/sse/messages/", app=sse.handle_post_message),  # 更具体的路由必须在 /sse 前面
             Mount("/sse", app=handle_sse),
-            Mount("/messages/", app=sse.handle_post_message),
         ]
     )
     starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
