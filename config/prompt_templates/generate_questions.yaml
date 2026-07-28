@@ -34,6 +34,8 @@ templates:
       - Do NOT generate questions about minor details that are only briefly mentioned
       - Do NOT generate questions that can be answered with a single word or number extracted from the text
       - Do NOT generate questions that are too broad to be meaningfully answered by this specific content
+      - Do NOT generate meta questions about images themselves, e.g. "这张图片展示了什么", "图片内容是什么", "这张图里有什么", "what does this image show", "what is in the picture", "describe the image"
+      - When content includes images / OCR / captions, treat that text as factual information about the subject (logos, UI labels, product names, etc.). Ask what a user would search for about that subject — never ask what the image looks like or what it displays
 
       ## Output
       Generate {{question_count}} questions, one per line, no numbering or prefixes.
