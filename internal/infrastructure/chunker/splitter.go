@@ -593,7 +593,7 @@ func buildChunk(units []splitUnit, seq int) Chunk {
 //
 //  1. paragraph break (\n\n / \r\n\r\n)
 //  2. line break (\n / \r\n)
-//  3. sentence end (。？！, ". ", and English ?/!)
+//  3. sentence end (。？！, ". ", "? ", "! ")
 //
 // Priority wins first; for boundaries with the same priority, the earliest
 // one in the window wins so the useful overlap is as large as possible. The
@@ -796,12 +796,10 @@ func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd int) (int, b
 		switch runes[i] {
 		case '。', '？', '！':
 			consider(i, i+1, 3)
-		case '.':
+		case '.', '?', '!':
 			if i+1 < len(runes) && runes[i+1] == ' ' {
 				consider(i, i+2, 3)
 			}
-		case '?', '!':
-			consider(i, i+1, 3)
 		}
 	}
 
