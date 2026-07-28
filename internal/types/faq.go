@@ -36,6 +36,8 @@ type DocumentChunkMetadata struct {
 	// GeneratedQuestions 存储AI为该Chunk生成的相关问题
 	// 这些问题会被独立索引以提高召回率
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
+	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
+	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
 }
 
 // GetQuestionStrings 返回问题内容字符串列表（兼容旧代码）

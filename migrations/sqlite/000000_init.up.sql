@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata TEXT,
+    custom_metadata TEXT NOT NULL DEFAULT '{}',
     tag_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
@@ -242,6 +243,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     content TEXT NOT NULL,
+    source_content TEXT NOT NULL DEFAULT '',
+    content_revision INTEGER NOT NULL DEFAULT 0,
+    index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
+    last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    context_header TEXT NOT NULL DEFAULT '',
     chunk_index INTEGER NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
     start_at INTEGER NOT NULL,
@@ -273,6 +279,23 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
+
+CREATE TABLE IF NOT EXISTS chunk_revisions (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    revision INTEGER NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    editor_id VARCHAR(64) NOT NULL DEFAULT '',
+    edit_source VARCHAR(16) NOT NULL DEFAULT 'user',
+    edited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chunk_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_revisions_tenant_chunk ON chunk_revisions(tenant_id, chunk_id);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,

@@ -54,6 +54,15 @@ type ChunkRepository interface {
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
+	// CreateChunkRevision stores an immutable snapshot of a superseded revision.
+	CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error
+	// SaveChunkRevision atomically snapshots the old row and applies the new
+	// row only when its revision still matches expectedRevision.
+	SaveChunkRevision(ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int) error
+	// ListChunkRevisions returns snapshots ordered newest first.
+	ListChunkRevisions(ctx context.Context, tenantID uint64, chunkID string) ([]*types.ChunkRevision, error)
+	// GetChunkRevision returns one historical snapshot.
+	GetChunkRevision(ctx context.Context, tenantID uint64, chunkID string, revision int) (*types.ChunkRevision, error)
 	// UpdateChunks updates chunks in batch
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
@@ -148,4 +157,12 @@ type ChunkService interface {
 	// DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
 	// This updates the chunk metadata and removes the corresponding vector index
 	DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error
+	// UpdateDocumentChunk applies a revision-checked edit and synchronizes retrieval indices.
+	UpdateDocumentChunk(ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int) (*types.Chunk, error)
+	// ListChunkRevisions lists immutable snapshots for a chunk.
+	ListChunkRevisions(ctx context.Context, chunkID string) ([]*types.ChunkRevision, error)
+	// RevertDocumentChunk restores a historical revision as a new current revision.
+	RevertDocumentChunk(ctx context.Context, chunkID string, revision int, expectedRevision *int) (*types.Chunk, error)
+	// UpsertGeneratedQuestion creates or updates a generated retrieval question.
+	UpsertGeneratedQuestion(ctx context.Context, chunkID string, questionID string, question string) (*types.GeneratedQuestion, error)
 }

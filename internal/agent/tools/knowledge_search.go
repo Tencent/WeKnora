@@ -1274,6 +1274,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 			if snippet != "" {
 				ob.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
 			}
+			if result.KnowledgeCustomMetadata != "" {
+				ob.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", xmlEscape(result.KnowledgeCustomMetadata)))
+			}
 			ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
 
 			if result.ImageInfo != "" {
@@ -1302,6 +1305,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,
+			"knowledge_metadata":  result.KnowledgeCustomMetadata,
 			"match_type":          result.MatchType,
 			"source_query":        result.SourceQuery,
 			"query_type":          result.QueryType,

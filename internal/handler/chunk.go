@@ -1,6 +1,7 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -152,13 +153,9 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 
 // UpdateChunkRequest defines the request structure for updating a chunk
 type UpdateChunkRequest struct {
-	Content    string    `json:"content"`
-	Embedding  []float32 `json:"embedding"`
-	ChunkIndex int       `json:"chunk_index"`
-	IsEnabled  bool      `json:"is_enabled"`
-	StartAt    int       `json:"start_at"`
-	EndAt      int       `json:"end_at"`
-	ImageInfo  string    `json:"image_info"`
+	Content          *string `json:"content"`
+	IsEnabled        *bool   `json:"is_enabled"`
+	ExpectedRevision *int    `json:"expected_revision"`
 }
 
 // fetchChunkAndVerifyOwnership fetches a chunk by ID and verifies it
@@ -227,14 +224,13 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 		return
 	}
 
-	if req.Content != "" {
-		chunk.Content = req.Content
-	}
-
-	chunk.IsEnabled = req.IsEnabled
-
-	if err := h.service.UpdateChunk(ctx, chunk); err != nil {
+	chunk, err = h.service.UpdateDocumentChunk(ctx, chunk.ID, req.Content, req.IsEnabled, req.ExpectedRevision)
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+			c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -245,6 +241,90 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 		"success": true,
 		"data":    chunk,
 	})
+}
+
+func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	items, err := h.service.ListChunkRevisions(c.Request.Context(), chunk.ID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+}
+
+type RevertChunkRequest struct {
+	Revision         *int `json:"revision" binding:"required"`
+	ExpectedRevision *int `json:"expected_revision"`
+}
+
+func (h *ChunkHandler) RevertChunk(c *gin.Context) {
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req RevertChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Revision == nil || *req.Revision < 0 {
+		c.Error(errors.NewBadRequestError("revision must be a non-negative integer"))
+		return
+	}
+	updated, err := h.service.RevertDocumentChunk(c.Request.Context(), chunk.ID, *req.Revision, req.ExpectedRevision)
+	if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+		c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+		return
+	}
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": updated})
+}
+
+type UpsertGeneratedQuestionRequest struct {
+	QuestionID string `json:"question_id"`
+	Question   string `json:"question" binding:"required"`
+}
+
+func (h *ChunkHandler) UpsertGeneratedQuestion(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	var req UpsertGeneratedQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	item, err := h.service.UpsertGeneratedQuestion(c.Request.Context(), chunkID, req.QuestionID, req.Question)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
+}
+
+func (h *ChunkHandler) RegenerateGeneratedQuestions(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	items, err := h.kgService.RegenerateChunkQuestions(c.Request.Context(), chunkID)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
 }
 
 // DeleteChunk godoc

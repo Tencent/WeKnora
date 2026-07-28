@@ -240,6 +240,7 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 	type docMeta struct {
 		title       string
 		description string
+		metadata    string
 	}
 
 	seen := make(map[string]struct{})
@@ -265,6 +266,7 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 		docs = append(docs, docMeta{
 			title:       title,
 			description: r.KnowledgeDescription,
+			metadata:    r.KnowledgeCustomMetadata,
 		})
 	}
 
@@ -279,6 +281,9 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 		b.WriteString(fmt.Sprintf("<title>%s</title>\n", d.title))
 		if d.description != "" {
 			b.WriteString(fmt.Sprintf("<description>%s</description>\n", d.description))
+		}
+		if d.metadata != "" {
+			b.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", d.metadata))
 		}
 		b.WriteString("</document>\n")
 	}
