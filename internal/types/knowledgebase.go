@@ -220,14 +220,22 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 
 // ResolveParserEngineRule returns the parser rule for a file type.
 func (c ChunkingConfig) ResolveParserEngineRule(fileType string) *ParserEngineRule {
+	fileType = normalizeParserFileType(fileType)
+	if fileType == "" {
+		return nil
+	}
 	for i := range c.ParserEngineRules {
 		for _, ft := range c.ParserEngineRules[i].FileTypes {
-			if ft == fileType {
+			if normalizeParserFileType(ft) == fileType {
 				return &c.ParserEngineRules[i]
 			}
 		}
 	}
 	return nil
+}
+
+func normalizeParserFileType(fileType string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
 }
 
 // StorageProviderConfig stores the KB-level storage provider selection.

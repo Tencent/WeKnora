@@ -360,6 +360,24 @@ class ExcelParserTest(unittest.TestCase):
             ["Name: Alice,Name_2: Alias,C: Shenzhen"],
         )
 
+    def test_xlsx_explicit_false_override_keeps_first_row_as_data(self):
+        content = self._workbook_bytes(
+            [
+                ["Name", "Age"],
+                ["Alice", 30],
+            ]
+        )
+
+        document = ExcelParser(
+            file_name="people.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header="false",
+        ).parse_into_text(content)
+
+        chunks = [chunk.content.strip() for chunk in document.chunks]
+        self.assertEqual(chunks[0], "A: Name,B: Age")
+        self.assertEqual(chunks[1], "A: Alice,B: 30")
+
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())
         self.assertIn("hello", document.content)
