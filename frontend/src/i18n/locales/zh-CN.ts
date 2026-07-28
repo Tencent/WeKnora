@@ -1123,6 +1123,7 @@ export default {
     versionInfo: "版本信息",
     taskQueue: "任务队列",
     tenantInfo: "空间信息",
+    workspaceSettings: "空间设置",
     apiInfo: "API信息",
     navGroups: {
       account: "账户",
@@ -3403,6 +3404,8 @@ export default {
   general: {
     title: "常规设置",
     allSettings: "全部设置",
+    personalSettings: "个人设置",
+    helpAndDocs: "帮助与文档",
     description: "配置语言、外观等基础选项",
     settings: "设置",
     close: "关闭设置",

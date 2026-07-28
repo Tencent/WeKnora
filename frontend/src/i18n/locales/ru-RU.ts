@@ -1163,6 +1163,7 @@ export default {
     versionInfo: 'Информация о версии',
     taskQueue: 'Очереди задач',
     tenantInfo: 'Информация о пространстве',
+    workspaceSettings: 'Настройки пространства',
     apiInfo: 'Информация API',
     navGroups: {
       account: 'Аккаунт',
@@ -4140,6 +4141,8 @@ export default {
   general: {
     title: 'Общие настройки',
     allSettings: 'Все настройки',
+    personalSettings: 'Личные настройки',
+    helpAndDocs: 'Справка и документация',
     description: 'Настройка языка, внешнего вида и других базовых параметров',
     settings: 'Настройки',
     close: 'Закрыть настройки'

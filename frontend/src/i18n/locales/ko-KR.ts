@@ -1115,6 +1115,7 @@ export default {
     versionInfo: "버전 정보",
     taskQueue: "작업 큐",
     tenantInfo: "워크스페이스 정보",
+    workspaceSettings: "워크스페이스 설정",
     apiInfo: "API 정보",
     navGroups: {
       account: "계정",
@@ -3377,6 +3378,8 @@ export default {
   general: {
     title: "일반 설정",
     allSettings: "모든 설정",
+    personalSettings: "개인 설정",
+    helpAndDocs: "도움말 및 문서",
     description: "언어, 외관 등 기본 옵션 설정",
     settings: "설정",
     close: "설정 닫기",

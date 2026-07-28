@@ -1250,6 +1250,7 @@ export default {
     versionInfo: 'Version Info',
     taskQueue: 'Task Queues',
     tenantInfo: 'Workspace Info',
+    workspaceSettings: 'Workspace Settings',
     apiInfo: 'API Info',
     navGroups: {
       account: 'Account',
@@ -4479,6 +4480,8 @@ export default {
   general: {
     title: 'General Settings',
     allSettings: 'All Settings',
+    personalSettings: 'Personal Settings',
+    helpAndDocs: 'Help & Documentation',
     description: 'Configure language, appearance and other basic options',
     settings: 'Settings',
     close: 'Close Settings'
