@@ -158,7 +158,7 @@ type Knowledge struct {
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
 	// CustomMetadata is user-authored descriptive metadata. It is deliberately
 	// separate from Metadata, which contains internal ingestion state and IDs.
-	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json"`
+	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
@@ -220,10 +220,17 @@ func (k *Knowledge) GetMetadata() map[string]string {
 	return metadata
 }
 
-// BeforeCreate hook generates a UUID for new Knowledge entities before they are created.
+// BeforeCreate initializes required defaults for new Knowledge entities.
 func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	if k.ID == "" {
 		k.ID = uuid.New().String()
+	}
+	// JSON.Value returns SQL NULL for an empty value. PostgreSQL's column
+	// default is not applied when GORM explicitly inserts that NULL, so keep the
+	// application-side representation aligned with the NOT NULL database
+	// invariant for every knowledge creation path.
+	if len(k.CustomMetadata) == 0 {
+		k.CustomMetadata = JSON(`{}`)
 	}
 	return nil
 }
