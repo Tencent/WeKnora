@@ -317,13 +317,13 @@ func TestFindSemanticOverlapBoundary_PriorityThenEarliest(t *testing.T) {
 			want: "Second sentence",
 		},
 		{
-			name: "english question mark needs no following space",
-			text: "Question?Answer",
+			name: "english question mark requires following space",
+			text: "Question? Answer",
 			want: "Answer",
 		},
 		{
-			name: "english exclamation mark needs no following space",
-			text: "Warning!Continue",
+			name: "english exclamation mark requires following space",
+			text: "Warning! Continue",
 			want: "Continue",
 		},
 	}
@@ -348,6 +348,7 @@ func TestFindSemanticOverlapBoundary_NoConfiguredSemanticSeparator(t *testing.T)
 		"只有，逗号；分号：冒号",
 		"version1.2 remains one unit",
 		"address 192.168.1.1 remains one unit",
+		"see https://ex.com?q=1&foo=bar",
 	} {
 		if end, ok := findSemanticOverlapBoundary(text); ok {
 			t.Errorf("findSemanticOverlapBoundary(%q) returned boundary at %d", text, end)
@@ -382,7 +383,7 @@ func TestFindSemanticOverlapBoundary_FiltersEligibilityBeforePriorityAndPosition
 		},
 		{
 			name:   "ineligible paragraph does not outrank eligible sentence",
-			text:   "\n\nx?tail",
+			text:   "\n\nx? tail",
 			minEnd: 3,
 			want:   "tail",
 		},
@@ -482,6 +483,31 @@ func TestComputeOverlap_LookbehindBoundaryEligibility(t *testing.T) {
 				t.Fatalf("overlap exceeds configured limit: %d > 4", overlapLen)
 			}
 		})
+	}
+}
+
+func TestSplitText_OverlapDoesNotBreakURLQuery(t *testing.T) {
+	line1 := strings.Repeat("a", 35)
+	text := line1 + "\n" + "https://ex.com?q=1 tail\n" + "more content here"
+	cfg := SplitterConfig{ChunkSize: 40, ChunkOverlap: 10, Separators: []string{"\n\n", "\n"}}
+
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 3 {
+		t.Fatalf("expected at least 3 chunks, got %d: %#v", len(chunks), chunks)
+	}
+	if strings.HasPrefix(chunks[2].Content, "q=1") {
+		t.Fatalf("overlap broke at URL query string: chunk[2]=%q", chunks[2].Content)
+	}
+}
+
+func TestBuildUnitsWithProtection_InlineCodeNotSplit(t *testing.T) {
+	text := "intro `code.here` suffix"
+	units := buildUnitsWithProtection(text, protectedSpans(text), []string{"\n"}, 0)
+
+	for _, u := range units {
+		if strings.Contains(u.text, "code.here") && !strings.Contains(u.text, "`code.here`") {
+			t.Fatalf("inline code period split unit: %q", u.text)
+		}
 	}
 }
 
