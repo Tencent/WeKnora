@@ -29,6 +29,7 @@ import {
   updateKnowledgeTagBatch,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
+  moveKnowledgeToFolder,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -41,6 +42,8 @@ import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import KbFolderBar from './components/KbFolderBar.vue';
+import FolderTreePicker from './components/FolderTreePicker.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -507,6 +510,11 @@ const isTagFilterPlaceholder = computed(
 );
 
 const selectedTagIds = ref<string[]>([]);
+
+// 多级文件夹（#1311）：当前所在文件夹（'' = 根目录）。无筛选时文档列表只显示
+// 当前层级；任一筛选激活时切换为"当前文件夹子树内递归搜索"。
+const currentFolderId = ref('');
+const batchMovePickerVisible = ref(false);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -572,8 +580,32 @@ const sourceOptions = computed(() => [
 const updatedTimeRange = ref<string[]>([]);
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+const hasActiveDocFilters = computed(() => {
+  const [start, end] = updatedTimeRange.value || [];
+  return (
+    selectedTagIds.value.length > 0 ||
+    !!(docSearchKeyword.value && docSearchKeyword.value.trim()) ||
+    !!selectedFileType.value ||
+    !!selectedParseStatus.value ||
+    !!selectedSource.value ||
+    !!start ||
+    !!end
+  );
+});
+
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
+  // 文件夹导航与筛选的组合规则：纯导航时仅展示当前层级（根目录用
+  // __root__ 哨兵，空串在后端表示"不过滤"）；筛选激活时改为从当前文件夹
+  // 子树递归搜索（在根目录则搜全库，与引入文件夹前的行为一致）。
+  let folderId: string | undefined;
+  let folderRecursive: boolean | undefined;
+  if (hasActiveDocFilters.value) {
+    folderId = currentFolderId.value || undefined;
+    folderRecursive = currentFolderId.value ? true : undefined;
+  } else {
+    folderId = currentFolderId.value || '__root__';
+  }
   return {
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
@@ -582,6 +614,8 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_id: isFAQ.value ? undefined : folderId,
+    folder_recursive: isFAQ.value ? undefined : folderRecursive,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -911,6 +945,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     resetPage();
     tagSearchQuery.value = '';
     tagPage.value = 1;
+    currentFolderId.value = '';
     uiStore.clearSelectedTagIds();
   }
   loadKnowledgeBaseInfo(newKbId);
@@ -965,6 +1000,37 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
     loadKnowledgeFiles(kbId.value);
   }
 }, { deep: true });
+
+// 进入/离开文件夹时刷新文档列表
+watch(currentFolderId, () => {
+  if (kbId.value) {
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  }
+});
+
+// 文件夹树变化（新建/重命名/移动/删除/整理）后刷新
+const handleFolderTreeChanged = () => {
+  if (kbId.value) {
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  }
+};
+
+// 批量移动选中文档到文件夹
+const handleBatchMoveToFolder = async (folderId: string) => {
+  const ids = [...selectedIds.value];
+  if (!ids.length || !kbId.value) return;
+  try {
+    const res: any = await moveKnowledgeToFolder(kbId.value, { knowledge_ids: ids, folder_id: folderId });
+    MessagePlugin.success(t('knowledgeBase.folder.movedDocs', { count: res?.data?.moved ?? ids.length }));
+    clearSelection();
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.error?.message || e?.message || t('common.operationFailed'));
+  }
+};
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
@@ -1443,8 +1509,10 @@ const executeUploadBatch = async (
         file: File
         tag_ids?: string[]
         fileName?: string
+        folder_id?: string
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
+      if (currentFolderId.value) uploadData.folder_id = currentFolderId.value;
 
       const fileName = getFolderUploadFileName(file);
       if (fileName) uploadData.fileName = fileName;
@@ -1509,6 +1577,7 @@ const executeUrlImport = async (
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
       tag_ids: tagIdsToUpload,
+      folder_id: currentFolderId.value || undefined,
       process_config: processConfig,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
@@ -2249,6 +2318,8 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </div>
               </div>
+              <KbFolderBar v-if="!isFAQ" v-model="currentFolderId" :kb-id="kbId" :can-edit="canEdit"
+                :filters-active="hasActiveDocFilters" @changed="handleFolderTreeChanged" />
               <div class="doc-scroll-container"
                 :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2326,7 +2397,11 @@ async function createNewSession(value: string): Promise<void> {
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @move-folder="batchMovePickerVisible = true" />
+                <FolderTreePicker v-model:visible="batchMovePickerVisible" :kb-id="kbId" allow-root
+                  :title="t('knowledgeBase.folder.moveDocsTo', { count: selectedIds.size })"
+                  @confirm="handleBatchMoveToFolder" />
               </div>
             </div>
           </div>

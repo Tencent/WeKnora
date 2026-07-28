@@ -800,6 +800,12 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    // Folder scope (#1311): backend attributes bare folder_ids to the sole
+    // selected KB, so only send them when exactly one KB is in scope.
+    const selectedFolders = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFolders || []);
+    const folderIds = kbIds.length === 1
+        ? [...new Set(selectedFolders.filter(f => f.kbId === kbIds[0]).map(f => f.id))]
+        : [];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
@@ -823,6 +829,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
+        folder_ids: folderIds.length > 0 ? folderIds : undefined,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,

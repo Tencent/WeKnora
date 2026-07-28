@@ -177,7 +177,20 @@ watch(
     { deep: true },
 );
 
-onMounted(() => { fetchSuggestedQuestions(); });
+// 从知识库页"在此文件夹内问答"进入（#1311）：query 携带 folder_id/folder_name，
+// kbCreatChat 路由的 :kbId 决定唯一的知识库范围。chip 展示与移除由 Input-field
+// 基于 settingsStore.selectedFolders 自动完成。
+const applyFolderEntry = () => {
+    const folderId = typeof route.query.folder_id === 'string' ? route.query.folder_id : '';
+    const kbIdParam = typeof route.params.kbId === 'string' ? route.params.kbId : '';
+    if (!folderId || !kbIdParam) return;
+    const folderName = typeof route.query.folder_name === 'string' ? route.query.folder_name : folderId;
+    settingsStore.clearFolders();
+    settingsStore.selectKnowledgeBases([kbIdParam]);
+    settingsStore.addFolder({ id: folderId, name: folderName, kbId: kbIdParam });
+};
+
+onMounted(() => { applyFolderEntry(); fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
 

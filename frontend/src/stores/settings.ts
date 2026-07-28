@@ -16,6 +16,7 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedFolders: Array<{ id: string; name: string; kbId: string; kbName?: string }>; // 文件夹范围问答（#1311）
   selectedMCPServices: string[];
   selectedSkills: string[];
   selectedTools?: string[];
@@ -85,6 +86,7 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
+  selectedFolders: [],
   selectedMCPServices: [],
   selectedSkills: [],
   modelConfig: {
@@ -372,6 +374,27 @@ export const useSettingsStore = defineStore("settings", {
 
     clearTags() {
       this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addFolder(folder: { id: string; name: string; kbId: string; kbName?: string }) {
+      if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+      if (!this.settings.selectedFolders.some(f => f.id === folder.id && f.kbId === folder.kbId)) {
+        this.settings.selectedFolders.push(folder);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFolder(folderId: string, kbId?: string) {
+      if (!this.settings.selectedFolders) return;
+      this.settings.selectedFolders = this.settings.selectedFolders.filter(
+        f => !(f.id === folderId && (!kbId || f.kbId === kbId)),
+      );
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolders = [];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
