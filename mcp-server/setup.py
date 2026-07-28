@@ -27,7 +27,7 @@ def read_requirements():
 
 
 setup(
-    name="weknora-mcp-server",
+    name="weknora-mcp",
     version="1.0.0",
     author="WeKnora Team",
     author_email="support@weknora.com",

@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "weknora-mcp-server"
+name = "weknora-mcp"
 version = "1.0.0"
 description = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
 readme = "README.md"
