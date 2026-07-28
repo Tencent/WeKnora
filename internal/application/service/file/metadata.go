@@ -10,6 +10,10 @@ type storageProvider interface {
 	StorageProvider() string
 }
 
+type storageBackendIdentity interface {
+	StorageBackendID() string
+}
+
 type storedPathMapper interface {
 	CanonicalStoredPath(string) string
 	ServiceStoredPath(string) string
@@ -22,6 +26,16 @@ func StorageProvider(service interfaces.FileService) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(provider.StorageProvider()))
+}
+
+// StorageBackendID returns the concrete storage instance advertised by a
+// backend-scoped service.
+func StorageBackendID(service interfaces.FileService) string {
+	backend, ok := service.(storageBackendIdentity)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(backend.StorageBackendID())
 }
 
 // CanonicalStoredPath maps a service-returned path to its stable persisted form when supported.

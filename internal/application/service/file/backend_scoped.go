@@ -26,6 +26,10 @@ func NewBackendScopedFileService(backendID string, inner interfaces.FileService)
 	return &backendScopedFileService{backendID: backendID, inner: inner}
 }
 
+func (s *backendScopedFileService) StorageBackendID() string {
+	return s.backendID
+}
+
 func (s *backendScopedFileService) unwrap(path string) (string, error) {
 	id, inner, ok := types.ParseStorageBackendPath(path)
 	if !ok {

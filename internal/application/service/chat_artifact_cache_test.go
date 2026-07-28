@@ -16,12 +16,16 @@ import (
 )
 
 type chatArtifactFakeStore struct {
-	values       map[types.ProcessingArtifactKey][]byte
-	getErr       error
-	putErr       error
-	putCanonical []byte
-	getCalls     int
-	putCalls     int
+	values                        map[types.ProcessingArtifactKey][]byte
+	getErr                        error
+	putErr                        error
+	invalidateErr                 error
+	putCanonical                  []byte
+	clearPutCanonicalOnInvalidate bool
+	getCalls                      int
+	putCalls                      int
+	invalidated                   []types.ProcessingArtifactKey
+	observed                      [][]byte
 }
 
 func newChatArtifactFakeStore() *chatArtifactFakeStore {
@@ -57,6 +61,23 @@ func (s *chatArtifactFakeStore) PutIfAbsent(
 	}
 	s.values[key] = append([]byte(nil), value...)
 	return append([]byte(nil), value...), true, nil
+}
+
+func (s *chatArtifactFakeStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	if s.invalidateErr != nil {
+		return s.invalidateErr
+	}
+	delete(s.values, key)
+	if s.clearPutCanonicalOnInvalidate {
+		s.putCanonical = nil
+	}
+	return nil
 }
 
 type chatArtifactFakeModel struct {
@@ -327,6 +348,64 @@ func TestCompleteChatArtifactMalformedHitRecomputes(t *testing.T) {
 	assert.Equal(t, "canonical repair", completion)
 	assert.Equal(t, 1, model.calls)
 	assert.Equal(t, 1, store.putCalls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{{99}}, store.observed)
+}
+
+func TestCompleteChatArtifactStopsBeforeProviderWhenInvalidationFails(t *testing.T) {
+	store := newChatArtifactFakeStore()
+	store.invalidateErr = errors.New("invalidate failed")
+	model := &chatArtifactFakeModel{modelID: "model-1", response: &types.ChatResponse{Content: "fresh completion"}}
+	request := testChatArtifactRequest(model)
+	key, err := newChatArtifactKey(request)
+	require.NoError(t, err)
+	store.values[key] = []byte{99}
+
+	_, _, providerCalled, err := completeChatArtifact(context.Background(), store, request)
+	assert.ErrorIs(t, err, store.invalidateErr)
+	assert.False(t, providerCalled)
+	assert.Zero(t, model.calls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+}
+
+func TestCompleteChatArtifactInvalidatesInvalidConcurrentWinner(t *testing.T) {
+	store := newChatArtifactFakeStore()
+	store.putCanonical = []byte{99}
+	model := &chatArtifactFakeModel{modelID: "model-1", response: &types.ChatResponse{Content: "fresh completion"}}
+	request := testChatArtifactRequest(model)
+	key, err := newChatArtifactKey(request)
+	require.NoError(t, err)
+
+	completion, hit, providerCalled, err := completeChatArtifact(context.Background(), store, request)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.True(t, providerCalled)
+	assert.Equal(t, "fresh completion", completion)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{{99}}, store.observed)
+}
+
+func TestCompleteChatArtifactInvalidatesSemanticallyInvalidHit(t *testing.T) {
+	store := newChatArtifactFakeStore()
+	model := &chatArtifactFakeModel{modelID: "model-1", response: &types.ChatResponse{Content: "fresh completion"}}
+	request := testChatArtifactRequest(model)
+	request.valuePolicy.validate = func(value string) error {
+		if value == "cached completion" {
+			return errors.New("cached completion is invalid")
+		}
+		return nil
+	}
+	key, err := newChatArtifactKey(request)
+	require.NoError(t, err)
+	store.values[key], err = encodeChatArtifactCompletion("cached completion")
+	require.NoError(t, err)
+
+	completion, hit, providerCalled, err := completeChatArtifact(context.Background(), store, request)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.True(t, providerCalled)
+	assert.Equal(t, "fresh completion", completion)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
 }
 
 func TestCompleteChatArtifactWrapsProviderAndStoreErrorsDistinctly(t *testing.T) {

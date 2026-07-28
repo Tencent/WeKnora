@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -324,4 +326,83 @@ func TestProcessingArtifactGetMapsOnlyRecordNotFound(t *testing.T) {
 	_, err := repo.Get(context.Background(), key)
 	assert.ErrorIs(t, err, types.ErrProcessingArtifactNotFound)
 	assert.False(t, errors.Is(err, gorm.ErrRecordNotFound))
+}
+
+func TestProcessingArtifactListExpiredUsesCutoffAndIDPagination(t *testing.T) {
+	db, _ := setupProcessingArtifactTestDBs(t)
+	repo := NewProcessingArtifactRepository(db)
+	cutoff := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+
+	artifacts := []*types.ProcessingArtifact{
+		processingArtifact(7, "chunking", 1, strings.Repeat("a", 64), "first-old"),
+		processingArtifact(8, "chunking", 1, strings.Repeat("b", 64), "second-old"),
+		processingArtifact(7, "embedding.vector", 1, strings.Repeat("c", 64), "third-old"),
+		processingArtifact(9, "chunking", 1, strings.Repeat("d", 64), "at-cutoff"),
+		processingArtifact(7, "chunking", 2, strings.Repeat("e", 64), "new"),
+	}
+	for _, artifact := range artifacts {
+		created, err := repo.PutIfAbsent(context.Background(), artifact)
+		require.NoError(t, err)
+		require.True(t, created)
+	}
+	for index, artifact := range artifacts {
+		createdAt := cutoff.Add(-time.Hour)
+		if index == 3 {
+			createdAt = cutoff
+		}
+		if index == 4 {
+			createdAt = cutoff.Add(time.Hour)
+		}
+		require.NoError(t, db.Model(&types.ProcessingArtifact{}).
+			Where("id = ?", artifact.ID).
+			Update("created_at", createdAt).Error)
+	}
+
+	firstPage, err := repo.ListExpired(context.Background(), cutoff, 0, 2)
+	require.NoError(t, err)
+	require.Len(t, firstPage, 2)
+	assert.Equal(t, []uint64{artifacts[0].ID, artifacts[1].ID}, []uint64{firstPage[0].ID, firstPage[1].ID})
+	for _, artifact := range firstPage {
+		assert.Nil(t, artifact.Payload)
+		assert.NotZero(t, artifact.TenantID)
+		assert.NotEmpty(t, artifact.Stage)
+		assert.NotZero(t, artifact.SizeBytes)
+	}
+
+	secondPage, err := repo.ListExpired(context.Background(), cutoff, firstPage[1].ID, 2)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	assert.Equal(t, artifacts[2].ID, secondPage[0].ID)
+}
+
+func TestProcessingArtifactMigrationsIncludeAllTenantRetentionIndex(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	upPaths := []string{
+		"migrations/versioned/000069_processing_artifacts.up.sql",
+		"migrations/sqlite/000001_processing_artifacts.up.sql",
+		"migrations/mysql/00-init-db.sql",
+		"migrations/paradedb/00-init-db.sql",
+	}
+	for _, path := range upPaths {
+		t.Run(path, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+			require.NoError(t, err)
+			sql := strings.ToLower(string(content))
+			assert.Contains(t, sql, "idx_processing_artifacts_created_id")
+			assert.Contains(t, sql, "processing_artifacts (created_at, id)")
+			assert.Contains(t, sql, "idx_processing_artifacts_tenant_created")
+		})
+	}
+
+	for _, path := range []string{
+		"migrations/versioned/000069_processing_artifacts.down.sql",
+		"migrations/sqlite/000001_processing_artifacts.down.sql",
+	} {
+		t.Run(path, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+			require.NoError(t, err)
+			sql := strings.ToLower(string(content))
+			assert.Contains(t, sql, "drop index if exists idx_processing_artifacts_created_id")
+		})
+	}
 }

@@ -1123,6 +1123,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	modelRevision := s.resolveChatArtifactRevision(ctx, kb.SummaryModelID)
 	summary, summaryCacheHit, err := s.getSummary(ctx, chatModel, modelRevision, knowledge, textChunks)
 	summaryOut["summary_cache_hit"] = summaryCacheHit
+	summaryOut["summary_cache_status"] = processingArtifactTraceCacheStatus(
+		s.artifactStore != nil && strings.TrimSpace(modelRevision) != "", summaryCacheHit,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -3287,7 +3290,7 @@ func (s *knowledgeService) convert(
 		// outlive the source fetch semantics through the parse cache.
 		sourcePath = ""
 	}
-	result, cacheHit, err := readDocReaderArtifact(ctx, s.artifactStore, docReaderArtifactRequest{
+	result, cacheHit, cacheStatus, err := readDocReaderArtifactWithCacheStatus(ctx, s.artifactStore, docReaderArtifactRequest{
 		tenantID:   payload.TenantID,
 		sourcePath: sourcePath,
 		read: func(callCtx context.Context, callReq *types.ReadRequest) (*types.ReadResult, error) {
@@ -3321,10 +3324,11 @@ func (s *knowledgeService) convert(
 		return nil, nil
 	}
 	docOutput := types.JSONMap{
-		"text_length":         len(result.MarkdownContent),
-		"images_found":        len(result.ImageRefs),
-		"is_audio":            result.IsAudio,
-		"docreader_cache_hit": cacheHit,
+		"text_length":            len(result.MarkdownContent),
+		"images_found":           len(result.ImageRefs),
+		"is_audio":               result.IsAudio,
+		"docreader_cache_hit":    cacheHit,
+		"docreader_cache_status": cacheStatus,
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages

@@ -145,6 +145,9 @@ func completeWikiMapArtifact(
 		} else {
 			cacheStatus = wikiMapCacheStatusStale
 		}
+		if err := store.Invalidate(ctx, key, payload); err != nil {
+			return wikiMapArtifactValue{}, false, cacheStatus, fmt.Errorf("invalidate wiki map artifact: %w", err)
+		}
 	}
 
 	value, cacheable, err := compute()
@@ -153,9 +156,6 @@ func completeWikiMapArtifact(
 	}
 	if !cacheable {
 		return value, false, wikiMapCacheStatusUncacheable, nil
-	}
-	if hit {
-		return value, false, cacheStatus, nil
 	}
 	encoded, err := encodeWikiMapArtifact(value, request.chunks)
 	if err != nil {
@@ -167,10 +167,41 @@ func completeWikiMapArtifact(
 	}
 	canonicalValue, decodeErr := decodeWikiMapArtifact(canonical, request.chunks)
 	if decodeErr != nil {
-		return value, false, wikiMapCacheStatusCorrupt, nil
+		if err := store.Invalidate(ctx, key, canonical); err != nil {
+			return wikiMapArtifactValue{}, false, wikiMapCacheStatusCorrupt, fmt.Errorf("invalidate wiki map artifact: %w", err)
+		}
+		canonical, _, err = store.PutIfAbsent(ctx, key, encoded)
+		if err != nil {
+			return wikiMapArtifactValue{}, false, wikiMapCacheStatusCorrupt, fmt.Errorf("put wiki map artifact repair: %w", err)
+		}
+		canonicalValue, decodeErr = decodeWikiMapArtifact(canonical, request.chunks)
+		if decodeErr != nil {
+			return value, false, wikiMapCacheStatusCorrupt, nil
+		}
+		if isConcurrentWinnerCurrent != nil && !isConcurrentWinnerCurrent(canonicalValue, value) {
+			return value, false, wikiMapCacheStatusCorrupt, nil
+		}
+		return canonicalValue, false, wikiMapCacheStatusCorrupt, nil
 	}
 	if !created && isConcurrentWinnerCurrent != nil && !isConcurrentWinnerCurrent(canonicalValue, value) {
-		return value, false, wikiMapCacheStatusStale, nil
+		if err := store.Invalidate(ctx, key, canonical); err != nil {
+			return wikiMapArtifactValue{}, false, wikiMapCacheStatusStale, fmt.Errorf("invalidate wiki map artifact: %w", err)
+		}
+		canonical, created, err = store.PutIfAbsent(ctx, key, encoded)
+		if err != nil {
+			return wikiMapArtifactValue{}, false, wikiMapCacheStatusStale, fmt.Errorf("put wiki map artifact repair: %w", err)
+		}
+		canonicalValue, decodeErr = decodeWikiMapArtifact(canonical, request.chunks)
+		if decodeErr != nil {
+			return value, false, wikiMapCacheStatusCorrupt, nil
+		}
+		if !created && !isConcurrentWinnerCurrent(canonicalValue, value) {
+			return value, false, wikiMapCacheStatusStale, nil
+		}
+		return canonicalValue, false, wikiMapCacheStatusStale, nil
+	}
+	if hit {
+		return canonicalValue, false, cacheStatus, nil
 	}
 	return canonicalValue, false, wikiMapCacheStatusStored, nil
 }

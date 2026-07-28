@@ -31,27 +31,29 @@ CREATE TABLE processing_artifacts (
     stage VARCHAR(64) NOT NULL,
     key_version INTEGER NOT NULL,
     input_fingerprint CHAR(64) NOT NULL,
-    payload BLOB NULL,
-    object_path TEXT NOT NULL DEFAULT '',
-    content_sha256 CHAR(64) NOT NULL,
+	payload BLOB NULL,
+	object_path TEXT NOT NULL DEFAULT '',
+	content_sha256 CHAR(64) NOT NULL,
     size_bytes BIGINT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tenant_id, stage, key_version, input_fingerprint)
 );`
 
 type artifactFakeFileService struct {
-	mu           sync.Mutex
-	objects      map[string][]byte
-	getErrors    map[string]error
-	streamErrors map[string]error
-	closeErrors  map[string]error
-	readers      map[string]io.Reader
-	saves        []string
-	deletes      []string
-	events       []string
-	savePath     string
-	saveStarted  chan struct{}
-	saveRelease  chan struct{}
+	mu               sync.Mutex
+	objects          map[string][]byte
+	getErrors        map[string]error
+	streamErrors     map[string]error
+	closeErrors      map[string]error
+	readers          map[string]io.Reader
+	deleteErrors     map[string]error
+	missingDeleteErr bool
+	saves            []string
+	deletes          []string
+	events           []string
+	savePath         string
+	saveStarted      chan struct{}
+	saveRelease      chan struct{}
 }
 
 type artifactMetadataFileService struct {
@@ -81,6 +83,50 @@ type artifactFileServiceWithoutMetadata struct {
 	interfaces.FileService
 }
 
+type artifactDeleteHookFileService struct {
+	interfaces.FileService
+	onDelete func(context.Context, string) error
+}
+
+type artifactStorageBackendResolver struct {
+	services map[string]interfaces.FileService
+}
+
+func (r *artifactStorageBackendResolver) ResolveFileService(
+	_ context.Context,
+	tenant *types.Tenant,
+	backendID string,
+	_ string,
+	_ string,
+) (interfaces.FileService, string, error) {
+	if backendID == "" && tenant != nil && tenant.DefaultStorageBackendID != nil {
+		backendID = *tenant.DefaultStorageBackendID
+	}
+	service := r.services[backendID]
+	if service == nil {
+		return nil, "", errors.New("storage backend not found")
+	}
+	return filesvc.NewBackendScopedFileService(backendID, service), "cos", nil
+}
+
+func (r *artifactStorageBackendResolver) ResolveBackend(
+	context.Context,
+	*types.Tenant,
+	string,
+	string,
+) (*types.StorageBackend, error) {
+	return nil, nil
+}
+
+func (s artifactDeleteHookFileService) StorageProvider() string { return "local" }
+
+func (s artifactDeleteHookFileService) DeleteFile(ctx context.Context, path string) error {
+	if err := s.FileService.DeleteFile(ctx, path); err != nil {
+		return err
+	}
+	return s.onDelete(ctx, path)
+}
+
 func newArtifactFakeFileService() *artifactFakeFileService {
 	return &artifactFakeFileService{
 		objects:      make(map[string][]byte),
@@ -88,6 +134,7 @@ func newArtifactFakeFileService() *artifactFakeFileService {
 		streamErrors: make(map[string]error),
 		closeErrors:  make(map[string]error),
 		readers:      make(map[string]io.Reader),
+		deleteErrors: make(map[string]error),
 	}
 }
 
@@ -180,6 +227,12 @@ func (f *artifactFakeFileService) DeleteFile(_ context.Context, path string) err
 	defer f.mu.Unlock()
 	f.deletes = append(f.deletes, path)
 	f.events = append(f.events, "delete:"+path)
+	if err := f.deleteErrors[path]; err != nil {
+		return err
+	}
+	if _, ok := f.objects[path]; !ok && f.missingDeleteErr {
+		return fs.ErrNotExist
+	}
 	delete(f.objects, path)
 	return nil
 }
@@ -258,6 +311,26 @@ type artifactDeleteErrorRepository struct {
 
 func (r *artifactDeleteErrorRepository) DeleteByID(context.Context, uint64, uint64) error {
 	return r.err
+}
+
+func (r *artifactDeleteErrorRepository) DeleteByIDWithResult(context.Context, uint64, uint64) (bool, error) {
+	return false, r.err
+}
+
+type artifactInvalidationBarrierRepository struct {
+	interfaces.ProcessingArtifactRepository
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (r *artifactInvalidationBarrierRepository) Get(
+	ctx context.Context,
+	key types.ProcessingArtifactKey,
+) (*types.ProcessingArtifact, error) {
+	artifact, err := r.ProcessingArtifactRepository.Get(ctx, key)
+	r.entered <- struct{}{}
+	<-r.release
+	return artifact, err
 }
 
 type artifactCountingReader struct {
@@ -367,13 +440,29 @@ func seedProcessingArtifact(
 	hash string,
 ) *types.ProcessingArtifact {
 	t.Helper()
+	if objectPath != "" {
+		objectPath = processingArtifactObjectReference(objectPath)
+	}
+	return seedProcessingArtifactReference(t, repo, key, payload, objectPath, size, hash)
+}
+
+func seedProcessingArtifactReference(
+	t *testing.T,
+	repo interfaces.ProcessingArtifactRepository,
+	key types.ProcessingArtifactKey,
+	payload []byte,
+	objectReference string,
+	size int64,
+	hash string,
+) *types.ProcessingArtifact {
+	t.Helper()
 	row := &types.ProcessingArtifact{
 		TenantID:         key.TenantID,
 		Stage:            key.Stage,
 		KeyVersion:       key.KeyVersion,
 		InputFingerprint: key.InputFingerprint,
 		Payload:          bytes.Clone(payload),
-		ObjectPath:       objectPath,
+		ObjectPath:       objectReference,
 		ContentSHA256:    hash,
 		SizeBytes:        size,
 	}
@@ -535,10 +624,12 @@ func TestProcessingArtifactStoreStoresLargeValuesByManifest(t *testing.T) {
 	row, err := testStore.repository.Get(context.Background(), key)
 	require.NoError(t, err)
 	assert.Nil(t, row.Payload)
-	assert.Equal(t, saves[0], row.ObjectPath)
+	objectPath, ok := processingArtifactObjectPath(row.ObjectPath)
+	require.True(t, ok)
+	assert.Equal(t, saves[0], objectPath)
 	assert.Equal(t, int64(len(want)), row.SizeBytes)
 	assert.Equal(t, artifactSHA(want), row.ContentSHA256)
-	assert.Contains(t, filepath.Base(row.ObjectPath), artifactSHA(want))
+	assert.Contains(t, filepath.Base(objectPath), artifactSHA(want))
 }
 
 func TestProcessingArtifactStoreConcurrentDifferentValuesReturnWinner(t *testing.T) {
@@ -637,13 +728,15 @@ func TestProcessingArtifactStoreConcurrentDifferentValuesReturnWinner(t *testing
 				require.Len(t, deletes, 1)
 				row, err := testStore.repository.Get(context.Background(), key)
 				require.NoError(t, err)
+				objectPath, ok := processingArtifactObjectPath(row.ObjectPath)
+				require.True(t, ok)
 				assert.Equal(t, deletes[0], func() string {
-					if saves[0] == row.ObjectPath {
+					if saves[0] == objectPath {
 						return saves[1]
 					}
 					return saves[0]
 				}())
-				assert.Contains(t, objects, row.ObjectPath)
+				assert.Contains(t, objects, objectPath)
 				assert.NotContains(t, objects, deletes[0])
 			}
 		})
@@ -825,7 +918,9 @@ func TestProcessingArtifactStoreUsesConfiguredTenantDefaultForWrites(t *testing.
 	assert.Empty(t, fallbackSaves)
 	row, err := testStore.repository.Get(context.Background(), key)
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(row.ObjectPath, "local://"))
+	objectPath, ok := processingArtifactObjectPath(row.ObjectPath)
+	require.True(t, ok)
+	assert.True(t, strings.HasPrefix(objectPath, "local://"))
 	got, hit, err := store.Get(context.Background(), key)
 	require.NoError(t, err)
 	assert.True(t, hit)
@@ -1092,7 +1187,9 @@ func TestProcessingArtifactStoreGlobalOBSWriteUsesAdapterMetadata(t *testing.T) 
 			assert.True(t, created)
 			row, err := testStore.repository.Get(context.Background(), key)
 			require.NoError(t, err)
-			assert.Equal(t, canonicalPath, row.ObjectPath)
+			objectPath, ok := processingArtifactObjectPath(row.ObjectPath)
+			require.True(t, ok)
+			assert.Equal(t, canonicalPath, objectPath)
 			got, hit, err := store.Get(context.Background(), key)
 			require.NoError(t, err)
 			assert.True(t, hit)
@@ -1231,7 +1328,9 @@ func TestProcessingArtifactStorePersistsCanonicalOBSProxyPath(t *testing.T) {
 	assert.True(t, created)
 	row, err := testStore.repository.Get(context.Background(), processingArtifactServiceKey(t, "obs-proxy-manifest"))
 	require.NoError(t, err)
-	assert.Equal(t, canonicalPath, row.ObjectPath)
+	objectPath, ok := processingArtifactObjectPath(row.ObjectPath)
+	require.True(t, ok)
+	assert.Equal(t, canonicalPath, objectPath)
 }
 
 func TestProcessingArtifactStoreResolvesCanonicalOBSPathAfterDefaultProviderChange(t *testing.T) {
@@ -1355,7 +1454,8 @@ func TestProcessingArtifactStoreEvictsInvalidObjectSizeWithoutReading(t *testing
 				`INSERT INTO processing_artifacts
 		(tenant_id, stage, key_version, input_fingerprint, payload, object_path, content_sha256, size_bytes)
 		VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
-				key.TenantID, key.Stage, key.KeyVersion, key.InputFingerprint, path, strings.Repeat("a", 64), size,
+				key.TenantID, key.Stage, key.KeyVersion, key.InputFingerprint,
+				processingArtifactObjectReference(path), strings.Repeat("a", 64), size,
 			).Error)
 			testStore.files.getErrors[path] = errors.New("must not read invalid manifest")
 
@@ -1487,6 +1587,136 @@ func TestProcessingArtifactStoreClosesReaderBeforeEvictingObject(t *testing.T) {
 	assert.Equal(t, []string{"close:" + path, "delete:" + path}, testStore.files.eventSnapshot())
 }
 
+func TestProcessingArtifactStoreKeepsCorruptObjectManifestWhenOwnershipIsNotAuthoritative(t *testing.T) {
+	testStore := newProcessingArtifactTestStore(t)
+	key := processingArtifactServiceKey(t, "corrupt-non-authoritative")
+	path := "minio://historical-bucket/corrupt"
+	testStore.files.objects[path] = []byte("corrupt")
+	require.NoError(t, testStore.db.Exec(
+		`INSERT INTO processing_artifacts
+		(tenant_id, stage, key_version, input_fingerprint, payload, object_path, content_sha256, size_bytes)
+		VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+		key.TenantID, key.Stage, key.KeyVersion, key.InputFingerprint,
+		processingArtifactObjectReference(path), artifactSHA([]byte("expected")), -1,
+	).Error)
+	store := NewProcessingArtifactStore(
+		testStore.repository,
+		&artifactTenantRepository{tenant: &types.Tenant{ID: key.TenantID}},
+		artifactMetadataFileService{FileService: testStore.files, provider: "local"},
+	)
+
+	value, hit, err := store.Get(context.Background(), key)
+	require.ErrorContains(t, err, "not authoritatively owned")
+	assert.False(t, hit)
+	assert.Nil(t, value)
+	_, err = testStore.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	_, deletes, objects := testStore.files.snapshot()
+	assert.Empty(t, deletes)
+	assert.Contains(t, objects, path)
+}
+
+func TestProcessingArtifactStoreKeepsCorruptObjectManifestWhenResolutionFails(t *testing.T) {
+	testStore := newProcessingArtifactTestStore(t)
+	key := processingArtifactServiceKey(t, "corrupt-resolution-failure")
+	path := "local://tenant-7/corrupt"
+	testStore.files.objects[path] = []byte("corrupt")
+	require.NoError(t, testStore.db.Exec(
+		`INSERT INTO processing_artifacts
+		(tenant_id, stage, key_version, input_fingerprint, payload, object_path, content_sha256, size_bytes)
+		VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+		key.TenantID, key.Stage, key.KeyVersion, key.InputFingerprint,
+		processingArtifactObjectReference(path), artifactSHA([]byte("expected")), -1,
+	).Error)
+	resolveErr := errors.New("tenant lookup failed")
+	store := NewProcessingArtifactStore(
+		testStore.repository,
+		&artifactTenantRepository{err: resolveErr},
+		testStore.files,
+	)
+
+	value, hit, err := store.Get(context.Background(), key)
+	assert.ErrorIs(t, err, resolveErr)
+	assert.False(t, hit)
+	assert.Nil(t, value)
+	_, err = testStore.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	_, deletes, objects := testStore.files.snapshot()
+	assert.Empty(t, deletes)
+	assert.Contains(t, objects, path)
+}
+
+func TestProcessingArtifactStoreKeepsCorruptObjectManifestWhenObjectDeleteFails(t *testing.T) {
+	testStore := newProcessingArtifactTestStore(t)
+	key := processingArtifactServiceKey(t, "corrupt-object-delete-failure")
+	path := "local://tenant-7/corrupt"
+	testStore.files.objects[path] = []byte("corrupt")
+	deleteErr := errors.New("object delete failed")
+	testStore.files.deleteErrors[path] = deleteErr
+	seedProcessingArtifact(
+		t, testStore.repository, key, nil, path,
+		int64(len("expected")), artifactSHA([]byte("expected")),
+	)
+
+	value, hit, err := testStore.store.Get(context.Background(), key)
+	assert.ErrorIs(t, err, deleteErr)
+	assert.False(t, hit)
+	assert.Nil(t, value)
+	_, err = testStore.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	_, deletes, objects := testStore.files.snapshot()
+	assert.Equal(t, []string{path}, deletes)
+	assert.Contains(t, objects, path)
+}
+
+func TestProcessingArtifactStoreCorruptObjectEvictionPreservesNewerWinner(t *testing.T) {
+	testStore := newProcessingArtifactTestStore(t)
+	key := processingArtifactServiceKey(t, "corrupt-object-newer-winner")
+	path := "local://tenant-7/corrupt"
+	testStore.files.objects[path] = []byte("corrupt")
+	old := seedProcessingArtifact(
+		t, testStore.repository, key, nil, path,
+		int64(len("expected")), artifactSHA([]byte("expected")),
+	)
+	replacement := &types.ProcessingArtifact{
+		TenantID:         key.TenantID,
+		Stage:            key.Stage,
+		KeyVersion:       key.KeyVersion,
+		InputFingerprint: key.InputFingerprint,
+		Payload:          []byte("new"),
+		ContentSHA256:    artifactSHA([]byte("new")),
+		SizeBytes:        3,
+	}
+	oldRemovedByHook := false
+	fileService := artifactDeleteHookFileService{
+		FileService: testStore.files,
+		onDelete: func(ctx context.Context, _ string) error {
+			removed, err := testStore.repository.DeleteByIDWithResult(ctx, key.TenantID, old.ID)
+			if err != nil {
+				return err
+			}
+			oldRemovedByHook = removed
+			_, err = testStore.repository.PutIfAbsent(ctx, replacement)
+			return err
+		},
+	}
+	store := NewProcessingArtifactStore(
+		testStore.repository,
+		&artifactTenantRepository{tenant: &types.Tenant{ID: key.TenantID}},
+		fileService,
+	)
+
+	value, hit, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.Nil(t, value)
+	current, err := testStore.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	assert.NotEqual(t, old.ID, current.ID)
+	assert.Equal(t, []byte("new"), current.Payload)
+	assert.True(t, oldRemovedByHook, "object deletion must happen before deleting the captured old manifest")
+}
+
 func TestProcessingArtifactStoreKeepsManifestOnCloseError(t *testing.T) {
 	testStore := newProcessingArtifactTestStore(t)
 	key := processingArtifactServiceKey(t, "close-error")
@@ -1522,7 +1752,7 @@ func TestProcessingArtifactStoreBoundsObjectReadAtSizePlusOne(t *testing.T) {
 	assert.Equal(t, 5, reader.bytesRead())
 }
 
-func TestProcessingArtifactStoreDoesNotDeleteObjectWhenManifestEvictionFails(t *testing.T) {
+func TestProcessingArtifactStoreDeletesObjectBeforeManifestEviction(t *testing.T) {
 	testStore := newProcessingArtifactTestStore(t)
 	key := processingArtifactServiceKey(t, "delete-row-fails")
 	path := "local://tenant-7/corrupt-protected"
@@ -1540,8 +1770,10 @@ func TestProcessingArtifactStoreDoesNotDeleteObjectWhenManifestEvictionFails(t *
 	assert.False(t, hit)
 	assert.Nil(t, value)
 	_, deletes, objects := testStore.files.snapshot()
-	assert.Empty(t, deletes)
-	assert.Contains(t, objects, path)
+	assert.Equal(t, []string{path}, deletes)
+	assert.NotContains(t, objects, path)
+	_, manifestErr := testStore.repository.Get(context.Background(), key)
+	require.NoError(t, manifestErr)
 }
 
 func TestProcessingArtifactStoreRepairsCorruptWinnerWithRealRepositoryRetry(t *testing.T) {

@@ -463,52 +463,67 @@ func readDocReaderArtifact(
 	store interfaces.ProcessingArtifactStore,
 	request docReaderArtifactRequest,
 ) (*types.ReadResult, bool, error) {
+	result, hit, _, err := readDocReaderArtifactWithCacheStatus(ctx, store, request)
+	return result, hit, err
+}
+
+func readDocReaderArtifactWithCacheStatus(
+	ctx context.Context,
+	store interfaces.ProcessingArtifactStore,
+	request docReaderArtifactRequest,
+) (*types.ReadResult, bool, string, error) {
 	if request.read == nil {
-		return nil, false, errors.New("DocReader artifact reader must not be nil")
+		return nil, false, "bypass", errors.New("DocReader artifact reader must not be nil")
 	}
 	if request.readRequest == nil {
-		return nil, false, errors.New("DocReader artifact request must not be nil")
+		return nil, false, "bypass", errors.New("DocReader artifact request must not be nil")
 	}
 	if store == nil {
 		result, err := callDocReaderArtifactProvider(ctx, request)
-		return result, false, err
+		return result, false, "bypass", err
 	}
 
 	key, eligible, err := newDocReaderArtifactKey(request)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "bypass", err
 	}
 	if !eligible {
 		result, err := callDocReaderArtifactProvider(ctx, request)
-		return result, false, err
+		return result, false, "bypass", err
 	}
 
 	cached, hit, err := store.Get(ctx, key)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: get: %w", errDocReaderArtifactStore, err)
+		return nil, false, "miss", fmt.Errorf("%w: get: %w", errDocReaderArtifactStore, err)
 	}
 	if hit {
 		if result, decodeErr := decodeDocReaderArtifact(cached); decodeErr == nil {
-			return result, true, nil
+			return result, true, "hit", nil
+		}
+		if err := store.Invalidate(ctx, key, cached); err != nil {
+			return nil, false, "miss", fmt.Errorf("%w: invalidate: %w", errDocReaderArtifactStore, err)
 		}
 	}
 
 	fresh, err := callDocReaderArtifactProvider(ctx, request)
 	if err != nil || fresh.Error != "" || fresh.IsAudio || len(fresh.AudioData) > 0 {
-		return fresh, false, err
+		return fresh, false, "miss", err
 	}
 	payload, err := encodeDocReaderArtifact(fresh)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "miss", err
 	}
 	canonical, _, err := store.PutIfAbsent(ctx, key, payload)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: put: %w", errDocReaderArtifactStore, err)
+		return nil, false, "miss", fmt.Errorf("%w: put: %w", errDocReaderArtifactStore, err)
 	}
 	if winner, decodeErr := decodeDocReaderArtifact(canonical); decodeErr == nil {
-		return winner, false, nil
+		return winner, false, "miss", nil
 	}
-	return fresh, false, nil
+	if err := store.Invalidate(ctx, key, canonical); err != nil {
+		return nil, false, "miss", fmt.Errorf("%w: invalidate: %w", errDocReaderArtifactStore, err)
+	}
+	return fresh, false, "miss", nil
 }
 
 func callDocReaderArtifactProvider(

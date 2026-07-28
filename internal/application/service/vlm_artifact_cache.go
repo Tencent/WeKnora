@@ -149,7 +149,13 @@ func predictVLMArtifact(
 		return "", false, fmt.Errorf("%w: get: %w", errVLMArtifactStore, err)
 	}
 	if hit {
-		return string(value), true, nil
+		cached := string(value)
+		if request.canonicalize(cached) == cached {
+			return cached, true, nil
+		}
+		if err := store.Invalidate(ctx, key, value); err != nil {
+			return "", false, fmt.Errorf("%w: invalidate: %w", errVLMArtifactStore, err)
+		}
 	}
 
 	valueText, err := request.model.Predict(ctx, [][]byte{request.imageBytes}, request.prompt)
@@ -163,5 +169,12 @@ func predictVLMArtifact(
 	if err != nil {
 		return "", false, fmt.Errorf("%w: put: %w", errVLMArtifactStore, err)
 	}
-	return string(canonical), false, nil
+	canonicalText := string(canonical)
+	if request.canonicalize(canonicalText) != canonicalText {
+		if err := store.Invalidate(ctx, key, canonical); err != nil {
+			return "", false, fmt.Errorf("%w: invalidate: %w", errVLMArtifactStore, err)
+		}
+		return valueText, false, nil
+	}
+	return canonicalText, false, nil
 }

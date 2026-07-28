@@ -97,8 +97,42 @@ func registerProcessingArtifactRepository(container *dig.Container) {
 	must(container.Provide(repository.NewProcessingArtifactRepository))
 }
 
+func registerProcessingArtifactCounterRegistry(container *dig.Container) {
+	must(container.Provide(service.NewProcessingArtifactCounterRegistry))
+}
+
+type processingArtifactStoreParams struct {
+	dig.In
+
+	Config           *config.Config
+	Repository       interfaces.ProcessingArtifactRepository
+	TenantRepository interfaces.TenantRepository
+	FileService      interfaces.FileService
+	StorageResolver  interfaces.StorageBackendResolver
+	Counters         interfaces.ProcessingArtifactCounterRegistry
+}
+
 func registerProcessingArtifactStore(container *dig.Container) {
-	must(container.Provide(service.NewProcessingArtifactStore))
+	must(container.Provide(func(params processingArtifactStoreParams) interfaces.ProcessingArtifactStore {
+		return service.NewProcessingArtifactStoreWithDependencies(
+			params.Repository,
+			params.TenantRepository,
+			params.FileService,
+			params.StorageResolver,
+			params.Config.ProcessingArtifact.MaxPayloadBytes,
+			params.Counters,
+		)
+	}))
+}
+
+func registerProcessingArtifactRetentionService(container *dig.Container) {
+	must(container.Provide(func(store interfaces.ProcessingArtifactStore) (interfaces.ProcessingArtifactRetentionService, error) {
+		retention, ok := store.(interfaces.ProcessingArtifactRetentionService)
+		if !ok {
+			return nil, fmt.Errorf("processing artifact store does not support retention")
+		}
+		return retention, nil
+	}))
 }
 
 // BuildContainer constructs the dependency injection container
@@ -157,6 +191,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	registerProcessingArtifactRepository(container)
+	registerProcessingArtifactCounterRegistry(container)
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
@@ -206,6 +241,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
 	registerProcessingArtifactStore(container)
+	registerProcessingArtifactRetentionService(container)
+	must(container.Provide(service.NewProcessingArtifactRetentionRunner))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
@@ -323,6 +360,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Invoke(startProcessingArtifactRetention))
+	logger.Debugf(ctx, "[Container] Processing artifact retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
@@ -1617,6 +1656,17 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.Stop()
+		return nil
+	})
+}
+
+func startProcessingArtifactRetention(
+	runner *service.ProcessingArtifactRetentionRunner,
+	cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("ProcessingArtifactRetentionRunner", func() error {
 		runner.Stop()
 		return nil
 	})

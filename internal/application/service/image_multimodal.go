@@ -294,6 +294,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
 			imgOut["ocr_cache_hit"] = cacheHit
+			imgOut["ocr_cache_status"] = processingArtifactTraceCacheStatus(s.artifactStore != nil, cacheHit)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -329,6 +330,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["caption_error"] = capErr.Error()
 		} else {
 			imgOut["caption_cache_hit"] = cacheHit
+			imgOut["caption_cache_status"] = processingArtifactTraceCacheStatus(s.artifactStore != nil, cacheHit)
 			if caption != "" {
 				imageInfo.Caption = caption
 				imgOut["caption_chars"] = len([]rune(caption))

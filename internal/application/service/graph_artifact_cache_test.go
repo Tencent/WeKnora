@@ -305,8 +305,12 @@ func TestCompleteGraphArtifactMissUsesPutIfAbsentWinner(t *testing.T) {
 
 func TestCompleteGraphArtifactMissFallsBackWhenConcurrentWinnerIsCorrupt(t *testing.T) {
 	request := testGraphArtifactRequest()
+	key, err := newGraphArtifactKey(request)
+	require.NoError(t, err)
 	store := newChatArtifactFakeStore()
 	store.putCanonical = []byte(`{`)
+	store.clearPutCanonicalOnInvalidate = true
+	providerCalls := 0
 
 	graph, cacheHit, providerCalled, err := completeGraphArtifact(
 		context.Background(),
@@ -314,6 +318,7 @@ func TestCompleteGraphArtifactMissFallsBackWhenConcurrentWinnerIsCorrupt(t *test
 		request,
 		"current-chunk",
 		func(context.Context) (*types.GraphData, error) {
+			providerCalls++
 			return &types.GraphData{Node: []*types.GraphNode{{Name: "Candidate"}}}, nil
 		},
 	)
@@ -324,14 +329,33 @@ func TestCompleteGraphArtifactMissFallsBackWhenConcurrentWinnerIsCorrupt(t *test
 	require.Len(t, graph.Node, 1)
 	assert.Equal(t, "Candidate", graph.Node[0].Name)
 	assert.Equal(t, []string{"current-chunk"}, graph.Node[0].Chunks)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{[]byte(`{`)}, store.observed)
+	assert.Equal(t, 2, store.putCalls)
+	assert.Equal(t, 1, providerCalls)
+
+	graph, cacheHit, providerCalled, err = completeGraphArtifact(
+		context.Background(), store, request, "current-chunk",
+		func(context.Context) (*types.GraphData, error) {
+			providerCalls++
+			return &types.GraphData{Node: []*types.GraphNode{{Name: "Unexpected"}}}, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, cacheHit)
+	assert.False(t, providerCalled)
+	assert.Equal(t, 1, providerCalls)
+	require.Len(t, graph.Node, 1)
+	assert.Equal(t, "Candidate", graph.Node[0].Name)
 }
 
-func TestCompleteGraphArtifactCorruptHitRecomputesWithoutReusingWinner(t *testing.T) {
+func TestCompleteGraphArtifactCorruptHitRecomputesAndRepublishes(t *testing.T) {
 	request := testGraphArtifactRequest()
 	key, err := newGraphArtifactKey(request)
 	require.NoError(t, err)
 	store := newChatArtifactFakeStore()
 	store.values[key] = []byte(`{`)
+	providerCalls := 0
 
 	graph, cacheHit, providerCalled, err := completeGraphArtifact(
 		context.Background(),
@@ -339,6 +363,7 @@ func TestCompleteGraphArtifactCorruptHitRecomputesWithoutReusingWinner(t *testin
 		request,
 		"current-chunk",
 		func(context.Context) (*types.GraphData, error) {
+			providerCalls++
 			return &types.GraphData{Node: []*types.GraphNode{{Name: "Fresh"}}}, nil
 		},
 	)
@@ -348,7 +373,49 @@ func TestCompleteGraphArtifactCorruptHitRecomputesWithoutReusingWinner(t *testin
 	assert.True(t, providerCalled)
 	require.Len(t, graph.Node, 1)
 	assert.Equal(t, "Fresh", graph.Node[0].Name)
-	assert.Zero(t, store.putCalls, "immutable corrupt winners cannot be replaced in this stage")
+	assert.Equal(t, 1, store.putCalls)
+	assert.Equal(t, 1, providerCalls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{[]byte(`{`)}, store.observed)
+
+	graph, cacheHit, providerCalled, err = completeGraphArtifact(
+		context.Background(), store, request, "current-chunk",
+		func(context.Context) (*types.GraphData, error) {
+			providerCalls++
+			return &types.GraphData{Node: []*types.GraphNode{{Name: "Unexpected"}}}, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, cacheHit)
+	assert.False(t, providerCalled)
+	assert.Equal(t, 1, providerCalls)
+	require.Len(t, graph.Node, 1)
+	assert.Equal(t, "Fresh", graph.Node[0].Name)
+}
+
+func TestCompleteGraphArtifactStopsWhenInvalidationFails(t *testing.T) {
+	request := testGraphArtifactRequest()
+	key, err := newGraphArtifactKey(request)
+	require.NoError(t, err)
+	store := newChatArtifactFakeStore()
+	store.values[key] = []byte(`{`)
+	store.invalidateErr = errors.New("invalidate failed")
+	providerCalls := 0
+
+	graph, cacheHit, providerCalled, err := completeGraphArtifact(
+		context.Background(), store, request, "current-chunk",
+		func(context.Context) (*types.GraphData, error) {
+			providerCalls++
+			return &types.GraphData{Node: []*types.GraphNode{{Name: "Fresh"}}}, nil
+		},
+	)
+
+	assert.ErrorIs(t, err, store.invalidateErr)
+	assert.Nil(t, graph)
+	assert.False(t, cacheHit)
+	assert.False(t, providerCalled)
+	assert.Zero(t, providerCalls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
 }
 
 func TestCompleteGraphArtifactBypassDoesNotRequireCacheIdentity(t *testing.T) {

@@ -38,13 +38,16 @@ func (r *docReaderArtifactFakeReader) ListEngines(
 }
 
 type docReaderArtifactFakeStore struct {
-	values       map[types.ProcessingArtifactKey][]byte
-	getErr       error
-	putErr       error
-	putCanonical []byte
-	hasCanonical bool
-	getCalls     int
-	putCalls     int
+	values        map[types.ProcessingArtifactKey][]byte
+	getErr        error
+	putErr        error
+	invalidateErr error
+	putCanonical  []byte
+	hasCanonical  bool
+	getCalls      int
+	putCalls      int
+	invalidated   []types.ProcessingArtifactKey
+	observed      [][]byte
 }
 
 func newDocReaderArtifactFakeStore() *docReaderArtifactFakeStore {
@@ -80,6 +83,20 @@ func (s *docReaderArtifactFakeStore) PutIfAbsent(
 	}
 	s.values[key] = append([]byte(nil), value...)
 	return append([]byte(nil), value...), true, nil
+}
+
+func (s *docReaderArtifactFakeStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	if s.invalidateErr != nil {
+		return s.invalidateErr
+	}
+	delete(s.values, key)
+	return nil
 }
 
 func TestNewDocReaderArtifactKeyStabilityAndInvalidation(t *testing.T) {
@@ -469,6 +486,11 @@ func TestReadDocReaderArtifactMalformedPayloadFallsBackToFreshResult(t *testing.
 		assert.False(t, hit)
 		assert.Equal(t, "fresh", result.MarkdownContent)
 		assert.Equal(t, 1, reader.calls)
+		key, keyEligible, keyErr := newDocReaderArtifactKey(testDocReaderArtifactRequest(reader))
+		require.NoError(t, keyErr)
+		require.True(t, keyEligible)
+		assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+		assert.Equal(t, [][]byte{[]byte("malformed")}, store.observed)
 	})
 
 	t.Run("concurrent winner", func(t *testing.T) {
@@ -484,7 +506,30 @@ func TestReadDocReaderArtifactMalformedPayloadFallsBackToFreshResult(t *testing.
 		assert.False(t, hit)
 		assert.Equal(t, "fresh", result.MarkdownContent)
 		assert.Equal(t, 1, reader.calls)
+		key, keyEligible, keyErr := newDocReaderArtifactKey(testDocReaderArtifactRequest(reader))
+		require.NoError(t, keyErr)
+		require.True(t, keyEligible)
+		assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+		assert.Equal(t, [][]byte{[]byte("malformed")}, store.observed)
 	})
+}
+
+func TestReadDocReaderArtifactStopsWhenInvalidationFails(t *testing.T) {
+	store := newDocReaderArtifactFakeStore()
+	store.invalidateErr = errors.New("invalidate failed")
+	reader := &docReaderArtifactFakeReader{result: testDocReaderResult("fresh")}
+	request := testDocReaderArtifactRequest(reader)
+	key, eligible, err := newDocReaderArtifactKey(request)
+	require.NoError(t, err)
+	require.True(t, eligible)
+	store.values[key] = []byte("malformed")
+
+	result, hit, err := readDocReaderArtifact(context.Background(), store, request)
+	assert.ErrorIs(t, err, store.invalidateErr)
+	assert.Nil(t, result)
+	assert.False(t, hit)
+	assert.Zero(t, reader.calls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
 }
 
 func TestReadDocReaderArtifactDistinguishesStoreErrors(t *testing.T) {

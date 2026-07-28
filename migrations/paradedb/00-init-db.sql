@@ -202,6 +202,9 @@ CREATE TABLE IF NOT EXISTS processing_artifacts (
 CREATE INDEX IF NOT EXISTS idx_processing_artifacts_tenant_created
     ON processing_artifacts (tenant_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_processing_artifacts_created_id
+    ON processing_artifacts (created_at, id);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

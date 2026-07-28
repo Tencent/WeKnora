@@ -157,12 +157,15 @@ func (m *wikiMapOutOfOrderCitationChat) GetModelName() string { return "chat-mod
 func (m *wikiMapOutOfOrderCitationChat) GetModelID() string   { return "model-1" }
 
 type wikiMapArtifactFakeStore struct {
-	mu       sync.Mutex
-	values   map[types.ProcessingArtifactKey][]byte
-	getErr   error
-	putErr   error
-	getCalls int
-	putCalls int
+	mu            sync.Mutex
+	values        map[types.ProcessingArtifactKey][]byte
+	getErr        error
+	putErr        error
+	invalidateErr error
+	getCalls      int
+	putCalls      int
+	invalidated   []types.ProcessingArtifactKey
+	observed      [][]byte
 }
 
 func newWikiMapArtifactFakeStore() *wikiMapArtifactFakeStore {
@@ -196,6 +199,22 @@ func (s *wikiMapArtifactFakeStore) PutIfAbsent(
 	}
 	s.values[key] = append([]byte(nil), value...)
 	return append([]byte(nil), value...), true, nil
+}
+
+func (s *wikiMapArtifactFakeStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	if s.invalidateErr != nil {
+		return s.invalidateErr
+	}
+	delete(s.values, key)
+	return nil
 }
 
 func TestCompleteWikiMapArtifactReusesAndRebindsCurrentChunks(t *testing.T) {
@@ -258,10 +277,25 @@ func TestCompleteWikiMapArtifactRecomputesCorruptHit(t *testing.T) {
 	assert.Equal(t, wikiMapCacheStatusCorrupt, status)
 	assert.Equal(t, "fresh", got.SummaryContent)
 	assert.Equal(t, 1, computed)
-	assert.Zero(t, store.putCalls)
+	assert.Equal(t, 1, store.putCalls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{[]byte(`{"version":99}`)}, store.observed)
+
+	got, hit, status, err = completeWikiMapArtifact(
+		context.Background(), store, request, nil, nil,
+		func() (wikiMapArtifactValue, bool, error) {
+			computed++
+			return wikiMapArtifactValue{SummaryContent: "unexpected"}, true, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, hit)
+	assert.Equal(t, wikiMapCacheStatusHit, status)
+	assert.Equal(t, "fresh", got.SummaryContent)
+	assert.Equal(t, 1, computed)
 }
 
-func TestCompleteWikiMapArtifactRecomputesStaleHitWithoutRepublishing(t *testing.T) {
+func TestCompleteWikiMapArtifactRecomputesAndRepublishesStaleHit(t *testing.T) {
 	store := newWikiMapArtifactFakeStore()
 	request := testWikiMapArtifactRequest()
 	key, err := newWikiMapArtifactKey(request)
@@ -292,8 +326,54 @@ func TestCompleteWikiMapArtifactRecomputesStaleHitWithoutRepublishing(t *testing
 	assert.Equal(t, wikiMapCacheStatusStale, status)
 	assert.Equal(t, "fresh", got.SummaryContent)
 	assert.Equal(t, 1, computed)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{stale}, store.observed)
 	assert.Equal(t, 1, validated)
-	assert.Zero(t, store.putCalls)
+	assert.Equal(t, 1, store.putCalls)
+
+	got, hit, status, err = completeWikiMapArtifact(
+		context.Background(), store, request,
+		func(value wikiMapArtifactValue) bool {
+			validated++
+			return value.SummaryContent != "stale"
+		},
+		nil,
+		func() (wikiMapArtifactValue, bool, error) {
+			computed++
+			return wikiMapArtifactValue{SummaryContent: "unexpected"}, true, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, hit)
+	assert.Equal(t, wikiMapCacheStatusHit, status)
+	assert.Equal(t, "fresh", got.SummaryContent)
+	assert.Equal(t, 1, computed)
+	assert.Equal(t, 2, validated)
+}
+
+func TestCompleteWikiMapArtifactStopsWhenInvalidationFails(t *testing.T) {
+	request := testWikiMapArtifactRequest()
+	key, err := newWikiMapArtifactKey(request)
+	require.NoError(t, err)
+	store := newWikiMapArtifactFakeStore()
+	store.invalidateErr = errors.New("invalidate failed")
+	store.values[key] = []byte(`{"version":99}`)
+	computed := 0
+
+	value, hit, status, err := completeWikiMapArtifact(
+		context.Background(), store, request, nil, nil,
+		func() (wikiMapArtifactValue, bool, error) {
+			computed++
+			return wikiMapArtifactValue{SummaryContent: "fallback"}, true, nil
+		},
+	)
+
+	assert.ErrorIs(t, err, store.invalidateErr)
+	assert.Equal(t, wikiMapArtifactValue{}, value)
+	assert.False(t, hit)
+	assert.Equal(t, wikiMapCacheStatusCorrupt, status)
+	assert.Zero(t, computed)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
 }
 
 func TestCompleteWikiMapArtifactPropagatesStoreErrorsAndSkipsUncacheableResults(t *testing.T) {
@@ -378,19 +458,107 @@ func TestCompleteWikiMapArtifactConcurrentMissesConverge(t *testing.T) {
 }
 
 type wikiMapConcurrentWinnerStore struct {
-	winner []byte
+	winner        []byte
+	invalidateErr error
+	invalidated   []types.ProcessingArtifactKey
+	observed      [][]byte
+	published     bool
+	putCalls      int
 }
 
-func (s wikiMapConcurrentWinnerStore) Get(
+type wikiMapRepairWinnerSequenceStore struct {
+	winners     [][]byte
+	putCalls    int
+	invalidated [][]byte
+}
+
+func (s *wikiMapRepairWinnerSequenceStore) Get(
 	context.Context, types.ProcessingArtifactKey,
 ) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-func (s wikiMapConcurrentWinnerStore) PutIfAbsent(
-	context.Context, types.ProcessingArtifactKey, []byte,
+func (s *wikiMapRepairWinnerSequenceStore) PutIfAbsent(
+	_ context.Context, _ types.ProcessingArtifactKey, _ []byte,
 ) ([]byte, bool, error) {
+	winner := s.winners[s.putCalls]
+	s.putCalls++
+	return append([]byte(nil), winner...), false, nil
+}
+
+func (s *wikiMapRepairWinnerSequenceStore) Invalidate(
+	_ context.Context, _ types.ProcessingArtifactKey, observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, append([]byte(nil), observed...))
+	return nil
+}
+
+func TestCompleteWikiMapArtifactRejectsStaleWinnerAfterCorruptRepair(t *testing.T) {
+	request := testWikiMapArtifactRequest()
+	stale, err := encodeWikiMapArtifact(
+		wikiMapArtifactValue{SummaryContent: "stale"}, request.chunks,
+	)
+	require.NoError(t, err)
+	store := &wikiMapRepairWinnerSequenceStore{
+		winners: [][]byte{[]byte(`{"version":99}`), stale},
+	}
+	computed := 0
+	validated := 0
+
+	got, hit, status, err := completeWikiMapArtifact(
+		context.Background(),
+		store,
+		request,
+		nil,
+		func(winner, _ wikiMapArtifactValue) bool {
+			validated++
+			return winner.SummaryContent == "fresh"
+		},
+		func() (wikiMapArtifactValue, bool, error) {
+			computed++
+			return wikiMapArtifactValue{SummaryContent: "fresh"}, true, nil
+		},
+	)
+
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.Equal(t, wikiMapCacheStatusCorrupt, status)
+	assert.Equal(t, "fresh", got.SummaryContent)
+	assert.Equal(t, 1, computed)
+	assert.Equal(t, 1, validated)
+	assert.Equal(t, 2, store.putCalls)
+	assert.Equal(t, [][]byte{[]byte(`{"version":99}`)}, store.invalidated)
+}
+
+func (s *wikiMapConcurrentWinnerStore) Get(
+	context.Context, types.ProcessingArtifactKey,
+) ([]byte, bool, error) {
+	if s.published {
+		return append([]byte(nil), s.winner...), true, nil
+	}
+	return nil, false, nil
+}
+
+func (s *wikiMapConcurrentWinnerStore) PutIfAbsent(
+	_ context.Context, _ types.ProcessingArtifactKey, candidate []byte,
+) ([]byte, bool, error) {
+	s.putCalls++
+	if len(s.invalidated) > 0 {
+		s.winner = append([]byte(nil), candidate...)
+		s.published = true
+		return append([]byte(nil), candidate...), true, nil
+	}
 	return append([]byte(nil), s.winner...), false, nil
+}
+
+func (s *wikiMapConcurrentWinnerStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	return s.invalidateErr
 }
 
 func TestCompleteWikiMapArtifactKeepsFreshValueWhenConcurrentWinnerIsStale(t *testing.T) {
@@ -401,8 +569,11 @@ func TestCompleteWikiMapArtifactKeepsFreshValueWhenConcurrentWinnerIsStale(t *te
 	require.NoError(t, err)
 	computed := 0
 
+	store := &wikiMapConcurrentWinnerStore{winner: winner}
+	key, err := newWikiMapArtifactKey(request)
+	require.NoError(t, err)
 	got, hit, status, err := completeWikiMapArtifact(
-		context.Background(), wikiMapConcurrentWinnerStore{winner: winner}, request,
+		context.Background(), store, request,
 		nil,
 		func(winner, _ wikiMapArtifactValue) bool { return winner.SummaryContent == "fresh" },
 		func() (wikiMapArtifactValue, bool, error) {
@@ -414,6 +585,22 @@ func TestCompleteWikiMapArtifactKeepsFreshValueWhenConcurrentWinnerIsStale(t *te
 	require.NoError(t, err)
 	assert.False(t, hit)
 	assert.Equal(t, wikiMapCacheStatusStale, status)
+	assert.Equal(t, "fresh", got.SummaryContent)
+	assert.Equal(t, 1, computed)
+	assert.Equal(t, [][]byte{winner}, store.observed)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, 2, store.putCalls)
+
+	got, hit, status, err = completeWikiMapArtifact(
+		context.Background(), store, request, nil, nil,
+		func() (wikiMapArtifactValue, bool, error) {
+			computed++
+			return wikiMapArtifactValue{SummaryContent: "unexpected"}, true, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, hit)
+	assert.Equal(t, wikiMapCacheStatusHit, status)
 	assert.Equal(t, "fresh", got.SummaryContent)
 	assert.Equal(t, 1, computed)
 }
@@ -437,7 +624,7 @@ func TestCompleteWikiMapArtifactConcurrentInitialMissUsesCanonicalWinner(t *test
 	require.NoError(t, err)
 
 	got, hit, status, err := completeWikiMapArtifact(
-		context.Background(), wikiMapConcurrentWinnerStore{winner: winner}, request,
+		context.Background(), &wikiMapConcurrentWinnerStore{winner: winner}, request,
 		func(value wikiMapArtifactValue) bool {
 			return service.wikiMapArtifactStateCurrent(
 				context.Background(), "kb-1", "summary/knowledge-1", oldSlugs, value,

@@ -255,6 +255,37 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 	return filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, localBaseDir)
 }
 
+// ResolveHistoricalFileService resolves an exact backend for internal artifact
+// reads and cleanup, including after the backend has been disabled or soft-deleted.
+func (s *StorageBackendService) ResolveHistoricalFileService(
+	ctx context.Context,
+	tenant *types.Tenant,
+	backendID, localBaseDir string,
+) (interfaces.FileService, string, error) {
+	if tenant == nil || tenant.ID == 0 {
+		return nil, "", fmt.Errorf("workspace context missing")
+	}
+	if strings.TrimSpace(backendID) == "" {
+		return nil, "", fmt.Errorf("storage backend ID missing")
+	}
+	var backend types.StorageBackend
+	if err := s.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND id = ?", tenant.ID, backendID).
+		First(&backend).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", fmt.Errorf("storage backend not found")
+		}
+		return nil, "", err
+	}
+	inner, provider, err := filesvc.NewFileServiceFromStorageConfig(
+		backend.Provider, backend.ToStorageEngineConfig(), localBaseDir,
+	)
+	if err != nil {
+		return nil, provider, err
+	}
+	return filesvc.NewBackendScopedFileService(backend.ID, inner), provider, nil
+}
+
 func validateStorageBackendEndpoint(backend *types.StorageBackend) error {
 	if backend.Provider == "local" || (backend.Provider == "minio" && backend.Config.Mode == "docker") {
 		return nil

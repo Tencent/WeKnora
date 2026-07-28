@@ -269,13 +269,9 @@ func completeGraphArtifact(
 		if decodeErr == nil {
 			return graph, true, false, nil
 		}
-
-		graph, providerErr := provider(ctx)
-		if providerErr != nil {
-			return nil, false, true, providerErr
+		if err := store.Invalidate(ctx, key, payload); err != nil {
+			return nil, false, false, fmt.Errorf("invalidate graph artifact: %w", err)
 		}
-		canonical, canonicalErr := canonicalizeGraphArtifact(graph, chunkID)
-		return canonical, false, true, canonicalErr
 	}
 
 	graph, err := provider(ctx)
@@ -292,6 +288,17 @@ func completeGraphArtifact(
 	}
 	canonical, err := decodeGraphArtifact(winner, chunkID)
 	if err != nil {
+		if invalidateErr := store.Invalidate(ctx, key, winner); invalidateErr != nil {
+			return nil, false, true, fmt.Errorf("invalidate graph artifact: %w", invalidateErr)
+		}
+		winner, _, putErr := store.PutIfAbsent(ctx, key, candidate)
+		if putErr != nil {
+			return nil, false, true, fmt.Errorf("put graph artifact repair: %w", putErr)
+		}
+		canonical, err = decodeGraphArtifact(winner, chunkID)
+		if err == nil {
+			return canonical, false, true, nil
+		}
 		canonical, err = decodeGraphArtifact(candidate, chunkID)
 	}
 	return canonical, false, true, err

@@ -14,18 +14,22 @@ import (
 )
 
 type embeddingArtifactFakeStore struct {
-	values       map[types.ProcessingArtifactKey][]byte
-	getErr       error
-	putErr       error
-	putCanonical []byte
-	getCalls     int
-	putCalls     int
+	values        map[types.ProcessingArtifactKey][]byte
+	getErr        error
+	putErr        error
+	invalidateErr error
+	putCanonical  []byte
+	getCalls      int
+	putCalls      int
+	invalidated   []types.ProcessingArtifactKey
+	observed      [][]byte
 }
 
 type embeddingArtifactBatchFakeStore struct {
 	*embeddingArtifactFakeStore
-	getManyCalls int
-	putManyCalls int
+	getManyCalls     int
+	putManyCalls     int
+	putManyCanonical map[types.ProcessingArtifactKey][]byte
 }
 
 func newEmbeddingArtifactBatchFakeStore() *embeddingArtifactBatchFakeStore {
@@ -55,6 +59,10 @@ func (s *embeddingArtifactBatchFakeStore) PutManyIfAbsent(
 	s.putManyCalls++
 	result := make(map[types.ProcessingArtifactKey][]byte, len(values))
 	for key, value := range values {
+		if canonical, ok := s.putManyCanonical[key]; ok {
+			result[key] = append([]byte(nil), canonical...)
+			continue
+		}
 		if _, ok := s.values[key]; !ok {
 			s.values[key] = append([]byte(nil), value...)
 		}
@@ -96,6 +104,20 @@ func (s *embeddingArtifactFakeStore) PutIfAbsent(
 	}
 	s.values[key] = append([]byte(nil), value...)
 	return append([]byte(nil), value...), true, nil
+}
+
+func (s *embeddingArtifactFakeStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	if s.invalidateErr != nil {
+		return s.invalidateErr
+	}
+	delete(s.values, key)
+	return nil
 }
 
 type embeddingArtifactFakeEmbedder struct {
@@ -235,7 +257,7 @@ func TestEmbeddingArtifactBatchPartialHitsDeduplicatesMissesAndRestoresOrder(t *
 		modelID: "model-1", modelName: "text-embedding", dimensions: 2,
 		batchResults: [][]float32{{2, 20}, {3, 30}},
 	}
-	wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1")
+	wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1").(*embeddingArtifactEmbedder)
 
 	hitKey, _, err := newEmbeddingArtifactKey(embeddingArtifactKeyRequest{
 		tenantID: 7, modelID: "model-1", modelName: "text-embedding", modelRevision: "revision-1",
@@ -387,10 +409,64 @@ func TestEmbeddingArtifactRejectsNonFinitePutIfAbsentWinner(t *testing.T) {
 	require.NoError(t, err)
 	store.putCanonical = winner
 	inner := &embeddingArtifactFakeEmbedder{dimensions: 1, batchResults: [][]float32{{1}}}
-	wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1")
+	wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1").(*embeddingArtifactEmbedder)
 
-	_, err = wrapped.BatchEmbed(documentEmbeddingContext(), []string{"one"})
-	assert.ErrorContains(t, err, "non-finite")
+	key, _, err := wrapped.key("one")
+	require.NoError(t, err)
+	got, err := wrapped.BatchEmbed(documentEmbeddingContext(), []string{"one"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}}, got)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{winner}, store.observed)
+}
+
+func TestEmbeddingArtifactBatchInvalidatesNonFiniteConcurrentWinner(t *testing.T) {
+	store := newEmbeddingArtifactBatchFakeStore()
+	winner, err := encodeEmbeddingVector([]float32{float32(math.NaN())})
+	require.NoError(t, err)
+	inner := &embeddingArtifactFakeEmbedder{dimensions: 1, batchResults: [][]float32{{1}}}
+	wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1").(*embeddingArtifactEmbedder)
+	key, _, err := wrapped.key("one")
+	require.NoError(t, err)
+	store.putManyCanonical = map[types.ProcessingArtifactKey][]byte{key: winner}
+
+	got, err := wrapped.BatchEmbed(documentEmbeddingContext(), []string{"one"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}}, got)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{winner}, store.observed)
+}
+
+func TestEmbeddingArtifactInvalidationFailureStopsSingleAndBatchFallbacks(t *testing.T) {
+	t.Run("single", func(t *testing.T) {
+		store := newEmbeddingArtifactFakeStore()
+		store.invalidateErr = errors.New("invalidate failed")
+		inner := &embeddingArtifactFakeEmbedder{dimensions: 1, batchResults: [][]float32{{1}}}
+		wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1").(*embeddingArtifactEmbedder)
+		key, _, err := wrapped.key("one")
+		require.NoError(t, err)
+		store.values[key] = []byte("corrupt")
+
+		_, err = wrapped.Embed(documentEmbeddingContext(), "one")
+		assert.ErrorIs(t, err, store.invalidateErr)
+		assert.Empty(t, inner.embedCalls)
+		assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	})
+
+	t.Run("batch", func(t *testing.T) {
+		store := newEmbeddingArtifactBatchFakeStore()
+		store.invalidateErr = errors.New("invalidate failed")
+		inner := &embeddingArtifactFakeEmbedder{dimensions: 1, batchResults: [][]float32{{1}}}
+		wrapped := newEmbeddingArtifactEmbedder(inner, store, 7, "revision-1").(*embeddingArtifactEmbedder)
+		key, _, err := wrapped.key("one")
+		require.NoError(t, err)
+		store.values[key] = []byte("corrupt")
+
+		_, err = wrapped.BatchEmbed(documentEmbeddingContext(), []string{"one"})
+		assert.ErrorIs(t, err, store.invalidateErr)
+		assert.Empty(t, inner.batchCalls)
+		assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	})
 }
 
 func TestEmbeddingArtifactEmbedReusesDocumentsAndBypassesUnmarkedInputs(t *testing.T) {

@@ -37,6 +37,13 @@ func TestStorageProviderIsOptional(t *testing.T) {
 	assert.Empty(t, StorageProvider(service))
 }
 
+func TestBackendScopedServiceExposesStorageBackendID(t *testing.T) {
+	service := NewBackendScopedFileService("backend-a", &DummyFileService{})
+
+	assert.Equal(t, "backend-a", StorageBackendID(service))
+	assert.Empty(t, StorageBackendID(&DummyFileService{}))
+}
+
 func TestOBSStoredPathMappingUsesAdapterState(t *testing.T) {
 	service := &obsFileService{
 		bucketName:  "tenant-bucket",

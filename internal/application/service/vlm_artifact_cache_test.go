@@ -29,13 +29,16 @@ func (m *vlmArtifactFakeModel) GetModelName() string { return m.modelName }
 func (m *vlmArtifactFakeModel) GetModelID() string   { return m.modelID }
 
 type vlmArtifactFakeStore struct {
-	values       map[types.ProcessingArtifactKey][]byte
-	getErr       error
-	putErr       error
-	putCanonical []byte
-	hasCanonical bool
-	getCalls     int
-	putCalls     int
+	values        map[types.ProcessingArtifactKey][]byte
+	getErr        error
+	putErr        error
+	invalidateErr error
+	putCanonical  []byte
+	hasCanonical  bool
+	getCalls      int
+	putCalls      int
+	invalidated   []types.ProcessingArtifactKey
+	observed      [][]byte
 }
 
 func newVLMArtifactFakeStore() *vlmArtifactFakeStore {
@@ -71,6 +74,20 @@ func (s *vlmArtifactFakeStore) PutIfAbsent(
 	}
 	s.values[key] = append([]byte(nil), value...)
 	return append([]byte(nil), value...), true, nil
+}
+
+func (s *vlmArtifactFakeStore) Invalidate(
+	_ context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	s.invalidated = append(s.invalidated, key)
+	s.observed = append(s.observed, append([]byte(nil), observed...))
+	if s.invalidateErr != nil {
+		return s.invalidateErr
+	}
+	delete(s.values, key)
+	return nil
 }
 
 func TestNewVLMArtifactKeyStabilityAndInvalidation(t *testing.T) {
@@ -321,6 +338,58 @@ func TestPredictVLMArtifactUsesEmptyPutIfAbsentWinner(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, hit)
 	assert.Empty(t, got)
+}
+
+func TestPredictVLMArtifactInvalidatesNonCanonicalHitBeforeProvider(t *testing.T) {
+	store := newVLMArtifactFakeStore()
+	model := &vlmArtifactFakeModel{modelID: "model-1", result: "fresh"}
+	request := testVLMArtifactRequest(model)
+	request.canonicalize = strings.TrimSpace
+	key, err := newVLMArtifactKey(request)
+	require.NoError(t, err)
+	store.values[key] = []byte(" stale ")
+
+	got, hit, err := predictVLMArtifact(context.Background(), store, request)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.Equal(t, "fresh", got)
+	assert.Equal(t, 1, model.calls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{[]byte(" stale ")}, store.observed)
+}
+
+func TestPredictVLMArtifactStopsBeforeProviderWhenInvalidationFails(t *testing.T) {
+	store := newVLMArtifactFakeStore()
+	store.invalidateErr = errors.New("invalidate failed")
+	model := &vlmArtifactFakeModel{modelID: "model-1", result: "fresh"}
+	request := testVLMArtifactRequest(model)
+	request.canonicalize = strings.TrimSpace
+	key, err := newVLMArtifactKey(request)
+	require.NoError(t, err)
+	store.values[key] = []byte(" stale ")
+
+	_, _, err = predictVLMArtifact(context.Background(), store, request)
+	assert.ErrorIs(t, err, store.invalidateErr)
+	assert.Zero(t, model.calls)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+}
+
+func TestPredictVLMArtifactInvalidatesNonCanonicalConcurrentWinner(t *testing.T) {
+	store := newVLMArtifactFakeStore()
+	store.putCanonical = []byte(" stale ")
+	store.hasCanonical = true
+	model := &vlmArtifactFakeModel{modelID: "model-1", result: "fresh"}
+	request := testVLMArtifactRequest(model)
+	request.canonicalize = strings.TrimSpace
+	key, err := newVLMArtifactKey(request)
+	require.NoError(t, err)
+
+	got, hit, err := predictVLMArtifact(context.Background(), store, request)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.Equal(t, "fresh", got)
+	assert.Equal(t, []types.ProcessingArtifactKey{key}, store.invalidated)
+	assert.Equal(t, [][]byte{[]byte(" stale ")}, store.observed)
 }
 
 func testVLMArtifactRequest(model vlm.VLM) vlmArtifactRequest {

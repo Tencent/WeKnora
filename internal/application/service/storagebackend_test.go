@@ -40,3 +40,29 @@ func TestStorageBackendResolverScopesPathsAndTenant(t *testing.T) {
 	_, _, err = resolver.ResolveFileService(context.Background(), &types.Tenant{ID: 8}, backend.ID, "local", t.TempDir())
 	require.Error(t, err)
 }
+
+func TestStorageBackendResolverRestoresSoftDeletedBackendForArtifacts(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.StorageBackend{}))
+	repo := repository.NewStorageBackendRepository(db)
+	backend := &types.StorageBackend{TenantID: 7, Name: "Retired", Provider: "local"}
+	require.NoError(t, repo.Create(context.Background(), backend))
+	require.NoError(t, repo.Delete(context.Background(), backend.TenantID, backend.ID))
+	resolver := service.NewStorageBackendService(repo, db)
+	tenant := &types.Tenant{ID: backend.TenantID}
+
+	_, _, err = resolver.ResolveFileService(
+		context.Background(), tenant, backend.ID, backend.Provider, t.TempDir(),
+	)
+	require.Error(t, err)
+
+	fileService, provider, err := resolver.ResolveHistoricalFileService(
+		context.Background(), tenant, backend.ID, t.TempDir(),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, backend.Provider, provider)
+	path, err := fileService.SaveBytes(context.Background(), []byte("artifact"), backend.TenantID, "artifact.bin", false)
+	require.NoError(t, err)
+	assert.Contains(t, path, "storage://"+backend.ID+"/")
+}

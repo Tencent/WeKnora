@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -17,15 +19,43 @@ import (
 )
 
 const (
-	ProcessingArtifactInlineLimit = 1 << 20
-	processingArtifactPutAttempts = 3
+	ProcessingArtifactInlineLimit           = 1 << 20
+	ProcessingArtifactMaxPayload            = 64 << 20
+	processingArtifactPutAttempts           = 3
+	processingArtifactObjectReferencePrefix = "processing-artifact:v1:"
 )
+
+var errProcessingArtifactObjectNotOwned = errors.New("processing artifact object is not authoritatively owned")
+
+type processingArtifactPurgeFailure struct {
+	kind string
+	err  error
+}
+
+func (e *processingArtifactPurgeFailure) Error() string {
+	return e.err.Error()
+}
+
+func (e *processingArtifactPurgeFailure) Unwrap() error {
+	return e.err
+}
+
+func (e *processingArtifactPurgeFailure) ProcessingArtifactFailureKind() string {
+	return e.kind
+}
+
+func newProcessingArtifactPurgeFailure(kind string, err error) error {
+	return &processingArtifactPurgeFailure{kind: kind, err: err}
+}
 
 type processingArtifactStore struct {
 	repository       interfaces.ProcessingArtifactRepository
 	tenantRepository interfaces.TenantRepository
 	fileService      interfaces.FileService
 	newFileService   processingArtifactFileServiceFactory
+	storageResolver  interfaces.StorageBackendResolver
+	maxPayloadBytes  int
+	counters         interfaces.ProcessingArtifactCounterRegistry
 }
 
 type processingArtifactBatchRepository interface {
@@ -35,15 +65,40 @@ type processingArtifactBatchRepository interface {
 	PutManyIfAbsent(ctx context.Context, artifacts []*types.ProcessingArtifact) error
 }
 
+type processingArtifactWriteProgress struct {
+	durable  bool
+	complete bool
+}
+
 type processingArtifactFileServiceFactory func(
 	provider string,
 	storageConfig *types.StorageEngineConfig,
 	localBaseDir string,
 ) (interfaces.FileService, string, error)
 
+type processingArtifactHistoricalStorageResolver interface {
+	ResolveHistoricalFileService(
+		ctx context.Context,
+		tenant *types.Tenant,
+		backendID, localBaseDir string,
+	) (interfaces.FileService, string, error)
+}
+
 type processingArtifactFileServiceResolver struct {
-	service  interfaces.FileService
-	provider string
+	service   interfaces.FileService
+	provider  string
+	backendID string
+}
+
+type processingArtifactPurgeResolverKey struct {
+	tenantID  uint64
+	provider  string
+	backendID string
+}
+
+type processingArtifactPurgeResolverResult struct {
+	resolver processingArtifactFileServiceResolver
+	err      error
 }
 
 func NewProcessingArtifactStore(
@@ -51,11 +106,56 @@ func NewProcessingArtifactStore(
 	tenantRepository interfaces.TenantRepository,
 	fileService interfaces.FileService,
 ) interfaces.ProcessingArtifactStore {
-	return newProcessingArtifactStore(
+	return NewProcessingArtifactStoreWithMaxPayloadAndCounterRegistry(
+		repository, tenantRepository, fileService, ProcessingArtifactMaxPayload, NewProcessingArtifactCounterRegistry(),
+	)
+}
+
+func NewProcessingArtifactStoreWithMaxPayload(
+	repository interfaces.ProcessingArtifactRepository,
+	tenantRepository interfaces.TenantRepository,
+	fileService interfaces.FileService,
+	maxPayloadBytes int,
+) interfaces.ProcessingArtifactStore {
+	return NewProcessingArtifactStoreWithMaxPayloadAndCounterRegistry(
+		repository, tenantRepository, fileService, maxPayloadBytes, NewProcessingArtifactCounterRegistry(),
+	)
+}
+
+func NewProcessingArtifactStoreWithMaxPayloadAndCounterRegistry(
+	repository interfaces.ProcessingArtifactRepository,
+	tenantRepository interfaces.TenantRepository,
+	fileService interfaces.FileService,
+	maxPayloadBytes int,
+	counters interfaces.ProcessingArtifactCounterRegistry,
+) interfaces.ProcessingArtifactStore {
+	return newProcessingArtifactStoreWithDependencies(
 		repository,
 		tenantRepository,
 		fileService,
 		filesvc.NewFileServiceFromStorageConfig,
+		nil,
+		maxPayloadBytes,
+		counters,
+	)
+}
+
+func NewProcessingArtifactStoreWithDependencies(
+	repository interfaces.ProcessingArtifactRepository,
+	tenantRepository interfaces.TenantRepository,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	maxPayloadBytes int,
+	counters interfaces.ProcessingArtifactCounterRegistry,
+) interfaces.ProcessingArtifactStore {
+	return newProcessingArtifactStoreWithDependencies(
+		repository,
+		tenantRepository,
+		fileService,
+		filesvc.NewFileServiceFromStorageConfig,
+		storageResolver,
+		maxPayloadBytes,
+		counters,
 	)
 }
 
@@ -64,16 +164,67 @@ func newProcessingArtifactStore(
 	tenantRepository interfaces.TenantRepository,
 	fileService interfaces.FileService,
 	newFileService processingArtifactFileServiceFactory,
+	maxPayloadBytes ...int,
 ) *processingArtifactStore {
+	maxPayload := ProcessingArtifactMaxPayload
+	if len(maxPayloadBytes) > 0 && maxPayloadBytes[0] > 0 {
+		maxPayload = maxPayloadBytes[0]
+	}
+	return newProcessingArtifactStoreWithCounterRegistry(
+		repository, tenantRepository, fileService, newFileService, maxPayload, NewProcessingArtifactCounterRegistry(),
+	)
+}
+
+func newProcessingArtifactStoreWithCounterRegistry(
+	repository interfaces.ProcessingArtifactRepository,
+	tenantRepository interfaces.TenantRepository,
+	fileService interfaces.FileService,
+	newFileService processingArtifactFileServiceFactory,
+	maxPayloadBytes int,
+	counters interfaces.ProcessingArtifactCounterRegistry,
+) *processingArtifactStore {
+	return newProcessingArtifactStoreWithDependencies(
+		repository, tenantRepository, fileService, newFileService, nil, maxPayloadBytes, counters,
+	)
+}
+
+func newProcessingArtifactStoreWithDependencies(
+	repository interfaces.ProcessingArtifactRepository,
+	tenantRepository interfaces.TenantRepository,
+	fileService interfaces.FileService,
+	newFileService processingArtifactFileServiceFactory,
+	storageResolver interfaces.StorageBackendResolver,
+	maxPayloadBytes int,
+	counters interfaces.ProcessingArtifactCounterRegistry,
+) *processingArtifactStore {
+	maxPayload := ProcessingArtifactMaxPayload
+	if maxPayloadBytes > 0 {
+		maxPayload = maxPayloadBytes
+	}
+	if counters == nil {
+		counters = NewProcessingArtifactCounterRegistry()
+	}
 	return &processingArtifactStore{
 		repository:       repository,
 		tenantRepository: tenantRepository,
 		fileService:      fileService,
 		newFileService:   newFileService,
+		storageResolver:  storageResolver,
+		maxPayloadBytes:  maxPayload,
+		counters:         counters,
 	}
 }
 
 func (s *processingArtifactStore) Get(
+	ctx context.Context,
+	key types.ProcessingArtifactKey,
+) ([]byte, bool, error) {
+	value, hit, err := s.get(ctx, key)
+	s.recordLookup(key.Stage, hit, err)
+	return value, hit, err
+}
+
+func (s *processingArtifactStore) get(
 	ctx context.Context,
 	key types.ProcessingArtifactKey,
 ) ([]byte, bool, error) {
@@ -94,11 +245,13 @@ func (s *processingArtifactStore) GetMany(
 	result := make(map[types.ProcessingArtifactKey][]byte, len(keys))
 	batchRepository, ok := s.repository.(processingArtifactBatchRepository)
 	if !ok {
-		for _, key := range keys {
-			value, hit, err := s.Get(ctx, key)
+		for index, key := range keys {
+			value, hit, err := s.get(ctx, key)
 			if err != nil {
+				s.recordLookupErrors(keys[index:])
 				return nil, err
 			}
+			s.recordLookup(key.Stage, hit, nil)
 			if hit {
 				result[key] = value
 			}
@@ -108,17 +261,21 @@ func (s *processingArtifactStore) GetMany(
 
 	artifacts, err := batchRepository.GetMany(ctx, keys)
 	if err != nil {
+		s.recordLookupErrors(keys)
 		return nil, fmt.Errorf("get processing artifact manifests: %w", err)
 	}
-	for _, key := range keys {
+	for index, key := range keys {
 		artifact, ok := artifacts[key]
 		if !ok {
+			s.recordLookup(key.Stage, false, nil)
 			continue
 		}
 		value, hit, err := s.readArtifact(ctx, key, artifact)
 		if err != nil {
+			s.recordLookupErrors(keys[index:])
 			return nil, err
 		}
+		s.recordLookup(key.Stage, hit, nil)
 		if hit {
 			result[key] = value
 		}
@@ -131,6 +288,19 @@ func (s *processingArtifactStore) PutIfAbsent(
 	key types.ProcessingArtifactKey,
 	value []byte,
 ) ([]byte, bool, error) {
+	canonical, created, err := s.putIfAbsent(ctx, key, value)
+	s.recordWrite(key.Stage, err)
+	return canonical, created, err
+}
+
+func (s *processingArtifactStore) putIfAbsent(
+	ctx context.Context,
+	key types.ProcessingArtifactKey,
+	value []byte,
+) ([]byte, bool, error) {
+	if err := s.validatePayloadSize(value); err != nil {
+		return nil, false, err
+	}
 	candidate := cloneProcessingArtifactValue(value)
 	hash := processingArtifactSHA256(candidate)
 
@@ -149,7 +319,7 @@ func (s *processingArtifactStore) PutIfAbsent(
 			artifact.Payload = cloneProcessingArtifactValue(candidate)
 		} else {
 			var err error
-			candidateResolver, err = s.resolveFileService(ctx, key.TenantID, "")
+			candidateResolver, err = s.resolveFileService(ctx, key.TenantID, "", "")
 			if err != nil {
 				return nil, false, err
 			}
@@ -166,7 +336,8 @@ func (s *processingArtifactStore) PutIfAbsent(
 			if artifact.ObjectPath == "" {
 				return nil, false, errors.New("save processing artifact object returned an empty path")
 			}
-			artifact.ObjectPath = filesvc.CanonicalStoredPath(candidateResolver.service, artifact.ObjectPath)
+			objectPath := filesvc.CanonicalStoredPath(candidateResolver.service, artifact.ObjectPath)
+			artifact.ObjectPath = processingArtifactObjectReference(objectPath)
 		}
 
 		created, err := s.repository.PutIfAbsent(ctx, artifact)
@@ -218,21 +389,40 @@ func (s *processingArtifactStore) PutManyIfAbsent(
 	ctx context.Context,
 	values map[types.ProcessingArtifactKey][]byte,
 ) (map[types.ProcessingArtifactKey][]byte, error) {
+	canonical, progress, err := s.putManyIfAbsent(ctx, values)
+	s.recordBatchWrites(values, progress)
+	if err != nil {
+		return nil, err
+	}
+	return canonical, nil
+}
+
+func (s *processingArtifactStore) putManyIfAbsent(
+	ctx context.Context,
+	values map[types.ProcessingArtifactKey][]byte,
+) (map[types.ProcessingArtifactKey][]byte, map[types.ProcessingArtifactKey]processingArtifactWriteProgress, error) {
+	progress := make(map[types.ProcessingArtifactKey]processingArtifactWriteProgress, len(values))
+	for _, value := range values {
+		if err := s.validatePayloadSize(value); err != nil {
+			return nil, progress, err
+		}
+	}
 	result := make(map[types.ProcessingArtifactKey][]byte, len(values))
 	batchRepository, ok := s.repository.(processingArtifactBatchRepository)
 	if !ok {
-		return s.putManySequential(ctx, values)
+		return s.putManySequential(ctx, values, progress)
 	}
 
 	inlineValues := make(map[types.ProcessingArtifactKey][]byte, len(values))
 	artifacts := make([]*types.ProcessingArtifact, 0, len(values))
 	for key, value := range values {
 		if len(value) > ProcessingArtifactInlineLimit {
-			canonical, _, err := s.PutIfAbsent(ctx, key, value)
+			canonical, _, err := s.putIfAbsent(ctx, key, value)
 			if err != nil {
-				return nil, err
+				return nil, progress, err
 			}
 			result[key] = canonical
+			progress[key] = processingArtifactWriteProgress{durable: true, complete: true}
 			continue
 		}
 
@@ -249,10 +439,13 @@ func (s *processingArtifactStore) PutManyIfAbsent(
 		})
 	}
 	if len(artifacts) == 0 {
-		return result, nil
+		return result, progress, nil
 	}
 	if err := batchRepository.PutManyIfAbsent(ctx, artifacts); err != nil {
-		return nil, fmt.Errorf("put processing artifact manifests: %w", err)
+		return nil, progress, fmt.Errorf("put processing artifact manifests: %w", err)
+	}
+	for key := range inlineValues {
+		progress[key] = processingArtifactWriteProgress{durable: true}
 	}
 
 	keys := make([]types.ProcessingArtifactKey, 0, len(inlineValues))
@@ -261,42 +454,267 @@ func (s *processingArtifactStore) PutManyIfAbsent(
 	}
 	winners, err := batchRepository.GetMany(ctx, keys)
 	if err != nil {
-		return nil, fmt.Errorf("get winning processing artifact manifests: %w", err)
+		return nil, progress, fmt.Errorf("get winning processing artifact manifests: %w", err)
 	}
 	for key, candidate := range inlineValues {
 		winner, ok := winners[key]
 		if ok {
 			canonical, hit, readErr := s.readArtifact(ctx, key, winner)
 			if readErr != nil {
-				return nil, readErr
+				return nil, progress, readErr
 			}
 			if hit {
 				result[key] = canonical
+				progress[key] = processingArtifactWriteProgress{durable: true, complete: true}
 				continue
 			}
 		}
-		canonical, _, putErr := s.PutIfAbsent(ctx, key, candidate)
+		canonical, _, putErr := s.putIfAbsent(ctx, key, candidate)
 		if putErr != nil {
-			return nil, putErr
+			return nil, progress, putErr
 		}
 		result[key] = canonical
+		progress[key] = processingArtifactWriteProgress{durable: true, complete: true}
+	}
+	return result, progress, nil
+}
+
+func (s *processingArtifactStore) Invalidate(
+	ctx context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) error {
+	evicted, err := s.invalidate(ctx, key, observed)
+	if err != nil {
+		s.counters.Record(key.Stage, "error")
+	} else if evicted {
+		s.counters.Record(key.Stage, "evicted")
+	}
+	return err
+}
+
+func (s *processingArtifactStore) invalidate(
+	ctx context.Context,
+	key types.ProcessingArtifactKey,
+	observed []byte,
+) (bool, error) {
+	artifact, err := s.repository.Get(ctx, key)
+	if errors.Is(err, types.ErrProcessingArtifactNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get processing artifact manifest for invalidation: %w", err)
+	}
+	if artifact == nil {
+		return false, errors.New("processing artifact repository returned a nil manifest")
+	}
+	if artifact.ContentSHA256 != processingArtifactSHA256(observed) {
+		return false, nil
+	}
+
+	var resolver processingArtifactFileServiceResolver
+	var objectPath string
+	if artifact.ObjectPath != "" {
+		resolver, objectPath, err = s.resolveOwnedObject(ctx, key.TenantID, artifact.ObjectPath)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	if artifact.ObjectPath != "" {
+		if err := resolver.service.DeleteFile(ctx, filesvc.ServiceStoredPath(resolver.service, objectPath)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("delete processing artifact object: %w", err)
+		}
+	}
+	removed, err := s.repository.DeleteByIDWithResult(ctx, key.TenantID, artifact.ID)
+	if err != nil {
+		return false, fmt.Errorf("delete processing artifact manifest: %w", err)
+	}
+	return removed, nil
+}
+
+func (s *processingArtifactStore) PurgeExpired(
+	ctx context.Context,
+	cutoff time.Time,
+	batchSize int,
+) (types.ProcessingArtifactPurgeResult, error) {
+	if batchSize <= 0 {
+		return types.ProcessingArtifactPurgeResult{}, errors.New("processing artifact purge batch size must be positive")
+	}
+
+	var result types.ProcessingArtifactPurgeResult
+	var representative error
+	var afterID uint64
+	resolvers := make(map[processingArtifactPurgeResolverKey]processingArtifactPurgeResolverResult)
+	for {
+		artifacts, err := s.repository.ListExpired(ctx, cutoff, afterID, batchSize)
+		if err != nil {
+			return result, newProcessingArtifactPurgeFailure(
+				"manifest_list",
+				fmt.Errorf("list expired processing artifacts: %w", err),
+			)
+		}
+		if len(artifacts) == 0 {
+			break
+		}
+
+		pageAdvanced := false
+		for _, artifact := range artifacts {
+			if artifact == nil {
+				result.Failed++
+				if representative == nil {
+					representative = newProcessingArtifactPurgeFailure(
+						"manifest_invalid",
+						errors.New("processing artifact repository returned a nil expired manifest"),
+					)
+				}
+				continue
+			}
+			afterID = artifact.ID
+			pageAdvanced = true
+			result.Scanned++
+			removed, err := s.purgeExpiredArtifact(ctx, artifact, resolvers)
+			if err != nil {
+				result.Failed++
+				s.counters.Record(artifact.Stage, "error")
+				if representative == nil {
+					representative = err
+				}
+				continue
+			}
+			if removed {
+				result.Deleted++
+				result.DeletedBytes += artifact.SizeBytes
+				s.counters.Record(artifact.Stage, "evicted")
+			}
+		}
+		if !pageAdvanced {
+			return result, fmt.Errorf("purge expired processing artifacts (%d failures): %w", result.Failed, representative)
+		}
+		if len(artifacts) < batchSize {
+			break
+		}
+	}
+	if representative != nil {
+		return result, fmt.Errorf("purge expired processing artifacts (%d failures): %w", result.Failed, representative)
 	}
 	return result, nil
+}
+
+func (s *processingArtifactStore) purgeExpiredArtifact(
+	ctx context.Context,
+	artifact *types.ProcessingArtifact,
+	resolvers map[processingArtifactPurgeResolverKey]processingArtifactPurgeResolverResult,
+) (bool, error) {
+	if artifact.ObjectPath != "" {
+		objectPath, ok := processingArtifactObjectPath(artifact.ObjectPath)
+		if !ok {
+			return false, newProcessingArtifactPurgeFailure("ownership", errProcessingArtifactObjectNotOwned)
+		}
+		resolver, err := s.resolvePurgeFileService(ctx, artifact.TenantID, objectPath, resolvers)
+		if err != nil {
+			return false, newProcessingArtifactPurgeFailure("storage_resolve", err)
+		}
+		if !processingArtifactServiceOwnsPath(resolver, objectPath) {
+			return false, newProcessingArtifactPurgeFailure("ownership", errProcessingArtifactObjectNotOwned)
+		}
+		if err := resolver.service.DeleteFile(ctx, filesvc.ServiceStoredPath(resolver.service, objectPath)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, newProcessingArtifactPurgeFailure(
+				"object_delete",
+				fmt.Errorf("delete processing artifact object: %w", err),
+			)
+		}
+	}
+	removed, err := s.repository.DeleteByIDWithResult(ctx, artifact.TenantID, artifact.ID)
+	if err != nil {
+		return false, newProcessingArtifactPurgeFailure(
+			"manifest_delete",
+			fmt.Errorf("delete processing artifact manifest: %w", err),
+		)
+	}
+	return removed, nil
+}
+
+func (s *processingArtifactStore) resolvePurgeFileService(
+	ctx context.Context,
+	tenantID uint64,
+	objectPath string,
+	resolvers map[processingArtifactPurgeResolverKey]processingArtifactPurgeResolverResult,
+) (processingArtifactFileServiceResolver, error) {
+	provider := strings.ToLower(strings.TrimSpace(types.InferStorageFromFilePath(objectPath)))
+	backendID, _, _ := types.ParseStorageBackendPath(objectPath)
+	key := processingArtifactPurgeResolverKey{tenantID: tenantID, provider: provider, backendID: backendID}
+	if cached, ok := resolvers[key]; ok {
+		return cached.resolver, cached.err
+	}
+	resolver, err := s.resolveFileServiceForPath(ctx, tenantID, objectPath)
+	resolvers[key] = processingArtifactPurgeResolverResult{resolver: resolver, err: err}
+	return resolver, err
+}
+
+func (s *processingArtifactStore) validatePayloadSize(value []byte) error {
+	if len(value) > s.maxPayloadBytes {
+		return errors.New("processing artifact payload exceeds configured maximum")
+	}
+	return nil
 }
 
 func (s *processingArtifactStore) putManySequential(
 	ctx context.Context,
 	values map[types.ProcessingArtifactKey][]byte,
-) (map[types.ProcessingArtifactKey][]byte, error) {
+	progress map[types.ProcessingArtifactKey]processingArtifactWriteProgress,
+) (map[types.ProcessingArtifactKey][]byte, map[types.ProcessingArtifactKey]processingArtifactWriteProgress, error) {
 	result := make(map[types.ProcessingArtifactKey][]byte, len(values))
 	for key, value := range values {
-		canonical, _, err := s.PutIfAbsent(ctx, key, value)
+		canonical, _, err := s.putIfAbsent(ctx, key, value)
 		if err != nil {
-			return nil, err
+			return nil, progress, err
 		}
 		result[key] = canonical
+		progress[key] = processingArtifactWriteProgress{durable: true, complete: true}
 	}
-	return result, nil
+	return result, progress, nil
+}
+
+func (s *processingArtifactStore) recordLookup(stage string, hit bool, err error) {
+	if err != nil {
+		s.counters.Record(stage, "error")
+		return
+	}
+	if hit {
+		s.counters.Record(stage, "hit")
+		return
+	}
+	s.counters.Record(stage, "miss")
+}
+
+func (s *processingArtifactStore) recordLookupErrors(keys []types.ProcessingArtifactKey) {
+	for _, key := range keys {
+		s.counters.Record(key.Stage, "error")
+	}
+}
+
+func (s *processingArtifactStore) recordWrite(stage string, err error) {
+	if err != nil {
+		s.counters.Record(stage, "error")
+		return
+	}
+	s.counters.Record(stage, "write")
+}
+
+func (s *processingArtifactStore) recordBatchWrites(
+	values map[types.ProcessingArtifactKey][]byte,
+	progress map[types.ProcessingArtifactKey]processingArtifactWriteProgress,
+) {
+	for key := range values {
+		state := progress[key]
+		if state.durable {
+			s.counters.Record(key.Stage, "write")
+		}
+		if !state.complete {
+			s.counters.Record(key.Stage, "error")
+		}
+	}
 }
 
 func (s *processingArtifactStore) readArtifact(
@@ -319,12 +737,16 @@ func (s *processingArtifactStore) readArtifact(
 		return s.evictCorrupt(ctx, key, artifact, nil)
 	}
 
-	resolver, err := s.resolveFileService(ctx, key.TenantID, types.InferStorageFromFilePath(artifact.ObjectPath))
+	objectPath, ok := processingArtifactObjectPath(artifact.ObjectPath)
+	if !ok {
+		return nil, false, errProcessingArtifactObjectNotOwned
+	}
+	resolver, err := s.resolveFileServiceForPath(ctx, key.TenantID, objectPath)
 	if err != nil {
 		return nil, false, err
 	}
-	authoritative := processingArtifactServiceOwnsPath(resolver, artifact.ObjectPath)
-	servicePath := filesvc.ServiceStoredPath(resolver.service, artifact.ObjectPath)
+	authoritative := processingArtifactServiceOwnsPath(resolver, objectPath)
+	servicePath := filesvc.ServiceStoredPath(resolver.service, objectPath)
 	reader, err := resolver.service.GetFile(ctx, servicePath)
 	if errors.Is(err, fs.ErrNotExist) && authoritative {
 		return s.evictCorrupt(ctx, key, artifact, &resolver)
@@ -362,23 +784,35 @@ func (s *processingArtifactStore) evictCorrupt(
 	artifact *types.ProcessingArtifact,
 	resolver *processingArtifactFileServiceResolver,
 ) ([]byte, bool, error) {
-	if err := s.repository.DeleteByID(ctx, key.TenantID, artifact.ID); err != nil {
+	if artifact.ObjectPath != "" {
+		objectPath, ok := processingArtifactObjectPath(artifact.ObjectPath)
+		if !ok {
+			return nil, false, errProcessingArtifactObjectNotOwned
+		}
+		if resolver == nil {
+			resolved, err := s.resolveFileServiceForPath(ctx, key.TenantID, objectPath)
+			if err != nil {
+				return nil, false, err
+			}
+			resolver = &resolved
+		}
+		if !processingArtifactServiceOwnsPath(*resolver, objectPath) {
+			return nil, false, errProcessingArtifactObjectNotOwned
+		}
+		if err := resolver.service.DeleteFile(
+			ctx,
+			filesvc.ServiceStoredPath(resolver.service, objectPath),
+		); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, false, fmt.Errorf("delete corrupt processing artifact object: %w", err)
+		}
+	}
+
+	removed, err := s.repository.DeleteByIDWithResult(ctx, key.TenantID, artifact.ID)
+	if err != nil {
 		return nil, false, fmt.Errorf("evict corrupt processing artifact manifest: %w", err)
 	}
-	if artifact.ObjectPath != "" {
-		if resolver == nil {
-			resolved, err := s.resolveFileService(
-				ctx,
-				key.TenantID,
-				types.InferStorageFromFilePath(artifact.ObjectPath),
-			)
-			if err == nil {
-				resolver = &resolved
-			}
-		}
-		if resolver != nil && processingArtifactServiceOwnsPath(*resolver, artifact.ObjectPath) {
-			_ = resolver.service.DeleteFile(ctx, filesvc.ServiceStoredPath(resolver.service, artifact.ObjectPath))
-		}
+	if removed {
+		s.counters.Record(key.Stage, "evicted")
 	}
 	return nil, false, nil
 }
@@ -386,6 +820,7 @@ func (s *processingArtifactStore) evictCorrupt(
 func (s *processingArtifactStore) resolveFileService(
 	ctx context.Context,
 	tenantID uint64,
+	backendID string,
 	provider string,
 ) (processingArtifactFileServiceResolver, error) {
 	tenant, ok := types.TenantInfoFromContext(ctx)
@@ -399,6 +834,30 @@ func (s *processingArtifactStore) resolveFileService(
 				return processingArtifactFileServiceResolver{}, fmt.Errorf("get processing artifact tenant: %w", err)
 			}
 		}
+	}
+
+	if tenant != nil && s.storageResolver != nil {
+		localBaseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		var service interfaces.FileService
+		var resolvedProvider string
+		var err error
+		if historical, ok := s.storageResolver.(processingArtifactHistoricalStorageResolver); ok && backendID != "" {
+			service, resolvedProvider, err = historical.ResolveHistoricalFileService(
+				ctx, tenant, backendID, localBaseDir,
+			)
+		} else {
+			service, resolvedProvider, err = s.storageResolver.ResolveFileService(
+				ctx, tenant, backendID, provider, localBaseDir,
+			)
+		}
+		if err != nil {
+			return processingArtifactFileServiceResolver{}, fmt.Errorf("resolve processing artifact file service: %w", err)
+		}
+		return processingArtifactFileServiceResolver{
+			service:   service,
+			provider:  strings.ToLower(strings.TrimSpace(resolvedProvider)),
+			backendID: filesvc.StorageBackendID(service),
+		}, nil
 	}
 
 	if tenant == nil || tenant.StorageEngineConfig == nil {
@@ -427,6 +886,34 @@ func (s *processingArtifactStore) resolveFileService(
 	return processingArtifactFileServiceResolver{service: service, provider: provider}, nil
 }
 
+func (s *processingArtifactStore) resolveFileServiceForPath(
+	ctx context.Context,
+	tenantID uint64,
+	objectPath string,
+) (processingArtifactFileServiceResolver, error) {
+	backendID, _, _ := types.ParseStorageBackendPath(objectPath)
+	return s.resolveFileService(ctx, tenantID, backendID, types.InferStorageFromFilePath(objectPath))
+}
+
+func (s *processingArtifactStore) resolveOwnedObject(
+	ctx context.Context,
+	tenantID uint64,
+	reference string,
+) (processingArtifactFileServiceResolver, string, error) {
+	objectPath, ok := processingArtifactObjectPath(reference)
+	if !ok {
+		return processingArtifactFileServiceResolver{}, "", errProcessingArtifactObjectNotOwned
+	}
+	resolver, err := s.resolveFileServiceForPath(ctx, tenantID, objectPath)
+	if err != nil {
+		return processingArtifactFileServiceResolver{}, "", err
+	}
+	if !processingArtifactServiceOwnsPath(resolver, objectPath) {
+		return processingArtifactFileServiceResolver{}, "", errProcessingArtifactObjectNotOwned
+	}
+	return resolver, objectPath, nil
+}
+
 func (s *processingArtifactStore) globalFileService() (interfaces.FileService, error) {
 	if s.fileService == nil {
 		return nil, errors.New("processing artifact file service is not configured")
@@ -440,8 +927,9 @@ func (s *processingArtifactStore) globalFileServiceResolver() (processingArtifac
 		return processingArtifactFileServiceResolver{}, err
 	}
 	return processingArtifactFileServiceResolver{
-		service:  service,
-		provider: filesvc.StorageProvider(service),
+		service:   service,
+		provider:  filesvc.StorageProvider(service),
+		backendID: filesvc.StorageBackendID(service),
 	}, nil
 }
 
@@ -476,6 +964,9 @@ func processingArtifactServiceOwnsPath(
 	path string,
 ) bool {
 	canonicalPath := filesvc.CanonicalStoredPath(resolver.service, path)
+	if backendID, _, ok := types.ParseStorageBackendPath(canonicalPath); ok {
+		return backendID != "" && backendID == resolver.backendID
+	}
 	scheme := processingArtifactPathScheme(canonicalPath)
 	if scheme == "http" || scheme == "https" {
 		return false
@@ -484,6 +975,23 @@ func processingArtifactServiceOwnsPath(
 		return resolver.provider == "local"
 	}
 	return resolver.provider == scheme
+}
+
+func processingArtifactObjectReference(objectPath string) string {
+	return processingArtifactObjectReferencePrefix +
+		base64.RawURLEncoding.EncodeToString([]byte(objectPath))
+}
+
+func processingArtifactObjectPath(reference string) (string, bool) {
+	if !strings.HasPrefix(reference, processingArtifactObjectReferencePrefix) {
+		return "", false
+	}
+	encoded := strings.TrimPrefix(reference, processingArtifactObjectReferencePrefix)
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || len(decoded) == 0 || processingArtifactObjectReference(string(decoded)) != reference {
+		return "", false
+	}
+	return string(decoded), true
 }
 
 func processingArtifactPathScheme(path string) string {
@@ -507,8 +1015,8 @@ func (s *processingArtifactStore) deleteCandidate(
 	path string,
 	resolver processingArtifactFileServiceResolver,
 ) {
-	if path != "" && resolver.service != nil {
-		_ = resolver.service.DeleteFile(ctx, filesvc.ServiceStoredPath(resolver.service, path))
+	if objectPath, ok := processingArtifactObjectPath(path); ok && resolver.service != nil {
+		_ = resolver.service.DeleteFile(ctx, filesvc.ServiceStoredPath(resolver.service, objectPath))
 	}
 }
 

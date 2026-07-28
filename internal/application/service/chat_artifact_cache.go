@@ -226,6 +226,9 @@ func completeChatArtifact(
 			if decodeErr == nil && validateChatArtifactValue(request.valuePolicy, completion) == nil {
 				return completion, true, false, nil
 			}
+			if err := store.Invalidate(ctx, key, payload); err != nil {
+				return "", false, false, fmt.Errorf("%w: invalidate: %w", errChatArtifactStore, err)
+			}
 		}
 	}
 
@@ -250,6 +253,9 @@ func completeChatArtifact(
 	}
 	canonicalCompletion, err := decodeChatArtifactCompletion(canonical)
 	if err != nil || validateChatArtifactValue(request.valuePolicy, canonicalCompletion) != nil {
+		if invalidateErr := store.Invalidate(ctx, key, canonical); invalidateErr != nil {
+			return "", false, true, fmt.Errorf("%w: invalidate: %w", errChatArtifactStore, invalidateErr)
+		}
 		return completion, false, true, nil
 	}
 	return canonicalCompletion, false, true, nil

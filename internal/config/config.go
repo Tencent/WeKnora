@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,28 +18,106 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation       *ConversationConfig       `yaml:"conversation"     json:"conversation"`
+	Server             *ServerConfig             `yaml:"server"           json:"server"`
+	KnowledgeBase      *KnowledgeBaseConfig      `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant             *TenantConfig             `yaml:"tenant"           json:"tenant"`
+	Auth               *AuthConfig               `yaml:"auth"             json:"auth"`
+	Audit              *AuditConfig              `yaml:"audit"            json:"audit"`
+	OIDCAuth           *OIDCAuthConfig           `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models             []ModelConfig             `yaml:"models"           json:"models"`
+	VectorDatabase     *VectorDatabaseConfig     `yaml:"vector_database"  json:"vector_database"`
+	DocReader          *DocReaderConfig          `yaml:"docreader"        json:"docreader"`
+	StreamManager      *StreamManagerConfig      `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager     *ExtractManagerConfig     `yaml:"extract"          json:"extract"`
+	WebSearch          *WebSearchConfig          `yaml:"web_search"       json:"web_search"`
+	PromptTemplates    *PromptTemplatesConfig    `yaml:"prompt_templates" json:"prompt_templates"`
+	IM                 *IMConfig                 `yaml:"im"               json:"im"`
+	Agent              *AgentConfig              `yaml:"agent"            json:"agent"`
+	ProcessingArtifact *ProcessingArtifactConfig `yaml:"processing_artifact" json:"processing_artifact"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+const (
+	DefaultProcessingArtifactMaxPayloadBytes  = 64 << 20
+	maxProcessingArtifactDuration             = time.Duration(1<<63 - 1)
+	MaxProcessingArtifactCleanupIntervalHours = int(maxProcessingArtifactDuration / time.Hour)
+	MaxProcessingArtifactRetentionDays        = int(maxProcessingArtifactDuration / (24 * time.Hour))
+)
+
+type ProcessingArtifactConfig struct {
+	MaxPayloadBytes      int `yaml:"max_payload_bytes" json:"max_payload_bytes"`
+	RetentionDays        int `yaml:"retention_days" json:"retention_days"`
+	CleanupIntervalHours int `yaml:"cleanup_interval_hours" json:"cleanup_interval_hours"`
+	CleanupBatchSize     int `yaml:"cleanup_batch_size" json:"cleanup_batch_size"`
+
+	maxPayloadBytesSet      bool
+	retentionDaysSet        bool
+	cleanupIntervalHoursSet bool
+	cleanupBatchSizeSet     bool
+}
+
+func (c *ProcessingArtifactConfig) UnmarshalYAML(node *yaml.Node) error {
+	var value struct {
+		MaxPayloadBytes      *int `yaml:"max_payload_bytes"`
+		RetentionDays        *int `yaml:"retention_days"`
+		CleanupIntervalHours *int `yaml:"cleanup_interval_hours"`
+		CleanupBatchSize     *int `yaml:"cleanup_batch_size"`
+	}
+	if err := node.Decode(&value); err != nil {
+		return err
+	}
+	if value.MaxPayloadBytes != nil {
+		c.MaxPayloadBytes = *value.MaxPayloadBytes
+		c.maxPayloadBytesSet = true
+	}
+	if value.RetentionDays != nil {
+		c.RetentionDays = *value.RetentionDays
+		c.retentionDaysSet = true
+	}
+	if value.CleanupIntervalHours != nil {
+		c.CleanupIntervalHours = *value.CleanupIntervalHours
+		c.cleanupIntervalHoursSet = true
+	}
+	if value.CleanupBatchSize != nil {
+		c.CleanupBatchSize = *value.CleanupBatchSize
+		c.cleanupBatchSizeSet = true
+	}
+	return nil
+}
+
+func (c *ProcessingArtifactConfig) UnmarshalJSON(data []byte) error {
+	var value struct {
+		MaxPayloadBytes      *int `json:"max_payload_bytes"`
+		RetentionDays        *int `json:"retention_days"`
+		CleanupIntervalHours *int `json:"cleanup_interval_hours"`
+		CleanupBatchSize     *int `json:"cleanup_batch_size"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value.MaxPayloadBytes != nil {
+		c.MaxPayloadBytes = *value.MaxPayloadBytes
+		c.maxPayloadBytesSet = true
+	}
+	if value.RetentionDays != nil {
+		c.RetentionDays = *value.RetentionDays
+		c.retentionDaysSet = true
+	}
+	if value.CleanupIntervalHours != nil {
+		c.CleanupIntervalHours = *value.CleanupIntervalHours
+		c.cleanupIntervalHoursSet = true
+	}
+	if value.CleanupBatchSize != nil {
+		c.CleanupBatchSize = *value.CleanupBatchSize
+		c.cleanupBatchSizeSet = true
+	}
+	return nil
 }
 
 // AgentConfig represents the global agent settings.
@@ -534,6 +613,12 @@ func LoadConfig() (*Config, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("unable to decode config into struct: %w", err)
 	}
+	if cfg.ProcessingArtifact != nil {
+		cfg.ProcessingArtifact.maxPayloadBytesSet = viper.IsSet("processing_artifact.max_payload_bytes")
+		cfg.ProcessingArtifact.retentionDaysSet = viper.IsSet("processing_artifact.retention_days")
+		cfg.ProcessingArtifact.cleanupIntervalHoursSet = viper.IsSet("processing_artifact.cleanup_interval_hours")
+		cfg.ProcessingArtifact.cleanupBatchSizeSet = viper.IsSet("processing_artifact.cleanup_batch_size")
+	}
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 
 	// 加载提示词模板（从目录或配置文件）
@@ -582,6 +667,9 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	if err := applyProcessingArtifactDefaults(&cfg); err != nil {
+		return nil, err
+	}
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -642,6 +730,24 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
 		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
 			cfg.Audit.RetentionDays))
+	}
+	if cfg.ProcessingArtifact != nil && cfg.ProcessingArtifact.MaxPayloadBytes <= 0 {
+		errs = append(errs, "processing_artifact.max_payload_bytes must be > 0")
+	}
+	if cfg.ProcessingArtifact != nil && cfg.ProcessingArtifact.RetentionDays < 0 {
+		errs = append(errs, "processing_artifact.retention_days must be >= 0")
+	}
+	if cfg.ProcessingArtifact != nil && cfg.ProcessingArtifact.CleanupIntervalHours <= 0 {
+		errs = append(errs, "processing_artifact.cleanup_interval_hours must be > 0")
+	}
+	if cfg.ProcessingArtifact != nil && cfg.ProcessingArtifact.CleanupIntervalHours > MaxProcessingArtifactCleanupIntervalHours {
+		errs = append(errs, fmt.Sprintf("processing_artifact.cleanup_interval_hours must be <= %d", MaxProcessingArtifactCleanupIntervalHours))
+	}
+	if cfg.ProcessingArtifact != nil && cfg.ProcessingArtifact.RetentionDays > MaxProcessingArtifactRetentionDays {
+		errs = append(errs, fmt.Sprintf("processing_artifact.retention_days must be <= %d", MaxProcessingArtifactRetentionDays))
+	}
+	if cfg.ProcessingArtifact != nil && (cfg.ProcessingArtifact.CleanupBatchSize < 1 || cfg.ProcessingArtifact.CleanupBatchSize > 1000) {
+		errs = append(errs, "processing_artifact.cleanup_batch_size must be between 1 and 1000")
 	}
 
 	if cfg.Conversation != nil {
@@ -916,6 +1022,55 @@ func applyAuditDefaults(cfg *Config) {
 			cfg.Audit.RetentionDays = n
 		}
 	}
+}
+
+func applyProcessingArtifactDefaults(cfg *Config) error {
+	if cfg.ProcessingArtifact == nil {
+		cfg.ProcessingArtifact = &ProcessingArtifactConfig{
+			MaxPayloadBytes:      DefaultProcessingArtifactMaxPayloadBytes,
+			RetentionDays:        30,
+			CleanupIntervalHours: 24,
+			CleanupBatchSize:     100,
+		}
+	} else {
+		if !cfg.ProcessingArtifact.maxPayloadBytesSet {
+			cfg.ProcessingArtifact.MaxPayloadBytes = DefaultProcessingArtifactMaxPayloadBytes
+		}
+		if !cfg.ProcessingArtifact.retentionDaysSet {
+			cfg.ProcessingArtifact.RetentionDays = 30
+		}
+		if !cfg.ProcessingArtifact.cleanupIntervalHoursSet {
+			cfg.ProcessingArtifact.CleanupIntervalHours = 24
+		}
+		if !cfg.ProcessingArtifact.cleanupBatchSizeSet {
+			cfg.ProcessingArtifact.CleanupBatchSize = 100
+		}
+	}
+	overrides := []struct {
+		name string
+		set  func(int)
+	}{
+		{"WEKNORA_PROCESSING_ARTIFACT_MAX_PAYLOAD_BYTES", func(value int) { cfg.ProcessingArtifact.MaxPayloadBytes = value }},
+		{"WEKNORA_PROCESSING_ARTIFACT_RETENTION_DAYS", func(value int) { cfg.ProcessingArtifact.RetentionDays = value }},
+		{"WEKNORA_PROCESSING_ARTIFACT_CLEANUP_INTERVAL_HOURS", func(value int) { cfg.ProcessingArtifact.CleanupIntervalHours = value }},
+		{"WEKNORA_PROCESSING_ARTIFACT_CLEANUP_BATCH_SIZE", func(value int) { cfg.ProcessingArtifact.CleanupBatchSize = value }},
+	}
+	for _, override := range overrides {
+		rawValue, ok := os.LookupEnv(override.name)
+		if !ok {
+			continue
+		}
+		value := strings.TrimSpace(rawValue)
+		if value == "" {
+			return fmt.Errorf("invalid %s: value must not be blank", override.name)
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s: %w", override.name, err)
+		}
+		override.set(parsed)
+	}
+	return nil
 }
 
 // into actual prompt text content. Only xxx_id fields are used;

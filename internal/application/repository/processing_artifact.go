@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -45,6 +46,24 @@ func (r *processingArtifactRepository) Get(
 		return nil, err
 	}
 	return &artifact, nil
+}
+
+func (r *processingArtifactRepository) ListExpired(
+	ctx context.Context,
+	cutoff time.Time,
+	afterID uint64,
+	limit int,
+) ([]*types.ProcessingArtifact, error) {
+	var artifacts []*types.ProcessingArtifact
+	if err := r.db.WithContext(ctx).
+		Select("id", "tenant_id", "stage", "object_path", "size_bytes").
+		Where("created_at < ? AND id > ?", cutoff, afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&artifacts).Error; err != nil {
+		return nil, err
+	}
+	return artifacts, nil
 }
 
 func (r *processingArtifactRepository) GetMany(
@@ -138,9 +157,18 @@ func (r *processingArtifactRepository) PutManyIfAbsent(
 }
 
 func (r *processingArtifactRepository) DeleteByID(ctx context.Context, tenantID, id uint64) error {
-	return r.db.WithContext(ctx).
+	_, err := r.DeleteByIDWithResult(ctx, tenantID, id)
+	return err
+}
+
+func (r *processingArtifactRepository) DeleteByIDWithResult(
+	ctx context.Context,
+	tenantID, id uint64,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
-		Delete(&types.ProcessingArtifact{}).Error
+		Delete(&types.ProcessingArtifact{})
+	return result.RowsAffected == 1, result.Error
 }
 
 func validateProcessingArtifact(artifact *types.ProcessingArtifact) error {

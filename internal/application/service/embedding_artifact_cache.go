@@ -319,6 +319,12 @@ func (e *embeddingArtifactEmbedder) load(
 	if err == nil {
 		err = e.validateVector(vector)
 	}
+	if err != nil {
+		if invalidateErr := e.store.Invalidate(ctx, key, payload); invalidateErr != nil {
+			return nil, false, fmt.Errorf("invalidate embedding artifact: %w", invalidateErr)
+		}
+		return nil, false, nil
+	}
 	return vector, true, err
 }
 
@@ -355,7 +361,10 @@ func (e *embeddingArtifactEmbedder) loadMany(
 			err = e.validateVector(vector)
 		}
 		if err != nil {
-			return nil, err
+			if invalidateErr := e.store.Invalidate(ctx, key, payload); invalidateErr != nil {
+				return nil, fmt.Errorf("invalidate embedding artifact: %w", invalidateErr)
+			}
+			continue
 		}
 		result[key] = vector
 	}
@@ -377,10 +386,16 @@ func (e *embeddingArtifactEmbedder) freeze(
 	}
 	decoded, err := decodeEmbeddingVector(canonical, e.inner.GetDimensions())
 	if err != nil {
-		return nil, err
+		if invalidateErr := e.store.Invalidate(ctx, key, canonical); invalidateErr != nil {
+			return nil, fmt.Errorf("invalidate embedding artifact: %w", invalidateErr)
+		}
+		return vector, nil
 	}
 	if err := e.validateVector(decoded); err != nil {
-		return nil, err
+		if invalidateErr := e.store.Invalidate(ctx, key, canonical); invalidateErr != nil {
+			return nil, fmt.Errorf("invalidate embedding artifact: %w", invalidateErr)
+		}
+		return vector, nil
 	}
 	return decoded, nil
 }
@@ -424,7 +439,11 @@ func (e *embeddingArtifactEmbedder) freezeMany(
 			err = e.validateVector(vector)
 		}
 		if err != nil {
-			return nil, err
+			if invalidateErr := e.store.Invalidate(ctx, key, payload); invalidateErr != nil {
+				return nil, fmt.Errorf("invalidate embedding artifact: %w", invalidateErr)
+			}
+			result[key] = append([]float32(nil), vectors[key]...)
+			continue
 		}
 		result[key] = vector
 	}

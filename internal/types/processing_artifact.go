@@ -25,11 +25,28 @@ type ProcessingArtifactKey struct {
 	InputFingerprint string
 }
 
+type ProcessingArtifactCounter struct {
+	Stage   string `json:"stage"`
+	Outcome string `json:"outcome"`
+	Count   uint64 `json:"count"`
+}
+
+type ProcessingArtifactPurgeResult struct {
+	Scanned      uint64 `json:"scanned"`
+	Deleted      uint64 `json:"deleted"`
+	Failed       uint64 `json:"failed"`
+	DeletedBytes int64  `json:"deleted_bytes"`
+}
+
+func IsValidProcessingArtifactStage(stage string) bool {
+	return processingArtifactStagePattern.MatchString(stage)
+}
+
 func NewProcessingArtifactKey(tenantID uint64, stage string, keyVersion uint16, inputParts ...[]byte) (ProcessingArtifactKey, error) {
 	if tenantID == 0 {
 		return ProcessingArtifactKey{}, errors.New("processing artifact tenant ID must not be zero")
 	}
-	if !processingArtifactStagePattern.MatchString(stage) {
+	if !IsValidProcessingArtifactStage(stage) {
 		return ProcessingArtifactKey{}, fmt.Errorf("invalid processing artifact stage %q", stage)
 	}
 	if keyVersion == 0 {
