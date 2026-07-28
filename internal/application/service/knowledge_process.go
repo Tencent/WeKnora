@@ -2330,18 +2330,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
 		}
 
-		existing.ParseStatus = "pending"
-		existing.EnableStatus = "disabled"
-		existing.Description = ""
-		existing.ProcessedAt = nil
-		existing.EmbeddingModelID = kb.EmbeddingModelID
-		// Reset the enrichment counter so a leftover value from a
-		// previous attempt (e.g. cancelled before all subtasks decremented)
-		// cannot block the new finalizing transition later. This must be
-		// an explicit column write: UpdateKnowledge (full-row Save) omits
-		// pending_subtasks_count, so the struct assignment alone would not
-		// persist.
-		existing.PendingSubtasksCount = 0
+		resetKnowledgeForReparse(existing, kb)
 
 		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -2373,17 +2362,7 @@ func (s *knowledgeService) ReparseKnowledge(
 	}
 
 	// Step 2: Update knowledge status and metadata
-	existing.ParseStatus = "pending"
-	existing.EnableStatus = "disabled"
-	existing.Description = ""
-	existing.ProcessedAt = nil
-	existing.EmbeddingModelID = kb.EmbeddingModelID
-	// Reset the enrichment counter so a leftover value from a previous
-	// attempt cannot block the new finalizing transition later. This must
-	// be an explicit column write: UpdateKnowledge (full-row Save) omits
-	// pending_subtasks_count, so the struct assignment alone would not
-	// persist.
-	existing.PendingSubtasksCount = 0
+	resetKnowledgeForReparse(existing, kb)
 
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -2549,6 +2528,21 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
 	return existing, nil
+}
+
+// resetKnowledgeForReparse makes the top-level knowledge state describe the
+// new processing attempt rather than retaining terminal state from the
+// previous one.
+func resetKnowledgeForReparse(knowledge *types.Knowledge, kb *types.KnowledgeBase) {
+	knowledge.ParseStatus = types.ParseStatusPending
+	knowledge.EnableStatus = "disabled"
+	knowledge.Description = ""
+	knowledge.ProcessedAt = nil
+	knowledge.ErrorMessage = ""
+	knowledge.EmbeddingModelID = kb.EmbeddingModelID
+	// UpdateKnowledge deliberately omits pending_subtasks_count, so callers
+	// must still persist this reset through an explicit column update.
+	knowledge.PendingSubtasksCount = 0
 }
 
 // CancelKnowledgeParse marks an in-progress parse as cancelled by the user.
