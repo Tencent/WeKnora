@@ -191,6 +191,24 @@ curl --location 'http://localhost:8080/api/v1/auth/oidc/url?redirect=%2Fdashboar
 
 ---
 
+## GET `/auth/oidc/start` - 发起 OIDC 登录（直接 302）
+
+与 `/auth/oidc/url` 不同，此端点**直接 302 重定向**到 OIDC Provider 的授权页，不返回 JSON，因此无需前端 JS 介入。适用于外部平台（如企业门户 / Nexus）直接给出一个链接即可触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+
+回调地址由后端根据请求自身的 origin（`<scheme>://<host>/api/v1/auth/oidc/callback`）自动构造，无需调用方提供。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/auth/oidc/start'
+```
+
+**响应**：`302 Found`，`Location` 指向 IdP 授权页（含 `client_id` / `state` / `redirect_uri` / `scope`）。
+
+> 登录成功后的回调行为与 `/auth/oidc/callback` 一致：302 回前端首页并把登录结果编码进 URL hash。当前登录后固定落到默认首页 `/platform/knowledge-bases`（直达指定业务页的 `next` 参数为未来扩展）。
+
+---
+
 ## POST `/auth/refresh` - 刷新令牌
 
 **参数说明（请求体）**:
