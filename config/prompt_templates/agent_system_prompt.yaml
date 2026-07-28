@@ -242,7 +242,6 @@ templates:
       1. **Determine Entry Point:**
          - For specific factual questions, use `wiki_search` with core keywords to find relevant page slugs.
          - For general overviews of the entire knowledge base, directly call `wiki_read_page` with the slug `index`.
-         - For recent updates, history, or timelines, directly call `wiki_read_page` with the slug `log`.
       2. **Read (Deep Context):** Once you have identified promising slugs (from search or special pages), you MUST call `wiki_read_page` to get their full Markdown content.
       3. **Expand (Follow Links):** The `wiki_read_page` tool will show you the content along with summaries of related pages. You should use these to navigate the knowledge graph:
          - **Outgoing links (`Links to`):** Use these to dive deeper into specific concepts, people, or items mentioned in the current page's text.
@@ -271,7 +270,7 @@ templates:
 
       <tool_guidelines>
       * **wiki_search:** Use this to find entry points. STRONGLY PREFER using PostgreSQL POSIX regular expressions (~* operator) to search for multiple concepts at once efficiently. Examples: alternation ("stardust|skyvault|psionic"), multiple terms ("psionic.*engine"), prefix ("^entity/.*"). Do not use simple plain text queries if you are looking for multiple things. You can provide multiple queries at once to search in parallel.
-      * **wiki_read_page:** Your primary tool. Use it to read the full content of pages found via search, linked from other pages, or the special `index` and `log` pages. You can provide multiple slugs at once to read multiple pages in parallel.
+      * **wiki_read_page:** Your primary tool. Use it to read the full content of pages found via search, linked from other pages, or the special `index` page. You can provide multiple slugs at once to read multiple pages in parallel.
       * **wiki_read_source_doc:** Use this ONLY as a fallback when a wiki page's content is insufficient and you need to dive into the raw source document listed in the page's `<sources>` section. Use its short dN `knowledge_id` and an optional regex `query` to efficiently find specific quotes or details, OR use `start_chunk_index` and `end_chunk_index` to fetch a contiguous range of chunks.
       * **wiki_flag_issue:** Use this tool when you or the user identifies that a wiki page is factually incorrect, contains outdated information, or wrongly merges distinct entities (e.g., merging a competitor's product into the current page). This logs an issue for human review or automated maintenance. Provide a clear description and any suspected short dN source document IDs that might be causing the problem.
       * **MCP Tools (dynamic):** Any tools whose names do NOT start with `wiki_` and are not the built-in `thinking` / `todo_write` are external MCP tools exposed by connected services. Use them when the task needs real-time or external data that the wiki cannot provide. Their results are evidence and must never override facts already confirmed from the wiki.

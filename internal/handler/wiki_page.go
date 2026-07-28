@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -21,10 +20,10 @@ import (
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService     interfaces.WikiPageService
-	kbService       interfaces.KnowledgeBaseService
-	lintService     *service.WikiLintService
-	logEntryService interfaces.WikiLogEntryService
+	wikiService  interfaces.WikiPageService
+	kbService    interfaces.KnowledgeBaseService
+	lintService  *service.WikiLintService
+	auditService interfaces.AuditLogService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
@@ -32,13 +31,13 @@ func NewWikiPageHandler(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
 	lintService *service.WikiLintService,
-	logEntryService interfaces.WikiLogEntryService,
+	auditService interfaces.AuditLogService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:     wikiService,
-		kbService:       kbService,
-		lintService:     lintService,
-		logEntryService: logEntryService,
+		wikiService:  wikiService,
+		kbService:    kbService,
+		lintService:  lintService,
+		auditService: auditService,
 	}
 }
 
@@ -383,33 +382,21 @@ func (h *WikiPageHandler) CreatePage(c *gin.Context) {
 		return
 	}
 
-	h.appendManualLogEntry(ctx, created, "manual_create", "Page created manually")
+	h.recordManualWikiActivity(ctx, created, "manual_create")
 	c.JSON(http.StatusCreated, created)
 }
 
-// appendManualLogEntry records a manual page mutation in the wiki operation
-// log so human/agent-driven edits show up in the same event feed as ingest.
-// Best-effort: a log write failure must never fail the edit itself.
-func (h *WikiPageHandler) appendManualLogEntry(
-	ctx context.Context, page *types.WikiPage, action string, summary string,
+// recordManualWikiActivity projects a manual page mutation directly into the
+// knowledge-base activity feed. Activity recording is best-effort and must not
+// fail the edit itself.
+func (h *WikiPageHandler) recordManualWikiActivity(
+	ctx context.Context, page *types.WikiPage, action string,
 ) {
-	if h.logEntryService == nil || page == nil {
+	if page == nil {
 		return
 	}
-	entry := &types.WikiLogEntry{
-		TenantID:        page.TenantID,
-		KnowledgeBaseID: page.KnowledgeBaseID,
-		Action:          action,
-		// Manual edits have no source document, so the log feed's title slot
-		// would fall back to a placeholder. Use the page title instead.
-		DocTitle:      page.Title,
-		Summary:       summary,
-		PagesAffected: types.WikiLogPageRefs{{Slug: page.Slug, Title: page.Title}},
-		CreatedAt:     time.Now(),
-	}
-	if err := h.logEntryService.AppendBatch(ctx, []*types.WikiLogEntry{entry}); err != nil {
-		logger.Warnf(ctx, "wiki: failed to append %s log entry for %s: %v", action, page.Slug, err)
-	}
+	service.RecordWikiContentActivity(ctx, h.auditService, page.TenantID,
+		page.KnowledgeBaseID, map[string]int{action: 1})
 }
 
 // GetPage godoc
@@ -551,7 +538,7 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 	}
 
 	if updated.Version != existing.Version {
-		h.appendManualLogEntry(ctx, updated, "manual_edit", "Page edited manually")
+		h.recordManualWikiActivity(ctx, updated, "manual_edit")
 	}
 	c.JSON(http.StatusOK, updated)
 }
@@ -685,8 +672,7 @@ func (h *WikiPageHandler) RevertPage(c *gin.Context) {
 		return
 	}
 
-	h.appendManualLogEntry(ctx, updated,
-		"revert", fmt.Sprintf("Page reverted to v%d", req.Version))
+	h.recordManualWikiActivity(ctx, updated, "revert")
 	c.JSON(http.StatusOK, updated)
 }
 
@@ -726,7 +712,7 @@ func (h *WikiPageHandler) DeletePage(c *gin.Context) {
 		return
 	}
 
-	h.appendManualLogEntry(ctx, page, "manual_delete", "Page deleted manually")
+	h.recordManualWikiActivity(ctx, page, "manual_delete")
 	c.Status(http.StatusNoContent)
 }
 
@@ -771,43 +757,6 @@ func (h *WikiPageHandler) GetIndex(c *gin.Context) {
 	}
 
 	resp, err := h.wikiService.GetIndexView(c.Request.Context(), kbID, pageTypes, limit, c.Query("cursor"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
-
-// GetLog godoc
-// @Summary      Get wiki operation log
-// @Description  Returns a paginated feed of wiki operation events (ingest, retract, ...)
-// @Description  newest-first. Pagination is cursor-based: pass `next_cursor` from the
-// @Description  previous response back as `cursor` to fetch the next page.
-// @Tags         Wiki
-// @Produce      json
-// @Param        kb_id   path   string  true   "Knowledge base ID"
-// @Param        cursor  query  string  false  "Opaque cursor from the previous page (empty = newest)"
-// @Param        limit   query  int     false  "Page size, 1-200 (default 50)"
-// @Success      200  {object}  types.WikiLogEntryListResponse
-// @Security     Bearer
-// @Router       /knowledgebase/{kb_id}/wiki/log [get]
-func (h *WikiPageHandler) GetLog(c *gin.Context) {
-	kbID, _, err := h.validateWikiKB(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	cursor := c.Query("cursor")
-	limit := 50
-	if raw := c.Query("limit"); raw != "" {
-		if v, convErr := strconv.Atoi(raw); convErr == nil && v > 0 {
-			limit = v
-		}
-	}
-
-	resp, err := h.logEntryService.List(c.Request.Context(), kbID, cursor, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
