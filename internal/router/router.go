@@ -127,8 +127,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 
+	operations := newOperationsObserver(params.DB, params.RedisClient)
+	r.Use(operations.httpMetricsMiddleware())
+
 	// 健康检查（不需要认证）
 	registerHealthRoutes(r, params.DB, params.RedisClient)
+	registerMetricsRoute(r, operations)
 
 	// Swagger API 文档（仅在非生产环境下启用）
 	// 通过 GIN_MODE 环境变量判断：release 模式下禁用 Swagger
@@ -254,6 +258,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
+		RegisterOperationsAdminRoutes(v1, operations, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)

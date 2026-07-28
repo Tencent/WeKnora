@@ -26,7 +26,11 @@ func registerHealthRoutes(r gin.IRouter, db *gorm.DB, redisClient *redis.Client)
 
 	r.GET("/health", livenessHandler)
 	r.GET("/livez", livenessHandler)
-	r.GET("/readyz", newReadinessHandler([]readinessCheck{
+	r.GET("/readyz", newReadinessHandler(defaultReadinessChecks(db, redisClient), readinessCheckTimeout))
+}
+
+func defaultReadinessChecks(db *gorm.DB, redisClient *redis.Client) []readinessCheck {
+	return []readinessCheck{
 		{
 			name: "database",
 			probe: func(ctx context.Context) error {
@@ -48,31 +52,12 @@ func registerHealthRoutes(r gin.IRouter, db *gorm.DB, redisClient *redis.Client)
 				return redisClient.Ping(ctx).Err()
 			},
 		},
-	}, readinessCheckTimeout))
+	}
 }
 
 func newReadinessHandler(checks []readinessCheck, timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		statuses := gin.H{}
-		failed := false
-
-		for _, check := range checks {
-			if check.disabled {
-				statuses[check.name] = "disabled"
-				continue
-			}
-
-			ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-			err := check.probe(ctx)
-			cancel()
-			if err != nil {
-				statuses[check.name] = "failed"
-				failed = true
-				continue
-			}
-
-			statuses[check.name] = "ok"
-		}
+		statuses, failed := runReadinessChecks(c.Request.Context(), checks, timeout)
 
 		if failed {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "checks": statuses})
@@ -81,4 +66,29 @@ func newReadinessHandler(checks []readinessCheck, timeout time.Duration) gin.Han
 
 		c.JSON(http.StatusOK, gin.H{"status": "ready", "checks": statuses})
 	}
+}
+
+func runReadinessChecks(parent context.Context, checks []readinessCheck, timeout time.Duration) (map[string]string, bool) {
+	statuses := make(map[string]string, len(checks))
+	failed := false
+
+	for _, check := range checks {
+		if check.disabled {
+			statuses[check.name] = "disabled"
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(parent, timeout)
+		err := check.probe(ctx)
+		cancel()
+		if err != nil {
+			statuses[check.name] = "failed"
+			failed = true
+			continue
+		}
+
+		statuses[check.name] = "ok"
+	}
+
+	return statuses, failed
 }

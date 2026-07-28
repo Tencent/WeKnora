@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -337,6 +338,22 @@ func TestLogDiskThresholdsRejectUnsafeValues(t *testing.T) {
 		minFreeGB:           defaultLogDiskMinFreeGB,
 	}) {
 		t.Fatalf("thresholds = %#v, want defaults", thresholds)
+	}
+}
+
+func TestGetFileLogRuntimeStatus(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "app.log")
+	if err := os.WriteFile(logPath, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("os.WriteFile returned error: %v", err)
+	}
+	t.Setenv("LOG_PATH", logPath)
+
+	status, err := GetFileLogRuntimeStatus()
+	if err != nil {
+		t.Fatalf("GetFileLogRuntimeStatus returned error: %v", err)
+	}
+	if !status.Enabled || status.SizeBytes != 5 || status.DiskTotalBytes == 0 || status.DiskFreeBytes == 0 {
+		t.Fatalf("unexpected file log status: %#v", status)
 	}
 }
 

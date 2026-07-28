@@ -68,6 +68,15 @@ const (
 	logDiskStateUnknown  logDiskState = "unknown"
 )
 
+// FileLogRuntimeStatus contains log-file storage measurements without exposing
+// the configured path. It is intended for operational status and metrics APIs.
+type FileLogRuntimeStatus struct {
+	Enabled        bool
+	SizeBytes      int64
+	DiskFreeBytes  uint64
+	DiskTotalBytes uint64
+}
+
 // ansiStripWriter removes ANSI color/style sequences so file logs stay plain text
 // while stdout can still render colors in a terminal.
 type ansiStripWriter struct {
@@ -582,6 +591,30 @@ func evaluateLogDiskState(usage logDiskUsage, thresholds logDiskThresholds) logD
 		return logDiskStateWarning
 	}
 	return logDiskStateHealthy
+}
+
+// GetFileLogRuntimeStatus returns best-effort measurements for the filesystem
+// that holds LOG_PATH. A disabled file log is not an error.
+func GetFileLogRuntimeStatus() (FileLogRuntimeStatus, error) {
+	logPath := resolveLogPathFromEnv()
+	if logPath == "" {
+		return FileLogRuntimeStatus{}, nil
+	}
+
+	status := FileLogRuntimeStatus{Enabled: true}
+	if info, err := os.Stat(logPath); err == nil {
+		status.SizeBytes = info.Size()
+	} else if !os.IsNotExist(err) {
+		return status, err
+	}
+
+	usage, err := disk.Usage(filepath.Dir(logPath))
+	if err != nil {
+		return status, err
+	}
+	status.DiskFreeBytes = usage.Free
+	status.DiskTotalBytes = usage.Total
+	return status, nil
 }
 
 // 添加调用者字段

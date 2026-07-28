@@ -72,6 +72,23 @@ These signals do not delete logs, trigger automatic backups, or send email.
 Connect them to external monitoring in the later observability and alerting
 steps.
 
+## Monitoring Endpoints
+
+`GET /metrics` exposes low-cardinality Prometheus metrics for HTTP traffic,
+database and Redis reachability, database pool use, application file-log size,
+free disk space, build version, and the migration state captured at startup.
+It intentionally excludes request paths, user data, credentials, and error
+messages from labels and responses.
+
+Prometheus should scrape the application port directly. Treat `/metrics` as an
+internal endpoint: restrict it with a firewall or reverse-proxy allowlist and
+do not publish it through a public frontend route.
+
+`GET /api/v1/admin/operations/status` returns a sanitized runtime snapshot for
+system administrators. It reports dependency states, connection-pool values,
+file-log storage values, and migration state, but never filesystem paths, DSNs,
+passwords, or raw dependency errors.
+
 ## Schema Check
 
 Run the repeatable schema validation before publishing a MySQL-related change:
