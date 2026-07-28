@@ -677,7 +677,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	}
 	if meta != nil {
 		for _, question := range meta.GeneratedQuestions {
-			if strings.TrimSpace(question.Question) == "" || !meta.IsQuestionCurrent(question, chunk.ContentRevision) {
+			if strings.TrimSpace(question.Question) == "" {
 				continue
 			}
 			items = append(items, &types.IndexInfo{

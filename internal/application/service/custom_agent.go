@@ -722,11 +722,11 @@ func (s *customAgentService) getSuggestedQuestions(
 			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
 				continue
 			}
-			currentQuestions := meta.GetCurrentQuestionStrings(chunk.ContentRevision)
-			if len(currentQuestions) == 0 {
+			questions := meta.GetQuestionStrings()
+			if len(questions) == 0 {
 				continue
 			}
-			q := currentQuestions[0]
+			q := questions[0]
 			if q == "" || seen[q] {
 				continue
 			}
