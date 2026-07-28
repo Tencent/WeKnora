@@ -1600,7 +1600,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		// Create index entries for generated questions
 		for _, gq := range generatedQuestions {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
+			sourceID := types.GeneratedQuestionSourceID(chunk.ID, gq.ID)
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         gq.Question,
 				SourceID:        sourceID,
@@ -1930,7 +1930,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		for _, gq := range generatedQuestions {
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         gq.Question,
-				SourceID:        fmt.Sprintf("%s-%s", chunk.ID, gq.ID),
+				SourceID:        types.GeneratedQuestionSourceID(chunk.ID, gq.ID),
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
@@ -2688,7 +2688,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			for _, q := range meta.GeneratedQuestions {
 				if strings.TrimSpace(q.Question) != "" {
 					indexInfo = append(indexInfo, &types.IndexInfo{
-						Content: prefix + q.Question, SourceID: fmt.Sprintf("%s-%s", chunk.ID, q.ID),
+						Content: prefix + q.Question, SourceID: types.GeneratedQuestionSourceID(chunk.ID, q.ID),
 						SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 						KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 						KnowledgeType: sourceKB.Type, IsEnabled: true,

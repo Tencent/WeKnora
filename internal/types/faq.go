@@ -30,6 +30,24 @@ type GeneratedQuestion struct {
 	Question string `json:"question"` // 问题内容
 }
 
+const maxGeneratedQuestionSourceIDLength = 64
+
+// GeneratedQuestionSourceID builds the retrieval source identifier for a
+// generated question. PostgreSQL stores source_id as varchar(64), while a
+// chunk UUID plus a question UUID would be 73 bytes. Preserve the historical
+// representation for short IDs and hash only oversized question IDs so
+// existing index rows remain addressable by delete/reindex operations.
+func GeneratedQuestionSourceID(chunkID, questionID string) string {
+	candidate := chunkID + "-" + questionID
+	if len(candidate) <= maxGeneratedQuestionSourceIDLength {
+		return candidate
+	}
+	digest := sha256.Sum256([]byte(questionID))
+	// UUID chunk IDs use 36 bytes; "-q" plus 24 hex characters keeps the
+	// complete identifier at 62 bytes while retaining ample collision space.
+	return chunkID + "-q" + hex.EncodeToString(digest[:12])
+}
+
 // DocumentChunkMetadata 定义文档 Chunk 的元数据结构
 // 用于存储AI生成的问题等增强信息
 type DocumentChunkMetadata struct {

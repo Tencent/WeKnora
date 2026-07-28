@@ -601,7 +601,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 				continue
 			}
 			items = append(items, &types.IndexInfo{
-				Content: prefix + question.Question, SourceID: fmt.Sprintf("%s-%s", chunk.ID, question.ID),
+				Content: prefix + question.Question, SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
 				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType: kb.Type, IsEnabled: true,
@@ -717,7 +717,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 
 	// 5. Delete the vector index for this question
 	// The source_id format is: {chunk_id}-{question_id}
-	sourceID := fmt.Sprintf("%s-%s", chunkID, questionID)
+	sourceID := types.GeneratedQuestionSourceID(chunkID, questionID)
 
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
