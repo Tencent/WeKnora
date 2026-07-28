@@ -2,12 +2,15 @@ package logger
 
 import (
 	"context"
+	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry {
@@ -180,6 +183,160 @@ func TestLevelColorFor(t *testing.T) {
 		if got := levelColorFor(lvl); got != want {
 			t.Errorf("levelColorFor(%v) = %q, want %q", lvl, got, want)
 		}
+	}
+}
+
+func TestLogFileRotationConfigDefaults(t *testing.T) {
+	t.Setenv("LOG_FILE_MAX_SIZE_MB", "")
+	t.Setenv("LOG_FILE_MAX_BACKUPS", "")
+	t.Setenv("LOG_FILE_MAX_AGE_DAYS", "")
+	t.Setenv("LOG_FILE_COMPRESS", "")
+
+	config, warnings := resolveLogFileRotationConfigFromEnv()
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if config != (logFileRotationConfig{
+		maxSizeMB:  defaultLogFileMaxSizeMB,
+		maxBackups: defaultLogFileMaxBackups,
+		maxAgeDays: defaultLogFileMaxAgeDays,
+		compress:   defaultLogFileCompress,
+	}) {
+		t.Fatalf("config = %#v, want defaults", config)
+	}
+}
+
+func TestLogFileRotationConfigUsesEnvironmentValues(t *testing.T) {
+	t.Setenv("LOG_FILE_MAX_SIZE_MB", "17")
+	t.Setenv("LOG_FILE_MAX_BACKUPS", "4")
+	t.Setenv("LOG_FILE_MAX_AGE_DAYS", "9")
+	t.Setenv("LOG_FILE_COMPRESS", "false")
+
+	config, warnings := resolveLogFileRotationConfigFromEnv()
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if config != (logFileRotationConfig{maxSizeMB: 17, maxBackups: 4, maxAgeDays: 9, compress: false}) {
+		t.Fatalf("config = %#v, want configured values", config)
+	}
+}
+
+func TestLogFileRotationConfigRejectsUnsafeValues(t *testing.T) {
+	t.Setenv("LOG_FILE_MAX_SIZE_MB", "0")
+	t.Setenv("LOG_FILE_MAX_BACKUPS", "-1")
+	t.Setenv("LOG_FILE_MAX_AGE_DAYS", "not-a-number")
+	t.Setenv("LOG_FILE_COMPRESS", "sometimes")
+
+	config, warnings := resolveLogFileRotationConfigFromEnv()
+	if len(warnings) != 4 {
+		t.Fatalf("warnings = %v, want four warnings", warnings)
+	}
+	if config != (logFileRotationConfig{
+		maxSizeMB:  defaultLogFileMaxSizeMB,
+		maxBackups: defaultLogFileMaxBackups,
+		maxAgeDays: defaultLogFileMaxAgeDays,
+		compress:   defaultLogFileCompress,
+	}) {
+		t.Fatalf("config = %#v, want defaults", config)
+	}
+}
+
+func TestOpenLogFileUsesRotationConfig(t *testing.T) {
+	config := logFileRotationConfig{maxSizeMB: 1, maxBackups: 2, maxAgeDays: 3, compress: false}
+	writer, err := openLogFile(filepath.Join(t.TempDir(), "app.log"), config)
+	if err != nil {
+		t.Fatalf("openLogFile returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	rotationWriter, ok := writer.(*lumberjack.Logger)
+	if !ok {
+		t.Fatalf("writer type = %T, want *lumberjack.Logger", writer)
+	}
+	if rotationWriter.MaxSize != config.maxSizeMB || rotationWriter.MaxBackups != config.maxBackups ||
+		rotationWriter.MaxAge != config.maxAgeDays || rotationWriter.Compress != config.compress {
+		t.Fatalf("rotation writer = %#v, want %#v", rotationWriter, config)
+	}
+}
+
+func TestOpenLogFileRotatesAtConfiguredSize(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "app.log")
+	writer, err := openLogFile(logPath, logFileRotationConfig{
+		maxSizeMB:  1,
+		maxBackups: 3,
+		maxAgeDays: 28,
+		compress:   false,
+	})
+	if err != nil {
+		t.Fatalf("openLogFile returned error: %v", err)
+	}
+
+	if _, err := io.WriteString(writer, strings.Repeat("x", 1024*1024)); err != nil {
+		t.Fatalf("first log write returned error: %v", err)
+	}
+	if _, err := io.WriteString(writer, "y"); err != nil {
+		t.Fatalf("rotation-triggering write returned error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close returned error: %v", err)
+	}
+
+	rotated, err := filepath.Glob(filepath.Join(filepath.Dir(logPath), "app-*.log"))
+	if err != nil {
+		t.Fatalf("filepath.Glob returned error: %v", err)
+	}
+	if len(rotated) != 1 {
+		t.Fatalf("rotated files = %v, want one file", rotated)
+	}
+}
+
+func TestLogDiskThresholdsAndState(t *testing.T) {
+	t.Setenv("LOG_DISK_WARNING_FREE_PERCENT", "30")
+	t.Setenv("LOG_DISK_CRITICAL_FREE_PERCENT", "15")
+	t.Setenv("LOG_DISK_MIN_FREE_GB", "7")
+
+	thresholds, warnings := resolveLogDiskThresholdsFromEnv()
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+
+	const gib = 1024 * 1024 * 1024
+	tests := []struct {
+		name  string
+		usage logDiskUsage
+		want  logDiskState
+	}{
+		{name: "healthy", usage: logDiskUsage{totalBytes: 100 * gib, freeBytes: 40 * gib}, want: logDiskStateHealthy},
+		{name: "warning", usage: logDiskUsage{totalBytes: 100 * gib, freeBytes: 20 * gib}, want: logDiskStateWarning},
+		{name: "critical percent", usage: logDiskUsage{totalBytes: 100 * gib, freeBytes: 10 * gib}, want: logDiskStateCritical},
+		{name: "critical capacity", usage: logDiskUsage{totalBytes: 10 * gib, freeBytes: 6 * gib}, want: logDiskStateCritical},
+		{name: "unknown", usage: logDiskUsage{}, want: logDiskStateUnknown},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := evaluateLogDiskState(test.usage, thresholds); got != test.want {
+				t.Fatalf("evaluateLogDiskState(%#v) = %q, want %q", test.usage, got, test.want)
+			}
+		})
+	}
+}
+
+func TestLogDiskThresholdsRejectUnsafeValues(t *testing.T) {
+	t.Setenv("LOG_DISK_WARNING_FREE_PERCENT", "10")
+	t.Setenv("LOG_DISK_CRITICAL_FREE_PERCENT", "10")
+	t.Setenv("LOG_DISK_MIN_FREE_GB", "-1")
+
+	thresholds, warnings := resolveLogDiskThresholdsFromEnv()
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %v, want invalid capacity and invalid ordering warnings", warnings)
+	}
+	if thresholds != (logDiskThresholds{
+		warningFreePercent:  defaultLogDiskWarningFreePercent,
+		criticalFreePercent: defaultLogDiskCriticalFreePercent,
+		minFreeGB:           defaultLogDiskMinFreeGB,
+	}) {
+		t.Fatalf("thresholds = %#v, want defaults", thresholds)
 	}
 }
 
