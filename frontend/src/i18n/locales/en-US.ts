@@ -549,6 +549,8 @@ export default {
     summaryRefreshed: 'Summary refreshed',
     summaryRefreshQueued: 'Summary refresh queued; it will update automatically when ready',
     indexFailed: 'Index sync failed',
+    chunkSavedIndexFailed: 'Content saved, but index sync failed. Use Retry index.',
+    chunkEditConflict: 'This chunk was modified by someone else. The list was refreshed; please try again.',
     retryIndex: 'Retry index',
     indexRetrySuccess: 'Index synchronized',
     history: 'History',

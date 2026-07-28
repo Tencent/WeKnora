@@ -548,6 +548,8 @@ export default {
     summaryRefreshed: "摘要已更新",
     summaryRefreshQueued: "摘要刷新已提交，完成后会自动更新",
     indexFailed: "索引同步失败",
+    chunkSavedIndexFailed: "内容已保存，但索引同步失败，请点击重试索引",
+    chunkEditConflict: "分块已被他人修改，列表已刷新，请重试",
     retryIndex: "重试索引",
     indexRetrySuccess: "索引已同步",
     history: "历史",
