@@ -1851,6 +1851,14 @@ const handleDetailsScroll = () => {
                                   {{ chunk.original.is_enabled ? $t('knowledgeBase.enabledStatus') : $t('knowledgeBase.disabledStatus') }}
                                 </div>
                               </div>
+                              <div class="chunk-history-diff-legend">
+                                <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--add">
+                                  <i />{{ $t('knowledgeBase.diffAddedInCurrent') }}
+                                </span>
+                                <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--del">
+                                  <i />{{ $t('knowledgeBase.diffRemovedFromCurrent') }}
+                                </span>
+                              </div>
                             </div>
                             <div v-if="chunkHistoryLoading === chunk.original.id" class="chunk-history-popup-state">
                               <t-loading size="small" />
@@ -1883,20 +1891,12 @@ const handleDetailsScroll = () => {
                                     <t-popconfirm theme="warning"
                                       :content="$t('knowledgeBase.revertRevisionConfirm', { revision: revision.revision })"
                                       @confirm="revertChunk(chunk.original, revision.revision)">
-                                      <t-button size="small" variant="text"
+                                      <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                        :title="$t('knowledgeBase.revertRevision')"
                                         :loading="revertingRevision === `${chunk.original.id}:${revision.revision}`">
                                         <template #icon><t-icon name="rollback" size="14px" /></template>
-                                        {{ $t('knowledgeBase.revertRevision') }}
                                       </t-button>
                                     </t-popconfirm>
-                                  </div>
-                                  <div class="chunk-history-diff-legend">
-                                    <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--add">
-                                      <i />{{ $t('knowledgeBase.diffAddedInCurrent') }}
-                                    </span>
-                                    <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--del">
-                                      <i />{{ $t('knowledgeBase.diffRemovedFromCurrent') }}
-                                    </span>
                                   </div>
                                   <div v-if="!compactChunkDiff(chunk.original).length" class="chunk-history-no-diff">
                                     {{ $t('knowledgeBase.noContentChanges') }}
@@ -2614,6 +2614,10 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-history-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 8px 12px 7px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
@@ -2710,7 +2714,7 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-history-diff {
-  padding: 0 14px 12px;
+  padding: 0 12px 10px;
 }
 
 .chunk-history-diff-head {
@@ -2718,7 +2722,7 @@ const handleDetailsScroll = () => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 32px;
+  min-height: 30px;
   color: var(--td-text-color-placeholder);
   font-size: 11px;
 }
@@ -2727,7 +2731,8 @@ const handleDetailsScroll = () => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 0 6px;
+  margin: 0;
+  flex-shrink: 0;
   color: var(--td-text-color-placeholder);
   font-size: 10px;
 }
