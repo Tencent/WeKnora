@@ -559,6 +559,8 @@ export default {
     summaryRefreshed: "요약이 업데이트되었습니다",
     summaryRefreshQueued: "요약 새로고침이 대기열에 추가되었으며 완료되면 자동으로 업데이트됩니다",
     indexFailed: "인덱스 동기화 실패",
+    chunkSavedIndexFailed: "내용은 저장되었지만 인덱스 동기화에 실패했습니다. 인덱스 재시도를 사용하세요.",
+    chunkEditConflict: "다른 사용자가 이 청크를 수정했습니다. 목록을 새로고침했으니 다시 시도하세요.",
     retryIndex: "인덱스 재시도",
     indexRetrySuccess: "인덱스가 동기화되었습니다",
     history: "기록",

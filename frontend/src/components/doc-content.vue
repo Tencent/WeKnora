@@ -1090,6 +1090,60 @@ const chunkDraft = ref('');
 const savingChunkId = ref('');
 const chunkStatusLoading = ref('');
 
+const getChunkMetadata = (item: any): Record<string, any> => (
+  typeof item.metadata === 'string'
+    ? JSON.parse(item.metadata || '{}')
+    : { ...(item.metadata || {}) }
+);
+
+const setChunkMetadata = (item: any, metadata: Record<string, any>) => {
+  item.metadata = metadata;
+};
+
+const upsertChunkGeneratedQuestion = (item: any, questionData: GeneratedQuestion) => {
+  const metadata = getChunkMetadata(item);
+  const questions: GeneratedQuestion[] = [...(metadata.generated_questions || [])];
+  const index = questions.findIndex((q) => q.id === questionData.id);
+  if (index >= 0) {
+    questions[index] = questionData;
+  } else {
+    questions.push(questionData);
+  }
+  metadata.generated_questions = questions;
+  setChunkMetadata(item, metadata);
+};
+
+const notifyChunkMutationOutcome = (item: any, result: any, successMessage?: string) => {
+  Object.assign(item, result.data);
+  applySummaryState(result.summary_status, result.description);
+  if (item.index_status === 'failed') {
+    MessagePlugin.warning(t('knowledgeBase.chunkSavedIndexFailed'));
+    return;
+  }
+  if (successMessage) {
+    MessagePlugin.success(successMessage);
+  }
+};
+
+const reloadChunksFromStart = () => {
+  page = 1;
+  loadingChunks = true;
+  pendingRequestedPage = 1;
+  pendingChunksBeforeLoad = 0;
+  editingChunkId.value = '';
+  chunkDraft.value = '';
+  emit('getDoc', 1);
+};
+
+const handleChunkEditError = (error: any, fallbackMessage: string) => {
+  if (error?.status === 409) {
+    MessagePlugin.warning(error?.message || t('knowledgeBase.chunkEditConflict'));
+    reloadChunksFromStart();
+    return;
+  }
+  MessagePlugin.error(error?.message || fallbackMessage);
+};
+
 const startChunkEdit = (item: any) => {
   if (editingChunkId.value === item.id) {
     editingChunkId.value = '';
@@ -1111,13 +1165,11 @@ const saveChunkEdit = async (item: any) => {
       content: chunkDraft.value,
       expected_revision: item.content_revision || 0,
     });
-    Object.assign(item, result.data);
     editingChunkId.value = '';
-    applySummaryState(result.summary_status, result.description);
+    notifyChunkMutationOutcome(item, result, t('common.saveSuccess'));
     void refreshChunkHistoryAfterMutation(item);
-    MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.saveFailed'));
+    handleChunkEditError(error, t('common.saveFailed'));
   } finally {
     savingChunkId.value = '';
   }
@@ -1130,11 +1182,10 @@ const toggleChunkEnabled = async (item: any, isEnabled: boolean) => {
       is_enabled: isEnabled,
       expected_revision: item.content_revision || 0,
     });
-    Object.assign(item, result.data);
-    applySummaryState(result.summary_status, result.description);
+    notifyChunkMutationOutcome(item, result);
     void refreshChunkHistoryAfterMutation(item);
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.error'));
+    handleChunkEditError(error, t('common.error'));
   } finally {
     chunkStatusLoading.value = '';
   }
@@ -1254,12 +1305,10 @@ const revertChunk = async (item: any, revision: number) => {
   revertingRevision.value = `${item.id}:${revision}`;
   try {
     const result: any = await revertDocumentChunk(props.details.id, item.id, revision, item.content_revision || 0);
-    Object.assign(item, result.data);
-    applySummaryState(result.summary_status, result.description);
+    notifyChunkMutationOutcome(item, result, t('knowledgeBase.chunkReverted'));
     await refreshChunkHistoryAfterMutation(item);
-    MessagePlugin.success(t('knowledgeBase.chunkReverted'));
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.error'));
+    handleChunkEditError(error, t('common.error'));
   } finally {
     revertingRevision.value = '';
   }
@@ -1317,9 +1366,7 @@ const addQuestion = async (item: any) => {
     const result: any = await upsertGeneratedQuestion(item.id, question);
     questionDrafts.value[item.id] = '';
     questionComposerChunk.value = '';
-    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata || '{}') : (item.metadata || {});
-    metadata.generated_questions = [...(metadata.generated_questions || []), result.data];
-    item.metadata = metadata;
+    upsertChunkGeneratedQuestion(item, result.data);
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
@@ -1348,8 +1395,9 @@ const saveQuestionEdit = async (item: any, question: GeneratedQuestion) => {
   savingQuestionKey.value = `${item.id}:${question.id}`;
   try {
     const result: any = await upsertGeneratedQuestion(item.id, value, question.id);
-    question.question = value;
-    question.content_revision = result?.data?.content_revision ?? (item.content_revision || 0);
+    if (result?.data) {
+      upsertChunkGeneratedQuestion(item, result.data);
+    }
     cancelQuestionEdit();
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
