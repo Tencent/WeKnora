@@ -30,8 +30,8 @@ func SliceContentByDocumentRange(content string, contentStartAt, rangeStart, ran
 	return string(runes[relStart:relEnd])
 }
 
-// ImageURLsInContent returns the set of image URLs referenced as Markdown
-// images in content.
+// ImageURLsInContent returns the set of image URLs referenced by content,
+// covering both Markdown image links and HTML <img> tags with a quoted src.
 func ImageURLsInContent(content string) map[string]bool {
 	urls := make(map[string]bool)
 	for _, match := range MarkdownImageRegex.FindAllStringSubmatch(content, -1) {
@@ -40,12 +40,24 @@ func ImageURLsInContent(content string) map[string]bool {
 		}
 		urls[match[2]] = true
 	}
+	// Screenshots embedded as HTML count as present in the content too.
+	// Collecting only Markdown links would make the image_info filters treat an
+	// HTML-only passage as holding no images at all and drop every entry.
+	for _, match := range HTMLImageSrcRegex.FindAllStringSubmatch(content, -1) {
+		if len(match) <= HTMLImageSrcURLGroup {
+			continue
+		}
+		if src := strings.TrimSpace(match[HTMLImageSrcURLGroup]); src != "" {
+			urls[src] = true
+		}
+	}
 	return urls
 }
 
 // FilterImageInfoByContentURLs keeps only image_info entries whose URL or
-// OriginalURL appears as a Markdown image in content. Returns empty string
-// when nothing matches or imageInfoJSON is invalid.
+// OriginalURL is referenced by content, as either a Markdown image link or an
+// HTML <img> tag. Returns empty string when nothing matches or imageInfoJSON
+// is invalid.
 func FilterImageInfoByContentURLs(content string, imageInfoJSON string) string {
 	if imageInfoJSON == "" {
 		return ""
@@ -117,8 +129,8 @@ func PruneMarkdownImagesByImageInfo(content, imageInfoJSON string) string {
 	return collapseBlankLines(filtered)
 }
 
-// FilterImageInfoByMatchRange keeps image_info entries whose Markdown image
-// reference falls within the document rune range [matchStart, matchEnd).
+// FilterImageInfoByMatchRange keeps image_info entries whose image reference
+// falls within the document rune range [matchStart, matchEnd).
 // Used when parent content is expanded for context but multimodal enrichment
 // should only cover the retrieved child window.
 func FilterImageInfoByMatchRange(
