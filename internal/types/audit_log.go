@@ -123,6 +123,11 @@ const (
 	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
 	AuditActionSystemAPIKeyCreated     AuditAction = "system.api_key_created"
 	AuditActionSystemAPIKeyRevoked     AuditAction = "system.api_key_revoked"
+	// AuditActionSystemBackupCreated and AuditActionSystemBackupFailed record
+	// an operator-triggered MySQL logical backup without storing credentials,
+	// absolute paths, or command output in the audit detail.
+	AuditActionSystemBackupCreated AuditAction = "system.backup_created"
+	AuditActionSystemBackupFailed  AuditAction = "system.backup_failed"
 
 	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
 	// archived task can repeat its original side effects; deleting one removes

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/backup"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -21,9 +22,11 @@ import (
 const operationsMetricNamespace = "weknora"
 
 type operationsObserver struct {
-	db          *gorm.DB
-	redisClient *redis.Client
-	startedAt   time.Time
+	db            *gorm.DB
+	redisClient   *redis.Client
+	startedAt     time.Time
+	backupManager manualBackupCreator
+	auditService  interfaces.AuditLogService
 
 	registry             *prometheus.Registry
 	metricsHandler       http.Handler
@@ -74,10 +77,11 @@ type operationsMigrationStatus struct {
 func newOperationsObserver(db *gorm.DB, redisClient *redis.Client) *operationsObserver {
 	registry := prometheus.NewRegistry()
 	observer := &operationsObserver{
-		db:          db,
-		redisClient: redisClient,
-		startedAt:   time.Now(),
-		registry:    registry,
+		db:            db,
+		redisClient:   redisClient,
+		startedAt:     time.Now(),
+		backupManager: backup.NewMySQLManager(db),
+		registry:      registry,
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: operationsMetricNamespace,
 			Name:      "http_requests_total",
@@ -172,6 +176,7 @@ func registerMetricsRoute(r gin.IRouter, observer *operationsObserver) {
 func RegisterOperationsAdminRoutes(r *gin.RouterGroup, observer *operationsObserver, g *rbacGuards) {
 	operations := r.Group("/admin/operations", g.SystemAdmin())
 	operations.GET("/status", observer.status)
+	operations.POST("/backups", observer.createManualBackup)
 }
 
 func (o *operationsObserver) httpMetricsMiddleware() gin.HandlerFunc {

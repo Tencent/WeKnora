@@ -129,6 +129,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.ErrorHandler())
 
 	operations := newOperationsObserver(params.DB, params.RedisClient)
+	operations.auditService = params.AuditLogService
 	r.Use(operations.httpMetricsMiddleware())
 
 	// 健康检查（不需要认证）

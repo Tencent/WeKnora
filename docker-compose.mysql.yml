@@ -51,6 +51,9 @@ services:
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
     volumes:
       - data-files:/data/files
+      - type: bind
+        source: ${BACKUP_HOST_DIR:-D:/WeKnoraBackups}
+        target: /data/backups
       - docreader-tmp:/tmp/docreader:ro
       - ./config/config.yaml:/app/config/config.yaml:ro
       - ./skills/preloaded:/app/skills/preloaded:ro

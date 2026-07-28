@@ -124,6 +124,51 @@ an independent monitor such as Uptime Kuma or Prometheus Alertmanager outside
 this Compose stack to poll `/readyz` and send its own notification when the app
 cannot run at all.
 
+## Manual Backups
+
+The first backup phase is deliberately limited to an operator-triggered MySQL
+logical backup. It is only available to system administrators, requires a
+reason, and is disabled by default. PostgreSQL and SQLite never enter this
+MySQL-specific path.
+
+For Docker Desktop on Windows, keep the backup directory on a host data drive
+rather than inside Docker's virtual disk or a container layer:
+
+```env
+BACKUP_ENABLED=true
+BACKUP_LOCAL_DIR=/data/backups
+BACKUP_HOST_DIR=D:/WeKnoraBackups
+BACKUP_TIMEOUT_SECONDS=900
+BACKUP_MYSQLDUMP_PATH=mysqldump
+```
+
+The Compose file mounts `BACKUP_HOST_DIR` into the app at `/data/backups`.
+Choose a directory that only the deployment operator can read. This phase does
+not encrypt archives yet, so filesystem access control and an off-host copy are
+important until the later encrypted-destination feature is added.
+
+Create a backup by waiting for the protected request to complete:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/operations/backups \
+  -H "Authorization: Bearer <system-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"before a schema or deployment change"}'
+```
+
+The app obtains a MySQL advisory lock, so a second request returns `409` rather
+than overlapping the first dump. The dump uses `mysqldump --single-transaction
+--routines --events`, writes a private gzip archive and an adjacent JSON
+manifest atomically, and records the archive size, SHA-256, application version,
+migration state, trigger, reason, and final result. Passwords, absolute paths,
+DSNs, and raw `mysqldump` output are excluded from the response, manifest, and
+audit event. A failed dump removes its partial archive and records only a safe
+failure category in its manifest and audit event.
+
+Do not put secrets in the operator reason: it is recorded in the manifest and
+the system audit log. Restore is intentionally not available from this API; the
+next restore-verification task restores only into an isolated MySQL instance.
+
 ## Schema Check
 
 Run the repeatable schema validation before publishing a MySQL-related change:
