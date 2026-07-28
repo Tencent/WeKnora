@@ -27,6 +27,30 @@ type Config struct {
 	// Base URL for Feishu API (default: https://open.feishu.cn)
 	// Use https://open.larksuite.com for Lark (international) deployments
 	BaseURL string `json:"base_url,omitempty"`
+
+	// Timezone is the IANA name (e.g. "Asia/Shanghai", "America/New_York") used to
+	// render bitable date cells. Feishu stores a date as a UTC instant, but the
+	// calendar date a user sees is that instant in the table's timezone, so
+	// rendering in UTC shifts the date. Empty defaults to GMT+8, which matches
+	// Feishu (mainland) tenants; set it for Lark tenants in other zones.
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// defaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
+// no timezone is configured. A fixed zone avoids any dependency on system tzdata,
+// which minimal container images may omit.
+const defaultTimezoneOffsetSeconds = 8 * 3600
+
+// resolveLocation returns the *time.Location used to render bitable date cells.
+// An empty name yields a fixed GMT+8 zone (no tzdata dependency); a named zone is
+// loaded from the system tz database, falling back to GMT+8 if it is unavailable.
+func resolveLocation(name string) *time.Location {
+	if name != "" {
+		if loc, err := time.LoadLocation(name); err == nil {
+			return loc
+		}
+	}
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
 }
 
 // DefaultBaseURL is the default Feishu Open Platform API base URL.
@@ -198,7 +222,19 @@ type driveFileMetaResponse struct {
 	} `json:"data"`
 }
 
-// --- Drive (云盘) file listing types ---
+// feishuCursor stores incremental sync state for Feishu.
+type feishuCursor struct {
+	// LastSyncTime is the timestamp of the last successful sync.
+	LastSyncTime time.Time `json:"last_sync_time"`
+
+	// SpaceNodeTimes maps space_id -> node_token -> last known edit time.
+	// Used to detect which nodes have changed since last sync.
+	SpaceNodeTimes map[string]map[string]string `json:"space_node_times,omitempty"`
+}
+
+// --- Drive (云盘) file listing types (feishu_drive / lark_drive connectors) ---
+// Added by feat/datasource-feishu-drive. These are independent of the wiki
+// types above and do not affect the wiki connector.
 
 // driveFile represents a file/folder in Feishu Drive (云空间). Returned by
 // GET /open-apis/drive/v1/files?folder_token=xxx. The list API returns
@@ -287,14 +323,4 @@ type feishuDriveCursor struct {
 	// FileTimes maps resourceID -> file_token -> last known modified_time.
 	// Used to detect which files have changed since last sync.
 	FileTimes map[string]map[string]string `json:"file_times,omitempty"`
-}
-
-// feishuCursor stores incremental sync state for Feishu.
-type feishuCursor struct {
-	// LastSyncTime is the timestamp of the last successful sync.
-	LastSyncTime time.Time `json:"last_sync_time"`
-
-	// SpaceNodeTimes maps space_id -> node_token -> last known edit time.
-	// Used to detect which nodes have changed since last sync.
-	SpaceNodeTimes map[string]map[string]string `json:"space_node_times,omitempty"`
 }

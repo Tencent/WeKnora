@@ -23,6 +23,9 @@ type Client struct {
 	appID     string
 	appSecret string
 
+	// location renders bitable date cells in the table's timezone (default GMT+8).
+	location *time.Location
+
 	httpClient *http.Client
 
 	// Token cache (thread-safe)
@@ -51,12 +54,22 @@ func (e *partialWikiNodeListError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
+// tz returns the client's date-rendering location, defaulting to GMT+8 when a
+// Client was constructed without one (e.g. in tests that build Client directly).
+func (c *Client) tz() *time.Location {
+	if c.location != nil {
+		return c.location
+	}
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
+}
+
 // NewClient creates a new Feishu API client.
 func NewClient(config *Config) *Client {
 	return &Client{
 		baseURL:    config.GetBaseURL(),
 		appID:      config.AppID,
 		appSecret:  config.AppSecret,
+		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 	}
 }
@@ -125,6 +138,10 @@ const (
 	feishuMax5xxRetries = 1
 	feishuRetry5xxDelay = 2 * time.Second
 )
+
+// maxFeishuDownloadBytes bounds a single file download to protect the sync
+// worker from adversarial or pathological oversized responses.
+const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
 
 var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
@@ -650,6 +667,108 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 	return c.downloadRawBytes(ctx, path)
 }
 
+// DownloadMediaFile downloads embedded media (attachments/images referenced by
+// document File/Image blocks) by its media token. Embedded block media live in a
+// different token space than standalone Drive files and must use the /medias/
+// endpoint rather than /files/.
+func (c *Client) DownloadMediaFile(ctx context.Context, fileToken string) ([]byte, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/medias/%s/download", url.PathEscape(fileToken))
+	return c.downloadRawBytes(ctx, path)
+}
+
+// downloadRawBytes performs an authenticated GET and returns the raw response body.
+func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
+	token, err := c.getTenantAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.baseURL + path
+	var lastErr error
+
+	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create download request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if attempt == 0 {
+			logger.Infof(ctx, "[Feishu] download GET %s", path)
+		} else {
+			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, feishuMaxRetries)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download request: %w", err)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
+			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, wait); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+			if attempt < feishuMax5xxRetries {
+				if sErr := sleepCtx(ctx, feishuRetry5xxDelay); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+		}
+
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
+		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
+			resp.Body.Close()
+			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", maxFeishuDownloadBytes, path)
+		}
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read download body: %w", readErr)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))
+		return data, nil
+	}
+
+	return nil, lastErr
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Drive (云盘) file listing: for feishu_drive / lark_drive connectors.
 // Mirrors the wiki ListWikiNodes / ListWikiNodesRecursiveFrom shape so the
@@ -794,93 +913,4 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 		return all, &partialDriveFileListError{Failures: failures}
 	}
 	return all, nil
-}
-
-// downloadRawBytes performs an authenticated GET and returns the raw response body.
-func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
-	token, err := c.getTenantAccessToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	url := c.baseURL + path
-	var lastErr error
-
-	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return nil, fmt.Errorf("create download request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		if attempt == 0 {
-			logger.Infof(ctx, "[Feishu] download GET %s", path)
-		} else {
-			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, feishuMaxRetries)
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("download request: %w", err)
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
-					return nil, sErr
-				}
-				continue
-			}
-			return nil, lastErr
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
-			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
-					return nil, sErr
-				}
-				continue
-			}
-			return nil, lastErr
-		}
-
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
-			if attempt < feishuMax5xxRetries {
-				if sErr := sleepCtx(ctx, feishuRetry5xxDelay); sErr != nil {
-					return nil, sErr
-				}
-				continue
-			}
-			return nil, lastErr
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
-		}
-
-		data, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			lastErr = fmt.Errorf("read download body: %w", readErr)
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
-					return nil, sErr
-				}
-				continue
-			}
-			return nil, lastErr
-		}
-
-		logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))
-		return data, nil
-	}
-
-	return nil, lastErr
 }

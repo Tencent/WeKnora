@@ -327,7 +327,7 @@ type wikiIngestService struct {
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
-	logEntrySvc    interfaces.WikiLogEntryService
+	audit          interfaces.AuditLogService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
@@ -367,7 +367,7 @@ func NewWikiIngestService(
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
-	logEntrySvc interfaces.WikiLogEntryService,
+	audit interfaces.AuditLogService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
@@ -381,7 +381,7 @@ func NewWikiIngestService(
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
 		task:           task,
-		logEntrySvc:    logEntrySvc,
+		audit:          audit,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
@@ -1170,14 +1170,18 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 }
 
 // docIngestResult captures per-document info for batch post-processing.
+type wikiIngestPageRef struct {
+	Slug  string
+	Title string
+}
+
 type docIngestResult struct {
 	KnowledgeID string
 	DocTitle    string
 	Summary     string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
-	// the slug (for navigation / retract lookups) and the human-readable
-	// title captured at ingest time (for the log feed's display layer).
-	Pages []types.WikiLogPageRef
+	// the slug used for link/retract bookkeeping and its human-readable title.
+	Pages []wikiIngestPageRef
 	// MapStats are the per-doc map-phase metrics captured at the moment
 	// mapOneDocument finishes. Surfaced into the postprocess.wiki span's
 	// output so the trace viewer can show "what the map phase produced"
@@ -1626,7 +1630,7 @@ func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, aff
 		if page.Status == types.WikiPageStatusArchived {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if len(page.OutLinks) == 0 {
@@ -1721,7 +1725,7 @@ func (s *wikiIngestService) injectCrossLinks(
 		if err != nil || page == nil {
 			continue
 		}
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 
@@ -1771,7 +1775,7 @@ func (s *wikiIngestService) injectCrossLinks(
 func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	refs := make([]linkRef, 0, len(pages)*2)
 	for _, p := range pages {
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if p.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if p.Title != "" {
@@ -1909,7 +1913,7 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 	for _, slug := range slugs {
 		// Defense-in-depth: skip wiki-intrinsic slugs that never have
 		// real source refs.
-		if slug == "index" || slug == "log" {
+		if slug == "index" {
 			continue
 		}
 		out[slug] = true
@@ -2123,34 +2127,6 @@ func splitSummaryLine(raw string) (summary string, content string) {
 		return strings.TrimSpace(summaryLine), strings.TrimSpace(raw[idx+1:])
 	}
 	return "", raw
-}
-
-// buildLogEntry builds a WikiLogEntry struct for the current batch. It is
-// pure (no DB access) so callers can accumulate entries cheaply under their
-// lock and flush them in a single AppendBatch call at the end of the batch.
-//
-// Historically this was a per-event `GetLog + UpdatePage` round trip, which
-// rewrote the entire log page's TEXT column on every ingest/retract op —
-// O(n^2) write amplification as the log grew. The batch writer now uses
-// wikiLogEntryService.AppendBatch instead; see ProcessWikiIngest.
-func (s *wikiIngestService) buildLogEntry(tenantID uint64, kbID, action, knowledgeID, docTitle, summary string, pagesAffected []types.WikiLogPageRef) *types.WikiLogEntry {
-	// Copy pagesAffected so the entry does not alias caller-owned slices.
-	// The batch accumulates SlugUpdate results that may be reused downstream.
-	var pages types.WikiLogPageRefs
-	if len(pagesAffected) > 0 {
-		pages = make(types.WikiLogPageRefs, len(pagesAffected))
-		copy(pages, pagesAffected)
-	}
-	return &types.WikiLogEntry{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		Action:          action,
-		KnowledgeID:     knowledgeID,
-		DocTitle:        docTitle,
-		Summary:         summary,
-		PagesAffected:   pages,
-		CreatedAt:       time.Now(),
-	}
 }
 
 // publishDraftPages transitions draft pages to published status after ingest completes.

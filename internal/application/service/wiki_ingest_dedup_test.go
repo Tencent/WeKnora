@@ -179,7 +179,7 @@ func TestSelectDedupCandidatePages_SmallCorpusBypass(t *testing.T) {
 	}
 }
 
-// Non-entity/concept pages (summaries, logs, …) must be stripped regardless
+// Non-entity/concept pages (summaries, comparisons, …) must be stripped regardless
 // of corpus size — they are never valid merge targets.
 func TestSelectDedupCandidatePages_DropsNonEntityConcept(t *testing.T) {
 	newItems := []extractedItem{
@@ -187,7 +187,7 @@ func TestSelectDedupCandidatePages_DropsNonEntityConcept(t *testing.T) {
 	}
 	pages := []*types.WikiPage{
 		makePage("summary/some-doc", "Some Doc Summary", types.WikiPageTypeSummary),
-		makePage("log/batch-123", "Batch 123", types.WikiPageTypeLog),
+		makePage("comparison/foo-vs-bar", "Foo vs Bar", types.WikiPageTypeComparison),
 		makePage("concept/foo-related", "Foo Related", types.WikiPageTypeConcept),
 	}
 	got := selectDedupCandidatePages(newItems, pages)
