@@ -20,14 +20,29 @@ func TestSelectSessionBindingStorePrefersRedis(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
-	store, kind, err := selectSessionBindingStore(client)
+	store, kind, err := selectSessionBindingStore(client, true)
 	require.NoError(t, err)
 	require.Equal(t, "redis", kind)
 	require.IsType(t, &sandbox.RedisSessionSandboxBindingStore{}, store)
 }
 
-func TestSelectSessionBindingStoreFallsBackToMemory(t *testing.T) {
-	store, kind, err := selectSessionBindingStore(nil)
+func TestSelectSessionBindingStoreRequiresRedisForRemoteModes(t *testing.T) {
+	_, _, err := selectSessionBindingStore(nil, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "require Redis")
+}
+
+func TestSelectSessionBindingStoreAllowsMemoryWhenOptedIn(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_ALLOW_MEMORY_BINDING", "true")
+
+	store, kind, err := selectSessionBindingStore(nil, true)
+	require.NoError(t, err)
+	require.Equal(t, "memory", kind)
+	require.IsType(t, &sandbox.MemorySessionSandboxBindingStore{}, store)
+}
+
+func TestSelectSessionBindingStoreFallsBackToMemoryWhenNotRequired(t *testing.T) {
+	store, kind, err := selectSessionBindingStore(nil, false)
 	require.NoError(t, err)
 	require.Equal(t, "memory", kind)
 	require.IsType(t, &sandbox.MemorySessionSandboxBindingStore{}, store)

@@ -643,8 +643,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
 		if h.artifactCollector != nil {
+			collectCtx := context.WithoutCancel(h.ctx)
 			artifacts, err := h.artifactCollector.Collect(
-				h.ctx,
+				collectCtx,
 				h.sessionID,
 				h.assistantMessageID,
 				h.tenantID,
