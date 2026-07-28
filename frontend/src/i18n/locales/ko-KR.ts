@@ -540,7 +540,7 @@ export default {
       "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",
     legacyQuestionCannotDelete: "이전 형식의 질문은 삭제할 수 없습니다. 질문을 다시 생성하세요",
     customMetadata: "사용자 정의 메타데이터",
-    metadataCapabilityHint: "인덱싱 및 검색, 문서 요약, 지식베이스 답변, 에이전트 검색을 지원하는 데 사용됩니다",
+    metadataCapabilityHint: "문서 요약과 검색 후 문서 수준 답변 컨텍스트에 사용됩니다. 인덱스에 포함되지 않으며 검색 순위에 영향을 주지 않습니다",
     noCustomMetadata: "사용자 정의 메타데이터 없음",
     metadataObjectRequired: "메타데이터는 JSON 객체여야 합니다",
     addMetadataField: "메타데이터 필드 추가",

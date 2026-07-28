@@ -11,7 +11,7 @@ import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
-  regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions,
+  regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
@@ -126,8 +126,7 @@ const saveMetadata = async () => {
     props.details.custom_metadata = value;
     metadataEditing.value = false;
     if (result?.data) {
-      props.details.summary_status = result.data.summary_status || props.details.summary_status;
-      props.details.description = result.data.description ?? props.details.description;
+      applySummaryState(result.data.summary_status, result.data.description);
     }
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
@@ -142,8 +141,7 @@ const refreshSummary = async () => {
   try {
     const result: any = await regenerateKnowledgeSummary(props.details.id);
     if (result?.data) {
-      props.details.description = result.data.description || '';
-      props.details.summary_status = result.data.summary_status || 'completed';
+      applySummaryState(result.data.summary_status || 'completed', result.data.description || '');
     }
     MessagePlugin.success(t('knowledgeBase.summaryRefreshed'));
   } catch (error: any) {
@@ -208,7 +206,73 @@ mermaid.initialize({
   }
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
+
+const applySummaryState = (summaryStatus?: string, description?: string) => {
+  if (typeof summaryStatus === 'string' && summaryStatus) {
+    props.details.summary_status = summaryStatus;
+  }
+  if (typeof description === 'string') {
+    props.details.description = description;
+  }
+  if (props.details?.id) {
+    emit('summaryStateChange', {
+      id: props.details.id,
+      summary_status: props.details.summary_status,
+      description: props.details.description,
+    });
+  }
+};
+
+const isSummaryStatusInFlight = (status?: string) => status === 'pending' || status === 'processing';
+const summaryStatusRefreshing = computed(() => isSummaryStatusInFlight(props.details?.summary_status));
+let summaryStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
+let summaryStatusPollGeneration = 0;
+
+const stopSummaryStatusPolling = () => {
+  summaryStatusPollGeneration++;
+  if (summaryStatusPollTimer !== null) {
+    clearTimeout(summaryStatusPollTimer);
+    summaryStatusPollTimer = null;
+  }
+};
+
+const scheduleSummaryStatusPoll = () => {
+  if (summaryStatusPollTimer !== null || !props.visible || !props.details?.id ||
+    !isSummaryStatusInFlight(props.details?.summary_status)) return;
+
+  const knowledgeID = props.details.id;
+  const generation = summaryStatusPollGeneration;
+  summaryStatusPollTimer = setTimeout(async () => {
+    summaryStatusPollTimer = null;
+    if (generation !== summaryStatusPollGeneration || !props.visible || props.details?.id !== knowledgeID) return;
+    try {
+      const result: any = await getKnowledgeDetails(knowledgeID);
+      if (generation !== summaryStatusPollGeneration || props.details?.id !== knowledgeID) return;
+      if (result?.success && result.data) {
+        applySummaryState(result.data.summary_status, result.data.description);
+      }
+    } catch {
+      // Keep the current status visible and retry while the drawer remains open.
+    }
+    if (generation === summaryStatusPollGeneration && props.visible && props.details?.id === knowledgeID &&
+      isSummaryStatusInFlight(props.details?.summary_status)) {
+      scheduleSummaryStatusPoll();
+    }
+  }, 1500);
+};
+
+watch(
+  () => [props.visible, props.details?.id, props.details?.summary_status],
+  ([visible, knowledgeID, summaryStatus]) => {
+    if (visible && knowledgeID && isSummaryStatusInFlight(summaryStatus as string)) {
+      scheduleSummaryStatusPoll();
+    } else {
+      stopSummaryStatusPolling();
+    }
+  },
+  { immediate: true },
+);
 watch(() => props.details?.id, syncMetadataDraft, { immediate: true });
 
 const hasTimelineSpans = ref(false);
@@ -578,6 +642,7 @@ watch(() => props.details?.chunkLoading, (val) => {
   }
 });
 onUnmounted(() => {
+  stopSummaryStatusPolling();
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
@@ -1043,8 +1108,7 @@ const saveChunkEdit = async (item: any) => {
     });
     Object.assign(item, result.data);
     editingChunkId.value = '';
-    props.details.summary_status = result.summary_status || props.details.summary_status;
-    props.details.description = result.description ?? props.details.description;
+    applySummaryState(result.summary_status, result.description);
     void refreshChunkHistoryAfterMutation(item);
     MessagePlugin.success(t('common.saveSuccess'));
   } catch (error: any) {
@@ -1062,8 +1126,7 @@ const toggleChunkEnabled = async (item: any, isEnabled: boolean) => {
       expected_revision: item.content_revision || 0,
     });
     Object.assign(item, result.data);
-    props.details.summary_status = result.summary_status || props.details.summary_status;
-    props.details.description = result.description ?? props.details.description;
+    applySummaryState(result.summary_status, result.description);
     void refreshChunkHistoryAfterMutation(item);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
@@ -1187,8 +1250,7 @@ const revertChunk = async (item: any, revision: number) => {
   try {
     const result: any = await revertDocumentChunk(props.details.id, item.id, revision, item.content_revision || 0);
     Object.assign(item, result.data);
-    props.details.summary_status = result.summary_status || props.details.summary_status;
-    props.details.description = result.description ?? props.details.description;
+    applySummaryState(result.summary_status, result.description);
     await refreshChunkHistoryAfterMutation(item);
     MessagePlugin.success(t('knowledgeBase.chunkReverted'));
   } catch (error: any) {
@@ -1660,7 +1722,13 @@ const handleDetailsScroll = () => {
 
         <section v-if="showSummarySection" class="setting-drawer__section summary-section">
           <div class="section-title-actions">
-            <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+            <div class="summary-section-heading">
+              <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+              <span v-if="details.description && summaryStatusRefreshing" class="summary-refreshing-indicator">
+                <t-loading size="small" />
+                <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+              </span>
+            </div>
             <t-tooltip v-if="canEditContent" :content="$t('knowledgeBase.regenerateSummary')" placement="top">
               <t-button class="icon-action-btn" size="small" variant="text" shape="square"
                 :loading="summaryRefreshing" @click="refreshSummary">
@@ -2218,6 +2286,24 @@ const handleDetailsScroll = () => {
 
 .metadata-display {
   min-width: 0;
+}
+
+.summary-section-heading,
+.summary-refreshing-indicator {
+  display: flex;
+  align-items: center;
+}
+
+.summary-section-heading {
+  min-width: 0;
+  gap: 10px;
+}
+
+.summary-refreshing-indicator {
+  gap: 5px;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .metadata-grid {
