@@ -24,6 +24,25 @@ spec:
 ---
 {{- end }}
 
+{{/* MySQL PVC */}}
+{{- if and .Values.mysql.enabled .Values.mysql.persistence.enabled (not .Values.mysql.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-mysql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "mysql" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mysql.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
 {{/* Redis PVC */}}
 {{- if and .Values.redis.enabled .Values.redis.persistence.enabled (not .Values.redis.persistence.existingClaim) }}
 apiVersion: v1

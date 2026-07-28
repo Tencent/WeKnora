@@ -298,10 +298,21 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
-	err := r.db.WithContext(ctx).Raw(
-		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
-		id,
-	).Scan(&newCount).Error
+	var err error
+	switch r.db.Dialector.Name() {
+	case "mysql", "sqlite": // MySQL: no RETURNING; SQLite < 3.35: no RETURNING either
+		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ?", id).Error; err != nil {
+				return err
+			}
+			return tx.Raw("SELECT fail_count FROM task_pending_ops WHERE id = ?", id).Scan(&newCount).Error
+		})
+	default: // PostgreSQL (SQLite >= 3.35 supports RETURNING, but the transaction path is safer)
+		err = r.db.WithContext(ctx).Raw(
+			`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
+			id,
+		).Scan(&newCount).Error
+	}
 	if err != nil {
 		return 0, err
 	}

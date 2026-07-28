@@ -93,7 +93,7 @@ type User struct {
 	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
-	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
+	Preferences UserPreferences `json:"preferences" gorm:"type:json;not null;default:'{}'"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user

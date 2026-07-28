@@ -98,7 +98,7 @@ type WikiLogEntry struct {
 	// navigation) and title (for display) so the log renders human-
 	// readable text without a post-hoc slug→title lookup that might fail
 	// for now-deleted pages.
-	PagesAffected WikiLogPageRefs `json:"pages_affected" gorm:"type:jsonb;default:'[]'"`
+	PagesAffected WikiLogPageRefs `json:"pages_affected" gorm:"type:json;default:'[]'"`
 	// Server-side timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
 }

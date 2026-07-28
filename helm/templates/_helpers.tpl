@@ -134,6 +134,13 @@ Return the PostgreSQL image with tag.
 {{- end }}
 
 {{/*
+Return the MySQL image with tag.
+*/}}
+{{- define "weknora.mysql.image" -}}
+{{- printf "%s:%s" .Values.mysql.image.repository .Values.mysql.image.tag }}
+{{- end }}
+
+{{/*
 Return the Redis image with tag.
 */}}
 {{- define "weknora.redis.image" -}}

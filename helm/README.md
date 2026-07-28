@@ -231,6 +231,38 @@ These map to docker-compose profiles:
 | `neo4j.enabled` | Enable Neo4j (GraphRAG) | `false` |
 | `qdrant.enabled` | Enable Qdrant vector DB | `false` |
 
+### MySQL (Experimental)
+
+MySQL 8.0 can be used as the business database instead of PostgreSQL:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `mysql.enabled` | Enable MySQL as business database | `false` |
+| `mysql.image.repository` | Image repository | `mysql` |
+| `mysql.image.tag` | Image tag | `8.0` |
+| `mysql.persistence.enabled` | Enable persistence | `true` |
+| `mysql.persistence.size` | PVC size | `10Gi` |
+
+When `mysql.enabled=true`:
+- The chart deploys MySQL instead of PostgreSQL internally
+- `DB_DRIVER` is automatically set to `mysql`
+- `DB_HOST` points to the MySQL service
+- `RETRIEVE_DRIVER` is automatically switched from `postgres` to `qdrant` (since MySQL cannot use pgvector)
+- An external vector store (Qdrant, Milvus, Elasticsearch) must be configured separately
+
+Example installation with MySQL:
+```bash
+helm install weknora ./helm \
+  --namespace weknora \
+  --create-namespace \
+  --set mysql.enabled=true \
+  --set mysql.persistence.size=20Gi \
+  --set app.env.RETRIEVE_DRIVER=qdrant \
+  --set secrets.dbPassword=<secure-mysql-password> \
+  --set secrets.redisPassword=<secure-redis-password> \
+  --set secrets.jwtSecret=$(openssl rand -base64 32)
+```
+
 ## Security Best Practices
 
 ### Secret Management

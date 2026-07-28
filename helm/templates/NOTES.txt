@@ -58,7 +58,10 @@ Components deployed:
 {{- if .Values.docreader.enabled }}
   - Document Reader ({{ include "weknora.docreader.image" . }})
 {{- end }}
-{{- if .Values.postgresql.enabled }}
+{{- if .Values.mysql.enabled }}
+  - MySQL 8.0 ({{ include "weknora.mysql.image" . }})
+{{- end }}
+{{- if and (not .Values.mysql.enabled) .Values.postgresql.enabled }}
   - PostgreSQL/ParadeDB ({{ include "weknora.postgresql.image" . }})
 {{- end }}
 {{- if .Values.redis.enabled }}
@@ -76,6 +79,9 @@ Optional components enabled:
 {{- end }}
 {{- if .Values.qdrant.enabled }}
   - Qdrant (Vector Database)
+{{- end }}
+{{- if .Values.mysql.enabled }}
+  - MySQL requires an external vector store (Qdrant/Milvus/Weaviate/Elasticsearch) — set `app.env.RETRIEVE_DRIVER`
 {{- end }}
 {{- end }}
 

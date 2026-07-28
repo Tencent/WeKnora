@@ -71,7 +71,7 @@ type DataSource struct {
 
 	// Encrypted configuration (API credentials, tokens, etc.)
 	// Stored as JSON with AES-256-GCM encryption
-	Config JSON `json:"config" gorm:"type:jsonb"`
+	Config JSON `json:"config" gorm:"type:json"`
 
 	// Cron expression for scheduled syncs (e.g., "0 */6 * * *" = every 6 hours)
 	SyncSchedule string `json:"sync_schedule"`
@@ -92,10 +92,10 @@ type DataSource struct {
 	LastSyncAt *time.Time `json:"last_sync_at"`
 
 	// Cursor or state for incremental sync (connector-specific)
-	LastSyncCursor JSON `json:"last_sync_cursor" gorm:"type:jsonb"`
+	LastSyncCursor JSON `json:"last_sync_cursor" gorm:"type:json"`
 
 	// Summary of last sync result
-	LastSyncResult JSON `json:"last_sync_result" gorm:"type:jsonb"`
+	LastSyncResult JSON `json:"last_sync_result" gorm:"type:json"`
 
 	// Error message if status is "error"
 	ErrorMessage string `json:"error_message"`
@@ -174,7 +174,7 @@ type SyncLog struct {
 	ErrorMessage string `json:"error_message"`
 
 	// Detailed sync result (JSON-encoded)
-	Result JSON `json:"result" gorm:"type:jsonb"`
+	Result JSON `json:"result" gorm:"type:json"`
 
 	// Creation timestamp (usually same as StartedAt)
 	CreatedAt time.Time `json:"created_at"`

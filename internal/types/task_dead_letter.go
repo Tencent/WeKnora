@@ -45,7 +45,7 @@ type TaskDeadLetter struct {
 	// Raw task payload at the time of failure. For asynq tasks this is
 	// the verbatim asynq.Task.Payload(); for service-level dead letters
 	// the consumer chooses what to record.
-	Payload json.RawMessage `json:"payload" gorm:"type:jsonb"`
+	Payload json.RawMessage `json:"payload" gorm:"type:json"`
 	// String form of the final error. Long stack traces are kept verbatim.
 	LastError string `json:"last_error" gorm:"type:text;default:''"`
 	// Total attempt count when the dead-letter record was written.

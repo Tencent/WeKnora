@@ -101,23 +101,23 @@ type Tenant struct {
 	// Storage used (Bytes)
 	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
 	// Global Context configuration for this workspace (default for all sessions)
-	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
+	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:json"`
 	// Global WebSearch configuration for this workspace
-	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
+	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:json"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
-	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
+	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:json"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
-	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
+	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:json"`
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
-	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:jsonb"`
+	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:json"`
 	// DefaultStorageBackendID is the workspace default concrete storage instance.
 	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"`
 	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
-	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
+	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:json"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
-	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
+	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:json"`
 	// API principal config: controls how X-API-Key requests map to terminal principals.
-	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
+	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:json"`
 	// Creation time
 	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
 	// Last updated time
