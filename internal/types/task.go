@@ -351,6 +351,9 @@ type QuestionGenerationPayload struct {
 	// knowledge. Empty when the batch is at a document boundary.
 	PrevChunkID string `json:"prev_chunk_id,omitempty"`
 	NextChunkID string `json:"next_chunk_id,omitempty"`
+	// ForceRegenerate bypasses the question-generation cache for an explicit
+	// operator retry. It is false for normal rebuilds and crash recovery.
+	ForceRegenerate bool `json:"force_regenerate,omitempty"`
 }
 
 // SummaryGenerationPayload represents the summary generation task payload
@@ -492,6 +495,9 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+	// ForceRegenerate bypasses deterministic generation caches for an explicit
+	// operator retry. Normal rebuilds leave this false.
+	ForceRegenerate bool `json:"force_regenerate,omitempty"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

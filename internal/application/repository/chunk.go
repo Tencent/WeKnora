@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
@@ -58,6 +59,51 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	// explicitly inserted, bypassing GORM's default value behavior.
 	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
 	return db.Select("*").CreateInBatches(chunks, 100).Error
+}
+
+// UpsertChunks inserts new stable chunks and refreshes existing chunks without
+// overwriting auto-generated SeqID / CreatedAt. It also revives soft-deleted
+// rows when a deterministic ID reappears in a later rebuild.
+func (r *chunkRepository) UpsertChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	for _, chunk := range chunks {
+		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+	}
+	db := r.db.WithContext(ctx)
+	if db.Dialector.Name() == "sqlite" {
+		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
+			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+		}
+	}
+	return db.Unscoped().Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"tenant_id",
+			"knowledge_id",
+			"knowledge_base_id",
+			"tag_id",
+			"content",
+			"chunk_index",
+			"is_enabled",
+			"flags",
+			"status",
+			"start_at",
+			"end_at",
+			"pre_chunk_id",
+			"next_chunk_id",
+			"chunk_type",
+			"parent_chunk_id",
+			"relation_chunks",
+			"indirect_relation_chunks",
+			"metadata",
+			"content_hash",
+			"image_info",
+			"updated_at",
+			"deleted_at",
+		}),
+	}).Select("*").CreateInBatches(chunks, 100).Error
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
@@ -144,6 +190,20 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	var chunks []*types.Chunk
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_id = ? and chunk_type = ?", tenantID, knowledgeID, "text").
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListAllChunksByKnowledgeID lists all chunk types for a knowledge ID.
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
 		Order("chunk_index ASC").
 		Find(&chunks).Error; err != nil {
 		return nil, err

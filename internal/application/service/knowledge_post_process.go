@@ -528,6 +528,7 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 			Attempt:         attempt,
 			ChunkIDs:        chunkIDs,
 			BatchIndex:      batchIndex,
+			ForceRegenerate: payload.ForceRegenerate,
 		}
 		// Boundary context: the text chunk just before / after this window.
 		if start > 0 {

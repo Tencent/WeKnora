@@ -164,6 +164,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	generationCache   interfaces.GenerationCacheRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -178,6 +179,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	generationCache interfaces.GenerationCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -187,6 +189,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		generationCache:   generationCache,
 		spanTracker:       spanTracker,
 	}
 }
@@ -329,11 +332,28 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	templateRaw, _ := json.Marshal(template)
+	graphInputHash := contentHash(chunk.Content)
+	graphPromptHash := stableHash(string(templateRaw))
+	modelID := strings.TrimSpace(chatModel.GetModelID())
+	if modelID == "" {
+		modelID = chatModel.GetModelName()
+	}
+	var graph *types.GraphData
+	if cached, ok := getGenerationCache[types.GraphData](ctx, s.generationCache, p.TenantID,
+		"graph_chunk", chunk.KnowledgeBaseID, modelID, graphInputHash, generationCacheGraphPromptVersion, graphPromptHash); ok {
+		graphOut["cache"] = "hit"
+		graph = &cached
+	} else {
+		graphOut["cache"] = "miss"
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		putGenerationCache(ctx, s.generationCache, p.TenantID,
+			"graph_chunk", chunk.KnowledgeBaseID, modelID, graphInputHash, generationCacheGraphPromptVersion, graphPromptHash, graph)
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
