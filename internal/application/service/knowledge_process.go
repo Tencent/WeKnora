@@ -943,7 +943,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 	if payload.Refresh {
-		_, err := s.RegenerateKnowledgeSummary(ctx, payload.KnowledgeID)
+		var err error
+		ctx, err = restoreSummaryRefreshTenantInfo(ctx, s.tenantRepo, payload.TenantID)
+		if err == nil {
+			_, err = s.RegenerateKnowledgeSummary(ctx, payload.KnowledgeID)
+		}
 		if err != nil {
 			// A retry will move the row back to processing. Keeping failed here
 			// ensures both Redis workers and the Lite executor have a terminal,
