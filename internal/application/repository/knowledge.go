@@ -241,10 +241,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		// If file hash exists, prioritize exact match using hash
+		// File content is only a duplicate within the same file type. This keeps
+		// same-content documents with distinct formats (for example, .md and
+		// .txt) available as separate knowledge items.
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
-			err := query.Where("file_hash = ?", params.FileHash).First(&knowledge).Error
+			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("file_type = ?", params.FileType)
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil

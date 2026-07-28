@@ -445,6 +445,7 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 type KnowledgeCheckParams struct {
 	// File parameters
 	FileName string
+	FileType string
 	FileSize int64
 	FileHash string
 	// URL parameters
