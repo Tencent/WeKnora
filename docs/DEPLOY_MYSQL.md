@@ -68,9 +68,7 @@ signal below 10% or 5 GB free. The thresholds can be adjusted with
 `LOG_DISK_WARNING_FREE_PERCENT`, `LOG_DISK_CRITICAL_FREE_PERCENT`, and
 `LOG_DISK_MIN_FREE_GB`.
 
-These signals do not delete logs, trigger automatic backups, or send email.
-Connect them to external monitoring in the later observability and alerting
-steps.
+These signals do not delete logs or trigger automatic backups.
 
 ## Monitoring Endpoints
 
@@ -88,6 +86,43 @@ do not publish it through a public frontend route.
 system administrators. It reports dependency states, connection-pool values,
 file-log storage values, and migration state, but never filesystem paths, DSNs,
 passwords, or raw dependency errors.
+
+## Email Alerts
+
+SMTP alerts are opt-in and are intended for deployment operators, not every
+WeKnora user. The app checks database and Redis reachability, dirty migration
+state, and the configured file-log filesystem. It sends a first alert for a new
+condition, suppresses duplicates while that condition persists, and sends one
+recovery email when it clears. Failed email deliveries are retried only after
+the cooldown period and log only a rate-limited, sanitized message.
+The check interval has a minimum of 10 seconds and the cooldown has a minimum
+of 60 seconds so an unsafe configuration cannot create an email or log storm.
+
+```env
+OPS_ALERT_EMAIL_ENABLED=true
+OPS_ALERT_EMAIL_TO=operator@example.com,oncall@example.com
+OPS_ALERT_CHECK_INTERVAL_SECONDS=60
+OPS_ALERT_COOLDOWN_SECONDS=300
+OPS_ALERT_TIMEOUT_SECONDS=5
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_TLS_MODE=starttls
+SMTP_USERNAME=weknora-alerts@example.com
+SMTP_PASSWORD_FILE=/run/secrets/weknora_smtp_password
+SMTP_FROM=weknora-alerts@example.com
+```
+
+`SMTP_TLS_MODE` supports `starttls` (the default, normally port 587),
+`implicit` (normally port 465), and `none`. Authentication is refused when
+`none` is selected. Configure exactly one of `SMTP_PASSWORD` and
+`SMTP_PASSWORD_FILE`; a mounted secret file is recommended. Configuration
+errors leave email alerts disabled and never expose the password in logs or API
+responses.
+
+The in-process notifier cannot report a total application or host outage. Keep
+an independent monitor such as Uptime Kuma or Prometheus Alertmanager outside
+this Compose stack to poll `/readyz` and send its own notification when the app
+cannot run at all.
 
 ## Schema Check
 

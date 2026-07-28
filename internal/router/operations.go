@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -61,6 +62,7 @@ type operationsFileLogStatus struct {
 	SizeBytes      int64  `json:"size_bytes"`
 	DiskFreeBytes  uint64 `json:"disk_free_bytes"`
 	DiskTotalBytes uint64 `json:"disk_total_bytes"`
+	DiskState      string `json:"disk_state"`
 }
 
 type operationsMigrationStatus struct {
@@ -274,7 +276,7 @@ func (o *operationsObserver) collectFileLogMetrics() operationsFileLogStatus {
 	if err != nil {
 		o.logFileBytes.Set(0)
 		o.diskFreeBytes.Set(0)
-		return operationsFileLogStatus{Enabled: status.Enabled}
+		return operationsFileLogStatus{Enabled: status.Enabled, DiskState: status.DiskState}
 	}
 
 	o.logFileBytes.Set(float64(status.SizeBytes))
@@ -284,7 +286,23 @@ func (o *operationsObserver) collectFileLogMetrics() operationsFileLogStatus {
 		SizeBytes:      status.SizeBytes,
 		DiskFreeBytes:  status.DiskFreeBytes,
 		DiskTotalBytes: status.DiskTotalBytes,
+		DiskState:      status.DiskState,
 	}
+}
+
+func (o *operationsObserver) startEmailAlerts(cleaner interfaces.ResourceCleaner) {
+	alerts := newOperationsEmailAlerterFromEnv()
+	if alerts == nil || cleaner == nil {
+		return
+	}
+
+	stop := alerts.start(func(ctx context.Context) []operationsAlertCondition {
+		return operationAlertConditions(o.collect(ctx))
+	})
+	cleaner.RegisterWithName("OperationsEmailAlerts", func() error {
+		stop()
+		return nil
+	})
 }
 
 func (o *operationsObserver) collectMigrationMetrics() operationsMigrationStatus {

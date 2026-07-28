@@ -75,6 +75,7 @@ type FileLogRuntimeStatus struct {
 	SizeBytes      int64
 	DiskFreeBytes  uint64
 	DiskTotalBytes uint64
+	DiskState      string
 }
 
 // ansiStripWriter removes ANSI color/style sequences so file logs stay plain text
@@ -614,6 +615,11 @@ func GetFileLogRuntimeStatus() (FileLogRuntimeStatus, error) {
 	}
 	status.DiskFreeBytes = usage.Free
 	status.DiskTotalBytes = usage.Total
+	thresholds, _ := resolveLogDiskThresholdsFromEnv()
+	status.DiskState = string(evaluateLogDiskState(logDiskUsage{
+		totalBytes: usage.Total,
+		freeBytes:  usage.Free,
+	}, thresholds))
 	return status, nil
 }
 

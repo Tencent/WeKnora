@@ -352,7 +352,7 @@ func TestGetFileLogRuntimeStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetFileLogRuntimeStatus returned error: %v", err)
 	}
-	if !status.Enabled || status.SizeBytes != 5 || status.DiskTotalBytes == 0 || status.DiskFreeBytes == 0 {
+	if !status.Enabled || status.SizeBytes != 5 || status.DiskTotalBytes == 0 || status.DiskFreeBytes == 0 || status.DiskState == "" {
 		t.Fatalf("unexpected file log status: %#v", status)
 	}
 }

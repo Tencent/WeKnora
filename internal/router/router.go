@@ -89,6 +89,7 @@ type RouterParams struct {
 	EmbedChannelService          interfaces.EmbedChannelService
 	DB                           *gorm.DB
 	RedisClient                  *redis.Client
+	ResourceCleaner              interfaces.ResourceCleaner
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
@@ -133,6 +134,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 健康检查（不需要认证）
 	registerHealthRoutes(r, params.DB, params.RedisClient)
 	registerMetricsRoute(r, operations)
+	operations.startEmailAlerts(params.ResourceCleaner)
 
 	// Swagger API 文档（仅在非生产环境下启用）
 	// 通过 GIN_MODE 环境变量判断：release 模式下禁用 Swagger
