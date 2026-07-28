@@ -60,6 +60,8 @@ type KnowledgeFolderService interface {
 type KnowledgeFolderRepository interface {
 	Create(ctx context.Context, folder *types.KnowledgeFolder) error
 	GetByID(ctx context.Context, kbID string, id string) (*types.KnowledgeFolder, error)
+	// GetChildByName returns the live child of parentID with the given name.
+	GetChildByName(ctx context.Context, kbID string, parentID string, name string) (*types.KnowledgeFolder, error)
 	// ListAll returns every live folder of the KB ordered by path.
 	ListAll(ctx context.Context, kbID string) ([]*types.KnowledgeFolder, error)
 	// ListChildren returns the direct children of parentID enriched with the

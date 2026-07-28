@@ -150,6 +150,19 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	// Folder placement. FolderIDs (a subtree pre-expanded by the service for
+	// recursive listing) takes precedence over the single-folder FolderID,
+	// where FolderRootSentinel selects root-level rows. The repository stays
+	// tree-agnostic on purpose.
+	if len(filter.FolderIDs) > 0 {
+		query = query.Where("folder_id IN (?)", filter.FolderIDs)
+	} else if filter.FolderID != "" {
+		if filter.FolderID == types.FolderRootSentinel {
+			query = query.Where("folder_id = ?", types.KnowledgeFolderRootID)
+		} else {
+			query = query.Where("folder_id = ?", filter.FolderID)
+		}
+	}
 	return query
 }
 
