@@ -21,6 +21,15 @@ type TagScope struct {
 	TagIDs          []string `json:"tag_ids"`
 }
 
+// FolderScope represents a folder-constrained retrieval scope inside one
+// knowledge base. Folder subtrees are resolved to concrete knowledge IDs at
+// request time (mirroring how document-KB tag scopes resolve), so the
+// retrieval backends only ever see a KnowledgeIDs filter.
+type FolderScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	FolderIDs       []string `json:"folder_ids"`
+}
+
 // SearchTarget represents a unified search target
 // Either search an entire knowledge base, or specific knowledge files within a knowledge base
 type SearchTarget struct {
@@ -40,6 +49,9 @@ type SearchTarget struct {
 	// document KBs this is kept for tracing after the relation-table lookup has
 	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// ScopeFolderIDs records the logical folder scope selected by the user,
+	// kept for tracing after the subtree has been resolved to KnowledgeIDs.
+	ScopeFolderIDs []string `json:"scope_folder_ids,omitempty"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
@@ -92,7 +104,7 @@ func HasKnowledgeRetrievalScope(
 			continue
 		}
 		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
-			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 || len(target.ScopeFolderIDs) > 0 {
 			return true
 		}
 	}

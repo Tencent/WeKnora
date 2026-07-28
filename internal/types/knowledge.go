@@ -104,6 +104,13 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderID filters by folder placement: "" = no folder filter (all rows),
+	// FolderRootSentinel = only rows at the KB root, otherwise rows directly in
+	// the given folder. When FolderIDs is non-empty it takes precedence over
+	// FolderID — used by the service layer to expand a folder subtree
+	// (recursive listing) into an IN clause; the repository stays tree-agnostic.
+	FolderID  string
+	FolderIDs []string
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -116,6 +123,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the knowledge_folders.id this document sits in ("" = KB root).
+	FolderID string `json:"folder_id"          gorm:"type:varchar(36);default:''"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
