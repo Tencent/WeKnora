@@ -77,16 +77,35 @@
             >
               {{ t('graphSettings.generateRandomTags') }}
             </t-button>
-            <t-select
+            <t-tag-input
+              ref="tagInputRef"
               v-model="localGraphExtract.tags"
-              multiple
+              :input-value="tagInputValue"
               :placeholder="t('graphSettings.tagsPlaceholder')"
-              clearable
-              creatable
-              filterable
+              :disabled="tagFabring"
               @change="handleTagsChange"
+              @update:inputValue="handleInputValueUpdate"
+              @enter="handleTagEnter"
+              @blur="handleTagBlur"
               style="flex: 1; min-width: 400px;"
             />
+          </div>
+          <!-- 粘贴/输入逗号分隔文本时的快速拆分提示 -->
+          <div v-if="pendingSplitTags.length > 0" class="split-suggestion">
+            <t-icon name="info-circle" class="tip-icon" />
+            <span>检测到逗号分隔内容：</span>
+            <span
+              v-for="tag in pendingSplitTags"
+              :key="tag"
+              class="split-tag-preview"
+              :class="{ 'split-tag-dup': duplicatedTags.includes(tag) }"
+            >{{ tag }}<span v-if="duplicatedTags.includes(tag)" class="dup-badge">已存在</span></span>
+            <t-button theme="primary" size="small" @click="confirmSplitTags">
+              添加{{ newTagCount }}个标签
+            </t-button>
+            <t-button theme="default" size="small" @click="pendingSplitTags = []">
+              取消
+            </t-button>
           </div>
           <div v-if="!modelStatus.llm.available" class="control-tip">
             <t-icon name="info-circle" class="tip-icon" />
@@ -320,7 +339,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
@@ -378,6 +397,19 @@ const tagFabring = ref(false)
 const textFabring = ref(false)
 const extracting = ref(false)
 
+// 标签输入框 ref 和待拆分提示
+const tagInputRef = ref()
+const tagInputValue = ref('')
+const pendingSplitTags = ref<string[]>([])
+
+// 计算已存在的重复标签和实际可添加的新标签数量
+const duplicatedTags = computed(() => {
+  return pendingSplitTags.value.filter(t => localGraphExtract.value.tags.includes(t))
+})
+const newTagCount = computed(() => {
+  return pendingSplitTags.value.filter(t => !localGraphExtract.value.tags.includes(t)).length
+})
+
 // 系统信息
 const systemInfo = ref<any>(null)
 
@@ -413,7 +445,80 @@ const handleEnabledChange = () => {
   handleConfigChange()
 }
 
+const splitCommaTags = (str: string): string[] => {
+  return str.split(/[,，]/).map(t => t.trim()).filter(t => t)
+}
+
 const handleTagsChange = () => {
+  // 自动拆分包含逗号（中英文）的标签
+  const tags = localGraphExtract.value.tags
+  const result: string[] = []
+  let needSplit = false
+  for (const tag of tags) {
+    if (tag.match(/[,，]/)) {
+      needSplit = true
+      splitCommaTags(tag).forEach(t => {
+        if (!result.includes(t)) result.push(t)
+      })
+    } else if (tag && !result.includes(tag)) {
+      result.push(tag)
+    }
+  }
+  if (needSplit) {
+    localGraphExtract.value.tags = result
+    pendingSplitTags.value = []
+  }
+  handleConfigChange()
+}
+
+// 实时追踪输入内容，检测到逗号立即显示拆分提示
+const handleInputValueUpdate = (value: string) => {
+  tagInputValue.value = value
+  // 输入框为空时不清空已有提示（可能是点击按钮前的blur导致的清空）
+  if (!value && pendingSplitTags.value.length > 0) return
+  checkAndShowSplitSuggestion(value)
+}
+
+// 检查输入值是否包含逗号，如果有则显示拆分提示
+const checkAndShowSplitSuggestion = (value: string) => {
+  const trimmed = value.trim()
+  if (trimmed && trimmed.match(/[,，]/)) {
+    // 拆分后自身也去重
+    const parts = [...new Set(splitCommaTags(trimmed))]
+    if (parts.length > 1) {
+      pendingSplitTags.value = parts
+      return true
+    }
+  }
+  // 如果没有逗号内容，清除提示
+  if (!trimmed || !trimmed.match(/[,，]/)) {
+    pendingSplitTags.value = []
+  }
+  return false
+}
+
+// 按回车键时
+const handleTagEnter = () => {
+  const value = tagInputValue.value
+  if (checkAndShowSplitSuggestion(value)) {
+    // 有逗号内容，显示提示行后清空输入框
+    tagInputValue.value = ''
+  }
+}
+
+// 失焦时检查
+const handleTagBlur = () => {
+  // 不在这里处理，避免与按钮点击冲突
+  // inputValue 变化和 @change 已覆盖所有场景
+}
+
+// 用户点击"添加N个标签"按钮确认
+const confirmSplitTags = () => {
+  const existing = localGraphExtract.value.tags
+  const newTags = pendingSplitTags.value.filter(t => !existing.includes(t))
+  localGraphExtract.value.tags = [...existing, ...newTags]
+  pendingSplitTags.value = []
+  tagInputValue.value = ''
   handleConfigChange()
 }
 
@@ -710,6 +815,45 @@ onMounted(async () => {
 
   .tip-icon {
     color: var(--td-brand-color);
+  }
+}
+
+.split-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--td-brand-color-1);
+  border: 1px solid var(--td-brand-color-3);
+  border-radius: 6px;
+  font-size: 13px;
+  flex-wrap: wrap;
+
+  .tip-icon {
+    color: var(--td-brand-color);
+  }
+
+  .split-tag-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-brand-color-4);
+    border-radius: 4px;
+    color: var(--td-brand-color);
+    font-size: 12px;
+
+    &.split-tag-dup {
+      color: var(--td-text-color-placeholder);
+      border-color: var(--td-component-stroke);
+      background: var(--td-bg-color-component);
+    }
+
+    .dup-badge {
+      font-size: 10px;
+      color: var(--td-text-color-placeholder);
+    }
   }
 }
 
