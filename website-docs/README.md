@@ -4,6 +4,19 @@ WeKnora（维娜拉）是腾讯开源的企业级知识库与 RAG（Retrieval-Au
 
 本目录是 WeKnora 的完整官方文档，全部内容基于源码整理，按「入门 → 架构 → 功能 → API → 客户端 → 开发」六个部分组织。
 
+## 文档站点
+
+本目录同时是一个 VitePress 站点，Markdown 即页面，新增文件会自动进入侧边栏（标题取正文一级标题，目录顺序按文件名数字前缀）。
+
+```bash
+npm install
+npm run dev      # 本地预览
+npm run build    # 产物输出到 .vitepress/dist
+npm run preview  # 预览构建产物
+```
+
+主题位于 `.vitepress/theme/`：`style.css` 是排版与配色的单一来源，`Landing.vue` 是首页。
+
 ## 阅读路径建议
 
 - **初次使用**：01 快速开始 四篇按顺序读完即可完成部署与首次问答。
