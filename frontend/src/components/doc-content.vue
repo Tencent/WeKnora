@@ -998,21 +998,6 @@ const getGeneratedQuestions = (item: any): GeneratedQuestion[] => {
   }
 };
 
-// 展开状态管理
-const expandedChunks = ref<Set<number>>(new Set());
-
-const toggleQuestions = (index: number) => {
-  if (expandedChunks.value.has(index)) {
-    expandedChunks.value.delete(index);
-  } else {
-    expandedChunks.value.add(index);
-  }
-  // 触发响应式更新
-  expandedChunks.value = new Set(expandedChunks.value);
-};
-
-const isExpanded = (index: number) => expandedChunks.value.has(index);
-
 const editingChunkId = ref('');
 const chunkDraft = ref('');
 const savingChunkId = ref('');
@@ -1102,7 +1087,11 @@ const showChunkHistory = async (item: any) => {
 
 const setChunkHistoryPopupVisible = (item: any, visible: boolean) => {
   chunkHistoryPopup.value = visible ? item.id : '';
-  if (visible) showChunkHistory(item);
+  if (visible) {
+    parentContextPopup.value = '';
+    questionPopupChunk.value = '';
+    showChunkHistory(item);
+  }
 };
 
 const selectChunkRevision = (item: any, revision: number) => {
@@ -1168,6 +1157,7 @@ const revertChunk = async (item: any, revision: number) => {
 const questionDrafts = ref<Record<string, string>>({});
 const savingQuestionChunk = ref('');
 const regeneratingQuestionChunk = ref('');
+const questionPopupChunk = ref('');
 const questionComposerChunk = ref('');
 const editingQuestionKey = ref('');
 const questionEditDraft = ref('');
@@ -1177,14 +1167,26 @@ watch(() => props.details?.id, () => {
   metadataEditing.value = false;
   editingChunkId.value = '';
   chunkHistoryPopup.value = '';
+  parentContextPopup.value = '';
+  questionPopupChunk.value = '';
   questionComposerChunk.value = '';
   editingQuestionKey.value = '';
 });
 
-const openQuestionComposer = (item: any, index: number) => {
+const setQuestionPopupVisible = (item: any, visible: boolean) => {
+  questionPopupChunk.value = visible ? item.id : '';
+  if (visible) {
+    parentContextPopup.value = '';
+    chunkHistoryPopup.value = '';
+  } else {
+    closeQuestionComposer(item);
+    cancelQuestionEdit();
+  }
+};
+
+const openQuestionComposer = (item: any) => {
+  questionPopupChunk.value = item.id;
   questionComposerChunk.value = item.id;
-  expandedChunks.value.add(index);
-  expandedChunks.value = new Set(expandedChunks.value);
 };
 
 const closeQuestionComposer = (item: any) => {
@@ -1242,7 +1244,7 @@ const saveQuestionEdit = async (item: any, question: GeneratedQuestion) => {
   }
 };
 
-const regenerateQuestions = async (item: any, index?: number) => {
+const regenerateQuestions = async (item: any) => {
   regeneratingQuestionChunk.value = item.id;
   try {
     const result: any = await regenerateGeneratedQuestions(item.id);
@@ -1251,10 +1253,6 @@ const regenerateQuestions = async (item: any, index?: number) => {
     metadata.generated_questions_revision = item.content_revision || 0;
     item.metadata = metadata;
     questionComposerChunk.value = '';
-    if (typeof index === 'number') {
-      expandedChunks.value.add(index);
-      expandedChunks.value = new Set(expandedChunks.value);
-    }
     MessagePlugin.success(t('knowledgeBase.questionsRegenerated'));
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.error'));
@@ -1308,22 +1306,14 @@ const isDeleting = (chunkIndex: number, questionId: string) => {
   return deletingQuestion.value?.chunkIndex === chunkIndex && deletingQuestion.value?.questionId === questionId;
 };
 
-// 父 Chunk 上下文展开状态
-const parentContextExpanded = ref<Set<number>>(new Set());
+// 父 Chunk 上下文通过 Header Popup 展示，避免在每个分块下方占用高度。
+const parentContextPopup = ref('');
 const parentContextCache = ref<Map<string, string>>(new Map());
 const parentContextLoading = ref<Set<number>>(new Set());
 
 const hasParentChunk = (item: any) => !!item?.parent_chunk_id;
 
-const isParentExpanded = (index: number) => parentContextExpanded.value.has(index);
-
-const toggleParentContext = async (item: any, index: number) => {
-  if (parentContextExpanded.value.has(index)) {
-    parentContextExpanded.value.delete(index);
-    parentContextExpanded.value = new Set(parentContextExpanded.value);
-    return;
-  }
-
+const loadParentContext = async (item: any, index: number) => {
   const parentId = item.parent_chunk_id;
   if (!parentContextCache.value.has(parentId)) {
     parentContextLoading.value.add(index);
@@ -1336,6 +1326,7 @@ const toggleParentContext = async (item: any, index: number) => {
       }
     } catch (err) {
       MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed'));
+      parentContextPopup.value = '';
       return;
     } finally {
       parentContextLoading.value.delete(index);
@@ -1343,9 +1334,17 @@ const toggleParentContext = async (item: any, index: number) => {
     }
   }
 
-  parentContextExpanded.value.add(index);
-  parentContextExpanded.value = new Set(parentContextExpanded.value);
+  await nextTick();
   await runMarkdownPostRenderPipeline();
+};
+
+const setParentContextPopupVisible = (item: any, index: number, visible: boolean) => {
+  parentContextPopup.value = visible ? item.id : '';
+  if (visible) {
+    questionPopupChunk.value = '';
+    chunkHistoryPopup.value = '';
+    loadParentContext(item, index);
+  }
 };
 
 const getParentContent = (item: any) => {
@@ -1702,10 +1701,6 @@ const handleDetailsScroll = () => {
                     <t-tag v-if="chunk.hasParent" size="small" theme="default" variant="light">
                       {{ $t('knowledgeBase.childChunk') }}
                     </t-tag>
-                    <span v-if="chunk.questions.length > 0" class="chunk-question-count">
-                      <t-icon name="help-circle" size="13px" />
-                      {{ chunk.questions.length }}
-                    </span>
                   </div>
                   <div class="chunk-header-right">
                     <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
@@ -1715,6 +1710,128 @@ const handleDetailsScroll = () => {
                         <template #icon><t-icon name="refresh" size="15px" /></template>
                       </t-button>
                     </t-tooltip>
+                    <t-popup v-if="chunk.hasParent" :visible="parentContextPopup === chunk.original.id"
+                      trigger="click" placement="bottom-right" :show-arrow="true" destroy-on-close
+                      :overlay-inner-style="{ padding: 0 }" overlay-class-name="chunk-context-popup-overlay"
+                      @visible-change="(visible: boolean) => setParentContextPopupVisible(chunk.original, index, visible)">
+                      <t-button class="icon-action-btn" :class="{ 'is-active': parentContextPopup === chunk.original.id }"
+                        size="small" variant="text" shape="square" :title="$t('knowledgeBase.viewParentContext')">
+                        <template #icon><t-icon name="git-branch" size="15px" /></template>
+                      </t-button>
+                      <template #content>
+                        <div class="chunk-context-popup" @click.stop>
+                          <div class="chunk-popup-head">
+                            <div class="chunk-popup-title">
+                              <t-icon name="git-branch" size="15px" />
+                              <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+                            </div>
+                          </div>
+                          <div v-if="parentContextLoading.has(index)" class="chunk-popup-state">
+                            <t-loading size="small" />
+                            <span>{{ $t('common.loading') }}</span>
+                          </div>
+                          <div v-else class="chunk-context-popup-body md-content"
+                            v-html="processMarkdown(getParentContent(chunk.original))"></div>
+                        </div>
+                      </template>
+                    </t-popup>
+                    <t-popup v-if="chunk.questions.length > 0 || canEditContent"
+                      :visible="questionPopupChunk === chunk.original.id" trigger="click" placement="bottom-right"
+                      :show-arrow="true" destroy-on-close :overlay-inner-style="{ padding: 0 }"
+                      overlay-class-name="chunk-questions-popup-overlay"
+                      @visible-change="(visible: boolean) => setQuestionPopupVisible(chunk.original, visible)">
+                      <t-button class="icon-action-btn chunk-question-entry"
+                        :class="{ 'is-active': questionPopupChunk === chunk.original.id }" size="small" variant="text"
+                        shape="square" :title="$t('knowledgeBase.generatedQuestions')">
+                        <template #icon>
+                          <span class="chunk-question-entry-icon">
+                            <t-icon name="help-circle" size="15px" />
+                            <span v-if="chunk.questions.length" class="chunk-question-entry-count">{{ chunk.questions.length }}</span>
+                          </span>
+                        </template>
+                      </t-button>
+                      <template #content>
+                        <div class="chunk-questions-popup" @click.stop>
+                          <div class="chunk-popup-head">
+                            <div class="chunk-popup-title">
+                              <t-icon name="help-circle" size="15px" />
+                              <span>{{ $t('knowledgeBase.generatedQuestions') }}</span>
+                              <span class="chunk-popup-count">{{ chunk.questions.length }}</span>
+                            </div>
+                            <div v-if="canEditContent" class="chunk-popup-actions">
+                              <t-tooltip :content="$t('knowledgeBase.addGeneratedQuestion')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  @click.stop="openQuestionComposer(chunk.original)">
+                                  <template #icon><t-icon name="add" size="15px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <t-tooltip :content="$t('knowledgeBase.regenerateQuestions')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  :loading="regeneratingQuestionChunk === chunk.original.id"
+                                  @click.stop="regenerateQuestions(chunk.original)">
+                                  <template #icon><t-icon name="refresh" size="15px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                            </div>
+                          </div>
+                          <div class="chunk-questions-popup-body">
+                            <div v-if="chunk.questions.length" class="questions-list">
+                              <div v-for="question in chunk.questions" :key="question.id" class="question-item">
+                                <span class="question-leading-icon"><t-icon name="help-circle" size="14px" /></span>
+                                <div v-if="editingQuestionKey === `${chunk.original.id}:${question.id}`" class="question-inline-editor">
+                                  <t-input v-model="questionEditDraft" autofocus
+                                    @enter="saveQuestionEdit(chunk.original, question)" />
+                                  <t-button size="small" variant="text" @click="cancelQuestionEdit">{{ $t('common.cancel') }}</t-button>
+                                  <t-button size="small" theme="primary"
+                                    :loading="savingQuestionKey === `${chunk.original.id}:${question.id}`"
+                                    @click="saveQuestionEdit(chunk.original, question)">{{ $t('common.save') }}</t-button>
+                                </div>
+                                <template v-else>
+                                  <span class="question-text">{{ question.question }}</span>
+                                  <div class="question-actions">
+                                    <t-tooltip v-if="canEditContent && !question.id.startsWith('legacy-')"
+                                      :content="$t('common.edit')" placement="top">
+                                      <t-button class="icon-action-btn" theme="default" variant="text" shape="square"
+                                        size="small" @click.stop="startQuestionEdit(chunk.original, question)">
+                                        <template #icon><t-icon name="edit" size="14px" /></template>
+                                      </t-button>
+                                    </t-tooltip>
+                                    <t-popconfirm v-if="canDeleteGeneratedQuestion && !question.id.startsWith('legacy-')"
+                                      theme="warning" :content="$t('knowledgeBase.confirmDeleteQuestion')"
+                                      @confirm="handleDeleteQuestion(chunk.original, index, question)">
+                                      <t-button class="icon-action-btn delete-question-btn" theme="default" variant="text"
+                                        shape="square" size="small" :loading="isDeleting(index, question.id)">
+                                        <template #icon><t-icon name="delete" size="14px" /></template>
+                                      </t-button>
+                                    </t-popconfirm>
+                                  </div>
+                                </template>
+                              </div>
+                            </div>
+                            <div v-else-if="questionComposerChunk !== chunk.original.id" class="questions-empty">
+                              <t-icon name="chat-bubble-help" size="20px" />
+                              <span>{{ $t('knowledgeBase.noGeneratedQuestions') }}</span>
+                              <t-button v-if="canEditContent" size="small" variant="text"
+                                @click="openQuestionComposer(chunk.original)">
+                                <template #icon><t-icon name="add" size="14px" /></template>
+                                {{ $t('common.add') }}
+                              </t-button>
+                            </div>
+                            <div v-if="canEditContent && questionComposerChunk === chunk.original.id" class="question-composer">
+                              <div class="question-composer-icon"><t-icon name="add" size="15px" /></div>
+                              <t-input v-model="questionDrafts[chunk.original.id]" autofocus
+                                :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
+                              <t-button size="small" variant="text" :disabled="savingQuestionChunk === chunk.original.id"
+                                @click="closeQuestionComposer(chunk.original)">{{ $t('common.cancel') }}</t-button>
+                              <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id"
+                                :disabled="!(questionDrafts[chunk.original.id] || '').trim()" @click="addQuestion(chunk.original)">
+                                {{ $t('common.add') }}
+                              </t-button>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                    </t-popup>
                     <template v-if="canEditContent">
                       <t-tooltip :content="$t('common.edit')" placement="top">
                         <t-button class="icon-action-btn" :class="{ 'is-active': editingChunkId === chunk.original.id }"
@@ -1822,101 +1939,6 @@ const handleDetailsScroll = () => {
                 </div>
                 <div v-else class="md-content" :class="{ 'chunk-disabled': !chunk.original.is_enabled }" v-html="chunk.processedContent"></div>
 
-                <!-- 父 Chunk 上下文展开 -->
-                <div v-if="chunk.hasParent" class="parent-context-section">
-                  <button type="button" class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                    <span class="parent-context-toggle-label">
-                      <t-icon name="git-branch" size="14px" />
-                      <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
-                    </span>
-                    <t-loading v-if="parentContextLoading.has(index)" size="small" />
-                    <t-icon v-else :name="isParentExpanded(index) ? 'chevron-up' : 'chevron-down'" size="14px" />
-                  </button>
-                  <div v-show="isParentExpanded(index)" class="parent-context-content">
-                    <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
-                  </div>
-                </div>
-
-                <!-- 辅助召回问题 -->
-                <div v-if="chunk.questions.length > 0 || canEditContent" class="questions-section">
-                  <div class="questions-head">
-                    <button type="button" class="questions-toggle" @click="toggleQuestions(index)">
-                      <t-icon name="help-circle" size="15px" />
-                      <span>{{ $t('knowledgeBase.generatedQuestions') }}</span>
-                      <span class="questions-count">{{ chunk.questions.length }}</span>
-                      <t-icon :name="isExpanded(index) ? 'chevron-up' : 'chevron-down'" size="14px" class="questions-chevron" />
-                    </button>
-                    <div v-if="canEditContent" class="questions-head-actions">
-                      <t-tooltip :content="$t('knowledgeBase.addGeneratedQuestion')" placement="top">
-                        <t-button class="icon-action-btn" size="small" variant="text" shape="square"
-                          @click.stop="openQuestionComposer(chunk.original, index)">
-                          <template #icon><t-icon name="add" size="15px" /></template>
-                        </t-button>
-                      </t-tooltip>
-                      <t-tooltip :content="$t('knowledgeBase.regenerateQuestions')" placement="top">
-                        <t-button class="icon-action-btn" size="small" variant="text" shape="square"
-                          :loading="regeneratingQuestionChunk === chunk.original.id"
-                          @click.stop="regenerateQuestions(chunk.original, index)">
-                          <template #icon><t-icon name="refresh" size="15px" /></template>
-                        </t-button>
-                      </t-tooltip>
-                    </div>
-                  </div>
-                  <div v-show="isExpanded(index)" class="questions-body">
-                    <div v-if="chunk.questions.length" class="questions-list">
-                      <div v-for="question in chunk.questions" :key="question.id" class="question-item">
-                        <span class="question-leading-icon"><t-icon name="help-circle" size="14px" /></span>
-                        <div v-if="editingQuestionKey === `${chunk.original.id}:${question.id}`" class="question-inline-editor">
-                          <t-input v-model="questionEditDraft" autofocus @enter="saveQuestionEdit(chunk.original, question)" />
-                          <t-button size="small" variant="text" @click="cancelQuestionEdit">{{ $t('common.cancel') }}</t-button>
-                          <t-button size="small" theme="primary"
-                            :loading="savingQuestionKey === `${chunk.original.id}:${question.id}`"
-                            @click="saveQuestionEdit(chunk.original, question)">{{ $t('common.save') }}</t-button>
-                        </div>
-                        <template v-else>
-                          <span class="question-text">{{ question.question }}</span>
-                          <div class="question-actions">
-                            <t-tooltip v-if="canEditContent && !question.id.startsWith('legacy-')"
-                              :content="$t('common.edit')" placement="top">
-                              <t-button class="icon-action-btn" theme="default" variant="text" shape="square" size="small"
-                                @click.stop="startQuestionEdit(chunk.original, question)">
-                                <template #icon><t-icon name="edit" size="14px" /></template>
-                              </t-button>
-                            </t-tooltip>
-                            <t-popconfirm v-if="canDeleteGeneratedQuestion && !question.id.startsWith('legacy-')"
-                              theme="warning" :content="$t('knowledgeBase.confirmDeleteQuestion')"
-                              @confirm="handleDeleteQuestion(chunk.original, index, question)">
-                              <t-button class="icon-action-btn delete-question-btn" theme="default" variant="text"
-                                shape="square" size="small" :loading="isDeleting(index, question.id)">
-                                <template #icon><t-icon name="delete" size="14px" /></template>
-                              </t-button>
-                            </t-popconfirm>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                    <div v-else-if="questionComposerChunk !== chunk.original.id" class="questions-empty">
-                      <t-icon name="chat-bubble-help" size="20px" />
-                      <span>{{ $t('knowledgeBase.noGeneratedQuestions') }}</span>
-                      <t-button v-if="canEditContent" size="small" variant="text"
-                        @click="openQuestionComposer(chunk.original, index)">
-                        <template #icon><t-icon name="add" size="14px" /></template>
-                        {{ $t('common.add') }}
-                      </t-button>
-                    </div>
-                    <div v-if="canEditContent && questionComposerChunk === chunk.original.id" class="question-composer">
-                      <div class="question-composer-icon"><t-icon name="add" size="15px" /></div>
-                      <t-input v-model="questionDrafts[chunk.original.id]" autofocus
-                        :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
-                      <t-button size="small" variant="text" :disabled="savingQuestionChunk === chunk.original.id"
-                        @click="closeQuestionComposer(chunk.original)">{{ $t('common.cancel') }}</t-button>
-                      <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id"
-                        :disabled="!(questionDrafts[chunk.original.id] || '').trim()" @click="addQuestion(chunk.original)">
-                        {{ $t('common.add') }}
-                      </t-button>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -2560,14 +2582,6 @@ const handleDetailsScroll = () => {
   }
 }
 
-.chunk-question-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--td-text-color-placeholder);
-  font-size: 11px;
-}
-
 .chunk-toolbar-divider {
   width: 1px;
   height: 16px;
@@ -2758,110 +2772,103 @@ const handleDetailsScroll = () => {
   }
 }
 
-// 父 Chunk 上下文样式
-.parent-context-section {
-  margin-top: 12px;
-  border-top: 1px solid var(--td-component-stroke);
+.chunk-question-entry {
+  overflow: visible;
 }
 
-.parent-context-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 6px 2px;
-  border: none;
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-
-  &:hover {
-    color: var(--td-text-color-primary);
-  }
-}
-
-.parent-context-toggle-label {
+.chunk-question-entry-icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
 }
 
-.parent-context-content {
-  margin-bottom: 4px;
-  padding: 10px 12px;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
-
-  .md-content {
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-  }
+.chunk-question-entry-count {
+  position: absolute;
+  top: -8px;
+  right: -9px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--td-bg-color-container);
+  border-radius: 999px;
+  color: var(--td-text-color-anti);
+  background: var(--td-brand-color);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 12px;
+  text-align: center;
 }
 
-// 辅助召回问题：沿用中性容器样式，避免使用成功态绿色作为列表背景。
-.questions-section {
-  margin-top: 12px;
-  padding-top: 4px;
-  border-top: 1px solid var(--td-component-stroke);
+.chunk-context-popup,
+.chunk-questions-popup {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
 }
 
-.questions-head,
-.questions-toggle,
-.questions-head-actions,
+.chunk-popup-head,
+.chunk-popup-title,
+.chunk-popup-actions,
+.chunk-popup-state {
+  display: flex;
+  align-items: center;
+}
+
+.chunk-popup-head {
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 8px 12px 8px 14px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.chunk-popup-title {
+  gap: 7px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chunk-popup-count {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chunk-popup-actions {
+  gap: 2px;
+}
+
+.chunk-popup-state {
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.chunk-context-popup-body {
+  max-height: min(480px, calc(100vh - 170px));
+  padding: 14px 16px;
+  overflow: auto;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.chunk-questions-popup-body {
+  max-height: min(480px, calc(100vh - 170px));
+  padding: 0 10px 10px;
+  overflow-y: auto;
+}
+
 .question-item,
 .question-inline-editor,
 .question-composer,
 .questions-empty {
   display: flex;
   align-items: center;
-}
-
-.questions-head {
-  justify-content: space-between;
-  min-height: 38px;
-  padding: 4px 0;
-}
-
-.questions-toggle {
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-
-  &:hover {
-    color: var(--td-text-color-primary);
-  }
-}
-
-.questions-count {
-  min-width: 20px;
-  color: var(--td-text-color-placeholder);
-  text-align: center;
-  font-size: 11px;
-  font-weight: 400;
-}
-
-.questions-chevron {
-  color: var(--td-text-color-placeholder);
-}
-
-.questions-head-actions {
-  gap: 2px;
-}
-
-.questions-body {
-  padding-bottom: 4px;
 }
 
 .questions-list {
