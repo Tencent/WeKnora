@@ -31,6 +31,23 @@ It creates the complete current application schema and records migration version
 `74` in `schema_migrations`. Existing PostgreSQL migrations continue to be used
 unchanged when `DB_DRIVER=postgres`; SQLite continues to use its own baseline.
 
+## Container Log Retention
+
+The MySQL Compose stack configures Docker's `local` logging driver for every
+service (`frontend`, `app`, `mysql`, `redis`, `qdrant`, and `docreader`). Docker
+rotates stdout and stderr logs at 20 MB per file and keeps three files, limiting
+each container's local Docker log history to approximately 60 MB.
+
+The setting applies when a container is created. To apply it to an existing
+stack, recreate the services:
+
+```bash
+docker compose --env-file .env.mysql -f docker-compose.mysql.yml up -d --force-recreate
+```
+
+This limit does not replace centralized log retention for long-term auditing,
+and it does not limit application files configured through `LOG_PATH`.
+
 ## Schema Check
 
 Run the repeatable schema validation before publishing a MySQL-related change:
