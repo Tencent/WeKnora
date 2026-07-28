@@ -17,7 +17,7 @@ import (
 func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
@@ -73,7 +73,7 @@ func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
 func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
@@ -176,7 +176,7 @@ func TestParseOutLinks(t *testing.T) {
 func TestRepairContentLinks(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)

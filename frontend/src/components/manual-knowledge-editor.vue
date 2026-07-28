@@ -29,6 +29,7 @@ interface KnowledgeDetailResponse {
   file_name?: string
   metadata?: any
   parse_status?: string
+  tags?: Array<{ id: string }>
 }
 
 type ManualStatus = 'draft' | 'publish'
@@ -69,6 +70,7 @@ const visible = computed({
 const mode = computed(() => uiStore.manualEditorMode)
 const knowledgeId = computed(() => uiStore.manualEditorKnowledgeId)
 const currentKnowledgeId = ref<string | null>(null)
+const manualTagIds = ref<string[]>([])
 
 const form = reactive({
   kbId: '' as string,
@@ -528,6 +530,7 @@ const loadKnowledgeContent = async () => {
       ''
     form.content = meta?.content || uiStore.manualEditorInitialContent || ''
     form.status = resolveManualKnowledgeStatus(meta?.status, data.parse_status)
+    manualTagIds.value = (data.tags || []).map(tag => String(tag.id))
     if (meta?.updatedAt) {
       lastUpdatedAt.value = meta.updatedAt
     }
@@ -555,6 +558,7 @@ const resetForm = () => {
   activeTab.value = 'edit'
   lastUpdatedAt.value = ''
   initialLoaded.value = false
+  manualTagIds.value = mode.value === 'create' ? [...uiStore.selectedTagIds] : []
   selectionRange.start = 0
   selectionRange.end = 0
 }
@@ -613,7 +617,6 @@ const handleSave = async (targetStatus: ManualStatus) => {
   saving.value = true
   savingAction.value = targetStatus
   try {
-    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined
     const payload: {
       title: string
       content: string
@@ -625,9 +628,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       content: form.content,
       status: targetStatus,
     }
-    if (tagIdsToUpload && tagIdsToUpload.length > 0) {
-      payload.tag_ids = tagIdsToUpload
-    }
+    payload.tag_ids = [...manualTagIds.value]
 
     if (targetStatus === 'publish') {
       let kbInfo: any
@@ -651,10 +652,12 @@ const handleSave = async (targetStatus: ManualStatus) => {
             knowledgeId: currentKnowledgeId.value || undefined,
             title: payload.title,
             content: payload.content,
-            tagIds: tagIdsToUpload,
+            tagIds: [...manualTagIds.value],
           },
         })
         payload.process_config = confirmResult.processConfig
+        manualTagIds.value = [...(confirmResult.tagIds || [])]
+        payload.tag_ids = [...manualTagIds.value]
       } catch {
         return
       }
