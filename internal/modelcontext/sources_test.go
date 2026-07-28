@@ -234,6 +234,32 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 	require.False(t, strings.Contains(second, "c2"))
 }
 
+func TestModelOutputRendersKnowledgeMetadataOncePerDocument(t *testing.T) {
+	registry := newSourceRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"display_type": "search_results",
+			"results": []map[string]interface{}{
+				{
+					"chunk_id": "chunk-1", "chunk_index": 1, "content": "first",
+					"knowledge_id": "document-1", "knowledge_base_id": "kb-1", "knowledge_title": "Doc",
+					"knowledge_metadata": "region: Shanghai & Suzhou",
+				},
+				{
+					"chunk_id": "chunk-2", "chunk_index": 2, "content": "second",
+					"knowledge_id": "document-1", "knowledge_base_id": "kb-1", "knowledge_title": "Doc",
+					"knowledge_metadata": "region: Shanghai & Suzhou",
+				},
+			},
+		},
+	})
+
+	require.Equal(t, 1, strings.Count(output, "<metadata>"))
+	require.Contains(t, output, "<metadata>region: Shanghai &amp; Suzhou</metadata>")
+	require.Equal(t, 2, strings.Count(output, "<chunk "))
+}
+
 func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{

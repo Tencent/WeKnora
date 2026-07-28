@@ -150,6 +150,7 @@ type modelChunk struct {
 	docHandle  string
 	kbHandle   string
 	title      string
+	metadata   string
 	chunkType  string
 	index      int
 	view       string
@@ -195,6 +196,7 @@ func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]int
 			docHandle:  r.RegisterDocument(knowledgeID),
 			kbHandle:   r.RegisterKnowledgeBase(kbID),
 			title:      title,
+			metadata:   stringValue(row, "knowledge_metadata"),
 			chunkType:  chunkType,
 			index:      chunkIndex,
 			view:       viewForRow(row, mode),
@@ -255,6 +257,7 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 		handle   string
 		kbHandle string
 		title    string
+		metadata string
 		chunks   []modelChunk
 		order    int
 	}
@@ -267,9 +270,14 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 		}
 		group := groupsByKey[key]
 		if group == nil {
-			group = &docGroup{handle: chunk.docHandle, kbHandle: chunk.kbHandle, title: chunk.title, order: chunk.inputOrder}
+			group = &docGroup{
+				handle: chunk.docHandle, kbHandle: chunk.kbHandle, title: chunk.title,
+				metadata: chunk.metadata, order: chunk.inputOrder,
+			}
 			groupsByKey[key] = group
 			groups = append(groups, group)
+		} else if group.metadata == "" {
+			group.metadata = chunk.metadata
 		}
 		group.chunks = append(group.chunks, chunk)
 	}
@@ -289,6 +297,9 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(group.title))
 		}
 		b.WriteString(">\n")
+		if group.metadata != "" {
+			fmt.Fprintf(&b, "    <metadata>%s</metadata>\n", escapeText(group.metadata))
+		}
 		for _, chunk := range group.chunks {
 			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.handle, chunk.index, chunk.view)
 			if chunk.chunkType != "" {

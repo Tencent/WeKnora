@@ -638,13 +638,6 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		return err
 	}
 	if metadataChanged {
-		chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, record.TenantID, record.ID)
-		if err != nil {
-			return fmt.Errorf("list chunks for metadata reindex: %w", err)
-		}
-		if err := s.updateChunkVector(ctx, record.KnowledgeBaseID, chunks); err != nil {
-			return fmt.Errorf("metadata saved but reindex failed: %w", err)
-		}
 		if record.SummaryStatus == types.SummaryStatusCompleted {
 			_ = s.repo.UpdateKnowledgeColumn(ctx, record.ID, "summary_status", types.SummaryStatusPending)
 		}

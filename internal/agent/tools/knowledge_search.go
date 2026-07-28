@@ -1103,6 +1103,39 @@ func (t *KnowledgeSearchTool) buildContentSignature(content string) string {
 	return searchutil.BuildContentSignature(content)
 }
 
+// writeKnowledgeMetadataHeader emits document-scoped metadata once per
+// knowledge item. Chunk entries keep only chunk-specific content so repeated
+// results from the same document do not waste model context.
+func writeKnowledgeMetadataHeader(ob *strings.Builder, results []*searchResultWithMeta) {
+	seen := make(map[string]struct{}, len(results))
+	hasMetadata := false
+	var documents strings.Builder
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil || result.KnowledgeID == "" || result.KnowledgeCustomMetadata == "" {
+			continue
+		}
+		if _, ok := seen[result.KnowledgeID]; ok {
+			continue
+		}
+		seen[result.KnowledgeID] = struct{}{}
+		hasMetadata = true
+		documents.WriteString(fmt.Sprintf(
+			"<document knowledge_id=\"%s\" knowledge_base_id=\"%s\" title=\"%s\">\n",
+			xmlEscape(result.KnowledgeID),
+			xmlEscape(result.KnowledgeBaseID),
+			xmlEscape(result.KnowledgeTitle),
+		))
+		documents.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", xmlEscape(result.KnowledgeCustomMetadata)))
+		documents.WriteString("</document>\n")
+	}
+	if !hasMetadata {
+		return
+	}
+	ob.WriteString("<documents>\n")
+	ob.WriteString(documents.String())
+	ob.WriteString("</documents>\n")
+}
+
 // formatOutput formats the search results for display
 func (t *KnowledgeSearchTool) formatOutput(
 	ctx context.Context,
@@ -1148,6 +1181,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	for _, q := range queries {
 		ob.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
 	}
+	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
 
@@ -1273,9 +1307,6 @@ func (t *KnowledgeSearchTool) formatOutput(
 			}
 			if snippet != "" {
 				ob.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
-			}
-			if result.KnowledgeCustomMetadata != "" {
-				ob.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", xmlEscape(result.KnowledgeCustomMetadata)))
 			}
 			ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
 
