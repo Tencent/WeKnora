@@ -842,8 +842,10 @@ export default {
     head: {
       duration: "总耗时",
       stages: "阶段",
-      stagesDone: "已完成阶段",
+      stagesDone: "主流程阶段",
       stagesProgress: "当前阶段",
+      postprocessTasks: "后台任务：运行中 {running} / 失败 {failed} / 已完成 {completed}",
+      completedWithActiveTrace: "处理已完成，但仍有 {n} 个 Trace 任务处于活动状态",
       stage: "阶段",
       status: "状态",
       attempt: "尝试",

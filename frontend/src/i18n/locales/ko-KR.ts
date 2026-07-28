@@ -844,8 +844,10 @@ export default {
     head: {
       duration: "소요시간",
       stages: "단계",
-      stagesDone: "완료된 단계",
+      stagesDone: "주요 단계",
       stagesProgress: "현재 단계",
+      postprocessTasks: "후처리: 실행 중 {running} / 실패 {failed} / 완료 {completed}",
+      completedWithActiveTrace: "처리는 완료되었지만 {n}개의 Trace 작업이 아직 활성 상태입니다",
       stage: "단계",
       status: "상태",
       attempt: "시도",
