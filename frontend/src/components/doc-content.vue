@@ -1698,9 +1698,6 @@ const handleDetailsScroll = () => {
                   <div class="chunk-heading">
                     <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
-                    <t-tag v-if="chunk.hasParent" size="small" theme="default" variant="light">
-                      {{ $t('knowledgeBase.childChunk') }}
-                    </t-tag>
                   </div>
                   <div class="chunk-header-right">
                     <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
@@ -1743,12 +1740,7 @@ const handleDetailsScroll = () => {
                       <t-button class="icon-action-btn chunk-question-entry"
                         :class="{ 'is-active': questionPopupChunk === chunk.original.id }" size="small" variant="text"
                         shape="square" :title="$t('knowledgeBase.generatedQuestions')">
-                        <template #icon>
-                          <span class="chunk-question-entry-icon">
-                            <t-icon name="help-circle" size="15px" />
-                            <span v-if="chunk.questions.length" class="chunk-question-entry-count">{{ chunk.questions.length }}</span>
-                          </span>
-                        </template>
+                        <template #icon><t-icon name="help-circle" size="15px" /></template>
                       </t-button>
                       <template #content>
                         <div class="chunk-questions-popup" @click.stop>
@@ -1775,6 +1767,21 @@ const handleDetailsScroll = () => {
                             </div>
                           </div>
                           <div class="chunk-questions-popup-body">
+                            <div v-if="canEditContent && questionComposerChunk === chunk.original.id" class="question-composer">
+                              <t-input v-model="questionDrafts[chunk.original.id]" autofocus
+                                :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
+                              <t-tooltip :content="$t('common.cancel')" placement="top">
+                                <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                                  :disabled="savingQuestionChunk === chunk.original.id"
+                                  @click="closeQuestionComposer(chunk.original)">
+                                  <template #icon><t-icon name="close" size="14px" /></template>
+                                </t-button>
+                              </t-tooltip>
+                              <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id"
+                                :disabled="!(questionDrafts[chunk.original.id] || '').trim()" @click="addQuestion(chunk.original)">
+                                {{ $t('common.add') }}
+                              </t-button>
+                            </div>
                             <div v-if="chunk.questions.length" class="questions-list">
                               <div v-for="question in chunk.questions" :key="question.id" class="question-item">
                                 <span class="question-leading-icon"><t-icon name="help-circle" size="14px" /></span>
@@ -1811,22 +1818,6 @@ const handleDetailsScroll = () => {
                             <div v-else-if="questionComposerChunk !== chunk.original.id" class="questions-empty">
                               <t-icon name="chat-bubble-help" size="20px" />
                               <span>{{ $t('knowledgeBase.noGeneratedQuestions') }}</span>
-                              <t-button v-if="canEditContent" size="small" variant="text"
-                                @click="openQuestionComposer(chunk.original)">
-                                <template #icon><t-icon name="add" size="14px" /></template>
-                                {{ $t('common.add') }}
-                              </t-button>
-                            </div>
-                            <div v-if="canEditContent && questionComposerChunk === chunk.original.id" class="question-composer">
-                              <div class="question-composer-icon"><t-icon name="add" size="15px" /></div>
-                              <t-input v-model="questionDrafts[chunk.original.id]" autofocus
-                                :placeholder="$t('knowledgeBase.addGeneratedQuestion')" @enter="addQuestion(chunk.original)" />
-                              <t-button size="small" variant="text" :disabled="savingQuestionChunk === chunk.original.id"
-                                @click="closeQuestionComposer(chunk.original)">{{ $t('common.cancel') }}</t-button>
-                              <t-button size="small" theme="primary" :loading="savingQuestionChunk === chunk.original.id"
-                                :disabled="!(questionDrafts[chunk.original.id] || '').trim()" @click="addQuestion(chunk.original)">
-                                {{ $t('common.add') }}
-                              </t-button>
                             </div>
                           </div>
                         </div>
@@ -1898,6 +1889,14 @@ const handleDetailsScroll = () => {
                                         {{ $t('knowledgeBase.revertRevision') }}
                                       </t-button>
                                     </t-popconfirm>
+                                  </div>
+                                  <div class="chunk-history-diff-legend">
+                                    <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--add">
+                                      <i />{{ $t('knowledgeBase.diffAddedInCurrent') }}
+                                    </span>
+                                    <span class="chunk-history-diff-legend-item chunk-history-diff-legend-item--del">
+                                      <i />{{ $t('knowledgeBase.diffRemovedFromCurrent') }}
+                                    </span>
                                   </div>
                                   <div v-if="!compactChunkDiff(chunk.original).length" class="chunk-history-no-diff">
                                     {{ $t('knowledgeBase.noContentChanges') }}
@@ -2615,7 +2614,7 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-history-popup-head {
-  padding: 12px 14px 10px;
+  padding: 8px 12px 7px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
@@ -2629,7 +2628,7 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-history-current {
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--td-text-color-placeholder);
   font-size: 11px;
 }
@@ -2724,6 +2723,35 @@ const handleDetailsScroll = () => {
   font-size: 11px;
 }
 
+.chunk-history-diff-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 6px;
+  color: var(--td-text-color-placeholder);
+  font-size: 10px;
+}
+
+.chunk-history-diff-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  i {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+  }
+
+  &--add i {
+    background: var(--td-success-color);
+  }
+
+  &--del i {
+    background: var(--td-error-color);
+  }
+}
+
 .chunk-history-no-diff {
   padding: 12px;
   border-radius: 4px;
@@ -2772,34 +2800,6 @@ const handleDetailsScroll = () => {
   }
 }
 
-.chunk-question-entry {
-  overflow: visible;
-}
-
-.chunk-question-entry-icon {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chunk-question-entry-count {
-  position: absolute;
-  top: -8px;
-  right: -9px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border: 1px solid var(--td-bg-color-container);
-  border-radius: 999px;
-  color: var(--td-text-color-anti);
-  background: var(--td-brand-color);
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 12px;
-  text-align: center;
-}
-
 .chunk-context-popup,
 .chunk-questions-popup {
   width: min(520px, calc(100vw - 32px));
@@ -2819,8 +2819,8 @@ const handleDetailsScroll = () => {
 
 .chunk-popup-head {
   justify-content: space-between;
-  min-height: 46px;
-  padding: 8px 12px 8px 14px;
+  min-height: 38px;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
@@ -2859,7 +2859,7 @@ const handleDetailsScroll = () => {
 
 .chunk-questions-popup-body {
   max-height: min(480px, calc(100vh - 170px));
-  padding: 0 10px 10px;
+  padding: 0 10px 8px;
   overflow-y: auto;
 }
 
@@ -2872,20 +2872,20 @@ const handleDetailsScroll = () => {
 }
 
 .questions-list {
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .question-item {
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  min-height: 38px;
-  padding: 8px 6px;
+  min-height: 34px;
+  padding: 5px 6px;
   border-bottom: 1px solid var(--td-component-stroke);
   border-radius: 4px;
   background: transparent;
   font-size: 13px;
   color: var(--td-text-color-primary);
-  line-height: 1.5;
+  line-height: 20px;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -2897,6 +2897,7 @@ const handleDetailsScroll = () => {
 
   .question-text {
     flex: 1;
+    line-height: 20px;
     word-break: break-word;
   }
 
@@ -2915,8 +2916,7 @@ const handleDetailsScroll = () => {
   align-items: center;
   justify-content: center;
   width: 18px;
-  height: 24px;
-  margin-top: -1px;
+  height: 20px;
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
@@ -2934,7 +2934,7 @@ const handleDetailsScroll = () => {
 }
 
 .question-inline-editor {
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   flex: 1;
 }
@@ -2946,30 +2946,19 @@ const handleDetailsScroll = () => {
 .questions-empty {
   justify-content: center;
   gap: 8px;
-  padding: 18px 8px 8px;
+  padding: 20px 8px 12px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
 }
 
 .question-composer {
   gap: 6px;
-  padding-top: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .question-composer :deep(.t-input) {
   flex: 1;
-}
-
-.question-composer-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-container-hover);
-  flex-shrink: 0;
 }
 
 // 音频播放器样式

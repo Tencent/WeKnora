@@ -554,6 +554,8 @@ export default {
     currentVersion: 'Current version',
     noChunkHistory: 'No edit history',
     compareRevisionWithCurrent: 'Content changes from v{revision} to current v{current}',
+    diffAddedInCurrent: 'Added in current',
+    diffRemovedFromCurrent: 'Removed from current',
     noContentChanges: 'No content changes; this revision only changed status',
     revertRevision: 'Revert revision',
     revertRevisionConfirm: 'Revert to v{revision}? A new revision will be created.',
