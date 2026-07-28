@@ -88,7 +88,7 @@ func TestWebFetchToolAllFailuresReturnStructuredFallback(t *testing.T) {
 	))
 
 	require.NoError(t, err)
-	require.True(t, result.Success, "structured fetch failures must not fail the whole tool call")
+	require.False(t, result.Success, "all-failed batches should not report tool success")
 	assert.Equal(t, true, result.Data["all_failed"])
 	assert.Equal(t, 0, result.Data["successful_count"])
 	assert.Contains(t, result.Output, "answer from existing web_search titles, URLs, and snippets")
@@ -111,6 +111,22 @@ func TestWebFetchToolDeduplicatesURLsWithinBatch(t *testing.T) {
 	assert.Equal(t, 1, result.Data["skipped_count"])
 	items := result.Data["results"].([]map[string]interface{})
 	assert.Equal(t, "duplicate_url", items[1]["error_code"])
+}
+
+func TestWebFetchToolDeduplicatesGitHubBlobAndRawURLs(t *testing.T) {
+	const blobURL = "https://github.com/org/repo/blob/main/README.md"
+	const rawURL = "https://raw.githubusercontent.com/org/repo/main/README.md"
+	fetcher := newStubWebContentFetcher(map[string]string{rawURL: "readme content"}, nil)
+	tool := newWebFetchTool(nil, fetcher)
+
+	result, err := tool.Execute(context.Background(), webFetchArgs(
+		WebFetchItem{URL: blobURL, Prompt: "extract facts"},
+		WebFetchItem{URL: rawURL, Prompt: "extract facts"},
+	))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, fetcher.callCount[rawURL]+fetcher.callCount[blobURL])
+	assert.Equal(t, 1, result.Data["skipped_count"])
 }
 
 func newStubWebContentFetcher(contents map[string]string, failures map[string]error) *stubWebContentFetcher {

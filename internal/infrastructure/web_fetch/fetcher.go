@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	fetchTimeout = 60 * time.Second
-	maxBodySize  = 100 * 1024
+	fetchTimeout         = 60 * time.Second
+	pipelineFetchTimeout = 15 * time.Second
+	maxBodySize          = 100 * 1024
 )
 
 // ErrorCode identifies the stage and class of a fetch failure.
@@ -106,16 +107,26 @@ type httpFetchResult struct {
 
 // NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
 func NewFetcher() *Fetcher {
+	return newFetcher(fetchTimeout, renderWithChromium)
+}
+
+// NewPipelineFetcher creates an HTTP-only fetcher for the chat pipeline.
+// It keeps the pre-refactor 15s timeout and does not launch Chromium.
+func NewPipelineFetcher() *Fetcher {
+	return newFetcher(pipelineFetchTimeout, nil)
+}
+
+func newFetcher(timeout time.Duration, renderBrowser func(context.Context, pinnedTarget) (string, error)) *Fetcher {
 	config := utils.SSRFSafeHTTPClientConfig{
-		Timeout:      fetchTimeout,
+		Timeout:      timeout,
 		MaxRedirects: 10,
 	}
 	fetcher := &Fetcher{
-		timeout:       fetchTimeout,
+		timeout:       timeout,
 		maxBodySize:   maxBodySize,
 		validateURL:   utils.ValidateURLForSSRF,
 		resolveIPs:    lookupPublicDNS,
-		renderBrowser: renderWithChromium,
+		renderBrowser: renderBrowser,
 	}
 	transport := utils.NewSSRFSafeTransport(config)
 	transport.DialContext = fetcher.pinnedDialContext()
@@ -123,9 +134,9 @@ func NewFetcher() *Fetcher {
 	return fetcher
 }
 
-// FetchURLContent preserves the existing package-level API.
+// FetchURLContent preserves the existing package-level API for the chat pipeline.
 func FetchURLContent(ctx context.Context, rawURL string) (string, error) {
-	return NewFetcher().Fetch(ctx, rawURL)
+	return NewPipelineFetcher().Fetch(ctx, rawURL)
 }
 
 // Fetch downloads a page and returns clean text content.
@@ -149,7 +160,8 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 	httpResult, httpErr := f.fetchHTTP(requestCtx, rawURL, parsedURL)
 	if httpErr == nil {
 		content, parseErr := htmlToText(string(httpResult.body))
-		if parseErr == nil && strings.TrimSpace(content) != "" && !needsBrowserFallback(content, httpResult.body) {
+		requiresBrowser := parseErr == nil && needsBrowserFallback(content, httpResult.body)
+		if parseErr == nil && strings.TrimSpace(content) != "" && !requiresBrowser {
 			logger.Infof(ctx, "[WebFetch] fetched %s → %d chars", rawURL, len(content))
 			return content, nil
 		}
@@ -166,7 +178,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 		if parseErr != nil {
 			return "", parseErr
 		}
-		if strings.TrimSpace(content) == "" {
+		if strings.TrimSpace(content) == "" || requiresBrowser {
 			return "", newFetchError(ErrorEmptyContent, false, "page contains no readable text")
 		}
 		return content, nil
