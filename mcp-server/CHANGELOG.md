@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-07-28
+
+### 修复
+- 将入口脚本（`run_server.py`、`main.py`、`run.py`）的诊断输出改到 stderr，避免破坏 MCP stdio 协议流导致客户端启动失败
+- 修复 wheel 漏打包 `upload_paths.py` 导致的 `ModuleNotFoundError`
+- 将 `__init__.py` 改为绝对导入，修复 unittest/pytest 收集测试时的包导入错误
+
+### 变更
+- PyPI 分发包名统一为 `weknora-mcp`（命令行入口 `weknora-mcp-server` / `weknora-server` 不变）
+- 新增 CI workflow（`.github/workflows/mcp-server.yml`），发布 tag 格式为 `mcp-server-v*`
+
 ## [1.0.0] - 2024-01-XX
 
 ### 新增

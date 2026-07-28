@@ -1318,7 +1318,7 @@ def _init_options() -> InitializationOptions:
     """Build MCP InitializationOptions (shared across all transports)"""
     return InitializationOptions(
         server_name="weknora-server",
-        server_version="1.0.0",
+        server_version="1.0.1",
         capabilities=app.get_capabilities(
             notification_options=NotificationOptions(),
             experimental_capabilities={},
