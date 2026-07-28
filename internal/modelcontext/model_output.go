@@ -22,13 +22,16 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	if result == nil {
 		return ""
 	}
+	displayType := stringValue(result.Data, "display_type")
+	if displayType == "web_fetch_results" {
+		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
+	}
 	if !result.Success {
 		if result.Error != "" {
 			return "Error: " + r.CompactKnownText(result.Error)
 		}
 		return "Error: tool call failed"
 	}
-	displayType := stringValue(result.Data, "display_type")
 	switch displayType {
 	case "grep_results":
 		return r.modelKnowledgeOutput("keyword", mapsValue(result.Data["chunk_results"]), result.Output)
@@ -42,8 +45,6 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 		return r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output)
 	case "web_search_results":
 		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
-	case "web_fetch_results":
-		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "database_query":
 		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:

@@ -213,8 +213,8 @@ func buildWebFetchToolResult(ctx context.Context, results []*webFetchItemResult)
 	}
 
 	logger.Infof(ctx, "[Tool][WebFetch] completed success=%d failed=%d skipped=%d", successCount, failedCount, skippedCount)
-	return &types.ToolResult{
-		Success: true,
+	toolResult := &types.ToolResult{
+		Success: successCount > 0,
 		Output:  builder.String(),
 		Data: map[string]interface{}{
 			"results":          aggregated,
@@ -226,6 +226,10 @@ func buildWebFetchToolResult(ctx context.Context, results []*webFetchItemResult)
 			"display_type":     "web_fetch_results",
 		},
 	}
+	if allFailed {
+		toolResult.Error = "all page fetches failed"
+	}
+	return toolResult
 }
 
 func (t *WebFetchTool) processWithLLM(ctx context.Context, item WebFetchItem, content string) (string, error) {
@@ -269,7 +273,7 @@ func buildWebFetchOutput(item WebFetchItem, content, summary string, summaryErr 
 }
 
 func canonicalFetchURL(rawURL string) string {
-	trimmed := strings.TrimSpace(rawURL)
+	trimmed := normalizeGitHubURL(strings.TrimSpace(rawURL))
 	parsedURL, err := url.Parse(trimmed)
 	if err != nil || parsedURL.Host == "" {
 		return trimmed

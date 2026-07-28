@@ -376,6 +376,30 @@ func TestModelOutputWebFetchAllFailuresIncludeSearchFallback(t *testing.T) {
 	require.Contains(t, output, "page content was not verified")
 }
 
+func TestModelOutputWebFetchAllFailuresStillStructuredWhenToolNotSuccessful(t *testing.T) {
+	registry := newSourceRegistry()
+	output := registry.ModelOutput(&types.ToolResult{
+		Success: false,
+		Error:   "all page fetches failed",
+		Data: map[string]interface{}{
+			"display_type": "web_fetch_results",
+			"results": []map[string]interface{}{
+				{
+					"url":           "https://example.com/dns",
+					"status":        "failed",
+					"retryable":     true,
+					"error_code":    "dns_failed",
+					"error_message": "DNS lookup failed",
+				},
+			},
+		},
+	})
+
+	require.Contains(t, output, `status="failed" retryable="true" error_code="dns_failed"`)
+	require.Contains(t, output, "Stop expanding web searches")
+	require.NotContains(t, output, "Error: all page fetches failed")
+}
+
 func TestModelOutputWebFetchKeepsContentWhenSummaryFails(t *testing.T) {
 	registry := newSourceRegistry()
 	output := registry.ModelOutput(&types.ToolResult{
