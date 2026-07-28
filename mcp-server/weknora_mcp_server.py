@@ -1357,8 +1357,8 @@ async def run_sse(host: str, port: int):
 
     starlette_app = Starlette(
         routes=[
+            Mount("/sse/messages/", app=sse.handle_post_message),  # 更具体的路由必须在 /sse 前面
             Mount("/sse", app=handle_sse),
-            Mount("/messages/", app=sse.handle_post_message),
         ]
     )
     starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
