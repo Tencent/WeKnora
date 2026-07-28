@@ -351,7 +351,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 }
 ```
 
-## 空间 API Key 管理（`tenant_api_keys`）
+## API Key 管理（`tenant_api_keys`）
 
 自 scoped API Key 改造后，密钥以独立记录存储，支持：
 
@@ -360,7 +360,36 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 - **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
 - **过期**：创建时可选 `expires_at_unix`
 
-认证上下文中的空间角色与 Key 的 `role` 一致（`viewer` / `contributor` / `admin`）。路由级 API Key 鉴权与 KB 访问守卫在 `X-API-Key` 认证后强制执行。
+空间 Key 固定绑定创建时的空间。路由级 capability 鉴权与 KB 访问守卫会在 `X-API-Key` 认证后继续强制执行。
+
+### 平台 API Key
+
+系统管理员可在“系统管理 → 平台 API Key”创建不绑定单一空间的 Key。平台 Key 默认可以选择任意存在的空间，但每项操作仍必须具备对应 capability；平台 Key 不支持 `full_access`。
+
+- 管理接口：`GET/POST /system/admin/api-keys`、`DELETE /system/admin/api-keys/:key_id`，仅人类 SystemAdmin 会话可调用，平台 Key 不能创建或吊销其他平台 Key。
+- 调用普通空间 API 时必须同时传 `X-Tenant-ID: <空间 ID>`；服务端解析目标空间后继续复用原有空间 Context、路由 capability 和知识库范围检查。
+- 调用明确开放的 `/system/admin/*` 控制面接口时不需要 `X-Tenant-ID`，需要 `system_*` capability。
+- 平台 Key 明文仅在创建响应的 `data.token` 返回一次；列表仅返回脱敏值。
+
+```bash
+curl 'http://localhost:8080/api/v1/knowledge-bases' \
+  -H 'X-API-Key: <platform-api-key>' \
+  -H 'X-Tenant-ID: 10000'
+```
+
+平台 capability：
+
+| capability | 权限 |
+| --- | --- |
+| `system_tenants_read` | 列出、搜索、查看全部空间 |
+| `system_tenants_manage` | 创建、更新、删除空间以及应用全局空间配置 |
+| `system_settings_read` | 读取系统设置 |
+| `system_settings_manage` | 更新、重置系统设置 |
+| `system_runtime_read` | 查看运行时队列和任务 |
+| `system_runtime_manage` | 重试、立即执行、取消、删除运行时任务 |
+| `system_audit_read` | 读取平台审计日志 |
+
+平台 Key 也可以携带现有空间 capability，例如 `retrieve`、`ingest`、`manage_kbs`；这些能力作用于请求中 `X-Tenant-ID` 指定的空间。
 
 ## API Key Principal：隔离边界与安全说明
 

@@ -55,6 +55,17 @@ func TestRequireSystemAdmin_RejectsAPIKey(t *testing.T) {
 	}
 }
 
+func TestRequireSystemAdmin_AllowsPlatformAPIKeyAfterRouteGate(t *testing.T) {
+	w := apiKeyRBACHarness(
+		types.TenantAPIKeyScope{ScopeType: types.APIKeyScopePlatform},
+		types.TenantRoleViewer,
+		RequireSystemAdmin(cfgRBAC(true)),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("platform API key should pass the system-admin role guard after route authorization, got %d", w.Code)
+	}
+}
+
 // TestRequireOwnershipOrRole_ShortCircuitsAPIKey is the core regression for
 // review #1: an API key writing to a KB it does not
 // "own" (synthetic system user never matches creator_id) must not be 403'd by

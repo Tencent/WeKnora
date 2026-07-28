@@ -3,15 +3,18 @@ package im
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/textproto"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -342,10 +345,17 @@ const (
 	RedisKeyQueueUser  = "im:queue:user:"   // + userKey   — global per-user queue counter
 	RedisKeyRateLimit  = "im:ratelimit:"    // + key       — sliding-window rate limiting
 	RedisKeyGlobalGate = "im:global:active" // global concurrent worker counter
+	// RedisChannelConfig broadcasts durable im_channels mutations so every
+	// application replica invalidates its local adapter/config snapshot.
+	RedisChannelConfig = "im:channel:config"
 
 	defaultRateLimitWindow      = 60 * time.Second
 	defaultRateLimitMaxRequests = 10
 )
+
+// ErrChannelDisabled reports that a channel row exists but is disabled, so
+// callers can tell it apart from a missing channel or a transient failure.
+var ErrChannelDisabled = errors.New("channel is disabled")
 
 // channelState holds runtime state for a running IM channel.
 type channelState struct {
@@ -353,6 +363,15 @@ type channelState struct {
 	Adapter      Adapter
 	Cancel       context.CancelFunc // for stopping websocket goroutines
 	leaderCancel context.CancelFunc // stops the leader renewal goroutine (nil if not leader)
+}
+
+type leaderRetryState struct {
+	cancel context.CancelFunc
+}
+
+type channelConfigEvent struct {
+	ChannelID      string `json:"channel_id"`
+	SourceInstance string `json:"source_instance"`
 }
 
 // AdapterFactory creates an Adapter from an IMChannel configuration.
@@ -407,8 +426,9 @@ type Service struct {
 	cmdRegistry *CommandRegistry
 
 	// channels maps channel ID -> running channel state
-	channels map[string]*channelState
-	mu       sync.RWMutex
+	channels      map[string]*channelState
+	leaderRetries map[string]*leaderRetryState
+	mu            sync.RWMutex
 
 	// adapterFactories maps platform name -> factory function
 	adapterFactories map[string]AdapterFactory
@@ -438,7 +458,10 @@ type Service struct {
 	// instanceID uniquely identifies this service instance for leader election.
 	instanceID string
 
-	stopCh chan struct{}
+	stopCh         chan struct{}
+	stopOnce       sync.Once
+	subscriberOnce sync.Once
+	stopped        atomic.Bool
 }
 
 // makeUserKey builds the canonical key used to identify a user's request
@@ -843,6 +866,7 @@ func NewService(
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
+		leaderRetries:    make(map[string]*leaderRetryState),
 		adapterFactories: make(map[string]AdapterFactory),
 		rateLimiter:      ratelimit.New(redisClient, RedisKeyRateLimit, rlWindow, instanceID),
 		rateLimitMax:     rlMax,
@@ -887,13 +911,22 @@ func (s *Service) RegisterAdapterFactory(platform string, factory AdapterFactory
 
 // Stop gracefully shuts down the service, stopping all channels and background goroutines.
 func (s *Service) Stop() {
-	close(s.stopCh)
-	s.qaQueue.Stop()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, cs := range s.channels {
-		s.stopChannelLocked(id, cs)
-	}
+	s.stopOnce.Do(func() {
+		s.stopped.Store(true)
+		close(s.stopCh)
+		if s.qaQueue != nil {
+			s.qaQueue.Stop()
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for id, cs := range s.channels {
+			s.stopChannelLocked(id, cs)
+		}
+		for id, retry := range s.leaderRetries {
+			retry.cancel()
+			delete(s.leaderRetries, id)
+		}
+	})
 }
 
 // dedupCleanupLoop periodically cleans up expired entries from the dedup map.
@@ -918,6 +951,8 @@ func (s *Service) dedupCleanupLoop() {
 
 // LoadAndStartChannels loads all enabled channels from the database and starts them.
 func (s *Service) LoadAndStartChannels() error {
+	s.startChannelConfigSubscriber()
+
 	ctx := context.Background()
 	var channels []IMChannel
 	if err := s.db.Where("enabled = ? AND deleted_at IS NULL", true).Find(&channels).Error; err != nil {
@@ -928,8 +963,13 @@ func (s *Service) LoadAndStartChannels() error {
 		ch := channels[i]
 		if err := s.StartChannel(&ch); err != nil {
 			logger.Warnf(ctx, "[IM] Failed to start channel %s (%s/%s): %v", ch.ID, ch.Platform, ch.Name, err)
+		} else if _, _, active := s.GetChannelAdapter(ch.ID); active {
+			// Adapter initialization can launch an asynchronous connection attempt.
+			// Do not claim network readiness here; platform connection logs report it.
+			logger.Infof(ctx, "[IM] Initialized channel runtime: id=%s platform=%s name=%s mode=%s agent=%s",
+				ch.ID, ch.Platform, ch.Name, ch.Mode, ch.AgentID)
 		} else {
-			logger.Infof(ctx, "[IM] Started channel: id=%s platform=%s name=%s mode=%s agent=%s",
+			logger.Infof(ctx, "[IM] Channel runtime is on standby: id=%s platform=%s name=%s mode=%s agent=%s",
 				ch.ID, ch.Platform, ch.Name, ch.Mode, ch.AgentID)
 		}
 	}
@@ -938,12 +978,98 @@ func (s *Service) LoadAndStartChannels() error {
 	return nil
 }
 
+// startChannelConfigSubscriber listens for durable channel mutations made by
+// other application replicas. Redis Pub/Sub provides the fast path; callback
+// freshness checks and the leader renewal DB check remain the durable fallback
+// if an event is missed while a replica is disconnected.
+func (s *Service) startChannelConfigSubscriber() {
+	if s.redis == nil {
+		return
+	}
+	s.subscriberOnce.Do(func() {
+		go s.channelConfigSubscriberLoop()
+	})
+}
+
+func (s *Service) channelConfigSubscriberLoop() {
+	pubsub := s.redis.Subscribe(context.Background(), RedisChannelConfig)
+	defer pubsub.Close()
+
+	messages := pubsub.Channel()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case msg, ok := <-messages:
+			if !ok {
+				return
+			}
+			var event channelConfigEvent
+			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+				logger.Warnf(context.Background(), "[IM] Ignore invalid channel config event: %v", err)
+				continue
+			}
+			if event.ChannelID == "" || event.SourceInstance == s.instanceID {
+				continue
+			}
+			s.reloadChannelFromDB(event.ChannelID, "config event")
+		}
+	}
+}
+
+func (s *Service) publishChannelConfigChange(channelID string) {
+	if s.redis == nil || channelID == "" || s.stopped.Load() {
+		return
+	}
+	payload, err := json.Marshal(channelConfigEvent{
+		ChannelID:      channelID,
+		SourceInstance: s.instanceID,
+	})
+	if err != nil {
+		return
+	}
+	if err := s.redis.Publish(context.Background(), RedisChannelConfig, payload).Err(); err != nil {
+		// The database is the source of truth. Subscribers also verify freshness
+		// on webhook callbacks / leader renewal, so publication is best-effort.
+		logger.Warnf(context.Background(), "[IM] Publish channel config event failed for %s: %v", channelID, err)
+	}
+}
+
+func (s *Service) reloadChannelFromDB(channelID, reason string) {
+	fresh, err := s.GetChannelByID(channelID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		s.StopChannel(channelID)
+		return
+	}
+	if err != nil {
+		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
+		return
+	}
+	if !fresh.Enabled {
+		s.StopChannel(channelID)
+		return
+	}
+	if _, cached, running := s.GetChannelAdapter(channelID); running && sameChannelRuntimeConfig(cached, fresh) {
+		return
+	}
+
+	logger.Infof(context.Background(), "[IM] Reloading channel %s after %s", channelID, reason)
+	if err := s.StartChannel(fresh); err != nil && !s.stopped.Load() {
+		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
+	}
+}
+
 // StartChannel creates and registers an adapter for the given channel.
 // For WebSocket channels with Redis available, only one instance acquires
 // the leader lock and opens the connection; other instances periodically
 // retry so they can take over if the leader dies.
 func (s *Service) StartChannel(channel *IMChannel) error {
+	if s.stopped.Load() {
+		return fmt.Errorf("im service is stopped")
+	}
+
 	s.mu.Lock()
+	s.stopLeaderRetryLocked(channel.ID)
 	factory, ok := s.adapterFactories[channel.Platform]
 	if !ok {
 		s.mu.Unlock()
@@ -963,7 +1089,7 @@ func (s *Service) StartChannel(channel *IMChannel) error {
 		if !acquired {
 			logger.Infof(context.Background(),
 				"[IM] Channel %s %s owned by another instance, will retry", channel.ID, channel.Mode)
-			go s.wsLeaderRetryLoop(channel)
+			s.scheduleWSLeaderRetry(channel)
 			return nil
 		}
 	}
@@ -994,6 +1120,20 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 	}
 
 	s.mu.Lock()
+	// Stop() may have drained the channel map while the factory was connecting
+	// above, since the factory runs unlocked. Re-check under the lock, otherwise
+	// this adapter's long connection would outlive process shutdown.
+	if s.stopped.Load() {
+		s.mu.Unlock()
+		if leaderCancel != nil {
+			leaderCancel()
+		}
+		if cancelFn != nil {
+			cancelFn()
+		}
+		s.releaseWSLeader(channel.ID)
+		return fmt.Errorf("im service is stopped")
+	}
 	// Idempotency: another goroutine may have started this channel while
 	// factory was running above (factory is called unlocked). Stop the old
 	// state before overwriting so its adapter / long connection doesn't leak.
@@ -1015,8 +1155,16 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 func (s *Service) StopChannel(channelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stopLeaderRetryLocked(channelID)
 	if cs, ok := s.channels[channelID]; ok {
 		s.stopChannelLocked(channelID, cs)
+	}
+}
+
+func (s *Service) stopLeaderRetryLocked(channelID string) {
+	if retry, ok := s.leaderRetries[channelID]; ok {
+		retry.cancel()
+		delete(s.leaderRetries, channelID)
 	}
 }
 
@@ -1055,8 +1203,8 @@ func (s *Service) tryAcquireWSLeader(channelID string) bool {
 	key := RedisKeyLeader + channelID
 	ok, err := s.redis.SetNX(context.Background(), key, s.instanceID, wsLeaderTTL).Result()
 	if err != nil {
-		logger.Warnf(context.Background(), "[IM] Redis leader election failed for %s: %v, assuming leader", channelID, err)
-		return true // Redis error: proceed anyway to avoid channel getting stuck
+		logger.Warnf(context.Background(), "[IM] Redis leader election failed for %s: %v; connection will retry without taking leadership", channelID, err)
+		return false
 	}
 	return ok
 }
@@ -1128,17 +1276,58 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				s.StopChannel(channelID)
 				return
 			}
+			_, cached, running := s.GetChannelAdapter(channelID)
+			if !running {
+				return
+			}
+			if !sameChannelRuntimeConfig(cached, ch) {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s config changed; rebuilding runtime", channelID)
+				// StartChannel synchronously stops the old runtime, releases its
+				// lease, and then competes to start the fresh configuration. Return
+				// because the old renewal context has been cancelled.
+				if err := s.StartChannel(ch); err != nil && !s.stopped.Load() {
+					logger.Warnf(context.Background(),
+						"[IM] Rebuild changed channel %s failed: %v", channelID, err)
+				}
+				return
+			}
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
+func (s *Service) scheduleWSLeaderRetry(channel *IMChannel) {
+	retryCtx, cancel := context.WithCancel(context.Background())
+	state := &leaderRetryState{cancel: cancel}
+	s.mu.Lock()
+	if existing, ok := s.leaderRetries[channel.ID]; ok {
+		existing.cancel()
+	}
+	if s.stopped.Load() {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
+	s.leaderRetries[channel.ID] = state
+	s.mu.Unlock()
+	go s.wsLeaderRetryLoop(retryCtx, channel, state)
+}
+
 // wsLeaderRetryLoop periodically tries to acquire the WebSocket leader lock.
-// When it succeeds, it starts the channel adapter.
-func (s *Service) wsLeaderRetryLoop(channel *IMChannel) {
+// When it succeeds, it starts the channel adapter. A per-channel retry state
+// ensures repeated config events cannot accumulate duplicate retry goroutines.
+func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, state *leaderRetryState) {
 	ticker := time.NewTicker(wsLeaderRetryInterval)
 	defer ticker.Stop()
+	defer func() {
+		s.mu.Lock()
+		if s.leaderRetries[channel.ID] == state {
+			delete(s.leaderRetries, channel.ID)
+		}
+		s.mu.Unlock()
+	}()
 
 	for {
 		select {
@@ -1190,6 +1379,8 @@ func (s *Service) wsLeaderRetryLoop(channel *IMChannel) {
 				}
 				return
 			}
+		case <-ctx.Done():
+			return
 		case <-s.stopCh:
 			return
 		}
@@ -1315,6 +1506,68 @@ func (s *Service) GetChannelAdapter(channelID string) (Adapter, *IMChannel, bool
 		return nil, nil, false
 	}
 	return cs.Adapter, cs.Channel, true
+}
+
+// EnsureChannelAdapter loads the durable channel row before serving a webhook
+// callback. This prevents a replica that missed an invalidation event from
+// verifying or processing the callback with stale credentials/configuration.
+func (s *Service) EnsureChannelAdapter(channelID string) (Adapter, *IMChannel, error) {
+	fresh, err := s.GetChannelByID(channelID)
+	if err != nil {
+		// A deleted channel may still exist in this replica's runtime map. Do
+		// not tear down a healthy runtime on a transient database failure.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			s.StopChannel(channelID)
+		}
+		return nil, nil, err
+	}
+	if !fresh.Enabled {
+		s.StopChannel(channelID)
+		return nil, fresh, ErrChannelDisabled
+	}
+
+	adapter, cached, ok := s.GetChannelAdapter(channelID)
+	if !ok || !sameChannelRuntimeConfig(cached, fresh) {
+		if err := s.StartChannel(fresh); err != nil {
+			return nil, fresh, err
+		}
+		adapter, cached, ok = s.GetChannelAdapter(channelID)
+		if !ok {
+			return nil, fresh, fmt.Errorf("channel adapter is not active on this instance")
+		}
+	}
+	return adapter, cached, nil
+}
+
+// sameChannelRuntimeConfig compares every field that affects adapter creation
+// or message routing. It intentionally does not compare UpdatedAt: PostgreSQL
+// timestamp precision can differ from the in-memory value assigned by GORM,
+// which would otherwise rebuild webhook adapters on every callback.
+func sameChannelRuntimeConfig(cached, fresh *IMChannel) bool {
+	if cached == nil || fresh == nil {
+		return false
+	}
+	return cached.ID == fresh.ID &&
+		cached.TenantID == fresh.TenantID &&
+		cached.AgentID == fresh.AgentID &&
+		cached.Platform == fresh.Platform &&
+		cached.Enabled == fresh.Enabled &&
+		cached.Mode == fresh.Mode &&
+		cached.OutputMode == fresh.OutputMode &&
+		cached.KnowledgeBaseID == fresh.KnowledgeBaseID &&
+		cached.SessionMode == fresh.SessionMode &&
+		equalChannelCredentials(cached.Credentials, fresh.Credentials)
+}
+
+func equalChannelCredentials(left, right types.JSON) bool {
+	var leftValue, rightValue any
+	if err := json.Unmarshal(left, &leftValue); err != nil {
+		return string(left) == string(right)
+	}
+	if err := json.Unmarshal(right, &rightValue); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 // GetChannelByID loads a channel from the database.
@@ -2739,6 +2992,7 @@ func (s *Service) CreateChannel(channel *IMChannel) error {
 			logger.Warnf(context.Background(), "[IM] Created channel %s but failed to start: %v", channel.ID, err)
 		}
 	}
+	s.publishChannelConfigChange(channel.ID)
 	return nil
 }
 
@@ -2775,6 +3029,7 @@ func (s *Service) UpdateChannel(channel *IMChannel) error {
 			logger.Warnf(context.Background(), "[IM] Updated channel %s but failed to restart: %v", channel.ID, err)
 		}
 	}
+	s.publishChannelConfigChange(channel.ID)
 	return nil
 }
 
@@ -2787,19 +3042,22 @@ func (s *Service) DeleteChannelsByAgent(agentID string, tenantID uint64) error {
 		Find(&channels).Error; err != nil {
 		return err
 	}
-	for i := range channels {
-		s.StopChannel(channels[i].ID)
-	}
 	if len(channels) == 0 {
 		return nil
 	}
-	return s.db.Where("agent_id = ? AND tenant_id = ? AND deleted_at IS NULL", agentID, tenantID).
-		Delete(&IMChannel{}).Error
+	if err := s.db.Where("agent_id = ? AND tenant_id = ? AND deleted_at IS NULL", agentID, tenantID).
+		Delete(&IMChannel{}).Error; err != nil {
+		return err
+	}
+	for i := range channels {
+		s.StopChannel(channels[i].ID)
+		s.publishChannelConfigChange(channels[i].ID)
+	}
+	return nil
 }
 
 // DeleteChannel soft-deletes a channel and stops it. Only deletes if the channel belongs to the given tenant.
 func (s *Service) DeleteChannel(channelID string, tenantID uint64) error {
-	s.StopChannel(channelID)
 	result := s.db.Where("id = ? AND tenant_id = ?", channelID, tenantID).Delete(&IMChannel{})
 	if result.Error != nil {
 		return result.Error
@@ -2807,6 +3065,8 @@ func (s *Service) DeleteChannel(channelID string, tenantID uint64) error {
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("channel not found")
 	}
+	s.StopChannel(channelID)
+	s.publishChannelConfigChange(channelID)
 	return nil
 }
 
@@ -2827,6 +3087,7 @@ func (s *Service) ToggleChannel(channelID string, tenantID uint64) (*IMChannel, 
 	} else {
 		s.StopChannel(channelID)
 	}
+	s.publishChannelConfigChange(channelID)
 	return &ch, nil
 }
 

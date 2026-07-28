@@ -28,6 +28,18 @@ func (s *folderTargetFolderService) GetFolder(_ context.Context, kbID, folderID 
 	}
 	return f, nil
 }
+func (s *folderTargetFolderService) ResolveFolderOwners(_ context.Context, folderIDs []string) (map[string]string, error) {
+	owners := make(map[string]string, len(folderIDs))
+	for _, id := range folderIDs {
+		if id == "" || id == types.FolderRootFilter {
+			continue
+		}
+		if f := s.folders[id]; f != nil {
+			owners[f.ID] = f.KnowledgeBaseID
+		}
+	}
+	return owners, nil
+}
 func (s *folderTargetFolderService) ResolveKnowledgeScope(_ context.Context, kbID string, folderIDs []string) (*types.FolderKnowledgeScope, error) {
 	s.calls[kbID]++
 	key := kbID + ":"

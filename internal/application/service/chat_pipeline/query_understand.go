@@ -114,7 +114,8 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Call model ---
 	thinking := false
-	response, err := rewriteModel.Chat(ctx, []chat.Message{
+	modelCtx := types.WithLLMCallMetadata(ctx, "query_rewrite", "")
+	response, err := rewriteModel.Chat(modelCtx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		userMsg,
 	}, &chat.ChatOptions{

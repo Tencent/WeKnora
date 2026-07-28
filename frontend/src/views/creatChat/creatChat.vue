@@ -139,7 +139,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams(6));
+        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             sqCardsRevealed.value = false;
             sqRenderKey.value++;

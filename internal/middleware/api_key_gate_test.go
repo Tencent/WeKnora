@@ -171,6 +171,35 @@ func TestGateKBScopeDoesNotBlockDataPlane(t *testing.T) {
 	}
 }
 
+func TestGatePlatformOnlyPolicyRejectsTenantKeyBeforeFullAccess(t *testing.T) {
+	a := NewAPIKeyRouteAuthorizer()
+	a.Register(http.MethodGet, "/api/v1/system/admin/settings",
+		APIKeyRoutePolicy{PlatformOnly: true}.
+			WithCapability(types.APIKeyCapabilitySystemSettingsRead))
+	tenantFull := &types.TenantAPIKeyScope{FullAccess: true}
+	platform := &types.TenantAPIKeyScope{
+		ScopeType:    types.APIKeyScopePlatform,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilitySystemSettingsRead)},
+	}
+	if runGate(t, a, tenantFull, http.MethodGet, "/api/v1/system/admin/settings") {
+		t.Fatal("tenant full-access key must not enter a platform-only route")
+	}
+	if !runGate(t, a, platform, http.MethodGet, "/api/v1/system/admin/settings") {
+		t.Fatal("platform key with the required capability should pass")
+	}
+
+	withoutCapability := NewAPIKeyRouteAuthorizer()
+	withoutCapability.Register(http.MethodGet, "/api/v1/system/admin/unsafe",
+		APIKeyRoutePolicy{PlatformOnly: true})
+	corruptPlatformFull := &types.TenantAPIKeyScope{
+		ScopeType:  types.APIKeyScopePlatform,
+		FullAccess: true,
+	}
+	if runGate(t, withoutCapability, corruptPlatformFull, http.MethodGet, "/api/v1/system/admin/unsafe") {
+		t.Fatal("platform-only policy without an explicit capability must fail closed")
+	}
+}
+
 // runDenyAPIKey mounts DenyAPIKeyPrincipal ahead of a handler and reports
 // whether the request reached the handler.
 func runDenyAPIKey(t *testing.T, scope *types.TenantAPIKeyScope) (reached bool, status int) {

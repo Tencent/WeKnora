@@ -294,10 +294,47 @@ definitions:
     - system.admin_promoted
     - system.admin_revoked
     - system.user_password_reset
+    - system.api_key_created
+    - system.api_key_revoked
     - system.queue_task_retried
     - system.queue_task_deleted
     - system.queue_task_run_now
     - system.queue_task_cancelled
+    - system.queue_archived_purged
+    - kb.created
+    - kb.updated
+    - kb.deleted
+    - kb.duplicated
+    - kb.clone_started
+    - kb.clone_completed
+    - kb.clone_failed
+    - knowledge.created
+    - knowledge.updated
+    - knowledge.deleted
+    - knowledge.batch_deleted
+    - knowledge.reparse_started
+    - knowledge.parse_canceled
+    - knowledge.move_started
+    - knowledge.move_completed
+    - knowledge.move_failed
+    - tag.created
+    - tag.updated
+    - tag.deleted
+    - datasource.created
+    - datasource.updated
+    - datasource.deleted
+    - datasource.sync_started
+    - datasource.sync_completed
+    - datasource.sync_failed
+    - datasource.paused
+    - datasource.resumed
+    - kb.share_added
+    - kb.share_permission_changed
+    - kb.share_removed
+    - wiki.content_changed
+    - faq.import_started
+    - faq.import_completed
+    - faq.import_failed
     type: string
     x-enum-varnames:
     - AuditActionMemberAdded
@@ -320,10 +357,47 @@ definitions:
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
     - AuditActionSystemUserPasswordReset
+    - AuditActionSystemAPIKeyCreated
+    - AuditActionSystemAPIKeyRevoked
     - AuditActionSystemQueueTaskRetried
     - AuditActionSystemQueueTaskDeleted
     - AuditActionSystemQueueTaskRunNow
     - AuditActionSystemQueueTaskCancelled
+    - AuditActionSystemQueueArchivedPurged
+    - AuditActionKBCreated
+    - AuditActionKBUpdated
+    - AuditActionKBDeleted
+    - AuditActionKBDuplicated
+    - AuditActionKBCloneStarted
+    - AuditActionKBCloneCompleted
+    - AuditActionKBCloneFailed
+    - AuditActionKnowledgeCreated
+    - AuditActionKnowledgeUpdated
+    - AuditActionKnowledgeDeleted
+    - AuditActionKnowledgeBatchDeleted
+    - AuditActionKnowledgeReparseStarted
+    - AuditActionKnowledgeParseCanceled
+    - AuditActionKnowledgeMoveStarted
+    - AuditActionKnowledgeMoveCompleted
+    - AuditActionKnowledgeMoveFailed
+    - AuditActionTagCreated
+    - AuditActionTagUpdated
+    - AuditActionTagDeleted
+    - AuditActionDataSourceCreated
+    - AuditActionDataSourceUpdated
+    - AuditActionDataSourceDeleted
+    - AuditActionDataSourceSyncStarted
+    - AuditActionDataSourceSyncCompleted
+    - AuditActionDataSourceSyncFailed
+    - AuditActionDataSourcePaused
+    - AuditActionDataSourceResumed
+    - AuditActionKBShareAdded
+    - AuditActionKBSharePermissionChanged
+    - AuditActionKBShareRemoved
+    - AuditActionWikiContentChanged
+    - AuditActionFAQImportStarted
+    - AuditActionFAQImportCompleted
+    - AuditActionFAQImportFailed
   github_com_Tencent_WeKnora_internal_types.AuditLog:
     properties:
       action:
@@ -346,6 +420,10 @@ definitions:
         type: string
       request_path:
         type: string
+      scope_id:
+        type: string
+      scope_type:
+        type: string
       target_id:
         type: string
       target_type:
@@ -358,11 +436,19 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.AuditOutcome:
     enum:
     - success
+    - accepted
     - denied
+    - failed
+    - partial
+    - canceled
     type: string
     x-enum-varnames:
     - AuditOutcomeSuccess
+    - AuditOutcomeAccepted
     - AuditOutcomeDenied
+    - AuditOutcomeFailed
+    - AuditOutcomePartial
+    - AuditOutcomeCanceled
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
       app_id:
@@ -2945,6 +3031,9 @@ definitions:
           type: number
         type: array
       query_text:
+        description: |-
+          QueryText is required unless query_embedding is provided, keyword matching is disabled,
+          and vector matching remains enabled.
         type: string
       scope_tag_ids:
         items:
@@ -3059,6 +3148,13 @@ definitions:
         type: string
       id:
         description: ID
+        type: string
+      im_platform:
+        description: |-
+          IMPlatform is the originating IM platform (e.g. "feishu", "wecom") when
+          this session is bound to an IM channel. It is not stored on the sessions
+          table (it lives in im_channel_sessions) and is populated on read so the
+          Web console can classify a session's origin folder without a list query.
         type: string
       is_pinned:
         description: IsPinned indicates whether the session is pinned in the list.
@@ -4075,67 +4171,6 @@ definitions:
       version:
         type: integer
     type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogEntry:
-    properties:
-      action:
-        description: |-
-          Short operation tag: "ingest", "retract", etc. Matches the `action`
-          argument historically passed to appendLogEntry.
-        type: string
-      created_at:
-        description: Server-side timestamp (UTC).
-        type: string
-      doc_title:
-        description: |-
-          Document title at the time of the event. Stored verbatim rather than
-          joined at read time so deleted knowledge still has a human-readable
-          label in the log.
-        type: string
-      id:
-        description: |-
-          Auto-increment identifier. Monotonic within a single database, so
-          frontend pagination uses it as a stable cursor without needing to
-          disambiguate identical created_at values.
-        type: integer
-      knowledge_base_id:
-        description: Knowledge base this event belongs to.
-        type: string
-      knowledge_id:
-        description: Knowledge ID the event was about (may be empty for KB-level events).
-        type: string
-      pages_affected:
-        description: |-
-          Wiki pages affected by this event. Each ref carries both slug (for
-          navigation) and title (for display) so the log renders human-
-          readable text without a post-hoc slug→title lookup that might fail
-          for now-deleted pages.
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogPageRef'
-        type: array
-      summary:
-        description: One-line summary of the change, as it was when the event was
-          logged.
-        type: string
-      tenant_id:
-        description: Workspace scope, mirrored from the enclosing knowledge base.
-        type: integer
-    type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse:
-    properties:
-      entries:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntry'
-        type: array
-      next_cursor:
-        type: string
-    type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogPageRef:
-    properties:
-      slug:
-        type: string
-      title:
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.WikiPage:
     properties:
       aliases:
@@ -4195,6 +4230,18 @@ definitions:
       knowledge_base_id:
         description: Knowledge base this page belongs to
         type: string
+      last_edit_source:
+        description: |-
+          LastEditSource records who authored the CURRENT version: pipeline |
+          agent | user | revert. Empty for legacy rows (treated as pipeline).
+          When the version is superseded this value travels into the revision
+          snapshot, so each historical version keeps its own author kind.
+        type: string
+      last_editor_id:
+        description: |-
+          LastEditorID is the user id of the caller that produced the current
+          version (empty for background pipeline writes).
+        type: string
       out_links:
         description: Slugs of pages this page links to (outbound links)
         items:
@@ -4206,8 +4253,7 @@ definitions:
           type: integer
         type: array
       page_type:
-        description: 'Page type: summary, entity, concept, index, log, synthesis,
-          comparison'
+        description: 'Page type: summary, entity, concept, index, synthesis, comparison'
         type: string
       parent_slug:
         description: |-
@@ -4315,6 +4361,89 @@ definitions:
         type: string
     required:
     - slug
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest:
+    properties:
+      slug:
+        type: string
+      version:
+        type: integer
+    required:
+    - slug
+    - version
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevision:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      created_at:
+        type: string
+      edit_source:
+        description: Author of THIS version (same semantics as WikiPage.LastEditSource).
+        type: string
+      edited_at:
+        description: When this version was authored (the page's updated_at while current).
+        type: string
+      editor_id:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      page_id:
+        type: string
+      page_type:
+        type: string
+      slug:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      tenant_id:
+        type: integer
+      title:
+        type: string
+      version:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse:
+    properties:
+      current_version:
+        type: integer
+      revisions:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevision'
+        type: array
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      page_type:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      version:
+        description: |-
+          Version is the optimistic-lock guard: when > 0 the update is rejected
+          with a conflict if the stored version differs (someone else edited the
+          page since the client loaded it). 0 skips the check (legacy clients).
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiStats:
     properties:
@@ -5374,6 +5503,17 @@ definitions:
       tenant_name:
         type: string
     type: object
+  internal_handler.platformAPIKeyCreateRequest:
+    properties:
+      capabilities:
+        items:
+          type: string
+        type: array
+      expires_at_unix:
+        type: integer
+      name:
+        type: string
+    type: object
   internal_handler.registerByInviteRequest:
     properties:
       email:
@@ -5991,7 +6131,7 @@ paths:
         in: query
         name: tag_scopes
         type: string
-      - description: 返回数量上限（默认6）
+      - description: 返回数量上限（未传时使用智能体配置的开场问题数量，最大30）
         in: query
         name: limit
         type: integer
@@ -8098,6 +8238,51 @@ paths:
       summary: 更新知识库
       tags:
       - 知识库
+  /knowledge-bases/{id}/activity:
+    get:
+      description: 返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 游标：返回 id 小于此值的记录
+        in: query
+        name: after_id
+        type: integer
+      - description: 页大小，1-100，默认 50
+        in: query
+        name: limit
+        type: integer
+      - description: 按 action 精确过滤
+        in: query
+        name: action
+        type: string
+      - description: 按 outcome 精确过滤
+        in: query
+        name: outcome
+        type: string
+      - description: 按 actor_user_id 精确过滤
+        in: query
+        name: actor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.auditLogListResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取知识库活动记录
+      tags:
+      - 知识库
   /knowledge-bases/{id}/duplicate:
     post:
       consumes:
@@ -8184,10 +8369,14 @@ paths:
         in: query
         name: page_size
         type: integer
-      - description: 标签ID筛选(seq_id)
+      - description: 标签ID筛选(seq_id)，兼容旧版单标签
         in: query
         name: tag_id
         type: integer
+      - description: 标签UUID筛选，逗号分隔（OR语义）
+        in: query
+        name: tag_ids
+        type: string
       - description: 关键词搜索
         in: query
         name: keyword
@@ -8381,18 +8570,23 @@ paths:
     get:
       consumes:
       - application/json
-      description: 将所有FAQ条目导出为CSV文件
+      description: 将所有FAQ条目导出为 CSV（默认）或 JSON。?format=json 返回与 FAQEntryPayload 结构兼容的数组。
       parameters:
       - description: 知识库ID
         in: path
         name: id
         required: true
         type: string
+      - description: 导出格式：csv（默认）或 json
+        in: query
+        name: format
+        type: string
       produces:
       - text/csv
+      - application/json
       responses:
         "200":
-          description: CSV文件
+          description: 导出文件
           schema:
             type: file
         "400":
@@ -10201,38 +10395,6 @@ paths:
       summary: Run wiki lint
       tags:
       - Wiki
-  /knowledgebase/{kb_id}/wiki/log:
-    get:
-      description: |-
-        Returns a paginated feed of wiki operation events (ingest, retract, ...)
-        newest-first. Pagination is cursor-based: pass `next_cursor` from the
-        previous response back as `cursor` to fetch the next page.
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Opaque cursor from the previous page (empty = newest)
-        in: query
-        name: cursor
-        type: string
-      - description: Page size, 1-200 (default 50)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse'
-      security:
-      - Bearer: []
-      summary: Get wiki operation log
-      tags:
-      - Wiki
   /knowledgebase/{kb_id}/wiki/move-page:
     put:
       consumes:
@@ -10410,7 +10572,12 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update an existing wiki page by slug
+      description: |-
+        Partially update a wiki page by slug. Absent fields keep
+        their stored value. When `version` is > 0 it acts as an
+        optimistic-lock guard: a mismatch with the stored version
+        returns 409 together with the current version so the client
+        can reload and re-apply.
       parameters:
       - description: Knowledge base ID
         in: path
@@ -10422,12 +10589,12 @@ paths:
         name: slug
         required: true
         type: string
-      - description: Updated wiki page data
+      - description: Fields to update
         in: body
         name: page
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest'
       produces:
       - application/json
       responses:
@@ -10435,8 +10602,16 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -10463,6 +10638,96 @@ paths:
       security:
       - Bearer: []
       summary: Rebuild wiki links
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/revert:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Rolls the page (slug in the body, like move-page) back to
+        the content of the given stored revision. Applied as a
+        regular edit: the pre-revert state is snapshotted and the
+        version advances.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Revert target
+        in: body
+        name: revert
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Revert a wiki page to an earlier revision
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/revisions/{slug}:
+    get:
+      description: |-
+        Returns the stored historical snapshots for a page, newest
+        first (content omitted), plus the current version. Passing
+        `version` returns that single snapshot with full content.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Page slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Return this single revision with content
+        in: query
+        name: version
+        type: integer
+      - description: Page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Offset into the newest-first list
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List wiki page revisions
       tags:
       - Wiki
   /knowledgebase/{kb_id}/wiki/search:
@@ -10756,7 +11021,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: '{authorization_url: string}'
+          description: '{authorization_url: string, authorization_attempt: string}'
           schema:
             additionalProperties: true
             type: object
@@ -10771,18 +11036,23 @@ paths:
       - MCP服务
   /mcp-services/{id}/oauth/status:
     get:
-      description: 返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+      description: 返回当前用户的 OAuth Token 生命周期状态；传 authorization_attempt 时只检查本次授权流程
       parameters:
       - description: MCP 服务 ID
         in: path
         name: id
         required: true
         type: string
+      - description: 本次授权尝试 ID；传入后不会接受历史 Token
+        in: query
+        name: authorization_attempt
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: '{authorized: bool}'
+          description: '{authorized: bool, state: string, refresh_available: bool,
+            expires_at?: string}'
           schema:
             additionalProperties: true
             type: object
@@ -11784,14 +12054,14 @@ paths:
       - 组织管理
   /organizations/{id}/search-tenants:
     get:
-      description: 搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户
+      description: 按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 搜索关键词（空间名、用户名或邮箱）
+      - description: 搜索关键词（空间名）
         in: query
         name: q
         required: true
@@ -12044,7 +12314,8 @@ paths:
         in: query
         name: keyword
         type: string
-      - description: 来源过滤：web / feishu / wechat / slack / ...
+      - description: 来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM
+          渠道需 Admin+）
         in: query
         name: source
         type: string
@@ -12971,6 +13242,70 @@ paths:
       summary: List allowed storage provider types
       tags:
       - StorageBackend
+  /system/admin/api-keys:
+    get:
+      description: Lists non-workspace API keys. Full tokens are always masked. Human
+        SystemAdmin only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: List platform API keys
+      tags:
+      - System Admin
+    post:
+      consumes:
+      - application/json
+      description: Creates a capability-scoped key that may target any workspace through
+        X-Tenant-ID. The plaintext token is returned once. Human SystemAdmin only.
+      parameters:
+      - description: Platform API key
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.platformAPIKeyCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Create a platform API key
+      tags:
+      - System Admin
+  /system/admin/api-keys/{key_id}:
+    delete:
+      description: Immediately revokes a platform API key. Human SystemAdmin only.
+      parameters:
+      - description: API key ID
+        in: path
+        name: key_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Revoke a platform API key
+      tags:
+      - System Admin
   /system/admin/audit-log:
     get:
       description: 返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed / system.admin_promoted
@@ -13141,6 +13476,25 @@ paths:
       summary: 获取解析任务队列运行时状态
       tags:
       - 系统管理
+  /system/admin/runtime/queues/{queue}/archived:
+    delete:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Purge all archived tasks in a queue
+      tags:
+      - System Admin
   /system/admin/runtime/queues/{queue}/tasks:
     get:
       parameters:
@@ -14827,7 +15181,7 @@ paths:
       - WeKnoraCloud
 securityDefinitions:
   ApiKeyAuth:
-    description: 空间身份认证：输入 sk- 开头的 API Key
+    description: API Key 认证：空间 Key 固定访问所属空间；平台 Key 调用空间接口时需同时传 X-Tenant-ID
     in: header
     name: X-API-Key
     type: apiKey

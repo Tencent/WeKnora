@@ -779,49 +779,74 @@ func stripRedirectSensitiveHeaders(req *http.Request) {
 	req.Header.Del("Api-Key")
 }
 
-// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
-// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
-func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
-	transport := &http.Transport{
+// NewSSRFSafeTransport builds an *http.Transport whose connections are guarded
+// by SSRFSafeDialContext. The transport carries no per-request timeout and no
+// redirect policy — those live on the *http.Client — so a single transport can
+// be shared across many clients to pool keep-alive connections globally.
+func NewSSRFSafeTransport(config SSRFSafeHTTPClientConfig) *http.Transport {
+	return &http.Transport{
 		DisableKeepAlives:  config.DisableKeepAlives,
 		DisableCompression: config.DisableCompression,
 		// Dial with SSRF protection - validates resolved IPs before connecting
 		DialContext: SSRFSafeDialContext,
 	}
+}
 
-	return &http.Client{
-		Timeout:   config.Timeout,
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Check redirect count
-			if len(via) >= config.MaxRedirects {
-				return fmt.Errorf("stopped after %d redirects", config.MaxRedirects)
-			}
+// newSSRFCheckRedirect returns a CheckRedirect policy that enforces the redirect
+// count limit, strips sensitive headers on cross-host hops, and re-validates
+// every redirect target against SSRF protections.
+func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		// Check redirect count
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
 
-			// Strip credentials when the redirect crosses hosts so connector
-			// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
-			if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
-				stripRedirectSensitiveHeaders(req)
-			}
+		// Strip credentials when the redirect crosses hosts so connector
+		// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
+		if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+			stripRedirectSensitiveHeaders(req)
+		}
 
-			// Validate the redirect target URL for SSRF (whitelist-aware).
-			// Even whitelisted hosts must use http/https to prevent scheme-based attacks.
-			redirectScheme := strings.ToLower(req.URL.Scheme)
-			if redirectScheme != "http" && redirectScheme != "https" {
-				return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
-			}
-			redirectHost := req.URL.Hostname()
-			if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
-				return nil
-			}
-			redirectURL := req.URL.String()
-			if safe, reason := isSSRFSafeURL(redirectURL); !safe {
-				return fmt.Errorf("%w: %s", ErrSSRFRedirectBlocked, reason)
-			}
-
+		// Validate the redirect target URL for SSRF (whitelist-aware).
+		// Even whitelisted hosts must use http/https to prevent scheme-based attacks.
+		redirectScheme := strings.ToLower(req.URL.Scheme)
+		if redirectScheme != "http" && redirectScheme != "https" {
+			return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
+		}
+		redirectHost := req.URL.Hostname()
+		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
 			return nil
-		},
+		}
+		redirectURL := req.URL.String()
+		if safe, reason := isSSRFSafeURL(redirectURL); !safe {
+			return fmt.Errorf("%w: %s", ErrSSRFRedirectBlocked, reason)
+		}
+
+		return nil
 	}
+}
+
+// NewSSRFSafeHTTPClientWithTransport wraps a caller-supplied transport in an
+// *http.Client carrying the given timeout and the SSRF-aware redirect policy.
+// Pass a transport from NewSSRFSafeTransport (optionally shared across clients)
+// to reuse a single connection pool while keeping per-client timeouts.
+func NewSSRFSafeHTTPClientWithTransport(
+	config SSRFSafeHTTPClientConfig, transport http.RoundTripper,
+) *http.Client {
+	return &http.Client{
+		Timeout:       config.Timeout,
+		Transport:     transport,
+		CheckRedirect: newSSRFCheckRedirect(config.MaxRedirects),
+	}
+}
+
+// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
+// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
+// Each call builds a dedicated transport; callers that create many short-lived clients against the same
+// upstream should share one NewSSRFSafeTransport via NewSSRFSafeHTTPClientWithTransport instead.
+func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
+	return NewSSRFSafeHTTPClientWithTransport(config, NewSSRFSafeTransport(config))
 }
 
 // SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses

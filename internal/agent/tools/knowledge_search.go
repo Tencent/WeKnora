@@ -180,6 +180,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, userSpecifiedKBs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
@@ -193,6 +196,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 		var filteredTargets types.SearchTargets
 		for _, target := range t.searchTargets {
+			if target == nil {
+				continue
+			}
 			if userKBSet[target.KnowledgeBaseID] {
 				filteredTargets = append(filteredTargets, target)
 			}
@@ -460,6 +466,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	}
 	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		if searchableKBs[st.KnowledgeBaseID] {
 			filteredTargets = append(filteredTargets, st)
 			continue
@@ -482,6 +491,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 
 	groups := make(map[string][]*types.SearchTarget)
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		key := modelKeyMap[st.KnowledgeBaseID]
 		groups[key] = append(groups[key], st)
 	}
@@ -785,7 +797,8 @@ Output only the scores, no explanations or additional text.`,
 		// Each score line is ~15 tokens, add buffer for safety
 		maxTokens := len(batch)*20 + 100
 
-		response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
+		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
 		})
@@ -1123,7 +1136,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
-		kbCounts[r.KnowledgeID]++
+		kbCounts[r.KnowledgeBaseID]++
 	}
 
 	// Format individual results as XML. Tag names are kept in sync with
@@ -1175,7 +1188,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
 					effectiveTenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "",
+					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
 				)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)

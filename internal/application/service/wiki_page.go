@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,9 +22,9 @@ import (
 // wikiLinkRegex matches [[wiki-link]] syntax in markdown content
 var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
-// wikiInlineChunkCitationRegex matches internal short aliases emitted by the
+// wikiInlineChunkCitationRegex matches internal short handles emitted by the
 // wiki ingest prompt while it classifies supporting chunks. The stable source
-// relationship lives in WikiPage.ChunkRefs, so these aliases have no meaning
+// relationship lives in WikiPage.ChunkRefs, so these handles have no meaning
 // to readers and must not leak into generated Markdown.
 var wikiInlineChunkCitationRegex = regexp.MustCompile(`[ \t]*\[c\d{3,}(?:\s*[,;]\s*c\d{3,})*\]`)
 
@@ -82,6 +83,8 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Version == 0 {
 		page.Version = 1
 	}
+	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
+	page.LastEditorID, _ = types.UserIDFromContext(ctx)
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
@@ -130,12 +133,18 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		existing.Content != page.Content ||
 		existing.Summary != page.Summary ||
 		existing.PageType != page.PageType ||
-		existing.Status != page.Status
+		existing.Status != page.Status ||
+		!slices.Equal(existing.Aliases, page.Aliases)
+
+	// Keep an unmutated copy of the version being replaced: it becomes the
+	// revision snapshot when this turns out to be a real content change.
+	prev := *existing
 
 	existing.Title = page.Title
 	existing.Content = page.Content
 	existing.Summary = page.Summary
 	existing.PageType = page.PageType
+	existing.Aliases = append(types.StringArray(nil), page.Aliases...)
 	existing.SourceRefs = page.SourceRefs
 	existing.ChunkRefs = page.ChunkRefs
 	existing.PageMetadata = page.PageMetadata
@@ -158,15 +167,19 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
-		if err := s.repo.Update(ctx, existing); err != nil {
+		// The new version is authored by whoever is driving this write.
+		existing.LastEditSource = types.WikiEditSourceFromContext(ctx)
+		existing.LastEditorID, _ = types.UserIDFromContext(ctx)
+
+		// Snapshot the superseded version and write the new one atomically,
+		// so the content of every past version is preserved and a failed
+		// update leaves no snapshot behind.
+		if err := s.repo.UpdateWithRevision(ctx, existing, revisionFromPage(&prev)); err != nil {
 			return nil, fmt.Errorf("update wiki page: %w", err)
 		}
-		// GORM's struct Updates path skips zero values, so persist hierarchy
-		// metadata through the explicit map path as well. This keeps clearing
-		// parent/category fields deterministic without changing version again.
-		if err := s.repo.UpdateMeta(ctx, existing); err != nil {
-			return nil, fmt.Errorf("update wiki page hierarchy meta: %w", err)
-		}
+		// Bound per-page history; best-effort — a failed prune only means
+		// slightly more storage until the next content change.
+		s.pruneRevisions(ctx, existing.ID, existing.Version)
 	} else {
 		// No user-visible change — persist bookkeeping fields but preserve
 		// the version so downstream consumers can rely on it.
@@ -215,6 +228,117 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
 
 	return nil
+}
+
+// revisionFromPage builds the immutable snapshot row for the given page
+// state. EditSource on the snapshot is the author of THAT version — the
+// page's provenance columns as they stood while the version was current —
+// not whoever is performing the write that supersedes it.
+func revisionFromPage(p *types.WikiPage) *types.WikiPageRevision {
+	return &types.WikiPageRevision{
+		ID:              uuid.New().String(),
+		TenantID:        p.TenantID,
+		KnowledgeBaseID: p.KnowledgeBaseID,
+		PageID:          p.ID,
+		Slug:            p.Slug,
+		Version:         p.Version,
+		Title:           p.Title,
+		PageType:        p.PageType,
+		Status:          p.Status,
+		Content:         p.Content,
+		Summary:         p.Summary,
+		Aliases:         append(types.StringArray(nil), p.Aliases...),
+		EditSource:      types.NormalizeWikiEditSource(p.LastEditSource),
+		EditorID:        p.LastEditorID,
+		EditedAt:        p.UpdatedAt,
+		CreatedAt:       time.Now(),
+	}
+}
+
+// pruneRevisions bounds one page's snapshot history after it advanced to
+// currentVersion. Machine-authored snapshots are dropped once they fall out
+// of the recent window; human/agent/revert ones survive until the hard cap,
+// so pipeline churn on a hot page cannot evict the edits users care about.
+func (s *wikiPageService) pruneRevisions(ctx context.Context, pageID string, currentVersion int) {
+	req := types.WikiRevisionPruneRequest{
+		PageID:              pageID,
+		KeepFromVersion:     currentVersion - types.WikiMaxRevisionsPerPage,
+		PrunableSources:     types.WikiPrunableEditSources,
+		HardKeepFromVersion: currentVersion - types.WikiMaxRevisionsHardCap,
+	}
+	if req.KeepFromVersion <= 0 && req.HardKeepFromVersion <= 0 {
+		return
+	}
+	if err := s.repo.PruneRevisions(ctx, req); err != nil {
+		logger.Warnf(ctx, "prune wiki page revisions for %s failed: %v", pageID, err)
+	}
+}
+
+// ErrWikiRevertToCurrentVersion is returned when a revert targets the version
+// the page is already on — a client-side mistake (usually a stale history
+// list), not a server fault, so handlers map it to 400.
+var ErrWikiRevertToCurrentVersion = errors.New("cannot revert to the current version")
+
+// ListRevisions returns the stored historical snapshots for a page (newest
+// first, content omitted) plus the page's current version.
+func (s *wikiPageService) ListRevisions(
+	ctx context.Context, kbID string, slug string, limit int, offset int,
+) (*types.WikiPageRevisionListResponse, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	revs, total, err := s.repo.ListRevisions(ctx, kbID, page.ID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list wiki page revisions: %w", err)
+	}
+	return &types.WikiPageRevisionListResponse{
+		Revisions:      revs,
+		Total:          total,
+		CurrentVersion: page.Version,
+	}, nil
+}
+
+// GetRevision returns one historical snapshot with content.
+func (s *wikiPageService) GetRevision(
+	ctx context.Context, kbID string, slug string, version int,
+) (*types.WikiPageRevision, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetRevision(ctx, kbID, page.ID, version)
+}
+
+// RevertPageToVersion rolls the page back to a stored revision by applying
+// that revision's content fields as a regular edit: the pre-revert state is
+// snapshotted, version advances, links are re-parsed. Placement (folder,
+// sort order) and provenance refs keep their current values — a revert is
+// about content, not about undoing directory moves.
+func (s *wikiPageService) RevertPageToVersion(
+	ctx context.Context, kbID string, slug string, version int,
+) (*types.WikiPage, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if version == page.Version {
+		return nil, ErrWikiRevertToCurrentVersion
+	}
+	rev, err := s.repo.GetRevision(ctx, kbID, page.ID, version)
+	if err != nil {
+		return nil, err
+	}
+
+	target := *page
+	target.Title = rev.Title
+	target.Content = rev.Content
+	target.Summary = rev.Summary
+	target.PageType = rev.PageType
+	target.Status = rev.Status
+	target.Aliases = append(types.StringArray(nil), rev.Aliases...)
+
+	return s.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceRevert), &target)
 }
 
 // GetPageBySlug retrieves a wiki page by its slug
@@ -285,6 +409,13 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 		return err
 	}
 
+	// Drop the snapshot history too: the page is gone from every read path,
+	// so its revisions are unreachable rows holding full content bodies.
+	// Best-effort — the page is already deleted and cannot be rolled back.
+	if err := s.repo.DeleteRevisionsByPage(ctx, page.ID); err != nil {
+		logger.Warnf(ctx, "delete wiki page revisions for %s failed: %v", page.ID, err)
+	}
+
 	// Delete synced chunk
 	s.deleteChunkForPage(ctx, page)
 
@@ -306,7 +437,7 @@ func (s *wikiPageService) GetIndex(ctx context.Context, kbID string) (*types.Wik
 }
 
 // wikiIndexContentPageTypes enumerates the page types that make up a wiki's
-// user-visible directory. System pages (index/log) are excluded; any
+// user-visible directory. The index page is excluded; any
 // LLM-created type we do not recognize surfaces under a generic "other"
 // bucket.
 var wikiIndexContentPageTypes = []string{
@@ -411,26 +542,6 @@ func (s *wikiPageService) GetIndexView(
 		Version: indexPage.Version,
 		Groups:  groups,
 	}, nil
-}
-
-// GetLog returns the wiki_pages row for slug='log' if it exists.
-//
-// Log events are now stored in the dedicated `wiki_log_entries` table and
-// paginated via wikiLogEntryService — the per-KB log is no longer a single
-// TEXT column on a wiki_pages row (that model caused O(n^2) write
-// amplification as logs grew). This method is retained for callers that
-// still probe the legacy row (wiki_lint, knowledge delete, etc.), but it
-// no longer auto-creates the placeholder page on miss; a missing row is a
-// normal state and the helper returns `nil, nil`.
-func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiPage, error) {
-	page, err := s.repo.GetBySlug(ctx, kbID, "log")
-	if err != nil {
-		if errors.Is(err, repository.ErrWikiPageNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return page, nil
 }
 
 // GetGraph returns a slice of the wiki link graph for visualization.
@@ -918,6 +1029,151 @@ func normalizeSlug(slug string) string {
 	return slug
 }
 
+// slugNamespace returns the prefix of a slug up to (but excluding) the first
+// '/', e.g. "summary/abc" -> "summary". Slugs without a '/' map to "".
+func slugNamespace(slug string) string {
+	if i := strings.IndexByte(slug, '/'); i >= 0 {
+		return slug[:i]
+	}
+	return ""
+}
+
+// rewriteDeadWikiLinks walks every [[slug]] / [[slug|display]] occurrence in
+// content and lets `resolve` decide, per link, whether to rewrite the slug.
+// `resolve` receives the normalized slug and its display text and returns the
+// replacement slug plus true to rewrite, or ("", false) to leave the link
+// untouched. Display text is preserved verbatim. This is a pure helper — the
+// resolution policy lives entirely in the callback.
+func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
+	changed := false
+	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
+		inner := match[2 : len(match)-2]
+		rawSlug := inner
+		display := ""
+		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
+			rawSlug = parts[0]
+			display = strings.TrimSpace(parts[1])
+		}
+		norm := normalizeSlug(rawSlug)
+		if norm == "" {
+			return match
+		}
+		newSlug, ok := resolve(norm, display)
+		if !ok || newSlug == "" || newSlug == norm {
+			return match
+		}
+		changed = true
+		if display != "" {
+			return "[[" + newSlug + "|" + display + "]]"
+		}
+		return "[[" + newSlug + "]]"
+	})
+	return out, changed
+}
+
+// RepairContentLinks rewrites [[slug]] / [[slug|display]] references in
+// `content` whose target does not exist in the KB but is almost certainly a
+// mangled form of a real page. The canonical case: an LLM re-typed a summary
+// page's UUID-based slug and inserted/dropped a hex digit
+// (summary/…06fb5d5b5b5e → summary/…06fb14d5b14b14e), producing a link that
+// 404s and can never be recovered by exact lookup.
+//
+// Unlike stripDeadWikiLinks (the ingest cleanup pass), this method is
+// REWRITE-ONLY: a dead link is corrected only when a confident live candidate
+// exists; otherwise it is left completely untouched. It NEVER strips a link to
+// plain text, so it is safe on any write path — including writes whose targets
+// legitimately do not exist yet (those simply stay as-is until they do).
+//
+// The candidate pool for each dead link is scoped to live slugs that share the
+// same namespace prefix (a dead `summary/<uuid>` only resolves against live
+// `summary/*` slugs). Scoping keeps the bigram-similarity lever safe: distinct
+// high-entropy UUIDs in one namespace don't collide, while a one-character
+// mangle stays comfortably above threshold against its true source.
+//
+// Returns the possibly-updated content and whether any rewrite happened.
+// Errors are only returned for hard repo failures; callers may treat repair as
+// best-effort and ignore them.
+func (s *wikiPageService) RepairContentLinks(
+	ctx context.Context, kbID, selfSlug, content string,
+) (string, bool, error) {
+	if strings.TrimSpace(content) == "" {
+		return content, false, nil
+	}
+	outLinks := s.parseOutLinks(content)
+	if len(outLinks) == 0 {
+		return content, false, nil
+	}
+
+	existMap, err := s.repo.ExistsSlugs(ctx, kbID, outLinks)
+	if err != nil {
+		return content, false, err
+	}
+	deadPrefixes := make(map[string]struct{})
+	for _, l := range outLinks {
+		if l == selfSlug || existMap[l] {
+			continue
+		}
+		deadPrefixes[slugNamespace(l)] = struct{}{}
+	}
+	if len(deadPrefixes) == 0 {
+		return content, false, nil
+	}
+
+	allSlugs, err := s.repo.ListAllSlugs(ctx, kbID)
+	if err != nil {
+		return content, false, err
+	}
+	liveByPrefix := make(map[string]map[string]struct{})
+	var candidateSlugs []string
+	for _, sl := range allSlugs {
+		ns := slugNamespace(sl)
+		if _, want := deadPrefixes[ns]; !want {
+			continue
+		}
+		set, ok := liveByPrefix[ns]
+		if !ok {
+			set = make(map[string]struct{})
+			liveByPrefix[ns] = set
+		}
+		set[sl] = struct{}{}
+		candidateSlugs = append(candidateSlugs, sl)
+	}
+	if len(candidateSlugs) == 0 {
+		return content, false, nil
+	}
+
+	// Build a title -> slug reverse lookup for candidate pages so the
+	// display-text lever (the safest, most precise one) can fire. Bounded to
+	// the relevant namespaces so this stays cheap even on large KBs.
+	titleToSlug := make(map[string]string)
+	if lites, lerr := s.repo.ListBySlugs(ctx, kbID, candidateSlugs); lerr == nil {
+		for _, lp := range lites {
+			if lp != nil && lp.Title != "" {
+				titleToSlug[lp.Title] = lp.Slug
+			}
+		}
+	}
+
+	resolveCache := make(map[string]string)
+	newContent, changed := rewriteDeadWikiLinks(content, func(norm, display string) (string, bool) {
+		if norm == selfSlug || existMap[norm] {
+			return "", false
+		}
+		key := norm + "\x00" + display
+		if cached, ok := resolveCache[key]; ok {
+			return cached, cached != ""
+		}
+		resolved, ok := resolveDeadSlug(norm, display, liveByPrefix[slugNamespace(norm)], titleToSlug)
+		if !ok || resolved == norm {
+			resolveCache[key] = ""
+			return "", false
+		}
+		resolveCache[key] = resolved
+		return resolved, true
+	})
+	return newContent, changed, nil
+}
+
 // updateInLinks adds the source slug to the in_links of target pages
 func (s *wikiPageService) updateInLinks(ctx context.Context, kbID string, sourceSlug string, targets types.StringArray) {
 	for _, targetSlug := range targets {
@@ -953,15 +1209,20 @@ func (s *wikiPageService) removeInLinks(ctx context.Context, kbID string, source
 	}
 }
 
-// deleteChunkForPage removes the synced chunk for a wiki page
+// deleteChunkForPage removes the synced chunk for a wiki page. Chunk sync is
+// optional wiring, so a service built without a chunk repository just skips
+// it rather than taking the delete down with it.
 func (s *wikiPageService) deleteChunkForPage(ctx context.Context, page *types.WikiPage) {
+	if s.chunkRepo == nil {
+		return
+	}
 	chunkID := "wp-" + page.ID
 	if err := s.chunkRepo.DeleteChunk(ctx, page.TenantID, chunkID); err != nil {
 		logger.Warnf(ctx, "wiki: failed to delete chunk for page %s: %v", page.Slug, err)
 	}
 }
 
-// createDefaultPage creates a default system page (index, log)
+// createDefaultPage creates the default index page.
 func (s *wikiPageService) createDefaultPage(ctx context.Context, kbID string, slug string, title string, pageType string, content string) (*types.WikiPage, error) {
 	// Get KB to get tenant ID
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
@@ -1460,16 +1721,95 @@ func (s *wikiPageService) DeleteFolder(ctx context.Context, kbID string, id stri
 		return err
 	}
 	if len(children) > 0 {
-		return errors.New("folder is not empty: it still has sub-folders")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{id})
 	if err != nil {
 		return err
 	}
 	if len(pages) > 0 {
-		return errors.New("folder is not empty: it still contains pages")
+		return repository.ErrWikiFolderNotEmpty
 	}
 	return s.repo.DeleteFolder(ctx, kbID, id)
+}
+
+// PruneEmptyFolderChains removes folders that became empty after retracting a
+// document, followed by any ancestors made empty by those removals. It only
+// considers the supplied folder chains, so intentionally-empty folders
+// elsewhere in the wiki are preserved. Callers must wait for the KB's ingest
+// queue to drain before invoking this method: taxonomy planning creates a
+// folder before reduce writes the page that will reference it.
+func (s *wikiPageService) PruneEmptyFolderChains(
+	ctx context.Context, kbID string, folderIDs []string,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	all, err := s.repo.ListAllFolders(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*types.WikiFolder, len(all))
+	for _, folder := range all {
+		if folder != nil {
+			byID[folder.ID] = folder
+		}
+	}
+
+	candidates := make(map[string]*types.WikiFolder)
+	for _, id := range folderIDs {
+		seen := make(map[string]struct{})
+		for id != types.WikiFolderRootID {
+			if _, cycle := seen[id]; cycle {
+				break
+			}
+			seen[id] = struct{}{}
+			folder := byID[id]
+			if folder == nil {
+				break
+			}
+			candidates[id] = folder
+			id = folder.ParentID
+		}
+	}
+
+	ordered := make([]*types.WikiFolder, 0, len(candidates))
+	for _, folder := range candidates {
+		ordered = append(ordered, folder)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Depth == ordered[j].Depth {
+			return ordered[i].Path > ordered[j].Path
+		}
+		return ordered[i].Depth > ordered[j].Depth
+	})
+
+	deleted := make([]string, 0, len(ordered))
+	for _, folder := range ordered {
+		children, err := s.repo.ListChildFolders(ctx, kbID, folder.ID)
+		if err != nil {
+			return deleted, err
+		}
+		if len(children) > 0 {
+			continue
+		}
+		pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{folder.ID})
+		if err != nil {
+			return deleted, err
+		}
+		if len(pages) > 0 {
+			continue
+		}
+		if err := s.repo.DeleteFolder(ctx, kbID, folder.ID); err != nil {
+			if errors.Is(err, repository.ErrWikiFolderNotFound) ||
+				errors.Is(err, repository.ErrWikiFolderNotEmpty) {
+				continue
+			}
+			return deleted, err
+		}
+		deleted = append(deleted, folder.ID)
+	}
+	return deleted, nil
 }
 
 // InjectCrossLinks scans affected pages and injects [[wiki-links]] for mentions
@@ -1497,7 +1837,7 @@ func (s *wikiPageService) InjectCrossLinks(ctx context.Context, kbID string, aff
 		if !affectedSet[p.Slug] {
 			continue
 		}
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if p.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 

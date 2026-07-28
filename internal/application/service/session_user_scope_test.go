@@ -292,6 +292,33 @@ func TestGetSessionDeniesViewerOnIMSession(t *testing.T) {
 	require.Equal(t, "feishu", got.IMPlatform)
 }
 
+func TestGetSessionAllowsIMRuntimeToReadIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID,
+		Platform:  "feishu",
+	}).Error)
+
+	ctx := context.WithValue(
+		testSessionScopeContext(1, "system-1"),
+		types.TenantRoleContextKey,
+		types.TenantRoleViewer,
+	)
+	ctx = types.WithPrincipal(ctx, types.Principal{
+		Type: types.PrincipalIMUser,
+		ID:   "1:channel-1:feishu:open-id-1",
+	})
+
+	got, err := svc.GetSession(ctx, imSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, imSession.ID, got.ID)
+	require.Equal(t, "feishu", got.IMPlatform)
+}
+
 // testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a
 // real table in the in-memory SQLite database.
 type testListSessionsIMChannelSession struct {

@@ -443,10 +443,13 @@ func (s *agentService) registerTools(
 	}
 
 	// ---- Capability detection from SearchTargets ----
-	var hasVectorKB, hasWikiKB bool
+	var hasVectorKB bool
 	var wikiKBIDs []string
-	var wikiScopes []tools.WikiScope
+	wikiRoutes := tools.NewWikiRouteResolver()
 	for _, target := range config.SearchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
 		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByIDOnly(ctx, target.KnowledgeBaseID)
 		if err != nil {
 			continue
@@ -455,21 +458,20 @@ func (s *agentService) registerTools(
 			hasVectorKB = true
 		}
 		if kb.IsWikiEnabled() {
-			hasWikiKB = true
 			wikiKBIDs = append(wikiKBIDs, kb.ID)
-			// When the user @mentioned specific documents, carry the document
-			// whitelist into the wiki scope so wiki_search / wiki_read_page
-			// only surface pages whose SourceRefs intersect the pinned docs.
-			scope := tools.WikiScope{KnowledgeBaseID: kb.ID}
-			if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
-				scope.KnowledgeIDs = append([]string(nil), target.KnowledgeIDs...)
-			}
-			if len(target.TagIDs) > 0 {
-				scope.TagIDs = append([]string(nil), target.TagIDs...)
-			}
-			wikiScopes = append(wikiScopes, scope)
 		}
 	}
+	wikiKBIDs = dedupStrings(wikiKBIDs)
+	wikiScopes := tools.NewWikiScopesFromSearchTargets(config.SearchTargets, wikiKBIDs)
+	// Narrow to the KBs that survived scope resolution. Build a fresh slice
+	// rather than truncating in place, so the argument passed above can never
+	// be overwritten through a shared backing array.
+	scopedWikiKBIDs := make([]string, 0, len(wikiScopes))
+	for _, scope := range wikiScopes {
+		scopedWikiKBIDs = append(scopedWikiKBIDs, scope.KnowledgeBaseID)
+	}
+	wikiKBIDs = scopedWikiKBIDs
+	hasWikiKB := len(wikiKBIDs) > 0
 
 	// Filter out knowledge base tools if no knowledge scope is configured for this turn.
 	hasKnowledge := agentHasKnowledgeScope(config)
@@ -607,7 +609,8 @@ func (s *agentService) registerTools(
 		case tools.ToolListKnowledgeChunks:
 			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
-			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService)
+			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
+				WithKnowledgeScope(s.knowledgeService)
 		case tools.ToolGetDocumentInfo:
 			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolDatabaseQuery:
@@ -629,34 +632,39 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver)
+			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
+				WithSearchTargets(config.SearchTargets)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
-			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository())
+			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository()).
+				WithSearchTargets(config.SearchTargets)
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
 		case tools.ToolWikiReadPage:
-			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes)
+			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiSearch:
-			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes)
+			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiReadSourceDoc:
-			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService)
+			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolWikiFlagIssue:
-			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs)
+			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs, wikiRoutes).
+				WithKnowledgeScope(s.knowledgeService, config.SearchTargets)
 		case tools.ToolWikiReadIssue:
 			toolToRegister = tools.NewWikiReadIssueTool(s.wikiPageService, wikiKBIDs)
 		case tools.ToolWikiUpdateIssue:
 			toolToRegister = tools.NewWikiUpdateIssueTool(s.wikiPageService, wikiKBIDs)
 		case tools.ToolWikiWritePage:
-			toolToRegister = tools.NewWikiWritePageTool(s.wikiPageService, wikiKBIDs, s.knowledgeService)
+			toolToRegister = tools.NewWikiWritePageTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
+				WithSearchTargets(config.SearchTargets)
 		case tools.ToolWikiReplaceText:
-			toolToRegister = tools.NewWikiReplaceTextTool(s.wikiPageService, wikiKBIDs, s.knowledgeService)
+			toolToRegister = tools.NewWikiReplaceTextTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
+				WithSearchTargets(config.SearchTargets)
 		case tools.ToolWikiRenamePage:
-			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, wikiKBIDs)
+			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 		case tools.ToolWikiDeletePage:
-			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs)
+			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 
 		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
@@ -729,7 +737,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			pageResult, err := s.knowledgeService.ListFAQEntries(ctx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
-			}, 0, "", "", "")
+			}, nil, 0, "", "", "")
 			if err == nil && pageResult != nil {
 				docCount = int(pageResult.Total)
 				if entries, ok := pageResult.Data.([]*types.FAQEntry); ok {

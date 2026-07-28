@@ -19,7 +19,7 @@
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
 // @name X-API-Key
-// @description 空间身份认证：输入 sk- 开头的 API Key
+// @description API Key 认证：空间 Key 固定访问所属空间；平台 Key 调用空间接口时需同时传 X-Tenant-ID
 package main
 
 import (

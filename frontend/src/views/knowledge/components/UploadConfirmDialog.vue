@@ -141,6 +141,33 @@
                       </div>
                     </div>
                   </div>
+                  <div v-show="activeSection === 'tags'" class="section">
+                    <div class="kb-embedded-settings">
+                      <div class="setting-row setting-row--field setting-row--tags">
+                        <div class="setting-info">
+                          <label>{{ t('uploadConfirm.tabTags') }}</label>
+                          <p class="desc">{{ t('uploadConfirm.tagsDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control--full">
+                          <t-select
+                            v-model="selectedTagIds"
+                            :options="tagOptions"
+                            :loading="tagsLoading"
+                            multiple
+                            filterable
+                            clearable
+                            :placeholder="t('uploadConfirm.tagsPlaceholder')"
+                          />
+                          <p v-if="tagsLoadFailed" class="field-error field-error--muted">
+                            {{ t('uploadConfirm.tagsLoadFailed') }}
+                          </p>
+                          <p v-else-if="!tagsLoading && tagOptions.length === 0" class="field-hint">
+                            {{ t('uploadConfirm.tagsEmpty') }}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div v-show="activeSection === 'chunking'" class="section">
                     <KBChunkingSettings
                       embedded
@@ -181,6 +208,38 @@
                           </p>
                         </div>
                       </div>
+                      <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row--field">
+                        <div class="setting-info">
+                          <label>{{ t('knowledgeEditor.advanced.multimodal.descriptionLanguageLabel') }}</label>
+                          <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.descriptionLanguageDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control--full">
+                          <t-select
+                            v-model="uiState.multimodalConfig.descriptionLanguage"
+                            clearable
+                            :placeholder="t('knowledgeEditor.advanced.multimodal.descriptionLanguageAuto')"
+                          >
+                            <t-option value="Chinese" :label="t('language.zhCN')" />
+                            <t-option value="English" :label="t('language.enUS')" />
+                            <t-option value="Korean" :label="t('language.koKR')" />
+                            <t-option value="Russian" :label="t('language.ruRU')" />
+                          </t-select>
+                        </div>
+                      </div>
+                      <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row--field">
+                        <div class="setting-info">
+                          <label>{{ t('knowledgeEditor.advanced.multimodal.customInstructionsLabel') }}</label>
+                          <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.customInstructionsDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control--full">
+                          <t-textarea
+                            v-model="uiState.multimodalConfig.customInstructions"
+                            :placeholder="t('knowledgeEditor.advanced.multimodal.customInstructionsPlaceholder')"
+                            :maxlength="4000"
+                            :autosize="{ minRows: 3, maxRows: 8 }"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div v-show="activeSection === 'asr'" class="section">
@@ -216,6 +275,19 @@
                           </p>
                         </div>
                       </div>
+                      <div v-if="uiState.asrConfig.enabled" class="setting-row setting-row--field">
+                        <div class="setting-info">
+                          <label>{{ t('knowledgeEditor.asr.languageLabel') }}</label>
+                          <p class="desc">{{ t('knowledgeEditor.asr.languageDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control--full">
+                          <t-input
+                            v-model="uiState.asrConfig.language"
+                            clearable
+                            :placeholder="t('knowledgeEditor.asr.languagePlaceholder')"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div v-show="activeSection === 'question'" class="section">
@@ -224,7 +296,9 @@
                       :question-generation="uiState.questionGenerationConfig"
                       :rag-enabled="ragEnabled"
                       :all-models="allModels"
+                      :table-metadata-instructions="uiState.chunkingConfig.tableMetadataInstructions"
                       @update:question-generation="handleQuestionGenerationUpdate"
+                      @update:table-metadata-instructions="handleTableMetadataInstructionsUpdate"
                     />
                   </div>
                   <div v-show="activeSection === 'graph'" class="section">
@@ -268,6 +342,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
+import { listKnowledgeTags } from '@/api/knowledge-base'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import type {
@@ -317,6 +392,7 @@ const props = withDefaults(defineProps<{
   mode?: UploadConfirmMode
   files?: File[]
   urls?: string[]
+  tagIds?: string[]
   manualPreview?: UploadConfirmManualSource | null
   reparsePreview?: UploadConfirmReparseSource | null
   tagId?: string
@@ -328,6 +404,7 @@ const props = withDefaults(defineProps<{
   mode: 'file',
   files: () => [],
   urls: () => [],
+  tagIds: () => [],
   manualPreview: null,
   reparsePreview: null,
   acceptFileTypes: '',
@@ -349,6 +426,10 @@ const uiStore = useUIStore()
 const allModels = ref<any[]>([])
 const localFiles = ref<File[]>([])
 const localUrls = ref<string[]>([])
+const availableTags = ref<Array<{ id: string; name: string }>>([])
+const selectedTagIds = ref<string[]>([])
+const tagsLoading = ref(false)
+const tagsLoadFailed = ref(false)
 const activeSection = ref('overview')
 const uiState = ref<UploadUIState>(createDefaultUIState())
 
@@ -508,13 +589,39 @@ const chunkingOverviewValue = computed(() => {
   return parts.join(' · ')
 })
 
+const tagOptions = computed(() => availableTags.value.map(tag => ({
+  label: tag.name,
+  value: tag.id,
+})))
+
+const tagsOverviewValue = computed(() => {
+  if (selectedTagIds.value.length === 0) return t('uploadConfirm.summaryNoTags')
+  const nameById = new Map(availableTags.value.map(tag => [tag.id, tag.name]))
+  const names = selectedTagIds.value.map(id => nameById.get(id)).filter(Boolean) as string[]
+  if (names.length > 0 && names.length <= 3) return names.join('、')
+  return t('uploadConfirm.summaryTagsCount', { count: selectedTagIds.value.length })
+})
+
+const enhancementOverviewValue = computed(() => {
+  const question = uiState.value.questionGenerationConfig
+  const questionValue = question.enabled
+    ? t('uploadConfirm.summaryQuestionCountValue', { count: question.questionCount })
+    : t('uploadConfirm.statusOff')
+  const tableValue = uiState.value.chunkingConfig.tableMetadataInstructions?.trim()
+    ? t('uploadConfirm.summaryTableInstructionsSet')
+    : t('uploadConfirm.summaryTableInstructionsDefault')
+  return `${questionValue} · ${tableValue}`
+})
+
 const overviewLines = computed(() => {
   const mm = uiState.value.multimodalConfig
   const asr = uiState.value.asrConfig
-  const qg = uiState.value.questionGenerationConfig
   const graph = uiState.value.nodeExtractConfig
 
   return [
+    ...(props.mode === 'reparse'
+      ? []
+      : [{ key: 'tags', title: t('uploadConfirm.tabTags'), value: tagsOverviewValue.value }]),
     { key: 'parser', title: t('uploadConfirm.tabParser'), value: parserOverviewValue.value },
     { key: 'chunking', title: t('uploadConfirm.tabChunking'), value: chunkingOverviewValue.value },
     {
@@ -533,10 +640,8 @@ const overviewLines = computed(() => {
     },
     {
       key: 'question',
-      title: t('uploadConfirm.tabQuestion'),
-      value: qg.enabled
-        ? t('uploadConfirm.summaryQuestionCountValue', { count: qg.questionCount })
-        : t('uploadConfirm.statusOff'),
+      title: t('uploadConfirm.tabEnhancement'),
+      value: enhancementOverviewValue.value,
     },
     {
       key: 'graph',
@@ -551,11 +656,12 @@ const overviewLines = computed(() => {
 })
 
 const sectionMeta: Record<string, { titleKey: string; descKey?: string }> = {
+  tags: { titleKey: 'uploadConfirm.tabTags', descKey: 'uploadConfirm.tagsDescription' },
   parser: { titleKey: 'uploadConfirm.tabParser', descKey: 'kbSettings.parser.description' },
   chunking: { titleKey: 'uploadConfirm.tabChunking', descKey: 'knowledgeEditor.chunking.description' },
   multimodal: { titleKey: 'uploadConfirm.tabMultimodal', descKey: 'knowledgeEditor.multimodal.description' },
   asr: { titleKey: 'uploadConfirm.tabAsr', descKey: 'knowledgeEditor.asr.description' },
-  question: { titleKey: 'uploadConfirm.tabQuestion', descKey: 'knowledgeEditor.advanced.questionGeneration.description' },
+  question: { titleKey: 'uploadConfirm.tabEnhancement', descKey: 'knowledgeEditor.advanced.description' },
   graph: { titleKey: 'uploadConfirm.tabGraph', descKey: 'graphSettings.description' },
 }
 
@@ -705,7 +811,9 @@ function initFromKbInfo(kb: any) {
       customInstructions: kb.question_generation_config?.custom_instructions || '',
     },
     nodeExtractConfig: {
-      enabled: kb.extract_config?.enabled || false,
+      // This dialog exposes one graph switch, so show the effective state.
+      // The backend only runs graph extraction when both flags are enabled.
+      enabled: !!kb.extract_config?.enabled && !!kb.indexing_strategy?.graph_enabled,
       text: kb.extract_config?.text || '',
       tags: kb.extract_config?.tags || [],
       nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
@@ -821,6 +929,9 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (ec.custom_instructions != null) s.nodeExtractConfig.customInstructions = ec.custom_instructions
   }
   if (o.graph_enabled != null) s.graphEnabled = o.graph_enabled
+  // Older saved overrides may contain mismatched graph/extract flags. Keep
+  // the single visible switch aligned with the backend's effective state.
+  s.nodeExtractConfig.enabled = s.nodeExtractConfig.enabled && s.graphEnabled
   if (o.parser_engine_overrides && o.parser_engine_overrides.pdf_force_scanned === 'true') {
     s.pdfForceScanned = true
   } else {
@@ -837,18 +948,41 @@ async function loadModels() {
   }
 }
 
+async function loadTags() {
+  const kbId = props.kbInfo?.id
+  availableTags.value = []
+  tagsLoadFailed.value = false
+  if (!kbId || props.mode === 'reparse') return
+
+  tagsLoading.value = true
+  try {
+    const response: any = await listKnowledgeTags(kbId, { page: 1, page_size: 1000 })
+    const tags = response?.data?.data || []
+    availableTags.value = tags.map((tag: any) => ({
+      id: String(tag.id),
+      name: String(tag.name || ''),
+    }))
+  } catch {
+    tagsLoadFailed.value = true
+  } finally {
+    tagsLoading.value = false
+  }
+}
+
 watch(
   () => props.visible,
   (visible) => {
     if (!visible) return
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
+    selectedTagIds.value = props.mode === 'reparse' ? [] : [...(props.tagIds || [])]
     initFromKbInfo(props.kbInfo)
     if (props.mode === 'reparse') {
       applyOverridesToState(props.reparsePreview?.processOverrides)
     }
     activeSection.value = 'overview'
     loadModels()
+    loadTags()
   },
 )
 
@@ -912,12 +1046,20 @@ const handleAddASRModel = () => {
   uiStore.openSettings('models', 'asr')
 }
 
-const handleQuestionGenerationUpdate = (config: { enabled: boolean; questionCount: number }) => {
+const handleQuestionGenerationUpdate = (config: { enabled: boolean; questionCount: number; customInstructions?: string }) => {
   uiState.value.questionGenerationConfig = { ...config }
+}
+
+const handleTableMetadataInstructionsUpdate = (value: string) => {
+  uiState.value.chunkingConfig.tableMetadataInstructions = value
 }
 
 const handleNodeExtractUpdate = (config: UploadUIState['nodeExtractConfig']) => {
   uiState.value.nodeExtractConfig = { ...config }
+  // GraphSettings is the only graph switch in the upload dialog. Update both
+  // backend flags; otherwise the hidden KB default can silently override the
+  // user's checked switch and prevent graph tasks from being created.
+  uiState.value.graphEnabled = config.enabled
 }
 
 const validateBeforeConfirm = (): boolean => {
@@ -961,13 +1103,19 @@ const handleConfirm = () => {
 
   const processConfig = buildProcessOverrides()
   if (props.mode === 'manual' && props.manualPreview) {
-    emit('confirm', { processConfig, mode: 'manual', manual: { ...props.manualPreview } })
+    emit('confirm', {
+      processConfig,
+      mode: 'manual',
+      tagIds: [...selectedTagIds.value],
+      manual: { ...props.manualPreview, tagIds: [...selectedTagIds.value] },
+    })
   } else if (props.mode === 'reparse' && props.reparsePreview) {
     emit('confirm', { processConfig, mode: 'reparse', reparse: { ...props.reparsePreview } })
   } else {
     emit('confirm', {
       processConfig,
       mode: 'file',
+      tagIds: [...selectedTagIds.value],
       files: [...localFiles.value],
       urls: [...localUrls.value],
     })
@@ -1355,6 +1503,14 @@ const handleConfirm = () => {
     font-size: 12px;
     line-height: 1.4;
     color: var(--td-error-color);
+  }
+
+  .field-error--muted,
+  .field-hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--td-text-color-secondary);
   }
 }
 

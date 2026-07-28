@@ -85,9 +85,17 @@ export type TenantAPIKeyCapability =
   | 'manage_members'
   | 'manage_spaces'
   | 'manage_tenant_settings'
+  | 'system_tenants_read'
+  | 'system_tenants_manage'
+  | 'system_settings_read'
+  | 'system_settings_manage'
+  | 'system_runtime_read'
+  | 'system_runtime_manage'
+  | 'system_audit_read'
 
 export interface TenantAPIKey {
   id: number
+  scope_type?: 'tenant' | 'platform'
   name: string
   api_key: string
   full_access: boolean

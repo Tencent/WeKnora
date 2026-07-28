@@ -15,7 +15,7 @@ declare global {
 export const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB
   || Number(import.meta.env.VITE_MAX_FILE_SIZE_MB) 
   || 50;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export function generateRandomString(length: number) {
   let result = "";
@@ -42,6 +42,15 @@ export function formatStringDate(date: any) {
 }
 const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "epub", "mhtml", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
 
+/** Returns true when the file exceeds the deploy-time upload limit. */
+export function fileSizeVerification(file: Pick<File, 'size'>, silent = false) {
+  if (file.size <= MAX_FILE_SIZE_BYTES) return false;
+  if (!silent) {
+    MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
+  }
+  return true;
+}
+
 /**
  * Returns true when the file should be **rejected**.
  * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
@@ -61,11 +70,5 @@ export function kbFileTypeVerification(file: any, silent = false, validTypes?: S
     }
     return true;
   }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    if (!silent) {
-      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
-    }
-    return true;
-  }
-  return false;
+  return fileSizeVerification(file, silent);
 }
