@@ -22,27 +22,32 @@ import (
 const operationsMetricNamespace = "weknora"
 
 type operationsObserver struct {
-	db            *gorm.DB
-	redisClient   *redis.Client
-	startedAt     time.Time
-	backupManager manualBackupCreator
-	auditService  interfaces.AuditLogService
+	db             *gorm.DB
+	redisClient    *redis.Client
+	startedAt      time.Time
+	backupManager  manualBackupCreator
+	backupSchedule *backup.MySQLScheduler
+	auditService   interfaces.AuditLogService
 
-	registry             *prometheus.Registry
-	metricsHandler       http.Handler
-	httpRequests         *prometheus.CounterVec
-	httpDuration         *prometheus.HistogramVec
-	httpInFlight         prometheus.Gauge
-	dependencyUp         *prometheus.GaugeVec
-	dependencyConfigured *prometheus.GaugeVec
-	dbOpenConnections    prometheus.Gauge
-	dbInUseConnections   prometheus.Gauge
-	dbWaitCount          prometheus.Gauge
-	logFileBytes         prometheus.Gauge
-	diskFreeBytes        prometheus.Gauge
-	schemaVersion        prometheus.Gauge
-	schemaDirty          prometheus.Gauge
-	buildInfo            *prometheus.GaugeVec
+	registry              *prometheus.Registry
+	metricsHandler        http.Handler
+	httpRequests          *prometheus.CounterVec
+	httpDuration          *prometheus.HistogramVec
+	httpInFlight          prometheus.Gauge
+	dependencyUp          *prometheus.GaugeVec
+	dependencyConfigured  *prometheus.GaugeVec
+	dbOpenConnections     prometheus.Gauge
+	dbInUseConnections    prometheus.Gauge
+	dbWaitCount           prometheus.Gauge
+	logFileBytes          prometheus.Gauge
+	diskFreeBytes         prometheus.Gauge
+	schemaVersion         prometheus.Gauge
+	schemaDirty           prometheus.Gauge
+	buildInfo             *prometheus.GaugeVec
+	backupScheduleEnabled prometheus.Gauge
+	backupLastSuccess     prometheus.Gauge
+	backupLastFailure     prometheus.Gauge
+	backupRetentionFailed prometheus.Gauge
 }
 
 type operationsStatusResponse struct {
@@ -52,6 +57,7 @@ type operationsStatusResponse struct {
 	Database      operationsDatabaseStatus  `json:"database"`
 	FileLog       operationsFileLogStatus   `json:"file_log"`
 	Migration     operationsMigrationStatus `json:"migration"`
+	Backup        operationsBackupStatus    `json:"backup"`
 }
 
 type operationsDatabaseStatus struct {
@@ -74,14 +80,30 @@ type operationsMigrationStatus struct {
 	Dirty   bool `json:"dirty"`
 }
 
+type operationsBackupStatus struct {
+	Scheduled              bool             `json:"scheduled"`
+	ConfigurationError     bool             `json:"configuration_error"`
+	Schedule               string           `json:"schedule,omitempty"`
+	RetentionDays          int              `json:"retention_days"`
+	MinFreeGB              int              `json:"min_free_gb"`
+	LastSuccessAt          time.Time        `json:"last_success_at,omitempty"`
+	LastFailureAt          time.Time        `json:"last_failure_at,omitempty"`
+	LastFailureKind        backup.ErrorKind `json:"last_failure_kind,omitempty"`
+	LastRetentionAt        time.Time        `json:"last_retention_at,omitempty"`
+	LastRetentionFailureAt time.Time        `json:"last_retention_failure_at,omitempty"`
+	LastRetentionDeleted   int              `json:"last_retention_deleted"`
+}
+
 func newOperationsObserver(db *gorm.DB, redisClient *redis.Client) *operationsObserver {
 	registry := prometheus.NewRegistry()
+	backupManager := backup.NewMySQLManager(db)
 	observer := &operationsObserver{
-		db:            db,
-		redisClient:   redisClient,
-		startedAt:     time.Now(),
-		backupManager: backup.NewMySQLManager(db),
-		registry:      registry,
+		db:             db,
+		redisClient:    redisClient,
+		startedAt:      time.Now(),
+		backupManager:  backupManager,
+		backupSchedule: backup.NewMySQLScheduler(backupManager),
+		registry:       registry,
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: operationsMetricNamespace,
 			Name:      "http_requests_total",
@@ -147,6 +169,26 @@ func newOperationsObserver(db *gorm.DB, redisClient *redis.Client) *operationsOb
 			Name:      "build_info",
 			Help:      "WeKnora build information.",
 		}, []string{"version"}),
+		backupScheduleEnabled: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: operationsMetricNamespace,
+			Name:      "backup_schedule_enabled",
+			Help:      "Whether scheduled MySQL backups are enabled.",
+		}),
+		backupLastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: operationsMetricNamespace,
+			Name:      "backup_last_success_timestamp_seconds",
+			Help:      "Unix timestamp of the last successful scheduled MySQL backup.",
+		}),
+		backupLastFailure: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: operationsMetricNamespace,
+			Name:      "backup_last_failure_timestamp_seconds",
+			Help:      "Unix timestamp of the last failed scheduled MySQL backup.",
+		}),
+		backupRetentionFailed: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: operationsMetricNamespace,
+			Name:      "backup_retention_failure",
+			Help:      "Whether the most recent scheduled backup retention sweep failed.",
+		}),
 	}
 
 	registry.MustRegister(
@@ -163,6 +205,10 @@ func newOperationsObserver(db *gorm.DB, redisClient *redis.Client) *operationsOb
 		observer.schemaVersion,
 		observer.schemaDirty,
 		observer.buildInfo,
+		observer.backupScheduleEnabled,
+		observer.backupLastSuccess,
+		observer.backupLastFailure,
+		observer.backupRetentionFailed,
 	)
 	observer.buildInfo.WithLabelValues(buildVersion()).Set(1)
 	observer.metricsHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
@@ -217,6 +263,7 @@ func (o *operationsObserver) collect(ctx context.Context) operationsStatusRespon
 	databaseStatus := o.collectDatabaseMetrics()
 	fileLogStatus := o.collectFileLogMetrics()
 	migrationStatus := o.collectMigrationMetrics()
+	backupStatus := o.collectBackupMetrics()
 	o.collectDependencyMetrics(checks)
 
 	status := "ready"
@@ -230,6 +277,7 @@ func (o *operationsObserver) collect(ctx context.Context) operationsStatusRespon
 		Database:      databaseStatus,
 		FileLog:       fileLogStatus,
 		Migration:     migrationStatus,
+		Backup:        backupStatus,
 	}
 }
 
@@ -310,6 +358,22 @@ func (o *operationsObserver) startEmailAlerts(cleaner interfaces.ResourceCleaner
 	})
 }
 
+func (o *operationsObserver) startScheduledBackups(cleaner interfaces.ResourceCleaner) {
+	if o.backupSchedule == nil {
+		return
+	}
+	o.backupSchedule.SetRunHandler(o.emitScheduledBackupAudit)
+	if err := o.backupSchedule.Start(); err != nil {
+		logger.Warnf(context.Background(), "[backup] scheduled MySQL backup did not start; details suppressed")
+	}
+	if cleaner != nil {
+		cleaner.RegisterWithName("MySQLBackupScheduler", func() error {
+			o.backupSchedule.Stop()
+			return nil
+		})
+	}
+}
+
 func (o *operationsObserver) collectMigrationMetrics() operationsMigrationStatus {
 	version, dirty, known := database.CachedMigrationVersion()
 	if !known {
@@ -321,6 +385,41 @@ func (o *operationsObserver) collectMigrationMetrics() operationsMigrationStatus
 	o.schemaVersion.Set(float64(version))
 	o.schemaDirty.Set(metricValue(dirty))
 	return operationsMigrationStatus{Known: true, Version: version, Dirty: dirty}
+}
+
+func (o *operationsObserver) collectBackupMetrics() operationsBackupStatus {
+	if o.backupSchedule == nil {
+		o.backupScheduleEnabled.Set(0)
+		o.backupLastSuccess.Set(0)
+		o.backupLastFailure.Set(0)
+		o.backupRetentionFailed.Set(0)
+		return operationsBackupStatus{}
+	}
+	status := o.backupSchedule.Status()
+	o.backupScheduleEnabled.Set(metricValue(status.Enabled))
+	o.backupLastSuccess.Set(timeOrZero(status.LastSuccessAt))
+	o.backupLastFailure.Set(timeOrZero(status.LastFailureAt))
+	o.backupRetentionFailed.Set(metricValue(!status.LastRetentionFailureAt.IsZero()))
+	return operationsBackupStatus{
+		Scheduled:              status.Enabled,
+		ConfigurationError:     status.ConfigurationError,
+		Schedule:               status.Schedule,
+		RetentionDays:          status.RetentionDays,
+		MinFreeGB:              status.MinFreeGB,
+		LastSuccessAt:          status.LastSuccessAt,
+		LastFailureAt:          status.LastFailureAt,
+		LastFailureKind:        status.LastFailureKind,
+		LastRetentionAt:        status.LastRetentionAt,
+		LastRetentionFailureAt: status.LastRetentionFailureAt,
+		LastRetentionDeleted:   status.LastRetentionDeleted,
+	}
+}
+
+func timeOrZero(value time.Time) float64 {
+	if value.IsZero() {
+		return 0
+	}
+	return float64(value.Unix())
 }
 
 func metricValue(value bool) float64 {

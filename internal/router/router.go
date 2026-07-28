@@ -135,6 +135,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 健康检查（不需要认证）
 	registerHealthRoutes(r, params.DB, params.RedisClient)
 	registerMetricsRoute(r, operations)
+	operations.startScheduledBackups(params.ResourceCleaner)
 	operations.startEmailAlerts(params.ResourceCleaner)
 
 	// Swagger API 文档（仅在非生产环境下启用）

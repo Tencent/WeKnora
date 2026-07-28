@@ -3,6 +3,7 @@ package backup
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -119,6 +120,26 @@ func TestMySQLManagerCreateManualWritesVerifiableBackup(t *testing.T) {
 	}
 	if !strings.Contains(string(manifest), `"result": "success"`) || !strings.Contains(string(manifest), `"reason": "before a schema experiment"`) || strings.Contains(string(manifest), "password") || strings.Contains(string(manifest), directory) {
 		t.Fatalf("unexpected manifest: %s", manifest)
+	}
+}
+
+func TestMySQLManagerCreateScheduledWritesScheduledManifest(t *testing.T) {
+	directory := t.TempDir()
+	manager := newTestMySQLManager(directory, fakeDumpExecutor{payload: []byte("scheduled backup")}, &fakeBackupLocker{})
+	result, err := manager.CreateScheduled(context.Background())
+	if err != nil {
+		t.Fatalf("CreateScheduled returned error: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(directory, result.ManifestFile))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(contents, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if manifest.Trigger != "scheduled" || manifest.Reason != "scheduled backup" {
+		t.Fatalf("unexpected scheduled manifest: %#v", manifest)
 	}
 }
 

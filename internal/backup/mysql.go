@@ -45,6 +45,7 @@ const (
 	ErrorIntegrity           ErrorKind = "integrity_failed"
 	ErrorDump                ErrorKind = "dump_failed"
 	ErrorTimeout             ErrorKind = "timeout"
+	ErrorInsufficientSpace   ErrorKind = "insufficient_space"
 )
 
 // Error represents a backup failure using a safe, stable category.
@@ -229,6 +230,17 @@ func LoadMySQLConfigFromEnv() (MySQLConfig, error) {
 // It is synchronous by design: a caller receives success only after the
 // archive and checksum have been durably written.
 func (m *MySQLManager) CreateManual(ctx context.Context, reason string) (Result, error) {
+	return m.create(ctx, "manual", reason)
+}
+
+// CreateScheduled creates a backup owned by the configured scheduler. Unlike
+// manual backups it has no user-supplied reason, so it cannot accidentally
+// persist operator-entered secrets in the manifest.
+func (m *MySQLManager) CreateScheduled(ctx context.Context) (Result, error) {
+	return m.create(ctx, "scheduled", "scheduled backup")
+}
+
+func (m *MySQLManager) create(ctx context.Context, trigger, reason string) (Result, error) {
 	if m.driverName == nil || m.driverName() != "mysql" {
 		return Result{}, &Error{Kind: ErrorUnsupportedDatabase}
 	}
@@ -262,7 +274,7 @@ func (m *MySQLManager) CreateManual(ctx context.Context, reason string) (Result,
 	manifest := Manifest{
 		FormatVersion:      backupManifestVersion,
 		BackupID:           backupID,
-		Trigger:            "manual",
+		Trigger:            trigger,
 		Reason:             reason,
 		StartedAt:          startedAt,
 		ApplicationVersion: m.config.ApplicationVersion,
@@ -307,6 +319,10 @@ func (m *MySQLManager) CreateManual(ctx context.Context, reason string) (Result,
 	result.SizeBytes = size
 	result.SHA256 = checksum
 	return result, nil
+}
+
+func (m *MySQLManager) isMySQL() bool {
+	return m != nil && m.driverName != nil && m.driverName() == "mysql"
 }
 
 // VerifyResult recomputes the checksum for a successful archive. Restore

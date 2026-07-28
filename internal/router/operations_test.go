@@ -175,3 +175,42 @@ func TestManualBackupReturnsSafeInProgressConflict(t *testing.T) {
 		t.Fatalf("unexpected internal failure response: %d %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestOperationAlertsIncludeScheduledBackupAndRetentionFailures(t *testing.T) {
+	started := time.Date(2026, 7, 28, 7, 0, 0, 0, time.UTC)
+	status := operationsStatusResponse{Backup: operationsBackupStatus{
+		Scheduled:              true,
+		LastSuccessAt:          started,
+		LastFailureAt:          started.Add(time.Minute),
+		LastRetentionFailureAt: started.Add(2 * time.Minute),
+	}}
+	conditions := operationAlertConditions(status)
+	keys := make(map[string]bool, len(conditions))
+	for _, condition := range conditions {
+		keys[condition.Key] = true
+	}
+	if !keys["scheduled_backup_failed"] || !keys["backup_retention_failed"] {
+		t.Fatalf("scheduled backup conditions missing: %#v", conditions)
+	}
+
+	status.Backup.LastSuccessAt = started.Add(3 * time.Minute)
+	status.Backup.LastRetentionFailureAt = time.Time{}
+	conditions = operationAlertConditions(status)
+	for _, condition := range conditions {
+		if condition.Key == "scheduled_backup_failed" || condition.Key == "backup_retention_failed" {
+			t.Fatalf("resolved scheduled backup condition still active: %#v", conditions)
+		}
+	}
+}
+
+func TestScheduledBackupAuditUsesSystemActorAndSafeDetails(t *testing.T) {
+	audit := &recordingBackupAuditService{}
+	observer := newOperationsObserver(nil, nil)
+	observer.auditService = audit
+	observer.emitScheduledBackupAudit(backup.ScheduledRun{Result: backup.Result{
+		BackupID: "backup-1", ArchiveFile: "backup-1.sql.gz", ManifestFile: "backup-1.manifest.json", SizeBytes: 12, SHA256: "checksum",
+	}, RetentionDeleted: 2})
+	if len(audit.entries) != 1 || audit.entries[0].ActorRole != "system" || audit.entries[0].Action != types.AuditActionSystemBackupCreated || strings.Contains(string(audit.entries[0].Details), "password") {
+		t.Fatalf("unexpected scheduled backup audit: %#v", audit.entries)
+	}
+}

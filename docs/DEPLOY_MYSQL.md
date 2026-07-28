@@ -216,6 +216,56 @@ It builds a temporary MySQL source database, produces a manifest-compatible
 gzip dump containing representative records, verifies that dump through the
 isolated profile, and removes every temporary container and file afterward.
 
+## 定时备份 / Scheduled Backups
+
+定时备份是 opt-in 功能：只有同时设置 `BACKUP_ENABLED=true` 和有效的
+`BACKUP_SCHEDULE` 后才会启动。仅设置 Cron 表达式不会意外开启备份，空值
+保持禁用。This is intentionally different from the manual-backup endpoint: a
+scheduled run has no operator-supplied reason and uses `trigger=scheduled` in
+its manifest and audit record.
+
+For a personal or small-team deployment, the following is a reasonable starting
+point. `BACKUP_SCHEDULE` uses the standard five-field Cron format: `minute
+hour day-of-month month day-of-week`. It follows the application container's
+local timezone, which is normally UTC unless the image/deployment configures a
+different timezone. Verify the container time with `docker compose exec app
+date` before choosing a production schedule.
+
+```env
+# Enable manual and scheduled MySQL backups / 启用 MySQL 手动与定时备份
+BACKUP_ENABLED=true
+
+# Every day at 03:30 / 每天 03:30
+BACKUP_SCHEDULE=30 3 * * *
+
+# Keep backups for seven days / 保留 7 天
+BACKUP_RETENTION_DAYS=7
+
+# Skip scheduled runs when fewer than 5 GiB are free / 低于 5 GiB 时跳过自动备份
+BACKUP_MIN_FREE_GB=5
+```
+
+After every **successful scheduled backup**, the retention sweep removes only
+expired, valid archive-and-manifest pairs. It never removes the newest valid
+backup, even if that backup is older than the configured horizon. Set
+`BACKUP_RETENTION_DAYS=0` to disable automatic deletion entirely. 手动备份与
+失败的备份不会触发删除；如果备份盘已满，请先确认最近一份可恢复备份，再由
+operator 手工释放空间或调整 retention policy。
+
+Before creating an automatic archive, the scheduler checks the free space of
+`BACKUP_LOCAL_DIR`. A value below `BACKUP_MIN_FREE_GB`, an unavailable MySQL
+database, a held MySQL advisory lock, or a failed dump produces no partial
+success record. Lock contention is treated as a safe skip, not a failure, so
+multiple application instances cannot overlap scheduled dumps. PostgreSQL and
+SQLite do not start this scheduler.
+
+`GET /api/v1/admin/operations/status` now includes sanitized scheduled-backup
+state, and `/metrics` exposes schedule enabled, last success, last failure,
+and retention-failure gauges. When SMTP alerts are enabled, a scheduled backup
+failure or retention cleanup failure sends one deduplicated email; a later
+successful run sends the normal recovery notification. 所有告警、状态和审计记录
+均不包含 password、DSN、absolute path 或 `mysqldump` 原始输出。
+
 ## Schema Check
 
 Run the repeatable schema validation before publishing a MySQL-related change:

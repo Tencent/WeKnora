@@ -77,12 +77,50 @@ func manualBackupErrorCode(err error) string {
 		backup.ErrorIntegrity,
 		backup.ErrorDump,
 		backup.ErrorTimeout,
+		backup.ErrorInsufficientSpace,
 	} {
 		if backup.IsErrorKind(err, kind) {
 			return string(kind)
 		}
 	}
 	return "backup_failed"
+}
+
+func (o *operationsObserver) emitScheduledBackupAudit(run backup.ScheduledRun) {
+	if o.auditService == nil {
+		return
+	}
+	action := types.AuditActionSystemBackupCreated
+	outcome := types.AuditOutcomeSuccess
+	details := map[string]any{
+		"backup_id":         run.Result.BackupID,
+		"trigger":           "scheduled",
+		"manifest_file":     run.Result.ManifestFile,
+		"retention_deleted": run.RetentionDeleted,
+	}
+	if run.Err != nil {
+		action = types.AuditActionSystemBackupFailed
+		outcome = types.AuditOutcomeFailed
+		details["failure_kind"] = manualBackupErrorCode(run.Err)
+	} else {
+		details["archive_file"] = run.Result.ArchiveFile
+		details["size_bytes"] = run.Result.SizeBytes
+		details["sha256"] = run.Result.SHA256
+		details["retention_failed"] = run.RetentionFailed
+	}
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return
+	}
+	_ = o.auditService.Log(context.Background(), &types.AuditLog{
+		TenantID:   0,
+		ActorRole:  "system",
+		Action:     action,
+		TargetType: "mysql_backup",
+		TargetID:   run.Result.BackupID,
+		Outcome:    outcome,
+		Details:    types.JSON(detailsJSON),
+	})
 }
 
 func (o *operationsObserver) emitManualBackupAudit(c *gin.Context, result backup.Result, reason string, operationErr error) {

@@ -403,6 +403,16 @@ func operationAlertConditions(status operationsStatusResponse) []operationsAlert
 			Summary:  "application log filesystem space is low",
 		})
 	}
+	if status.Backup.Scheduled && status.Backup.LastFailureAt.After(status.Backup.LastSuccessAt) {
+		conditions = append(conditions, operationsAlertCondition{
+			Key: "scheduled_backup_failed", Severity: "critical", Summary: "scheduled MySQL backup failed",
+		})
+	}
+	if status.Backup.Scheduled && !status.Backup.LastRetentionFailureAt.IsZero() {
+		conditions = append(conditions, operationsAlertCondition{
+			Key: "backup_retention_failed", Severity: "warning", Summary: "scheduled MySQL backup retention cleanup failed",
+		})
+	}
 	return conditions
 }
 

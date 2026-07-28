@@ -124,7 +124,7 @@ const (
 	AuditActionSystemAPIKeyCreated     AuditAction = "system.api_key_created"
 	AuditActionSystemAPIKeyRevoked     AuditAction = "system.api_key_revoked"
 	// AuditActionSystemBackupCreated and AuditActionSystemBackupFailed record
-	// an operator-triggered MySQL logical backup without storing credentials,
+	// a manual or scheduled MySQL logical backup without storing credentials,
 	// absolute paths, or command output in the audit detail.
 	AuditActionSystemBackupCreated AuditAction = "system.backup_created"
 	AuditActionSystemBackupFailed  AuditAction = "system.backup_failed"
