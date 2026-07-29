@@ -104,6 +104,7 @@ const props = defineProps<{
   count: number;
   kbId: string;
   tagList: Tag[];
+  preSelectedTagIds?: string[];
   canManage?: boolean;
 }>();
 
@@ -126,7 +127,7 @@ watch(
   () => props.visible,
   (val) => {
     if (val) {
-      selectedSet.value = new Set();
+      selectedSet.value = new Set(props.preSelectedTagIds ?? []);
       searchQuery.value = '';
       newTagName.value = '';
     }
