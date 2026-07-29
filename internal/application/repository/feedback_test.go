@@ -28,7 +28,7 @@ func setupFeedbackTestRepository(
 		CREATE TABLE sessions (
 			id text PRIMARY KEY,
 			tenant_id integer NOT NULL,
-			user_id text NOT NULL,
+			user_id text,
 			deleted_at datetime
 		);
 		CREATE TABLE messages (
@@ -51,7 +51,7 @@ func setupFeedbackTestRepository(
 		&types.MessageFeedback{},
 		&types.ChunkFeedbackAudit{},
 	))
-	session := &types.Session{ID: "session-a", TenantID: 101}
+	session := &types.Session{ID: "session-a", TenantID: 101, UserID: "user-a"}
 	require.NoError(t, db.Exec(
 		"INSERT INTO sessions (id, tenant_id, user_id) VALUES (?, ?, ?)",
 		session.ID, session.TenantID, session.UserID,
@@ -104,7 +104,7 @@ func TestHydrateMessagesRequiresAnActiveChunkReference(t *testing.T) {
 	message.IsCompleted = true
 
 	require.NoError(t, repo.HydrateMessages(
-		ctx, session.TenantID, "viewer", []*types.Message{message},
+		ctx, session.TenantID, session.UserID, []*types.Message{message},
 	))
 	assert.True(t, message.FeedbackEligible)
 
@@ -117,9 +117,76 @@ func TestHydrateMessagesRequiresAnActiveChunkReference(t *testing.T) {
 	require.EqualValues(t, 1, referenceCount)
 
 	require.NoError(t, repo.HydrateMessages(
-		ctx, session.TenantID, "viewer", []*types.Message{message},
+		ctx, session.TenantID, session.UserID, []*types.Message{message},
 	))
 	assert.False(t, message.FeedbackEligible)
+}
+
+func TestFeedbackRequiresExactSessionOwner(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		sessionSQL string
+		actor      string
+		allowed    bool
+	}{
+		{name: "exact owner", actor: "user-a", allowed: true},
+		{name: "same tenant non-owner", actor: "user-b"},
+		{name: "empty owner", sessionSQL: "UPDATE sessions SET user_id = ''", actor: "user-a"},
+		{name: "null owner", sessionSQL: "UPDATE sessions SET user_id = NULL", actor: "user-a"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+			if testCase.sessionSQL != "" {
+				require.NoError(t, db.Exec(testCase.sessionSQL).Error)
+			}
+			_, err := repo.CompleteAssistantMessageWithReferences(
+				context.Background(), session.TenantID, message, feedbackReference(chunk),
+			)
+			require.NoError(t, err)
+
+			_, err = repo.ApplyMessageFeedback(context.Background(), types.ApplyMessageFeedbackInput{
+				MessageTenantID: session.TenantID, ActorTenantID: session.TenantID,
+				ActorUserID: testCase.actor, SessionID: session.ID, MessageID: message.ID,
+				Type: types.FeedbackTypeLike,
+			})
+			if testCase.allowed {
+				require.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, ErrFeedbackMessageNotFound)
+			}
+		})
+	}
+}
+
+func TestHydrateMessagesRequiresExactSessionOwner(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		sessionSQL string
+		viewer     string
+		eligible   bool
+	}{
+		{name: "exact owner", viewer: "user-a", eligible: true},
+		{name: "same tenant non-owner", viewer: "user-b"},
+		{name: "empty owner", sessionSQL: "UPDATE sessions SET user_id = ''", viewer: "user-a"},
+		{name: "null owner", sessionSQL: "UPDATE sessions SET user_id = NULL", viewer: "user-a"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+			if testCase.sessionSQL != "" {
+				require.NoError(t, db.Exec(testCase.sessionSQL).Error)
+			}
+			_, err := repo.CompleteAssistantMessageWithReferences(
+				context.Background(), session.TenantID, message, feedbackReference(chunk),
+			)
+			require.NoError(t, err)
+			message.IsCompleted = true
+
+			require.NoError(t, repo.HydrateMessages(
+				context.Background(), session.TenantID, testCase.viewer, []*types.Message{message},
+			))
+			assert.Equal(t, testCase.eligible, message.FeedbackEligible)
+		})
+	}
 }
 
 func TestFeedbackLifecycleAndResetBaseline(t *testing.T) {
@@ -151,14 +218,14 @@ func TestFeedbackLifecycleAndResetBaseline(t *testing.T) {
 	reason := types.FeedbackReasonInaccurate
 	_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
 		MessageTenantID: session.TenantID, ActorTenantID: session.TenantID,
-		ActorUserID: "user-b", SessionID: session.ID, MessageID: message.ID,
+		ActorUserID: "user-a", SessionID: session.ID, MessageID: message.ID,
 		Type: types.FeedbackTypeDislike, ReasonCode: &reason,
 	})
 	require.NoError(t, err)
 	got = loadFeedbackChunk(t, db, chunk.ID)
-	assert.EqualValues(t, 1, got.LikeCount)
+	assert.Zero(t, got.LikeCount)
 	assert.EqualValues(t, 1, got.DislikeCount)
-	assert.Equal(t, 1.0, got.RecallWeight)
+	assert.Equal(t, 0.8, got.RecallWeight)
 
 	require.NoError(t, repo.ResetChunkFeedback(ctx, types.ResetChunkFeedbackInput{
 		ChunkTenantID: chunk.TenantID, ActorTenantID: session.TenantID,
@@ -681,8 +748,42 @@ func TestOrdinaryChunkSaveCannotOverwriteFeedbackProjection(t *testing.T) {
 func TestConcurrentFeedbackConvergesToExactProjection(t *testing.T) {
 	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
 	ctx := context.Background()
-	_, err := repo.CompleteAssistantMessageWithReferences(ctx, session.TenantID, message, feedbackReference(chunk))
-	require.NoError(t, err)
+	type ownedMessage struct {
+		sessionID string
+		messageID string
+		userID    string
+	}
+	owned := make([]ownedMessage, 12)
+	for i := range owned {
+		if i == 0 {
+			owned[i] = ownedMessage{sessionID: session.ID, messageID: message.ID, userID: session.UserID}
+			_, err := repo.CompleteAssistantMessageWithReferences(
+				ctx, session.TenantID, message, feedbackReference(chunk),
+			)
+			require.NoError(t, err)
+			continue
+		}
+		owned[i] = ownedMessage{
+			sessionID: fmt.Sprintf("session-%02d", i),
+			messageID: fmt.Sprintf("message-%02d", i),
+			userID:    fmt.Sprintf("concurrent-%02d", i),
+		}
+		require.NoError(t, db.Exec(
+			"INSERT INTO sessions (id, tenant_id, user_id) VALUES (?, ?, ?)",
+			owned[i].sessionID, session.TenantID, owned[i].userID,
+		).Error)
+		require.NoError(t, db.Exec(
+			"INSERT INTO messages (id, session_id, content, role, is_completed) VALUES (?, ?, ?, ?, ?)",
+			owned[i].messageID, owned[i].sessionID, "draft", "assistant", false,
+		).Error)
+		ownedModel := &types.Message{
+			ID: owned[i].messageID, SessionID: owned[i].sessionID, Role: "assistant", Content: "final",
+		}
+		_, err := repo.CompleteAssistantMessageWithReferences(
+			ctx, session.TenantID, ownedModel, feedbackReference(chunk),
+		)
+		require.NoError(t, err)
+	}
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 12)
@@ -697,9 +798,9 @@ func TestConcurrentFeedbackConvergesToExactProjection(t *testing.T) {
 			_, applyErr := repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
 				MessageTenantID: session.TenantID,
 				ActorTenantID:   session.TenantID,
-				ActorUserID:     fmt.Sprintf("concurrent-%02d", index),
-				SessionID:       session.ID,
-				MessageID:       message.ID,
+				ActorUserID:     owned[index].userID,
+				SessionID:       owned[index].sessionID,
+				MessageID:       owned[index].messageID,
 				Type:            feedbackType,
 			})
 			errs <- applyErr
@@ -737,7 +838,7 @@ func TestConcurrentSameUserFeedbackHasOneExactProjection(t *testing.T) {
 			}
 			_, applyErr := repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
 				MessageTenantID: session.TenantID, ActorTenantID: session.TenantID,
-				ActorUserID: "same-user", SessionID: session.ID, MessageID: message.ID,
+				ActorUserID: session.UserID, SessionID: session.ID, MessageID: message.ID,
 				Type: feedbackType,
 			})
 			errs <- applyErr
@@ -750,10 +851,10 @@ func TestConcurrentSameUserFeedbackHasOneExactProjection(t *testing.T) {
 	}
 
 	var feedback types.MessageFeedback
-	require.NoError(t, db.First(&feedback, "user_id = ?", "same-user").Error)
+	require.NoError(t, db.First(&feedback, "user_id = ?", session.UserID).Error)
 	var count int64
 	require.NoError(t, db.Model(&types.MessageFeedback{}).
-		Where("user_id = ?", "same-user").Count(&count).Error)
+		Where("user_id = ?", session.UserID).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
 	got := loadFeedbackChunk(t, db, chunk.ID)
 	if feedback.FeedbackType == types.FeedbackTypeLike {

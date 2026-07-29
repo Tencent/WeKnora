@@ -53,6 +53,7 @@ type RouterParams struct {
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	FeedbackHandler              *handler.FeedbackHandler
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
@@ -247,6 +248,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		RegisterFeedbackRoutes(v1, params.FeedbackHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)

@@ -162,8 +162,9 @@ func resolveReferenceKeys(tx *gorm.DB, references types.References) ([]reference
 	}
 	sort.Strings(ids)
 	var chunks []types.Chunk
+	// Every feedback lifecycle path locks chunks in tenant/id order.
 	if err := tx.Where("id IN ?", ids).
-		Order("id").
+		Order("tenant_id, id").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Find(&chunks).Error; err != nil {
 		return nil, err
@@ -209,7 +210,14 @@ func (r *feedbackRepository) HydrateMessages(
 			ON c.tenant_id = mcr.chunk_tenant_id
 			AND c.id = mcr.chunk_id
 			AND c.deleted_at IS NULL`).
-		Where("mcr.message_tenant_id = ? AND mcr.message_id IN ?", tenantID, ids).
+		Joins(`JOIN messages AS m
+			ON m.id = mcr.message_id
+			AND m.deleted_at IS NULL`).
+		Joins(`JOIN sessions AS s
+			ON s.id = m.session_id
+			AND s.deleted_at IS NULL`).
+		Where(`mcr.message_tenant_id = ? AND mcr.message_id IN ?
+			AND s.tenant_id = ? AND s.user_id = ?`, tenantID, ids, tenantID, userID).
 		Group("mcr.message_id").Scan(&counts).Error; err != nil {
 		return err
 	}
@@ -230,10 +238,11 @@ func (r *feedbackRepository) HydrateMessages(
 		}
 	}
 	for _, message := range messages {
-		if message == nil || message.Role != "assistant" || !message.IsCompleted || userID == "" {
+		if message == nil || message.Role != "assistant" || !message.IsCompleted ||
+			userID == "" || !eligible[message.ID] {
 			continue
 		}
-		message.FeedbackEligible = eligible[message.ID]
+		message.FeedbackEligible = true
 		if feedback := feedbackByMessage[message.ID]; feedback != nil {
 			message.MyFeedback = &types.MessageFeedbackState{
 				Type: feedback.FeedbackType, ReasonCode: feedback.ReasonCode,
@@ -309,7 +318,7 @@ func (r *feedbackRepository) ApplyMessageFeedback(
 		err := tx.Table("messages AS m").Select("m.*").
 			Joins("JOIN sessions AS s ON s.id = m.session_id AND s.deleted_at IS NULL").
 			Where(`m.id = ? AND m.session_id = ? AND m.deleted_at IS NULL AND
-				s.tenant_id = ? AND (s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')`,
+				s.tenant_id = ? AND s.user_id = ?`,
 				input.MessageID, input.SessionID, input.MessageTenantID, input.ActorUserID).
 			Clauses(clause.Locking{Strength: "UPDATE"}).First(&message).Error
 		if err != nil {
