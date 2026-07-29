@@ -69,18 +69,87 @@ test('keeps graph group live while any graph chunk is running', () => {
   assert.equal(graph?.duration_ms, undefined)
 })
 
-test('surfaces a failed graph chunk on the aggregate graph row', () => {
+test('marks the graph group partial when one chunk fails after another succeeds', () => {
   const stage: KnowledgeTraceNode = {
     span_id: 'postprocess',
     name: 'postprocess',
     kind: 'stage',
     status: 'done',
-    children: [graphChunk(0), graphChunk(1, { status: 'failed' })],
+    children: [
+      graphChunk(0),
+      graphChunk(1, {
+        status: 'failed',
+        error_code: 'GRAPH_EXTRACT_FAILED',
+        error_message: 'model response was not valid JSON',
+      }),
+    ],
   }
 
   const graph = groupPostprocessGraphSpans(stage).children?.[0]
-  assert.equal(graph?.status, 'failed')
+  assert.equal(graph?.status, 'partial')
   assert.equal(graph?.duration_ms, 3000)
+  assert.deepEqual(graph?.output, {
+    chunk_count: 2,
+    status_counts: { done: 1, failed: 1 },
+    failure_count: 1,
+    failures: [{
+      stage: 'graph_chunk',
+      kind: 'chunk',
+      chunk_index: 1,
+      error_code: 'GRAPH_EXTRACT_FAILED',
+      reason: 'model response was not valid JSON',
+    }],
+  })
+})
+
+test('aggregates partial graph statistics and failure details', () => {
+  const stage: KnowledgeTraceNode = {
+    span_id: 'postprocess',
+    name: 'postprocess',
+    kind: 'stage',
+    status: 'done',
+    children: [
+      graphChunk(0, {
+        output: {
+          nodes_succeeded: 2,
+          nodes_failed: 0,
+          relations_succeeded: 1,
+          relations_failed: 0,
+          failure_count: 0,
+        },
+      }),
+      graphChunk(1, {
+        status: 'partial',
+        output: {
+          nodes_succeeded: 1,
+          nodes_failed: 1,
+          relations_succeeded: 2,
+          relations_failed: 1,
+          failure_count: 2,
+          failures: [
+            { stage: 'validation', kind: 'node', item_index: 3, reason: 'entity must not be empty' },
+            { stage: 'neo4j_write', kind: 'relation', item_index: 4, reason: 'invalid relationship' },
+          ],
+        },
+      }),
+    ],
+  }
+
+  const graph = groupPostprocessGraphSpans(stage).children?.[0]
+  assert.equal(graph?.status, 'partial')
+  assert.deepEqual(graph?.output, {
+    chunk_count: 2,
+    status_counts: { done: 1, partial: 1 },
+    nodes_succeeded: 3,
+    nodes_failed: 1,
+    relations_succeeded: 3,
+    relations_failed: 1,
+    failure_count: 2,
+    failures: [
+      { chunk_index: 1, stage: 'validation', kind: 'node', item_index: 3, reason: 'entity must not be empty' },
+      { chunk_index: 1, stage: 'neo4j_write', kind: 'relation', item_index: 4, reason: 'invalid relationship' },
+    ],
+  })
 })
 
 test('keeps the aggregate running until all graph chunks are terminal', () => {

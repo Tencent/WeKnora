@@ -108,6 +108,10 @@ type SpanTracker interface {
 	// EndSpan marks span as done with optional output. Safe with nil.
 	EndSpan(ctx context.Context, span *Span, output types.JSONMap)
 
+	// PartialSpan marks span as completed with recoverable item-level failures.
+	// Unlike FailSpan it does not cancel descendants or poison the attempt.
+	PartialSpan(ctx context.Context, span *Span, output types.JSONMap)
+
 	// FailSpan marks span as failed and cascade-cancels its
 	// descendants. errorDetail (a Go error) is recorded verbatim in
 	// error_detail (truncated to 8 KB) for admin views.
@@ -471,6 +475,31 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 	}
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] EndSpan failed span=%s: %v", span.SpanID, err)
+	}
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
+}
+
+func (t *spanTracker) PartialSpan(ctx context.Context, span *Span, output types.JSONMap) {
+	if span == nil {
+		return
+	}
+	now := time.Now()
+	dur := durationSince(t, span, now)
+	row := &types.KnowledgeProcessingSpan{
+		KnowledgeID:  span.KnowledgeID,
+		Attempt:      span.Attempt,
+		SpanID:       span.SpanID,
+		ParentSpanID: span.ParentSpanID,
+		Name:         span.Name,
+		Kind:         span.Kind,
+		Status:       types.SpanStatusPartial,
+		Output:       output,
+		StartedAt:    &span.StartedAt,
+		FinishedAt:   &now,
+		DurationMs:   dur,
+	}
+	if err := t.repo.Upsert(ctx, row); err != nil {
+		logger.Warnf(ctx, "[SpanTracker] PartialSpan failed span=%s: %v", span.SpanID, err)
 	}
 	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
@@ -868,6 +897,7 @@ func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ t
 	return nil
 }
 func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)            {}
+func (noopSpanTracker) PartialSpan(_ context.Context, _ *Span, _ types.JSONMap)        {}
 func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }

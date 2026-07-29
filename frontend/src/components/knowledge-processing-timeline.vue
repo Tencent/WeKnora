@@ -782,6 +782,80 @@ const selectedRow = computed<FlatRow | null>(() => {
 
 const detailOpen = computed(() => selectedSpanId.value !== null && selectedRow.value !== null)
 
+interface GraphFailureView {
+  stage?: string
+  kind?: string
+  chunk_index?: number
+  item_index?: number
+  name?: string
+  node1?: string
+  node2?: string
+  type?: string
+  reason?: string
+  error_code?: string
+}
+
+interface GraphSummaryView {
+  nodesSucceeded: number
+  nodesFailed: number
+  relationsSucceeded: number
+  relationsFailed: number
+  failureCount: number
+  failures: GraphFailureView[]
+}
+
+function numericOutput(output: Record<string, unknown>, key: string): number {
+  const value = output[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+const selectedGraphSummary = computed<GraphSummaryView | null>(() => {
+  const node = selectedRow.value?.node
+  if (!node || (node.name !== 'postprocess.graph' && !graphChunkNameForView(node.name))) return null
+  if (!node.output || typeof node.output !== 'object' || Array.isArray(node.output)) return null
+  const output = node.output as Record<string, unknown>
+  const failures = Array.isArray(output.failures)
+    ? output.failures.filter((item): item is GraphFailureView => !!item && typeof item === 'object' && !Array.isArray(item))
+    : []
+  return {
+    nodesSucceeded: 'nodes_succeeded' in output
+      ? numericOutput(output, 'nodes_succeeded')
+      : numericOutput(output, 'nodes_added'),
+    nodesFailed: numericOutput(output, 'nodes_failed'),
+    relationsSucceeded: 'relations_succeeded' in output
+      ? numericOutput(output, 'relations_succeeded')
+      : numericOutput(output, 'relations_added'),
+    relationsFailed: numericOutput(output, 'relations_failed'),
+    failureCount: numericOutput(output, 'failure_count'),
+    failures,
+  }
+})
+
+function graphChunkNameForView(name: string): boolean {
+  return /^postprocess\.graph\.chunk\[\d+\]$/.test(name)
+}
+
+function graphFailureSubject(failure: GraphFailureView): string {
+  if (failure.kind === 'chunk' && typeof failure.chunk_index === 'number') {
+    return failure.error_code || t('knowledgeStages.detail.graphChunk', { n: failure.chunk_index + 1 })
+  }
+  if (failure.kind === 'relation' && (failure.node1 || failure.node2)) {
+    return `${failure.node1 || '?'} --[${failure.type || '?'}]--> ${failure.node2 || '?'}`
+  }
+  if (failure.name) return failure.name
+  if (typeof failure.item_index === 'number' && failure.item_index >= 0) {
+    return t('knowledgeStages.detail.graphItem', { n: failure.item_index + 1 })
+  }
+  return failure.kind || t('knowledgeStages.detail.graphItemUnknown')
+}
+
+function graphFailureStage(failure: GraphFailureView): string {
+  if (failure.stage === 'validation') return t('knowledgeStages.detail.graphValidation')
+  if (failure.stage === 'neo4j_write') return t('knowledgeStages.detail.graphWrite')
+  if (failure.stage === 'graph_chunk') return t('knowledgeStages.detail.graphChunkFailure')
+  return failure.stage || t('knowledgeStages.detail.graphUnknownStage')
+}
+
 function barStyle(node: SpanNode): Record<string, string> {
   const total = totalMs.value
   if (!total || t0.value === null) return { display: 'none' }
@@ -1705,6 +1779,48 @@ const processConfigLines = computed<string[]>(() => {
                   </div>
                 </div>
 
+                <!-- Knowledge graph partial-success statistics -->
+                <div v-if="selectedGraphSummary" class="kp-section">
+                  <div class="kp-section-title">{{ t('knowledgeStages.detail.graphSummary') }}</div>
+                  <p v-if="selectedRow.node.status === 'partial'" class="kp-graph-partial-hint">
+                    {{ t('knowledgeStages.detail.graphPartialHint') }}
+                  </p>
+                  <div class="kp-graph-stats">
+                    <div class="kp-graph-stat">
+                      <span class="kp-graph-stat-label">{{ t('knowledgeStages.detail.graphNodes') }}</span>
+                      <span class="kp-graph-stat-values">
+                        <span class="kp-graph-success">{{ t('knowledgeStages.detail.graphSucceeded') }} {{ selectedGraphSummary.nodesSucceeded }}</span>
+                        <span class="kp-graph-failed">{{ t('knowledgeStages.detail.graphFailed') }} {{ selectedGraphSummary.nodesFailed }}</span>
+                      </span>
+                    </div>
+                    <div class="kp-graph-stat">
+                      <span class="kp-graph-stat-label">{{ t('knowledgeStages.detail.graphRelations') }}</span>
+                      <span class="kp-graph-stat-values">
+                        <span class="kp-graph-success">{{ t('knowledgeStages.detail.graphSucceeded') }} {{ selectedGraphSummary.relationsSucceeded }}</span>
+                        <span class="kp-graph-failed">{{ t('knowledgeStages.detail.graphFailed') }} {{ selectedGraphSummary.relationsFailed }}</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="selectedGraphSummary.failureCount > 0" class="kp-graph-failures">
+                    <div class="kp-graph-failures-title">
+                      {{ t('knowledgeStages.detail.graphFailureDetails', { n: selectedGraphSummary.failureCount }) }}
+                    </div>
+                    <div v-if="selectedGraphSummary.failures.length === 0" class="kp-graph-no-detail">
+                      {{ t('knowledgeStages.detail.graphNoFailureDetails') }}
+                    </div>
+                    <div v-for="(failure, index) in selectedGraphSummary.failures" :key="index" class="kp-graph-failure-row">
+                      <div class="kp-graph-failure-head">
+                        <span class="kp-graph-failure-stage">{{ graphFailureStage(failure) }}</span>
+                        <span v-if="typeof failure.chunk_index === 'number'" class="kp-graph-failure-chunk">
+                          {{ t('knowledgeStages.detail.graphChunk', { n: failure.chunk_index + 1 }) }}
+                        </span>
+                        <span class="kp-graph-failure-subject kp-mono">{{ graphFailureSubject(failure) }}</span>
+                      </div>
+                      <div class="kp-graph-failure-reason">{{ failure.reason || t('knowledgeStages.detail.graphUnknownReason') }}</div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Identity / lineage -->
                 <div class="kp-section">
                   <div class="kp-section-title">{{ t('knowledgeStages.detail.identity') }}</div>
@@ -2451,6 +2567,10 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-success-color);
 }
 
+.kp-bar-partial {
+  background: var(--td-warning-color);
+}
+
 .kp-bar-failed {
   background: var(--td-error-color);
 }
@@ -2525,6 +2645,10 @@ const processConfigLines = computed<string[]>(() => {
   border-color: rgba(7, 192, 95, 0.35);
 }
 
+.kp-bar-wrap-partial {
+  border-color: rgba(250, 157, 59, 0.55);
+}
+
 .kp-bar-wrap-failed {
   border-color: rgba(229, 87, 64, 0.5);
 }
@@ -2596,6 +2720,10 @@ const processConfigLines = computed<string[]>(() => {
 /* Status dots (shared with compact mode) */
 .kp-dot-done {
   background: var(--td-success-color);
+}
+
+.kp-dot-partial {
+  background: var(--td-warning-color);
 }
 
 .kp-dot-running {
@@ -2789,6 +2917,11 @@ const processConfigLines = computed<string[]>(() => {
   color: var(--td-success-color);
 }
 
+.kp-chip-partial {
+  background: var(--td-warning-color-light);
+  color: var(--td-warning-color);
+}
+
 .kp-chip-running {
   background: var(--td-warning-color-light);
   color: var(--td-warning-color);
@@ -2893,6 +3026,104 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-bg-color-secondarycontainer);
   border-radius: var(--td-radius-medium);
   border-left: 2px solid var(--td-component-border);
+}
+
+.kp-graph-partial-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--td-warning-color);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-warning-color-light);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kp-graph-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kp-graph-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-bg-color-container);
+}
+
+.kp-graph-stat-label,
+.kp-graph-failures-title {
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kp-graph-stat-values {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.kp-graph-success {
+  color: var(--td-success-color);
+}
+
+.kp-graph-failed {
+  color: var(--td-error-color);
+}
+
+.kp-graph-failures {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kp-graph-failure-row {
+  padding: 8px 10px;
+  border: 1px solid var(--td-error-color-2);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-error-color-light);
+}
+
+.kp-graph-failure-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kp-graph-failure-stage,
+.kp-graph-failure-chunk {
+  padding: 1px 5px;
+  border-radius: var(--td-radius-small);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: 10px;
+}
+
+.kp-graph-failure-subject {
+  color: var(--td-text-color-primary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.kp-graph-failure-reason,
+.kp-graph-no-detail {
+  margin-top: 4px;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .kp-graph-stats {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Sections */

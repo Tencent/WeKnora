@@ -239,6 +239,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	var handleErr error
 	graphOut := types.JSONMap{}
+	graphPartial := false
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit so a
 		// completed (or terminally-failed) per-chunk extract releases its
@@ -252,6 +253,8 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		}
 		if handleErr != nil {
 			s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+		} else if graphPartial {
+			s.tracker().PartialSpan(ctx, gSpan, graphOut)
 		} else {
 			s.tracker().EndSpan(ctx, gSpan, graphOut)
 		}
@@ -346,16 +349,16 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
-	if err = s.graphEngine.AddGraph(ctx,
+	writeResult, writeErr := s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},
-	); err != nil {
-		logger.Errorf(ctx, "failed to add graph: %v", err)
-		handleErr = err
-		return err
+	)
+	graphPartial = populateGraphProcessingOutput(graphOut, graph, writeResult)
+	if writeErr != nil {
+		logger.Errorf(ctx, "failed to add graph: %v", writeErr)
+		handleErr = writeErr
+		return writeErr
 	}
-	graphOut["nodes_added"] = len(graph.Node)
-	graphOut["relations_added"] = len(graph.Relation)
 	// Capture a couple of sample nodes/relations so the trace viewer can
 	// answer "what did the LLM actually extract?" without round-tripping
 	// to the graph store. Cap to two each — anything more bloats span
@@ -383,6 +386,80 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		graphOut["sample_relations"] = out
 	}
 	return nil
+}
+
+// populateGraphProcessingOutput turns parser and repository diagnostics into
+// one stable span payload consumed by the processing timeline. It returns true
+// when the chunk completed with one or more tolerated item-level failures.
+func populateGraphProcessingOutput(
+	output types.JSONMap,
+	graph *types.GraphData,
+	writeResult *types.GraphWriteResult,
+) bool {
+	if output == nil || graph == nil {
+		return false
+	}
+	diagnostics := graph.Diagnostics
+	if diagnostics == nil {
+		diagnostics = &types.GraphDiagnostics{
+			ItemsReceived:      len(graph.Node) + len(graph.Relation),
+			NodesExtracted:     len(graph.Node),
+			NodesAccepted:      len(graph.Node),
+			RelationsExtracted: len(graph.Relation),
+			RelationsAccepted:  len(graph.Relation),
+		}
+	}
+	if writeResult == nil {
+		writeResult = &types.GraphWriteResult{}
+	}
+
+	nodesFailed := diagnostics.NodesRejected + writeResult.NodesFailed
+	relationsFailed := diagnostics.RelationsRejected + writeResult.RelationsFailed
+	failureCount := diagnostics.ItemsRejected + writeResult.NodesFailed + writeResult.RelationsFailed
+
+	output["graph_status"] = "completed"
+	output["items_received"] = diagnostics.ItemsReceived
+	output["items_rejected"] = diagnostics.ItemsRejected
+	output["nodes_extracted"] = diagnostics.NodesExtracted
+	output["nodes_valid"] = diagnostics.NodesAccepted
+	output["nodes_merged"] = diagnostics.NodesMerged
+	output["nodes_succeeded"] = writeResult.NodesWritten
+	output["nodes_failed"] = nodesFailed
+	output["relations_extracted"] = diagnostics.RelationsExtracted
+	output["relations_valid"] = diagnostics.RelationsAccepted
+	output["relations_merged"] = diagnostics.RelationsMerged
+	output["relations_succeeded"] = writeResult.RelationsWritten
+	output["relations_failed"] = relationsFailed
+	output["validation_failed"] = diagnostics.ItemsRejected
+	output["write_failed"] = writeResult.NodesFailed + writeResult.RelationsFailed
+	output["failure_count"] = failureCount
+	// Keep the old keys for clients that have not yet adopted the detailed
+	// counters. Their meaning is now explicitly "successfully written".
+	output["nodes_added"] = writeResult.NodesWritten
+	output["relations_added"] = writeResult.RelationsWritten
+
+	failures := make([]types.GraphFailureDetail, 0, types.MaxGraphFailureDetails)
+	appendFailures := func(items []types.GraphFailureDetail) {
+		remaining := types.MaxGraphFailureDetails - len(failures)
+		if remaining <= 0 {
+			return
+		}
+		if len(items) > remaining {
+			items = items[:remaining]
+		}
+		failures = append(failures, items...)
+	}
+	appendFailures(diagnostics.Failures)
+	appendFailures(writeResult.Failures)
+	if len(failures) > 0 {
+		output["failures"] = failures
+	}
+
+	partial := diagnostics.HasFailures() || writeResult.HasFailures()
+	if partial {
+		output["graph_status"] = "partial"
+	}
+	return partial
 }
 
 // DataTableExtractPayload represents the table extract task payload

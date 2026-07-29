@@ -213,6 +213,27 @@ func TestFitSpanName(t *testing.T) {
 	}
 }
 
+func TestSpanTracker_PartialSpanPersistsOutputWithoutCancellingAttempt(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid-partial-graph", "")
+	require.NoError(t, err)
+	parent := tracker.BeginStage(ctx, "kid-partial-graph", attempt, types.StagePostProcess, nil)
+	require.NotNil(t, parent)
+	graph := tracker.BeginSubSpan(ctx, parent, "postprocess.graph.chunk[0]", types.SpanKindSubSpan, nil)
+	require.NotNil(t, graph)
+
+	tracker.PartialSpan(ctx, graph, types.JSONMap{"relations_succeeded": 3, "relations_failed": 1})
+
+	var row types.KnowledgeProcessingSpan
+	require.NoError(t, db.Where("span_id = ?", graph.SpanID).First(&row).Error)
+	assert.Equal(t, types.SpanStatusPartial, row.Status)
+	assert.Equal(t, float64(3), row.Output["relations_succeeded"])
+	assert.Equal(t, float64(1), row.Output["relations_failed"])
+	assert.NotNil(t, row.FinishedAt)
+}
+
 // TestSpanTracker_BeginSubSpan_LongWikiPageName verifies wiki ingest's
 // postprocess.wiki.page[<slug>] subspans persist even when the slug pushes
 // the name past varchar(255).
