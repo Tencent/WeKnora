@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,8 +84,13 @@ func nodeResourceType(node WikiNode) string {
 }
 
 func isDocumentNode(node WikiNode) bool {
+	// DingTalk reports uploaded attachments such as PDFs as category=DOCUMENT.
+	// Those nodes are not accepted by the document blocks API. Native DingTalk
+	// documents are identified by category=ALIDOC or the compatible adoc
+	// extension exposed by the Wiki node API.
+	extension := strings.TrimPrefix(strings.TrimSpace(node.Extension), ".")
 	return strings.EqualFold(node.NodeType, "FILE") &&
-		(strings.EqualFold(node.Category, "ALIDOC") || strings.EqualFold(node.Category, "DOCUMENT"))
+		(strings.EqualFold(node.Category, "ALIDOC") || strings.EqualFold(extension, "adoc"))
 }
 
 // Type returns the connector type identifier.
@@ -366,7 +372,9 @@ func (c *Connector) walk(
 				continue
 			}
 
-			// Only sync document types (ALIDOC = 钉钉文档, DOCUMENT = 本地文档)
+			// Only native DingTalk documents are accepted by the blocks API.
+			// Generic uploaded files (including category=DOCUMENT PDFs) are
+			// intentionally skipped.
 			if !isDocumentNode(node) {
 				skippedNonDoc++
 				if sampleSkip == "" {
@@ -853,6 +861,13 @@ func intValue(v interface{}) int {
 	case json.Number:
 		i, _ := n.Int64()
 		return int(i)
+	case string:
+		value := strings.ToLower(strings.TrimSpace(n))
+		value = strings.TrimPrefix(value, "heading-")
+		value = strings.TrimPrefix(value, "heading_")
+		value = strings.TrimPrefix(value, "h")
+		i, _ := strconv.Atoi(value)
+		return i
 	default:
 		return 0
 	}

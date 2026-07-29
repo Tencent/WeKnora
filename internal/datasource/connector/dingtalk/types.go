@@ -10,7 +10,7 @@
 //   - Token:          https://open.dingtalk.com/document/orgapp-server/dingtalk-openapi-overview
 //
 // Known limitations (v1):
-//   - Only syncs type=FILE and category=ALIDOC/DOCUMENT (document nodes)
+//   - Only syncs native type=FILE, category=ALIDOC / extension=adoc nodes
 //   - Folders are listed as resources but not synced as content
 //   - Incremental sync based on node modifiedTime
 package dingtalk

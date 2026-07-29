@@ -149,6 +149,48 @@ func TestConnectorType(t *testing.T) {
 	}
 }
 
+func TestIsDocumentNode_ClassifiesNativeDocsAndAttachments(t *testing.T) {
+	tests := []struct {
+		name string
+		node WikiNode
+		want bool
+	}{
+		{
+			name: "native ALIDOC",
+			node: WikiNode{NodeType: "FILE", Category: "ALIDOC", Extension: "adoc"},
+			want: true,
+		},
+		{
+			name: "native adoc with compatible category",
+			node: WikiNode{NodeType: "FILE", Category: "DOCUMENT", Extension: ".ADOC"},
+			want: true,
+		},
+		{
+			name: "uploaded PDF reported as DOCUMENT",
+			node: WikiNode{NodeType: "FILE", Category: "DOCUMENT", Extension: "pdf"},
+			want: false,
+		},
+		{
+			name: "uploaded CSV",
+			node: WikiNode{NodeType: "FILE", Category: "OTHER", Extension: "csv"},
+			want: false,
+		},
+		{
+			name: "folder",
+			node: WikiNode{NodeType: "FOLDER", Category: "OTHER"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDocumentNode(tt.node); got != tt.want {
+				t.Fatalf("isDocumentNode(%+v) = %t, want %t", tt.node, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConnectorValidate_Success(t *testing.T) {
 	f := newFakeDingTalk(t)
 	defer f.Close()
@@ -245,6 +287,7 @@ func TestConnectorListResources_LoadsWorkspaceChildren(t *testing.T) {
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
 		{NodeID: "doc-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
+		{NodeID: "pdf-1", Name: "Manual.pdf", NodeType: "FILE", Category: "DOCUMENT", Extension: "pdf"},
 		{NodeID: "img-1", Name: "Logo", NodeType: "FILE", Category: "IMAGE"},
 	}
 
@@ -268,13 +311,16 @@ func TestConnectorListResources_LoadsWorkspaceChildren(t *testing.T) {
 	if _, ok := byID["ws-1:img-1:image"]; ok {
 		t.Fatalf("unsupported image leaf should not be selectable: %+v", resources)
 	}
+	if _, ok := byID["ws-1:pdf-1:document"]; ok {
+		t.Fatalf("generic DOCUMENT attachment should not be selectable as a DingTalk doc: %+v", resources)
+	}
 }
 
 func TestConnectorListResources_LoadsFolderChildren(t *testing.T) {
 	f := newFakeDingTalk(t)
 	defer f.Close()
 	f.nodesByParent["folder-1"] = []WikiNode{
-		{NodeID: "doc-2", Name: "Nested", NodeType: "FILE", Category: "DOCUMENT"},
+		{NodeID: "doc-2", Name: "Nested", NodeType: "FILE", Category: "ALIDOC", Extension: "adoc"},
 	}
 
 	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "ws-1:folder-1:folder")
@@ -292,10 +338,11 @@ func TestConnectorFetchAll_RecursesAndFetchesDocumentBlocks(t *testing.T) {
 	f.nodesByParent["root-1"] = []WikiNode{
 		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
 		{NodeID: "doc-1", DocKey: "doc-key-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC", URL: "https://wiki/doc-1", ModifiedTime: "2026-01-15T10:00:00+08:00", WordCount: 42},
+		{NodeID: "pdf-1", Name: "Manual.pdf", NodeType: "FILE", Category: "DOCUMENT", Extension: "pdf"},
 		{NodeID: "img-1", Name: "Logo", NodeType: "FILE", Category: "IMAGE"},
 	}
 	f.nodesByParent["folder-1"] = []WikiNode{
-		{NodeID: "doc-2", Name: "Nested Plan", NodeType: "FILE", Category: "DOCUMENT", URL: "https://wiki/doc-2", ModifiedTime: "2026-01-16T10:00:00+08:00"},
+		{NodeID: "doc-2", Name: "Nested Plan", NodeType: "FILE", Category: "ALIDOC", Extension: "adoc", URL: "https://wiki/doc-2", ModifiedTime: "2026-01-16T10:00:00+08:00"},
 	}
 	f.blocksByNode["doc-key-1"] = []docBlock{{BlockType: "heading2", Text: "Deploy"}, {Text: "Restart workers"}}
 	f.blocksByNode["doc-2"] = []docBlock{{Text: "Nested content"}}
@@ -500,6 +547,62 @@ func TestRenderBlocksMarkdown_OfficialBlockShapes(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderBlocksMarkdown_LiveResponseShapes(t *testing.T) {
+	var blocks []docBlock
+	// Preserve the field nesting and type/level values observed from the
+	// dedicated live tenant while replacing document IDs and content.
+	body := `[
+		{
+			"id": "paragraph",
+			"blockType": "paragraph",
+			"paragraph": {"text": "Live paragraph"}
+		},
+		{
+			"id": "heading-2",
+			"blockType": "heading",
+			"heading": {"level": "heading-2", "text": "Second level"}
+		},
+		{
+			"id": "heading-3",
+			"blockType": "heading",
+			"heading": {"level": "heading-3", "text": "Third level"}
+		},
+		{
+			"id": "unordered-list",
+			"blockType": "unorderedList",
+			"unorderedList": {"text": "Bullet item"}
+		},
+		{
+			"id": "ordered-list",
+			"blockType": "orderedList",
+			"orderedList": {"text": "Numbered item"}
+		},
+		{
+			"id": "table",
+			"blockType": "table",
+			"table": {"cells": [["Field", "Value"], ["marker", "DINGTALK_TABLE_MARKER"]]}
+		}
+	]`
+	if err := json.Unmarshal([]byte(body), &blocks); err != nil {
+		t.Fatalf("unmarshal blocks: %v", err)
+	}
+
+	got := renderBlocksMarkdown("Doc", blocks)
+	for _, want := range []string{
+		"Live paragraph",
+		"## Second level",
+		"### Third level",
+		"- Bullet item",
+		"1. Numbered item",
+		"| Field | Value |",
+		"| marker | DINGTALK_TABLE_MARKER |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("markdown missing %q for live DingTalk block shape:\n%s", want, got)
 		}
 	}
 }
