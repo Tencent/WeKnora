@@ -14,6 +14,15 @@ type scopeKnowledgeService struct {
 	tags      map[string][]*types.KnowledgeTag
 }
 
+type scopeChunkService struct {
+	interfaces.ChunkService
+	chunk *types.Chunk
+}
+
+func (s *scopeChunkService) GetChunkByIDOnly(context.Context, string) (*types.Chunk, error) {
+	return s.chunk, nil
+}
+
 func (s *scopeKnowledgeService) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
 	return s.knowledge, nil
 }
@@ -78,6 +87,25 @@ func TestAuthorizeKnowledgeInSearchTargetsAllowsBoundDocument(t *testing.T) {
 	got, err := authorizeKnowledgeInSearchTargets(context.Background(), targets, "doc-1", service)
 	if err != nil || got == nil || got.ID != "doc-1" {
 		t.Fatalf("bound document authorization failed: got=%+v err=%v", got, err)
+	}
+}
+
+func TestAuthorizeChunkInSearchTargetsRejectsDisabledFAQ(t *testing.T) {
+	chunkService := &scopeChunkService{chunk: &types.Chunk{
+		ID: "faq-1", KnowledgeID: "faq-document", KnowledgeBaseID: "kb-1",
+		ChunkType: types.ChunkTypeFAQ, IsEnabled: false,
+	}}
+	knowledgeService := &scopeKnowledgeService{knowledge: &types.Knowledge{
+		ID: "faq-document", KnowledgeBaseID: "kb-1",
+	}}
+	targets := types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1",
+	}}
+
+	if _, err := authorizeChunkInSearchTargets(
+		context.Background(), targets, "faq-1", chunkService, knowledgeService,
+	); err == nil {
+		t.Fatal("disabled FAQ chunk must not be authorized for Agent tools")
 	}
 }
 

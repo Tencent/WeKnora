@@ -171,6 +171,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	isEnabled *bool,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -181,6 +182,9 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if len(tagIDs) > 0 {
 			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if isEnabled != nil {
+			db = db.Where("is_enabled = ?", *isEnabled)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"

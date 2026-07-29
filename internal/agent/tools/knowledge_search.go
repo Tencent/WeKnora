@@ -1184,6 +1184,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
+	enabled := true
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 
@@ -1223,6 +1224,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 					effectiveTenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
 					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
+					&enabled,
 				)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)

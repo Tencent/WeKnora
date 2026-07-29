@@ -5,6 +5,11 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+- 将 `mcp` 依赖上限锁定为 `<2`，避免 `pip install` / `uv sync` 自动安装 MCP Python SDK 2.x 导致 `@app.list_tools()` 启动失败（`AttributeError: 'Server' object has no attribute 'list_tools'`）
+
 ## [1.0.1] - 2026-07-28
 
 ### 修复
