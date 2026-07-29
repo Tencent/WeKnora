@@ -916,6 +916,8 @@ export default {
       MULTIMODAL_VLM_FAILED_SUGGESTION: "部分图像无法处理，文档可能仍可使用。",
       MULTIMODAL_ALL_FAILED: "全部图像多模态处理失败",
       MULTIMODAL_ALL_FAILED_SUGGESTION: "请检查多模态模型配置。",
+      MULTIMODAL_OCR_REQUIRED: "扫描型 PDF 需要 OCR",
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: "该 PDF 未提取到可用文本。请开启多模态并配置 VLM/OCR 后重新解析。",
       TASK_TIMEOUT: "任务超过最大运行时间",
       TASK_TIMEOUT_SUGGESTION: "任务运行时间超出限制，请重试或联系支持人员。",
       SERVER_RESTART: "服务重启导致任务中断",

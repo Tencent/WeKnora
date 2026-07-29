@@ -50,6 +50,12 @@ const (
 	// but stage status is marked failed so the UI can warn.
 	ErrCodeMultimodalAllFailed = "MULTIMODAL_ALL_FAILED"
 
+	// ErrCodeMultimodalOCRRequired — a scanned/image-only PDF has no usable
+	// native text, while the upload disabled multimodal OCR. Keeping the
+	// image placeholder as an indexed chunk would make the document appear
+	// successfully parsed even though it cannot answer questions.
+	ErrCodeMultimodalOCRRequired = "MULTIMODAL_OCR_REQUIRED"
+
 	// ErrCodeTaskTimeout — asynq retry budget exhausted. Used by the
 	// dead-letter callback when promoting a task failure into a stage
 	// failure. Distinct from DocReaderTimeout: this is the asynq-level

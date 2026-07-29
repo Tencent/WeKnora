@@ -914,6 +914,8 @@ export default {
       MULTIMODAL_VLM_FAILED_SUGGESTION: 'A subset of images could not be processed. Document may still be usable.',
       MULTIMODAL_ALL_FAILED: 'All images failed multimodal processing',
       MULTIMODAL_ALL_FAILED_SUGGESTION: 'Verify the multimodal model configuration.',
+      MULTIMODAL_OCR_REQUIRED: 'Scanned PDF requires OCR',
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: 'No usable text was extracted. Enable multimodal processing and configure a VLM/OCR model, then reparse the document.',
       TASK_TIMEOUT: 'Task exceeded maximum runtime',
       TASK_TIMEOUT_SUGGESTION: 'The task ran longer than allowed. Retry or contact support.',
       SERVER_RESTART: 'Task interrupted by server restart',

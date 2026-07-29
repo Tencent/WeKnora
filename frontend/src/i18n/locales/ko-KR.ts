@@ -918,6 +918,8 @@ export default {
       MULTIMODAL_VLM_FAILED_SUGGESTION: "일부 이미지를 처리할 수 없습니다. 문서는 여전히 사용할 수 있습니다.",
       MULTIMODAL_ALL_FAILED: "모든 이미지의 멀티모달 처리 실패",
       MULTIMODAL_ALL_FAILED_SUGGESTION: "멀티모달 모델 구성을 확인하세요.",
+      MULTIMODAL_OCR_REQUIRED: "스캔 PDF에 OCR 필요",
+      MULTIMODAL_OCR_REQUIRED_SUGGESTION: "사용 가능한 텍스트를 추출하지 못했습니다. 멀티모달을 활성화하고 VLM/OCR 모델을 구성한 뒤 다시 파싱하세요.",
       TASK_TIMEOUT: "작업이 최대 실행 시간을 초과함",
       TASK_TIMEOUT_SUGGESTION: "작업이 허용된 시간보다 오래 실행되었습니다. 재시도하거나 지원팀에 문의하세요.",
       SERVER_RESTART: "서버 재시작으로 작업이 중단됨",
