@@ -445,6 +445,8 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 type KnowledgeCheckParams struct {
 	// File parameters
 	FileName string
+	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
+	FileType string
 	FileSize int64
 	FileHash string
 	// URL parameters

@@ -82,6 +82,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file",
 		FileName: fileName,
+		FileType: getFileType(fileName),
 		FileSize: file.Size,
 		FileHash: hash,
 	})
