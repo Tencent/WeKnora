@@ -100,6 +100,18 @@ type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
 }
 
+// TaskPendingOpsFinalizingSeeder atomically hands a processing knowledge row
+// to the asynchronous finalizing pipeline while persisting the durable
+// pending operation that owns one of its subtask slots.
+type TaskPendingOpsFinalizingSeeder interface {
+	SeedKnowledgeFinalizingWithPendingOp(
+		ctx context.Context,
+		knowledgeID string,
+		expectedSubtasks int,
+		op *types.TaskPendingOp,
+	) (promoted bool, err error)
+}
+
 // TaskDeadLetterRepository persists rows for the generic task dead-letter
 // archive (`task_dead_letters`). Two writers exist: the asynq
 // dead-letter middleware (one row per archived asynq task), and the
