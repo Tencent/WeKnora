@@ -207,9 +207,11 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 
-// extractDriveFolderToken accepts either a bare folder_token or a Feishu Drive
-// folder URL (https://xxx.feishu.cn/drive/folder/<token>?...) and returns the
-// token. Trims surrounding whitespace. Returns "" when nothing usable is found.
+// extractDriveFolderToken accepts either a bare folder_token or a Drive folder
+// URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
+// https://xxx.larksuite.com/drive/folder/<token>) and returns the token.
+// Matching is path-based, host-agnostic. Trims surrounding whitespace.
+// Returns "" when nothing usable is found.
 function extractDriveFolderToken(input: string): string {
   const raw = (input || '').trim()
   if (!raw) return ''
