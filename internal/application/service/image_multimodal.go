@@ -191,7 +191,17 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// previews, downstream chunk counts) so the trace viewer can answer
 	// "what did this image actually produce?" without joining back to
 	// the chunks table.
-	imgOut := types.JSONMap{}
+	imgOut := types.JSONMap{
+		"ocr_enabled":           payload.EnableOCR,
+		"ocr_operation":         string(types.IngestionOperationMultimodalOCR),
+		"ocr_request_count":     0,
+		"ocr_input_images":      0,
+		"caption_enabled":       payload.EnableCaption,
+		"caption_operation":     string(types.IngestionOperationMultimodalCaption),
+		"caption_request_count": 0,
+		"caption_input_images":  0,
+		"cache_status":          string(types.IngestionCacheStatusNotSupported),
+	}
 
 	// finalize-once semantics: on success we always decrement the parent's
 	// pending counter. On failure we only decrement when this is the last
@@ -268,7 +278,19 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrCtx := types.WithIngestionOperation(
+			ctx,
+			types.IngestionOperationMultimodalOCR,
+		)
+
+		ocrText, ocrErr := vlmModel.Predict(
+			ocrCtx,
+			[][]byte{imgBytes},
+			prompt,
+		)
+		imgOut["ocr_request_count"] = 1
+		imgOut["ocr_input_images"] = 1
+
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -286,7 +308,19 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	captionCtx := types.WithIngestionOperation(
+		ctx,
+		types.IngestionOperationMultimodalCaption,
+	)
+
+	caption, capErr := vlmModel.Predict(
+		captionCtx,
+		[][]byte{imgBytes},
+		captionPrompt,
+	)
+	imgOut["caption_request_count"] = 1
+	imgOut["caption_input_images"] = 1
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()

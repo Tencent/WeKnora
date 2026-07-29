@@ -272,6 +272,39 @@ func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg s
 	}
 	s.tracker().FailSpan(ctx, span, code, msg, err)
 }
+func (s *knowledgeService) failStageWithOutput(
+	ctx context.Context,
+	kid string,
+	name string,
+	output types.JSONMap,
+	code string,
+	message string,
+	err error,
+) {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		return
+	}
+
+	span := s.tracker().LookupStage(
+		ctx,
+		kid,
+		attempt,
+		name,
+	)
+	if span == nil {
+		return
+	}
+
+	s.tracker().FailSpanWithOutput(
+		ctx,
+		span,
+		output,
+		code,
+		message,
+		err,
+	)
+}
 
 func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason string) {
 	a := attemptFromCtx(ctx)
@@ -349,6 +382,15 @@ func (s *knowledgeService) failPostprocessSubspan(
 		return
 	}
 	s.tracker().FailSpan(ctx, span, code, msg, err)
+}
+
+func (s *knowledgeService) failPostprocessSubspanWithOutput(
+	ctx context.Context, span *Span, output types.JSONMap, code, msg string, err error,
+) {
+	if span == nil {
+		return
+	}
+	s.tracker().FailSpanWithOutput(ctx, span, output, code, msg, err)
 }
 
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).

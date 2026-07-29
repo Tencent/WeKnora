@@ -1331,7 +1331,14 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	if len(indexInfoToUpdate) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: updating %d index entries (skipped %d unchanged)",
 			len(indexInfoToUpdate), 1+newCount-len(indexInfoToUpdate))
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoToUpdate); err != nil {
+		if _, err := observeUnspannedEmbeddingBatch(
+			ctx,
+			types.IngestionOperationEmbeddingFAQ,
+			embeddingModel,
+			retrieveEngine,
+			indexInfoToUpdate,
+			"FAQ_EMBEDDING_FAILED",
+		); err != nil {
 			return err
 		}
 	} else {
@@ -1418,7 +1425,14 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 
 	// 批量索引（这里可能是性能瓶颈）
 	batchIndexStartTime := time.Now()
-	if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
+	if _, err := observeUnspannedEmbeddingBatch(
+		ctx,
+		types.IngestionOperationEmbeddingFAQ,
+		embeddingModel,
+		retrieveEngine,
+		indexInfo,
+		"FAQ_EMBEDDING_FAILED",
+	); err != nil {
 		return err
 	}
 	batchIndexDuration := time.Since(batchIndexStartTime)

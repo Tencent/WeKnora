@@ -1945,6 +1945,21 @@ const indexIntroSummaryCap = 200
 func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload,
 	changeDesc, lang, customInstructions string,
 ) error {
+	indexChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiIndexIntro)
+	defer func() {
+		snapshot := indexChat.Snapshot()
+		if snapshot.RequestCount == 0 {
+			return
+		}
+		logUnspannedChatObservation(
+			ctx,
+			types.IngestionOperationWikiIndexIntro,
+			"postprocess.wiki.index_intro",
+			indexChat,
+			snapshot,
+			types.JSONMap{"knowledge_base_id": payload.KnowledgeBaseID},
+		)
+	}()
 	indexPage, _ := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
 	if indexPage == nil {
 		return nil
@@ -1997,7 +2012,7 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		if docSummaries.Len() == 0 {
 			docSummaries.WriteString("(no documents yet)")
 		}
-		generatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroPrompt, map[string]string{
+		generatedIntro, genErr := s.generateWithTemplate(ctx, indexChat, agent.WikiIndexIntroPrompt, map[string]string{
 			"DocumentSummaries":  framing + docSummaries.String(),
 			"Language":           lang,
 			"CustomInstructions": customInstructions,
@@ -2015,7 +2030,7 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// would re-flood the context every batch, and the
 		// change-description block already encodes the "what just
 		// changed" signal the prompt is asking for.
-		updatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroUpdatePrompt, map[string]string{
+		updatedIntro, genErr := s.generateWithTemplate(ctx, indexChat, agent.WikiIndexIntroUpdatePrompt, map[string]string{
 			"ExistingIntro":      existingIntro,
 			"ChangeDescription":  changeDesc,
 			"DocumentSummaries":  "",
@@ -2228,10 +2243,19 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupItemXML(&newBuf, item.Slug, item.Name, "concept", item.Aliases)
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	dedupChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiDeduplicate)
+	dedupeJSON, err := s.generateWithTemplate(ctx, dedupChat, agent.WikiDeduplicationPrompt, map[string]string{
 		"NewItems":      newBuf.String(),
 		"ExistingPages": existingBuf.String(),
 	})
+	logUnspannedChatObservation(
+		ctx,
+		types.IngestionOperationWikiDeduplicate,
+		"postprocess.wiki.deduplicate",
+		dedupChat,
+		dedupChat.Snapshot(),
+		types.JSONMap{"knowledge_base_id": kbID},
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
 		return entities, concepts

@@ -517,8 +517,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	var totalStorageSize int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
 		embedInput := types.JSONMap{
+			"operation":       string(types.IngestionOperationEmbeddingChunk),
 			"chunks_to_embed": len(textChunks),
 			"model_id":        kb.EmbeddingModelID,
+			"cache_status": string(
+				types.IngestionCacheStatusNotSupported,
+			),
 		}
 		if dim := embeddingModel.GetDimensions(); dim > 0 {
 			embedInput["dim"] = dim
@@ -584,7 +588,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		embeddingCtx := types.WithIngestionOperation(
+			ctx,
+			types.IngestionOperationEmbeddingChunk,
+		)
+		observedEmbeddingModel := newIngestionObservedEmbedder(
+			embeddingModel,
+			types.IngestionOperationEmbeddingChunk,
+		)
+
+		err = retrieveEngine.BatchIndex(
+			embeddingCtx,
+			observedEmbeddingModel,
+			indexInfoList,
+		)
+		embeddingObservation :=
+			observedEmbeddingModel.Snapshot()
+
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
@@ -608,15 +628,44 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			if isLikelyRateLimitError(err) {
 				code = werrors.ErrCodeEmbeddingRateLimit
 			}
-			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
+
+			failureOutput := embeddingStageOutput(
+				types.IngestionOperationEmbeddingChunk,
+				embeddingModel,
+				embeddingObservation,
+				0,
+				0,
+				false,
+			)
+			failureOutput["error_code"] = code
+
+			s.failStageWithOutput(
+				ctx,
+				knowledge.ID,
+				types.StageEmbedding,
+				failureOutput,
+				code,
+				"batch index failed",
+				err,
+			)
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
-		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
-			"vectors_written": len(indexInfoList),
-			"storage_bytes":   totalStorageSize,
-		})
+		embeddingOutput := embeddingStageOutput(
+			types.IngestionOperationEmbeddingChunk,
+			embeddingModel,
+			embeddingObservation,
+			len(indexInfoList),
+			totalStorageSize,
+			true,
+		)
+
+		s.endStage(
+			ctx,
+			knowledge.ID,
+			types.StageEmbedding,
+			embeddingOutput,
+		)
 
 		// Final check before marking as completed.
 		// deleting → drop chunks+index we just wrote.
@@ -932,6 +981,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		})
 	var summaryErr error
 	summaryOut := types.JSONMap{}
+	var summaryChat *ingestionObservedChat
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit.
 		// "Terminal" is keyed on the value RETURNED to asynq, not on
@@ -947,8 +997,20 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		if span == nil {
 			return
 		}
+		if summaryChat != nil {
+			chatSnapshot := summaryChat.Snapshot()
+			mergeObservationOutput(summaryOut, chatOperationOutput(
+				types.IngestionOperationPostprocessSummary,
+				"postprocess.summary",
+				summaryChat,
+				chatSnapshot,
+				chatSnapshot.ErrorCount == 0,
+			))
+		}
 		if summaryErr != nil {
-			s.failPostprocessSubspan(ctx, span, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+			s.failPostprocessSubspanWithOutput(
+				ctx, span, summaryOut, "SUMMARY_FAILED", summaryErr.Error(), summaryErr,
+			)
 		} else {
 			s.endPostprocessSubspan(ctx, span, summaryOut)
 		}
@@ -1048,9 +1110,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		summaryErr = err
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
+	summaryChat = newIngestionObservedChat(chatModel, types.IngestionOperationPostprocessSummary)
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summary, err := s.getSummary(ctx, summaryChat, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1179,7 +1242,17 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			IsEnabled:       true,
 		}}
 
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
+		if err := observePostprocessEmbeddingBatch(
+			ctx,
+			s.tracker(),
+			span,
+			"postprocess.summary.embedding",
+			types.IngestionOperationEmbeddingSummary,
+			embeddingModel,
+			retrieveEngine,
+			indexInfo,
+			"SUMMARY_EMBEDDING_FAILED",
+		); err != nil {
 			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
 			summaryErr = err
 			return fmt.Errorf("failed to index summary chunk: %w", err)
@@ -1246,6 +1319,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// what we already log to stdout.
 	var qSpan *Span
 	var qErr error
+	var questionChat *ingestionObservedChat
 	// Set when a newer attempt supersedes this run; suppresses the
 	// FinalizeSubtask decrement so a stale task can't drain the new
 	// attempt's counter.
@@ -1315,6 +1389,16 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			if sampleQuestion != "" {
 				out["sample_question"] = sampleQuestion
 			}
+			if questionChat != nil {
+				chatSnapshot := questionChat.Snapshot()
+				mergeObservationOutput(out, chatOperationOutput(
+					types.IngestionOperationPostprocessQuestion,
+					"postprocess.question",
+					questionChat,
+					chatSnapshot,
+					chatSnapshot.ErrorCount == 0,
+				))
+			}
 			// Treat any non-success exitStatus as a failed run; the
 			// existing stats-string already enumerates them. qErr stays
 			// optional for callers that want to surface a Go error.
@@ -1324,7 +1408,9 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				if qErr != nil {
 					msg = qErr.Error()
 				}
-				s.failPostprocessSubspan(ctx, qSpan, "QUESTION_FAILED", msg, detailErr)
+				s.failPostprocessSubspanWithOutput(
+					ctx, qSpan, out, "QUESTION_FAILED", msg, detailErr,
+				)
 			} else {
 				s.endPostprocessSubspan(ctx, qSpan, out)
 			}
@@ -1430,6 +1516,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 	resolvedModelID = kb.SummaryModelID
+	questionChat = newIngestionObservedChat(chatModel, types.IngestionOperationPostprocessQuestion)
 
 	// Initialize embedding model and retrieval engine
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
@@ -1500,7 +1587,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
+		questions, err := s.generateQuestionsWithContext(ctx, questionChat, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
@@ -1563,7 +1650,17 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// Index generated questions
 	if len(indexInfoList) > 0 {
 		indexBatchAttempted = true
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
+		if err := observePostprocessEmbeddingBatch(
+			ctx,
+			s.tracker(),
+			qSpan,
+			"postprocess.question.embedding",
+			types.IngestionOperationEmbeddingQuestion,
+			embeddingModel,
+			retrieveEngine,
+			indexInfoList,
+			"QUESTION_EMBEDDING_FAILED",
+		); err != nil {
 			exitStatus = "index_questions_failed"
 			logger.Errorf(ctx, "Failed to index generated questions: %v", err)
 			return fmt.Errorf("failed to index questions: %w", err)
@@ -1606,6 +1703,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	var resolvedModelID string
 	var qSpan *Span
 	var qErr error
+	var questionChat *ingestionObservedChat
 	// Suppresses the FinalizeSubtask drain when a newer attempt superseded
 	// this run, so a stale task can't decrement the new attempt's counter.
 	superseded := false
@@ -1651,12 +1749,24 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			if sampleQuestion != "" {
 				out["sample_question"] = sampleQuestion
 			}
+			if questionChat != nil {
+				chatSnapshot := questionChat.Snapshot()
+				mergeObservationOutput(out, chatOperationOutput(
+					types.IngestionOperationPostprocessQuestion,
+					fmt.Sprintf("postprocess.question.batch[%d]", payload.BatchIndex),
+					questionChat,
+					chatSnapshot,
+					chatSnapshot.ErrorCount == 0,
+				))
+			}
 			if exitStatus != "success" || qErr != nil {
 				msg := exitStatus
 				if qErr != nil {
 					msg = qErr.Error()
 				}
-				s.failPostprocessSubspan(ctx, qSpan, "QUESTION_FAILED", msg, qErr)
+				s.failPostprocessSubspanWithOutput(
+					ctx, qSpan, out, "QUESTION_FAILED", msg, qErr,
+				)
 			} else {
 				s.endPostprocessSubspan(ctx, qSpan, out)
 			}
@@ -1732,6 +1842,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 	resolvedModelID = kb.SummaryModelID
+	questionChat = newIngestionObservedChat(chatModel, types.IngestionOperationPostprocessQuestion)
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
@@ -1831,7 +1942,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			ctx, questionChat, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
@@ -1878,7 +1989,20 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 	indexEntriesPrepared = len(indexInfoList)
 	if len(indexInfoList) > 0 {
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
+		if err := observePostprocessEmbeddingBatch(
+			ctx,
+			s.tracker(),
+			qSpan,
+			fmt.Sprintf(
+				"postprocess.question.batch[%d].embedding",
+				payload.BatchIndex,
+			),
+			types.IngestionOperationEmbeddingQuestion,
+			embeddingModel,
+			retrieveEngine,
+			indexInfoList,
+			"QUESTION_EMBEDDING_FAILED",
+		); err != nil {
 			exitStatus = "index_questions_failed"
 			qErr = err
 			logger.Errorf(ctx, "Failed to index generated questions for batch %d: %v", payload.BatchIndex, err)
@@ -3186,7 +3310,12 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	observedParserEngine := parserEngine
+	if observedParserEngine == "" {
+		observedParserEngine = "auto"
+	}
+	observedReader := newIngestionObservedDocReader(reader)
+	result, err := s.callDocReaderWithTimeout(ctx, observedReader, req)
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
 		// failure) from generic read errors so the UI can suggest
@@ -3195,8 +3324,12 @@ func (s *knowledgeService) convert(
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "docreader call timeout") {
 			code = werrors.ErrCodeDocReaderTimeout
 		}
-		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			code, "document read failed", err)
+		parseOut := parseDocumentOperationOutput(observedParserEngine, observedReader.Snapshot(), false)
+		parseOut["error_code"] = code
+		s.failStageWithOutput(
+			ctx, knowledge.ID, types.StageDocReader, parseOut,
+			code, "document read failed", err,
+		)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
 	if result.Error != "" {
@@ -3206,8 +3339,12 @@ func (s *knowledgeService) convert(
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
+		parseOut := parseDocumentOperationOutput(observedParserEngine, observedReader.Snapshot(), false)
+		parseOut["error_code"] = werrors.ErrCodeDocReaderParseFailed
+		s.failStageWithOutput(
+			ctx, knowledge.ID, types.StageDocReader, parseOut,
+			werrors.ErrCodeDocReaderParseFailed, result.Error, nil,
+		)
 		return nil, nil
 	}
 	docOutput := types.JSONMap{
@@ -3218,6 +3355,11 @@ func (s *knowledgeService) convert(
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages
 	}
+	mergeObservationOutput(docOutput, parseDocumentOperationOutput(
+		observedParserEngine,
+		observedReader.Snapshot(),
+		true,
+	))
 	s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
 	return result, nil
 }

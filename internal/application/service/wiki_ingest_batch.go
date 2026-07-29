@@ -1272,25 +1272,41 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiExtract)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, extractChat, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, extractChat, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
+			extractOut := chatOperationOutput(
+				types.IngestionOperationWikiExtract,
+				"postprocess.wiki.extract",
+				extractChat,
+				extractChat.Snapshot(),
+				false,
+			)
+			s.tracker().FailSpanWithOutput(ctx, extractSpan, extractOut, "EXTRACT_FAILED", err.Error(), err)
 			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
 			return nil, nil, err
 		}
 	}
-	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
+	extractOut := types.JSONMap{
 		"entities":         len(extractedEntities),
 		"concepts":         len(extractedConcepts),
 		"pass0_fallback":   pass0Failed,
 		"entities_preview": previewExtractedItems(extractedEntities, 8),
 		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
-	})
+	}
+	mergeObservationOutput(extractOut, chatOperationOutput(
+		types.IngestionOperationWikiExtract,
+		"postprocess.wiki.extract",
+		extractChat,
+		extractChat.Snapshot(),
+		true,
+	))
+	s.tracker().EndSpan(ctx, extractSpan, extractOut)
 
 	// Build slug listing for Summary's wiki-link input.
 	var summaryExtractedPages []string
@@ -1346,22 +1362,31 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		summaryChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiSummary)
+		summaryContent, summaryErr = s.generateWithTemplate(ctx, summaryChat, agent.WikiSummaryPrompt, map[string]string{
 			"Content":            content,
 			"Language":           lang,
 			"ExtractedSlugs":     slugListing,
 			"CustomInstructions": batchCtx.ContentInstructions,
 			"InstructionScope":   "wiki_content",
 		})
+		summaryOut := chatOperationOutput(
+			types.IngestionOperationWikiSummary,
+			"postprocess.wiki.summary",
+			summaryChat,
+			summaryChat.Snapshot(),
+			summaryErr == nil,
+		)
 		if summaryErr != nil {
-			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+			s.tracker().FailSpanWithOutput(ctx, summarySpan, summaryOut, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		} else {
 			sumLine, sumBody := splitSummaryLine(summaryContent)
-			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
+			mergeObservationOutput(summaryOut, types.JSONMap{
 				"chars":        utf8.RuneCountInString(summaryContent),
 				"summary_line": previewText(sumLine, 160),
 				"body_preview": previewText(sumBody, 320),
 			})
+			s.tracker().EndSpan(ctx, summarySpan, summaryOut)
 		}
 	}()
 	go func() {
@@ -1374,14 +1399,30 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
-		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
+		classifyChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiClassify)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, classifyChat, candidatesXML, chunks, lang, batchCtx)
+		classifySnapshot := classifyChat.Snapshot()
+		classifyOut := types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
 			"batches":          batchCount,
 			"top_cited":        topCitedSlugs(citations, 8),
 			"new_slugs_sample": previewNewSlugs(newSlugs, 8),
-		})
+		}
+		mergeObservationOutput(classifyOut, chatOperationOutput(
+			types.IngestionOperationWikiClassify,
+			"postprocess.wiki.classify",
+			classifyChat,
+			classifySnapshot,
+			classifySnapshot.ErrorCount == 0,
+		))
+		if classifySnapshot.ErrorCount > 0 {
+			s.tracker().FailSpanWithOutput(
+				ctx, classifySpan, classifyOut, "CLASSIFY_FAILED", "one or more classification requests failed", nil,
+			)
+		} else {
+			s.tracker().EndSpan(ctx, classifySpan, classifyOut)
+		}
 	}()
 	wg.Wait()
 
@@ -1707,6 +1748,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
 ) (changed bool, affectedType string, additionFailed bool, err error) {
+	reduceChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiReduce)
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -1762,11 +1804,19 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if pageSpan == nil {
 			return
 		}
+		reduceSnapshot := reduceChat.Snapshot()
+		reduceOut := chatOperationOutput(
+			types.IngestionOperationWikiReduce,
+			fmt.Sprintf("postprocess.wiki.page[%s]", slug),
+			reduceChat,
+			reduceSnapshot,
+			err == nil && reduceSnapshot.ErrorCount == 0,
+		)
 		if err != nil {
-			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
+			s.tracker().FailSpanWithOutput(ctx, pageSpan, reduceOut, "REDUCE_FAILED", err.Error(), err)
 			return
 		}
-		if !changed {
+		if !changed && reduceSnapshot.RequestCount == 0 {
 			s.tracker().SkipSpan(ctx, pageSpan, "no_change")
 			return
 		}
@@ -1784,7 +1834,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			out["chunk_refs"] = len(page.ChunkRefs)
 			out["aliases"] = []string(page.Aliases)
 		}
-		s.tracker().EndSpan(ctx, pageSpan, out)
+		mergeObservationOutput(out, reduceOut)
+		if reduceSnapshot.ErrorCount > 0 {
+			s.tracker().FailSpanWithOutput(
+				ctx, pageSpan, out, "REDUCE_LLM_FAILED", "wiki reduce model request failed", nil,
+			)
+		} else {
+			s.tracker().EndSpan(ctx, pageSpan, out)
+		}
 	}()
 
 	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
@@ -2005,7 +2062,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		pageAliases := strings.Join(page.Aliases, ", ")
 
 		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
+		updatedContent, err = s.generateWithTemplate(ctx, reduceChat, agent.WikiPageModifyPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,

@@ -251,7 +251,14 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			return
 		}
 		if handleErr != nil {
-			s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+			s.tracker().FailSpanWithOutput(
+				ctx,
+				gSpan,
+				graphOut,
+				"GRAPH_EXTRACT_FAILED",
+				handleErr.Error(),
+				handleErr,
+			)
 		} else {
 			s.tracker().EndSpan(ctx, gSpan, graphOut)
 		}
@@ -329,8 +336,15 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	graph, graphObservation, err := extractGraphWithObservation(
+		ctx,
+		chatModel,
+		template,
+		chunk.Content,
+	)
+	for key, value := range graphObservation {
+		graphOut[key] = value
+	}
 	if err != nil {
 		handleErr = err
 		return err
@@ -383,6 +397,36 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		graphOut["sample_relations"] = out
 	}
 	return nil
+}
+
+// extractGraphWithObservation runs the existing graph extractor through the
+// production Chat observation wrapper. It does not change prompts, parsing, or
+// graph results.
+func extractGraphWithObservation(
+	ctx context.Context,
+	chatModel chat.Chat,
+	template *types.PromptTemplateStructured,
+	content string,
+) (*types.GraphData, types.JSONMap, error) {
+	observedChat := newIngestionObservedChat(
+		chatModel,
+		types.IngestionOperationGraphExtractChunk,
+	)
+	extractor := chatpipeline.NewExtractor(observedChat, template)
+	operationCtx := types.WithIngestionOperation(
+		ctx,
+		types.IngestionOperationGraphExtractChunk,
+	)
+	graph, err := extractor.Extract(operationCtx, content)
+	observation := observedChat.Snapshot()
+	output := chatOperationOutput(
+		types.IngestionOperationGraphExtractChunk,
+		types.StagePostProcess,
+		chatModel,
+		observation,
+		err == nil,
+	)
+	return graph, output, err
 }
 
 // DataTableExtractPayload represents the table extract task payload

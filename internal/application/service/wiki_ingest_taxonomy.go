@@ -43,6 +43,25 @@ func (s *wikiIngestService) planBatchTaxonomy(
 	if len(items) == 0 {
 		return nil
 	}
+	taxonomyChat := newIngestionObservedChat(chatModel, types.IngestionOperationWikiClassify)
+	defer func() {
+		snapshot := taxonomyChat.Snapshot()
+		if snapshot.RequestCount == 0 {
+			return
+		}
+		logUnspannedChatObservation(
+			ctx,
+			types.IngestionOperationWikiClassify,
+			"postprocess.wiki.classify",
+			taxonomyChat,
+			snapshot,
+			types.JSONMap{
+				"knowledge_base_id": kb.ID,
+				"purpose":           "taxonomy_plan",
+				"taxonomy_items":    len(items),
+			},
+		)
+	}()
 
 	// Existing folders anchor reuse. Errors (e.g. a dialect without the query)
 	// just mean the plan designs a fresh tree — no fatal dependency.
@@ -80,7 +99,7 @@ func (s *wikiIngestService) planBatchTaxonomy(
 				it.slug, it.title, it.pageType, previewText(it.about, 120))
 		}
 
-		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyPlanPrompt, map[string]string{
+		raw, err := s.generateWithTemplate(ctx, taxonomyChat, agent.WikiTaxonomyPlanPrompt, map[string]string{
 			"ExistingTaxonomy": tree,
 			"Items":            itemsBlock.String(),
 			"Language":         lang,
@@ -192,12 +211,32 @@ func (s *wikiIngestService) selectRelevantFolders(
 		itemTexts[i] = strings.TrimSpace(it.title + " " + previewText(it.about, 120))
 	}
 
-	folderVecs, err := embedder.BatchEmbed(ctx, folderTexts)
+	folderVecs, _, err := observeUnspannedDirectEmbeddingBatch(
+		ctx,
+		types.IngestionOperationEmbeddingWikiPage,
+		embedder,
+		folderTexts,
+		"WIKI_EMBEDDING_FAILED",
+		types.JSONMap{
+			"purpose":           "taxonomy_folder",
+			"knowledge_base_id": kb.ID,
+		},
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan folder embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
 	}
-	itemVecs, err := embedder.BatchEmbed(ctx, itemTexts)
+	itemVecs, _, err := observeUnspannedDirectEmbeddingBatch(
+		ctx,
+		types.IngestionOperationEmbeddingWikiPage,
+		embedder,
+		itemTexts,
+		"WIKI_EMBEDDING_FAILED",
+		types.JSONMap{
+			"purpose":           "taxonomy_item",
+			"knowledge_base_id": kb.ID,
+		},
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan item embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)

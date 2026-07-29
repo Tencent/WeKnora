@@ -503,3 +503,87 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(qBytes, &qOut))
 	assert.Equal(t, 5, qOut.Attempt)
 }
+
+func TestSpanTracker_FailSpanWithOutputPreservesObservation(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	tracker, db := setupSpanTrackerTest(t)
+
+	_, attempt, err := tracker.OpenAttempt(
+		ctx,
+		"knowledge-failed-output-test",
+		"",
+	)
+	require.NoError(t, err)
+
+	span := tracker.BeginStage(
+		ctx,
+		"knowledge-failed-output-test",
+		attempt,
+		types.StageEmbedding,
+		nil,
+	)
+	require.NotNil(t, span)
+
+	expectedError := errors.New(
+		"provider request failed",
+	)
+
+	tracker.FailSpanWithOutput(
+		ctx,
+		span,
+		types.JSONMap{
+			"operation": string(
+				types.IngestionOperationEmbeddingChunk,
+			),
+			"request_count": 1,
+			"total_items":   2,
+			"success":       false,
+			"cache_status": string(
+				types.IngestionCacheStatusNotSupported,
+			),
+		},
+		"EMBEDDING_FAILED",
+		"embedding request failed",
+		expectedError,
+	)
+
+	var storedSpan types.KnowledgeProcessingSpan
+	require.NoError(
+		t,
+		db.Where(
+			"knowledge_id = ? AND attempt = ? AND name = ?",
+			"knowledge-failed-output-test",
+			attempt,
+			types.StageEmbedding,
+		).Take(&storedSpan).Error,
+	)
+
+	require.Equal(
+		t,
+		types.SpanStatusFailed,
+		storedSpan.Status,
+	)
+	require.Equal(
+		t,
+		"EMBEDDING_FAILED",
+		storedSpan.ErrorCode,
+	)
+	require.EqualValues(
+		t,
+		1,
+		storedSpan.Output["request_count"],
+	)
+	require.EqualValues(
+		t,
+		2,
+		storedSpan.Output["total_items"],
+	)
+	require.Equal(
+		t,
+		false,
+		storedSpan.Output["success"],
+	)
+}

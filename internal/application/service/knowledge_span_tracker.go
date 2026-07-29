@@ -108,11 +108,29 @@ type SpanTracker interface {
 	// EndSpan marks span as done with optional output. Safe with nil.
 	EndSpan(ctx context.Context, span *Span, output types.JSONMap)
 
-	// FailSpan marks span as failed and cascade-cancels its
-	// descendants. errorDetail (a Go error) is recorded verbatim in
-	// error_detail (truncated to 8 KB) for admin views.
-	FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error)
+	// FailSpan marks span as failed and cascade-cancels its descendants.
+	// It preserves the existing failure API for call sites that do not have
+	// structured output to record.
+	FailSpan(
+		ctx context.Context,
+		span *Span,
+		errorCode string,
+		errorMessage string,
+		errorDetail error,
+	)
 
+	// FailSpanWithOutput marks span as failed while also persisting structured
+	// output produced before the failure occurred. This is used for expensive
+	// operations where a provider request may already have happened before an
+	// error is returned.
+	FailSpanWithOutput(
+		ctx context.Context,
+		span *Span,
+		output types.JSONMap,
+		errorCode string,
+		errorMessage string,
+		errorDetail error,
+	)
 	// SkipSpan marks an intentionally not-run span (e.g. multimodal
 	// on a text-only document). Distinct from cancelled — skipped is
 	// "we chose not to" while cancelled is "an upstream broke".
@@ -475,12 +493,38 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
 
-func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error) {
+func (t *spanTracker) FailSpan(
+	ctx context.Context,
+	span *Span,
+	errorCode string,
+	errorMessage string,
+	errorDetail error,
+) {
+	t.FailSpanWithOutput(
+		ctx,
+		span,
+		nil,
+		errorCode,
+		errorMessage,
+		errorDetail,
+	)
+}
+
+func (t *spanTracker) FailSpanWithOutput(
+	ctx context.Context,
+	span *Span,
+	output types.JSONMap,
+	errorCode string,
+	errorMessage string,
+	errorDetail error,
+) {
 	if span == nil {
 		return
 	}
+
 	now := time.Now()
 	dur := durationSince(t, span, now)
+
 	detail := ""
 	if errorDetail != nil {
 		detail = errorDetail.Error()
@@ -488,9 +532,11 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 			detail = detail[:8192]
 		}
 	}
+
 	if len(errorMessage) > 1024 {
 		errorMessage = errorMessage[:1024]
 	}
+
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  span.KnowledgeID,
 		Attempt:      span.Attempt,
@@ -499,6 +545,7 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 		Name:         span.Name,
 		Kind:         span.Kind,
 		Status:       types.SpanStatusFailed,
+		Output:       output,
 		ErrorCode:    strings.TrimSpace(errorCode),
 		ErrorMessage: errorMessage,
 		ErrorDetail:  detail,
@@ -506,35 +553,66 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 		FinishedAt:   &now,
 		DurationMs:   dur,
 	}
+
 	if err := t.repo.Upsert(ctx, row); err != nil {
-		logger.Warnf(ctx, "[SpanTracker] FailSpan failed span=%s: %v", span.SpanID, err)
+		logger.Warnf(
+			ctx,
+			"[SpanTracker] FailSpanWithOutput failed span=%s: %v",
+			span.SpanID,
+			err,
+		)
 	}
-	// Cascade: anything downstream of this span gets cancelled. The
-	// reason string is what the UI surfaces under each cancelled
-	// child's tooltip — keep it short and human.
+
+	// Cascade: anything downstream of this span gets cancelled. The reason
+	// string is what the UI surfaces under each cancelled child's tooltip.
 	reason := "upstream " + span.Name + " failed"
 	if errorCode != "" {
 		reason = reason + " (" + errorCode + ")"
 	}
-	if _, err := t.repo.CancelDescendants(ctx, span.KnowledgeID, span.Attempt, span.SpanID, reason); err != nil {
-		logger.Warnf(ctx, "[SpanTracker] cancel descendants failed span=%s: %v", span.SpanID, err)
+
+	if _, err := t.repo.CancelDescendants(
+		ctx,
+		span.KnowledgeID,
+		span.Attempt,
+		span.SpanID,
+		reason,
+	); err != nil {
+		logger.Warnf(
+			ctx,
+			"[SpanTracker] cancel descendants failed span=%s: %v",
+			span.SpanID,
+			err,
+		)
 	}
-	// For STAGE failures, also cascade to dependent stages declared
-	// in StageDependencies (those are siblings, not descendants).
+
+	// For stage failures, also cascade to dependent stages declared in
+	// StageDependencies because those stages are siblings, not descendants.
 	if span.Kind == types.SpanKindStage {
-		t.cascadeDependentStages(ctx, span, reason)
-		// Any failure in a MAIN pipeline stage means the attempt is
-		// done — the parse cannot succeed past this point. Close the
-		// root span as failed so the UI doesn't show "进行中" forever.
-		// Optional downstream stages (summary/question/wiki/graph) do
-		// not poison the attempt: they can fail without invalidating
-		// the parsed document.
+		t.cascadeDependentStages(
+			ctx,
+			span,
+			reason,
+		)
+
+		// A main pipeline stage failure terminates the whole attempt.
 		if isMainPipelineStage(span.Name) {
-			t.FinalizeAttempt(ctx, span.KnowledgeID, span.Attempt,
-				types.SpanStatusFailed, nil, errorCode, errorMessage)
+			t.FinalizeAttempt(
+				ctx,
+				span.KnowledgeID,
+				span.Attempt,
+				types.SpanStatusFailed,
+				nil,
+				errorCode,
+				errorMessage,
+			)
 		}
 	}
-	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
+
+	t.touchKnowledgeHeartbeat(
+		ctx,
+		span.KnowledgeID,
+		span.Kind,
+	)
 }
 
 func (t *spanTracker) SkipSpan(ctx context.Context, span *Span, reason string) {
@@ -867,8 +945,17 @@ func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, 
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
-func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)            {}
-func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
+func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)       {}
+func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error) {}
+func (noopSpanTracker) FailSpanWithOutput(
+	_ context.Context,
+	_ *Span,
+	_ types.JSONMap,
+	_ string,
+	_ string,
+	_ error,
+) {
+}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
