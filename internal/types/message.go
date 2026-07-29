@@ -258,6 +258,9 @@ type Message struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete timestamp
 	DeletedAt gorm.DeletedAt `json:"deleted_at"            gorm:"index"`
+	// Feedback fields are hydrated for the current web user on reads.
+	MyFeedback       *MessageFeedbackState `json:"my_feedback,omitempty" gorm:"-"`
+	FeedbackEligible bool                  `json:"feedback_eligible" gorm:"-"`
 }
 
 // MessageExecutionContext is a message-level snapshot of the non-secret

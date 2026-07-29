@@ -202,14 +202,77 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    like_count BIGINT NOT NULL DEFAULT 0,
+    dislike_count BIGINT NOT NULL DEFAULT 0,
+    positive_rate DOUBLE,
+    recall_weight DOUBLE NOT NULL DEFAULT 1.0,
+    feedback_reset_at TIMESTAMP(6) NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT chk_chunks_feedback_counts CHECK (like_count >= 0 AND dislike_count >= 0),
+    CONSTRAINT chk_chunks_positive_rate CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1)),
+    CONSTRAINT chk_chunks_recall_weight CHECK (recall_weight >= 0.8 AND recall_weight <= 1.2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE message_chunk_references (
+    id VARCHAR(36) PRIMARY KEY,
+    message_tenant_id BIGINT NOT NULL,
+    chunk_tenant_id BIGINT NOT NULL,
+    chunk_knowledge_base_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_message_chunk_reference (
+        message_tenant_id, message_id, chunk_tenant_id, chunk_knowledge_base_id, chunk_id
+    ),
+    KEY idx_message_reference_message (message_tenant_id, message_id),
+    KEY idx_message_reference_chunk (chunk_tenant_id, chunk_knowledge_base_id, chunk_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    feedback_type VARCHAR(16) NOT NULL,
+    reason_code VARCHAR(16),
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_message_feedback_actor (tenant_id, user_id, message_id),
+    KEY idx_message_feedback_session (tenant_id, session_id),
+    KEY idx_message_feedback_message (tenant_id, message_id),
+    CONSTRAINT chk_message_feedback_type CHECK (feedback_type IN ('like', 'dislike')),
+    CONSTRAINT chk_message_feedback_reason CHECK (
+        (feedback_type = 'like' AND reason_code IS NULL)
+        OR
+        (feedback_type = 'dislike' AND reason_code IS NOT NULL
+            AND reason_code IN ('inaccurate', 'irrelevant', 'incomplete', 'outdated', 'other'))
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chunk_feedback_audits (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    chunk_tenant_id BIGINT NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    actor_tenant_id BIGINT NOT NULL,
+    actor_user_id VARCHAR(64) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    trigger_source VARCHAR(16) NOT NULL DEFAULT 'legacy',
+    old_weight DOUBLE NOT NULL,
+    new_weight DOUBLE NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_chunk_feedback_audit_chunk (chunk_tenant_id, chunk_id, created_at),
+    CONSTRAINT chk_chunk_feedback_audit_action CHECK (action IN ('feedback_weight_changed', 'feedback_reset')),
+    CONSTRAINT chk_chunk_feedback_audit_trigger_source CHECK (
+        trigger_source IN ('like', 'dislike', 'cancel', 'admin_reset', 'content_delete', 'legacy')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE chunk_revisions (
     id VARCHAR(36) PRIMARY KEY,

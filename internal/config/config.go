@@ -33,12 +33,28 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Feedback        *FeedbackConfig        `yaml:"feedback"         json:"feedback"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// FeedbackConfig controls the minimal answer-feedback integration. Feedback
+// collection itself is message-scoped; only retrieval weighting is gated so
+// operators can immediately restore legacy ranking without deleting data.
+type FeedbackConfig struct {
+	RetrievalWeightEnabled bool    `yaml:"retrieval_weight_enabled" json:"retrieval_weight_enabled"`
+	OptimizationThreshold  float64 `yaml:"optimization_threshold"   json:"optimization_threshold"`
+}
+
+func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
+	if c == nil || c.OptimizationThreshold <= 0 || c.OptimizationThreshold > 1 {
+		return 0.3
+	}
+	return c.OptimizationThreshold
 }
 
 // AgentConfig represents the global agent settings.
