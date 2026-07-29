@@ -200,6 +200,20 @@
               </t-popup>
             </div>
             <div class="faq-filter-bar__trailing">
+              <div class="faq-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
+                <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
+                  <button type="button" class="faq-view-toggle-btn" :class="{ active: faqViewMode === 'card' }"
+                    @click="faqViewMode = 'card'" :aria-pressed="faqViewMode === 'card'">
+                    <t-icon name="view-module" size="16px" />
+                  </button>
+                </t-tooltip>
+                <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
+                  <button type="button" class="faq-view-toggle-btn" :class="{ active: faqViewMode === 'list' }"
+                    @click="faqViewMode = 'list'" :aria-pressed="faqViewMode === 'list'">
+                    <t-icon name="view-list" size="16px" />
+                  </button>
+                </t-tooltip>
+              </div>
               <!-- 新建：新建条目 / 导入 -->
               <template v-if="faqCreateOptions.length">
                 <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
@@ -231,7 +245,8 @@
             </div>
           </div>
           <!-- Card List Container with Scroll -->
-          <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
+          <div ref="scrollContainer" class="faq-scroll-container"
+            :class="{ 'is-list-view': faqViewMode === 'list' }" @scroll="handleScroll">
             <!-- FAQ 骨架屏 -->
             <div v-if="loading && entries.length === 0" class="faq-skeleton-grid">
               <div v-for="n in 6" :key="'faq-skel-' + n" class="faq-card faq-card-skeleton">
@@ -250,7 +265,7 @@
             </div>
             <!-- Card List -->
             <template v-else-if="entries.length > 0">
-              <div ref="cardListRef" class="faq-card-list">
+              <div v-if="faqViewMode === 'card'" ref="cardListRef" class="faq-card-list">
                 <div v-for="entry in entries" :key="entry.id" class="faq-card"
                   :class="{ 'selected': selectedRowKeys.includes(entry.id) }"
                   @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))">
@@ -374,7 +389,6 @@
                       </template>
                     </div>
                     <div class="faq-card-status" @click.stop>
-                      <!-- 暂时隐藏推荐开关
                       <t-tooltip
                         :content="entry.is_recommended ? $t('knowledgeEditor.faq.recommendedEnabled') : $t('knowledgeEditor.faq.recommendedDisabled')"
                         placement="top"
@@ -385,14 +399,13 @@
                             size="small"
                             :value="entry.is_recommended"
                             :loading="!!entryRecommendedLoading[entry.id]"
-                            :disabled="!!entryRecommendedLoading[entry.id]"
+                            :disabled="!!entryRecommendedLoading[entry.id] || !canEdit"
                             @click.stop
                             @change="(value: boolean) => handleEntryRecommendedChange(entry, value)"
                           />
                           <span class="status-label">{{ $t('knowledgeEditor.faq.recommended') }}</span>
                         </div>
                       </t-tooltip>
-                      -->
                       <t-tooltip
                         :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
                         placement="top">
@@ -404,6 +417,85 @@
                         </div>
                       </t-tooltip>
                     </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="faq-list-view" role="table">
+                <div class="faq-list-header" role="row">
+                  <div role="columnheader">{{ $t('knowledgeEditor.faq.standardQuestion') }}</div>
+                  <div role="columnheader">{{ $t('knowledgeEditor.faq.similarQuestions') }}</div>
+                  <div role="columnheader">{{ $t('knowledgeEditor.faq.answers') }}</div>
+                  <div role="columnheader">{{ $t('knowledgeEditor.faq.categoryLabel') }}</div>
+                  <div role="columnheader">{{ $t('knowledgeEditor.faq.recommended') }}</div>
+                  <div role="columnheader">{{ $t('common.status') }}</div>
+                  <div role="columnheader" class="faq-list-actions-header"></div>
+                </div>
+                <div
+                  v-for="entry in entries"
+                  :key="entry.id"
+                  class="faq-list-row"
+                  :class="{ selected: selectedRowKeys.includes(entry.id) }"
+                  role="row"
+                  @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))"
+                >
+                  <div class="faq-list-question" role="cell" :title="entry.standard_question">
+                    {{ entry.standard_question }}
+                  </div>
+                  <div class="faq-list-preview" role="cell" :title="entry.similar_questions?.join('、')">
+                    {{ entry.similar_questions?.join('、') || $t('knowledgeEditor.faq.noSimilar') }}
+                  </div>
+                  <div class="faq-list-preview" role="cell" :title="entry.answers?.join('、')">
+                    {{ entry.answers?.join('、') || $t('knowledgeEditor.faq.noAnswer') }}
+                  </div>
+                  <div class="faq-list-tag" role="cell" @click.stop>
+                    <template v-if="canEdit && tagList.length">
+                      <t-dropdown :options="tagDropdownOptions" trigger="click"
+                        @click="(data: any) => handleEntryTagChange(entry.id, data.value as string)">
+                        <t-tag size="small" variant="light-outline" class="faq-tag-chip">
+                          <span class="tag-text">{{ getTagName(entry.tag_id) || $t('knowledgeBase.untagged') }}</span>
+                        </t-tag>
+                      </t-dropdown>
+                    </template>
+                    <t-tag v-else size="small" variant="light-outline" class="faq-tag-chip">
+                      <span class="tag-text">{{ getTagName(entry.tag_id) || $t('knowledgeBase.untagged') }}</span>
+                    </t-tag>
+                  </div>
+                  <div class="faq-list-status" role="cell" @click.stop>
+                    <t-tooltip
+                      :content="entry.is_recommended ? $t('knowledgeEditor.faq.recommendedEnabled') : $t('knowledgeEditor.faq.recommendedDisabled')"
+                      placement="top">
+                      <t-switch :key="`${entry.id}-recommended-${entry.is_recommended}`" size="small"
+                        :value="entry.is_recommended" :loading="!!entryRecommendedLoading[entry.id]"
+                        :disabled="!!entryRecommendedLoading[entry.id] || !canEdit" @click.stop
+                        @change="(value: boolean) => handleEntryRecommendedChange(entry, value)" />
+                    </t-tooltip>
+                  </div>
+                  <div class="faq-list-status" role="cell" @click.stop>
+                    <t-switch :key="`${entry.id}-${entry.is_enabled}`" size="small" :value="entry.is_enabled"
+                      :loading="!!entryStatusLoading[entry.id]"
+                      :disabled="!!entryStatusLoading[entry.id] || !canEdit"
+                      @click.stop @change="(value: boolean) => handleEntryStatusChange(entry, value)" />
+                  </div>
+                  <div class="faq-list-actions" role="cell" @click.stop>
+                    <t-popup v-if="canManage" v-model="entry.showMore" overlayClassName="card-more-popup"
+                      trigger="click" destroy-on-close placement="bottom-right"
+                      @visible-change="(visible: boolean) => (entry.showMore = visible)">
+                      <button type="button" class="faq-list-more-btn" :aria-label="$t('common.actions')">
+                        <t-icon name="more" size="18px" />
+                      </button>
+                      <template #content>
+                        <div class="popup-menu" @click.stop>
+                          <div class="popup-menu-item" @click.stop="handleMenuEdit(entry)">
+                            <t-icon class="menu-icon" name="edit" />
+                            <span>{{ $t('common.edit') }}</span>
+                          </div>
+                          <div class="popup-menu-item delete" @click.stop="handleMenuDelete(entry)">
+                            <t-icon class="menu-icon" name="delete" />
+                            <span>{{ $t('common.delete') }}</span>
+                          </div>
+                        </div>
+                      </template>
+                    </t-popup>
                   </div>
                 </div>
               </div>
@@ -881,6 +973,8 @@ import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import KBInfoPopover from '@/components/KBInfoPopover.vue'
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue'
 import KbTagManageDrawer from './KbTagManageDrawer.vue'
+import { mergeFAQEntryPage } from './faqEntryPagination'
+import { parseFAQEntryViewMode, type FAQEntryViewMode } from './faqEntryViewMode'
 import { useUIStore } from '@/stores/ui'
 
 interface FAQEntry {
@@ -1030,6 +1124,20 @@ const pageSize = 20
 let currentPage = 1
 const entrySearchKeyword = ref('')
 let entrySearchDebounce: number | null = null
+
+const FAQ_VIEW_MODE_KEY = 'weknora.kb.faq.entries.viewMode'
+const initialFAQViewMode = (): FAQEntryViewMode => {
+  try {
+    return parseFAQEntryViewMode(localStorage.getItem(FAQ_VIEW_MODE_KEY))
+  } catch {
+    return 'card'
+  }
+}
+const faqViewMode = ref<FAQEntryViewMode>(initialFAQViewMode())
+watch(faqViewMode, (mode) => {
+  try { localStorage.setItem(FAQ_VIEW_MODE_KEY, mode) } catch { /* ignore */ }
+  if (mode === 'list') nextTick(checkAndLoadMore)
+})
 
 const tagList = ref<any[]>([])
 const tagLoading = ref(false)
@@ -1604,9 +1712,9 @@ const loadEntries = async (append = false) => {
     }))
 
     if (append) {
-      entries.value = [...entries.value, ...newEntries]
+      entries.value = mergeFAQEntryPage(entries.value, newEntries)
     } else {
-      entries.value = newEntries
+      entries.value = mergeFAQEntryPage([], newEntries)
     }
     // 判断是否还有更多数据
     hasMore.value = entries.value.length < (pageData.total || 0)
@@ -3103,6 +3211,39 @@ watch(() => entries.value.map(e => ({
     }
   }
 
+  .faq-view-toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: 6px;
+
+    &-btn {
+      width: 28px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--td-text-color-secondary);
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease;
+
+      &:hover {
+        color: var(--td-text-color-primary);
+      }
+
+      &.active {
+        color: var(--td-brand-color);
+        background: var(--td-bg-color-container);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      }
+    }
+  }
+
   @media (max-width: 767px) {
     .faq-search-input {
       flex: 1 1 100%;
@@ -3622,6 +3763,10 @@ watch(() => entries.value.map(e => ({
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
+
+  &.is-list-view {
+    overflow-x: auto;
+  }
 }
 
 @keyframes contentFadeIn {
@@ -3669,6 +3814,112 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   animation: contentFadeIn 0.32s ease-out;
   min-width: 0;
+}
+
+.faq-list-view {
+  min-width: 900px;
+  // Keep the sticky header relative to the outer FAQ scroll container.
+  // overflow:hidden would turn this wrapper into the sticky scroll ancestor.
+  overflow: visible;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 9px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.faq-list-header,
+.faq-list-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(160px, 1.25fr) minmax(180px, 1.5fr) 128px 76px 76px 40px;
+  align-items: center;
+  min-width: 0;
+  padding: 0 16px;
+}
+
+.faq-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 40px;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-bottom: 1px solid var(--td-component-stroke);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.faq-list-row {
+  min-height: 60px;
+  color: var(--td-text-color-primary);
+  border-bottom: 1px solid var(--td-component-stroke);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &:hover:not(.selected) {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.selected {
+    background: var(--td-success-color-light);
+    border-color: var(--td-brand-color);
+  }
+}
+
+.faq-list-question,
+.faq-list-preview,
+.faq-list-tag,
+.faq-list-status,
+.faq-list-actions {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.faq-list-question,
+.faq-list-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.faq-list-question {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.faq-list-preview {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+
+.faq-list-status,
+.faq-list-actions,
+.faq-list-actions-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.faq-list-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
 }
 
 .faq-card {

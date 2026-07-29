@@ -248,10 +248,11 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	// Determine sort order based on knowledge type
 	var orderClause string
 	if knowledgeType == types.KnowledgeTypeFAQ {
-		// FAQ: sort by updated_at
-		orderClause = "updated_at DESC"
+		// FAQ: sort by updated_at. SeqID makes offset pages deterministic for a
+		// fixed result set when multiple entries share an update timestamp.
+		orderClause = "updated_at DESC, seq_id DESC"
 		if sortOrder == "asc" {
-			orderClause = "updated_at ASC"
+			orderClause = "updated_at ASC, seq_id ASC"
 		}
 	} else {
 		// Document: sort by chunk_index

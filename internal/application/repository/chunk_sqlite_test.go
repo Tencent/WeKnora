@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -245,6 +246,44 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), allTotal)
 	assert.Len(t, allChunks, 2)
+}
+
+func TestListPagedFAQChunks_UsesSeqIDToBreakUpdatedAtTies(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	const tenantID = uint64(1)
+	kbID := uuid.NewString()
+	knowledgeID := uuid.NewString()
+	chunks := []*types.Chunk{
+		makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ),
+		makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ),
+		makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ),
+	}
+	require.NoError(t, repo.CreateChunks(ctx, chunks))
+
+	updatedAt := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id IN ?", []string{
+		chunks[0].ID, chunks[1].ID, chunks[2].ID,
+	}).Update("updated_at", updatedAt).Error)
+
+	firstPage, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, tenantID, knowledgeID, &types.Pagination{Page: 1, PageSize: 2},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, firstPage, 2)
+	assert.Equal(t, []int64{chunks[2].SeqID, chunks[1].SeqID}, []int64{firstPage[0].SeqID, firstPage[1].SeqID})
+
+	secondPage, _, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, tenantID, knowledgeID, &types.Pagination{Page: 2, PageSize: 2},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	assert.Equal(t, chunks[0].SeqID, secondPage[0].SeqID)
 }
 
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
