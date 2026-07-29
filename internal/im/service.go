@@ -88,6 +88,15 @@ var storageSchemeRe = regexp.MustCompile(
 		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
 )
 
+// isHTTPResolvedURL reports whether s is an http(s) URL — the only form an IM
+// client can fetch; any provider:// scheme (oss://, local://, …) is not.
+// Scheme match is case-insensitive per RFC 3986 §3.1: a backend may emit an
+// operator-configured host (e.g. OBS_PROXY_DOMAIN) with an uppercase scheme.
+func isHTTPResolvedURL(s string) bool {
+	return len(s) >= 7 && strings.EqualFold(s[:7], "http://") ||
+		len(s) >= 8 && strings.EqualFold(s[:8], "https://")
+}
+
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
 // be resolved are left unchanged.
@@ -98,8 +107,9 @@ var storageSchemeRe = regexp.MustCompile(
 //     trade-off: anyone with log access can use a signed URL until it
 //     expires (WeKnora 2h, MinIO 24h). Acceptable for diagnosability.
 //   - Failure or no-op rewrite logs at WARN. The no-op case typically means
-//     APP_EXTERNAL_URL is not configured for the local backend, which is
-//     the most common cause of "image broken in IM" reports.
+//     APP_EXTERNAL_URL is not configured (local backend, or resource:// content
+//     that must be served via /r/), the most common cause of "image broken in
+//     IM" reports.
 func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileServiceResolver) string {
 	if resolver == nil {
 		return content
@@ -115,10 +125,13 @@ func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileSer
 			logger.Warnf(ctx, "[IM] rewriteStorageURLs failed: src=%s err=%v", match, err)
 			return match
 		}
-		if httpURL == match {
+		// A non-http(s) result cannot be rendered by an IM client — covers both the
+		// unchanged no-op and a resource:// alias left as an internal storage:// path
+		// (APP_EXTERNAL_URL unset / nginx not proxying /r/).
+		if !isHTTPResolvedURL(httpURL) {
 			logger.Warnf(ctx,
-				"[IM] rewriteStorageURLs no-op (URL unchanged; for local storage set APP_EXTERNAL_URL): src=%s",
-				match)
+				"[IM] rewriteStorageURLs no-op (resolved to non-HTTP URL %q; for local/private storage set APP_EXTERNAL_URL and ensure nginx proxies /r/): src=%s",
+				httpURL, match)
 			return match
 		}
 		logger.Infof(ctx, "[IM] rewriteStorageURLs: src=%s dst=%s", match, httpURL)
@@ -949,6 +962,23 @@ func (s *Service) dedupCleanupLoop() {
 	}
 }
 
+// imImageConfigWarning returns an operator warning when IM channels are active
+// but APP_EXTERNAL_URL is unset. resource:// images then render only if the
+// storage backend is itself publicly reachable (e.g. a cloud bucket with a
+// public endpoint); on the default MinIO (internal minio:9000) or local
+// deployment it is not, so images silently break. Advisory only; returns ""
+// when there is nothing to warn about. Pure (no receiver/closures) so it is
+// unit-testable.
+func imImageConfigWarning(activeChannels int, externalURL string) string {
+	if activeChannels == 0 || strings.TrimSpace(externalURL) != "" {
+		return ""
+	}
+	return fmt.Sprintf("[IM] %d IM channel(s) active but APP_EXTERNAL_URL is unset; "+
+		"resource:// images render only if the storage backend is publicly reachable — "+
+		"otherwise set APP_EXTERNAL_URL so they route through nginx /r/",
+		activeChannels)
+}
+
 // LoadAndStartChannels loads all enabled channels from the database and starts them.
 func (s *Service) LoadAndStartChannels() error {
 	s.startChannelConfigSubscriber()
@@ -957,6 +987,10 @@ func (s *Service) LoadAndStartChannels() error {
 	var channels []IMChannel
 	if err := s.db.Where("enabled = ? AND deleted_at IS NULL", true).Find(&channels).Error; err != nil {
 		return fmt.Errorf("load im channels: %w", err)
+	}
+
+	if msg := imImageConfigWarning(len(channels), os.Getenv("APP_EXTERNAL_URL")); msg != "" {
+		logger.Warnf(ctx, "%s", msg)
 	}
 
 	for i := range channels {
@@ -1247,8 +1281,8 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			result, err := script.Run(ctx, s.redis, []string{key}, s.instanceID, wsLeaderTTL.Milliseconds()).Int64()
 			if err != nil || result == 0 {
 				logger.Warnf(context.Background(),
-					"[IM] Lost leadership for channel %s, stopping adapter", channelID)
-				s.StopChannel(channelID)
+					"[IM] Lost leadership for channel %s, stopping adapter and scheduling recovery", channelID)
+				s.handleWSLeadershipLoss(channelID)
 				return
 			}
 			// Still the leader — verify the channel is still active. A
@@ -1296,6 +1330,23 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 			return
 		}
 	}
+}
+
+// handleWSLeadershipLoss tears down the adapter that no longer owns its lease
+// and puts the enabled channel back into the existing takeover loop. The retry
+// loop re-reads the durable channel row before reconnecting, so a concurrent
+// delete, disable, or config update cannot resurrect a stale runtime.
+func (s *Service) handleWSLeadershipLoss(channelID string) {
+	_, channel, running := s.GetChannelAdapter(channelID)
+	if !running || channel == nil {
+		return
+	}
+
+	s.StopChannel(channelID)
+	if s.stopped.Load() {
+		return
+	}
+	s.scheduleWSLeaderRetry(channel)
 }
 
 func (s *Service) scheduleWSLeaderRetry(channel *IMChannel) {

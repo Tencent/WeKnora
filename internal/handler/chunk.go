@@ -1,6 +1,7 @@
 package handler
 
 import (
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -80,11 +81,6 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
-	}
-
-	// 对 chunk 内容进行安全清理
-	if chunk.Content != "" {
-		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -225,13 +221,6 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		return
 	}
 
-	// 对 chunk 内容进行安全清理
-	for _, chunk := range result.Data.([]*types.Chunk) {
-		if chunk.Content != "" {
-			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"data":      result.Data,
@@ -269,13 +258,9 @@ func parseChunkFeedbackFilter(c *gin.Context) (*types.ChunkFeedbackFilter, error
 
 // UpdateChunkRequest defines the request structure for updating a chunk
 type UpdateChunkRequest struct {
-	Content    string    `json:"content"`
-	Embedding  []float32 `json:"embedding"`
-	ChunkIndex int       `json:"chunk_index"`
-	IsEnabled  bool      `json:"is_enabled"`
-	StartAt    int       `json:"start_at"`
-	EndAt      int       `json:"end_at"`
-	ImageInfo  string    `json:"image_info"`
+	Content          *string `json:"content"`
+	IsEnabled        *bool   `json:"is_enabled"`
+	ExpectedRevision *int    `json:"expected_revision"`
 }
 
 // fetchChunkAndVerifyOwnership fetches a chunk by ID and verifies it
@@ -344,24 +329,122 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 		return
 	}
 
-	if req.Content != "" {
-		chunk.Content = req.Content
-	}
-
-	chunk.IsEnabled = req.IsEnabled
-
-	if err := h.service.UpdateChunk(ctx, chunk); err != nil {
+	chunk, err = h.service.UpdateDocumentChunk(ctx, chunk.ID, req.Content, req.IsEnabled, req.ExpectedRevision)
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+			c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	logger.Infof(ctx, "Knowledge chunk updated successfully, knowledge ID: %s, chunk ID: %s",
 		secutils.SanitizeForLog(knowledgeID), secutils.SanitizeForLog(chunk.ID))
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    chunk,
-	})
+	knowledge, getErr := h.kgService.GetKnowledgeByID(ctx, knowledgeID)
+	if getErr != nil {
+		logger.Warnf(ctx, "Chunk updated but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": chunk}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	items, err := h.service.ListChunkRevisions(c.Request.Context(), chunk.ID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+}
+
+type RevertChunkRequest struct {
+	Revision         *int `json:"revision" binding:"required"`
+	ExpectedRevision *int `json:"expected_revision"`
+}
+
+func (h *ChunkHandler) RevertChunk(c *gin.Context) {
+	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req RevertChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Revision == nil || *req.Revision < 0 {
+		c.Error(errors.NewBadRequestError("revision must be a non-negative integer"))
+		return
+	}
+	updated, err := h.service.RevertDocumentChunk(c.Request.Context(), chunk.ID, *req.Revision, req.ExpectedRevision)
+	if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+		c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+		return
+	}
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	knowledge, getErr := h.kgService.GetKnowledgeByID(c.Request.Context(), knowledgeID)
+	if getErr != nil {
+		logger.Warnf(c.Request.Context(), "Chunk reverted but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": updated}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+type UpsertGeneratedQuestionRequest struct {
+	QuestionID string `json:"question_id"`
+	Question   string `json:"question" binding:"required"`
+}
+
+func (h *ChunkHandler) UpsertGeneratedQuestion(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	var req UpsertGeneratedQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	item, err := h.service.UpsertGeneratedQuestion(c.Request.Context(), chunkID, req.QuestionID, req.Question)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
+}
+
+func (h *ChunkHandler) RegenerateGeneratedQuestions(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	items, err := h.kgService.RegenerateChunkQuestions(c.Request.Context(), chunkID)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
 }
 
 // DeleteChunk godoc

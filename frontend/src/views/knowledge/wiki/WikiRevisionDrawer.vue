@@ -32,7 +32,7 @@
 
           <div v-if="revisions.length < total" class="wiki-rev-load-more">
             <t-button size="small" variant="outline" theme="default" :loading="loadingList" block @click="loadMore">
-              {{ t('knowledgeEditor.wikiBrowser.logLoadMore') }}
+              {{ t('knowledgeEditor.wikiBrowser.loadMoreShort') }}
             </t-button>
           </div>
         </div>
@@ -77,7 +77,7 @@
 
           <div v-if="loadingDetail" class="wiki-rev-detail-loading">
             <t-loading size="small" />
-            <span>{{ t('knowledgeEditor.wikiBrowser.logLoading') }}</span>
+            <span>{{ t('knowledgeEditor.wikiBrowser.loading') }}</span>
           </div>
 
           <!-- Diff vs current -->

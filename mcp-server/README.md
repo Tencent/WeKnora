@@ -58,6 +58,15 @@ python main.py --version              # 显示版本信息
 
 ## 安装为 Python 包
 
+### 从 PyPI 安装
+
+```bash
+pip install weknora-mcp
+```
+
+> PyPI 包名为 **`weknora-mcp`**（请勿与第三方包 `weknora-mcp-server` 混淆）。
+> 安装后命令行入口仍为 `weknora-mcp-server` / `weknora-server`。
+
 ### 开发模式安装
 ```bash
 pip install -e .

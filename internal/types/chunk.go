@@ -131,6 +131,16 @@ type Chunk struct {
 	TagID string `json:"tag_id"                   gorm:"type:varchar(36);index"`
 	// Actual text content of the chunk
 	Content string `json:"content"`
+	// SourceContent is the immutable parser output. Legacy rows are lazily
+	// backfilled from Content on the first manual edit.
+	SourceContent string `json:"-"`
+	// ContentRevision is incremented for every user edit or rollback.
+	ContentRevision int `json:"content_revision" gorm:"not null;default:0"`
+	// IndexStatus reports whether the current content is reflected in the
+	// retrieval stores: ready | processing | failed.
+	IndexStatus string `json:"index_status" gorm:"type:varchar(16);not null;default:'ready'"`
+	// LastEditorID records the actor that produced the current revision.
+	LastEditorID string `json:"last_editor_id" gorm:"type:varchar(64);not null;default:''"`
 	// Index position of the chunk in the original document
 	ChunkIndex int `json:"chunk_index"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
@@ -180,11 +190,26 @@ type Chunk struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete marker, supports data recovery
 	DeletedAt gorm.DeletedAt `json:"deleted_at"               gorm:"index"`
-	// ContextHeader is an in-memory-only context string (e.g. a Markdown
-	// heading breadcrumb) that the indexing pipeline prepends to Content
-	// when generating embeddings. NOT persisted — populated by the chunker
-	// during initial splitting and discarded after indexing.
-	ContextHeader string `json:"-" gorm:"-"`
+	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
+	// It is persisted so a later content edit can rebuild the same index input.
+	ContextHeader string `json:"-" gorm:"type:text"`
+}
+
+// ChunkRevision is an immutable snapshot of a superseded chunk revision.
+// The current content lives on Chunk; this table stores prior versions.
+type ChunkRevision struct {
+	ID              string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64    `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	KnowledgeID     string    `json:"knowledge_id" gorm:"type:varchar(36);index"`
+	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_chunk_revision"`
+	Revision        int       `json:"revision" gorm:"uniqueIndex:idx_chunk_revision"`
+	Content         string    `json:"content" gorm:"type:text"`
+	IsEnabled       bool      `json:"is_enabled"`
+	EditorID        string    `json:"editor_id" gorm:"type:varchar(64)"`
+	EditSource      string    `json:"edit_source" gorm:"type:varchar(16)"`
+	EditedAt        time.Time `json:"edited_at"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended

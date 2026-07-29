@@ -378,12 +378,10 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	linked.InLinks = types.StringArray{"entity/source"}
 	indexPage := makeWikiPage("kb-orphans", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
 	indexPage.InLinks = types.StringArray{}
-	logPage := makeWikiPage("kb-orphans", "log", types.WikiPageTypeLog, types.WikiPageStatusPublished)
-	logPage.InLinks = types.StringArray{}
 	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	otherKB.InLinks = types.StringArray{}
 
-	for _, p := range []*types.WikiPage{orphan, linked, indexPage, logPage, otherKB} {
+	for _, p := range []*types.WikiPage{orphan, linked, indexPage, otherKB} {
 		require.NoError(t, repo.Create(ctx, p))
 	}
 
