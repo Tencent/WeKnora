@@ -323,6 +323,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			"",
 			"",
 			nil,
+			nil,
 		)
 		chunkPage++
 		if err != nil {
@@ -1199,9 +1200,28 @@ func (s *knowledgeService) moveOneKnowledge(
 		return fmt.Errorf("failed to mark knowledge as processing: %w", err)
 	}
 
+	// From the source KB's point of view the document is leaving for good, so it
+	// needs the same wiki reconciliation a delete performs: wiki_pages carry
+	// source_refs back to this knowledge and are what the folder tree and the
+	// wiki graph are built from, and nothing below touches them. This must run
+	// while KnowledgeBaseID still points at the source and before any chunk is
+	// removed, since the cleanup matches pages by chunk_refs.
+	if sourceKB.IsWikiEnabled() {
+		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+	}
+
 	switch mode {
 	case "reuse_vectors":
-		return s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB)
+		if err := s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB); err != nil {
+			return err
+		}
+		// reparse re-ingests through KnowledgePostProcess once the new chunks
+		// land; reuse_vectors keeps the existing chunks and never re-enters that
+		// pipeline, so the target KB has to be told about the document here.
+		if targetKB.IsWikiEnabled() {
+			EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
+		}
+		return nil
 	case "reparse":
 		return s.moveKnowledgeReparse(ctx, knowledge, sourceKB, targetKB)
 	default:

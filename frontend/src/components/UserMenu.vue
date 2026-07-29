@@ -32,7 +32,9 @@
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
         <!-- 弹出菜单：账号（头像+昵称）／当前空间（名称+权限）；底部侧栏样式不改。 -->
-        <div v-if="userName" class="dropdown-user-header">
+        <div v-if="userName" class="dropdown-user-header is-clickable" role="button" tabindex="0"
+          @click="handleQuickNav('userprofile')" @keydown.enter.prevent="handleQuickNav('userprofile')"
+          @keydown.space.prevent="handleQuickNav('userprofile')">
           <div class="dropdown-user-avatar">
             <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
             <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
@@ -47,6 +49,7 @@
                 </button>
               </t-tooltip>
             </div>
+            <span v-if="userEmail" class="dropdown-user-email">{{ userEmail }}</span>
           </div>
         </div>
 
@@ -70,38 +73,24 @@
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
         <div class="menu-divider"></div>
-        <!-- QuickNav 入口与 Settings 的最低角色对齐：members/models/websearch/mcp/api
-             分别对应 viewer/viewer/admin/admin/owner（详情见 Settings.vue 的
-             SECTION_MIN_ROLE）。低角色用户看到这些入口点进去也只能看到
-             role-denied 兜底页，索性藏起来。 -->
-        <div v-if="canSeeQuickNav('members')" class="menu-item" @click="handleQuickNav('members')">
+        <!-- 账号与空间是头像菜单的核心上下文；基础设施类配置统一收进「全部设置」。 -->
+        <div class="menu-item" @click="handleQuickNav('general')">
+          <t-icon name="user" class="menu-icon" />
+          <span>{{ $t('general.personalSettings') }}</span>
+        </div>
+        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
+          <t-icon name="user-circle" class="menu-icon" />
+          <span>{{ $t('settings.workspaceSettings') }}</span>
+        </div>
+        <!-- “管理”类快捷入口只对真正具备写权限的人展示。只读名册和模型列表
+             仍可从「全部设置」进入，避免 viewer 看到名不副实的管理入口。 -->
+        <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
           <t-icon name="usergroup" class="menu-icon" />
           <span>{{ $t('tenantMember.title') }}</span>
         </div>
-        <div v-if="canSeeQuickNav('models')" class="menu-item" @click="handleQuickNav('models')">
+        <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('websearch')" class="menu-item" @click="handleQuickNav('websearch')">
-          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-            class="menu-icon svg-icon">
-            <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-            <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-          </svg>
-          <span>{{ $t('settings.webSearchConfig') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('mcp')" class="menu-item" @click="handleQuickNav('mcp')">
-          <t-icon name="tools" class="menu-icon" />
-          <span>{{ $t('settings.mcpService') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('integration-api')" class="menu-item" @click="handleQuickNav('integration-api')">
-          <t-icon name="secured" class="menu-icon" />
-          <span>{{ $t('integrations.tabs.api') }}</span>
         </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
@@ -116,10 +105,19 @@
         -->
         <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handleSystemAdmin">
           <t-icon name="server" class="menu-icon" />
-          <span>{{ $t('settings.system') }}</span>
+          <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
-        <!-- 切换空间入口在下拉「当前空间」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
+        <div class="menu-item" @click="openDocs">
+          <t-icon name="help-circle" class="menu-icon" />
+          <span class="menu-text-with-icon">
+            <span>{{ $t('general.helpAndDocs') }}</span>
+            <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
+            </svg>
+          </span>
+        </div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
@@ -216,6 +214,7 @@ import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
+import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
 
 const { t } = useI18n()
 
@@ -247,19 +246,16 @@ const showTenantIdentityLine = computed(() => {
   return (authStore.memberships ?? []).length > 1
 })
 
-// 与 Settings.vue 的 SECTION_MIN_ROLE 同步；这里只挂 quickNav 直接跳转的
-// 那 4 项。改这张表前请同步 Settings.vue 的对照注释。
-const QUICKNAV_MIN_ROLE: Record<string, 'viewer' | 'contributor' | 'admin' | 'owner'> = {
-  members: 'viewer',
-  models: 'viewer',
-  websearch: 'admin',
-  mcp: 'admin',
-  'integration-api': 'owner',
-}
-const canSeeQuickNav = (key: string): boolean => {
-  if (authStore.canAccessAllTenants) return true
-  return authStore.hasRole(QUICKNAV_MIN_ROLE[key] ?? 'viewer')
-}
+// 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
+// viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。
+const canManageMembers = computed(() =>
+  authStore.canAccessAllTenants || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
+)
+const canManageModels = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models),
+)
 
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
@@ -293,18 +289,7 @@ const toggleMenu = () => {
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
-  if (section === 'integration-api') {
-    router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
-  } else {
-    router.push('/platform/settings')
-  }
-
-  // 延迟一下，确保设置页面已经渲染
-  setTimeout(() => {
-    // 触发设置页面切换到对应section
-    const event = new CustomEvent('settings-nav', { detail: { section } })
-    window.dispatchEvent(event)
-  }, 100)
+  router.push({ path: '/platform/settings', query: { section } })
 }
 
 // 打开设置
@@ -314,11 +299,9 @@ const handleSettings = () => {
   router.push('/platform/settings')
 }
 
-// Open the platform administration area inside the standard Settings
-// modal. The admin roster lives at the top of the global-settings
-// pane (as a tag-input row) so we route straight there; this is the
-// only system-admin section now. Gated by SYSTEM_ADMIN_SECTIONS in
-// Settings.vue.
+// Open the platform administration group inside the standard Settings
+// modal. Global settings is the group's landing page; task queues, platform
+// API keys and the audit log remain available beside it in the settings nav.
 const handleSystemAdmin = () => {
   menuVisible.value = false
   uiStore.openSettings('system-global')
@@ -508,6 +491,11 @@ const clampFloatingToViewport = (selector: string, target: { value: Record<strin
 const reopenGuide = () => {
   menuVisible.value = false
   openNewUserGuide()
+}
+
+const openDocs = () => {
+  menuVisible.value = false
+  window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
 }
 
 // 打开 GitHub
@@ -773,6 +761,17 @@ onUnmounted(() => {
   padding: 9px 12px;
   min-width: 0;
 
+  &.is-clickable {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--td-bg-color-container-hover);
+      outline: none;
+    }
+  }
+
   .dropdown-user-avatar {
     width: 24px;
     height: 24px;
@@ -822,6 +821,16 @@ onUnmounted(() => {
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dropdown-user-email {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 
+- **IMPROVED**: **Unified Wiki activity history** — removed the duplicate Wiki Browser log feed and its dedicated storage/API. Wiki mutations continue to appear in the knowledge-base Activity view, which is now the single operation-history surface (migration `000077_remove_wiki_log`).
 - **IMPROVED**: **Removed Neo4j conversation memory** — the Neo4j-based episodic memory pipeline, its API fields, settings UI, and embed toggles were dropped, so chat no longer depends on Neo4j graph storage. This simplifies deployment and reduces the required infrastructure footprint.
 - **IMPROVED**: **Shared SSRF-safe HTTP transport** — model clients, embedders, the Doris Stream Load client, and datasource connectors now reuse a single SSRF-safe HTTP transport, consolidating outbound-request protection.
 - **IMPROVED**: **Resilient Feishu large-wiki sync** — Feishu wiki synchronization now retries, resumes streaming, and surfaces failure reasons for large spaces.
@@ -50,7 +51,7 @@ All notable changes to this project will be documented in this file.
 
 ### Infrastructure & Build
 
-- **BUILD**: Migrations `000071_platform_api_keys`, `000072_auth_timestamp_tz`, `000073_kb_activity_scope`, `000074_mcp_oauth_refresh_lease`.
+- **BUILD**: Migrations `000071_platform_api_keys`, `000072_auth_timestamp_tz`, `000073_kb_activity_scope`, `000074_mcp_oauth_refresh_lease`, `000077_remove_wiki_log`.
 - **BUILD**: `tenant_api_keys` table structure updated and legacy migration files removed; Langfuse tracing client replaced by an OTel exporter.
 - **BUILD**: Swagger / API docs regenerated for platform API keys, activity audit trail, web-search providers, and the removed memory feature.
 

@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
+
 // ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
 // sentinel (matching the ErrXNotFound convention used by the other repos)
 // so callers can errors.Is it safely through wrapping — replacing the
@@ -40,6 +42,12 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+		if chunk.SourceContent == "" {
+			chunk.SourceContent = chunk.Content
+		}
+		if chunk.IndexStatus == "" {
+			chunk.IndexStatus = "ready"
+		}
 	}
 
 	db := r.db.WithContext(ctx)
@@ -121,7 +129,7 @@ func (r *chunkRepository) ListChunkRecallWeights(
 		return map[string]float64{}, nil
 	}
 	type row struct {
-		ID          string  `gorm:"column:id"`
+		ID           string  `gorm:"column:id"`
 		RecallWeight float64 `gorm:"column:recall_weight"`
 	}
 	var rows []row
@@ -197,6 +205,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	isEnabled *bool,
 	feedbackFilter *types.ChunkFeedbackFilter,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
@@ -208,6 +217,9 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if len(tagIDs) > 0 {
 			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if isEnabled != nil {
+			db = db.Where("is_enabled = ?", *isEnabled)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
@@ -334,6 +346,56 @@ func (r *chunkRepository) ListChunksByParentIDs(
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
 func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) error {
 	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
+}
+
+func (r *chunkRepository) CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error {
+	return r.db.WithContext(ctx).Create(revision).Error
+}
+
+func (r *chunkRepository) SaveChunkRevision(
+	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.Chunk{}).
+			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
+			Updates(map[string]interface{}{
+				"content":          common.CleanInvalidUTF8(chunk.Content),
+				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+				"content_revision": chunk.ContentRevision,
+				"is_enabled":       chunk.IsEnabled,
+				"metadata":         chunk.Metadata,
+				"index_status":     chunk.IndexStatus,
+				"last_editor_id":   chunk.LastEditorID,
+				"updated_at":       chunk.UpdatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrChunkRevisionConflict
+		}
+		return tx.Create(revision).Error
+	})
+}
+
+func (r *chunkRepository) ListChunkRevisions(
+	ctx context.Context, tenantID uint64, chunkID string,
+) ([]*types.ChunkRevision, error) {
+	var revisions []*types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Order("revision DESC").Find(&revisions).Error
+	return revisions, err
+}
+
+func (r *chunkRepository) GetChunkRevision(
+	ctx context.Context, tenantID uint64, chunkID string, revision int,
+) (*types.ChunkRevision, error) {
+	var item types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ? AND revision = ?", tenantID, chunkID, revision).
+		First(&item).Error
+	return &item, err
 }
 
 // SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).

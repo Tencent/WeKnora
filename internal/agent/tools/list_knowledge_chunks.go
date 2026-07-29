@@ -117,34 +117,12 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		}, fmt.Errorf("missing id parameter")
 	}
 
-	// Get knowledge info without tenant filter to support shared KB
-	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	knowledge, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, knowledgeID, t.knowledgeService)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("Knowledge not found: %v", err),
+			Error:   fmt.Sprintf("Knowledge is not accessible: %v", err),
 		}, err
-	}
-
-	// Verify the knowledge's KB is in searchTargets (permission check)
-	if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
-		}, fmt.Errorf("knowledge base not in search targets")
-	}
-	allowed, err := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
-	if err != nil {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to validate knowledge scope: %v", err),
-		}, err
-	}
-	if !allowed {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Knowledge %s is not within the current @mention scope", knowledge.ID),
-		}, fmt.Errorf("knowledge not in search target scope")
 	}
 
 	// Use the knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
@@ -167,8 +145,9 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		PageSize: chunkLimit,
 	}
 
+	enabled := true
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", nil)
+		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", &enabled, nil)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -296,31 +275,14 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 
 // executeByChunkID loads one chunk by faq_id / chunk_id (FAQ entry or any chunk).
 func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID string) (*types.ToolResult, error) {
-	chunk, err := t.chunkService.GetChunkByIDOnly(ctx, chunkID)
-	if err != nil || chunk == nil {
+	chunk, err := authorizeChunkInSearchTargets(
+		ctx, t.searchTargets, chunkID, t.chunkService, t.knowledgeService,
+	)
+	if err != nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("chunk not found: %v", err),
+			Error:   fmt.Sprintf("chunk is not accessible: %v", err),
 		}, err
-	}
-	if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
-		}, fmt.Errorf("knowledge base not in search targets")
-	}
-	allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
-	if scopeErr != nil {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to validate chunk scope: %v", scopeErr),
-		}, scopeErr
-	}
-	if !allowed {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("chunk %s is not within the current @mention scope", chunk.ID),
-		}, fmt.Errorf("chunk not in search target scope")
 	}
 
 	chunks := []*types.Chunk{chunk}

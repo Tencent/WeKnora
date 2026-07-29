@@ -54,6 +54,20 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// WithWikiEditSource marks ctx so wiki page writes performed under it are
+// attributed to the given edit source (WikiEditSourceUser / Agent / Revert).
+// Writes without the mark are attributed to the ingest pipeline.
+func WithWikiEditSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, WikiEditSourceContextKey, NormalizeWikiEditSource(source))
+}
+
+// WikiEditSourceFromContext returns the wiki edit source carried by ctx,
+// defaulting to WikiEditSourcePipeline when absent.
+func WikiEditSourceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(WikiEditSourceContextKey).(string)
+	return NormalizeWikiEditSource(v)
+}
+
 // TaskInitiator is the authenticated caller that submitted an asynchronous
 // task. Workers restore it into their context so audit entries describe who
 // initiated the operation, while tasks created by schedulers remain

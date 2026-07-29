@@ -173,6 +173,9 @@ type KnowledgeBaseConfig struct {
 type ParserEngineRule struct {
 	FileTypes []string `yaml:"file_types" json:"file_types"`
 	Engine    string   `yaml:"engine"     json:"engine"`
+	// XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
+	// nil preserves the parser default; an explicit false disables the mode.
+	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty"`
 }
 
 // ChunkingConfig represents the document splitting configuration
@@ -217,14 +220,30 @@ type ChunkingConfig struct {
 // based on the configured rules. Returns empty string (builtin) when
 // no rule matches.
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
-	for _, rule := range c.ParserEngineRules {
-		for _, ft := range rule.FileTypes {
-			if ft == fileType {
-				return rule.Engine
+	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
+		return rule.Engine
+	}
+	return ""
+}
+
+// ResolveParserEngineRule returns the parser rule for a file type.
+func (c ChunkingConfig) ResolveParserEngineRule(fileType string) *ParserEngineRule {
+	fileType = normalizeParserFileType(fileType)
+	if fileType == "" {
+		return nil
+	}
+	for i := range c.ParserEngineRules {
+		for _, ft := range c.ParserEngineRules[i].FileTypes {
+			if normalizeParserFileType(ft) == fileType {
+				return &c.ParserEngineRules[i]
 			}
 		}
 	}
-	return ""
+	return nil
+}
+
+func normalizeParserFileType(fileType string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
 }
 
 // StorageProviderConfig stores the KB-level storage provider selection.

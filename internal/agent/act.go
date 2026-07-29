@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
@@ -49,6 +50,52 @@ func argKeys(args map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// traceArgumentValue keeps valid model-emitted JSON structured in Langfuse
+// while preserving malformed payloads verbatim for diagnosis.
+func traceArgumentValue(raw string) interface{} {
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return raw
+	}
+	return value
+}
+
+// buildToolSpanInput exposes both sides of the model-context boundary:
+// model_arguments is exactly what the model emitted (including temporary
+// handles), while resolved_arguments is the durable payload actually executed.
+// Langfuse never performs mapping itself; it only observes the registry's audit.
+func buildToolSpanInput(tc types.LLMToolCall, resolvedArgs map[string]any, sensitive bool) map[string]interface{} {
+	modelArguments := tc.ModelArguments
+	if modelArguments == "" {
+		modelArguments = tc.Function.Arguments
+	}
+	resolution := tc.ArgumentResolution
+	if resolution == "" {
+		resolution = modelcontext.ArgumentResolutionUnchanged
+	}
+	if sensitive {
+		modelArgKeys := []string(nil)
+		if parsed, ok := traceArgumentValue(modelArguments).(map[string]interface{}); ok {
+			modelArgKeys = argKeys(parsed)
+		}
+		return map[string]interface{}{
+			"tool_call_id":            tc.ID,
+			"model_arg_keys":          modelArgKeys,
+			"resolved_arg_keys":       argKeys(resolvedArgs),
+			"argument_resolution":     resolution,
+			"unresolved_handle_count": len(tc.UnresolvedHandles),
+			"args_redacted":           true,
+		}
+	}
+	return map[string]interface{}{
+		"tool_call_id":        tc.ID,
+		"model_arguments":     traceArgumentValue(modelArguments),
+		"resolved_arguments":  resolvedArgs,
+		"argument_resolution": resolution,
+		"unresolved_handles":  tc.UnresolvedHandles,
+	}
 }
 
 // finishToolSpan serialises a completed tool call into a Langfuse span
@@ -330,7 +377,29 @@ func (e *AgentEngine) runToolCall(
 			}
 		}
 		logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
-		tc.Function.Arguments = repaired
+		// The initial model-context pass could not inspect malformed JSON.
+		// Decode the repaired payload before execution, while preserving the
+		// exact provider payload already stored in tc.ModelArguments.
+		decoded := tc
+		decoded.ModelArguments = ""
+		decoded.Function.Arguments = repaired
+		decodedCalls := []types.LLMToolCall{decoded}
+		e.modelContext.DecodeToolCalls(decodedCalls)
+		tc.Function.Arguments = decodedCalls[0].Function.Arguments
+		tc.ArgumentResolution = decodedCalls[0].ArgumentResolution
+		tc.UnresolvedHandles = decodedCalls[0].UnresolvedHandles
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			return types.ToolCall{
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Args:             map[string]any{"_raw": tc.Function.Arguments},
+				ProviderMetadata: tc.ProviderMetadata,
+				Result: &types.ToolResult{
+					Success: false,
+					Error:   fmt.Sprintf("Failed to parse repaired tool arguments: %v", err),
+				},
+			}
+		}
 	}
 
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
@@ -365,30 +434,23 @@ func (e *AgentEngine) runToolCall(
 	// any nested generations (embedding/rerank/VLM) that the tool itself
 	// triggers. No-op when Langfuse is disabled.
 	mgr := langfuse.GetManager()
-	toolSpanInput := map[string]interface{}{
-		"arguments":    args,
-		"tool_call_id": tc.ID,
-	}
 	// database_query's SQL is treated as sensitive by the UI hint layer
 	// (toolHintSensitiveArgs) because it exposes implementation details.
 	// Mirror that policy for Langfuse: redact raw arguments to avoid
 	// leaking raw SQL into the observability backend.
-	if toolHintSensitiveArgs[tc.Function.Name] {
-		toolSpanInput = map[string]interface{}{
-			"tool_call_id":  tc.ID,
-			"arg_keys":      argKeys(args),
-			"args_redacted": true,
-		}
-	}
+	toolSpanInput := buildToolSpanInput(tc, args, toolHintSensitiveArgs[tc.Function.Name])
+	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
 		Name:  "agent.tool." + tc.Function.Name,
 		Input: toolSpanInput,
 		Metadata: map[string]interface{}{
-			"iteration":    iteration,
-			"round":        round,
-			"tool_index":   i + 1,
-			"tool_call_id": tc.ID,
-			"session_id":   sessionID,
+			"iteration":               iteration,
+			"round":                   round,
+			"tool_index":              i + 1,
+			"tool_call_id":            tc.ID,
+			"session_id":              sessionID,
+			"argument_resolution":     argumentResolution,
+			"unresolved_handle_count": len(tc.UnresolvedHandles),
 		},
 	})
 
@@ -405,12 +467,21 @@ func (e *AgentEngine) runToolCall(
 		ExecTimeout: defaultToolExecTimeout,
 	})
 
-	execCtx, toolCancel := context.WithTimeout(toolExecCtx, defaultToolExecTimeout)
-	result, err := e.toolRegistry.ExecuteTool(
-		execCtx, tc.Function.Name,
-		json.RawMessage(tc.Function.Arguments),
-	)
-	toolCancel()
+	var result *types.ToolResult
+	var err error
+	if len(tc.UnresolvedHandles) > 0 {
+		// A temporary handle is not an application identity. Fail before tool
+		// execution so a hallucinated/stale cN/dN/bN/wN/iN/res:// token can
+		// never reach persistence, an external service, or a routing decision.
+		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
+	} else {
+		execCtx, toolCancel := context.WithTimeout(toolExecCtx, defaultToolExecTimeout)
+		result, err = e.toolRegistry.ExecuteTool(
+			execCtx, tc.Function.Name,
+			json.RawMessage(tc.Function.Arguments),
+		)
+		toolCancel()
+	}
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{

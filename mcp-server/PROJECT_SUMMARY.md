@@ -25,7 +25,7 @@ WeKnoraMCP/
 │
 ├── 🧪 测试文件
 │   ├── test_module.py         # 模组功能测试
-│   └── test_imports.py        # 导入测试
+│   └── check_imports.py       # 手动导入检查
 │
 ├── 📚 文档文件
 │   ├── README.md              # 项目说明

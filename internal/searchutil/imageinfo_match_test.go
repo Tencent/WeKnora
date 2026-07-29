@@ -68,6 +68,22 @@ func TestPruneMarkdownImagesOutsideRange(t *testing.T) {
 	}
 }
 
+func TestPruneMarkdownImagesByImageInfoIgnoresShiftedOffsets(t *testing.T) {
+	content := "a manually inserted prefix that shifts every parser offset\n\n" +
+		"![p1](u1)\n\nbody\n\n![p2](u2)"
+	raw, err := json.Marshal([]types.ImageInfo{{URL: "u2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := PruneMarkdownImagesByImageInfo(content, string(raw))
+	if strings.Contains(got, "u1") {
+		t.Fatalf("unscoped image remained: %q", got)
+	}
+	if !strings.Contains(got, "![p2](u2)") {
+		t.Fatalf("scoped image was removed: %q", got)
+	}
+}
+
 func TestEnrichContentWithImageInfoForChat_SkipsUnmatched(t *testing.T) {
 	content := "![p1](u1)\n\n![p2](u2)"
 	raw, _ := json.Marshal([]types.ImageInfo{{URL: "u2", OCRText: "two"}})

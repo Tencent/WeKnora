@@ -93,6 +93,70 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	return accepted, err
 }
 
+// SeedKnowledgeFinalizingWithPendingOp commits the finalizing counter and the
+// durable operation that owns one slot in the same transaction. This closes
+// the crash window where a knowledge row could enter finalizing before its
+// Wiki operation existed.
+func (r *taskPendingOpsRepository) SeedKnowledgeFinalizingWithPendingOp(
+	ctx context.Context,
+	knowledgeID string,
+	expectedSubtasks int,
+	op *types.TaskPendingOp,
+) (bool, error) {
+	if knowledgeID == "" {
+		return false, errors.New("task pending ops: knowledge_id is required")
+	}
+	if expectedSubtasks <= 0 {
+		return false, errors.New("task pending ops: expected_subtasks must be positive")
+	}
+	if err := preparePendingOp(op); err != nil {
+		return false, err
+	}
+	if op.Scope != types.TaskScopeKnowledgeBase {
+		return false, errors.New("task pending ops: finalizing seed requires knowledge_base scope")
+	}
+
+	promoted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&types.KnowledgeBase{}).
+			Select("id").
+			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var kb types.KnowledgeBase
+		if err := query.Take(&kb).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		res := tx.Model(&types.Knowledge{}).
+			Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ? AND parse_status = ?",
+				knowledgeID, op.TenantID, op.ScopeID, types.ParseStatusProcessing,
+			).
+			Updates(map[string]interface{}{
+				"parse_status":           types.ParseStatusFinalizing,
+				"pending_subtasks_count": expectedSubtasks,
+				"updated_at":             time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Create(op).Error; err != nil {
+			return err
+		}
+		promoted = true
+		return nil
+	})
+	return promoted, err
+}
+
 // PeekBatch returns up to `limit` rows for the (task_type, scope, scope_id)
 // tuple ordered by id ASC. Rows are not removed; callers must
 // DeleteByIDs once they have been consumed (or IncrFailCount and leave

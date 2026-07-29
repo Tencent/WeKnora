@@ -114,7 +114,11 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 				usage = resp.Usage
 			}
 			if len(resp.ToolCalls) > 0 {
-				toolCalls = resp.ToolCalls
+				// The downstream model-context registry decodes arguments in
+				// place before tool execution. Snapshot the provider payload so
+				// the generation observation remains the exact model output and
+				// cannot be changed through the shared slice backing array.
+				toolCalls = snapshotLangfuseToolCalls(resp.ToolCalls)
 			}
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
@@ -128,6 +132,10 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
+}
+
+func snapshotLangfuseToolCalls(toolCalls []types.LLMToolCall) []types.LLMToolCall {
+	return append([]types.LLMToolCall(nil), toolCalls...)
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {

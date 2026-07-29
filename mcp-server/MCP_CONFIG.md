@@ -1,6 +1,8 @@
 # 使用 uv 运行 WeKnora MCP 服务器
 
 > 更推荐使用`uv`来运行基于python的MCP服务。
+>
+> 也可通过 PyPI 安装：`pip install weknora-mcp`（包名 `weknora-mcp`，非 `weknora-mcp-server`）。
 
 ## 1. 安装 uv
 
