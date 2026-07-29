@@ -30,32 +30,34 @@
           </div>
         </div>
         <div class="setting-control">
-          <t-select
-            :value="getEngineForGroup(group.extensions) || undefined"
-            @change="(val: string) => handleEngineChange(group.extensions, val)"
-            :style="embedded ? undefined : { width: '280px' }"
-            :class="{ 'parser-engine-select--embedded': embedded }"
-            :status="hasAvailableEngine(group.extensions) ? 'default' : 'warning'"
-            :placeholder="$t('kbSettings.parser.noEngine')"
-            :popup-props="{ overlayInnerStyle: { maxHeight: '240px' } }"
-          >
-            <t-option
-              v-for="opt in getEngineOptions(group.extensions)"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.selectLabel"
-            />
-          </t-select>
-          <t-checkbox
-            v-if="group.extensions.includes('xlsx') && getEngineForGroup(group.extensions) === 'builtin'"
-            class="xlsx-header-option"
-            :checked="getXLSXFirstRowAsHeader(group.extensions)"
-            @change="(checked: boolean) => handleXLSXFirstRowAsHeaderChange(group.extensions, checked)"
-          >
-            {{ $t('kbSettings.parser.xlsxFirstRowAsHeader') }}
-          </t-checkbox>
-          <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
-            <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
+          <div class="parser-control-stack">
+            <t-select
+              :value="getEngineForGroup(group.extensions) || undefined"
+              @change="(val: string) => handleEngineChange(group.extensions, val)"
+              :style="embedded ? undefined : { width: '280px' }"
+              :class="{ 'parser-engine-select--embedded': embedded }"
+              :status="hasAvailableEngine(group.extensions) ? 'default' : 'warning'"
+              :placeholder="$t('kbSettings.parser.noEngine')"
+              :popup-props="{ overlayInnerStyle: { maxHeight: '240px' } }"
+            >
+              <t-option
+                v-for="opt in getEngineOptions(group.extensions)"
+                :key="opt.value"
+                :value="opt.value"
+                :label="opt.selectLabel"
+              />
+            </t-select>
+            <t-checkbox
+              v-if="group.extensions.includes('xlsx') && getEngineForGroup(group.extensions) === 'builtin'"
+              class="xlsx-header-option"
+              :checked="getXLSXFirstRowAsHeader(group.extensions)"
+              @change="(checked: boolean) => handleXLSXFirstRowAsHeaderChange(group.extensions, checked)"
+            >
+              {{ $t('kbSettings.parser.xlsxFirstRowAsHeader') }}
+            </t-checkbox>
+            <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
+              <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
+            </div>
           </div>
         </div>
       </div>
@@ -433,9 +435,27 @@ watch(() => props.parserEngineRules, (v) => {
   align-items: flex-end;
 }
 
+.parser-control-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 280px;
+}
+
 .xlsx-header-option {
-  margin-top: 10px;
-  text-align: right;
+  align-self: stretch;
+
+  :deep(.t-checkbox) {
+    align-items: flex-start;
+  }
+
+  :deep(.t-checkbox__label) {
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: left;
+    white-space: normal;
+  }
 }
 
 .no-engine-warning {
@@ -493,6 +513,10 @@ watch(() => props.parserEngineRules, (v) => {
     min-width: 0;
     max-width: none;
     align-items: stretch;
+  }
+
+  .parser-control-stack {
+    width: 100%;
   }
 
   .group-label {
