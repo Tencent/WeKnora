@@ -51,3 +51,22 @@ func TestProgressKnowledgeTerminalTreatsSoftDeletedDocumentAsTerminal(t *testing
 	}
 	require.True(t, progressKnowledgeTerminal(deleted))
 }
+
+func TestBatchParseCancellable(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		knowledge *types.Knowledge
+		want      bool
+	}{
+		{"pending", &types.Knowledge{ParseStatus: types.ParseStatusPending}, true},
+		{"processing", &types.Knowledge{ParseStatus: types.ParseStatusProcessing}, true},
+		{"finalizing", &types.Knowledge{ParseStatus: types.ParseStatusFinalizing}, true},
+		{"completed", &types.Knowledge{ParseStatus: types.ParseStatusCompleted}, false},
+		{"cancelled", &types.Knowledge{ParseStatus: types.ParseStatusCancelled}, false},
+		{"soft deleted", &types.Knowledge{ParseStatus: types.ParseStatusProcessing, DeletedAt: gorm.DeletedAt{Valid: true}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, batchParseCancellable(test.knowledge))
+		})
+	}
+}

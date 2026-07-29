@@ -31,6 +31,7 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
+  batchCancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
   getKnowledgeSpans,
@@ -539,6 +540,7 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchCancelling = ref(false);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -1988,6 +1990,34 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
   openCardDetails(item);
 };
 
+const confirmBatchCancelParse = async () => {
+  if (batchCancelling.value || batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  batchCancelling.value = true;
+  try {
+    const res: any = await batchCancelKnowledgeParse(kbId.value, ids);
+    if (res?.success) {
+      const cancelledCount = Math.max(0, Number(res?.data?.cancelled_count) || 0);
+      const skippedCount = Math.max(0, Number(res?.data?.skipped_count) || 0);
+      if (cancelledCount > 0) {
+        MessagePlugin.success(t('knowledgeBase.batchCancelParseSuccess', { count: cancelledCount }));
+      }
+      if (skippedCount > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchCancelParseSkipped', { count: skippedCount }));
+      }
+      clearSelection();
+      batchMode.value = false;
+      await loadKnowledgeFiles(kbId.value);
+      startKnowledgeProgressPolling();
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.cancelParseFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'));
+  } finally {
+    batchCancelling.value = false;
+  }
+};
 const confirmBatchDelete = async () => {
   if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
@@ -2495,8 +2525,9 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :cancel-parse-loading="batchCancelling"
+                  :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
+                  @cancel-parse="confirmBatchCancelParse" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>

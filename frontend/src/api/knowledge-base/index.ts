@@ -320,6 +320,10 @@ export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
 }
 
+export function batchCancelKnowledgeParse(kbId: string, ids: string[]) {
+  return post(`/api/v1/knowledge/batch-cancel-parse`, { kb_id: kbId, ids });
+}
+
 export function getKnowledgeSpans(id: string, attempt?: number) {
   const qs = attempt ? `?attempt=${attempt}` : '';
   return get(`/api/v1/knowledge/${id}/spans${qs}`);
