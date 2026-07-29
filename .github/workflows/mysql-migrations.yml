@@ -1,0 +1,63 @@
+name: MySQL Migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/mysql-migration-check/**'
+      - 'cmd/migration-parity/**'
+      - 'internal/database/**'
+      - 'migrations/mysql/**'
+      - 'migrations/versioned/**'
+      - '.github/workflows/mysql-migrations.yml'
+      - 'go.mod'
+      - 'go.sum'
+  pull_request:
+    paths:
+      - 'cmd/mysql-migration-check/**'
+      - 'cmd/migration-parity/**'
+      - 'internal/database/**'
+      - 'migrations/mysql/**'
+      - 'migrations/versioned/**'
+      - '.github/workflows/mysql-migrations.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  mysql-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: weknora_mysql_test
+          MYSQL_USER: weknora
+          MYSQL_PASSWORD: weknora
+          MYSQL_ROOT_PASSWORD: root
+          TZ: UTC
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uweknora -pweknora --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - name: Check MySQL migration parity
+        run: go run ./cmd/migration-parity
+
+      - name: Run MySQL migrations
+        env:
+          WEKNORA_MYSQL_TEST_DSN: mysql://weknora:weknora@tcp(127.0.0.1:3306)/weknora_mysql_test?parseTime=true&multiStatements=true&loc=UTC&time_zone=%27%2B00%3A00%27
+        run: go run ./cmd/mysql-migration-check

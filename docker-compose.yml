@@ -521,6 +521,35 @@ services:
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
 
+  mysql:
+    image: mysql:8.0
+    container_name: WeKnora-mysql
+    profiles:
+      - mysql
+    environment:
+      - MYSQL_DATABASE=${DB_NAME:-WeKnora}
+      - MYSQL_USER=${DB_USER:-weknora}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-weknora}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
+      - TZ=UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
@@ -1009,6 +1038,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql-data:
   data-files:
   docreader-tmp:
   minio_data:
