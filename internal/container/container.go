@@ -151,8 +151,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(
 		repo interfaces.ProcessingArtifactRepository,
 		redisClient *redis.Client,
+		cfg *config.Config,
 	) *artifact.Runtime {
-		runtime := artifact.NewRuntime(repo, nil)
+		readEnabled := true
+		writeEnabled := true
+		var stages map[string]bool
+		if cfg != nil && cfg.ArtifactCache != nil {
+			readEnabled = cfg.ArtifactCache.ReadEnabled
+			writeEnabled = cfg.ArtifactCache.WriteEnabled
+			stages = cfg.ArtifactCache.Stages
+		}
+		runtime := artifact.NewRuntime(repo, newArtifactObserver())
+		runtime.ConfigureCacheMode(readEnabled, writeEnabled, stages)
 		runtime.ConfigureLease(artifact.NewRedisLease(redisClient))
 		return runtime
 	}))

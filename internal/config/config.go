@@ -33,12 +33,21 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	ArtifactCache   *ArtifactCacheConfig   `yaml:"artifact_cache"   json:"artifact_cache"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// ArtifactCacheConfig controls reusable ingestion artifacts. A nil config
+// keeps reads and writes enabled for backward-compatible defaults.
+type ArtifactCacheConfig struct {
+	ReadEnabled  bool            `yaml:"read_enabled"  json:"read_enabled"`
+	WriteEnabled bool            `yaml:"write_enabled" json:"write_enabled"`
+	Stages       map[string]bool `yaml:"stages"        json:"stages"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -489,6 +498,9 @@ func ConfigDir() string {
 
 // LoadConfig 从配置文件加载配置
 func LoadConfig() (*Config, error) {
+	viper.SetDefault("artifact_cache.read_enabled", true)
+	viper.SetDefault("artifact_cache.write_enabled", true)
+
 	// 设置配置文件名和路径
 	viper.SetConfigName("config")         // 配置文件名称(不带扩展名)
 	viper.SetConfigType("yaml")           // 配置文件类型

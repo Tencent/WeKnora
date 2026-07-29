@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (knowledge_id, attempt, span_id)
 );
+
+CREATE TABLE IF NOT EXISTS knowledge_attempt_counters (
+    knowledge_id VARCHAR(64) PRIMARY KEY,
+    last_attempt INTEGER NOT NULL CHECK (last_attempt >= 0),
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 func setupSpanTrackerTest(t *testing.T) (SpanTracker, *gorm.DB) {

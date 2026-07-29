@@ -3,6 +3,22 @@ server:
   port: 8080
   host: "0.0.0.0"
 
+# Reusable ingestion artifacts. Environment overrides use
+# ARTIFACT_CACHE_READ_ENABLED and ARTIFACT_CACHE_WRITE_ENABLED.
+artifact_cache:
+  read_enabled: true
+  write_enabled: true
+  stages:
+    parse: true
+    embedding: true
+    summary: true
+    question: true
+    vlm_ocr: true
+    vlm_caption: true
+    wiki_map: true
+    graph_extract.entities: true
+    graph_extract.relationships: true
+
 # Conversation service configuration
 # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
 # Set the _id to the template ID you want; the system will load its content at startup.

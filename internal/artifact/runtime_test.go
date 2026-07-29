@@ -227,3 +227,112 @@ func TestRuntimeRedisLeaseSuppressesCrossProcessDuplicateCompute(t *testing.T) {
 	require.NoError(t, <-results)
 	assert.Equal(t, int32(1), calls.Load())
 }
+
+func TestRuntimeCacheModes(t *testing.T) {
+	t.Run("shadow write does not read", func(t *testing.T) {
+		repository := newMemoryArtifactRepository()
+		runtime := NewRuntime(repository, nil)
+		runtime.ConfigureCacheMode(false, true, nil)
+		expected := testExpected(t)
+		var calls int
+
+		for index := 0; index < 2; index++ {
+			_, err := runtime.LoadOrCompute(
+				context.Background(),
+				expected,
+				func(context.Context) ([]byte, error) {
+					calls++
+					return []byte(`{"value":"computed"}`), nil
+				},
+			)
+			require.NoError(t, err)
+		}
+
+		assert.Equal(t, 2, calls)
+		assert.Len(t, repository.values, 1)
+	})
+
+	t.Run("read only does not write misses", func(t *testing.T) {
+		repository := newMemoryArtifactRepository()
+		runtime := NewRuntime(repository, nil)
+		runtime.ConfigureCacheMode(true, false, nil)
+
+		_, err := runtime.LoadOrCompute(
+			context.Background(),
+			testExpected(t),
+			func(context.Context) ([]byte, error) {
+				return []byte(`{"value":"computed"}`), nil
+			},
+		)
+		require.NoError(t, err)
+		assert.Empty(t, repository.values)
+	})
+
+	t.Run("disabled stage bypasses reads and writes", func(t *testing.T) {
+		repository := newMemoryArtifactRepository()
+		runtime := NewRuntime(repository, nil)
+		runtime.ConfigureCacheMode(true, true, map[string]bool{"summary": false})
+		expected := testExpected(t)
+		var calls int
+
+		for index := 0; index < 2; index++ {
+			_, err := runtime.LoadOrCompute(
+				context.Background(),
+				expected,
+				func(context.Context) ([]byte, error) {
+					calls++
+					return []byte(`{"value":"computed"}`), nil
+				},
+			)
+			require.NoError(t, err)
+		}
+
+		assert.Equal(t, 2, calls)
+		assert.Empty(t, repository.values)
+	})
+}
+
+func TestRuntimeObserverRecordsSingleflightWaitWithoutExposingPayload(t *testing.T) {
+	repository := newMemoryArtifactRepository()
+	var eventsMu sync.Mutex
+	var events []Event
+	runtime := NewRuntime(repository, func(event Event) {
+		eventsMu.Lock()
+		defer eventsMu.Unlock()
+		events = append(events, event)
+	})
+	expected := testExpected(t)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for index := 0; index < 2; index++ {
+		go func() {
+			<-start
+			_, err := runtime.LoadOrCompute(
+				context.Background(),
+				expected,
+				func(context.Context) ([]byte, error) {
+					time.Sleep(20 * time.Millisecond)
+					return []byte(`{"value":"computed"}`), nil
+				},
+			)
+			results <- err
+		}()
+	}
+	close(start)
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	assert.Condition(t, func() bool {
+		for _, event := range events {
+			if event.Kind == EventWait &&
+				event.Reason == "singleflight" &&
+				event.SingleflightWaitMS >= 0 {
+				return true
+			}
+		}
+		return false
+	})
+}

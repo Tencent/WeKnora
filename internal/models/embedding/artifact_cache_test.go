@@ -5,10 +5,13 @@ import (
 	"math"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/artifact"
 	"github.com/Tencent/WeKnora/internal/testutil/artifactrepo"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +22,7 @@ type countingEmbedder struct {
 	dimensions  int
 	shortResult bool
 	invalid     float32
+	delay       time.Duration
 }
 
 func (e *countingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -33,6 +37,9 @@ func (e *countingEmbedder) BatchEmbed(_ context.Context, texts []string) ([][]fl
 	e.mu.Lock()
 	e.batches = append(e.batches, append([]string(nil), texts...))
 	e.mu.Unlock()
+	if e.delay > 0 {
+		time.Sleep(e.delay)
+	}
 	count := len(texts)
 	if e.shortResult && count > 0 {
 		count--
@@ -132,6 +139,56 @@ func TestArtifactCachedEmbeddingUsesPartialHits(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, vectors, 2)
 	assert.Equal(t, [][]string{{"missing"}}, provider.calls())
+}
+
+func TestArtifactCachedEmbeddingBatchSuppressesConcurrentProviderCalls(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+
+	repository := artifactrepo.New()
+	firstRuntime := artifact.NewRuntime(repository, nil)
+	secondRuntime := artifact.NewRuntime(repository, nil)
+	firstRuntime.ConfigureLease(artifact.NewRedisLease(client))
+	secondRuntime.ConfigureLease(artifact.NewRedisLease(client))
+
+	provider := &countingEmbedder{dimensions: 3, delay: 75 * time.Millisecond}
+	cached := []Embedder{
+		NewArtifactCachedEmbedder(provider, firstRuntime, embeddingArtifactConfig()),
+		NewArtifactCachedEmbedder(provider, secondRuntime, embeddingArtifactConfig()),
+	}
+	inputs := []string{"alpha", "beta", "alpha", "gamma"}
+
+	const workers = 10
+	start := make(chan struct{})
+	results := make(chan [][]float32, workers)
+	errors := make(chan error, workers)
+	for index := 0; index < workers; index++ {
+		go func(worker int) {
+			<-start
+			vectors, err := cached[worker%len(cached)].BatchEmbed(
+				documentEmbeddingContext(),
+				inputs,
+			)
+			results <- vectors
+			errors <- err
+		}(index)
+	}
+	close(start)
+
+	var first [][]float32
+	for index := 0; index < workers; index++ {
+		require.NoError(t, <-errors)
+		vectors := <-results
+		require.Len(t, vectors, len(inputs))
+		assert.Equal(t, vectors[0], vectors[2])
+		if index == 0 {
+			first = vectors
+			continue
+		}
+		assert.Equal(t, first, vectors)
+	}
+	assert.Equal(t, [][]string{{"alpha", "beta", "gamma"}}, provider.calls())
 }
 
 func TestArtifactCachedEmbeddingBypassesInteractiveQuery(t *testing.T) {

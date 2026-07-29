@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,12 +23,23 @@ const (
 	EventStoreFailure EventKind = "store_failure"
 	EventStored       EventKind = "stored"
 	EventLostRace     EventKind = "lost_race"
+	EventComputed     EventKind = "computed"
+	EventWait         EventKind = "wait"
+	EventBypass       EventKind = "bypass"
 )
 
 type Event struct {
-	Kind   EventKind
-	Lookup types.ProcessingArtifactLookup
-	Err    error
+	Kind               EventKind
+	Lookup             types.ProcessingArtifactLookup
+	OutputSchema       string
+	Reason             string
+	ProviderCall       bool
+	BatchTotal         int
+	BatchHits          int
+	BatchMisses        int
+	BatchDeduplicated  int
+	SingleflightWaitMS int64
+	Err                error
 }
 
 type Observer func(Event)
@@ -66,15 +80,43 @@ type Runtime struct {
 	observer   Observer
 	lease      Lease
 	group      singleflight.Group
+	configMu   sync.RWMutex
+	read       bool
+	write      bool
+	stages     map[string]bool
 }
 
 func NewRuntime(repository Repository, observer Observer) *Runtime {
-	return &Runtime{repository: repository, observer: observer}
+	return &Runtime{
+		repository: repository,
+		observer:   observer,
+		read:       true,
+		write:      true,
+	}
 }
 
 func (r *Runtime) ConfigureLease(lease Lease) {
 	if r != nil {
 		r.lease = lease
+	}
+}
+
+// ConfigureCacheMode controls artifact reads and writes without changing the
+// provider path. Stages omitted from the map remain enabled.
+func (r *Runtime) ConfigureCacheMode(read, write bool, stages map[string]bool) {
+	if r == nil {
+		return
+	}
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	r.read = read
+	r.write = write
+	r.stages = make(map[string]bool, len(stages))
+	for stage, enabled := range stages {
+		normalized := strings.TrimSpace(stage)
+		if normalized != "" {
+			r.stages[normalized] = enabled
+		}
 	}
 }
 
@@ -116,13 +158,31 @@ func (r *Runtime) BatchLoad(
 	keys := make([]types.ProcessingArtifactLookup, 0, len(expected))
 	byKey := make(map[types.ProcessingArtifactLookup]Expected, len(expected))
 	for _, item := range expected {
+		if !r.readEnabled(item.Key.Lookup.Stage) {
+			r.emit(Event{
+				Kind:         EventBypass,
+				Lookup:       item.Key.Lookup,
+				OutputSchema: item.Key.OutputSchema,
+				Reason:       "read_disabled",
+			})
+			continue
+		}
 		keys = append(keys, item.Key.Lookup)
 		byKey[item.Key.Lookup] = item
+	}
+	if len(keys) == 0 {
+		return result
 	}
 	artifacts, err := r.repository.BatchGet(ctx, keys)
 	if err != nil {
 		for _, key := range keys {
-			r.emit(Event{Kind: EventStoreFailure, Lookup: key, Err: err})
+			r.emit(Event{
+				Kind:         EventStoreFailure,
+				Lookup:       key,
+				OutputSchema: byKey[key].Key.OutputSchema,
+				Reason:       "read_error",
+				Err:          err,
+			})
 		}
 		return result
 	}
@@ -132,7 +192,12 @@ func (r *Runtime) BatchLoad(
 		item := byKey[key]
 		manifest, found := artifacts[key]
 		if !found {
-			r.emit(Event{Kind: EventMiss, Lookup: key})
+			r.emit(Event{
+				Kind:         EventMiss,
+				Lookup:       key,
+				OutputSchema: item.Key.OutputSchema,
+				Reason:       "not_found",
+			})
 			continue
 		}
 		payload, decodeErr := DecodeInline(manifest, key, item.Key.OutputSchema, item.Codec)
@@ -140,9 +205,21 @@ func (r *Runtime) BatchLoad(
 			decodeErr = item.Validate(payload)
 		}
 		if decodeErr != nil {
-			r.emit(Event{Kind: EventCorrupt, Lookup: key, Err: decodeErr})
+			r.emit(Event{
+				Kind:         EventCorrupt,
+				Lookup:       key,
+				OutputSchema: item.Key.OutputSchema,
+				Reason:       corruptReason(decodeErr),
+				Err:          decodeErr,
+			})
 			if deleteErr := r.repository.DeleteCorrupt(ctx, key, manifest.PayloadChecksum); deleteErr != nil {
-				r.emit(Event{Kind: EventStoreFailure, Lookup: key, Err: deleteErr})
+				r.emit(Event{
+					Kind:         EventStoreFailure,
+					Lookup:       key,
+					OutputSchema: item.Key.OutputSchema,
+					Reason:       "corrupt_delete_error",
+					Err:          deleteErr,
+				})
 			}
 			continue
 		}
@@ -152,12 +229,23 @@ func (r *Runtime) BatchLoad(
 			CacheHit:     true,
 		}
 		hits = append(hits, key)
-		r.emit(Event{Kind: EventHit, Lookup: key})
+		r.emit(Event{
+			Kind:         EventHit,
+			Lookup:       key,
+			OutputSchema: item.Key.OutputSchema,
+			Reason:       "found_valid",
+		})
 	}
 	if len(hits) > 0 {
 		if err := r.repository.TouchHits(ctx, hits); err != nil {
 			for _, key := range hits {
-				r.emit(Event{Kind: EventStoreFailure, Lookup: key, Err: err})
+				r.emit(Event{
+					Kind:         EventStoreFailure,
+					Lookup:       key,
+					OutputSchema: byKey[key].Key.OutputSchema,
+					Reason:       "touch_error",
+					Err:          err,
+				})
 			}
 		}
 	}
@@ -182,6 +270,8 @@ func (r *Runtime) LoadOrCompute(
 		return uncachedValue(payload, expected.Validate, err)
 	}
 
+	waitStarted := time.Now()
+	var computedByCaller atomic.Bool
 	result := r.group.DoChan(singleflightKey(expected.Key.Lookup), func() (any, error) {
 		if value, hit := r.Load(ctx, expected); hit {
 			return value, nil
@@ -191,9 +281,11 @@ func (r *Runtime) LoadOrCompute(
 				handle, acquired, leaseErr := r.lease.TryAcquire(ctx, expected.Key.Lookup)
 				if leaseErr != nil {
 					r.emit(Event{
-						Kind:   EventStoreFailure,
-						Lookup: expected.Key.Lookup,
-						Err:    leaseErr,
+						Kind:         EventStoreFailure,
+						Lookup:       expected.Key.Lookup,
+						OutputSchema: expected.Key.OutputSchema,
+						Reason:       "lease_error",
+						Err:          leaseErr,
 					})
 					break
 				}
@@ -220,6 +312,7 @@ func (r *Runtime) LoadOrCompute(
 				}
 			}
 		}
+		computedByCaller.Store(true)
 		payload, err := compute(ctx)
 		if err != nil {
 			return Value{}, err
@@ -230,8 +323,22 @@ func (r *Runtime) LoadOrCompute(
 			}
 		}
 		if expected.Cacheable != nil && !expected.Cacheable(payload) {
+			r.emit(Event{
+				Kind:         EventBypass,
+				Lookup:       expected.Key.Lookup,
+				OutputSchema: expected.Key.OutputSchema,
+				Reason:       "output_not_cacheable",
+				ProviderCall: true,
+			})
 			return uncachedValue(payload, expected.Validate, nil)
 		}
+		r.emit(Event{
+			Kind:         EventComputed,
+			Lookup:       expected.Key.Lookup,
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       "provider_success",
+			ProviderCall: true,
+		})
 		candidate, err := NewInlineArtifact(expected.Key, expected.Codec, payload)
 		if err != nil {
 			return Value{}, err
@@ -245,6 +352,15 @@ func (r *Runtime) LoadOrCompute(
 	case completed := <-result:
 		if completed.Err != nil {
 			return Value{}, completed.Err
+		}
+		if completed.Shared && !computedByCaller.Load() {
+			r.emit(Event{
+				Kind:               EventWait,
+				Lookup:             expected.Key.Lookup,
+				OutputSchema:       expected.Key.OutputSchema,
+				Reason:             "singleflight",
+				SingleflightWaitMS: time.Since(waitStarted).Milliseconds(),
+			})
 		}
 		return completed.Val.(Value), nil
 	}
@@ -261,7 +377,14 @@ func (r *Runtime) BatchFreeze(
 	manifests := make([]*types.ProcessingArtifact, 0, len(candidates))
 	byKey := make(map[types.ProcessingArtifactLookup]Candidate, len(candidates))
 	for _, candidate := range candidates {
+		key := candidate.Expected.Key.Lookup
 		if candidate.Expected.Cacheable != nil && !candidate.Expected.Cacheable(candidate.Payload) {
+			r.emit(Event{
+				Kind:         EventBypass,
+				Lookup:       key,
+				OutputSchema: candidate.Expected.Key.OutputSchema,
+				Reason:       "output_not_cacheable",
+			})
 			continue
 		}
 		if candidate.Expected.Validate != nil {
@@ -277,7 +400,7 @@ func (r *Runtime) BatchFreeze(
 		if err != nil {
 			continue
 		}
-		key := manifest.Lookup()
+		key = manifest.Lookup()
 		manifests = append(manifests, manifest)
 		byKey[key] = candidate
 		result[key] = Value{
@@ -289,10 +412,36 @@ func (r *Runtime) BatchFreeze(
 		return result
 	}
 
+	filtered := manifests[:0]
+	for _, manifest := range manifests {
+		key := manifest.Lookup()
+		if !r.writeEnabled(key.Stage) {
+			r.emit(Event{
+				Kind:         EventBypass,
+				Lookup:       key,
+				OutputSchema: byKey[key].Expected.Key.OutputSchema,
+				Reason:       "write_disabled",
+			})
+			continue
+		}
+		filtered = append(filtered, manifest)
+	}
+	manifests = filtered
+	if len(manifests) == 0 {
+		return result
+	}
+
 	winners, err := r.repository.PutManyIfAbsent(ctx, manifests)
 	if err != nil {
 		for _, manifest := range manifests {
-			r.emit(Event{Kind: EventStoreFailure, Lookup: manifest.Lookup(), Err: err})
+			key := manifest.Lookup()
+			r.emit(Event{
+				Kind:         EventStoreFailure,
+				Lookup:       key,
+				OutputSchema: byKey[key].Expected.Key.OutputSchema,
+				Reason:       "write_error",
+				Err:          err,
+			})
 		}
 		return result
 	}
@@ -302,9 +451,11 @@ func (r *Runtime) BatchFreeze(
 		candidate := byKey[key]
 		if winner == nil {
 			r.emit(Event{
-				Kind:   EventStoreFailure,
-				Lookup: key,
-				Err:    errors.New("artifact repository omitted an inserted winner"),
+				Kind:         EventStoreFailure,
+				Lookup:       key,
+				OutputSchema: candidate.Expected.Key.OutputSchema,
+				Reason:       "winner_missing",
+				Err:          errors.New("artifact repository omitted an inserted winner"),
 			})
 			continue
 		}
@@ -318,10 +469,22 @@ func (r *Runtime) BatchFreeze(
 			decodeErr = candidate.Expected.Validate(payload)
 		}
 		if decodeErr != nil {
-			r.emit(Event{Kind: EventCorrupt, Lookup: key, Err: decodeErr})
+			r.emit(Event{
+				Kind:         EventCorrupt,
+				Lookup:       key,
+				OutputSchema: candidate.Expected.Key.OutputSchema,
+				Reason:       corruptReason(decodeErr),
+				Err:          decodeErr,
+			})
 			if winner != nil {
 				if deleteErr := r.repository.DeleteCorrupt(ctx, key, winner.PayloadChecksum); deleteErr != nil {
-					r.emit(Event{Kind: EventStoreFailure, Lookup: key, Err: deleteErr})
+					r.emit(Event{
+						Kind:         EventStoreFailure,
+						Lookup:       key,
+						OutputSchema: candidate.Expected.Key.OutputSchema,
+						Reason:       "corrupt_delete_error",
+						Err:          deleteErr,
+					})
 				}
 			}
 			continue
@@ -344,19 +507,35 @@ func (r *Runtime) freeze(
 		Payload:      append([]byte(nil), candidate.Payload...),
 		OutputDigest: candidate.OutputDigest,
 	}
-	if r.repository == nil {
+	if r.repository == nil || !r.writeEnabled(candidate.Stage) {
+		if r != nil && r.repository != nil {
+			r.emit(Event{
+				Kind:         EventBypass,
+				Lookup:       candidate.Lookup(),
+				OutputSchema: expected.Key.OutputSchema,
+				Reason:       "write_disabled",
+			})
+		}
 		return fallback
 	}
 	winner, created, err := r.repository.PutIfAbsent(ctx, candidate)
 	if err != nil {
-		r.emit(Event{Kind: EventStoreFailure, Lookup: candidate.Lookup(), Err: err})
+		r.emit(Event{
+			Kind:         EventStoreFailure,
+			Lookup:       candidate.Lookup(),
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       "write_error",
+			Err:          err,
+		})
 		return fallback
 	}
 	if winner == nil {
 		r.emit(Event{
-			Kind:   EventStoreFailure,
-			Lookup: candidate.Lookup(),
-			Err:    errors.New("artifact repository returned a nil winner"),
+			Kind:         EventStoreFailure,
+			Lookup:       candidate.Lookup(),
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       "winner_missing",
+			Err:          errors.New("artifact repository returned a nil winner"),
 		})
 		return fallback
 	}
@@ -370,16 +549,38 @@ func (r *Runtime) freeze(
 		err = expected.Validate(payload)
 	}
 	if err != nil {
-		r.emit(Event{Kind: EventCorrupt, Lookup: candidate.Lookup(), Err: err})
+		r.emit(Event{
+			Kind:         EventCorrupt,
+			Lookup:       candidate.Lookup(),
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       corruptReason(err),
+			Err:          err,
+		})
 		if deleteErr := r.repository.DeleteCorrupt(ctx, winner.Lookup(), winner.PayloadChecksum); deleteErr != nil {
-			r.emit(Event{Kind: EventStoreFailure, Lookup: winner.Lookup(), Err: deleteErr})
+			r.emit(Event{
+				Kind:         EventStoreFailure,
+				Lookup:       winner.Lookup(),
+				OutputSchema: expected.Key.OutputSchema,
+				Reason:       "corrupt_delete_error",
+				Err:          deleteErr,
+			})
 		}
 		return fallback
 	}
 	if created {
-		r.emit(Event{Kind: EventStored, Lookup: candidate.Lookup()})
+		r.emit(Event{
+			Kind:         EventStored,
+			Lookup:       candidate.Lookup(),
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       "stored",
+		})
 	} else {
-		r.emit(Event{Kind: EventLostRace, Lookup: candidate.Lookup()})
+		r.emit(Event{
+			Kind:         EventLostRace,
+			Lookup:       candidate.Lookup(),
+			OutputSchema: expected.Key.OutputSchema,
+			Reason:       "immutable_winner",
+		})
 	}
 	return Value{
 		Payload:      payload,
@@ -411,5 +612,47 @@ func singleflightKey(key types.ProcessingArtifactLookup) string {
 func (r *Runtime) emit(event Event) {
 	if r != nil && r.observer != nil {
 		r.observer(event)
+	}
+}
+
+// Observe records adapter-level batch metrics through the same safe observer
+// used by the runtime.
+func (r *Runtime) Observe(event Event) {
+	r.emit(event)
+}
+
+func (r *Runtime) readEnabled(stage string) bool {
+	if r == nil {
+		return false
+	}
+	r.configMu.RLock()
+	defer r.configMu.RUnlock()
+	return r.read && r.stageEnabledLocked(stage)
+}
+
+func (r *Runtime) writeEnabled(stage string) bool {
+	if r == nil {
+		return false
+	}
+	r.configMu.RLock()
+	defer r.configMu.RUnlock()
+	return r.write && r.stageEnabledLocked(stage)
+}
+
+func (r *Runtime) stageEnabledLocked(stage string) bool {
+	enabled, configured := r.stages[stage]
+	return !configured || enabled
+}
+
+func corruptReason(err error) string {
+	switch {
+	case err == nil:
+		return "decode_failed"
+	case strings.Contains(err.Error(), "checksum"):
+		return "checksum_mismatch"
+	case strings.Contains(err.Error(), "schema"):
+		return "schema_mismatch"
+	default:
+		return "decode_failed"
 	}
 }

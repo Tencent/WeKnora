@@ -41,4 +41,4 @@ CREATE TABLE IF NOT EXISTS knowledge_attempt_counters (
         CHECK (last_attempt >= 0)
 );
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000075] Processing artifacts ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000077] Processing artifacts ready'; END $$;

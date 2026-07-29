@@ -173,51 +173,184 @@ func (e *artifactCachedEmbedder) batchEmbed(
 		}
 		uniqueVectors[index] = vector
 	}
+	initialMisses := len(missingIndexes)
+	providerCalled := false
 
-	if len(missingIndexes) > 0 {
-		missingTexts := make([]string, len(missingIndexes))
-		for index, uniquePosition := range missingIndexes {
-			missingTexts[index] = uniqueTexts[uniquePosition]
+	for len(missingIndexes) > 0 {
+		// Every worker picks the same deterministic missing key as the batch
+		// leader. LoadOrCompute then applies both the in-process singleflight
+		// and the cross-process Redis lease to the entire provider batch.
+		leader := missingIndexes[0]
+		for _, uniquePosition := range missingIndexes[1:] {
+			if unique[uniquePosition].Key.Lookup.ArtifactKey <
+				unique[leader].Key.Lookup.ArtifactKey {
+				leader = uniquePosition
+			}
 		}
-		vectors, err := provider(ctx, missingTexts)
+		computed := make(map[int][]float32, len(missingIndexes))
+
+		leaderValue, err := e.runtime.LoadOrCompute(
+			ctx,
+			unique[leader],
+			func(computeContext context.Context) ([]byte, error) {
+				pendingExpected := make([]artifact.Expected, len(missingIndexes))
+				for index, uniquePosition := range missingIndexes {
+					pendingExpected[index] = unique[uniquePosition]
+				}
+				latest := e.runtime.BatchLoad(computeContext, pendingExpected)
+
+				providerPositions := make([]int, 0, len(missingIndexes))
+				var leaderPayload []byte
+				for _, uniquePosition := range missingIndexes {
+					value, found := latest[unique[uniquePosition].Key.Lookup]
+					if !found {
+						providerPositions = append(providerPositions, uniquePosition)
+						continue
+					}
+					vector, decodeErr := decodeEmbeddingArtifact(
+						value.Payload,
+						e.config.Dimensions,
+					)
+					if decodeErr != nil {
+						providerPositions = append(providerPositions, uniquePosition)
+						continue
+					}
+					computed[uniquePosition] = vector
+					if uniquePosition == leader {
+						leaderPayload = value.Payload
+					}
+				}
+
+				if len(providerPositions) > 0 {
+					missingTexts := make([]string, len(providerPositions))
+					for index, uniquePosition := range providerPositions {
+						missingTexts[index] = uniqueTexts[uniquePosition]
+					}
+					vectors, providerErr := provider(computeContext, missingTexts)
+					if providerErr != nil {
+						return nil, providerErr
+					}
+					providerCalled = true
+					if validateErr := ValidateEmbeddingBatch(
+						vectors,
+						len(missingTexts),
+						e.config.Dimensions,
+					); validateErr != nil {
+						return nil, validateErr
+					}
+
+					candidates := make([]artifact.Candidate, 0, len(providerPositions)-1)
+					candidatePositions := make([]int, 0, len(providerPositions)-1)
+					for index, uniquePosition := range providerPositions {
+						payload, encodeErr := encodeEmbeddingArtifact(
+							vectors[index],
+							e.config.Dimensions,
+						)
+						if encodeErr != nil {
+							return nil, encodeErr
+						}
+						if uniquePosition == leader {
+							leaderPayload = payload
+							continue
+						}
+						computed[uniquePosition] = append([]float32(nil), vectors[index]...)
+						candidates = append(candidates, artifact.Candidate{
+							Expected: unique[uniquePosition],
+							Payload:  payload,
+						})
+						candidatePositions = append(candidatePositions, uniquePosition)
+					}
+
+					frozen := e.runtime.BatchFreeze(computeContext, candidates)
+					for _, uniquePosition := range candidatePositions {
+						value, found := frozen[unique[uniquePosition].Key.Lookup]
+						if !found {
+							continue
+						}
+						vector, decodeErr := decodeEmbeddingArtifact(
+							value.Payload,
+							e.config.Dimensions,
+						)
+						if decodeErr == nil {
+							computed[uniquePosition] = vector
+						}
+					}
+				}
+
+				if len(leaderPayload) == 0 {
+					return nil, errors.New("embedding batch leader did not produce a payload")
+				}
+				return leaderPayload, nil
+			},
+		)
 		if err != nil {
 			return nil, err
 		}
-		if err := ValidateEmbeddingBatch(vectors, len(missingTexts), e.config.Dimensions); err != nil {
+		leaderVector, err := decodeEmbeddingArtifact(
+			leaderValue.Payload,
+			e.config.Dimensions,
+		)
+		if err != nil {
 			return nil, err
 		}
+		uniqueVectors[leader] = leaderVector
 
-		candidates := make([]artifact.Candidate, 0, len(missingIndexes))
-		for index, uniquePosition := range missingIndexes {
-			payload, err := encodeEmbeddingArtifact(vectors[index], e.config.Dimensions)
-			if err != nil {
-				return nil, err
+		remainingExpected := make([]artifact.Expected, 0, len(missingIndexes)-1)
+		for _, uniquePosition := range missingIndexes {
+			if uniquePosition != leader {
+				remainingExpected = append(remainingExpected, unique[uniquePosition])
 			}
-			candidates = append(candidates, artifact.Candidate{
-				Expected: unique[uniquePosition],
-				Payload:  payload,
-			})
 		}
-		frozen := e.runtime.BatchFreeze(ctx, candidates)
-		for index, uniquePosition := range missingIndexes {
-			value, found := frozen[unique[uniquePosition].Key.Lookup]
-			if !found {
-				uniqueVectors[uniquePosition] = append([]float32(nil), vectors[index]...)
+		latest := e.runtime.BatchLoad(ctx, remainingExpected)
+		nextMissing := make([]int, 0, len(remainingExpected))
+		for _, uniquePosition := range missingIndexes {
+			if uniquePosition == leader {
 				continue
 			}
-			vector, err := decodeEmbeddingArtifact(value.Payload, e.config.Dimensions)
-			if err != nil {
-				uniqueVectors[uniquePosition] = append([]float32(nil), vectors[index]...)
+			value, found := latest[unique[uniquePosition].Key.Lookup]
+			if found {
+				vector, decodeErr := decodeEmbeddingArtifact(
+					value.Payload,
+					e.config.Dimensions,
+				)
+				if decodeErr == nil {
+					uniqueVectors[uniquePosition] = vector
+					continue
+				}
+			}
+			if vector, found := computed[uniquePosition]; found {
+				uniqueVectors[uniquePosition] = append([]float32(nil), vector...)
 				continue
 			}
-			uniqueVectors[uniquePosition] = vector
+			nextMissing = append(nextMissing, uniquePosition)
 		}
+		missingIndexes = nextMissing
 	}
 
 	result := make([][]float32, len(texts))
 	for index, key := range keys {
 		result[index] = append([]float32(nil), uniqueVectors[uniqueIndex[key]]...)
 	}
+	outcome := artifact.EventHit
+	reason := "batch_hit"
+	if providerCalled {
+		outcome = artifact.EventComputed
+		reason = "batch_computed"
+	} else if initialMisses > 0 {
+		outcome = artifact.EventWait
+		reason = "batch_filled_by_concurrent_worker"
+	}
+	e.runtime.Observe(artifact.Event{
+		Kind:              outcome,
+		Lookup:            unique[0].Key.Lookup,
+		OutputSchema:      unique[0].Key.OutputSchema,
+		Reason:            reason,
+		ProviderCall:      providerCalled,
+		BatchTotal:        len(texts),
+		BatchHits:         len(unique) - initialMisses,
+		BatchMisses:       initialMisses,
+		BatchDeduplicated: len(texts) - len(unique),
+	})
 	return result, nil
 }
 
