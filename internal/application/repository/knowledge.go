@@ -189,7 +189,13 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	omit := omitFieldsOnUpdate
+	// Legacy/unit-test schemas created before custom_metadata should continue
+	// to support unrelated updates when the caller did not provide the field.
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
 
@@ -236,10 +242,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		// If file hash exists, prioritize exact match using hash
+		// File content is only a duplicate within the same file type. This keeps
+		// same-content documents with distinct formats (for example, .md and
+		// .txt) available as separate knowledge items.
 		if params.FileHash != "" {
 			var knowledge types.Knowledge
-			err := query.Where("file_hash = ?", params.FileHash).First(&knowledge).Error
+			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -249,13 +261,17 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 
-		// If no hash or hash doesn't match, use filename and size
+		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			err := query.Where(
-				"file_name = ? AND file_size = ?",
-				params.FileName, params.FileSize,
-			).First(&knowledge).Error
+			duplicateQuery := query.Where(
+				"type = ? AND file_name = ? AND file_size = ?",
+				"file", params.FileName, params.FileSize,
+			)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
@@ -580,6 +596,47 @@ func (r *knowledgeRepository) FindByMetadataKey(
 		return nil, err
 	}
 	return &knowledge, nil
+}
+
+// FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts with
+// the given prefix. Used to sweep an external node's attachment sub-items on re-sync.
+func (r *knowledgeRepository) FindByMetadataKeyPrefix(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	key string,
+	prefix string,
+) ([]*types.Knowledge, error) {
+	escaped := escapeLikeKeyword(prefix)
+	var items []*types.Knowledge
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		// Keep the key literal so PostgreSQL can match the expression index from
+		// migration 000076. The key is internal, but quote it defensively.
+		keyExpr := "metadata->>'" + strings.ReplaceAll(key, "'", "''") + "'"
+		query = query.Where(keyExpr+" LIKE ? ESCAPE ?", escaped+"%", `\`)
+	case "mysql":
+		if key == "external_id" {
+			// Migration 000076 materializes this JSON value in an indexed
+			// generated column. Querying the column directly lets LIKE-prefix
+			// scans use that index.
+			query = query.Where("metadata_external_id LIKE ? ESCAPE ?", escaped+"%", `\`)
+		} else {
+			expression, keyArgument := database.JSONScalarLookup("mysql", "metadata", key)
+			query = query.Where(expression+" LIKE ? ESCAPE ?", keyArgument, escaped+"%", `\`)
+		}
+	default:
+		expression, keyArgument := database.JSONScalarLookup(r.db.Dialector.Name(), "metadata", key)
+		query = query.Where(expression+" LIKE ? ESCAPE ?", keyArgument, escaped+"%", `\`)
+	}
+
+	if err := query.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *knowledgeRepository) SearchKnowledge(

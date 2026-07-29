@@ -74,7 +74,10 @@ func TestMySQLRepositoryQueries(t *testing.T) {
 			id, tenant_id, knowledge_base_id, type, title, source, metadata
 		) VALUES (
 			'mysql-knowledge', 9001, 'mysql-kb', 'file', 'Metadata Test',
-			'manual', JSON_OBJECT('source-resource-id', 'resource-42')
+			'manual', JSON_OBJECT(
+				'source-resource-id', 'resource-42',
+				'external_id', 'nodeA#file#x'
+			)
 		)
 	`).Error)
 
@@ -119,6 +122,13 @@ func TestMySQLRepositoryQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, knowledge)
 	assert.Equal(t, "mysql-knowledge", knowledge.ID)
+
+	knowledgeItems, err := knowledgeRepo.FindByMetadataKeyPrefix(
+		ctx, 9001, "mysql-kb", "external_id", "nodeA#",
+	)
+	require.NoError(t, err)
+	require.Len(t, knowledgeItems, 1)
+	assert.Equal(t, "mysql-knowledge", knowledgeItems[0].ID)
 
 	messageRepo := &messageRepository{db: tx}
 	messages, err := messageRepo.SearchMessagesByKeyword(ctx, 9001, "hello mysql", nil, 10)

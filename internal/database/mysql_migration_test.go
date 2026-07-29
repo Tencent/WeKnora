@@ -89,7 +89,8 @@ func TestMySQLMigrationSchemaParity(t *testing.T) {
 		assert.Contains(t, string(down), "DROP TABLE IF EXISTS "+table+";")
 	}
 
-	sqlWithoutComments := regexp.MustCompile(`(?m)--.*$`).ReplaceAllString(string(up), "")
+	sqlWithoutComments := regexp.MustCompile(`(?m)--.*$`).
+		ReplaceAllString(readMySQLMigrations(t, ".up.sql"), "")
 	unsupported := regexp.MustCompile(`(?m)\b(ILIKE|JSONB|BIGSERIAL|AUTOINCREMENT)\b|::|^\s*WHERE\s`)
 	assert.Empty(t, unsupported.FindAllString(sqlWithoutComments, -1))
 }
@@ -121,6 +122,24 @@ func highestMigrationVersion(t *testing.T, directory string) int {
 	}
 	require.NotEqual(t, -1, highest, "no up migrations found in %s", directory)
 	return highest
+}
+
+func readMySQLMigrations(t *testing.T, suffix string) string {
+	t.Helper()
+	entries, err := os.ReadDir("../../migrations/mysql")
+	require.NoError(t, err)
+
+	var statements strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffix) {
+			continue
+		}
+		content, err := os.ReadFile("../../migrations/mysql/" + entry.Name())
+		require.NoError(t, err)
+		statements.Write(content)
+		statements.WriteByte('\n')
+	}
+	return statements.String()
 }
 
 func TestMySQLMigrationRoundTrip(t *testing.T) {
@@ -168,35 +187,36 @@ func TestMySQLMigrationRoundTrip(t *testing.T) {
 	require.NoError(t, RunMigrationsWithOptions(migrationURL, MigrationOptions{
 		FailOnDirty: true,
 	}))
-	assertMigrationState(t, db, 74, false)
-	assertBusinessTableCount(t, db, 50)
+	mysqlHead := highestMigrationVersion(t, "migrations/mysql")
+	assertMigrationState(t, db, mysqlHead, false)
+	assertBusinessTableCount(t, db, 51)
 
 	migrator, err := migrate.New("file://migrations/mysql", migrationURL)
 	require.NoError(t, err)
 	require.NoError(t, migrator.Down())
 	assertBusinessTableCount(t, db, 0)
 	require.NoError(t, migrator.Up())
-	assertMigrationState(t, db, 74, false)
-	assertBusinessTableCount(t, db, 50)
+	assertMigrationState(t, db, mysqlHead, false)
+	assertBusinessTableCount(t, db, 51)
 	sourceErr, databaseErr := migrator.Close()
 	require.NoError(t, sourceErr)
 	require.NoError(t, databaseErr)
 
 	version, dirty, err := GetMigrationVersion()
 	require.NoError(t, err)
-	assert.EqualValues(t, 74, version)
+	assert.EqualValues(t, mysqlHead, version)
 	assert.False(t, dirty)
 
 	assertMySQLSoftDeleteUniqueness(t, db)
 
-	_, err = db.Exec("UPDATE schema_migrations SET dirty = 1 WHERE version = 74")
+	_, err = db.Exec("UPDATE schema_migrations SET dirty = 1 WHERE version = ?", mysqlHead)
 	require.NoError(t, err)
 	err = RunMigrationsWithOptions(migrationURL, MigrationOptions{
 		AutoRecoverDirty: true,
 		FailOnDirty:      true,
 	})
 	require.ErrorContains(t, err, "automatic recovery is disabled")
-	_, restoreErr := db.Exec("UPDATE schema_migrations SET dirty = 0 WHERE version = 74")
+	_, restoreErr := db.Exec("UPDATE schema_migrations SET dirty = 0 WHERE version = ?", mysqlHead)
 	require.NoError(t, restoreErr)
 }
 

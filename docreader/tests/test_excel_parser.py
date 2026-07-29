@@ -275,6 +275,109 @@ class ExcelImageFilterTest(unittest.TestCase):
 
 
 class ExcelParserTest(unittest.TestCase):
+    @staticmethod
+    def _workbook_bytes(rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for row in rows:
+            ws.append(row)
+        bio = io.BytesIO()
+        wb.save(bio)
+        return bio.getvalue()
+
+    def test_xlsx_first_row_header_mode_repeats_column_context(self):
+        content = self._workbook_bytes(
+            [
+                ["Name", "Age", "City"],
+                ["Alice", 30, "Shenzhen"],
+                ["Bob", 28, "Shanghai"],
+            ]
+        )
+
+        document = ExcelParser(
+            file_name="people.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header="true",
+        ).parse_into_text(content)
+
+        chunks = [chunk.content.strip() for chunk in document.chunks]
+        self.assertEqual(
+            chunks,
+            [
+                "Name: Alice,Age: 30,City: Shenzhen",
+                "Name: Bob,Age: 28,City: Shanghai",
+            ],
+        )
+        self.assertNotIn("A: Name", document.content)
+
+    def test_xlsx_keeps_first_row_as_data_by_default(self):
+        content = self._workbook_bytes(
+            [
+                ["Name", "City"],
+                ["Alice", "Shenzhen"],
+            ]
+        )
+
+        document = ExcelParser(file_name="people.xlsx", file_type="xlsx").parse_into_text(
+            content
+        )
+
+        chunks = [chunk.content.strip() for chunk in document.chunks]
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0], "A: Name,B: City")
+        self.assertEqual(chunks[1], "A: Alice,B: Shenzhen")
+
+    def test_single_row_xlsx_is_not_consumed_in_header_mode(self):
+        content = self._workbook_bytes([["Name", "Age", "City"]])
+
+        document = ExcelParser(
+            file_name="single.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header=True,
+        ).parse_into_text(content)
+
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            ["A: Name,B: Age,C: City"],
+        )
+
+    def test_header_mode_generates_stable_labels_for_duplicate_and_empty_cells(self):
+        content = self._workbook_bytes(
+            [
+                ["Name", "Name", None],
+                ["Alice", "Alias", "Shenzhen"],
+            ]
+        )
+
+        document = ExcelParser(
+            file_name="people.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header="yes",
+        ).parse_into_text(content)
+
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            ["Name: Alice,Name_2: Alias,C: Shenzhen"],
+        )
+
+    def test_xlsx_explicit_false_override_keeps_first_row_as_data(self):
+        content = self._workbook_bytes(
+            [
+                ["Name", "Age"],
+                ["Alice", 30],
+            ]
+        )
+
+        document = ExcelParser(
+            file_name="people.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header="false",
+        ).parse_into_text(content)
+
+        chunks = [chunk.content.strip() for chunk in document.chunks]
+        self.assertEqual(chunks[0], "A: Name,B: Age")
+        self.assertEqual(chunks[1], "A: Alice,B: 30")
+
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())
         self.assertIn("hello", document.content)
