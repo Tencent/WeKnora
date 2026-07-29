@@ -203,9 +203,15 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 
 	key1 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:10", Title: "key1"}
 	key2 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:20", Title: "key2"}
+	externalUser := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPIExternalUserPrefix + "1:external-u1",
+		Title:    "external user",
+	}
 	web := &types.Session{TenantID: 1, UserID: "alice", Title: "alice web"}
 	require.NoError(t, db.Create(key1).Error)
 	require.NoError(t, db.Create(key2).Error)
+	require.NoError(t, db.Create(externalUser).Error)
 	require.NoError(t, db.Create(web).Error)
 
 	// A non-admin (viewer) web user is rejected.
@@ -220,7 +226,28 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
 	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: types.SessionSourceAPI})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, result.Total)
+	require.EqualValues(t, 3, result.Total)
+}
+
+func TestGetSessionAllowsAdminToReadAPIExternalUserSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	apiSession := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPIExternalUserPrefix + "1:external-u1",
+		Title:    "external user",
+	}
+	require.NoError(t, db.Create(apiSession).Error)
+
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.GetSession(viewerCtx, apiSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	adminCtx := context.WithValue(viewerCtx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+	got, err := svc.GetSession(adminCtx, apiSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, apiSession.ID, got.ID)
 }
 
 func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
