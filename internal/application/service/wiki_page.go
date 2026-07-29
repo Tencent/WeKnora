@@ -401,8 +401,12 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 		return err
 	}
 
-	// Remove inbound link references from pages this page links to
-	s.removeInLinks(ctx, kbID, slug, page.OutLinks)
+	// Clean up every reference to this page across the wiki. We cannot trust
+	// the deleted page's own InLinks/OutLinks bookkeeping: it is built
+	// incrementally during ingest and can be incomplete for summary pages.
+	// Scanning surviving pages handles both reverse out_links and forward
+	// in_links that would otherwise dangle after delete.
+	s.cleanupReverseInLinks(ctx, kbID, slug)
 
 	// Delete the page
 	if err := s.repo.Delete(ctx, kbID, slug); err != nil {
@@ -420,6 +424,51 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 	s.deleteChunkForPage(ctx, page)
 
 	return nil
+}
+
+// cleanupReverseInLinks scans every surviving wiki page in the KB and removes
+// references to deletedSlug from the page body and link bookkeeping arrays.
+func (s *wikiPageService) cleanupReverseInLinks(ctx context.Context, kbID, deletedSlug string) {
+	parts := strings.Split(deletedSlug, "/")
+	readableName := strings.ReplaceAll(parts[len(parts)-1], "-", " ")
+	linkPlain := "[[" + deletedSlug + "]]"
+	re := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(deletedSlug) + `\|([^\]]+)\]\]`)
+
+	allPages, err := s.repo.ListAll(ctx, kbID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki: list pages for in-link cleanup of %s failed: %v", deletedSlug, err)
+		return
+	}
+	for _, p := range allPages {
+		if p.Slug == deletedSlug {
+			continue
+		}
+		contentChanged := false
+		if strings.Contains(p.Content, linkPlain) {
+			p.Content = strings.ReplaceAll(p.Content, linkPlain, readableName)
+			contentChanged = true
+		}
+		if re.MatchString(p.Content) {
+			p.Content = re.ReplaceAllString(p.Content, "$1")
+			contentChanged = true
+		}
+		newIn := removeString(p.InLinks, deletedSlug)
+		newOut := removeString(p.OutLinks, deletedSlug)
+		if !contentChanged && len(newIn) == len(p.InLinks) && len(newOut) == len(p.OutLinks) {
+			continue
+		}
+		p.InLinks = newIn
+		p.OutLinks = newOut
+		p.UpdatedAt = time.Now()
+		if contentChanged {
+			if err := s.UpdateAutoLinkedContent(ctx, p); err != nil {
+				logger.Warnf(ctx, "wiki: failed to strip dead link on %s for deleted %s: %v", p.Slug, deletedSlug, err)
+			}
+		}
+		if err := s.repo.UpdateMeta(ctx, p); err != nil {
+			logger.Warnf(ctx, "wiki: failed to update links on %s for deleted %s: %v", p.Slug, deletedSlug, err)
+		}
+	}
 }
 
 // GetIndex returns the index page for a knowledge base

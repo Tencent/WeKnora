@@ -1630,11 +1630,13 @@ func stripDeadWikiLinks(
 // pages whose targets no longer exist (or were archived). Pure text
 // cleanup — no LLM call.
 //
-// Scope is intentionally limited to the slugs touched by this batch:
+// Scope is normally limited to the slugs touched by this batch:
 // at 4w-document scale the legacy "scan every page in the KB" path was
 // the dominant tail in the post-batch phase, and the long-tail
 // historical dead links are better handled by the lint AutoFix pipeline
 // (which runs out-of-band and can afford a full table walk).
+// A document retraction is different: it removes pages, so its final pass
+// rebuilds derived link fields and scans all live pages for dead links.
 //
 // For each affected page:
 //
@@ -1648,9 +1650,25 @@ func stripDeadWikiLinks(
 //  4. Persist the rewritten content via UpdateAutoLinkedContent so
 //     the version counter stays unchanged (this is a maintenance
 //     pass, not a user-visible edit).
-func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, affectedSlugs []string, batchCtx *WikiBatchContext) {
-	if len(affectedSlugs) == 0 {
+func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, affectedSlugs []string, batchCtx *WikiBatchContext, fullScan bool) {
+	if len(affectedSlugs) == 0 && !fullScan {
 		return
+	}
+	if fullScan {
+		if err := s.wikiService.RebuildLinks(ctx, kbID); err != nil {
+			logger.Warnf(ctx, "wiki: rebuild links before retract dead-link cleanup failed: %v", err)
+		}
+		allPages, err := s.wikiService.ListAllPages(ctx, kbID)
+		if err != nil {
+			logger.Warnf(ctx, "wiki: list pages for retract dead-link cleanup failed: %v", err)
+			return
+		}
+		affectedSlugs = affectedSlugs[:0]
+		for _, page := range allPages {
+			if page != nil && page.Slug != "" {
+				affectedSlugs = append(affectedSlugs, page.Slug)
+			}
+		}
 	}
 
 	// (1) Load the affected pages' content + out-links in one go.

@@ -995,6 +995,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	var freshRefs []linkRef
 	var folderPruneIDs []string
 	var changeDesc strings.Builder
+	hasRemoval := false
 	for _, r := range rows {
 		ids = append(ids, r.ID)
 		if r.Op == wikiFinalizeOpFolderPrune {
@@ -1014,6 +1015,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		}
 		if row.Change != nil {
 			if row.Change.Action == wikiFinalizeRemoved {
+				hasRemoval = true
 				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", row.Change.DocTitle, row.Change.DocSummary)
 			} else {
 				fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n", row.Change.DocTitle, row.Change.DocSummary)
@@ -1072,8 +1074,12 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		}
 	}
 
+	if len(affectedSlugs) > 0 || hasRemoval {
+		// A retract can delete a page linked from pages outside this batch.
+		// Rebuild and scan the KB so the final async state has no dead backlinks.
+		s.cleanDeadLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, batchCtx, hasRemoval)
+	}
 	if len(affectedSlugs) > 0 {
-		s.cleanDeadLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, batchCtx)
 		s.injectCrossLinks(ctx, payload.KnowledgeBaseID, affectedSlugs, freshRefs, batchCtx)
 	}
 
