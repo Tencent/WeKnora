@@ -47,4 +47,17 @@ func TestCheckKnowledgeExists_FileHashIsScopedByFileType(t *testing.T) {
 		require.NotNil(t, knowledge)
 		assert.Equal(t, "md", knowledge.FileType)
 	})
+
+	t.Run("file type matching is case-insensitive", func(t *testing.T) {
+		exists, knowledge, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+			Type:     "file",
+			FileHash: fileHash,
+			FileType: "MD",
+		})
+
+		require.NoError(t, err)
+		assert.True(t, exists)
+		require.NotNil(t, knowledge)
+		assert.Equal(t, "md", knowledge.FileType)
+	})
 }

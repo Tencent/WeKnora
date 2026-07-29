@@ -248,7 +248,7 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			var knowledge types.Knowledge
 			duplicateQuery := query.Where("type = ? AND file_hash = ?", "file", params.FileHash)
 			if params.FileType != "" {
-				duplicateQuery = duplicateQuery.Where("file_type = ?", params.FileType)
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
 			}
 			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
@@ -260,13 +260,17 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 
-		// If no hash or hash doesn't match, use filename and size
+		// If no hash or hash doesn't match, use filename, size, and file type.
 		if params.FileName != "" && params.FileSize > 0 {
 			var knowledge types.Knowledge
-			err := query.Where(
-				"file_name = ? AND file_size = ?",
-				params.FileName, params.FileSize,
-			).First(&knowledge).Error
+			duplicateQuery := query.Where(
+				"type = ? AND file_name = ? AND file_size = ?",
+				"file", params.FileName, params.FileSize,
+			)
+			if params.FileType != "" {
+				duplicateQuery = duplicateQuery.Where("LOWER(file_type) = ?", strings.ToLower(params.FileType))
+			}
+			err := duplicateQuery.First(&knowledge).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return false, nil, nil
