@@ -8,6 +8,7 @@ import enUS from './en-US.ts'
 import koKR from './ko-KR.ts'
 import ruRU from './ru-RU.ts'
 import zhCN from './zh-CN.ts'
+import zhTW from './zh-TW.ts'
 
 type LocaleValue = string | Record<string, unknown> | unknown[]
 
@@ -36,6 +37,7 @@ function withoutTechnicalTenantTokens(value: string): string {
 
 const localeChecks = [
   { name: 'zh-CN', locale: zhCN, forbidden: /租户/ },
+  { name: 'zh-TW', locale: zhTW, forbidden: /租[戶户]/ },
   { name: 'en-US', locale: enUS, forbidden: /\btenants?\b/i },
   { name: 'ko-KR', locale: koKR, forbidden: /테넌트/ },
   { name: 'ru-RU', locale: ruRU, forbidden: /(?:тенант|арендатор)/i },
