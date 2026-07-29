@@ -171,6 +171,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     pre_chunk_id VARCHAR(36),
     next_chunk_id VARCHAR(36),
     chunk_type VARCHAR(20) NOT NULL DEFAULT 'text',
+    stable_identity VARCHAR(36),
+    identity_version VARCHAR(32),
     parent_chunk_id VARCHAR(36),
     image_info TEXT,
     relation_chunks JSONB,
@@ -183,6 +185,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_stable_identity ON chunks(tenant_id, knowledge_id, stable_identity);
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,

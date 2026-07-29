@@ -197,6 +197,49 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+func TestCreateChunks_SQLite_StableIdentitySurvivesRebuildWithRandomRowIDs(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.NewString()
+	knowledgeID := uuid.NewString()
+	stableIdentity := uuid.NewString()
+
+	first := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	first.StableIdentity = stableIdentity
+	first.IdentityVersion = "chunk-identity-v1"
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{first}))
+
+	require.NoError(t, repo.DeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+
+	second := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	second.StableIdentity = stableIdentity
+	second.IdentityVersion = "chunk-identity-v1"
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{second}))
+
+	require.NotEqual(t, first.ID, second.ID)
+
+	var allRows []types.Chunk
+	require.NoError(t, db.Unscoped().Where("knowledge_id = ?", knowledgeID).Order("seq_id").Find(&allRows).Error)
+	require.Len(t, allRows, 2)
+	require.Equal(t, stableIdentity, allRows[0].StableIdentity)
+	require.Equal(t, stableIdentity, allRows[1].StableIdentity)
+	require.True(t, allRows[0].DeletedAt.Valid)
+	require.False(t, allRows[1].DeletedAt.Valid)
+
+	var activeRows []types.Chunk
+	require.NoError(t, db.Where(
+		"tenant_id = ? AND knowledge_id = ? AND stable_identity = ?",
+		1,
+		knowledgeID,
+		stableIdentity,
+	).Find(&activeRows).Error)
+	require.Len(t, activeRows, 1)
+	require.Equal(t, second.ID, activeRows[0].ID)
+	require.False(t, activeRows[0].DeletedAt.Valid)
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()

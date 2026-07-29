@@ -192,6 +192,8 @@ CREATE TABLE chunks (
     pre_chunk_id VARCHAR(36),
     next_chunk_id VARCHAR(36),
     chunk_type VARCHAR(20) NOT NULL DEFAULT 'text',
+    stable_identity VARCHAR(36),
+    identity_version VARCHAR(32),
     parent_chunk_id VARCHAR(36),
     image_info TEXT,
     relation_chunks JSON,
@@ -204,3 +206,4 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX idx_chunks_stable_identity ON chunks(tenant_id, knowledge_id, stable_identity);

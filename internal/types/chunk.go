@@ -116,9 +116,9 @@ type Chunk struct {
 	// SeqID is an auto-increment integer ID for external API usage (FAQ entries)
 	SeqID int64 `json:"seq_id"                   gorm:"type:bigint;uniqueIndex;autoIncrement"`
 	// Tenant ID, used for multi-tenant isolation
-	TenantID uint64 `json:"tenant_id"`
+	TenantID uint64 `json:"tenant_id" gorm:"index:idx_chunks_stable_identity,priority:1"`
 	// ID of the parent knowledge, associated with the Knowledge model
-	KnowledgeID string `json:"knowledge_id"`
+	KnowledgeID string `json:"knowledge_id" gorm:"index:idx_chunks_stable_identity,priority:2"`
 	// ID of the knowledge base, for quick location
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	// Optional tag ID for categorization within a knowledge base (used for FAQ)
@@ -144,6 +144,12 @@ type Chunk struct {
 	NextChunkID string `json:"next_chunk_id"`
 	// Chunk 类型，用于区分不同类型的 Chunk
 	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'"`
+	// StableIdentity is the deterministic business identity of an ingestion
+	// text chunk. It is intentionally separate from the random database row ID.
+	StableIdentity string `json:"-" gorm:"type:varchar(36);index:idx_chunks_stable_identity,priority:3"`
+	// IdentityVersion identifies the canonical stable-identity contract. Legacy
+	// and derived chunks leave both identity fields empty.
+	IdentityVersion string `json:"-" gorm:"type:varchar(32)"`
 	// 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
 	ParentChunkID string `json:"parent_chunk_id"          gorm:"type:varchar(36);index"`
 	// 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk

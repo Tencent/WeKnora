@@ -8,16 +8,28 @@ import (
 
 func TestChunkContextHeaderHiddenInJSON(t *testing.T) {
 	c := Chunk{
-		ID:            "test",
-		Content:       "body",
-		ContextHeader: "# Heading",
+		ID:              "test",
+		Content:         "body",
+		ContextHeader:   "# Heading",
+		StableIdentity:  "stable-id",
+		IdentityVersion: "identity-v1",
 	}
 	b, err := json.Marshal(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), "Heading") || strings.Contains(string(b), "context_header") {
-		t.Errorf("ContextHeader leaked into JSON: %s", string(b))
+	jsonText := string(b)
+	for _, privateValue := range []string{
+		"Heading",
+		"context_header",
+		"stable-id",
+		"stable_identity",
+		"identity-v1",
+		"identity_version",
+	} {
+		if strings.Contains(jsonText, privateValue) {
+			t.Errorf("internal chunk identity data leaked into JSON: %s", jsonText)
+		}
 	}
 }
 

@@ -382,34 +382,24 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// === Parent-Child Chunking: create parent chunks first ===
-	hasParentChild := len(options.ParentChunks) > 0
-	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
+	parentDBChunks, textDBChunks, identityErr := buildIngestionTextChunks(
+		knowledge.TenantID,
+		knowledge.ID,
+		knowledge.KnowledgeBaseID,
+		chunks,
+		options.ParentChunks,
+	)
+	if identityErr != nil {
+		logger.Errorf(ctx, "Assign stable chunk identities failed: %v", identityErr)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = identityErr.Error()
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+
+	hasParentChild := len(parentDBChunks) > 0
 	if hasParentChild {
-		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
-		for i, pc := range options.ParentChunks {
-			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
-			}
-		}
-		// Set prev/next links for parent chunks
-		for i := range parentDBChunks {
-			if i > 0 {
-				parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
-				parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
-			}
-		}
 		logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
 	}
 
@@ -420,37 +410,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if hasParentChild {
 		insertChunks = append(insertChunks, parentDBChunks...)
 	}
-
-	for idx, chunkData := range chunks {
-		if strings.TrimSpace(chunkData.Content) == "" {
-			continue
-		}
-
-		// 创建主文本Chunk
-		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         chunkData.Content,
-			ContextHeader:   chunkData.ContextHeader,
-			ChunkIndex:      int(chunkData.Seq),
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         int(chunkData.Start),
-			EndAt:           int(chunkData.End),
-			ChunkType:       types.ChunkTypeText,
-		}
-
-		// Wire up ParentChunkID for child chunks
-		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
-			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
-		}
-
-		chunks[idx].ChunkID = textChunk.ID
-		insertChunks = append(insertChunks, textChunk)
-	}
+	insertChunks = append(insertChunks, textDBChunks...)
 
 	// Sort chunks by index for proper ordering
 	sort.Slice(insertChunks, func(i, j int) bool {
