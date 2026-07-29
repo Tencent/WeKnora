@@ -176,9 +176,9 @@ func (h *MessageFeedbackHandler) ResetFeedback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
-		"data":         gin.H{"reset_chunks": resetCount},
-		"message":      "feedback epoch advanced",
+		"success": true,
+		"data":    gin.H{"reset_chunks": resetCount},
+		"message": "feedback epoch advanced",
 	})
 }
 
@@ -208,10 +208,10 @@ func (h *MessageFeedbackHandler) RecomputeTenantWeights(c *gin.Context) {
 // which keeps the route stable even when the UI evolves.
 func parseChunkFeedbackStatsQuery(c *gin.Context) *interfaces.ChunkFeedbackStatsQuery {
 	q := &interfaces.ChunkFeedbackStatsQuery{
-		SortBy:        strings.TrimSpace(c.Query("sort_by")),
+		SortBy:         strings.TrimSpace(c.Query("sort_by")),
 		LowQualityOnly: parseBoolQuery(c, "low_quality"),
-		Keyword:       strings.TrimSpace(c.Query("keyword")),
-		KnowledgeID:   strings.TrimSpace(c.Query("knowledge_id")),
+		Keyword:        strings.TrimSpace(c.Query("keyword")),
+		KnowledgeID:    strings.TrimSpace(c.Query("knowledge_id")),
 		Pagination: &types.Pagination{
 			Page:     parseIntQuery(c, "page", 1),
 			PageSize: parseIntQuery(c, "page_size", 20),
