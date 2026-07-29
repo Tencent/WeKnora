@@ -134,15 +134,17 @@ type AgentQueryData struct {
 
 // AgentCompleteData represents agent completion event data
 type AgentCompleteData struct {
-	SessionID       string                 `json:"session_id"`
-	TotalSteps      int                    `json:"total_steps"`
-	FinalAnswer     string                 `json:"final_answer"`
-	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
-	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
-	TotalDurationMs int64                  `json:"total_duration_ms"`
-	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
-	RequestID       string                 `json:"request_id,omitempty"`
-	Extra           map[string]interface{} `json:"extra,omitempty"`
+	SessionID     string        `json:"session_id"`
+	TotalSteps    int           `json:"total_steps"`
+	FinalAnswer   string        `json:"final_answer"`
+	KnowledgeRefs []interface{} `json:"knowledge_refs,omitempty"` // []*types.SearchResult
+	// AgentSteps contains []types.AgentStep values with detailed execution data.
+	AgentSteps       interface{}            `json:"agent_steps,omitempty"`
+	TotalDurationMs  int64                  `json:"total_duration_ms"`
+	MessageID        string                 `json:"message_id,omitempty"` // Assistant message ID
+	RequestID        string                 `json:"request_id,omitempty"`
+	FeedbackEligible bool                   `json:"feedback_eligible,omitempty"`
+	Extra            map[string]interface{} `json:"extra,omitempty"`
 }
 
 // === Streaming Event Data Structures ===
