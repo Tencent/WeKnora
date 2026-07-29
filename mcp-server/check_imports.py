@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-测试 MCP 导入
+手动 MCP 导入检查脚本（非 unittest 测试）。
+
+用法: python check_imports.py
 """
 
 try:

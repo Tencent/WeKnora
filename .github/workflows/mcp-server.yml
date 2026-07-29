@@ -48,6 +48,7 @@ jobs:
 
       - name: Run tests
         # unittest avoids pytest importing __init__.py as a broken package root.
+        # Manual diagnostics live in check_imports.py (not matched by test_*.py).
         run: uv run --python ${{ matrix.python-version }} python -m unittest discover -s . -p "test_*.py" -v
 
   build:
