@@ -1249,8 +1249,18 @@ func (s *knowledgeService) enqueueMovedKnowledgeWiki(
 	tenantID uint64,
 	kbID, knowledgeID string,
 ) error {
+	attempt, err := latestKnowledgeAttempt(ctx, s.tracker(), knowledgeID)
+	if err != nil {
+		return fmt.Errorf("load Wiki generation for moved knowledge %s: %w", knowledgeID, err)
+	}
+	if attempt <= 0 {
+		return fmt.Errorf(
+			"moved knowledge %s has no durable processing generation; reparse it before rebuilding Wiki provenance",
+			knowledgeID,
+		)
+	}
 	accepted, err := EnqueueWikiIngest(
-		ctx, s.task, s.taskPendingRepo, tenantID, kbID, knowledgeID,
+		ctx, s.task, s.taskPendingRepo, tenantID, kbID, knowledgeID, attempt,
 	)
 	if err != nil {
 		return fmt.Errorf("persist Wiki refresh for moved knowledge %s in KB %s: %w", knowledgeID, kbID, err)
@@ -1481,7 +1491,14 @@ func (s *knowledgeService) enqueueMovedKnowledgeReparse(
 		if err != nil || meta == nil {
 			return fmt.Errorf("failed to get manual metadata for reparse: %w", err)
 		}
-		s.triggerManualProcessing(ctx, targetKB, knowledge, meta.Content, false)
+		attempt, err := s.openKnowledgeAttempt(ctx, knowledge.ID, "")
+		if err != nil {
+			return err
+		}
+		ctx = withAttempt(ctx, attempt)
+		if err := s.triggerManualProcessing(ctx, targetKB, knowledge, meta.Content, false, nil); err != nil {
+			logger.Warnf(ctx, "failed to start moved manual knowledge processing: %v", err)
+		}
 		return nil
 	}
 
@@ -1511,8 +1528,13 @@ func (s *knowledgeService) enqueueMovedKnowledgeReparse(
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
+		if err := s.ensureDocumentProcessAttempt(ctx, &taskPayload); err != nil {
+			return err
+		}
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
+			s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+				"payload_marshal_failed", "failed to marshal moved knowledge task")
 			return fmt.Errorf("failed to marshal document process payload: %w", err)
 		}
 
@@ -1520,6 +1542,8 @@ func (s *knowledgeService) enqueueMovedKnowledgeReparse(
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
+			s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+				"task_enqueue_failed", "failed to enqueue moved knowledge task")
 			return fmt.Errorf("failed to enqueue document process task: %w", err)
 		}
 		logger.Infof(ctx, "moveKnowledgeReparse: enqueued reparse task id=%s for knowledge=%s", info.ID, knowledge.ID)

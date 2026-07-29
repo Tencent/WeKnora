@@ -53,10 +53,11 @@ func latestWikiAttempt(
 // overwriting paragraph provenance produced by a newer parse attempt. A
 // positive attempt must exactly match the latest persisted attempt; if the
 // lookup fails, Reduce fails too so the pending operation is retried instead
-// of publishing without a generation check. Retractions are generation-free
-// because deleting stale provenance must remain possible after its source row
-// is gone. Attempt-zero additions are dropped rather than published without a
-// generation guard.
+// of publishing without a generation check. Only attempt-zero retractions are
+// generation-free because deleting stale provenance must remain possible after
+// its source row is gone. Positive-attempt retractions are guarded exactly like
+// additions so an older reparse cannot remove newer provenance. Attempt-zero
+// additions are dropped rather than published without a generation guard.
 func (s *wikiIngestService) filterCurrentWikiAttempts(
 	ctx context.Context, updates []SlugUpdate,
 ) ([]SlugUpdate, error) {
@@ -64,7 +65,7 @@ func (s *wikiIngestService) filterCurrentWikiAttempts(
 	filtered := make([]SlugUpdate, 0, len(updates))
 	tracker := s.tracker()
 	for _, update := range updates {
-		if update.Type == "retract" || update.Type == "retractStale" {
+		if (update.Type == "retract" || update.Type == "retractStale") && update.KnowledgeAttempt <= 0 {
 			filtered = append(filtered, update)
 			continue
 		}

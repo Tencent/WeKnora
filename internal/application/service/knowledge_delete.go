@@ -58,23 +58,32 @@ func deleteExtractedImages(ctx context.Context, fileSvc interfaces.FileService, 
 
 // DeleteKnowledge deletes a knowledge entry and all related resources
 func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	// Get the knowledge entry
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
 
 	// Mark as deleting first to prevent async task conflicts
 	// This ensures that any running async tasks will detect the deletion and abort
-	originalStatus := knowledge.ParseStatus
-	knowledge.ParseStatus = types.ParseStatusDeleting
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	claimer, ok := s.repo.(interfaces.KnowledgeDeletionClaimer)
+	if !ok {
+		return fmt.Errorf("knowledge repository does not support generation-safe deletion")
+	}
+	originalStatus, claimed, err := claimer.ClaimKnowledgeDeleting(ctx, tenantID, id)
+	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge failed to mark as deleting")
 		return fmt.Errorf("mark knowledge %s as deleting: %w", id, err)
-	} else {
-		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
+	if !claimed {
+		// Another delete already owns the row. Treat this request as
+		// idempotently accepted instead of running the destructive cleanup twice.
+		return nil
+	}
+	knowledge.ParseStatus = types.ParseStatusDeleting
+	knowledge.UpdatedAt = time.Now()
+	logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 
 	// Best-effort: purge any queued downstream tasks for this knowledge
 	// (multimodal / post-process / question / summary / graph extract).
@@ -92,7 +101,6 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	kbFileSvc := s.resolveFileService(ctx, kb)
 
 	// Collect image URLs before chunks are deleted (ImageInfo references are lost after deletion)
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	chunkImageInfos, err := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantID, []string{id})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to collect image URLs for cleanup: %v", err)
@@ -891,16 +899,31 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
-	if knowledge.StorageSize > 0 {
+	if cleaner, ok := s.repo.(interfaces.KnowledgeStorageUsageCleaner); ok {
+		released, err := cleaner.ClearKnowledgeStorageUsage(ctx, knowledge.ID, tenantInfo.ID)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Error("Failed to atomically clear storage usage during knowledge cleanup")
+			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			tenantInfo.StorageUsed -= released
+			if tenantInfo.StorageUsed < 0 {
+				tenantInfo.StorageUsed = 0
+			}
+			knowledge.StorageSize = 0
+		}
+	} else if knowledge.StorageSize > 0 {
+		// Compatibility path for lightweight/custom repositories. Production's
+		// GORM repository implements KnowledgeStorageUsageCleaner above.
 		tenantInfo.StorageUsed -= knowledge.StorageSize
 		if tenantInfo.StorageUsed < 0 {
 			tenantInfo.StorageUsed = 0
 		}
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Error("Failed to adjust storage usage during manual cleanup")
+			logger.GetLogger(ctx).WithField("error", err).Error("Failed to adjust storage usage during knowledge cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			knowledge.StorageSize = 0
 		}
-		knowledge.StorageSize = 0
 	}
 
 	return cleanupErr

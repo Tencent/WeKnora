@@ -109,6 +109,21 @@ func (KnowledgeProcessingSpan) TableName() string {
 	return "knowledge_processing_spans"
 }
 
+// KnowledgeSubtaskSettlement is the durable idempotency marker for one
+// finalizing-counter owner. A positive attempt may settle a given subtask key
+// only once, including across worker retries and process restarts.
+type KnowledgeSubtaskSettlement struct {
+	ID          int64     `gorm:"primaryKey;column:id" json:"-"`
+	KnowledgeID string    `gorm:"column:knowledge_id;size:64;not null;uniqueIndex:uq_knowledge_subtask_settlement,priority:1" json:"knowledge_id"`
+	Attempt     int       `gorm:"column:attempt;not null;uniqueIndex:uq_knowledge_subtask_settlement,priority:2" json:"attempt"`
+	SubtaskKey  string    `gorm:"column:subtask_key;size:255;not null;uniqueIndex:uq_knowledge_subtask_settlement,priority:3" json:"subtask_key"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (KnowledgeSubtaskSettlement) TableName() string {
+	return "knowledge_subtask_settlements"
+}
+
 // SpanTreeNode is the API-only tree projection. The repo returns flat
 // rows; the handler/tracker assembles SpanTreeNode for the response.
 type SpanTreeNode struct {

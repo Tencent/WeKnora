@@ -87,13 +87,17 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
-	// Resolve attempt: payload carries it from the upstream stage, but
-	// fall back to the latest known attempt for compatibility with
-	// in-flight tasks queued before this code shipped.
 	attempt := payload.Attempt
-	if attempt <= 0 {
-		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
+	current, err := requireCarriedKnowledgeAttempt(ctx, s.tracker(), payload.KnowledgeID, attempt)
+	if err != nil {
+		return err
 	}
+	if !current {
+		logger.Infof(ctx, "[KnowledgePostProcess] Dropping stale task knowledge=%s attempt=%d",
+			payload.KnowledgeID, attempt)
+		return nil
+	}
+	ctx = withAttempt(ctx, attempt)
 
 	// Close the multimodal stage span (parent enqueued it as "running"
 	// and we never see the per-image fan-in here other than by reaching
@@ -253,34 +257,71 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if len(textChunks) > 0 {
 			updates["summary_status"] = types.SummaryStatusNone
 		}
-		if err := s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates); err != nil {
+		transitioned := false
+		var transitionErr error
+		if attempt > 0 {
+			transitioner, ok := s.knowledgeRepo.(interfaces.KnowledgeAttemptTransitioner)
+			if !ok {
+				return fmt.Errorf("knowledge repository does not support attempt-aware post-process transitions")
+			}
+			transitioned, transitionErr = transitioner.TransitionKnowledgeForAttempt(
+				ctx, payload.KnowledgeID, attempt, types.ParseStatusProcessing, updates,
+			)
+		} else {
+			transitionErr = s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates)
+			transitioned = transitionErr == nil
+		}
+		if transitionErr != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to mark %s completed (no subtasks): %v",
-				payload.KnowledgeID, err)
+				payload.KnowledgeID, transitionErr)
+			return transitionErr
+		}
+		if !transitioned {
+			logger.Infof(ctx, "[KnowledgePostProcess] Attempt %d no longer owns %s; skipping completion",
+				attempt, payload.KnowledgeID)
+			return nil
 		} else {
 			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
 				payload.KnowledgeID)
 		}
 	default:
-		// Flip processing → finalizing in one statement so a parallel
-		// cancel/delete cannot race us into completed.
-		promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
-		if err != nil {
+		// Flip processing → finalizing and seed the counter under the same
+		// generation lock as attempt creation.
+		summaryStatus := types.SummaryStatusNone
+		if willSpawnSummary {
+			summaryStatus = types.SummaryStatusPending
+		}
+		promoted := false
+		var promoteErr error
+		if attempt > 0 {
+			transitioner, ok := s.knowledgeRepo.(interfaces.KnowledgeAttemptTransitioner)
+			if !ok {
+				return fmt.Errorf("knowledge repository does not support attempt-aware post-process transitions")
+			}
+			promoted, promoteErr = transitioner.TransitionKnowledgeForAttempt(
+				ctx, payload.KnowledgeID, attempt, types.ParseStatusProcessing,
+				map[string]interface{}{
+					"parse_status":           types.ParseStatusFinalizing,
+					"pending_subtasks_count": expectedSubtasks,
+					"summary_status":         summaryStatus,
+					"updated_at":             time.Now(),
+				},
+			)
+		} else {
+			promoted, promoteErr = s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
+			if promoted {
+				promoteErr = s.knowledgeRepo.UpdateKnowledgeColumn(
+					ctx, payload.KnowledgeID, "summary_status", summaryStatus,
+				)
+			}
+		}
+		if promoteErr != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
-				payload.KnowledgeID, err)
+				payload.KnowledgeID, promoteErr)
+			return promoteErr
 		}
 		if promoted {
 			enteredFinalizing = true
-			// Reflect summary status separately so the UI shows the
-			// summary as queued for users who already had it visible.
-			summaryStatus := types.SummaryStatusNone
-			if willSpawnSummary {
-				summaryStatus = types.SummaryStatusPending
-			}
-			if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
-				payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
-				logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
-					payload.KnowledgeID, err)
-			}
 			logger.Infof(ctx,
 				"[KnowledgePostProcess] Knowledge %s entered finalizing (pending_subtasks=%d).",
 				payload.KnowledgeID, expectedSubtasks)
@@ -308,9 +349,16 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if willSpawnSummary {
 		enqueuedSummary = s.enqueueSummaryGenerationTask(ctx, payload, attempt)
 		if !enqueuedSummary {
-			_ = s.knowledgeRepo.UpdateKnowledgeColumn(
-				ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed,
-			)
+			if updater, ok := s.knowledgeRepo.(interfaces.KnowledgeAttemptUpdater); ok && attempt > 0 {
+				_, _ = updater.UpdateKnowledgeColumnsForAttempt(
+					ctx, payload.KnowledgeID, attempt,
+					map[string]interface{}{"summary_status": types.SummaryStatusFailed},
+				)
+			} else if attempt <= 0 {
+				_ = s.knowledgeRepo.UpdateKnowledgeColumn(
+					ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed,
+				)
+			}
 		}
 		if willSpawnQuestion {
 			// Create the postprocess.question grouping span up front so the
@@ -407,15 +455,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
 				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
 			for i := 0; i < shortfall; i++ {
-				rctx, cancel := context.WithTimeout(
-					context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-				_, _, err := s.knowledgeRepo.FinalizeSubtask(rctx, payload.KnowledgeID)
-				cancel()
-				if err != nil {
-					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
-						payload.KnowledgeID, err)
-					break
-				}
+				finalizeSubtaskDetached(
+					ctx, s.knowledgeRepo, payload.KnowledgeID, attempt,
+					fmt.Sprintf("postprocess_enqueue_shortfall[%d]", i), nil, false, true,
+				)
 			}
 		}
 	}

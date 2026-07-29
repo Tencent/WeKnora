@@ -91,26 +91,22 @@ func enqueueSummaryRefresh(
 	if knowledge == nil || knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
 		return nil
 	}
-	markFailed := func() {
-		if repo != nil {
-			_ = repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "summary_status", types.SummaryStatusFailed)
-		}
-	}
 	if repo == nil || taskEnqueuer == nil || kbReader == nil {
-		markFailed()
 		return fmt.Errorf("summary refresh dependencies are unavailable")
 	}
 	kb, err := kbReader.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	if err != nil {
-		markFailed()
 		return err
 	}
 	if kb.SummaryModelID == "" {
-		markFailed()
 		return fmt.Errorf("summary model is not configured")
 	}
 	if tracker == nil {
 		tracker = noopSpanTracker{}
+	}
+	attempt, err := latestKnowledgeAttempt(ctx, tracker, knowledge.ID)
+	if err != nil {
+		return fmt.Errorf("load summary refresh generation for knowledge %s: %w", knowledge.ID, err)
 	}
 	language, _ := types.LanguageFromContext(ctx)
 	payload := types.SummaryGenerationPayload{
@@ -118,21 +114,86 @@ func enqueueSummaryRefresh(
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		KnowledgeID:     knowledge.ID,
 		Language:        language,
-		Attempt:         tracker.LatestAttempt(ctx, knowledge.ID),
+		Attempt:         attempt,
 		Refresh:         true,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		markFailed()
 		return err
 	}
 	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes,
 		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
-	_ = repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "summary_status", types.SummaryStatusPending)
-	if _, err = taskEnqueuer.Enqueue(task); err != nil {
-		markFailed()
+	if err := updateSummaryRefreshStatus(
+		ctx, repo, knowledge.ID, attempt, types.SummaryStatusPending,
+	); err != nil {
 		return err
+	}
+	if _, err = taskEnqueuer.Enqueue(task); err != nil {
+		if statusErr := updateSummaryRefreshStatus(
+			ctx, repo, knowledge.ID, attempt, types.SummaryStatusFailed,
+		); statusErr != nil {
+			return errors.Join(err, statusErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func updateSummaryRefreshStatus(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	knowledgeID string,
+	attempt int,
+	status string,
+) error {
+	return updateCompletedSummaryFields(ctx, repo, knowledgeID, attempt, map[string]interface{}{
+		"summary_status": status,
+		"updated_at":     time.Now(),
+	})
+}
+
+func updateCompletedSummaryFields(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	knowledgeID string,
+	attempt int,
+	values map[string]interface{},
+) error {
+	if repo == nil {
+		return fmt.Errorf("knowledge repository is unavailable")
+	}
+	if attempt > 0 {
+		transitioner, ok := repo.(interfaces.KnowledgeAttemptTransitioner)
+		if !ok {
+			return fmt.Errorf("knowledge repository does not support attempt-aware summary refresh")
+		}
+		updated, err := transitioner.TransitionKnowledgeForAttempt(
+			ctx, knowledgeID, attempt, types.ParseStatusCompleted, values,
+		)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return ErrSummaryRefreshStale
+		}
+		return nil
+	}
+	// Compatibility for knowledge created before attempt tracking. Keep the
+	// status predicate even here so a concurrent reparse/delete cannot be
+	// overwritten by the refresh producer.
+	conditional, ok := repo.(interfaces.KnowledgeConditionalUpdater)
+	if !ok {
+		return fmt.Errorf("knowledge repository does not support conditional summary refresh")
+	}
+	updated, err := conditional.UpdateKnowledgeColumnsIfUnchanged(
+		ctx, knowledgeID, types.ParseStatusCompleted, time.Time{}, values,
+	)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return ErrSummaryRefreshStale
 	}
 	return nil
 }

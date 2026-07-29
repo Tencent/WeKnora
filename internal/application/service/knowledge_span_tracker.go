@@ -281,6 +281,59 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 	}, attempt, nil
 }
 
+// OpenClaimedAttempt atomically binds a user-triggered processing claim to the
+// root span that defines its generation. It is intentionally an optional
+// spanTracker capability so lightweight test/custom trackers can keep using
+// the older OpenAttempt surface without weakening the production path.
+func (t *spanTracker) OpenClaimedAttempt(
+	ctx context.Context,
+	knowledgeID, langfuseTraceID, expectedStatus string,
+	expectedUpdatedAt time.Time,
+	values map[string]interface{},
+) (*Span, int, bool, error) {
+	claimer, ok := t.repo.(repository.KnowledgeAttemptRootClaimer)
+	if !ok {
+		return nil, 0, false, fmt.Errorf("span repository does not support atomic processing claims")
+	}
+
+	now := time.Now()
+	rootID := newSpanID()
+	meta := types.JSONMap{}
+	if langfuseTraceID != "" {
+		meta["langfuse_trace_id"] = langfuseTraceID
+	}
+	row := &types.KnowledgeProcessingSpan{
+		KnowledgeID: knowledgeID,
+		SpanID:      rootID,
+		Name:        "knowledge_processing",
+		Kind:        types.SpanKindRoot,
+		Status:      types.SpanStatusRunning,
+		Metadata:    meta,
+		StartedAt:   &now,
+	}
+	attempt, claimed, err := claimer.CreateClaimedAttemptRoot(
+		ctx, row, expectedStatus, expectedUpdatedAt, values,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "[SpanTracker] OpenClaimedAttempt failed kid=%s: %v", knowledgeID, err)
+		return nil, 0, false, err
+	}
+	if !claimed {
+		return nil, 0, false, nil
+	}
+
+	t.recordStart(rootID, now)
+	return &Span{
+		KnowledgeID: knowledgeID,
+		Attempt:     attempt,
+		SpanID:      rootID,
+		Name:        "knowledge_processing",
+		Kind:        types.SpanKindRoot,
+		Status:      types.SpanStatusRunning,
+		StartedAt:   now,
+	}, attempt, true, nil
+}
+
 func (t *spanTracker) LatestAttempt(ctx context.Context, knowledgeID string) int {
 	n, err := t.LatestAttemptWithError(ctx, knowledgeID)
 	if err != nil {

@@ -17,10 +17,16 @@ import (
 func TestSaveChunkRevisionIsAtomicAndOptimistic(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.ChunkRevision{}, &types.TaskPendingOp{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.Knowledge{}, &types.Chunk{}, &types.ChunkRevision{}, &types.TaskPendingOp{},
+	))
 	repo := NewChunkRepository(db)
 	ctx := context.Background()
 	now := time.Now()
+	require.NoError(t, db.Create(&types.Knowledge{
+		ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb",
+		ParseStatus: types.ParseStatusCompleted,
+	}).Error)
 	chunk := &types.Chunk{
 		ID: uuid.NewString(), TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "knowledge",
 		Content: "before", SourceContent: "before", ChunkType: types.ChunkTypeText,

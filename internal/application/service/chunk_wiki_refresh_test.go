@@ -39,6 +39,17 @@ func (r *chunkWikiRefreshRepo) UpdateChunk(_ context.Context, chunk *types.Chunk
 	return nil
 }
 
+func (r *chunkWikiRefreshRepo) UpdateChunkFieldsIfCurrent(
+	_ context.Context, _ uint64, chunkID, _, _ string, expectedRevision int,
+	values map[string]interface{},
+) (bool, error) {
+	if r.chunk == nil || r.chunk.ID != chunkID || r.chunk.ContentRevision != expectedRevision {
+		return false, nil
+	}
+	applyTestChunkFields(r.chunk, values)
+	return true, nil
+}
+
 func (r *chunkWikiRefreshRepo) ListChunkByParentID(
 	_ context.Context, _ uint64, _ string,
 ) ([]*types.Chunk, error) {
@@ -149,7 +160,7 @@ func newChunkWikiRefreshHarness(wikiEnabled bool, attempt int) chunkWikiRefreshH
 	}}
 	knowledgeRepo := &chunkWikiRefreshKnowledgeRepo{knowledge: &types.Knowledge{
 		ID: chunk.KnowledgeID, TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-		SummaryStatus: types.SummaryStatusNone,
+		ParseStatus: types.ParseStatusCompleted, SummaryStatus: types.SummaryStatusNone,
 	}}
 	return chunkWikiRefreshHarness{
 		service: &chunkService{

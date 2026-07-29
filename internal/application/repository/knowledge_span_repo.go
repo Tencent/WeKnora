@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -48,8 +49,59 @@ type KnowledgeSpanRepository interface {
 	CancelOpenSpansByName(ctx context.Context, knowledgeID string, attempt int, name, errorCode, reason string) (int64, error)
 }
 
+// KnowledgeAttemptRootClaimer is the atomic boundary between an API-side
+// publish/reparse claim and its durable processing generation. Implementations
+// must either persist both the knowledge-row transition and the new root span,
+// or persist neither of them.
+type KnowledgeAttemptRootClaimer interface {
+	CreateClaimedAttemptRoot(
+		ctx context.Context,
+		row *types.KnowledgeProcessingSpan,
+		expectedStatus string,
+		expectedUpdatedAt time.Time,
+		values map[string]interface{},
+	) (attempt int, claimed bool, err error)
+}
+
 type knowledgeSpanRepository struct {
 	db *gorm.DB
+}
+
+type knowledgeGenerationLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+var localKnowledgeGenerationLocks = struct {
+	sync.Mutex
+	entries map[string]*knowledgeGenerationLockEntry
+}{entries: make(map[string]*knowledgeGenerationLockEntry)}
+
+// lockLocalKnowledgeGeneration supplies the cross-repository generation lock
+// for SQLite, whose process-local deployment cannot use PostgreSQL advisory
+// locks. We also take it on PostgreSQL to avoid needless same-process lock
+// contention before entering the database. Reference counting prevents the
+// lock table from growing forever as knowledge rows are created and deleted.
+func lockLocalKnowledgeGeneration(knowledgeID string) func() {
+	localKnowledgeGenerationLocks.Lock()
+	entry := localKnowledgeGenerationLocks.entries[knowledgeID]
+	if entry == nil {
+		entry = &knowledgeGenerationLockEntry{}
+		localKnowledgeGenerationLocks.entries[knowledgeID] = entry
+	}
+	entry.refs++
+	localKnowledgeGenerationLocks.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		localKnowledgeGenerationLocks.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(localKnowledgeGenerationLocks.entries, knowledgeID)
+		}
+		localKnowledgeGenerationLocks.Unlock()
+	}
 }
 
 // NewKnowledgeSpanRepository wires the GORM-backed implementation.
@@ -77,6 +129,8 @@ func (r *knowledgeSpanRepository) CreateAttemptRoot(
 	if row == nil || row.KnowledgeID == "" || row.SpanID == "" {
 		return 0, errors.New("knowledgeSpanRepository.CreateAttemptRoot: knowledge_id and span_id required")
 	}
+	unlock := lockLocalKnowledgeGeneration(row.KnowledgeID)
+	defer unlock()
 	attempt := 0
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockKnowledgeAttemptGeneration(tx, row.KnowledgeID); err != nil {
@@ -94,6 +148,71 @@ func (r *knowledgeSpanRepository) CreateAttemptRoot(
 		return tx.Create(row).Error
 	})
 	return attempt, err
+}
+
+// CreateClaimedAttemptRoot closes the generation-publication gap. The
+// knowledge CAS and root insert commit together while holding the same
+// per-knowledge generation lock used by ordinary attempt allocation and Wiki
+// publication. Consequently an old worker can never observe pending status
+// while the old attempt is still the latest durable generation.
+func (r *knowledgeSpanRepository) CreateClaimedAttemptRoot(
+	ctx context.Context,
+	row *types.KnowledgeProcessingSpan,
+	expectedStatus string,
+	expectedUpdatedAt time.Time,
+	values map[string]interface{},
+) (attempt int, claimed bool, err error) {
+	if row == nil || row.KnowledgeID == "" || row.SpanID == "" {
+		return 0, false, errors.New("knowledgeSpanRepository.CreateClaimedAttemptRoot: knowledge_id and span_id required")
+	}
+	unlock := lockLocalKnowledgeGeneration(row.KnowledgeID)
+	defer unlock()
+
+	updates := make(map[string]interface{}, len(values)+3)
+	for key, value := range values {
+		updates[key] = value
+	}
+	updates["parse_status"] = types.ParseStatusPending
+	updates["enable_status"] = "disabled"
+	updates["pending_subtasks_count"] = 0
+
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, row.KnowledgeID); err != nil {
+			return err
+		}
+
+		claim := tx.Model(&types.Knowledge{}).
+			Where("id = ? AND parse_status = ?", row.KnowledgeID, expectedStatus)
+		if !expectedUpdatedAt.IsZero() {
+			claim = claim.Where("updated_at = ?", expectedUpdatedAt)
+		}
+		result := claim.Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		var maxAttempt int
+		if err := tx.Model(&types.KnowledgeProcessingSpan{}).
+			Where("knowledge_id = ?", row.KnowledgeID).
+			Select("COALESCE(MAX(attempt), 0)").
+			Row().Scan(&maxAttempt); err != nil {
+			return err
+		}
+		attempt = maxAttempt + 1
+		row.Attempt = attempt
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return attempt, claimed, nil
 }
 
 func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.KnowledgeProcessingSpan) error {

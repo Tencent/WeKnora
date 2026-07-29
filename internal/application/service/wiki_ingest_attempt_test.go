@@ -72,3 +72,77 @@ func TestFilterCurrentWikiAttemptsRequiresExactLatestAttempt(t *testing.T) {
 		t.Fatalf("checked LatestAttempt calls = %d, want one cached lookup", tracker.checkedCall)
 	}
 }
+
+func TestFilterCurrentWikiAttemptsRequiresExactAttemptForRetractions(t *testing.T) {
+	tracker := &wikiAttemptLookupTracker{latest: 7}
+	svc := &wikiIngestService{spanTracker: tracker}
+
+	updates, err := svc.filterCurrentWikiAttempts(context.Background(), []SlugUpdate{
+		{Type: "retract", KnowledgeID: "knowledge-1", KnowledgeAttempt: 6, DocTitle: "stale-retract"},
+		{Type: "retract", KnowledgeID: "knowledge-1", KnowledgeAttempt: 7, DocTitle: "current-retract"},
+		{Type: "retractStale", KnowledgeID: "knowledge-1", KnowledgeAttempt: 6, DocTitle: "stale-retract-stale"},
+		{Type: "retractStale", KnowledgeID: "knowledge-1", KnowledgeAttempt: 7, DocTitle: "current-retract-stale"},
+		{Type: "retract", KnowledgeID: "knowledge-deleted", KnowledgeAttempt: 0, DocTitle: "deleted-source-retract"},
+		{Type: "retractStale", KnowledgeID: "knowledge-deleted-stale", KnowledgeAttempt: 0, DocTitle: "deleted-source-retract-stale"},
+	})
+	if err != nil {
+		t.Fatalf("filterCurrentWikiAttempts() error = %v", err)
+	}
+	if len(updates) != 4 {
+		t.Fatalf("filterCurrentWikiAttempts() returned %d updates, want 4: %+v", len(updates), updates)
+	}
+	if updates[0].DocTitle != "current-retract" ||
+		updates[1].DocTitle != "current-retract-stale" ||
+		updates[2].DocTitle != "deleted-source-retract" ||
+		updates[3].DocTitle != "deleted-source-retract-stale" {
+		t.Fatalf("filterCurrentWikiAttempts() updates = %+v", updates)
+	}
+	if tracker.checkedCall != 1 {
+		t.Fatalf("checked LatestAttempt calls = %d, want one cached lookup", tracker.checkedCall)
+	}
+}
+
+func TestMapOneDocumentRejectsUnsafeAttemptBeforeLLMWork(t *testing.T) {
+	t.Run("stale generation", func(t *testing.T) {
+		tracker := &wikiAttemptLookupTracker{latest: 3}
+		svc := &wikiIngestService{spanTracker: tracker}
+
+		result, updates, err := svc.mapOneDocument(
+			context.Background(), nil, WikiIngestPayload{},
+			WikiPendingOp{KnowledgeID: "knowledge-1", Attempt: 2}, nil,
+		)
+		if err != nil || result != nil || updates != nil {
+			t.Fatalf("mapOneDocument() = (%+v, %+v, %v), want (nil, nil, nil)", result, updates, err)
+		}
+		if tracker.checkedCall != 1 {
+			t.Fatalf("checked attempt lookups = %d, want 1", tracker.checkedCall)
+		}
+	})
+
+	t.Run("unguarded legacy addition", func(t *testing.T) {
+		tracker := &wikiAttemptLookupTracker{latest: 0}
+		svc := &wikiIngestService{spanTracker: tracker}
+
+		result, updates, err := svc.mapOneDocument(
+			context.Background(), nil, WikiIngestPayload{},
+			WikiPendingOp{KnowledgeID: "knowledge-1"}, nil,
+		)
+		if err != nil || result != nil || updates != nil {
+			t.Fatalf("mapOneDocument() = (%+v, %+v, %v), want (nil, nil, nil)", result, updates, err)
+		}
+	})
+
+	t.Run("attempt lookup failure", func(t *testing.T) {
+		wantErr := errors.New("span repository unavailable")
+		tracker := &wikiAttemptLookupTracker{err: wantErr}
+		svc := &wikiIngestService{spanTracker: tracker}
+
+		result, updates, err := svc.mapOneDocument(
+			context.Background(), nil, WikiIngestPayload{},
+			WikiPendingOp{KnowledgeID: "knowledge-1", Attempt: 1}, nil,
+		)
+		if result != nil || updates != nil || !errors.Is(err, wantErr) {
+			t.Fatalf("mapOneDocument() = (%+v, %+v, %v), want lookup error", result, updates, err)
+		}
+	})
+}

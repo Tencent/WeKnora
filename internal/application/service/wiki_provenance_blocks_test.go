@@ -118,6 +118,66 @@ func TestSplitWikiMarkdownBlocksCarriesUnchangedLogicalBlockAndSources(t *testin
 	}
 }
 
+func TestSplitWikiMarkdownBlocksKeepsManualIdentityWithinExactSection(t *testing.T) {
+	for _, author := range []string{types.WikiEditSourceUser, types.WikiEditSourceAgent} {
+		t.Run(author, func(t *testing.T) {
+			previousBlocks := splitWikiMarkdownBlocks(
+				"# Section A\n\nA manually maintained paragraph.\n",
+				nil,
+				types.WikiEditSourcePipeline,
+			)
+			require.Len(t, previousBlocks, 2)
+			previousManual := previousBlocks[1]
+			previousManual.AuthorType = author
+			previous := &types.WikiPageBlockSet{Blocks: previousBlocks}
+
+			current := splitWikiMarkdownBlocks(
+				"# Section A\n\nA manually   maintained paragraph.\n",
+				previous,
+				types.WikiEditSourcePipeline,
+			)
+			require.Len(t, current, 2)
+			require.Equal(t, previousManual.LogicalBlockID, current[1].LogicalBlockID)
+			require.Equal(t, author, current[1].AuthorType)
+		})
+	}
+}
+
+func TestSplitWikiMarkdownBlocksDoesNotMoveManualIdentityAcrossSections(t *testing.T) {
+	for _, author := range []string{types.WikiEditSourceUser, types.WikiEditSourceAgent} {
+		t.Run(author, func(t *testing.T) {
+			previousBlocks := splitWikiMarkdownBlocks(
+				"# Section A\n\nA manually maintained paragraph.\n",
+				nil,
+				types.WikiEditSourcePipeline,
+			)
+			require.Len(t, previousBlocks, 2)
+			previousManual := previousBlocks[1]
+			previousManual.AuthorType = author
+			previousManual.ProvenanceStatus = types.WikiBlockProvenanceVerified
+			previousManual.Sources = []*types.WikiBlockSource{{
+				ID:          "old-source-row",
+				BlockID:     previousManual.ID,
+				KnowledgeID: "knowledge-1",
+				ChunkID:     "chunk-1",
+			}}
+			previous := &types.WikiPageBlockSet{Blocks: previousBlocks}
+
+			current := splitWikiMarkdownBlocks(
+				"# Section B\n\nA manually maintained paragraph.\n",
+				previous,
+				types.WikiEditSourcePipeline,
+			)
+			require.Len(t, current, 2)
+			moved := current[1]
+			require.NotEqual(t, previousManual.LogicalBlockID, moved.LogicalBlockID)
+			require.Equal(t, types.WikiEditSourcePipeline, moved.AuthorType)
+			require.Equal(t, types.WikiBlockProvenanceUnsupported, moved.ProvenanceStatus)
+			require.Empty(t, moved.Sources)
+		})
+	}
+}
+
 func TestAddPreviousWikiSourceContextsKeepsRewrittenPageDependencies(t *testing.T) {
 	previous := &types.WikiPageBlockSet{Blocks: []*types.WikiPageBlock{{
 		Sources: []*types.WikiBlockSource{

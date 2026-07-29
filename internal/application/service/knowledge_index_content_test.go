@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -60,6 +61,19 @@ func (r *metadataUpdateKnowledgeRepo) UpdateKnowledgeColumn(
 		r.summaryStatusUpdate = value
 	}
 	return nil
+}
+
+func (r *metadataUpdateKnowledgeRepo) UpdateKnowledgeColumnsIfUnchanged(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ time.Time,
+	values map[string]interface{},
+) (bool, error) {
+	if value, ok := values["summary_status"]; ok {
+		r.summaryStatusUpdate = value
+	}
+	return true, nil
 }
 
 type metadataUpdateChunkRepo struct {

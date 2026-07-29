@@ -39,6 +39,17 @@ CREATE INDEX IF NOT EXISTS idx_kpspan_parent
     ON knowledge_processing_spans (parent_span_id)
     WHERE parent_span_id IS NOT NULL;
 
+-- Durable idempotency markers for finalizing-counter owners.
+CREATE TABLE IF NOT EXISTS knowledge_subtask_settlements (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_id        VARCHAR(64) NOT NULL,
+    attempt             INTEGER NOT NULL,
+    subtask_key         VARCHAR(255) NOT NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_knowledge_subtask_settlement
+        UNIQUE (knowledge_id, attempt, subtask_key)
+);
+
 ALTER TABLE wiki_pages
     ADD COLUMN current_block_set_id VARCHAR(36) NOT NULL DEFAULT '';
 

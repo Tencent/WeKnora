@@ -417,12 +417,16 @@ func carryForwardWikiLogicalBlocks(previous, current []*types.WikiPageBlock) {
 		contentOnly[wikiBlockMatchKey(block, false)] = append(contentOnly[wikiBlockMatchKey(block, false)], index)
 	}
 
-	pick := func(indices []int) *types.WikiPageBlock {
+	pick := func(indices []int, allowManual bool) *types.WikiPageBlock {
 		for _, index := range indices {
-			if index >= 0 && index < len(oldRefs) && !oldRefs[index].used {
-				oldRefs[index].used = true
-				return oldRefs[index].block
+			if index < 0 || index >= len(oldRefs) || oldRefs[index].used {
+				continue
 			}
+			if !allowManual && isWikiManualBlock(oldRefs[index].block) {
+				continue
+			}
+			oldRefs[index].used = true
+			return oldRefs[index].block
 		}
 		return nil
 	}
@@ -430,9 +434,13 @@ func carryForwardWikiLogicalBlocks(previous, current []*types.WikiPageBlock) {
 		if block == nil {
 			continue
 		}
-		matched := pick(exact[wikiBlockMatchKey(block, true)])
+		matched := pick(exact[wikiBlockMatchKey(block, true)], true)
 		if matched == nil {
-			matched = pick(contentOnly[wikiBlockMatchKey(block, false)])
+			// Pipeline blocks may move between sections during a generated
+			// rewrite, but user/agent blocks are anchored to their exact section.
+			// Otherwise repeated prose in another section could silently acquire
+			// the identity and authorship of a manually maintained paragraph.
+			matched = pick(contentOnly[wikiBlockMatchKey(block, false)], false)
 		}
 		if matched == nil {
 			continue

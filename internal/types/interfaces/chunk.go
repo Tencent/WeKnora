@@ -135,6 +135,20 @@ type ChunkRevisionOutboxRepository interface {
 	) error
 }
 
+// ChunkScopedUpdater applies a narrow field update only while the chunk still
+// belongs to the same document, knowledge base and content revision observed
+// by the caller. It prevents a late editor/index worker from recreating a
+// chunk deleted by reparse or moving it back to a previous knowledge base.
+type ChunkScopedUpdater interface {
+	UpdateChunkFieldsIfCurrent(
+		ctx context.Context,
+		tenantID uint64,
+		chunkID, knowledgeID, knowledgeBaseID string,
+		expectedRevision int,
+		values map[string]interface{},
+	) (bool, error)
+}
+
 // ChunkService defines the interface for chunk service operations
 type ChunkService interface {
 	// CreateChunks creates chunks

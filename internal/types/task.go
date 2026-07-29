@@ -283,6 +283,9 @@ type DocumentProcessPayload struct {
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
 	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
+	// NeedCleanup moves destructive reparse cleanup into the generation-bound
+	// worker. Initial imports leave it false; reparses set it true.
+	NeedCleanup bool `json:"need_cleanup,omitempty"`
 	// Attempt is the per-knowledge attempt number this task belongs to.
 	// Set on enqueue (initial parse → attempt 1; reparse → max+1) so
 	// every span recorded by this task lands on the right attempt
@@ -463,9 +466,8 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
-	// Attempt is allocated before a reparse is queued. Initial/manual update
-	// tasks may leave it at zero and let the worker allocate the first durable
-	// attempt. Once set, Asynq retries keep using the same generation.
+	// Attempt is allocated before every task is queued. Once set, Asynq retries
+	// keep using the same generation instead of opening a new span tree.
 	Attempt int `json:"attempt,omitempty"`
 }
 
@@ -490,6 +492,10 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// ImageCount is the total number of image tasks in this attempt. Redis
+	// deployments keep the durable pending counter separately; Lite mode uses
+	// this value to avoid starting post-process after only the first image.
+	ImageCount int `json:"image_count,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.

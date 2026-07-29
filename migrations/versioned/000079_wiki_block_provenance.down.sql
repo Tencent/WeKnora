@@ -1,5 +1,6 @@
 -- Roll back migration 000079.
 
+DROP TABLE IF EXISTS knowledge_subtask_settlements;
 DROP TABLE IF EXISTS wiki_block_sources;
 DROP TABLE IF EXISTS wiki_page_blocks;
 DROP TABLE IF EXISTS wiki_page_block_sets;

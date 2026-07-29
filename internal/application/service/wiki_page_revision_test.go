@@ -21,7 +21,15 @@ func newWikiRevisionTestService(t *testing.T) (context.Context, wikiRevisionTest
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.WikiFolder{},
+		&types.WikiPage{},
+		&types.WikiPageRevision{},
+		&types.WikiPageBlockSet{},
+		&types.WikiPageBlock{},
+		&types.WikiBlockSource{},
+		&types.KnowledgeProcessingSpan{},
+	))
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, nil, nil, nil)
 	return context.Background(), wikiRevisionTestHarness{svc: svc}, db

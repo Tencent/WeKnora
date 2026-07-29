@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -404,6 +405,304 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+// ClaimKnowledgeProcessing atomically transitions an active knowledge row
+// from the caller's observed status to pending. Keeping the status comparison
+// and all processing-state resets in one UPDATE prevents concurrent
+// publish/reparse requests from both claiming the same row. GORM's default
+// scope for types.Knowledge also adds deleted_at IS NULL, so soft-deleted rows
+// can never be claimed.
+func (r *knowledgeRepository) ClaimKnowledgeProcessing(
+	ctx context.Context,
+	id string,
+	expectedStatus string,
+	expectedUpdatedAt time.Time,
+	values map[string]interface{},
+) (bool, error) {
+	updates := make(map[string]interface{}, len(values)+3)
+	for key, value := range values {
+		updates[key] = value
+	}
+	updates["parse_status"] = types.ParseStatusPending
+	updates["enable_status"] = "disabled"
+	updates["pending_subtasks_count"] = 0
+
+	query := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, expectedStatus)
+	if !expectedUpdatedAt.IsZero() {
+		query = query.Where("updated_at = ?", expectedUpdatedAt)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeColumnsIfUnchanged(
+	ctx context.Context,
+	id, expectedStatus string,
+	expectedUpdatedAt time.Time,
+	values map[string]interface{},
+) (bool, error) {
+	if len(values) == 0 {
+		return true, nil
+	}
+	query := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, expectedStatus)
+	if !expectedUpdatedAt.IsZero() {
+		query = query.Where("updated_at = ?", expectedUpdatedAt)
+	}
+	result := query.Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *knowledgeRepository) currentKnowledgeAttemptQuery(
+	db *gorm.DB, id string, attempt int, allowedStatuses []string,
+) *gorm.DB {
+	return db.Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status IN ?", id, allowedStatuses).
+		Where(
+			"? = (SELECT COALESCE(MAX(attempt), 0) FROM knowledge_processing_spans WHERE knowledge_id = ?)",
+			attempt, id,
+		)
+}
+
+func (r *knowledgeRepository) ClaimKnowledgeAttemptProcessing(
+	ctx context.Context, id string, attempt int,
+) (bool, error) {
+	if id == "" || attempt <= 0 {
+		return false, nil
+	}
+	claimed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, id); err != nil {
+			return err
+		}
+		result := r.currentKnowledgeAttemptQuery(tx, id, attempt, []string{
+			types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFailed,
+		}).Updates(map[string]interface{}{
+			"parse_status": types.ParseStatusProcessing,
+			"updated_at":   time.Now(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		claimed = result.RowsAffected > 0
+		return nil
+	})
+	return claimed, err
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeColumnsForAttempt(
+	ctx context.Context, id string, attempt int, values map[string]interface{},
+) (bool, error) {
+	if id == "" || attempt <= 0 || len(values) == 0 {
+		return false, nil
+	}
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, id); err != nil {
+			return err
+		}
+		result := r.currentKnowledgeAttemptQuery(tx, id, attempt, []string{
+			types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFailed,
+			types.ParseStatusFinalizing,
+		}).Updates(values)
+		if result.Error != nil {
+			return result.Error
+		}
+		updated = result.RowsAffected > 0
+		return nil
+	})
+	return updated, err
+}
+
+func (r *knowledgeRepository) TransitionKnowledgeForAttempt(
+	ctx context.Context,
+	id string,
+	attempt int,
+	expectedStatus string,
+	values map[string]interface{},
+) (bool, error) {
+	if id == "" || attempt <= 0 || expectedStatus == "" || len(values) == 0 {
+		return false, nil
+	}
+	transitioned := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, id); err != nil {
+			return err
+		}
+		result := r.currentKnowledgeAttemptQuery(tx, id, attempt, []string{expectedStatus}).Updates(values)
+		if result.Error != nil {
+			return result.Error
+		}
+		transitioned = result.RowsAffected > 0
+		return nil
+	})
+	return transitioned, err
+}
+
+func (r *knowledgeRepository) knowledgeAttemptMutationAllowed(
+	db *gorm.DB, id string, attempt int, allowedStatuses []string,
+) (bool, error) {
+	var count int64
+	err := r.currentKnowledgeAttemptQuery(db, id, attempt, allowedStatuses).Count(&count).Error
+	return count > 0, err
+}
+
+// RunWithKnowledgeAttemptMutation keeps non-database side effects (chunk,
+// vector and graph writes) ordered with attempt creation. PostgreSQL uses the
+// durable advisory transaction lock; Lite/SQLite additionally relies on the
+// process-local lock shared with CreateAttemptRoot.
+func (r *knowledgeRepository) RunWithKnowledgeAttemptMutation(
+	ctx context.Context,
+	id string,
+	attempt int,
+	allowedStatuses []string,
+	mutate func() error,
+) (applied bool, err error) {
+	if id == "" || attempt <= 0 || len(allowedStatuses) == 0 || mutate == nil {
+		return false, nil
+	}
+	unlock := lockLocalKnowledgeGeneration(id)
+	defer unlock()
+
+	if r.db.Dialector.Name() != "postgres" {
+		allowed, checkErr := r.knowledgeAttemptMutationAllowed(
+			r.db.WithContext(ctx), id, attempt, allowedStatuses,
+		)
+		if checkErr != nil || !allowed {
+			return false, checkErr
+		}
+		return true, mutate()
+	}
+
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lockErr := lockKnowledgeAttemptGeneration(tx, id); lockErr != nil {
+			return lockErr
+		}
+		allowed, checkErr := r.knowledgeAttemptMutationAllowed(tx, id, attempt, allowedStatuses)
+		if checkErr != nil || !allowed {
+			return checkErr
+		}
+		applied = true
+		return mutate()
+	})
+	return applied, err
+}
+
+// ClaimKnowledgeDeleting serializes the deleting transition with attempt
+// creation and returns the status that owned the row immediately beforehand.
+func (r *knowledgeRepository) ClaimKnowledgeDeleting(
+	ctx context.Context, tenantID uint64, id string,
+) (previousStatus string, claimed bool, err error) {
+	if tenantID == 0 || id == "" {
+		return "", false, nil
+	}
+	unlock := lockLocalKnowledgeGeneration(id)
+	defer unlock()
+
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lockErr := lockKnowledgeAttemptGeneration(tx, id); lockErr != nil {
+			return lockErr
+		}
+		var snapshot struct {
+			ParseStatus string `gorm:"column:parse_status"`
+		}
+		if readErr := tx.Model(&types.Knowledge{}).
+			Select("parse_status").
+			Where("id = ? AND tenant_id = ? AND parse_status <> ?", id, tenantID, types.ParseStatusDeleting).
+			Take(&snapshot).Error; readErr != nil {
+			if errors.Is(readErr, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return readErr
+		}
+		result := tx.Model(&types.Knowledge{}).
+			Where("id = ? AND tenant_id = ? AND parse_status = ?", id, tenantID, snapshot.ParseStatus).
+			Updates(map[string]interface{}{
+				"parse_status": types.ParseStatusDeleting,
+				"updated_at":   time.Now(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		previousStatus = snapshot.ParseStatus
+		claimed = true
+		return nil
+	})
+	return previousStatus, claimed, err
+}
+
+// ClearKnowledgeStorageUsage makes reparse cleanup retry-safe. The knowledge
+// row is the idempotency marker: only the transaction that changes its
+// storage_size from a positive value to zero may decrement tenants.storage_used.
+func (r *knowledgeRepository) ClearKnowledgeStorageUsage(
+	ctx context.Context, id string, tenantID uint64,
+) (int64, error) {
+	if id == "" || tenantID == 0 {
+		return 0, nil
+	}
+
+	var released int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var knowledge types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "tenant_id", "storage_size").
+			Where("id = ? AND tenant_id = ?", id, tenantID).
+			First(&knowledge).Error; err != nil {
+			return err
+		}
+		if knowledge.StorageSize <= 0 {
+			return nil
+		}
+
+		result := tx.Model(&types.Knowledge{}).
+			Where("id = ? AND tenant_id = ? AND storage_size = ?", id, tenantID, knowledge.StorageSize).
+			UpdateColumn("storage_size", 0)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			// Another cleanup transaction won before this one acquired an
+			// effective lock (notably possible on SQLite, where FOR UPDATE is
+			// ignored). It owns the matching tenant decrement.
+			return nil
+		}
+
+		released = knowledge.StorageSize
+		result = tx.Model(&types.Tenant{}).
+			Where("id = ?", tenantID).
+			UpdateColumn(
+				"storage_used",
+				gorm.Expr("CASE WHEN storage_used > ? THEN storage_used - ? ELSE 0 END", released, released),
+			)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return released, nil
+}
+
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
 // to normal queries and have not moved out of the transient deleting state.
 func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
@@ -440,36 +739,100 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
-	return r.finalizeSubtask(ctx, id, 0, false)
+	return r.finalizeSubtaskWithDB(r.db.WithContext(ctx), id, 0, false)
 }
 
 // FinalizeSubtaskForAttempt is the attempt-aware counterpart to
-// FinalizeSubtask. For tracked attempts, both the decrement and promotion are
-// conditioned on the supplied attempt still being the latest persisted span
-// attempt for this knowledge. Keeping that predicate inside each UPDATE closes
-// the check-then-decrement window where a delayed task from attempt N could
-// consume attempt N+1's freshly seeded counter.
+// FinalizeSubtask. For tracked attempts, it first inserts a durable settlement
+// marker identified by (knowledge_id, attempt, subtask_key). Only the first
+// insert may decrement and promote, so worker retries are idempotent across
+// process restarts. The marker, decrement, and promotion share the attempt
+// generation lock and one transaction.
 //
 // attempt <= 0 is a compatibility path for legacy tasks that predate attempt
 // tracking and intentionally retains FinalizeSubtask's unguarded behavior.
 func (r *knowledgeRepository) FinalizeSubtaskForAttempt(
-	ctx context.Context, id string, attempt int,
+	ctx context.Context, id string, attempt int, subtaskKey string,
 ) (int, bool, error) {
 	if attempt <= 0 {
 		return r.FinalizeSubtask(ctx, id)
 	}
-	return r.finalizeSubtask(ctx, id, attempt, true)
+	subtaskKey = strings.TrimSpace(subtaskKey)
+	if subtaskKey == "" {
+		return 0, false, errors.New("finalize subtask for positive attempt requires subtask key")
+	}
+	return r.finalizeSubtaskForAttempt(ctx, id, attempt, subtaskKey)
 }
 
-func (r *knowledgeRepository) finalizeSubtask(
-	ctx context.Context, id string, attempt int, guardAttempt bool,
+func (r *knowledgeRepository) finalizeSubtaskForAttempt(
+	ctx context.Context, id string, attempt int, subtaskKey string,
+) (int, bool, error) {
+	var count int
+	var promoted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, id); err != nil {
+			return err
+		}
+
+		inserted, err := insertKnowledgeSubtaskSettlement(tx, id, attempt, subtaskKey)
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			count = pendingSubtasksCount(tx, id)
+			return nil
+		}
+
+		count, promoted, err = r.finalizeSubtaskWithDB(tx, id, attempt, true)
+		return err
+	})
+	return count, promoted, err
+}
+
+// insertKnowledgeSubtaskSettlement combines the current-attempt check and
+// unique marker insertion in one write. PostgreSQL's advisory transaction lock
+// serializes this statement with attempt creation; SQLite's writer lock supplies
+// the equivalent ordering. A missing settlement table is returned as an error,
+// so positive attempts fail closed before touching the counter.
+func insertKnowledgeSubtaskSettlement(
+	db *gorm.DB, id string, attempt int, subtaskKey string,
+) (bool, error) {
+	result := db.Exec(
+		"INSERT INTO knowledge_subtask_settlements "+
+			"(knowledge_id, attempt, subtask_key, created_at) "+
+			"SELECT ?, ?, ?, ? "+
+			"WHERE ? = ("+
+			"SELECT COALESCE(MAX(attempt), 0) "+
+			"FROM knowledge_processing_spans "+
+			"WHERE knowledge_id = ?) "+
+			"ON CONFLICT (knowledge_id, attempt, subtask_key) DO NOTHING",
+		id, attempt, subtaskKey, time.Now(), attempt, id,
+	)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func pendingSubtasksCount(db *gorm.DB, id string) int {
+	var count int
+	if err := db.Model(&types.Knowledge{}).
+		Select("pending_subtasks_count").
+		Where("id = ?", id).Scan(&count).Error; err != nil {
+		return 0
+	}
+	return count
+}
+
+func (r *knowledgeRepository) finalizeSubtaskWithDB(
+	db *gorm.DB, id string, attempt int, guardAttempt bool,
 ) (int, bool, error) {
 	now := time.Now()
 	// 1) Atomic decrement, clamped at zero. The `pending_subtasks_count > 0`
 	//    guard is purely a safety net for accounting bugs — under normal
 	//    operation each subtask handler decrements at most once per task,
 	//    so the counter cannot go negative.
-	decrement := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	decrement := db.Model(&types.Knowledge{}).
 		Where("id = ? AND pending_subtasks_count > 0", id)
 	if guardAttempt {
 		decrement = decrement.Where(
@@ -498,7 +861,7 @@ func (r *knowledgeRepository) finalizeSubtask(
 	//    the single authoritative, atomic check on the live row: only the
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
-	promote := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	promote := db.Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
 			id, types.ParseStatusFinalizing)
 	if guardAttempt {
@@ -522,15 +885,7 @@ func (r *knowledgeRepository) finalizeSubtask(
 	//    only. This read may be replica-stale and is intentionally NOT used
 	//    to decide whether to promote (see above). A read failure here does
 	//    not affect correctness, so we don't propagate it as an error.
-	var snap struct {
-		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
-	}
-	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Select("pending_subtasks_count").
-		Where("id = ?", id).Take(&snap).Error; err != nil {
-		return 0, promoted, nil
-	}
-	return snap.PendingSubtasksCount, promoted, nil
+	return pendingSubtasksCount(db, id), promoted, nil
 }
 
 // SetFinalizing atomically transitions a row from 'processing' to

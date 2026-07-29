@@ -576,6 +576,7 @@ type wikiAttemptFinalizeKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	mu              sync.Mutex
 	attempts        []int
+	subtaskKeys     []string
 	legacyCallCount int
 }
 
@@ -589,11 +590,12 @@ func (r *wikiAttemptFinalizeKnowledgeRepo) FinalizeSubtask(
 }
 
 func (r *wikiAttemptFinalizeKnowledgeRepo) FinalizeSubtaskForAttempt(
-	_ context.Context, _ string, attempt int,
+	_ context.Context, _ string, attempt int, subtaskKey string,
 ) (int, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempts = append(r.attempts, attempt)
+	r.subtaskKeys = append(r.subtaskKeys, subtaskKey)
 	return 0, false, nil
 }
 
@@ -645,6 +647,9 @@ func TestRequeueFailedOpsDeadLetterPreservesAttemptForFinalize(t *testing.T) {
 	defer knowledgeRepo.mu.Unlock()
 	if len(knowledgeRepo.attempts) != 1 || knowledgeRepo.attempts[0] != 12 {
 		t.Fatalf("dead-letter finalize attempts = %v, want [12]", knowledgeRepo.attempts)
+	}
+	if len(knowledgeRepo.subtaskKeys) != 1 || knowledgeRepo.subtaskKeys[0] != "wiki" {
+		t.Fatalf("dead-letter finalize subtask keys = %v, want [wiki]", knowledgeRepo.subtaskKeys)
 	}
 	if knowledgeRepo.legacyCallCount != 0 {
 		t.Fatalf("legacy unguarded FinalizeSubtask called %d time(s)", knowledgeRepo.legacyCallCount)

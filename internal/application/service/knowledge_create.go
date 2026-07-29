@@ -263,9 +263,17 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	langfuse.InjectTracing(ctx, &taskPayload)
+	if err := s.ensureDocumentProcessAttempt(ctx, &taskPayload); err != nil {
+		logger.Errorf(ctx, "Failed to allocate document process attempt: %v", err)
+		s.markKnowledgeEnqueueFailed(ctx, knowledge)
+		return knowledge, nil
+	}
+	ctx = withAttempt(ctx, taskPayload.Attempt)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"payload_marshal_failed", "failed to marshal document processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -284,6 +292,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"task_enqueue_failed", "failed to enqueue document processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -293,11 +303,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		// 即使入队失败，也返回knowledge，因为文件已保存
 		return knowledge, nil
 	}
-	recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
-		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{
-			"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
-			"processing_status": "pending", "task_id": info.ID, "trigger": kbActivityTrigger(ctx),
-		})
 	logger.Infof(
 		ctx,
 		"Enqueued document process task: id=%s queue=%s knowledge_id=%s",
@@ -307,8 +312,26 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	)
 
 	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
-		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+		if err := NewDataTableSummaryTask(
+			ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID, taskPayload.Attempt,
+		); err != nil {
+			logger.Errorf(ctx, "Failed to enqueue data table summary task: %v", err)
+			s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+				"task_enqueue_failed", "failed to enqueue data table summary task")
+			s.markKnowledgeEnqueueFailed(ctx, knowledge)
+			recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
+				"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
+					"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
+					"processing_status": "failed", "failure_stage": "datatable_summary_enqueue",
+				})
+			return knowledge, fmt.Errorf("enqueue data table summary task: %w", err)
+		}
 	}
+	recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
+		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{
+			"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
+			"processing_status": "pending", "task_id": info.ID, "trigger": kbActivityTrigger(ctx),
+		})
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -461,9 +484,17 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	}
 
 	langfuse.InjectTracing(ctx, &taskPayload)
+	if err := s.ensureDocumentProcessAttempt(ctx, &taskPayload); err != nil {
+		logger.Errorf(ctx, "Failed to allocate URL process attempt: %v", err)
+		s.markKnowledgeEnqueueFailed(ctx, knowledge)
+		return knowledge, nil
+	}
+	ctx = withAttempt(ctx, taskPayload.Attempt)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"payload_marshal_failed", "failed to marshal URL processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -481,6 +512,8 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"task_enqueue_failed", "failed to enqueue URL processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -716,9 +749,17 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	}
 
 	langfuse.InjectTracing(ctx, &taskPayload)
+	if err := s.ensureDocumentProcessAttempt(ctx, &taskPayload); err != nil {
+		logger.Errorf(ctx, "Failed to allocate file URL process attempt: %v", err)
+		s.markKnowledgeEnqueueFailed(ctx, knowledge)
+		return knowledge, nil
+	}
+	ctx = withAttempt(ctx, taskPayload.Attempt)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"payload_marshal_failed", "failed to marshal file URL processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -736,6 +777,8 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+			"task_enqueue_failed", "failed to enqueue file URL processing task")
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
 		recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -864,13 +907,13 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 
 	if status == types.ManualKnowledgeStatusPublish {
 		logger.Infof(ctx, "Manual knowledge created, enqueuing async processing task, ID: %s", knowledge.ID)
-		taskID, err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false, 0)
+		taskID, taskAttempt, err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false, 0)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual processing task for new knowledge: %v", err)
 			// Non-fatal: mark as failed so user can retry
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "Failed to enqueue processing task"
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			_ = s.persistKnowledgeForAttempt(withAttempt(ctx, taskAttempt), knowledge)
 			recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 				"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
 					"title": knowledge.Title, "source_type": "manual", "status": status,
@@ -952,6 +995,13 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 	// Process passages
 	if syncMode {
 		logger.Info(ctx, "Processing passage synchronously")
+		attempt, err := s.openKnowledgeAttempt(ctx, knowledge.ID, "")
+		if err != nil {
+			logger.Errorf(ctx, "Failed to allocate synchronous passage attempt: %v", err)
+			s.markKnowledgeEnqueueFailed(ctx, knowledge)
+			return knowledge, nil
+		}
+		ctx = withAttempt(ctx, attempt)
 		s.processDocumentFromPassage(ctx, kb, knowledge, safePassages)
 		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeSuccess, map[string]any{
@@ -986,9 +1036,17 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
+		if err := s.ensureDocumentProcessAttempt(ctx, &taskPayload); err != nil {
+			logger.Errorf(ctx, "Failed to allocate passage process attempt: %v", err)
+			s.markKnowledgeEnqueueFailed(ctx, knowledge)
+			return knowledge, nil
+		}
+		ctx = withAttempt(ctx, taskPayload.Attempt)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)
+			s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+				"payload_marshal_failed", "failed to marshal passage processing task")
 			s.markKnowledgeEnqueueFailed(ctx, knowledge)
 			recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 				"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -1007,6 +1065,8 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
+			s.failKnowledgeAttempt(ctx, knowledge.ID, taskPayload.Attempt,
+				"task_enqueue_failed", "failed to enqueue passage processing task")
 			s.markKnowledgeEnqueueFailed(ctx, knowledge)
 			recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 				"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
@@ -1067,6 +1127,14 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	if !existing.IsManual() {
 		return nil, werrors.NewBadRequestError("仅支持手工知识的在线编辑")
 	}
+	observedStatus := existing.ParseStatus
+	observedUpdatedAt := existing.UpdatedAt
+	if knowledgeProcessingInFlight(existing.ParseStatus) {
+		return nil, werrors.NewConflictError("知识正在处理中，请等待当前任务完成后再编辑")
+	}
+	if existing.ParseStatus == types.ParseStatusDeleting {
+		return nil, werrors.NewConflictError("知识正在删除，无法编辑")
+	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
 	if err != nil {
@@ -1105,7 +1173,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		existing.Description = ""
 		existing.ProcessedAt = nil
 
-		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+		if err := s.updateKnowledgeIfUnchanged(ctx, existing, observedStatus, observedUpdatedAt); err != nil {
 			logger.Errorf(ctx, "Failed to persist manual draft: %v", err)
 			return nil, err
 		}
@@ -1116,28 +1184,38 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return existing, nil
 	}
 
-	// Publish: persist pending status and enqueue async task for cleanup + re-indexing
-	existing.ParseStatus = "pending"
-	existing.Description = ""
-	existing.ProcessedAt = nil
-
+	// Publish: validate the final metadata, then atomically persist it together
+	// with both the pending-state claim and its durable attempt root. This leaves
+	// no window in which an older retry can still look like the current attempt.
 	if _, err := ApplyKnowledgeProcessOverrides(ctx, kb, existing, payload.ProcessConfig, nil, nil); err != nil {
 		return nil, err
 	}
-
-	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
-		logger.Errorf(ctx, "Failed to persist manual knowledge before indexing: %v", err)
+	existing.Description = ""
+	existing.ErrorMessage = ""
+	existing.ProcessedAt = nil
+	existing.PendingSubtasksCount = 0
+	tracePayload := types.ManualProcessPayload{KnowledgeID: existing.ID}
+	langfuse.InjectTracing(ctx, &tracePayload)
+	publishAttempt, err := s.claimKnowledgeProcessing(
+		ctx, existing, observedUpdatedAt, tracePayload.LangfuseTraceID,
+	)
+	if err != nil {
 		return nil, err
+	}
+	ctx = withAttempt(ctx, publishAttempt)
+	if kb.IsWikiEnabled() {
+		s.prepareWikiForReparse(ctx, existing)
 	}
 
 	logger.Infof(ctx, "Manual knowledge updated, enqueuing async processing task, ID: %s", existing.ID)
-	taskID, err := s.enqueueManualProcessing(ctx, existing, cleanContent, true, 0)
+	taskID, _, err := s.enqueueManualProcessing(ctx, existing, cleanContent, true, publishAttempt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue manual processing task: %v", err)
 		// Non-fatal: mark as failed so user can retry
 		existing.ParseStatus = "failed"
 		existing.ErrorMessage = "Failed to enqueue processing task"
-		s.repo.UpdateKnowledge(ctx, existing)
+		existing.UpdatedAt = time.Now()
+		_ = s.persistKnowledgeForAttempt(ctx, existing)
 		recordKBActivity(ctx, s.audit, tenantID, existing.KnowledgeBaseID, types.AuditActionKnowledgeUpdated,
 			"knowledge", existing.ID, types.AuditOutcomeFailed, map[string]any{
 				"title": existing.Title, "status": status,
@@ -1156,7 +1234,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 	knowledge *types.Knowledge, content string, needCleanup bool, attempt int,
-) (string, error) {
+) (string, int, error) {
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
 		RequestId:       requestID,
@@ -1168,19 +1246,30 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &payload)
+	if payload.Attempt <= 0 {
+		allocatedAttempt, err := s.openKnowledgeAttempt(ctx, knowledge.ID, payload.LangfuseTraceID)
+		if err != nil {
+			return "", 0, err
+		}
+		payload.Attempt = allocatedAttempt
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal manual process payload: %w", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, payload.Attempt,
+			"payload_marshal_failed", "failed to marshal manual processing task")
+		return "", payload.Attempt, fmt.Errorf("failed to marshal manual process payload: %w", err)
 	}
 
 	task := asynq.NewTask(types.TypeManualProcess, payloadBytes,
 		asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
-		return "", fmt.Errorf("failed to enqueue manual process task: %w", err)
+		s.failKnowledgeAttempt(ctx, knowledge.ID, payload.Attempt,
+			"task_enqueue_failed", "failed to enqueue manual processing task")
+		return "", payload.Attempt, fmt.Errorf("failed to enqueue manual process task: %w", err)
 	}
 	logger.Infof(ctx, "Enqueued manual process task: knowledge_id=%s, asynq_id=%s", knowledge.ID, info.ID)
-	return info.ID, nil
+	return info.ID, payload.Attempt, nil
 }
 
 // markKnowledgeEnqueueFailed prevents a durable knowledge row from remaining
@@ -1192,7 +1281,7 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	}
 	knowledge.ParseStatus = "failed"
 	knowledge.ErrorMessage = "Failed to enqueue processing task"
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.persistKnowledgeForAttempt(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to mark knowledge as failed after enqueue error: %v", err)
 	}
 }
@@ -1226,11 +1315,15 @@ func sanitizeManualDownloadFilename(title string) string {
 }
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
-) {
+	kb *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+	content string,
+	doSync bool,
+	beforeProcess func() (bool, error),
+) error {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
-		return
+		return nil
 	}
 
 	// Resolve embedded data:base64 images and remote http(s) images → storage, replace URLs.
@@ -1306,12 +1399,29 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			}
 		}
 	}
+	if err := s.preflightProcessChunksDependencies(ctx, kb, knowledge, parsed); err != nil {
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.persistKnowledgeForAttempt(ctx, knowledge)
+		return err
+	}
+	if beforeProcess != nil {
+		canContinue, err := beforeProcess()
+		if err != nil {
+			return err
+		}
+		if !canContinue {
+			return nil
+		}
+	}
 
 	if doSync {
 		s.processChunks(ctx, kb, knowledge, parsed, opts)
-		return
+		return nil
 	}
 
 	newCtx := logger.CloneContext(ctx)
 	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
+	return nil
 }

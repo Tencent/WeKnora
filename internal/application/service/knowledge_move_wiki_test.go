@@ -120,6 +120,15 @@ func (r *moveWikiTenantRepo) GetTenantByID(_ context.Context, id uint64) (*types
 	return &types.Tenant{ID: id}, nil
 }
 
+type moveWikiAttemptTracker struct {
+	SpanTracker
+	attempt int
+}
+
+func (t moveWikiAttemptTracker) LatestAttempt(context.Context, string) int {
+	return t.attempt
+}
+
 func wikiEnabledKB(id string) *types.KnowledgeBase {
 	return &types.KnowledgeBase{
 		ID:               id,
@@ -157,6 +166,7 @@ func newMoveWikiService(t *testing.T) (
 		taskPendingRepo: pendingRepo,
 		task:            &wikiGuardTaskQueue{},
 		chunkRepo:       chunkRepo,
+		spanTracker:     moveWikiAttemptTracker{attempt: 5},
 	}
 	return svc, wikiRepo, pendingRepo, chunkRepo
 }
@@ -193,6 +203,9 @@ func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 	require.Len(t, dstOps, 1)
 	assert.Equal(t, WikiOpIngest, dstOps[0].Op)
 	assert.Equal(t, "kn-1", dstOps[0].DedupKey)
+	var ingest WikiPendingOp
+	require.NoError(t, json.Unmarshal(dstOps[0].Payload, &ingest))
+	assert.Equal(t, 5, ingest.Attempt)
 	assert.Equal(t, []string{"kb-src"}, wikiRepo.listedKBs)
 	srcOps := opsFor(pendingRepo.ops, "kb-src")
 	require.Len(t, srcOps, 1)

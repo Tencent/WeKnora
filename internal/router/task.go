@@ -404,14 +404,48 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		if len(errMsg) > 8192 {
 			errMsg = errMsg[:8192]
 		}
-		// Single UPDATE so we never end up with parse_status=failed but
-		// stale error_message (or vice versa) when the second write
-		// fails.
-		if err := repo.UpdateKnowledgeColumns(ctx, probe.KnowledgeID, map[string]interface{}{
+		updates := map[string]interface{}{
 			"parse_status":  types.ParseStatusFailed,
 			"error_message": errMsg,
-		}); err != nil {
-			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, err)
+		}
+		updated := false
+		var updateErr error
+		if probe.Attempt > 0 {
+			attemptUpdater, ok := repo.(interfaces.KnowledgeAttemptUpdater)
+			if !ok {
+				logger.Warnf(ctx, "dead-letter callback: refusing unguarded update for knowledge %s attempt %d",
+					probe.KnowledgeID, probe.Attempt)
+				return
+			}
+			updated, updateErr = attemptUpdater.UpdateKnowledgeColumnsForAttempt(
+				ctx, probe.KnowledgeID, probe.Attempt, updates,
+			)
+		} else {
+			// A legacy task may update only when the tracker can prove that no
+			// durable generation exists. Lookup failures fail closed.
+			checked, ok := tracker.(interface {
+				LatestAttemptWithError(context.Context, string) (int, error)
+			})
+			if !ok {
+				logger.Warnf(ctx, "dead-letter callback: refusing unverifiable legacy update for knowledge %s", probe.KnowledgeID)
+				return
+			}
+			latest, latestErr := checked.LatestAttemptWithError(ctx, probe.KnowledgeID)
+			if latestErr != nil || latest > 0 {
+				logger.Warnf(ctx, "dead-letter callback: dropping legacy update for knowledge %s latest=%d err=%v",
+					probe.KnowledgeID, latest, latestErr)
+				return
+			}
+			updateErr = repo.UpdateKnowledgeColumns(ctx, probe.KnowledgeID, updates)
+			updated = updateErr == nil
+		}
+		if updateErr != nil {
+			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, updateErr)
+			return
+		}
+		if !updated {
+			logger.Infof(ctx, "dead-letter callback: stale attempt ignored knowledge=%s attempt=%d",
+				probe.KnowledgeID, probe.Attempt)
 			return
 		}
 		// Close the matching root span so the timeline stops showing

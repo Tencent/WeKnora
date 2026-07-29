@@ -163,6 +163,19 @@ type knowledgeAttemptOpener interface {
 	OpenAttempt(ctx context.Context, knowledgeID, langfuseTraceID string) (*Span, int, error)
 }
 
+type knowledgeAttemptTrackerWithError interface {
+	LatestAttemptWithError(ctx context.Context, knowledgeID string) (int, error)
+}
+
+type knowledgeProcessingAttemptOpener interface {
+	OpenClaimedAttempt(
+		ctx context.Context,
+		knowledgeID, langfuseTraceID, expectedStatus string,
+		expectedUpdatedAt time.Time,
+		values map[string]interface{},
+	) (root *Span, attempt int, claimed bool, err error)
+}
+
 // openRequiredKnowledgeAttempt converts the tracker's best-effort API into a
 // correctness boundary for source-aware Wiki publication. A document update
 // may only flow into Wiki after its generation has a durable root span.
@@ -195,6 +208,344 @@ func (s *knowledgeService) openKnowledgeAttempt(
 	default:
 		return openRequiredKnowledgeAttempt(ctx, tracker, knowledgeID, langfuseTraceID)
 	}
+}
+
+func latestKnowledgeAttempt(
+	ctx context.Context, tracker SpanTracker, knowledgeID string,
+) (int, error) {
+	if checked, ok := tracker.(knowledgeAttemptTrackerWithError); ok {
+		return checked.LatestAttemptWithError(ctx, knowledgeID)
+	}
+	return tracker.LatestAttempt(ctx, knowledgeID), nil
+}
+
+// requireCarriedKnowledgeAttempt is the strict generation gate for downstream
+// tasks. Legacy attempt-zero work is accepted only when no durable attempt has
+// ever been recorded; it must never attach itself to whatever generation is
+// current at execution time.
+func requireCarriedKnowledgeAttempt(
+	ctx context.Context, tracker SpanTracker, knowledgeID string, attempt int,
+) (bool, error) {
+	latest, err := latestKnowledgeAttempt(ctx, tracker, knowledgeID)
+	if err != nil {
+		return false, fmt.Errorf("load latest processing attempt for knowledge %s: %w", knowledgeID, err)
+	}
+	if attempt <= 0 {
+		return latest == 0, nil
+	}
+	return latest == attempt, nil
+}
+
+// requireCurrentKnowledgeAttempt is the worker-side generation gate. Positive
+// attempts must exactly equal the latest durable root before a task may update
+// status, clean resources, or write chunks. Attempt zero is retained only for
+// explicitly disabled tracking in narrow test/custom constructions.
+func (s *knowledgeService) requireCurrentKnowledgeAttempt(
+	ctx context.Context, knowledgeID string, attempt int,
+) (bool, error) {
+	if attempt <= 0 {
+		return true, nil
+	}
+	latest, err := latestKnowledgeAttempt(ctx, s.tracker(), knowledgeID)
+	if err != nil {
+		return false, fmt.Errorf("load latest processing attempt for knowledge %s: %w", knowledgeID, err)
+	}
+	return latest == attempt, nil
+}
+
+// resolveKnowledgeWorkerAttempt keeps rolling upgrades compatible with tasks
+// queued before attempt was added to the payload. A legacy task may create the
+// first durable attempt only while no attempt exists. Once a newer generation
+// is present, the legacy task is stale and must be ignored.
+func (s *knowledgeService) resolveKnowledgeWorkerAttempt(
+	ctx context.Context, knowledgeID, langfuseTraceID string, carriedAttempt int,
+) (attempt int, accepted bool, err error) {
+	if carriedAttempt > 0 {
+		return carriedAttempt, true, nil
+	}
+	latest, err := latestKnowledgeAttempt(ctx, s.tracker(), knowledgeID)
+	if err != nil {
+		return 0, false, fmt.Errorf("load latest processing attempt for knowledge %s: %w", knowledgeID, err)
+	}
+	if latest > 0 {
+		return 0, false, nil
+	}
+	attempt, err = s.openKnowledgeAttempt(ctx, knowledgeID, langfuseTraceID)
+	if err != nil {
+		return 0, false, err
+	}
+	return attempt, true, nil
+}
+
+func (s *knowledgeService) ensureDocumentProcessAttempt(
+	ctx context.Context, payload *types.DocumentProcessPayload,
+) error {
+	if payload == nil {
+		return errors.New("document process payload is required")
+	}
+	if payload.Attempt > 0 {
+		return nil
+	}
+	attempt, err := s.openKnowledgeAttempt(ctx, payload.KnowledgeID, payload.LangfuseTraceID)
+	if err != nil {
+		return err
+	}
+	payload.Attempt = attempt
+	return nil
+}
+
+func (s *knowledgeService) failKnowledgeAttempt(
+	ctx context.Context, knowledgeID string, attempt int, code, message string,
+) {
+	if attempt <= 0 {
+		return
+	}
+	if code == "" {
+		code = "processing_setup_failed"
+	}
+	if message == "" {
+		message = "processing task setup failed"
+	}
+	s.tracker().FinalizeAttempt(ctx, knowledgeID, attempt, types.SpanStatusFailed,
+		types.JSONMap{"phase": "enqueue"}, code, message)
+}
+
+func knowledgeProcessingInFlight(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	default:
+		return false
+	}
+}
+
+func knowledgeMutableColumns(knowledge *types.Knowledge) map[string]interface{} {
+	if knowledge == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"knowledge_base_id":      knowledge.KnowledgeBaseID,
+		"type":                   knowledge.Type,
+		"title":                  knowledge.Title,
+		"description":            knowledge.Description,
+		"source":                 knowledge.Source,
+		"channel":                knowledge.Channel,
+		"parse_status":           knowledge.ParseStatus,
+		"summary_status":         knowledge.SummaryStatus,
+		"enable_status":          knowledge.EnableStatus,
+		"embedding_model_id":     knowledge.EmbeddingModelID,
+		"file_name":              knowledge.FileName,
+		"file_type":              knowledge.FileType,
+		"file_size":              knowledge.FileSize,
+		"file_hash":              knowledge.FileHash,
+		"file_path":              knowledge.FilePath,
+		"storage_size":           knowledge.StorageSize,
+		"metadata":               knowledge.Metadata,
+		"custom_metadata":        knowledge.CustomMetadata,
+		"last_faq_import_result": knowledge.LastFAQImportResult,
+		"processed_at":           knowledge.ProcessedAt,
+		"error_message":          knowledge.ErrorMessage,
+	}
+}
+
+// claimKnowledgeProcessing atomically opens the new durable attempt and moves
+// the knowledge row to pending. Production's tracker commits those two writes
+// in one transaction, so an older worker cannot observe a pending row while
+// its own attempt is still current. The fallback keeps lightweight test/custom
+// constructions source-compatible; attempt-zero output cannot publish Wiki
+// provenance.
+func (s *knowledgeService) claimKnowledgeProcessing(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	expectedUpdatedAt time.Time,
+	langfuseTraceID string,
+) (int, error) {
+	if knowledge == nil || knowledge.ID == "" {
+		return 0, errors.New("knowledge processing claim requires a knowledge row")
+	}
+	if knowledgeProcessingInFlight(knowledge.ParseStatus) {
+		return 0, werrors.NewConflictError("知识正在处理中，请等待当前任务完成后再试")
+	}
+	if knowledge.ParseStatus == types.ParseStatusDeleting {
+		return 0, werrors.NewConflictError("知识正在删除，无法开始处理")
+	}
+	expectedStatus := knowledge.ParseStatus
+	knowledge.UpdatedAt = time.Now()
+	values := knowledgeMutableColumns(knowledge)
+	values["updated_at"] = knowledge.UpdatedAt
+
+	if opener, ok := s.tracker().(knowledgeProcessingAttemptOpener); ok {
+		root, attempt, claimed, err := opener.OpenClaimedAttempt(
+			ctx, knowledge.ID, langfuseTraceID, expectedStatus,
+			expectedUpdatedAt, values,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("atomically claim processing attempt for knowledge %s: %w", knowledge.ID, err)
+		}
+		if !claimed {
+			return 0, werrors.NewConflictError("知识状态已变化，请刷新后重试")
+		}
+		if root == nil || attempt <= 0 {
+			return 0, fmt.Errorf("atomic processing claim for knowledge %s returned no durable attempt", knowledge.ID)
+		}
+		knowledge.ParseStatus = types.ParseStatusPending
+		knowledge.EnableStatus = "disabled"
+		knowledge.PendingSubtasksCount = 0
+		return attempt, nil
+	}
+
+	if claimer, ok := s.repo.(interfaces.KnowledgeProcessingClaimer); ok {
+		claimed, err := claimer.ClaimKnowledgeProcessing(
+			ctx, knowledge.ID, expectedStatus, expectedUpdatedAt, values,
+		)
+		if err != nil {
+			return 0, err
+		}
+		if !claimed {
+			return 0, werrors.NewConflictError("知识状态已变化，请刷新后重试")
+		}
+	} else {
+		values["parse_status"] = types.ParseStatusPending
+		values["enable_status"] = "disabled"
+		values["pending_subtasks_count"] = 0
+		if err := s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, values); err != nil {
+			return 0, err
+		}
+	}
+
+	knowledge.ParseStatus = types.ParseStatusPending
+	knowledge.EnableStatus = "disabled"
+	knowledge.PendingSubtasksCount = 0
+	switch s.tracker().(type) {
+	case noopSpanTracker, *noopSpanTracker:
+		return 0, nil
+	}
+
+	claimedRevision := knowledge.UpdatedAt
+	attempt, err := s.openKnowledgeAttempt(ctx, knowledge.ID, langfuseTraceID)
+	if err == nil {
+		return attempt, nil
+	}
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = "Failed to allocate processing attempt"
+	knowledge.UpdatedAt = time.Now()
+	_ = s.updateKnowledgeIfUnchanged(
+		ctx, knowledge, types.ParseStatusPending, claimedRevision,
+	)
+	return 0, err
+}
+
+func (s *knowledgeService) updateKnowledgeIfUnchanged(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	expectedStatus string,
+	expectedUpdatedAt time.Time,
+) error {
+	if knowledge == nil {
+		return errors.New("knowledge row is required")
+	}
+	if updater, ok := s.repo.(interfaces.KnowledgeConditionalUpdater); ok {
+		updated, err := updater.UpdateKnowledgeColumnsIfUnchanged(
+			ctx, knowledge.ID, expectedStatus, expectedUpdatedAt, knowledgeMutableColumns(knowledge),
+		)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return werrors.NewConflictError("知识已被其他请求修改，请刷新后重试")
+		}
+		return nil
+	}
+	return s.repo.UpdateKnowledge(ctx, knowledge)
+}
+
+func (s *knowledgeService) claimKnowledgeAttemptProcessing(
+	ctx context.Context, knowledgeID string, attempt int,
+) (bool, error) {
+	if attempt <= 0 {
+		if err := s.repo.UpdateKnowledgeColumns(ctx, knowledgeID, map[string]interface{}{
+			"parse_status": types.ParseStatusProcessing,
+			"updated_at":   time.Now(),
+		}); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if updater, ok := s.repo.(interfaces.KnowledgeAttemptUpdater); ok {
+		return updater.ClaimKnowledgeAttemptProcessing(ctx, knowledgeID, attempt)
+	}
+	return false, fmt.Errorf(
+		"knowledge repository does not support attempt-aware processing claims for attempt %d",
+		attempt,
+	)
+}
+
+func (s *knowledgeService) persistKnowledgeForAttempt(
+	ctx context.Context, knowledge *types.Knowledge,
+) error {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		return s.repo.UpdateKnowledge(ctx, knowledge)
+	}
+	if updater, ok := s.repo.(interfaces.KnowledgeAttemptUpdater); ok {
+		updated, err := updater.UpdateKnowledgeColumnsForAttempt(
+			ctx, knowledge.ID, attempt, knowledgeMutableColumns(knowledge),
+		)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return fmt.Errorf("knowledge %s attempt %d is no longer mutable", knowledge.ID, attempt)
+		}
+		return nil
+	}
+	return fmt.Errorf(
+		"knowledge repository does not support attempt-aware updates for knowledge %s attempt %d",
+		knowledge.ID,
+		attempt,
+	)
+}
+
+func (s *knowledgeService) updateKnowledgeColumnsForAttempt(
+	ctx context.Context, knowledgeID string, attempt int, values map[string]interface{},
+) error {
+	if attempt > 0 {
+		updater, ok := s.repo.(interfaces.KnowledgeAttemptUpdater)
+		if !ok {
+			return fmt.Errorf("knowledge repository does not support attempt-aware updates")
+		}
+		updated, err := updater.UpdateKnowledgeColumnsForAttempt(ctx, knowledgeID, attempt, values)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return fmt.Errorf("knowledge %s attempt %d is no longer mutable", knowledgeID, attempt)
+		}
+		return nil
+	}
+	return s.repo.UpdateKnowledgeColumns(ctx, knowledgeID, values)
+}
+
+func (s *knowledgeService) runCurrentKnowledgeAttemptMutation(
+	ctx context.Context,
+	knowledgeID string,
+	allowedStatuses []string,
+	mutate func() error,
+) (bool, error) {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		return true, mutate()
+	}
+	guard, ok := s.repo.(interfaces.KnowledgeAttemptMutationGuard)
+	if !ok {
+		return false, fmt.Errorf(
+			"knowledge repository does not support guarded mutations for attempt %d",
+			attempt,
+		)
+	}
+	return guard.RunWithKnowledgeAttemptMutation(
+		ctx, knowledgeID, attempt, allowedStatuses, mutate,
+	)
 }
 
 // attemptCtxKey scopes the per-task attempt number to a single execution.
@@ -260,12 +611,14 @@ const finalizeSubtaskDetachedTimeout = 10 * time.Second
 // "finalizing" forever with a non-zero counter. Detaching keeps the counter
 // correct across cancellation; a bounded timeout guards against a wedged DB.
 //
-// source is a free-form tag (e.g. "question_batch[3]", "summary", "wiki")
-// used to attribute a decrement failure to a specific subtask in logs.
+// source is both the durable idempotency key (for positive attempts) and the
+// free-form log tag (e.g. "question_batch[3]", "summary", "wiki").
 func finalizeSubtaskDetached(
 	ctx context.Context,
 	repo interfaces.KnowledgeRepository,
-	knowledgeID, source string,
+	knowledgeID string,
+	attempt int,
+	source string,
 	retErr error,
 	superseded, final bool,
 ) {
@@ -275,6 +628,23 @@ func finalizeSubtaskDetached(
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
+	if guarded, ok := repo.(interfaces.KnowledgeAttemptSubtaskFinalizer); ok && attempt > 0 {
+		if _, _, err := guarded.FinalizeSubtaskForAttempt(dctx, knowledgeID, attempt, source); err != nil {
+			logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s attempt=%d err=%v",
+				source, knowledgeID, attempt, err)
+		}
+		return
+	}
+	if attempt > 0 {
+		// Falling back to FinalizeSubtask would let a delayed task from attempt N
+		// consume attempt N+1's counter. Production repositories implement the
+		// guarded interface; custom implementations fail closed instead.
+		logger.Warnf(ctx,
+			"finalize subtask skipped: attempt-aware repository unavailable source=%s knowledge=%s attempt=%d",
+			source, knowledgeID, attempt,
+		)
+		return
+	}
 	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -290,13 +291,99 @@ type KnowledgeRepository interface {
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
 }
 
+// KnowledgeProcessingClaimer is an optional repository extension for
+// atomically claiming a knowledge row before asynchronous processing starts.
+// The claim succeeds only while the active row still has expectedStatus, so
+// concurrent publish/reparse requests cannot both enqueue processing work.
+type KnowledgeProcessingClaimer interface {
+	ClaimKnowledgeProcessing(
+		ctx context.Context,
+		id, expectedStatus string,
+		expectedUpdatedAt time.Time,
+		values map[string]interface{},
+	) (bool, error)
+}
+
+// KnowledgeConditionalUpdater protects editor writes with the status and
+// updated_at observed by the caller. It prevents a stale draft/editor request
+// from overwriting a processing claim or a newer content revision.
+type KnowledgeConditionalUpdater interface {
+	UpdateKnowledgeColumnsIfUnchanged(
+		ctx context.Context,
+		id, expectedStatus string,
+		expectedUpdatedAt time.Time,
+		values map[string]interface{},
+	) (bool, error)
+}
+
+// KnowledgeAttemptUpdater is the worker-side generation fence. Both methods
+// verify the supplied attempt is still the latest persisted root and refuse
+// to modify rows that have entered deleting/cancelled state.
+type KnowledgeAttemptUpdater interface {
+	ClaimKnowledgeAttemptProcessing(ctx context.Context, id string, attempt int) (bool, error)
+	UpdateKnowledgeColumnsForAttempt(
+		ctx context.Context, id string, attempt int, values map[string]interface{},
+	) (bool, error)
+}
+
+// KnowledgeAttemptMutationGuard serializes non-transactional worker side
+// effects (chunk, vector and graph writes) with durable attempt creation. The
+// callback runs only while attempt is still the latest generation and the
+// knowledge row has one of allowedStatuses. Implementations must keep the
+// per-knowledge generation lock held until mutate returns.
+//
+// The callback can touch repositories or external stores, so it must not use
+// the guard's own transaction handle. Its error is returned to the caller and
+// applied reports whether the callback was entered.
+type KnowledgeAttemptMutationGuard interface {
+	RunWithKnowledgeAttemptMutation(
+		ctx context.Context,
+		id string,
+		attempt int,
+		allowedStatuses []string,
+		mutate func() error,
+	) (applied bool, err error)
+}
+
+// KnowledgeDeletionClaimer is the API-side counterpart to the worker mutation
+// guard. It marks an active knowledge row as deleting while holding the same
+// generation lock used to create attempts, so deletion and publication have a
+// single, deterministic order.
+type KnowledgeDeletionClaimer interface {
+	ClaimKnowledgeDeleting(
+		ctx context.Context, tenantID uint64, id string,
+	) (previousStatus string, claimed bool, err error)
+}
+
+// KnowledgeAttemptTransitioner performs a status-specific state transition
+// only when attempt is still the latest durable generation. It is used by the
+// post-process orchestrator, where a generic worker update would be too broad
+// (for example, a failed row must not be moved back to finalizing).
+type KnowledgeAttemptTransitioner interface {
+	TransitionKnowledgeForAttempt(
+		ctx context.Context,
+		id string,
+		attempt int,
+		expectedStatus string,
+		values map[string]interface{},
+	) (bool, error)
+}
+
+// KnowledgeStorageUsageCleaner atomically releases a knowledge row's recorded
+// storage usage and decrements the owning tenant's aggregate. Repeated calls
+// return zero, so an Asynq retry cannot charge the same cleanup twice.
+type KnowledgeStorageUsageCleaner interface {
+	ClearKnowledgeStorageUsage(ctx context.Context, id string, tenantID uint64) (int64, error)
+}
+
 // KnowledgeAttemptSubtaskFinalizer is an optional extension implemented by
-// repositories that can guard a finalizing-counter decrement with the parse
-// attempt in the same database statement. Callers handling delayed async work
-// should prefer this over a separate LatestAttempt check followed by
-// FinalizeSubtask, because a new attempt can start between those two calls.
+// repositories that can durably settle one named subtask for a parse attempt.
+// The settlement key makes retries idempotent, while the attempt guard prevents
+// delayed async work from consuming a newer attempt's counter.
 //
 // attempt <= 0 retains the legacy unguarded FinalizeSubtask behavior.
 type KnowledgeAttemptSubtaskFinalizer interface {
-	FinalizeSubtaskForAttempt(ctx context.Context, id string, attempt int) (int, bool, error)
+	FinalizeSubtaskForAttempt(
+		ctx context.Context, id string, attempt int, subtaskKey string,
+	) (int, bool, error)
 }

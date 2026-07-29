@@ -15,6 +15,19 @@ CREATE INDEX IF NOT EXISTS idx_wiki_page_revisions_block_set
     ON wiki_page_revisions (block_set_id)
     WHERE block_set_id <> '';
 
+-- Each positive parsing attempt may drain a named finalizing-counter slot only
+-- once. The repository inserts this marker and decrements the counter in the
+-- same transaction.
+CREATE TABLE IF NOT EXISTS knowledge_subtask_settlements (
+    id                  BIGSERIAL PRIMARY KEY,
+    knowledge_id        VARCHAR(64) NOT NULL,
+    attempt             INT NOT NULL,
+    subtask_key         VARCHAR(255) NOT NULL,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_knowledge_subtask_settlement
+        UNIQUE (knowledge_id, attempt, subtask_key)
+);
+
 CREATE TABLE IF NOT EXISTS wiki_page_block_sets (
     id                  VARCHAR(36) PRIMARY KEY,
     tenant_id           BIGINT NOT NULL,

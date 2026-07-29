@@ -412,6 +412,9 @@ func (s *chunkService) UpdateDocumentChunk(
 	}
 	if newContent == chunk.Content && newEnabled == chunk.IsEnabled {
 		if chunk.IndexStatus == "failed" {
+			if err := s.ensureChunkKnowledgeCompleted(ctx, chunk); err != nil {
+				return nil, err
+			}
 			if chunk.ParentChunkID != "" && chunk.ContentRevision > 0 {
 				if err := s.rebuildParentContent(ctx, chunk); err != nil {
 					logger.Warnf(ctx, "Failed to rebuild parent chunk while retrying edit: %v", err)
@@ -419,14 +422,25 @@ func (s *chunkService) UpdateDocumentChunk(
 				}
 			}
 			chunk.IndexStatus = "processing"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			if err := s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+				"index_status": chunk.IndexStatus,
+				"updated_at":   time.Now(),
+			}); err != nil {
+				return nil, err
+			}
 			if err := s.syncChunkIndex(ctx, chunk); err != nil {
 				chunk.IndexStatus = "failed"
-				_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+				_ = s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+					"index_status": chunk.IndexStatus,
+					"updated_at":   time.Now(),
+				})
 				return chunk, nil
 			}
 			chunk.IndexStatus = "ready"
-			if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+			if err := s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+				"index_status": chunk.IndexStatus,
+				"updated_at":   time.Now(),
+			}); err != nil {
 				return nil, err
 			}
 		}
@@ -462,13 +476,32 @@ func (s *chunkService) UpdateDocumentChunk(
 	chunk.LastEditorID = actorID
 	chunk.IndexStatus = "processing"
 	chunk.UpdatedAt = now
-	wikiAttempt := 0
-	if s.spanTracker != nil {
-		wikiAttempt = s.spanTracker.LatestAttempt(ctx, chunk.KnowledgeID)
-	}
-	wikiPendingOp, wikiEnabled, err := s.chunkWikiPendingOp(ctx, chunk, wikiAttempt)
+	// Determine whether this KB publishes Wiki content before making attempt
+	// tracking a hard dependency of an otherwise unrelated chunk edit.
+	wikiPendingOp, wikiEnabled, err := s.chunkWikiPendingOp(ctx, chunk, 0)
 	if err != nil {
 		return nil, err
+	}
+	wikiAttempt := 0
+	if wikiEnabled {
+		tracker := s.spanTracker
+		if tracker == nil {
+			tracker = noopSpanTracker{}
+		}
+		wikiAttempt, err = latestKnowledgeAttempt(ctx, tracker, chunk.KnowledgeID)
+		if err != nil {
+			return nil, fmt.Errorf("load Wiki generation before saving chunk edit: %w", err)
+		}
+		if wikiAttempt <= 0 {
+			return nil, fmt.Errorf(
+				"knowledge %s has no durable processing generation; reparse it before editing Wiki-backed chunks",
+				chunk.KnowledgeID,
+			)
+		}
+		wikiPendingOp, _, err = s.chunkWikiPendingOp(ctx, chunk, wikiAttempt)
+		if err != nil {
+			return nil, err
+		}
 	}
 	outboxPersisted := false
 	if wikiPendingOp != nil {
@@ -518,7 +551,10 @@ func (s *chunkService) UpdateDocumentChunk(
 		if err := s.rebuildParentContent(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to rebuild parent chunk after edit: %v", err)
 			chunk.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			_ = s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+				"index_status": chunk.IndexStatus,
+				"updated_at":   time.Now(),
+			})
 			return chunk, nil
 		}
 	}
@@ -526,7 +562,10 @@ func (s *chunkService) UpdateDocumentChunk(
 		if err := s.syncEditedChunkImages(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to synchronize image children after chunk edit: %v", err)
 			chunk.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			_ = s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+				"index_status": chunk.IndexStatus,
+				"updated_at":   time.Now(),
+			})
 			return chunk, nil
 		}
 	}
@@ -542,15 +581,59 @@ func (s *chunkService) UpdateDocumentChunk(
 	}
 	if err := s.syncChunkIndex(ctx, chunk); err != nil {
 		chunk.IndexStatus = "failed"
-		_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+		_ = s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+			"index_status": chunk.IndexStatus,
+			"updated_at":   time.Now(),
+		})
 		logger.Errorf(ctx, "Chunk %s saved but reindex failed: %v", chunk.ID, err)
 		return chunk, nil
 	}
 	chunk.IndexStatus = "ready"
-	if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+	if err := s.updateScopedChunkFields(ctx, chunk, map[string]interface{}{
+		"index_status": chunk.IndexStatus,
+		"updated_at":   time.Now(),
+	}); err != nil {
 		return nil, err
 	}
 	return chunk, nil
+}
+
+func (s *chunkService) ensureChunkKnowledgeCompleted(ctx context.Context, chunk *types.Chunk) error {
+	if chunk == nil || s.knowledgeRepo == nil {
+		return ErrChunkRevisionConflict
+	}
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge == nil || knowledge.KnowledgeBaseID != chunk.KnowledgeBaseID ||
+		knowledge.ParseStatus != types.ParseStatusCompleted {
+		return ErrChunkRevisionConflict
+	}
+	return nil
+}
+
+func (s *chunkService) updateScopedChunkFields(
+	ctx context.Context, chunk *types.Chunk, values map[string]interface{},
+) error {
+	if chunk == nil {
+		return ErrChunkRevisionConflict
+	}
+	updater, ok := s.chunkRepository.(interfaces.ChunkScopedUpdater)
+	if !ok {
+		return fmt.Errorf("chunk repository does not support scoped updates")
+	}
+	updated, err := updater.UpdateChunkFieldsIfCurrent(
+		ctx, chunk.TenantID, chunk.ID, chunk.KnowledgeID, chunk.KnowledgeBaseID,
+		chunk.ContentRevision, values,
+	)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return ErrChunkRevisionConflict
+	}
+	return nil
 }
 
 func (s *chunkService) chunkWikiPendingOp(
@@ -643,16 +726,26 @@ func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.C
 		child.IsEnabled = desiredEnabled
 		child.IndexStatus = "processing"
 		child.UpdatedAt = time.Now()
-		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+		if err := s.updateScopedChunkFields(ctx, child, map[string]interface{}{
+			"is_enabled":   child.IsEnabled,
+			"index_status": child.IndexStatus,
+			"updated_at":   child.UpdatedAt,
+		}); err != nil {
 			return err
 		}
 		if err := s.syncChunkIndex(ctx, child); err != nil {
 			child.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, child)
+			_ = s.updateScopedChunkFields(ctx, child, map[string]interface{}{
+				"index_status": child.IndexStatus,
+				"updated_at":   time.Now(),
+			})
 			return err
 		}
 		child.IndexStatus = "ready"
-		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+		if err := s.updateScopedChunkFields(ctx, child, map[string]interface{}{
+			"index_status": child.IndexStatus,
+			"updated_at":   time.Now(),
+		}); err != nil {
 			return err
 		}
 	}
@@ -739,10 +832,17 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 		parent.Content = searchutil.JoinChunkContent(parent.Content, conflict.content, "\n\n")
 	}
 	parent.UpdatedAt = time.Now()
-	return s.chunkRepository.UpdateChunk(ctx, parent)
+	return s.updateScopedChunkFields(ctx, parent, map[string]interface{}{
+		"content":        parent.Content,
+		"source_content": parent.SourceContent,
+		"updated_at":     parent.UpdatedAt,
+	})
 }
 
 func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) error {
+	if err := s.ensureChunkKnowledgeCompleted(ctx, chunk); err != nil {
+		return err
+	}
 	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
 		return err
@@ -791,7 +891,32 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 			})
 		}
 	}
-	return engine.BatchIndex(ctx, embedder, items)
+	if err := engine.BatchIndex(ctx, embedder, items); err != nil {
+		return err
+	}
+	// Reparse/delete/move may have started while the external index write was
+	// in flight. A same-KB reparse uses fresh chunk IDs, so removing this old
+	// ID cannot erase its new artifacts. A KB move is left to its own transfer
+	// transaction because two KBs may intentionally share one vector store.
+	current, currentErr := s.knowledgeRepo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
+	if currentErr != nil {
+		if errors.Is(currentErr, repository.ErrKnowledgeNotFound) {
+			return engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type)
+		}
+		return currentErr
+	}
+	if current.KnowledgeBaseID == chunk.KnowledgeBaseID && current.ParseStatus != types.ParseStatusCompleted {
+		if cleanupErr := engine.DeleteByChunkIDList(
+			ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type,
+		); cleanupErr != nil {
+			return cleanupErr
+		}
+		return ErrChunkRevisionConflict
+	}
+	if current.KnowledgeBaseID != chunk.KnowledgeBaseID {
+		return ErrChunkRevisionConflict
+	}
+	return nil
 }
 
 func (s *chunkService) UpsertGeneratedQuestion(

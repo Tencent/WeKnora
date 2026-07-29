@@ -293,7 +293,8 @@ type WikiPendingOp struct {
 	// Attempt identifies the document parse generation that produced this
 	// ingest request. It is persisted into paragraph source rows so a reparse
 	// can replace the previous generation instead of appending indistinguishable
-	// citations. Zero keeps legacy/manual enqueue callers compatible.
+	// citations. New ingest requests must carry a positive attempt; zero is
+	// retained only so pre-upgrade rows and source-deletion retractions decode.
 	Attempt int `json:"attempt,omitempty"`
 	// OwnsFinalizingSlot is true only when KnowledgePostProcess already counted
 	// this op in pending_subtasks_count. New maintenance refreshes explicitly
@@ -349,11 +350,9 @@ type wikiIngestService struct {
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
-	// postprocess.wiki subspan in the knowledge trace tree. Async
-	// batch design means we look up the parent attempt by knowledge
-	// id at run-time (LatestAttempt) rather than carrying it in the
-	// asynq payload, which is per-KB and would otherwise be ambiguous
-	// for the 5-docs-per-batch fan-out.
+	// postprocess.wiki subspan in the knowledge trace tree. The per-KB
+	// trigger is intentionally generation-free, while each durable pending
+	// row carries its own attempt for the 5-docs-per-batch fan-out.
 	spanTracker SpanTracker
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
@@ -417,21 +416,15 @@ func (s *wikiIngestService) tracker() SpanTracker {
 	return s.spanTracker
 }
 
-// beginWikiSubspan opens a postprocess.wiki subspan for this document
-// under the knowledge's most recent attempt. Returns nil when there is
-// no parse attempt to attach to (e.g. a wiki ingest fired from a manual
-// reparse path that never went through the tracker) — callers must
-// pair every begin with a tolerant end / fail / skip below.
-//
-// Lookups are by `LatestAttempt(knowledgeID)` because the asynq task
-// payload (WikiIngestPayload) is KB-scoped and carries no per-doc
-// attempt — see the type's comment for the batch architecture.
-func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, input types.JSONMap) *Span {
-	if knowledgeID == "" {
-		return nil
-	}
-	attempt := s.tracker().LatestAttempt(ctx, knowledgeID)
-	if attempt <= 0 {
+// beginWikiSubspan opens a postprocess.wiki subspan under the exact parse
+// attempt carried by this document's durable pending row. It never rebinds a
+// delayed task to whichever attempt happens to be latest at execution time.
+// Returns nil when the original attempt has no postprocess parent; callers
+// pair every begin with the tolerant end / fail / skip helpers below.
+func (s *wikiIngestService) beginWikiSubspan(
+	ctx context.Context, knowledgeID string, attempt int, input types.JSONMap,
+) *Span {
+	if knowledgeID == "" || attempt <= 0 {
 		return nil
 	}
 	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
@@ -1206,7 +1199,7 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 		// after that check.
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 		defer cancel()
-		if _, _, err := guarded.FinalizeSubtaskForAttempt(dctx, knowledgeID, attempt); err != nil {
+		if _, _, err := guarded.FinalizeSubtaskForAttempt(dctx, knowledgeID, attempt, "wiki"); err != nil {
 			logger.Warnf(ctx, "finalize subtask decrement failed source=wiki knowledge=%s attempt=%d err=%v",
 				knowledgeID, attempt, err)
 		}
@@ -1216,7 +1209,7 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, attempt, "wiki", nil, false, true)
 }
 
 func (s *wikiIngestService) finalizeWikiOpSubtasks(ctx context.Context, op WikiPendingOp) {

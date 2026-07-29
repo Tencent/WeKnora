@@ -4,10 +4,44 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type summaryRefreshKnowledgeRepo struct {
+	interfaces.KnowledgeRepository
+	transitioned       bool
+	conditionalUpdated bool
+	transitionAttempt  int
+	expectedStatus     string
+	values             map[string]interface{}
+}
+
+func (r *summaryRefreshKnowledgeRepo) TransitionKnowledgeForAttempt(
+	_ context.Context,
+	_ string,
+	attempt int,
+	expectedStatus string,
+	values map[string]interface{},
+) (bool, error) {
+	r.transitionAttempt = attempt
+	r.expectedStatus = expectedStatus
+	r.values = values
+	return r.transitioned, nil
+}
+
+func (r *summaryRefreshKnowledgeRepo) UpdateKnowledgeColumnsIfUnchanged(
+	_ context.Context,
+	_, expectedStatus string,
+	_ time.Time,
+	values map[string]interface{},
+) (bool, error) {
+	r.expectedStatus = expectedStatus
+	r.values = values
+	return r.conditionalUpdated, nil
+}
 
 type summaryRefreshTenantRepo struct {
 	interfaces.TenantRepository
@@ -65,5 +99,45 @@ func TestErrSummaryRefreshStaleIsDistinct(t *testing.T) {
 	}
 	if ErrSummaryRefreshStale.Error() == "" {
 		t.Fatal("expected non-empty stale refresh message")
+	}
+}
+
+func TestUpdateSummaryRefreshStatusUsesExactAttemptTransition(t *testing.T) {
+	repo := &summaryRefreshKnowledgeRepo{transitioned: true}
+	err := updateSummaryRefreshStatus(
+		context.Background(), repo, "knowledge-1", 8, types.SummaryStatusPending,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.transitionAttempt != 8 || repo.expectedStatus != types.ParseStatusCompleted {
+		t.Fatalf("transition attempt/status = %d/%q, want 8/%q",
+			repo.transitionAttempt, repo.expectedStatus, types.ParseStatusCompleted)
+	}
+	if repo.values["summary_status"] != types.SummaryStatusPending {
+		t.Fatalf("summary status = %#v, want pending", repo.values["summary_status"])
+	}
+}
+
+func TestUpdateSummaryRefreshStatusRejectsLostOwnership(t *testing.T) {
+	repo := &summaryRefreshKnowledgeRepo{}
+	err := updateSummaryRefreshStatus(
+		context.Background(), repo, "knowledge-1", 8, types.SummaryStatusPending,
+	)
+	if !errors.Is(err, ErrSummaryRefreshStale) {
+		t.Fatalf("error = %v, want ErrSummaryRefreshStale", err)
+	}
+}
+
+func TestUpdateSummaryRefreshStatusKeepsLegacyStatusGuard(t *testing.T) {
+	repo := &summaryRefreshKnowledgeRepo{conditionalUpdated: true}
+	err := updateSummaryRefreshStatus(
+		context.Background(), repo, "knowledge-1", 0, types.SummaryStatusFailed,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.expectedStatus != types.ParseStatusCompleted {
+		t.Fatalf("legacy expected status = %q, want completed", repo.expectedStatus)
 	}
 }

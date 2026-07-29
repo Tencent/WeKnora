@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +14,24 @@ import (
 type editableChunkRepo struct {
 	interfaces.ChunkRepository
 	chunk *types.Chunk
+}
+
+func applyTestChunkFields(chunk *types.Chunk, values map[string]interface{}) {
+	if value, ok := values["content"].(string); ok {
+		chunk.Content = value
+	}
+	if value, ok := values["source_content"].(string); ok {
+		chunk.SourceContent = value
+	}
+	if value, ok := values["is_enabled"].(bool); ok {
+		chunk.IsEnabled = value
+	}
+	if value, ok := values["index_status"].(string); ok {
+		chunk.IndexStatus = value
+	}
+	if value, ok := values["updated_at"].(time.Time); ok {
+		chunk.UpdatedAt = value
+	}
 }
 
 func (r *editableChunkRepo) GetChunkByID(
@@ -44,6 +61,17 @@ func (r *editableChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) e
 	return nil
 }
 
+func (r *editableChunkRepo) UpdateChunkFieldsIfCurrent(
+	_ context.Context, _ uint64, chunkID, _, _ string, expectedRevision int,
+	values map[string]interface{},
+) (bool, error) {
+	if r.chunk == nil || r.chunk.ID != chunkID || r.chunk.ContentRevision != expectedRevision {
+		return false, nil
+	}
+	applyTestChunkFields(r.chunk, values)
+	return true, nil
+}
+
 type editableChunkKBRepo struct {
 	interfaces.KnowledgeBaseRepository
 }
@@ -57,7 +85,9 @@ type editableChunkKnowledgeRepo struct {
 }
 
 func (editableChunkKnowledgeRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
-	return nil, errors.New("summary refresh not configured in unit test")
+	return &types.Knowledge{
+		ID: "knowledge", KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCompleted,
+	}, nil
 }
 
 type imageSyncChunkRepo struct {
@@ -80,6 +110,19 @@ func (r *imageSyncChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) 
 		}
 	}
 	return nil
+}
+
+func (r *imageSyncChunkRepo) UpdateChunkFieldsIfCurrent(
+	_ context.Context, _ uint64, chunkID, _, _ string, expectedRevision int,
+	values map[string]interface{},
+) (bool, error) {
+	for _, child := range r.children {
+		if child.ID == chunkID && child.ContentRevision == expectedRevision {
+			applyTestChunkFields(child, values)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type parentRebuildChunkRepo struct {
@@ -122,12 +165,17 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &imageSyncChunkRepo{children: []*types.Chunk{{
-		ID: "image", TenantID: 1, KnowledgeBaseID: "kb", ParentChunkID: "text",
+		ID: "image", TenantID: 1, KnowledgeID: "knowledge", KnowledgeBaseID: "kb", ParentChunkID: "text",
 		ChunkType: types.ChunkTypeImageOCR, ImageInfo: string(imageInfo),
 		IsEnabled: true, IndexStatus: "ready",
 	}}}
-	service := &chunkService{chunkRepository: repo, kbRepository: editableChunkKBRepo{}}
-	parent := &types.Chunk{ID: "text", TenantID: 1, IsEnabled: true, Content: "image removed"}
+	service := &chunkService{
+		chunkRepository: repo, kbRepository: editableChunkKBRepo{}, knowledgeRepo: editableChunkKnowledgeRepo{},
+	}
+	parent := &types.Chunk{
+		ID: "text", TenantID: 1, KnowledgeID: "knowledge", KnowledgeBaseID: "kb",
+		IsEnabled: true, Content: "image removed",
+	}
 
 	if err := service.syncEditedChunkImages(context.Background(), parent); err != nil {
 		t.Fatalf("disable removed image child: %v", err)
@@ -200,6 +248,19 @@ func (r *parentRebuildChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chu
 	copyOfChunk := *chunk
 	r.updated = &copyOfChunk
 	return nil
+}
+
+func (r *parentRebuildChunkRepo) UpdateChunkFieldsIfCurrent(
+	_ context.Context, _ uint64, chunkID, _, _ string, expectedRevision int,
+	values map[string]interface{},
+) (bool, error) {
+	if r.parent == nil || r.parent.ID != chunkID || r.parent.ContentRevision != expectedRevision {
+		return false, nil
+	}
+	applyTestChunkFields(r.parent, values)
+	copyOfChunk := *r.parent
+	r.updated = &copyOfChunk
+	return true, nil
 }
 
 func TestRebuildParentContentPreservesConflictingEdits(t *testing.T) {

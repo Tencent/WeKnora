@@ -315,8 +315,35 @@ func (r *chunkRepository) SaveChunkRevision(
 	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockCompletedKnowledgeForChunk(tx, chunk); err != nil {
+			return err
+		}
 		return saveChunkRevisionTx(tx, chunk, revision, expectedRevision)
 	})
+}
+
+func lockCompletedKnowledgeForChunk(tx *gorm.DB, chunk *types.Chunk) error {
+	if tx == nil || chunk == nil {
+		return ErrChunkRevisionConflict
+	}
+	knowledgeQuery := tx.Select("id", "parse_status").Where(
+		"id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+		chunk.KnowledgeID, chunk.TenantID, chunk.KnowledgeBaseID,
+	)
+	if tx.Dialector.Name() == "postgres" {
+		knowledgeQuery = knowledgeQuery.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	var knowledge types.Knowledge
+	if err := knowledgeQuery.First(&knowledge).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrChunkRevisionConflict
+		}
+		return err
+	}
+	if knowledge.ParseStatus != types.ParseStatusCompleted {
+		return ErrChunkRevisionConflict
+	}
+	return nil
 }
 
 func saveChunkRevisionTx(
@@ -371,33 +398,40 @@ func (r *chunkRepository) SaveChunkRevisionWithPendingOp(
 		// and its subsequent pending-op scrub removes the committed ingest. If
 		// deletion wins, its "deleting" status makes this edit fail closed, so
 		// a later ingest can never overtake and deduplicate away the retract.
-		knowledgeQuery := tx.Select("id", "parse_status").
-			Where(
-				"id = ? AND tenant_id = ? AND knowledge_base_id = ?",
-				chunk.KnowledgeID, chunk.TenantID, chunk.KnowledgeBaseID,
-			)
-		if tx.Dialector.Name() == "postgres" {
-			knowledgeQuery = knowledgeQuery.Clauses(clause.Locking{Strength: "SHARE"})
-		}
-		var knowledge types.Knowledge
-		if err := knowledgeQuery.First(&knowledge).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrChunkRevisionConflict
-			}
+		if err := lockCompletedKnowledgeForChunk(tx, chunk); err != nil {
 			return err
 		}
 		// Chunk editing is a maintenance operation for a stable, completed
 		// document. Reject every transitional/terminal state, not only deleting:
 		// this also serializes against post-process finalizing and KB moves, so a
 		// non-owning Wiki refresh cannot overtake an owned parse Wiki op.
-		if knowledge.ParseStatus != types.ParseStatusCompleted {
-			return ErrChunkRevisionConflict
-		}
 		if err := saveChunkRevisionTx(tx, chunk, revision, expectedRevision); err != nil {
 			return err
 		}
 		return tx.Create(op).Error
 	})
+}
+
+func (r *chunkRepository) UpdateChunkFieldsIfCurrent(
+	ctx context.Context,
+	tenantID uint64,
+	chunkID, knowledgeID, knowledgeBaseID string,
+	expectedRevision int,
+	values map[string]interface{},
+) (bool, error) {
+	if chunkID == "" || knowledgeID == "" || knowledgeBaseID == "" || len(values) == 0 {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where(
+			"id = ? AND tenant_id = ? AND knowledge_id = ? AND knowledge_base_id = ? AND content_revision = ?",
+			chunkID, tenantID, knowledgeID, knowledgeBaseID, expectedRevision,
+		).
+		Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *chunkRepository) ListChunkRevisions(

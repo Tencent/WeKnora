@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
 );
 `
 
+const knowledgeSubtaskSettlementsFinalizeTestDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_subtask_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_id VARCHAR(64) NOT NULL,
+    attempt INTEGER NOT NULL,
+    subtask_key VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_knowledge_subtask_settlement
+        UNIQUE (knowledge_id, attempt, subtask_key)
+);
+`
+
 // setupKnowledgeTestDB returns an in-memory SQLite db with the knowledges
 // table. SQLite has a single-writer constraint, so we cap MaxOpenConns at 1
 // and set a busy timeout: concurrent goroutines line up on the same
@@ -75,6 +87,7 @@ func setupKnowledgeTestDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec(knowledgesTestDDL).Error)
 	require.NoError(t, db.Exec(knowledgeProcessingSpansFinalizeTestDDL).Error)
+	require.NoError(t, db.Exec(knowledgeSubtaskSettlementsFinalizeTestDDL).Error)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }
@@ -106,6 +119,20 @@ func reloadKnowledgeRow(t *testing.T, db *gorm.DB, id string) (status string, co
 	row := db.Raw(`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, id).Row()
 	require.NoError(t, row.Scan(&status, &count))
 	return status, count
+}
+
+func countKnowledgeSubtaskSettlements(
+	t *testing.T, db *gorm.DB, knowledgeID string, attempt int, subtaskKey string,
+) int {
+	t.Helper()
+	var count int
+	row := db.Raw(
+		"SELECT COUNT(*) FROM knowledge_subtask_settlements "+
+			"WHERE knowledge_id = ? AND attempt = ? AND subtask_key = ?",
+		knowledgeID, attempt, subtaskKey,
+	).Row()
+	require.NoError(t, row.Scan(&count))
+	return count
 }
 
 func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {
@@ -239,19 +266,22 @@ func TestFinalizeSubtaskForAttempt_RejectsSupersededAttempt(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, transitioned)
 
-	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 1)
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 1, "summary")
 	require.NoError(t, err)
 	assert.False(t, promoted)
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusFinalizing, status)
 	assert.Equal(t, 2, count, "stale attempt must not consume the current attempt's counter")
+	assert.Equal(t, 0, countKnowledgeSubtaskSettlements(t, db, id, 1, "summary"),
+		"stale attempt must not persist a settlement marker")
 
-	_, promoted, err = repo.FinalizeSubtaskForAttempt(ctx, id, 2)
+	_, promoted, err = repo.FinalizeSubtaskForAttempt(ctx, id, 2, "summary")
 	require.NoError(t, err)
 	assert.False(t, promoted)
 	status, count = reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusFinalizing, status)
 	assert.Equal(t, 1, count, "current attempt should consume exactly one slot")
+	assert.Equal(t, 1, countKnowledgeSubtaskSettlements(t, db, id, 2, "summary"))
 }
 
 func TestFinalizeSubtaskForAttempt_CurrentAttemptPromotes(t *testing.T) {
@@ -265,12 +295,103 @@ func TestFinalizeSubtaskForAttempt_CurrentAttemptPromotes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, transitioned)
 
-	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 7)
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 7, "wiki")
 	require.NoError(t, err)
 	assert.True(t, promoted)
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	assert.Equal(t, 0, count)
+}
+
+func TestFinalizeSubtaskForAttempt_DuplicateKeyIsIdempotent(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	insertKnowledgeAttempt(t, db, id, 9)
+	transitioned, err := repo.SetFinalizing(ctx, id, 2)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+
+	const retries = 20
+	var promoteWins atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < retries; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, promoted, finalizeErr := repo.FinalizeSubtaskForAttempt(ctx, id, 9, "summary")
+			if finalizeErr != nil {
+				t.Errorf("FinalizeSubtaskForAttempt: %v", finalizeErr)
+				return
+			}
+			if promoted {
+				promoteWins.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(0), promoteWins.Load())
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "retries of one subtask key must consume only one slot")
+	assert.Equal(t, 1, countKnowledgeSubtaskSettlements(t, db, id, 9, "summary"))
+
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 9, "wiki")
+	require.NoError(t, err)
+	assert.True(t, promoted, "a different subtask key owns a different slot")
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Equal(t, 0, count)
+	assert.Equal(t, 1, countKnowledgeSubtaskSettlements(t, db, id, 9, "wiki"))
+}
+
+func TestFinalizeSubtaskForAttempt_FailsClosedWithoutSettlementStorage(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	insertKnowledgeAttempt(t, db, id, 3)
+	transitioned, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+	require.NoError(t, db.Exec("DROP TABLE knowledge_subtask_settlements").Error)
+
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 3, "summary")
+	require.Error(t, err)
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "missing idempotency storage must not fall back to an unsafe decrement")
+}
+
+func TestFinalizeSubtaskForAttempt_RequiresKeyButKeepsLegacyAttemptZero(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	insertKnowledgeAttempt(t, db, id, 4)
+	transitioned, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 4, "  ")
+	require.Error(t, err)
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count)
+
+	_, promoted, err = repo.FinalizeSubtaskForAttempt(ctx, id, 0, "")
+	require.NoError(t, err)
+	assert.True(t, promoted)
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Equal(t, 0, count, "attempt zero must retain the legacy unguarded behavior")
 }
 
 // TestUpdateKnowledge_DoesNotClobberPendingCounter is the regression test

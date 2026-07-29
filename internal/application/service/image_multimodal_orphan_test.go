@@ -80,9 +80,11 @@ func TestShouldDropOrphanedMultimodal(t *testing.T) {
 
 func TestImageMultimodalHandleDropsMissingKnowledge(t *testing.T) {
 	t.Parallel()
+	enqueuer := &orphanTaskEnqueuer{}
 	svc := &ImageMultimodalService{
 		knowledgeRepo: &orphanKnowledgeRepo{err: repository.ErrKnowledgeNotFound},
 		kbService:     &orphanKBService{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		taskEnqueuer:  enqueuer,
 	}
 	payload, err := json.Marshal(types.ImageMultimodalPayload{
 		TenantID:        1,
@@ -95,6 +97,9 @@ func TestImageMultimodalHandleDropsMissingKnowledge(t *testing.T) {
 	}
 	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); err != nil {
 		t.Fatalf("orphan task should succeed without retry: %v", err)
+	}
+	if len(enqueuer.enqueued) != 1 {
+		t.Fatalf("orphan completion enqueued %d post-process tasks, want 1", len(enqueuer.enqueued))
 	}
 }
 
@@ -167,5 +172,65 @@ func TestImageMultimodalHandlePropagatesTransientKnowledgeError(t *testing.T) {
 	}
 	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); !errors.Is(err, dbErr) {
 		t.Fatalf("transient error should propagate: %v", err)
+	}
+}
+
+func TestLiteMultimodalFanInWaitsForEveryImage(t *testing.T) {
+	t.Parallel()
+	enqueuer := &orphanTaskEnqueuer{}
+	svc := &ImageMultimodalService{taskEnqueuer: enqueuer}
+	payload := types.ImageMultimodalPayload{
+		KnowledgeID: "knowledge-1", KnowledgeBaseID: "kb-1", Attempt: 3, ImageCount: 2,
+	}
+	if err := svc.checkAndFinalizeAllImages(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("first image enqueued %d post-process tasks, want 0", len(enqueuer.enqueued))
+	}
+	payload.ImageIndex = 1
+	if err := svc.checkAndFinalizeAllImages(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(enqueuer.enqueued) != 1 {
+		t.Fatalf("second image enqueued %d post-process tasks, want 1", len(enqueuer.enqueued))
+	}
+}
+
+func TestMultimodalFinalizeFailsClosedWhenCounterMissing(t *testing.T) {
+	t.Parallel()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	enqueuer := &orphanTaskEnqueuer{}
+	svc := &ImageMultimodalService{redisClient: rdb, taskEnqueuer: enqueuer}
+	err = svc.checkAndFinalizeAllImages(context.Background(), types.ImageMultimodalPayload{
+		KnowledgeID: "knowledge-1", Attempt: 4,
+	})
+	if err == nil {
+		t.Fatal("missing pending counter should return an error")
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("missing counter enqueued %d premature post-process tasks", len(enqueuer.enqueued))
+	}
+}
+
+func TestMultimodalChunkIDIsRetryStableAndAttemptScoped(t *testing.T) {
+	t.Parallel()
+	payload := types.ImageMultimodalPayload{
+		KnowledgeID: "knowledge-1", ChunkID: "parent-1", Attempt: 2, ImageIndex: 3,
+	}
+	first := multimodalChunkID(payload, types.ChunkTypeImageOCR)
+	if again := multimodalChunkID(payload, types.ChunkTypeImageOCR); again != first {
+		t.Fatalf("retry ID = %q, want stable %q", again, first)
+	}
+	payload.Attempt++
+	if nextAttempt := multimodalChunkID(payload, types.ChunkTypeImageOCR); nextAttempt == first {
+		t.Fatal("different attempts must not share a multimodal chunk ID")
 	}
 }

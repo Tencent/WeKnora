@@ -287,7 +287,8 @@ func (wikiStrictReparseChunkRepository) ListChunksByParentIDs(
 
 func TestMapOneDocumentRetriesWhenExistingPageLookupIsIncomplete(t *testing.T) {
 	svc := &wikiIngestService{
-		chunkRepo: wikiStrictReparseChunkRepository{},
+		chunkRepo:   wikiStrictReparseChunkRepository{},
+		spanTracker: &wikiAttemptLookupTracker{SpanTracker: noopSpanTracker{}, latest: 3},
 		wikiService: wikiReparseSlugUnionService{
 			legacyErr: errors.New("temporary source index failure"),
 		},

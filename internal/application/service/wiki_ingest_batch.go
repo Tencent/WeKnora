@@ -1175,13 +1175,29 @@ func (s *wikiIngestService) mapOneDocument(
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
 	lang := types.LanguageLocaleName(op.Language)
+	currentAttempt, err := requireCarriedKnowledgeAttempt(
+		ctx, s.tracker(), knowledgeID, op.Attempt,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("wiki ingest: validate attempt for knowledge %s: %w", knowledgeID, err)
+	}
+	// Additions without a durable generation cannot be published safely. The
+	// final repository guard also repeats this check, but dropping here avoids
+	// spending LLM calls on a row that Reduce must reject.
+	if !currentAttempt || op.Attempt <= 0 {
+		logger.Infof(ctx,
+			"wiki ingest: skip non-current map knowledge=%s carried_attempt=%d",
+			knowledgeID, op.Attempt,
+		)
+		return nil, nil, nil
+	}
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +
 	// summary + classification) shows up in the trace tree. Returns
 	// nil when the parent attempt is gone (no panic on missing
 	// lookups — span tracker is best-effort).
-	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, types.JSONMap{
+	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, op.Attempt, types.JSONMap{
 		"language":          lang,
 		"knowledge_base_id": payload.KnowledgeBaseID,
 	})
