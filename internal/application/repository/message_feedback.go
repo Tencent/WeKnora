@@ -900,6 +900,8 @@ func (r *messageFeedbackRepository) RecomputeFeedbackWeights(
 
 		// Stream chunks in paged reads to keep individual transactions
 		// short and to avoid pulling the entire corpus into memory.
+		// Manual result.Close() (not defer) because we are inside a loop —
+		// defer would accumulate open result sets until the function returns.
 		const pageSize = 500
 		offset := 0
 		for {
