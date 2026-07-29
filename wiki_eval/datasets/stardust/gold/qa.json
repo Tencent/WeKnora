@@ -1,0 +1,82 @@
+[
+  {
+    "id": "q001",
+    "type": "multi_hop",
+    "question": "Which organization developed the engine used by the Stardust Program?",
+    "answers": [
+      "Acme Corporation",
+      "ACME"
+    ],
+    "expected_pages": [
+      "entity/stardust-program",
+      "entity/psionic-engine",
+      "entity/acme-corporation"
+    ],
+    "supporting_facts": [
+      "f001",
+      "f002"
+    ]
+  },
+  {
+    "id": "q002",
+    "type": "fact",
+    "question": "What is the PE-7 safety threshold?",
+    "answers": [
+      "42 kPa"
+    ],
+    "expected_pages": [
+      "entity/psionic-engine"
+    ],
+    "supporting_facts": [
+      "f003"
+    ]
+  },
+  {
+    "id": "q003",
+    "type": "relation",
+    "question": "Which supplier provided the Lumen Coil assemblies for PE-7?",
+    "answers": [
+      "Northstar Labs"
+    ],
+    "expected_pages": [
+      "entity/lumen-coil",
+      "entity/northstar-labs"
+    ],
+    "supporting_facts": [
+      "f004"
+    ]
+  },
+  {
+    "id": "q004",
+    "type": "multi_hop",
+    "question": "Who manages the station where Stardust PE-7 tests are performed?",
+    "answers": [
+      "Jonas Reed"
+    ],
+    "expected_pages": [
+      "entity/stardust-program",
+      "entity/borealis-station",
+      "entity/jonas-reed"
+    ],
+    "supporting_facts": [
+      "f001"
+    ]
+  },
+  {
+    "id": "q005",
+    "type": "update_sensitive",
+    "question": "Was Nightfall Protocol approved in the initial v1 corpus?",
+    "answers": [
+      "No",
+      "rejected",
+      "not approved"
+    ],
+    "expected_pages": [
+      "entity/nightfall-protocol",
+      "entity/celestial-review-board"
+    ],
+    "supporting_facts": [
+      "f007"
+    ]
+  }
+]

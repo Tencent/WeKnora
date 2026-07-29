@@ -57,3 +57,11 @@ fix-docker.sh
 
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json
+
+# wiki_eval local runtime artifacts
+wiki_eval/reports/
+wiki_eval/config.yaml
+wiki_eval/.venv/
+wiki_eval/**/*.log
+wiki_eval/**/*.err
+wiki_eval/**/__pycache__/

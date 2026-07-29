@@ -1,0 +1,156 @@
+[
+  {
+    "subject": "stardust-program",
+    "predicate": "operated_by",
+    "object": "skyvault-initiative",
+    "evidence_docs": [
+      "doc01_project_brief.md"
+    ],
+    "terms": [
+      "Stardust Program",
+      "Skyvault Initiative"
+    ]
+  },
+  {
+    "subject": "stardust-program",
+    "predicate": "uses",
+    "object": "psionic-engine",
+    "evidence_docs": [
+      "doc01_project_brief.md",
+      "doc03_psionic_engine_spec.md"
+    ],
+    "terms": [
+      "Stardust Program",
+      "Psionic Engine"
+    ]
+  },
+  {
+    "subject": "acme-corporation",
+    "predicate": "developed",
+    "object": "psionic-engine",
+    "evidence_docs": [
+      "doc02_acme_contract.md",
+      "doc03_psionic_engine_spec.md"
+    ],
+    "terms": [
+      "Acme Corporation",
+      "developed",
+      "Psionic Engine"
+    ]
+  },
+  {
+    "subject": "psionic-engine",
+    "predicate": "uses_component",
+    "object": "helion-crystal",
+    "evidence_docs": [
+      "doc03_psionic_engine_spec.md"
+    ],
+    "terms": [
+      "Psionic Engine",
+      "Helion Crystal"
+    ]
+  },
+  {
+    "subject": "psionic-engine",
+    "predicate": "uses_component",
+    "object": "lumen-coil",
+    "evidence_docs": [
+      "doc03_psionic_engine_spec.md"
+    ],
+    "terms": [
+      "Psionic Engine",
+      "Lumen Coil"
+    ]
+  },
+  {
+    "subject": "psionic-engine",
+    "predicate": "uses_component",
+    "object": "aurora-beacon",
+    "evidence_docs": [
+      "doc03_psionic_engine_spec.md"
+    ],
+    "terms": [
+      "Psionic Engine",
+      "Aurora Beacon"
+    ]
+  },
+  {
+    "subject": "northstar-labs",
+    "predicate": "supplies",
+    "object": "lumen-coil",
+    "evidence_docs": [
+      "doc02_acme_contract.md"
+    ],
+    "terms": [
+      "Northstar Labs",
+      "supplier",
+      "Lumen Coil"
+    ]
+  },
+  {
+    "subject": "mira-cole",
+    "predicate": "architect_of",
+    "object": "psionic-engine",
+    "evidence_docs": [
+      "doc01_project_brief.md",
+      "doc04_personnel_notes.md"
+    ],
+    "terms": [
+      "Dr. Mira Cole",
+      "chief architect",
+      "Psionic Engine"
+    ]
+  },
+  {
+    "subject": "jonas-reed",
+    "predicate": "manages",
+    "object": "borealis-station",
+    "evidence_docs": [
+      "doc04_personnel_notes.md",
+      "doc07_borealis_station.md"
+    ],
+    "terms": [
+      "Jonas Reed",
+      "manages",
+      "Borealis Station"
+    ]
+  },
+  {
+    "subject": "celestial-review-board",
+    "predicate": "approved",
+    "object": "stardust-program",
+    "evidence_docs": [
+      "doc06_review_board_minutes.md"
+    ],
+    "terms": [
+      "Celestial Review Board",
+      "approved",
+      "Stardust Program Phase Alpha"
+    ]
+  },
+  {
+    "subject": "celestial-review-board",
+    "predicate": "rejected",
+    "object": "nightfall-protocol",
+    "evidence_docs": [
+      "doc06_review_board_minutes.md"
+    ],
+    "terms": [
+      "Celestial Review Board",
+      "rejected",
+      "Nightfall Protocol"
+    ]
+  },
+  {
+    "subject": "borealis-station",
+    "predicate": "located_in",
+    "object": "svalbard",
+    "evidence_docs": [
+      "doc07_borealis_station.md"
+    ],
+    "terms": [
+      "Borealis Station",
+      "Svalbard"
+    ]
+  }
+]

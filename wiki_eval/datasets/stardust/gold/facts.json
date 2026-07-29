@@ -1,0 +1,123 @@
+[
+  {
+    "id": "f001",
+    "claim": "The Stardust Program is operated by the Skyvault Initiative.",
+    "expected_terms": [
+      "Stardust Program",
+      "Skyvault Initiative"
+    ],
+    "expected_pages": [
+      "entity/stardust-program",
+      "entity/skyvault-initiative"
+    ],
+    "evidence_docs": [
+      "doc01_project_brief.md"
+    ]
+  },
+  {
+    "id": "f002",
+    "claim": "The Psionic Engine used in Stardust was developed by Acme Corporation.",
+    "expected_terms": [
+      "Psionic Engine",
+      "developed by Acme Corporation"
+    ],
+    "expected_pages": [
+      "entity/psionic-engine",
+      "entity/acme-corporation"
+    ],
+    "evidence_docs": [
+      "doc01_project_brief.md",
+      "doc02_acme_contract.md"
+    ]
+  },
+  {
+    "id": "f003",
+    "claim": "PE-7 has a safety threshold of 42 kPa.",
+    "expected_terms": [
+      "PE-7",
+      "42 kPa"
+    ],
+    "expected_pages": [
+      "entity/psionic-engine"
+    ],
+    "evidence_docs": [
+      "doc03_psionic_engine_spec.md"
+    ]
+  },
+  {
+    "id": "f004",
+    "claim": "Northstar Labs supplies Lumen Coil assemblies.",
+    "expected_terms": [
+      "Northstar Labs",
+      "Lumen Coil"
+    ],
+    "expected_pages": [
+      "entity/northstar-labs",
+      "entity/lumen-coil"
+    ],
+    "evidence_docs": [
+      "doc02_acme_contract.md"
+    ]
+  },
+  {
+    "id": "f005",
+    "claim": "The Borealis incident was traced to Lumen Coil batch LC-19.",
+    "expected_terms": [
+      "Borealis Station",
+      "LC-19",
+      "Lumen Coil"
+    ],
+    "expected_pages": [
+      "entity/borealis-station",
+      "entity/lumen-coil"
+    ],
+    "evidence_docs": [
+      "doc05_borealis_incident.md"
+    ]
+  },
+  {
+    "id": "f006",
+    "claim": "The Celestial Review Board approved Stardust Program Phase Alpha on 2032-04-17.",
+    "expected_terms": [
+      "Celestial Review Board",
+      "approved",
+      "2032-04-17"
+    ],
+    "expected_pages": [
+      "entity/celestial-review-board",
+      "entity/stardust-program"
+    ],
+    "evidence_docs": [
+      "doc06_review_board_minutes.md"
+    ]
+  },
+  {
+    "id": "f007",
+    "claim": "The Celestial Review Board rejected Nightfall Protocol integration in v1.",
+    "expected_terms": [
+      "rejected",
+      "Nightfall Protocol"
+    ],
+    "expected_pages": [
+      "entity/celestial-review-board",
+      "entity/nightfall-protocol"
+    ],
+    "evidence_docs": [
+      "doc06_review_board_minutes.md"
+    ]
+  },
+  {
+    "id": "f008",
+    "claim": "Borealis Station is located in Svalbard.",
+    "expected_terms": [
+      "Borealis Station",
+      "Svalbard"
+    ],
+    "expected_pages": [
+      "entity/borealis-station"
+    ],
+    "evidence_docs": [
+      "doc07_borealis_station.md"
+    ]
+  }
+]

@@ -1,0 +1,45 @@
+[
+  {
+    "id": "s001",
+    "query": "Acme Corporation",
+    "expected_slugs": [
+      "entity/acme-corporation"
+    ]
+  },
+  {
+    "id": "s002",
+    "query": "ACME",
+    "expected_slugs": [
+      "entity/acme-corporation"
+    ]
+  },
+  {
+    "id": "s003",
+    "query": "Psionic Engine",
+    "expected_slugs": [
+      "entity/psionic-engine"
+    ]
+  },
+  {
+    "id": "s004",
+    "query": "LC-19",
+    "expected_slugs": [
+      "entity/lumen-coil",
+      "entity/borealis-station"
+    ]
+  },
+  {
+    "id": "s005",
+    "query": "Borealis Station Svalbard",
+    "expected_slugs": [
+      "entity/borealis-station"
+    ]
+  },
+  {
+    "id": "s006",
+    "query": "Nightfall Protocol",
+    "expected_slugs": [
+      "entity/nightfall-protocol"
+    ]
+  }
+]

@@ -1,0 +1,207 @@
+[
+  {
+    "event_id": "d001",
+    "target_doc_id": "doc05_borealis_incident.md",
+    "target_title": "Borealis Station Incident Report",
+    "delete_mode": "retract",
+    "reason": "The incident report is a canonical delete target because it contributes to several downstream pages and should disappear cleanly from source references after retract.",
+    "expected_impact": {
+      "must_remove_source_refs": [
+        "doc05_borealis_incident.md"
+      ],
+      "must_keep_pages": [
+        "entity/stardust-program",
+        "entity/psionic-engine",
+        "entity/borealis-station",
+        "entity/northstar-labs"
+      ],
+      "must_not_change_pages": [
+        "entity/aurora-beacon",
+        "entity/celestial-review-board"
+      ],
+      "must_remove_in_links": [
+        "summary/{target_knowledge_id}"
+      ],
+      "must_remove_terms": [
+        "Lumen Coil batch LC-19",
+        "unstable field event",
+        "delayed by twelve days"
+      ],
+      "equivalent_pages": {
+        "entity/psionic-engine": [
+          "entity/psionic-engine-pe-7",
+          "entity/pe-7"
+        ],
+        "entity/stardust-program": [
+          "entity/stardust-program-phase-alpha"
+        ],
+        "entity/northstar-labs": [
+          "entity/lumen-coil-assemblies"
+        ]
+      },
+      "may_rewrite_pages": [
+        "entity/acme-corporation",
+        "entity/borealis-station",
+        "entity/jonas-reed",
+        "entity/pe-7",
+        "entity/psionic-engine",
+        "entity/stardust-program",
+        "entity/northstar-labs"
+      ],
+      "expected_deleted_pages": [
+        "summary/{target_knowledge_id}"
+      ]
+    },
+    "idempotent": true,
+    "evaluation_focus": [
+      "delete",
+      "source_ref_cleanup",
+      "false_delete_control",
+      "idempotence"
+    ]
+  },
+  {
+    "event_id": "d002",
+    "target_doc_id": "doc08_aurora_beacon_notes.md",
+    "target_title": "Aurora Beacon Calibration Notes",
+    "delete_mode": "retract",
+    "reason": "The Aurora Beacon note is a cross-linked calibration document. Retracting it should remove calibration-note-specific source references and terms while preserving the broader engine, component, station, and organization pages.",
+    "expected_impact": {
+      "must_remove_source_refs": [
+        "doc08_aurora_beacon_notes.md"
+      ],
+      "must_keep_pages": [
+        "entity/stardust-program",
+        "entity/psionic-engine",
+        "entity/aurora-beacon",
+        "entity/lumen-coil",
+        "entity/helion-crystal",
+        "entity/northstar-labs",
+        "entity/borealis-station"
+      ],
+      "must_not_change_pages": [
+        "entity/celestial-review-board",
+        "entity/skyvault-initiative",
+        "entity/jonas-reed"
+      ],
+      "must_remove_in_links": [
+        "summary/{target_knowledge_id}"
+      ],
+      "must_remove_terms": [
+        "synchronizes the Lumen Coil",
+        "replacement Lumen Coil assemblies",
+        "Borealis Station control must block",
+        "Aurora Beacon calibration fails"
+      ],
+      "equivalent_pages": {
+        "entity/psionic-engine": [
+          "entity/psionic-engine-pe-7",
+          "entity/pe-7"
+        ],
+        "entity/aurora-beacon": [
+          "concept/aurora-beacon-calibration",
+          "entity/aurora-beacon-modules"
+        ],
+        "entity/lumen-coil": [
+          "entity/lumen-coil-batch-lc-19",
+          "entity/lumen-coil-assemblies"
+        ],
+        "entity/helion-crystal": [
+          "entity/helion-crystal-shielding"
+        ],
+        "entity/stardust-program": [
+          "entity/stardust-program-phase-alpha"
+        ]
+      },
+      "may_rewrite_pages": [
+        "entity/acme-corporation",
+        "entity/aurora-beacon",
+        "entity/borealis-station",
+        "entity/helion-crystal",
+        "entity/lumen-coil",
+        "entity/northstar-labs",
+        "entity/psionic-engine",
+        "entity/stardust-program"
+      ],
+      "expected_deleted_pages": [
+        "summary/{target_knowledge_id}"
+      ]
+    },
+    "idempotent": true,
+    "evaluation_focus": [
+      "delete",
+      "source_ref_cleanup",
+      "stale_link_cleanup",
+      "false_delete_control",
+      "idempotence"
+    ]
+  },
+  {
+    "event_id": "d003",
+    "target_doc_id": "doc06_review_board_minutes.md",
+    "target_title": "Celestial Review Board Minutes",
+    "delete_mode": "retract",
+    "reason": "The board-minutes page covers approval, rejection, and reporting behavior. It is a distinct regression target from the incident and calibration cases and helps verify that retracting a governance note does not wipe unrelated operational pages.",
+    "expected_impact": {
+      "must_remove_source_refs": [
+        "doc06_review_board_minutes.md"
+      ],
+      "must_keep_pages": [
+        "entity/celestial-review-board",
+        "entity/stardust-program",
+        "entity/psionic-engine",
+        "entity/acme-corporation",
+        "entity/borealis-station",
+        "entity/nightfall-protocol"
+      ],
+      "must_not_change_pages": [
+        "entity/aurora-beacon",
+        "entity/lumen-coil",
+        "entity/helion-crystal",
+        "entity/northstar-labs"
+      ],
+      "must_remove_in_links": [
+        "summary/{target_knowledge_id}"
+      ],
+      "must_remove_terms": [
+        "approved Stardust Program Phase Alpha",
+        "rejected Nightfall Protocol integration",
+        "post-incident analysis",
+        "monthly technical risk reports"
+      ],
+      "equivalent_pages": {
+        "entity/stardust-program": [
+          "entity/stardust-program-phase-alpha"
+        ],
+        "entity/nightfall-protocol": [
+          "concept/nightfall-protocol",
+          "entity/nightfall-protocol"
+        ],
+        "entity/psionic-engine": [
+          "entity/psionic-engine-pe-7",
+          "entity/pe-7"
+        ]
+      },
+      "may_rewrite_pages": [
+        "entity/acme-corporation",
+        "entity/borealis-station",
+        "entity/celestial-review-board",
+        "entity/mira-cole",
+        "entity/nightfall-protocol",
+        "entity/psionic-engine",
+        "entity/stardust-program"
+      ],
+      "expected_deleted_pages": [
+        "summary/{target_knowledge_id}"
+      ]
+    },
+    "idempotent": true,
+    "evaluation_focus": [
+      "delete",
+      "source_ref_cleanup",
+      "stale_link_cleanup",
+      "false_delete_control",
+      "idempotence"
+    ]
+  }
+]

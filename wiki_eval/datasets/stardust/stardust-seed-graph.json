@@ -1,0 +1,766 @@
+{
+  "graph_id": "stardust-seed-v1",
+  "domain": "stardust",
+  "purpose": "Seed graph for wiki benchmark construction, regression evaluation, and future corpus expansion.",
+  "corpus_versions": {
+    "v1": "docs_v1",
+    "v2": "docs_v2",
+    "delete": "docs_del (materialized: d001,d002,d003)"
+  },
+  "coverage_targets": {
+    "entity_count": 27,
+    "relation_count": 18,
+    "hop_depths": [
+      1,
+      2,
+      3
+    ],
+    "lifecycle_modes": [
+      "v1",
+      "v2",
+      "delete"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "stardust-program",
+      "name": "Stardust Program",
+      "type": "program",
+      "aliases": [
+        "Stardust"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "skyvault-initiative",
+      "name": "Skyvault Initiative",
+      "type": "organization",
+      "aliases": [
+        "Skyvault"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "acme-corporation",
+      "name": "Acme Corporation",
+      "type": "organization",
+      "aliases": [
+        "ACME",
+        "Acme"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "psionic-engine",
+      "name": "Psionic Engine",
+      "type": "technology",
+      "aliases": [
+        "PE-7",
+        "PE-8"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "pe-7",
+      "name": "PE-7",
+      "type": "version",
+      "aliases": [
+        "Psionic Engine PE-7"
+      ],
+      "status": "v1_only"
+    },
+    {
+      "id": "pe-8",
+      "name": "PE-8",
+      "type": "version",
+      "aliases": [
+        "Psionic Engine PE-8"
+      ],
+      "status": "v2_only"
+    },
+    {
+      "id": "aurora-beacon",
+      "name": "Aurora Beacon",
+      "type": "device",
+      "aliases": [
+        "Beacon"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "helion-crystal",
+      "name": "Helion Crystal",
+      "type": "component",
+      "aliases": [
+        "Helion power core"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "lumen-coil",
+      "name": "Lumen Coil",
+      "type": "component",
+      "aliases": [
+        "LC-19",
+        "LC-22"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "lc-19",
+      "name": "LC-19",
+      "type": "batch",
+      "aliases": [
+        "Lumen Coil batch LC-19"
+      ],
+      "status": "v1_only"
+    },
+    {
+      "id": "lc-22",
+      "name": "LC-22",
+      "type": "batch",
+      "aliases": [
+        "Lumen Coil batch LC-22"
+      ],
+      "status": "v2_only"
+    },
+    {
+      "id": "northstar-labs",
+      "name": "Northstar Labs",
+      "type": "organization",
+      "aliases": [
+        "Northstar"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "mira-cole",
+      "name": "Dr. Mira Cole",
+      "type": "person",
+      "aliases": [
+        "Mira Cole",
+        "Cole"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "jonas-reed",
+      "name": "Jonas Reed",
+      "type": "person",
+      "aliases": [
+        "Reed"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "ilya-voss",
+      "name": "Ilya Voss",
+      "type": "person",
+      "aliases": [
+        "Voss"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "borealis-station",
+      "name": "Borealis Station",
+      "type": "location",
+      "aliases": [
+        "Borealis"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "svalbard",
+      "name": "Svalbard",
+      "type": "location",
+      "aliases": [
+        "Spitsbergen"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "celestial-review-board",
+      "name": "Celestial Review Board",
+      "type": "organization",
+      "aliases": [
+        "CRB",
+        "the board"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "nightfall-protocol",
+      "name": "Nightfall Protocol",
+      "type": "program",
+      "aliases": [
+        "Nightfall"
+      ],
+      "status": "core"
+    },
+    {
+      "id": "sv-14",
+      "name": "SV-14",
+      "type": "contract",
+      "aliases": [
+        "Contract SV-14"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "phase-alpha",
+      "name": "Phase Alpha",
+      "type": "phase",
+      "aliases": [
+        "Alpha"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "phase-beta",
+      "name": "Phase Beta",
+      "type": "phase",
+      "aliases": [
+        "Beta"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "borealis-incident",
+      "name": "Borealis Station Incident",
+      "type": "event",
+      "aliases": [
+        "2032-05-09 incident"
+      ],
+      "status": "supporting"
+    },
+    {
+      "id": "comet-archive",
+      "name": "Comet Archive",
+      "type": "noise",
+      "aliases": [
+        "Comet"
+      ],
+      "status": "noise"
+    },
+    {
+      "id": "lattice-shade",
+      "name": "Lattice Shade",
+      "type": "noise",
+      "aliases": [
+        "Lattice"
+      ],
+      "status": "noise"
+    },
+    {
+      "id": "field-pressure",
+      "name": "Field Pressure",
+      "type": "attribute",
+      "aliases": [
+        "pressure"
+      ],
+      "status": "noise_like"
+    },
+    {
+      "id": "safe-mode",
+      "name": "Safe Mode",
+      "type": "state",
+      "aliases": [
+        "safe mode"
+      ],
+      "status": "noise_like"
+    }
+  ],
+  "edges": [
+    {
+      "id": "r01",
+      "subject": "stardust-program",
+      "predicate": "operated_by",
+      "object": "skyvault-initiative",
+      "evidence_docs": [
+        "doc01_project_brief.md"
+      ]
+    },
+    {
+      "id": "r02",
+      "subject": "stardust-program",
+      "predicate": "uses",
+      "object": "psionic-engine",
+      "evidence_docs": [
+        "doc01_project_brief.md",
+        "doc03_psionic_engine_spec.md"
+      ]
+    },
+    {
+      "id": "r03",
+      "subject": "acme-corporation",
+      "predicate": "developed",
+      "object": "psionic-engine",
+      "evidence_docs": [
+        "doc02_acme_contract.md",
+        "doc03_psionic_engine_spec.md"
+      ]
+    },
+    {
+      "id": "r04",
+      "subject": "psionic-engine",
+      "predicate": "uses_component",
+      "object": "helion-crystal",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec.md",
+        "doc08_aurora_beacon_notes.md"
+      ]
+    },
+    {
+      "id": "r05",
+      "subject": "psionic-engine",
+      "predicate": "uses_component",
+      "object": "lumen-coil",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec.md",
+        "doc02_acme_contract.md"
+      ]
+    },
+    {
+      "id": "r06",
+      "subject": "psionic-engine",
+      "predicate": "calibrated_by",
+      "object": "aurora-beacon",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec.md",
+        "doc08_aurora_beacon_notes.md"
+      ]
+    },
+    {
+      "id": "r07",
+      "subject": "lumen-coil",
+      "predicate": "supplied_by",
+      "object": "northstar-labs",
+      "evidence_docs": [
+        "doc02_acme_contract.md",
+        "doc05_borealis_incident.md"
+      ]
+    },
+    {
+      "id": "r08",
+      "subject": "mira-cole",
+      "predicate": "chief_architect_of",
+      "object": "psionic-engine",
+      "evidence_docs": [
+        "doc01_project_brief.md",
+        "doc04_personnel_notes.md"
+      ]
+    },
+    {
+      "id": "r09",
+      "subject": "jonas-reed",
+      "predicate": "manages",
+      "object": "borealis-station",
+      "evidence_docs": [
+        "doc01_project_brief.md",
+        "doc04_personnel_notes.md",
+        "doc07_borealis_station.md"
+      ]
+    },
+    {
+      "id": "r10",
+      "subject": "borealis-station",
+      "predicate": "located_in",
+      "object": "svalbard",
+      "evidence_docs": [
+        "doc07_borealis_station.md"
+      ]
+    },
+    {
+      "id": "r11",
+      "subject": "celestial-review-board",
+      "predicate": "approved",
+      "object": "phase-alpha",
+      "evidence_docs": [
+        "doc06_review_board_minutes.md"
+      ]
+    },
+    {
+      "id": "r12",
+      "subject": "celestial-review-board",
+      "predicate": "rejected",
+      "object": "nightfall-protocol",
+      "evidence_docs": [
+        "doc06_review_board_minutes.md"
+      ]
+    },
+    {
+      "id": "r13",
+      "subject": "pe-7",
+      "predicate": "replaced_by",
+      "object": "pe-8",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec_v2.md"
+      ]
+    },
+    {
+      "id": "r14",
+      "subject": "lc-19",
+      "predicate": "replaced_by",
+      "object": "lc-22",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec_v2.md",
+        "doc10_northstar_lc22_notice.md"
+      ]
+    },
+    {
+      "id": "r15",
+      "subject": "celestial-review-board",
+      "predicate": "conditionally_approved",
+      "object": "nightfall-protocol",
+      "evidence_docs": [
+        "doc09_nightfall_update.md"
+      ]
+    },
+    {
+      "id": "r16",
+      "subject": "ilya-voss",
+      "predicate": "signs_off_on",
+      "object": "sv-14",
+      "evidence_docs": [
+        "doc02_acme_contract.md"
+      ]
+    },
+    {
+      "id": "r17",
+      "subject": "borealis-station",
+      "predicate": "stores",
+      "object": "aurora-beacon",
+      "evidence_docs": [
+        "doc07_borealis_station.md",
+        "doc08_aurora_beacon_notes.md"
+      ]
+    },
+    {
+      "id": "r18",
+      "subject": "field-pressure",
+      "predicate": "triggers",
+      "object": "safe-mode",
+      "evidence_docs": [
+        "doc03_psionic_engine_spec.md",
+        "doc03_psionic_engine_spec_v2.md"
+      ]
+    }
+  ],
+  "update_events": [
+    {
+      "event_id": "u001",
+      "trigger_doc": "doc03_psionic_engine_spec_v2.md",
+      "summary": "PE-8 replaces PE-7 and raises the safety threshold from 42 kPa to 48 kPa.",
+      "new_facts": [
+        {
+          "claim": "PE-8 safety threshold is 48 kPa.",
+          "expected_terms": [
+            "PE-8",
+            "48 kPa"
+          ]
+        },
+        {
+          "claim": "PE-8 replaces PE-7.",
+          "expected_terms": [
+            "PE-8",
+            "replaces PE-7"
+          ]
+        }
+      ],
+      "old_facts_to_remove": [
+        {
+          "claim": "PE-7 safety threshold is 42 kPa.",
+          "old_terms_must_disappear_for_latest": [
+            "42 kPa"
+          ]
+        }
+      ],
+      "evaluation_focus": [
+        "update",
+        "retrieval",
+        "provenance"
+      ]
+    },
+    {
+      "event_id": "u002",
+      "trigger_doc": "doc09_nightfall_update.md",
+      "summary": "Nightfall Protocol moves from rejection to conditional approval after PE-8 validation.",
+      "new_facts": [
+        {
+          "claim": "Nightfall Protocol was conditionally approved on 2032-06-19.",
+          "expected_terms": [
+            "Nightfall Protocol",
+            "conditionally approved",
+            "2032-06-19"
+          ]
+        }
+      ],
+      "old_facts_to_remove": [
+        {
+          "claim": "Nightfall Protocol integration was rejected.",
+          "old_terms_must_disappear_for_latest": [
+            "rejected Nightfall Protocol integration"
+          ]
+        }
+      ],
+      "evaluation_focus": [
+        "update",
+        "contradiction_resolution"
+      ]
+    },
+    {
+      "event_id": "u003",
+      "trigger_doc": "doc10_northstar_lc22_notice.md",
+      "summary": "LC-22 becomes the replacement for LC-19.",
+      "new_facts": [
+        {
+          "claim": "LC-22 replaced LC-19.",
+          "expected_terms": [
+            "LC-22",
+            "replacement for LC-19"
+          ]
+        }
+      ],
+      "old_facts_to_remove": [
+        {
+          "claim": "LC-19 is the active batch.",
+          "old_terms_must_disappear_for_latest": [
+            "LC-19"
+          ]
+        }
+      ],
+      "evaluation_focus": [
+        "update",
+        "entity_resolution"
+      ]
+    }
+  ],
+  "delete_events": [
+    {
+      "event_id": "d001",
+      "target_doc_id": "doc05_borealis_incident.md",
+      "target_title": "Borealis Station Incident Report",
+      "delete_mode": "retract",
+      "reason": "The incident report is a canonical delete target because it contributes to several downstream pages and should disappear cleanly from source references after retract.",
+      "expected_impact": {
+        "must_remove_source_refs": [
+          "doc05_borealis_incident.md"
+        ],
+        "must_keep_pages": [
+          "entity/stardust-program",
+          "entity/psionic-engine",
+          "entity/borealis-station",
+          "entity/northstar-labs"
+        ],
+        "must_not_change_pages": [
+          "entity/aurora-beacon",
+          "entity/celestial-review-board"
+        ],
+        "must_remove_in_links": [
+          "summary/{target_knowledge_id}"
+        ],
+        "must_remove_terms": [
+          "Lumen Coil batch LC-19",
+          "unstable field event",
+          "delayed by twelve days"
+        ],
+        "equivalent_pages": {
+          "entity/psionic-engine": [
+            "entity/psionic-engine-pe-7",
+            "entity/pe-7"
+          ],
+          "entity/stardust-program": [
+            "entity/stardust-program-phase-alpha"
+          ],
+          "entity/northstar-labs": [
+            "entity/lumen-coil-assemblies"
+          ]
+        },
+        "may_rewrite_pages": [
+          "entity/acme-corporation",
+          "entity/borealis-station",
+          "entity/jonas-reed",
+          "entity/pe-7",
+          "entity/psionic-engine",
+          "entity/stardust-program",
+          "entity/northstar-labs"
+        ],
+        "expected_deleted_pages": [
+          "summary/{target_knowledge_id}"
+        ]
+      },
+      "idempotent": true,
+      "evaluation_focus": [
+        "delete",
+        "source_ref_cleanup",
+        "false_delete_control",
+        "idempotence"
+      ]
+    },
+    {
+      "event_id": "d002",
+      "target_doc_id": "doc08_aurora_beacon_notes.md",
+      "target_title": "Aurora Beacon Calibration Notes",
+      "delete_mode": "retract",
+      "reason": "The Aurora Beacon note is a cross-linked calibration document. Retracting it should remove calibration-note-specific source references and terms while preserving the broader engine, component, station, and organization pages.",
+      "expected_impact": {
+        "must_remove_source_refs": [
+          "doc08_aurora_beacon_notes.md"
+        ],
+        "must_keep_pages": [
+          "entity/stardust-program",
+          "entity/psionic-engine",
+          "entity/aurora-beacon",
+          "entity/lumen-coil",
+          "entity/helion-crystal",
+          "entity/northstar-labs",
+          "entity/borealis-station"
+        ],
+        "must_not_change_pages": [
+          "entity/celestial-review-board",
+          "entity/skyvault-initiative",
+          "entity/jonas-reed"
+        ],
+        "must_remove_in_links": [
+          "summary/{target_knowledge_id}"
+        ],
+        "must_remove_terms": [
+          "synchronizes the Lumen Coil",
+          "replacement Lumen Coil assemblies",
+          "Borealis Station control must block",
+          "Aurora Beacon calibration fails"
+        ],
+        "equivalent_pages": {
+          "entity/psionic-engine": [
+            "entity/psionic-engine-pe-7",
+            "entity/pe-7"
+          ],
+          "entity/aurora-beacon": [
+            "concept/aurora-beacon-calibration",
+            "entity/aurora-beacon-modules"
+          ],
+          "entity/lumen-coil": [
+            "entity/lumen-coil-batch-lc-19",
+            "entity/lumen-coil-assemblies"
+          ],
+          "entity/helion-crystal": [
+            "entity/helion-crystal-shielding"
+          ],
+          "entity/stardust-program": [
+            "entity/stardust-program-phase-alpha"
+          ]
+        },
+        "may_rewrite_pages": [
+          "entity/acme-corporation",
+          "entity/aurora-beacon",
+          "entity/borealis-station",
+          "entity/helion-crystal",
+          "entity/lumen-coil",
+          "entity/northstar-labs",
+          "entity/psionic-engine",
+          "entity/stardust-program"
+        ],
+        "expected_deleted_pages": [
+          "summary/{target_knowledge_id}"
+        ]
+      },
+      "idempotent": true,
+      "evaluation_focus": [
+        "delete",
+        "source_ref_cleanup",
+        "stale_link_cleanup",
+        "false_delete_control",
+        "idempotence"
+      ]
+    },
+    {
+      "event_id": "d003",
+      "target_doc_id": "doc06_review_board_minutes.md",
+      "target_title": "Celestial Review Board Minutes",
+      "delete_mode": "retract",
+      "reason": "The board-minutes page covers approval, rejection, and reporting behavior. It is a distinct regression target from the incident and calibration cases and helps verify that retracting a governance note does not wipe unrelated operational pages.",
+      "expected_impact": {
+        "must_remove_source_refs": [
+          "doc06_review_board_minutes.md"
+        ],
+        "must_keep_pages": [
+          "entity/celestial-review-board",
+          "entity/stardust-program",
+          "entity/psionic-engine",
+          "entity/acme-corporation",
+          "entity/borealis-station",
+          "entity/nightfall-protocol"
+        ],
+        "must_not_change_pages": [
+          "entity/aurora-beacon",
+          "entity/lumen-coil",
+          "entity/helion-crystal",
+          "entity/northstar-labs"
+        ],
+        "must_remove_in_links": [
+          "summary/{target_knowledge_id}"
+        ],
+        "must_remove_terms": [
+          "approved Stardust Program Phase Alpha",
+          "rejected Nightfall Protocol integration",
+          "post-incident analysis",
+          "monthly technical risk reports"
+        ],
+        "equivalent_pages": {
+          "entity/stardust-program": [
+            "entity/stardust-program-phase-alpha"
+          ],
+          "entity/nightfall-protocol": [
+            "concept/nightfall-protocol",
+            "entity/nightfall-protocol"
+          ],
+          "entity/psionic-engine": [
+            "entity/psionic-engine-pe-7",
+            "entity/pe-7"
+          ]
+        },
+        "may_rewrite_pages": [
+          "entity/acme-corporation",
+          "entity/borealis-station",
+          "entity/celestial-review-board",
+          "entity/mira-cole",
+          "entity/nightfall-protocol",
+          "entity/psionic-engine",
+          "entity/stardust-program"
+        ],
+        "expected_deleted_pages": [
+          "summary/{target_knowledge_id}"
+        ]
+      },
+      "idempotent": true,
+      "evaluation_focus": [
+        "delete",
+        "source_ref_cleanup",
+        "stale_link_cleanup",
+        "false_delete_control",
+        "idempotence"
+      ]
+    }
+  ],
+  "generation_rules": {
+    "document_strategy": [
+      "Start from the seed graph and generate relation-dense wiki pages rather than isolated prose.",
+      "Keep each core entity in at least one page and at least one cross-reference path.",
+      "Ensure every update event has a before-page and an after-page.",
+      "Reserve delete targets for pages that are cited by multiple downstream pages."
+    ],
+    "qa_strategy": [
+      "Mix single-hop, two-hop, and three-hop questions.",
+      "Add at least one provenance question per major relation cluster.",
+      "Add one contradiction-resolution question for each update event.",
+      "Add one delete-regression check for each retract target."
+    ],
+    "quality_controls": [
+      "No orphan core entity.",
+      "No update event without a corresponding old-fact removal rule.",
+      "No delete event without explicit must-remove and must-keep expectations.",
+      "At least two aliases for the most important entities."
+    ]
+  }
+}

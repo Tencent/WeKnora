@@ -1,0 +1,184 @@
+[
+  {
+    "id": "stardust-program",
+    "name": "Stardust Program",
+    "aliases": [
+      "Stardust"
+    ],
+    "expected_slug": "entity/stardust-program",
+    "type": "program",
+    "min_terms": [
+      "Stardust Program",
+      "Skyvault Initiative",
+      "Psionic Engine"
+    ]
+  },
+  {
+    "id": "skyvault-initiative",
+    "name": "Skyvault Initiative",
+    "aliases": [
+      "Skyvault"
+    ],
+    "expected_slug": "entity/skyvault-initiative",
+    "type": "organization",
+    "min_terms": [
+      "Skyvault Initiative",
+      "Stardust Program"
+    ]
+  },
+  {
+    "id": "acme-corporation",
+    "name": "Acme Corporation",
+    "aliases": [
+      "ACME",
+      "Acme"
+    ],
+    "expected_slug": "entity/acme-corporation",
+    "type": "organization",
+    "min_terms": [
+      "Acme Corporation",
+      "Psionic Engine",
+      "SV-14"
+    ]
+  },
+  {
+    "id": "psionic-engine",
+    "name": "Psionic Engine",
+    "aliases": [
+      "PE-7",
+      "PE-8"
+    ],
+    "expected_slug": "entity/psionic-engine",
+    "type": "technology",
+    "min_terms": [
+      "Psionic Engine",
+      "Helion Crystal",
+      "Lumen Coil",
+      "Aurora Beacon"
+    ]
+  },
+  {
+    "id": "aurora-beacon",
+    "name": "Aurora Beacon",
+    "aliases": [
+      "Beacon"
+    ],
+    "expected_slug": "entity/aurora-beacon",
+    "type": "device",
+    "min_terms": [
+      "Aurora Beacon",
+      "calibration",
+      "Lumen Coil"
+    ]
+  },
+  {
+    "id": "helion-crystal",
+    "name": "Helion Crystal",
+    "aliases": [
+      "Helion power core"
+    ],
+    "expected_slug": "entity/helion-crystal",
+    "type": "component",
+    "min_terms": [
+      "Helion Crystal",
+      "power core"
+    ]
+  },
+  {
+    "id": "lumen-coil",
+    "name": "Lumen Coil",
+    "aliases": [
+      "LC-19",
+      "LC-22"
+    ],
+    "expected_slug": "entity/lumen-coil",
+    "type": "component",
+    "min_terms": [
+      "Lumen Coil",
+      "Northstar Labs"
+    ]
+  },
+  {
+    "id": "northstar-labs",
+    "name": "Northstar Labs",
+    "aliases": [
+      "Northstar"
+    ],
+    "expected_slug": "entity/northstar-labs",
+    "type": "organization",
+    "min_terms": [
+      "Northstar Labs",
+      "Lumen Coil"
+    ]
+  },
+  {
+    "id": "mira-cole",
+    "name": "Dr. Mira Cole",
+    "aliases": [
+      "Mira Cole",
+      "Cole"
+    ],
+    "expected_slug": "entity/mira-cole",
+    "type": "person",
+    "min_terms": [
+      "Dr. Mira Cole",
+      "chief architect",
+      "Psionic Engine"
+    ]
+  },
+  {
+    "id": "jonas-reed",
+    "name": "Jonas Reed",
+    "aliases": [
+      "Reed"
+    ],
+    "expected_slug": "entity/jonas-reed",
+    "type": "person",
+    "min_terms": [
+      "Jonas Reed",
+      "Borealis Station"
+    ]
+  },
+  {
+    "id": "borealis-station",
+    "name": "Borealis Station",
+    "aliases": [
+      "Borealis"
+    ],
+    "expected_slug": "entity/borealis-station",
+    "type": "location",
+    "min_terms": [
+      "Borealis Station",
+      "Svalbard",
+      "Stardust Program"
+    ]
+  },
+  {
+    "id": "celestial-review-board",
+    "name": "Celestial Review Board",
+    "aliases": [
+      "the board",
+      "CRB"
+    ],
+    "expected_slug": "entity/celestial-review-board",
+    "type": "organization",
+    "min_terms": [
+      "Celestial Review Board",
+      "approved",
+      "Stardust Program"
+    ]
+  },
+  {
+    "id": "nightfall-protocol",
+    "name": "Nightfall Protocol",
+    "aliases": [
+      "Nightfall"
+    ],
+    "expected_slug": "entity/nightfall-protocol",
+    "type": "program",
+    "min_terms": [
+      "Nightfall Protocol",
+      "PE-7"
+    ]
+  }
+]

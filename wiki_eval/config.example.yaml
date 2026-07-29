@@ -1,0 +1,46 @@
+﻿# Copy to config.yaml and adjust if needed.
+# Windows 侧一般可用 localhost；在 WSL 内建议用 127.0.0.1
+base_url: http://localhost:8080
+api_prefix: /api/v1
+http_timeout: 60
+
+# Prefer env vars for secrets:
+#   WEKNORA_TOKEN=...
+#   WEKNORA_API_KEY=...
+#   WEKNORA_API_KEY_HEADER=X-API-Key
+# token: ""
+# api_key: ""
+# api_key_header: X-API-Key
+#
+# The KB creation step needs model UUIDs from your WeKnora instance or harness .env:
+#   WEKNORA_EMBEDDING_MODEL_ID=...
+#   WEKNORA_SUMMARY_MODEL_ID=...
+#   WEKNORA_WIKI_SYNTHESIS_MODEL_ID=...
+
+knowledge_base:
+  name: wiki-eval-stardust
+  type: document
+  description: Automated synthetic wiki evaluation corpus
+  indexing_strategy:
+    vector_enabled: true
+    keyword_enabled: true
+    wiki_enabled: true
+    graph_enabled: true
+  wiki_config:
+    extraction_granularity: standard
+    ingest_batch_size: 5
+    ingest_map_parallel: 4
+    ingest_reduce_parallel: 4
+
+search_k: 5
+
+# Optional: override if your WeKnora session/chat payload differs.
+# session_create_payloads:
+#   - title: wiki eval session
+#     knowledge_base_ids: ["${kb_id}"]
+# knowledge_chat_payload_template:
+#   message: "${question}"
+#   query: "${question}"
+#   knowledge_base_ids: ["${kb_id}"]
+#   stream: false
+

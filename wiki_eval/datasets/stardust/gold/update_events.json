@@ -1,0 +1,51 @@
+[
+  {
+    "id": "u001",
+    "op": "add",
+    "doc": "doc03_psionic_engine_spec_v2.md",
+    "new_facts": [
+      {
+        "claim": "PE-8 safety threshold is 48 kPa.",
+        "expected_terms": [
+          "PE-8",
+          "48 kPa"
+        ],
+        "old_terms_must_disappear_for_latest": [
+          "42 kPa"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u002",
+    "op": "add",
+    "doc": "doc09_nightfall_update.md",
+    "new_facts": [
+      {
+        "claim": "Nightfall Protocol was conditionally approved on 2032-06-19.",
+        "expected_terms": [
+          "Nightfall Protocol",
+          "conditionally approved",
+          "2032-06-19"
+        ],
+        "old_terms_must_disappear_for_latest": [
+          "rejected Nightfall Protocol integration"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "u003",
+    "op": "add",
+    "doc": "doc10_northstar_lc22_notice.md",
+    "new_facts": [
+      {
+        "claim": "LC-22 replaced LC-19.",
+        "expected_terms": [
+          "LC-22",
+          "replacement for LC-19"
+        ]
+      }
+    ]
+  }
+]
