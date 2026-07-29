@@ -809,6 +809,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         loading.value = false
         isReplying.value = false
         message.is_completed = true
+        message.feedback_eligible = dataPayload?.feedback_eligible === true
         onReplyComplete?.(String(message.content || ''))
         onTurnComplete?.(message)
         fullContent.value = ''

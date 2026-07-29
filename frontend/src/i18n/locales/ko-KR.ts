@@ -1,4 +1,39 @@
 export default {
+  feedback: {
+    answerLabel: '답변 피드백',
+    like: '도움이 됨',
+    dislike: '도움이 되지 않음',
+    reasonLabel: '어떤 점을 개선할 수 있나요?',
+    saveFailed: '피드백을 저장하지 못했습니다. 다시 시도해 주세요.',
+    chunkDetails: '청크 피드백',
+    sessionCount: '관련 세션 {count}개',
+    needsOptimization: '최적화 필요',
+    reset: '피드백 초기화',
+    resetSuccess: '청크 피드백을 초기화했습니다',
+    resetFailed: '청크 피드백을 초기화하지 못했습니다',
+    loadFailed: '청크 피드백을 불러오지 못했습니다',
+    optimizationThreshold: '저품질 피드백 임계값',
+    optimizationThresholdDescription:
+      '긍정 피드백 비율이 이 값보다 낮은 청크는 최적화 필요로 표시됩니다.',
+    retrievalWeightOptIn: '검색에 피드백 반영',
+    retrievalWeightOptInDescription:
+      '전역 정책이 활성화된 경우 이 지식베이스에 피드백 가중치를 적용합니다.',
+    reasons: {
+      inaccurate: '부정확함',
+      irrelevant: '질문과 관련 없음',
+      incomplete: '답변이 불완전함',
+      outdated: '정보가 오래됨',
+      other: '기타',
+    },
+    sources: {
+      like: '좋아요',
+      dislike: '싫어요',
+      cancel: '피드백 취소',
+      admin_reset: '관리자 초기화',
+      content_delete: '메시지 삭제',
+      legacy: '이전 이벤트',
+    },
+  },
   platformApiKeys: {
     title: '플랫폼 API 키',
     description: '워크스페이스 간 자동화를 위한 플랫폼 자격 증명입니다. 워크스페이스 API에는 X-Tenant-ID를 사용하세요.',

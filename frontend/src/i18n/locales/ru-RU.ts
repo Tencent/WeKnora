@@ -1,4 +1,39 @@
 export default {
+  feedback: {
+    answerLabel: 'Отзыв об ответе',
+    like: 'Полезно',
+    dislike: 'Не полезно',
+    reasonLabel: 'Что можно улучшить?',
+    saveFailed: 'Не удалось сохранить отзыв. Повторите попытку.',
+    chunkDetails: 'Отзывы о фрагменте',
+    sessionCount: '{count} связанных сеансов',
+    needsOptimization: 'Требует оптимизации',
+    reset: 'Сбросить отзывы',
+    resetSuccess: 'Отзывы о фрагменте сброшены',
+    resetFailed: 'Не удалось сбросить отзывы о фрагменте',
+    loadFailed: 'Не удалось загрузить отзывы о фрагменте',
+    optimizationThreshold: 'Порог отзывов низкого качества',
+    optimizationThresholdDescription:
+      'Фрагменты с долей положительных отзывов ниже этого значения помечаются как требующие оптимизации.',
+    retrievalWeightOptIn: 'Учитывать отзывы при поиске',
+    retrievalWeightOptInDescription:
+      'Включить для этой базы знаний взвешивание по отзывам, когда активна глобальная политика.',
+    reasons: {
+      inaccurate: 'Неточные сведения',
+      irrelevant: 'Не относится к вопросу',
+      incomplete: 'Неполный ответ',
+      outdated: 'Устаревшие сведения',
+      other: 'Другое',
+    },
+    sources: {
+      like: 'Положительная оценка',
+      dislike: 'Отрицательная оценка',
+      cancel: 'Отзыв отменён',
+      admin_reset: 'Сброс администратором',
+      content_delete: 'Сообщение удалено',
+      legacy: 'Историческое событие',
+    },
+  },
   platformApiKeys: {
     title: 'Платформенные API-ключи',
     description: 'Учетные данные для автоматизации между рабочими пространствами. Для API пространства используйте X-Tenant-ID.',

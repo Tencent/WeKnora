@@ -1,4 +1,38 @@
 export default {
+  feedback: {
+    answerLabel: 'Answer feedback',
+    like: 'Helpful',
+    dislike: 'Not helpful',
+    reasonLabel: 'What could be improved?',
+    saveFailed: 'Could not save feedback. Please try again.',
+    chunkDetails: 'Chunk feedback',
+    sessionCount: '{count} related sessions',
+    needsOptimization: 'Needs optimization',
+    reset: 'Reset feedback',
+    resetSuccess: 'Chunk feedback reset',
+    resetFailed: 'Could not reset chunk feedback',
+    loadFailed: 'Could not load chunk feedback',
+    optimizationThreshold: 'Low-quality feedback threshold',
+    optimizationThresholdDescription: 'Chunks below this positive rate are marked as needing optimization.',
+    retrievalWeightOptIn: 'Use feedback in retrieval',
+    retrievalWeightOptInDescription:
+      'Opt this knowledge base into feedback weighting when the global policy is enabled.',
+    reasons: {
+      inaccurate: 'Inaccurate',
+      irrelevant: 'Irrelevant',
+      incomplete: 'Incomplete',
+      outdated: 'Outdated',
+      other: 'Other',
+    },
+    sources: {
+      like: 'Like',
+      dislike: 'Dislike',
+      cancel: 'Feedback cancelled',
+      admin_reset: 'Admin reset',
+      content_delete: 'Message deleted',
+      legacy: 'Legacy event',
+    },
+  },
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',

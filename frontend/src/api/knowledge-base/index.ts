@@ -122,6 +122,7 @@ export function createKnowledgeBase(data: {
     keyword_enabled: boolean;
     wiki_enabled: boolean;
     graph_enabled: boolean;
+    feedback_weight_enabled?: boolean;
   };
 }) {
   return post(`/api/v1/knowledge-bases`, data);
@@ -154,6 +155,7 @@ export function updateKnowledgeBase(id: string, data: {
       keyword_enabled: boolean;
       wiki_enabled: boolean;
       graph_enabled: boolean;
+      feedback_weight_enabled?: boolean;
     };
   }
 }) {
@@ -370,6 +372,36 @@ export function regenerateKnowledgeSummary(knowledgeId: string) {
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
 export function getChunkByIdOnly(chunkId: string) {
   return get(`/api/v1/chunks/by-id/${chunkId}`);
+}
+
+export type ChunkFeedbackTriggerSource =
+  | 'like'
+  | 'dislike'
+  | 'cancel'
+  | 'admin_reset'
+  | 'content_delete'
+  | 'legacy';
+
+export interface ChunkFeedbackAudit {
+  id: number;
+  action: 'feedback_weight_changed' | 'feedback_reset';
+  trigger_source: ChunkFeedbackTriggerSource;
+  old_weight: number;
+  new_weight: number;
+  created_at: string;
+}
+
+export interface ChunkFeedbackDetails {
+  reason_counts: Record<string, number>;
+  audits: ChunkFeedbackAudit[];
+}
+
+export function getChunkFeedbackDetails(chunkId: string) {
+  return get<{ success: boolean; data: ChunkFeedbackDetails }>(`/api/v1/chunks/by-id/${chunkId}/feedback`);
+}
+
+export function resetChunkFeedback(knowledgeBaseId: string, chunkId: string) {
+  return post(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/feedback/reset`, {});
 }
 
 // Delete a single generated question from a chunk by question ID
