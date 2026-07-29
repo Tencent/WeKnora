@@ -423,6 +423,22 @@ const batchDeleting = ref(false);
 const batchReparsing = ref(false);
 const batchTagging = ref(false);
 const batchTagDialogVisible = ref(false);
+const batchTagPreSelectedIds = computed(() => {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return [];
+  const cards = ids
+    .map((id) => cardList.value.find((c) => c.id === id))
+    .filter((c): c is KnowledgeCard => Boolean(c));
+  if (cards.length === 0) return [];
+  const firstTagIds = new Set((cards[0].tags || []).map((t) => t.id));
+  for (let i = 1; i < cards.length; i++) {
+    const cur = new Set((cards[i].tags || []).map((t) => t.id));
+    for (const tid of firstTagIds) {
+      if (!cur.has(tid)) firstTagIds.delete(tid);
+    }
+  }
+  return Array.from(firstTagIds);
+});
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -2409,7 +2425,8 @@ async function createNewSession(value: string): Promise<void> {
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog :visible="batchTagDialogVisible"
-    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList" :can-manage="canEdit"
+    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
+    :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
 
