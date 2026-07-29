@@ -330,6 +330,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginChatCompletion))
 	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
 	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
+	// Bind interfaces.ChunkRepository to chatpipeline.ChunkWeightLookup so the
+	// feedback-weight plugin can pull recall multipliers via the narrow
+	// ChunkWeightLookup contract. The interface is exported specifically so
+	// dig can resolve it from outside the chatpipeline package.
+	must(container.Provide(func(cr interfaces.ChunkRepository) chatpipeline.ChunkWeightLookup {
+		return cr
+	}))
 	must(container.Invoke(chatpipeline.NewPluginFeedbackWeight))
 	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
 	must(container.Invoke(chatpipeline.NewPluginLoadHistory))

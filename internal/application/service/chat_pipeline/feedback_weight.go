@@ -1,3 +1,4 @@
+// Package chatpipeline
 package chatpipeline
 
 import (
@@ -21,13 +22,18 @@ import (
 // disabled or when no candidate has a non-neutral weight — this preserves
 // the historical ordering exactly for tenants that never opt in.
 type PluginFeedbackWeight struct {
-	chunkRepo chunkWeightLookup
+	chunkRepo ChunkWeightLookup
 }
 
-// chunkWeightLookup lets the plugin pull RecallWeight for a batch of chunk
+// ChunkWeightLookup is the minimal chunk-side contract the feedback-weight
+// plugin needs from the chunk repository. Defining a narrow interface here
+// keeps the chat-pipeline package independent of the full repository surface,
+// and exporting it allows the DI container (dig) to resolve an implementation
+// from the providers registered in internal/container.
+// ChunkWeightLookup lets the plugin pull RecallWeight for a batch of chunk
 // IDs without depending on the full ChunkRepository type. Tests inject a
 // stub.
-type chunkWeightLookup interface {
+type ChunkWeightLookup interface {
 	ListChunkRecallWeights(ctx context.Context, tenantID uint64, chunkIDs []string) (map[string]float64, error)
 }
 
@@ -37,7 +43,7 @@ type chunkWeightLookup interface {
 // disables the feature instead of breaking the pipeline.
 func NewPluginFeedbackWeight(
 	eventManager *EventManager,
-	chunkRepo chunkWeightLookup,
+	chunkRepo ChunkWeightLookup,
 ) *PluginFeedbackWeight {
 	res := &PluginFeedbackWeight{chunkRepo: chunkRepo}
 	eventManager.Register(res)

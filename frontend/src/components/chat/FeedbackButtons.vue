@@ -28,36 +28,45 @@
         <t-icon :name="currentRating === 'dislike' ? 'thumb-down-filled' : 'thumb-down'" />
       </template>
     </t-button>
-    <t-dialog
-      v-model:visible="dialogVisible"
-      :header="$t('feedback.dislikeHeader')"
-      :on-confirm="onConfirmDislike"
-      :on-close="onCancelDislike"
-      :close-on-overlay-click="false"
-      width="520px"
-      data-test="feedback-dislike-dialog"
-    >
-      <p class="feedback-buttons__hint">{{ $t('feedback.dislikeHint') }}</p>
-      <div class="feedback-buttons__reasons">
-        <t-checkbox
-          v-for="reason in reasonOptions"
-          :key="reason"
-          v-model="selectedReasons"
-          :label="reason"
-          :value="reason"
-        />
-      </div>
-      <t-textarea
-        v-model="comment"
-        :placeholder="$t('feedback.commentPlaceholder')"
-        :maxlength="500"
-        :autosize="{ minRows: 2, maxRows: 4 }"
-      />
-    </t-dialog>
+    <!-- Separate teleport so the dialog renders above modals/settings-overlays -->
+    <Teleport to="body">
+      <t-dialog
+        v-model:visible="dialogVisible"
+        :header="$t('feedback.dislikeHeader')"
+        :on-confirm="onConfirmDislike"
+        :on-close="onCancelDislike"
+        :close-on-overlay-click="false"
+        width="520px"
+        data-test="feedback-dislike-dialog"
+      >
+        <p class="feedback-buttons__hint">{{ $t('feedback.dislikeHint') }}</p>
+        <div class="feedback-buttons__reasons">
+          <t-checkbox
+            v-for="reason in reasonOptions"
+            :key="reason.key"
+            :checked="selectedReasons.includes(reason.key)"
+            :label="reason.label"
+            @change="(checked) => onReasonChange(reason.key, checked)"
+          />
+        </div>
+        <div class="feedback-buttons__comment-wrap">
+          <t-textarea
+            v-model="comment"
+            :placeholder="$t('feedback.commentPlaceholder')"
+            :maxlength="500"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            :status="commentError ? 'error' : undefined"
+          />
+          <p v-if="commentError" class="feedback-buttons__comment-error">
+            {{ commentError }}
+          </p>
+        </div>
+      </t-dialog>
+    </Teleport>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -85,6 +94,7 @@ const pending = ref(false);
 const dialogVisible = ref(false);
 const selectedReasons = ref([...props.reasons]);
 const comment = ref(props.comment || '');
+const commentError = ref('');
 
 // Keep the dialog's draft state in sync when the parent updates the
 // hydrated rating (e.g. after a page reload). The rating itself is not
@@ -100,14 +110,38 @@ watch(
 // Reason preset keys. The backend validates against these so the labels here
 // must stay in lockstep with the list in internal/types/message_feedback.go.
 // Translations are looked up via the i18n key feedback.reasons.<key>.
-const reasonOptions = computed(() => [
-  t('feedback.reasons.inaccurate'),
-  t('feedback.reasons.irrelevant'),
-  t('feedback.reasons.outdated'),
-  t('feedback.reasons.incomplete'),
-  t('feedback.reasons.harmful'),
-  t('feedback.reasons.other'),
-]);
+const REASON_KEYS = ['inaccurate', 'irrelevant', 'outdated', 'incomplete', 'harmful', 'other'];
+
+const reasonOptions = computed(() =>
+  REASON_KEYS.map((key) => ({
+    key,
+    label: t(`feedback.reasons.${key}`),
+  })),
+);
+
+function onReasonChange(key: string, checked: boolean) {
+  if (checked) {
+    if (!selectedReasons.value.includes(key)) {
+      selectedReasons.value = [...selectedReasons.value, key];
+    }
+  } else {
+    selectedReasons.value = selectedReasons.value.filter((r) => r !== key);
+    if (key === 'other') {
+      commentError.value = '';
+    }
+  }
+}
+
+function validateComment(): boolean {
+  if (selectedReasons.value.includes('other')) {
+    if (!comment.value.trim()) {
+      commentError.value = t('feedback.commentRequiredWhenOther');
+      return false;
+    }
+  }
+  commentError.value = '';
+  return true;
+}
 
 // onClick implements the optimistic-update + cancel-on-second-click flow.
 // The two state transitions are dispatched without waiting for the network
@@ -124,12 +158,11 @@ async function onClick(next) {
   const previousComment = comment.value;
 
   if (target === 'dislike') {
-    // Open the dialog; the actual PUT happens on confirm.
     selectedReasons.value = [...previousReasons];
     comment.value = previousComment;
+    commentError.value = '';
     pending.value = true;
     emit('update:modelValue', 'dislike');
-    // Optimistically clear the like state if the user is flipping.
     if (previous === 'like') {
       emit('update:reasons', []);
     }
@@ -153,7 +186,6 @@ async function onClick(next) {
     emit('feedback-saved', { rating: target, reasons: [], comment: '' });
     MessagePlugin.success(t(target === 'none' ? 'feedback.cancelSuccess' : 'feedback.saveSuccess'));
   } catch (err) {
-    // Roll back the optimistic state.
     emit('update:modelValue', previous);
     emit('update:reasons', previousReasons);
     emit('update:comment', previousComment);
@@ -165,11 +197,10 @@ async function onClick(next) {
 
 async function onConfirmDislike() {
   if (pending.value) return;
+  if (!validateComment()) return;
   pending.value = true;
   try {
-    // Pull the canonical reason keys from the Chinese labels so the backend
-    // gets the whitelist keys we documented in FeedbackDislikeReasons.
-    const apiReasons = selectedReasons.value.map(labelToKey);
+    const apiReasons = [...selectedReasons.value];
     await setMessageFeedback({
       session_id: props.sessionId,
       message_id: props.messageId,
@@ -183,7 +214,6 @@ async function onConfirmDislike() {
     dialogVisible.value = false;
     MessagePlugin.success(t('feedback.saveSuccess'));
   } catch (err) {
-    // Roll back the optimistic flip to "like".
     emit('update:modelValue', '');
     MessagePlugin.error(t('feedback.saveError'));
   } finally {
@@ -200,18 +230,6 @@ function onCancelDislike() {
   dialogVisible.value = false;
 }
 
-// Reason-key round-tripping: the i18n bundle translates the labels so the
-// UI matches the user's language, but the backend stores the canonical
-// whitelist keys. The labels are 1:1 with the keys here, so we just
-// lowercase and underscore-fold the localised label.
-function labelToKey(label) {
-  if (!label) return '';
-  return label
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/[\s/]+/g, '_');
-}
 </script>
 
 <style scoped>
@@ -235,5 +253,13 @@ function labelToKey(label) {
   color: var(--td-text-color-secondary, #666);
   margin: 0 0 12px 0;
   font-size: 13px;
+}
+.feedback-buttons__comment-wrap {
+  margin-top: 4px;
+}
+.feedback-buttons__comment-error {
+  color: var(--td-error-color, #d54941);
+  font-size: 12px;
+  margin: 4px 0 0 0;
 }
 </style>

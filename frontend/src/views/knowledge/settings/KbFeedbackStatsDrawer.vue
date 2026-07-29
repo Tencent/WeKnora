@@ -55,6 +55,22 @@
           {{ row.last_feedback_at ? formatDate(row.last_feedback_at) : '—' }}
         </span>
       </template>
+      <template #dislike_reasons="{ row }">
+        <span class="kb-feedback-stats-drawer__reasons">
+          <template v-if="row.dislike_reasons && Object.keys(row.dislike_reasons).length > 0">
+            <t-tag
+              v-for="(count, reason) in row.dislike_reasons"
+              :key="reason"
+              size="small"
+              theme="danger"
+              variant="light"
+            >
+              {{ t(`feedback.reasons.${reason}`) }} ({{ count }})
+            </t-tag>
+          </template>
+          <template v-else>—</template>
+        </span>
+      </template>
       <template #op="{ row }">
         <t-link theme="primary" hover="color" @click="openWeightLogs(row.chunk_id)">
           {{ $t('feedback.kbStats.weightLogTitle') }}
@@ -118,12 +134,14 @@ const sortOptions = computed(() => [
 ]);
 
 const columns = computed(() => [
-  { colKey: 'preview', title: t('feedback.kbStats.columnChunk'), ellipsis: true, minWidth: 320 },
-  { colKey: 'positive_rate', title: t('feedback.kbStats.columnPositiveRate'), width: 180 },
-  { colKey: 'like_count', title: t('feedback.kbStats.columnLikeCount'), width: 100 },
-  { colKey: 'dislike_count', title: t('feedback.kbStats.columnDislikeCount'), width: 100 },
-  { colKey: 'last_feedback_at', title: t('feedback.kbStats.columnLastFeedback'), width: 180 },
-  { colKey: 'op', title: '', width: 160 },
+  { colKey: 'content_preview', title: t('feedback.kbStats.columnChunk'), ellipsis: true, minWidth: 180 },
+  { colKey: 'like_count', title: t('feedback.kbStats.columnLikeCount'), width: 70 },
+  { colKey: 'dislike_count', title: t('feedback.kbStats.columnDislikeCount'), width: 70 },
+  { colKey: 'session_count', title: t('feedback.kbStats.columnSessionCount'), width: 80 },
+  { colKey: 'positive_rate', title: t('feedback.kbStats.columnPositiveRate'), width: 140 },
+  { colKey: 'dislike_reasons', title: t('feedback.kbStats.columnDislikeReasons'), minWidth: 160 },
+  { colKey: 'last_feedback_at', title: t('feedback.kbStats.columnLastFeedback'), width: 160 },
+  { colKey: 'op', title: '', width: 120 },
 ]);
 
 function positiveRateClass(rate) {
@@ -164,7 +182,7 @@ async function reload() {
       keyword: filters.keyword,
     });
     const page = resp?.data || {};
-    rows.value = page.items || [];
+    rows.value = page.data || [];
     total.value = page.total || 0;
     pagination.total = total.value;
   } catch (err) {
@@ -233,4 +251,5 @@ watch(
 .kb-feedback-stats-drawer__rate--bad { color: var(--td-error-color, #d54941); font-weight: 600; }
 .kb-feedback-stats-drawer__rate--neutral { color: var(--td-text-color-secondary, #666); }
 .kb-feedback-stats-drawer__date { color: var(--td-text-color-secondary, #666); }
+.kb-feedback-stats-drawer__reasons { display: flex; flex-wrap: wrap; gap: 4px; }
 </style>

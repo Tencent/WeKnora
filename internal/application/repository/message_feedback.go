@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -156,6 +157,7 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 
 		chunksByKB := groupChunkIDsByKB(refs)
 		kbIDs := sortedKeys(chunksByKB)
+		logger.Infof(ctx, "[FeedbackRepo] UpsertFeedback messageID=%s refs=%d chunksByKB=%v kbIDs=%v", feedback.MessageID, len(refs), chunksByKB, kbIDs)
 		kbMeta, err := lockAndReadKBFeedbackMeta(tx, isPG, kbIDs)
 		if err != nil {
 			return err
@@ -208,8 +210,10 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 			}
 			dLike, dDislike := types.FeedbackCounterDeltas(oldEffective, newRating)
 			if dLike == 0 && dDislike == 0 {
+				logger.Infof(ctx, "[FeedbackRepo] no counter delta for kbID=%s oldEffective=%q newRating=%q, skipping", kbID, oldEffective, newRating)
 				continue
 			}
+			logger.Infof(ctx, "[FeedbackRepo] applying counter delta kbID=%s dLike=%d dDislike=%d chunkCount=%d", kbID, dLike, dDislike, len(chunkIDs))
 			if err := applyCounterDelta(tx, chunkIDs, "like_count", dLike); err != nil {
 				return err
 			}
@@ -217,7 +221,7 @@ func (r *messageFeedbackRepository) UpsertFeedback(
 				return err
 			}
 			if err := refreshChunkWeights(
-				tx, chunkIDs, configByTenant[meta.ownerTenantID],
+				ctx, tx, chunkIDs, configByTenant[meta.ownerTenantID],
 				types.FeedbackWeightTriggerFeedback, feedback.ID,
 			); err != nil {
 				return err
@@ -433,6 +437,7 @@ func applyCounterDelta(tx *gorm.DB, chunkIDs []string, column string, delta int)
 // needs_optimization for each chunk and writes a single weight log per
 // chunk whose weight actually changed.
 func refreshChunkWeights(
+	ctx context.Context,
 	tx *gorm.DB,
 	chunkIDs []string,
 	cfg *types.RetrievalConfig,
@@ -443,18 +448,30 @@ func refreshChunkWeights(
 		return nil
 	}
 	type chunkRow struct {
-		ID           string
-		LikeCount    int
-		DislikeCount int
-		RecallWeight float64
-		TenantID     uint64
-		KBID         string
+		ID              string
+		LikeCount       int
+		DislikeCount    int
+		RecallWeight    float64
+		TenantID        uint64
+		KnowledgeBaseID string
 	}
-	var rows []chunkRow
-	if err := tx.Model(&types.Chunk{}).
-		Select("id, like_count, dislike_count, recall_weight, tenant_id, knowledge_base_id AS kbid").
+	rows := make([]chunkRow, 0, len(chunkIDs))
+	result, err := tx.Model(&types.Chunk{}).
+		Select("id, like_count, dislike_count, recall_weight, tenant_id, knowledge_base_id").
 		Where("id IN ?", chunkIDs).
-		Scan(&rows).Error; err != nil {
+		Rows()
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	for result.Next() {
+		var r chunkRow
+		if err := result.Scan(&r.ID, &r.LikeCount, &r.DislikeCount, &r.RecallWeight, &r.TenantID, &r.KnowledgeBaseID); err != nil {
+			return err
+		}
+		rows = append(rows, r)
+	}
+	if err := result.Err(); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -464,8 +481,8 @@ func refreshChunkWeights(
 		if err := tx.Model(&types.Chunk{}).
 			Where("id = ?", row.ID).
 			Updates(map[string]interface{}{
-				"positive_rate":    rate,
-				"recall_weight":    newWeight,
+				"positive_rate":      rate,
+				"recall_weight":      newWeight,
 				"needs_optimization": needs,
 			}).Error; err != nil {
 			return err
@@ -473,7 +490,7 @@ func refreshChunkWeights(
 		if !types.WeightApproximatelyEqual(newWeight, row.RecallWeight) {
 			log := types.ChunkWeightLog{
 				TenantID:        row.TenantID,
-				KnowledgeBaseID: row.KBID,
+				KnowledgeBaseID: row.KnowledgeBaseID,
 				ChunkID:         row.ID,
 				OldWeight:       row.RecallWeight,
 				NewWeight:       newWeight,
@@ -584,15 +601,15 @@ func (r *messageFeedbackRepository) ListChunkStats(
 	args = append(args, pageSize, offset)
 
 	type aggRow struct {
-		ChunkID        string
-		KnowledgeID    string
+		ChunkID         string
+		KnowledgeID     string
 		KnowledgeBaseID string
-		KnowledgeTitle string
-		ContentPreview string
-		LikeCount      int
-		DislikeCount   int
-		SessionCount   int
-		LastFeedbackAt *time.Time
+		KnowledgeTitle  string
+		ContentPreview  string
+		LikeCount       int
+		DislikeCount    int
+		SessionCount    int
+		LastFeedbackAt  *time.Time
 	}
 	var rows []aggRow
 	if err := r.db.WithContext(ctx).Raw(aggregateSQL, args...).Scan(&rows).Error; err != nil {
@@ -894,14 +911,27 @@ func (r *messageFeedbackRepository) RecomputeFeedbackWeights(
 				RecallWeight    float64
 				PositiveRate    float64
 			}
-			var rows []chunkRow
-			if err := tx.Model(&types.Chunk{}).
+			rows := make([]chunkRow, 0, pageSize)
+			result, err := tx.Model(&types.Chunk{}).
 				Select("id, knowledge_base_id, like_count, dislike_count, recall_weight, positive_rate").
 				Where("tenant_id = ?", tenantID).
 				Order("id ASC").
 				Limit(pageSize).
 				Offset(offset).
-				Scan(&rows).Error; err != nil {
+				Rows()
+			if err != nil {
+				return err
+			}
+			for result.Next() {
+				var r chunkRow
+				if err := result.Scan(&r.ID, &r.KnowledgeBaseID, &r.LikeCount, &r.DislikeCount, &r.RecallWeight, &r.PositiveRate); err != nil {
+					result.Close()
+					return err
+				}
+				rows = append(rows, r)
+			}
+			result.Close()
+			if err := result.Err(); err != nil {
 				return err
 			}
 			if len(rows) == 0 {

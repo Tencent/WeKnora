@@ -86,7 +86,7 @@ async function reload() {
       page_size: pagination.pageSize,
     });
     const page = resp?.data || {};
-    rows.value = page.items || [];
+    rows.value = page.data || [];
     pagination.total = page.total || 0;
   } catch (err) {
     MessagePlugin.error(t('common.error'));

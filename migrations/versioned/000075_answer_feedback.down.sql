@@ -3,6 +3,7 @@ ALTER TABLE knowledge_bases
     DROP COLUMN IF EXISTS feedback_reset_at;
 
 ALTER TABLE chunks
+    DROP COLUMN IF EXISTS needs_optimization,
     DROP COLUMN IF EXISTS recall_weight,
     DROP COLUMN IF EXISTS positive_rate,
     DROP COLUMN IF EXISTS dislike_count,

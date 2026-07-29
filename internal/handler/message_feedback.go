@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +15,15 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func readBody(c *gin.Context) string {
+	if c.Request == nil || c.Request.Body == nil {
+		return ""
+	}
+	raw, _ := io.ReadAll(c.Request.Body)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(raw))
+	return string(raw)
+}
 
 // MessageFeedbackHandler exposes the answer like/dislike endpoints required
 // by issue #1248. It owns three responsibilities:
@@ -59,18 +70,19 @@ type SetMessageFeedbackRequest struct {
 // @Param        message_id  path  string  true  "助手消息 ID"
 // @Param        request     body  SetMessageFeedbackRequest  true  "反馈"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      400  {object}  errors.AppError
-// @Failure      404  {object}  errors.AppError
+// @Failure      400  {object}  apperrors.AppError
+// @Failure      404  {object}  apperrors.AppError
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/messages/{message_id}/feedback [put]
 func (h *MessageFeedbackHandler) Set(c *gin.Context) {
+	logger.Infof(c.Request.Context(), "[FeedbackHandler] Set hit: url=%s rawBody=%s", c.Request.URL.String(), readBody(c))
 	var req SetMessageFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError("invalid request body"))
 		return
 	}
-	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	sessionID := secutils.SanitizeForLog(c.Param("id"))
 	messageID := secutils.SanitizeForLog(c.Param("message_id"))
 	feedback, err := h.service.UpsertFeedback(
 		c.Request.Context(),

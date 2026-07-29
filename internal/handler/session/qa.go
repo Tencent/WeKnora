@@ -1335,8 +1335,20 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	// reference rows from msg.KnowledgeReferences) but chunk counters will be
 	// temporarily off until the next feedback mutation triggers the merge.
 	if h.feedbackService != nil {
-		if err := h.feedbackService.RecordMessageReferences(ctx, assistantMessage); err != nil {
-			logger.Warnf(ctx, "failed to record message-chunk references for %s: %v", assistantMessage.ID, err)
+		// For agent-mode messages the pipeline emitted EventAgentReferences into
+		// the handler that accumulated refs into reqCtx.assistantMessage, but the
+		// reassign from createAssistantMessage means completeAssistantMessage may
+		// receive the DB-persisted message object whose KnowledgeReferences was
+		// never updated. As a safety net, extract refs directly from AgentSteps
+		// tool-call Data payloads whenever KnowledgeReferences is still empty.
+		if len(assistantMessage.KnowledgeReferences) == 0 && len(assistantMessage.AgentSteps) > 0 {
+			if err := h.feedbackService.RecordMessageReferencesFromAgentSteps(ctx, assistantMessage); err != nil {
+				logger.Warnf(ctx, "RecordMessageReferencesFromAgentSteps failed for %s: %v", assistantMessage.ID, err)
+			}
+		} else {
+			if err := h.feedbackService.RecordMessageReferences(ctx, assistantMessage); err != nil {
+				logger.Warnf(ctx, "failed to record message-chunk references for %s: %v", assistantMessage.ID, err)
+			}
 		}
 	}
 

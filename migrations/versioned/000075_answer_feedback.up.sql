@@ -66,7 +66,8 @@ ALTER TABLE chunks
     ADD COLUMN IF NOT EXISTS like_count INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS dislike_count INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS positive_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1;
+    ADD COLUMN IF NOT EXISTS recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS needs_optimization BOOLEAN NOT NULL DEFAULT false;
 
 -- Feedback epoch: ratings updated before this instant no longer count
 -- toward chunk stats after an admin reset. feedback_reset_by records which

@@ -45,6 +45,7 @@ var FeedbackDislikeReasons = map[string]bool{
 	"incomplete": true,
 	"irrelevant": true,
 	"outdated":   true,
+	"harmful":    true,
 	"other":      true,
 }
 

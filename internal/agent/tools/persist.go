@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -11,6 +13,104 @@ import (
 var persistStripFields = map[string][]string{
 	"knowledge_chunks_list": {"chunks"},
 	"grep_results":          {"chunk_results"},
+}
+
+// chunkRefSources maps a tool result's display_type to the fields needed to
+// extract a compact chunk-id attribution summary before the bulky payload is
+// stripped. The summary survives sanitization (as Data["_chunk_refs"]) so
+// like/dislike feedback can still be attributed back to the chunks the agent
+// retrieved via grep_chunks / list_knowledge_chunks — whose full payloads
+// (content, snippets) are too large to persist, but whose chunk ids are
+// essential for the per-chunk feedback statistics surface.
+var chunkRefSources = map[string]chunkRefSource{
+	"grep_results":          {listKey: "chunk_results", chunkIDKey: "chunk_id", kbIDKey: "knowledge_base_id"},
+	"knowledge_chunks_list": {listKey: "chunks", chunkIDKey: "chunk_id", kbIDKey: "knowledge_base"},
+}
+
+type chunkRefSource struct {
+	listKey    string
+	chunkIDKey string
+	kbIDKey    string
+}
+
+// extractPersistedChunkRefs pulls (chunk_id, knowledge_base_id) pairs out of a
+// tool result's bulky Data field before it is stripped, returning a compact
+// list that survives sanitization. Returns nil when no chunk ids are found.
+//
+// The list value may be a typed slice (e.g. []grepChunkResult from grep_chunks
+// or []map[string]interface{} from list_knowledge_chunks) — neither is
+// []interface{}, so reflection is used to iterate. Struct elements are
+// normalized via JSON marshalling so json tags (chunk_id, knowledge_base_id)
+// are respected.
+func extractPersistedChunkRefs(data map[string]interface{}, src chunkRefSource) []interface{} {
+	items := toInterfaceSlice(data[src.listKey])
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		m := toStringMap(item)
+		if m == nil {
+			continue
+		}
+		chunkID := strings.TrimSpace(fmt.Sprint(m[src.chunkIDKey]))
+		if chunkID == "" {
+			continue
+		}
+		kbID := strings.TrimSpace(fmt.Sprint(m[src.kbIDKey]))
+		if kbID == "" {
+			continue
+		}
+		out = append(out, map[string]interface{}{
+			"chunk_id":          chunkID,
+			"knowledge_base_id": kbID,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// toInterfaceSlice converts any slice type to []interface{} using reflection.
+// Handles typed slices like []grepChunkResult, []map[string]interface{}, etc.
+func toInterfaceSlice(v interface{}) []interface{} {
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Slice {
+		return nil
+	}
+	out := make([]interface{}, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out
+}
+
+// toStringMap converts a struct or map to map[string]interface{}.
+// For map[string]interface{} it's a direct cast; for typed structs it
+// uses JSON marshalling to respect json field tags.
+func toStringMap(v interface{}) map[string]interface{} {
+	if m, ok := v.(map[string]interface{}); ok {
+		return m
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // ShouldOmitRawToolOutput reports whether the raw XML/text Output should be
@@ -36,6 +136,16 @@ func SanitizeToolDataForPersist(data map[string]interface{}) map[string]interfac
 	displayType := stringField(data, "display_type")
 	for _, key := range persistStripFields[displayType] {
 		delete(out, key)
+	}
+	// Preserve a compact chunk-id attribution summary before the bulky
+	// payload is dropped, so like/dislike feedback can still be attributed
+	// back to the chunks the agent retrieved (grep_chunks /
+	// list_knowledge_chunks). The full chunk content/snippets are stripped
+	// for size, but the chunk ids are small and essential for feedback stats.
+	if src, ok := chunkRefSources[displayType]; ok {
+		if refs := extractPersistedChunkRefs(data, src); len(refs) > 0 {
+			out["_chunk_refs"] = refs
+		}
 	}
 	return out
 }

@@ -628,8 +628,11 @@ func RegisterSessionRoutes(
 		if feedbackHandler != nil {
 			// The PUT verb maps to "submit or replace" so the same URL
 			// transparently handles like, dislike and cancel (rating="none").
+			// gin enforces that all wildcards on a given verb share the same
+			// name. Other PUT routes on /sessions use :id, so we keep that
+			// name. The handler reads :id as the session id.
 			sessions.PUT(
-				"/:session_id/messages/:message_id/feedback",
+				"/:id/messages/:message_id/feedback",
 				feedbackHandler.Set,
 			)
 		}

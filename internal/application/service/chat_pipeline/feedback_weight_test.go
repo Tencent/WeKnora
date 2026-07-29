@@ -10,7 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// stubWeightRepo is a deterministic in-memory chunkWeightLookup used to
+// stubWeightRepo is a deterministic in-memory ChunkWeightLookup used to
 // drive the feedback weight plugin in tests. Returns pre-baked weights keyed
 // by chunk ID; absent keys are treated as 1.0.
 type stubWeightRepo struct {

@@ -33,6 +33,11 @@ type MessageFeedbackService interface {
 	// chunk_id) unique index and safe to call from inside a transaction.
 	RecordMessageReferences(ctx context.Context, msg *types.Message) error
 
+	// RecordMessageReferencesFromAgentSteps extracts and persists chunk references
+	// directly from a message's AgentSteps (for agent-mode messages where
+	// KnowledgeReferences may be empty but tool-call Data carries chunk ids).
+	RecordMessageReferencesFromAgentSteps(ctx context.Context, msg *types.Message) error
+
 	// ListChunkStats returns the paged per-chunk feedback statistics of one
 	// knowledge base, gated on KB ownership. Filters supported via the
 	// optional query struct (low-quality chunk listing, sort, pagination).

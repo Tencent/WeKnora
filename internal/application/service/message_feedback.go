@@ -48,6 +48,8 @@ func (s *messageFeedbackService) UpsertFeedback(
 	reasons []string,
 	comment string,
 ) (*types.MessageFeedback, error) {
+	logger.Infof(ctx, "UpsertFeedback: sessionID=%s, messageID=%s, rating=%s, reasons=%v, comment=%q", sessionID, messageID, rating, reasons, comment)
+
 	if !types.IsValidFeedbackRating(rating) {
 		return nil, werrors.NewBadRequestError("invalid rating, must be like, dislike or none")
 	}
@@ -69,6 +71,7 @@ func (s *messageFeedbackService) UpsertFeedback(
 
 	cleanReasons, err := normalizeFeedbackReasons(rating, reasons)
 	if err != nil {
+		logger.Errorf(ctx, "normalizeFeedbackReasons failed: %v, reasons=%v", err, reasons)
 		return nil, err
 	}
 	if rating != types.FeedbackRatingDislike {
@@ -78,8 +81,10 @@ func (s *messageFeedbackService) UpsertFeedback(
 
 	refs, err := s.resolveMessageChunkRefs(ctx, msg)
 	if err != nil {
+		logger.Errorf(ctx, "resolveMessageChunkRefs failed: %v", err)
 		return nil, err
 	}
+	logger.Infof(ctx, "resolveMessageChunkRefs returned %d refs for message %s", len(refs), messageID)
 
 	feedback := &types.MessageFeedback{
 		TenantID:  tenantID,
@@ -193,6 +198,83 @@ func (s *messageFeedbackService) RecordMessageReferences(ctx context.Context, ms
 	return s.feedbackRepo.SyncMessageChunkRefs(ctx, refs)
 }
 
+// RecordMessageReferencesFromAgentSteps extracts chunk references directly from
+// a message's AgentSteps (the in-memory or persisted tool-call Data payloads) and
+// persists them. This is the safety-net path for agent-mode messages whose
+// KnowledgeReferences were never updated due to the createAssistantMessage
+// pointer-reassign race between the event handler and completeAssistantMessage.
+func (s *messageFeedbackService) RecordMessageReferencesFromAgentSteps(ctx context.Context, msg *types.Message) error {
+	if msg == nil || msg.ID == "" || msg.Role != "assistant" || len(msg.AgentSteps) == 0 {
+		return nil
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	seen := make(map[string]bool)
+	refs := make([]types.MessageChunkReference, 0)
+	for _, step := range msg.AgentSteps {
+		for _, tc := range step.ToolCalls {
+			if tc.Result == nil || !tc.Result.Success || tc.Result.Data == nil {
+				continue
+			}
+			hasRefs := tc.Result.Data["_chunk_refs"] != nil
+			hasResults := tc.Result.Data["results"] != nil
+			if !hasRefs && !hasResults {
+				continue
+			}
+			if hasRefs {
+				for _, item := range toInterfaceSlice(tc.Result.Data["_chunk_refs"]) {
+					chunkID := mapStringField(item, "chunk_id")
+					kbID := mapStringField(item, "knowledge_base_id")
+					if chunkID == "" || kbID == "" || seen[chunkID] {
+						continue
+					}
+					seen[chunkID] = true
+					refs = append(refs, types.MessageChunkReference{
+						TenantID:        tenantID,
+						MessageID:       msg.ID,
+						SessionID:       msg.SessionID,
+						ChunkID:         chunkID,
+						KnowledgeID:     msg.KnowledgeID,
+						KnowledgeBaseID: kbID,
+						IsSubChunk:      false,
+					})
+				}
+			}
+			if tc.Name == "knowledge_search" || tc.Name == "hybrid_search" {
+				kbByID := kbIndexFromKnowledgeResults(tc.Result.Data)
+				for _, r := range toInterfaceSlice(tc.Result.Data["results"]) {
+					chunkID := mapStringField(r, "chunk_id")
+					kbID := mapStringField(r, "knowledge_base_id")
+					if chunkID == "" {
+						continue
+					}
+					if kbID == "" {
+						if knowledgeID := mapStringField(r, "knowledge_id"); knowledgeID != "" {
+							kbID = kbByID[knowledgeID]
+						}
+					}
+					if chunkID == "" || kbID == "" || seen[chunkID] {
+						continue
+					}
+					seen[chunkID] = true
+					refs = append(refs, types.MessageChunkReference{
+						TenantID:        tenantID,
+						MessageID:       msg.ID,
+						SessionID:       msg.SessionID,
+						ChunkID:         chunkID,
+						KnowledgeID:     msg.KnowledgeID,
+						KnowledgeBaseID: kbID,
+						IsSubChunk:      false,
+					})
+				}
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return s.feedbackRepo.SyncMessageChunkRefs(ctx, refs)
+}
+
 // extractChunkRefs converts a message's stored knowledge references into
 // reference rows, skipping web search results and deduplicating chunk ids.
 // The merge pipeline folds adjacent/overlapping chunks into one passage and
@@ -230,7 +312,150 @@ func extractChunkRefs(ctx context.Context, msg *types.Message) []types.MessageCh
 			add(subID, sr.KnowledgeBaseID, true)
 		}
 	}
+	// Agent mode never wires EventAgentReferences into KnowledgeReferences
+	// (its retrieval results live inside AgentSteps.ToolCalls[*].Result.Data),
+	// so the loop above yields zero refs and the answer can never be attributed
+	// back to its contributing chunks. As a fallback for messages that have
+	// AgentSteps but no KnowledgeReferences, mine the persisted tool-call
+	// payloads for the chunk ids that the LLM actually used.
+	if len(refs) == 0 && len(msg.AgentSteps) > 0 {
+		refs = extractChunkRefsFromAgentSteps(tenantID, msg, seen, add)
+	}
 	return refs
+}
+
+// extractChunkRefsFromAgentSteps walks AgentSteps.ToolCalls[*].Result.Data and
+// collects chunk ids that the agent retrieved during its run. It is a pure
+// fallback for agent-mode messages whose KnowledgeReferences were never set
+// (the agent flow emits EventAgentReferences for KB pipelines but not for the
+// per-iteration tool calls). Recognised payloads:
+//   - _chunk_refs (generic): a compact [{chunk_id, knowledge_base_id}] summary
+//     preserved by tools.SanitizeToolDataForPersist when the bulky chunk
+//     payload of grep_chunks / list_knowledge_chunks is stripped. This is the
+//     primary attribution path for agent answers built from grep/list reads.
+//   - knowledge_search / hybrid_search: Data["results"][*].chunk_id (not
+//     stripped, so read directly).
+//
+// Chunks are de-duplicated by id (the `seen` set is shared with the caller).
+func extractChunkRefsFromAgentSteps(
+	tenantID uint64,
+	msg *types.Message,
+	seen map[string]bool,
+	add func(chunkID, kbID string, isSub bool),
+) []types.MessageChunkReference {
+	refs := make([]types.MessageChunkReference, 0)
+	for _, step := range msg.AgentSteps {
+		for _, tc := range step.ToolCalls {
+			if tc.Result == nil || !tc.Result.Success || tc.Result.Data == nil {
+				continue
+			}
+			// Generic attribution path: tools whose bulky chunk payloads are
+			// stripped at persistence time (grep_chunks, list_knowledge_chunks)
+			// leave a compact _chunk_refs summary behind (see
+			// tools.SanitizeToolDataForPersist). Attribute every cited chunk
+			// back to its KB so feedback stats count for agent-mode answers
+			// that retrieved context via grep/list instead of knowledge_search.
+			for _, item := range toInterfaceSlice(tc.Result.Data["_chunk_refs"]) {
+				chunkID := mapStringField(item, "chunk_id")
+				kbID := mapStringField(item, "knowledge_base_id")
+				if chunkID == "" || kbID == "" || seen[chunkID] {
+					continue
+				}
+				seen[chunkID] = true
+				refs = append(refs, types.MessageChunkReference{
+					TenantID:        tenantID,
+					MessageID:       msg.ID,
+					SessionID:       msg.SessionID,
+					ChunkID:         chunkID,
+					KnowledgeID:     msg.KnowledgeID,
+					KnowledgeBaseID: kbID,
+					IsSubChunk:      false,
+				})
+			}
+			switch tc.Name {
+			case "knowledge_search", "hybrid_search":
+				kbByID := kbIndexFromKnowledgeResults(tc.Result.Data)
+				for _, r := range toInterfaceSlice(tc.Result.Data["results"]) {
+					chunkID := mapStringField(r, "chunk_id")
+					kbID := mapStringField(r, "knowledge_base_id")
+					if chunkID == "" {
+						continue
+					}
+					if kbID == "" {
+						// kb_index can resolve it from the per-KB rollup
+						if knowledgeID := mapStringField(r, "knowledge_id"); knowledgeID != "" {
+							kbID = kbByID[knowledgeID]
+						}
+					}
+					if chunkID == "" || kbID == "" || seen[chunkID] {
+						continue
+					}
+					seen[chunkID] = true
+					refs = append(refs, types.MessageChunkReference{
+						TenantID:        tenantID,
+						MessageID:       msg.ID,
+						SessionID:       msg.SessionID,
+						ChunkID:         chunkID,
+						KnowledgeID:     msg.KnowledgeID,
+						KnowledgeBaseID: kbID,
+						IsSubChunk:      false,
+					})
+				}
+			}
+		}
+	}
+	return refs
+}
+
+// toInterfaceSlice normalises whatever slice shape a JSON/bSON unmarshal produces
+// into []interface{} for uniform iteration. Handles the two shapes observed in
+// persisted tool Data: []interface{} (standard) and []map[string]interface{} (jsonpb / go-json interop).
+func toInterfaceSlice(v interface{}) []interface{} {
+	switch x := v.(type) {
+	case []interface{}:
+		return x
+	case []map[string]interface{}:
+		out := make([]interface{}, len(x))
+		for i, m := range x {
+			out[i] = m
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// kbIndexFromKnowledgeResults builds a knowledge_id -> knowledge_base_id map
+// out of a tool result's persisted `knowledge_results` array. The map is used
+// to fall back when individual chunk rows don't carry knowledge_base_id (the
+// per-chunk rows do carry it, but knowledge_search hybrid results occasionally
+// have it set to empty when the merge pipeline produces a parent passage).
+func kbIndexFromKnowledgeResults(data map[string]interface{}) map[string]string {
+	out := make(map[string]string)
+	for _, r := range toInterfaceSlice(data["knowledge_results"]) {
+		knowledgeID := mapStringField(r, "knowledge_id")
+		kbID := mapStringField(r, "knowledge_base_id")
+		if knowledgeID != "" && kbID != "" {
+			out[knowledgeID] = kbID
+		}
+	}
+	return out
+}
+
+// mapStringField reads a string field out of a map[string]interface{} or
+// map[string]string-shaped value. Returns "" for any other type.
+func mapStringField(v interface{}, key string) string {
+	if v == nil {
+		return ""
+	}
+	if m, ok := v.(map[string]interface{}); ok {
+		s, _ := m[key].(string)
+		return s
+	}
+	if m, ok := v.(map[string]string); ok {
+		return m[key]
+	}
+	return ""
 }
 
 // requireOwnedKB loads a KB and enforces that the caller's active tenant owns

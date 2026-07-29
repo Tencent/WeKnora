@@ -5,6 +5,7 @@ ALTER TABLE knowledge_bases DROP COLUMN;
 ALTER TABLE knowledge_bases DROP COLUMN feedback_reset_by;
 ALTER TABLE knowledge_bases DROP COLUMN feedback_reset_at;
 
+ALTER TABLE chunks DROP COLUMN needs_optimization;
 ALTER TABLE chunks DROP COLUMN recall_weight;
 ALTER TABLE chunks DROP COLUMN positive_rate;
 ALTER TABLE chunks DROP COLUMN dislike_count;
