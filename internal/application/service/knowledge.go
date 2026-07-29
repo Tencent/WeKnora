@@ -921,6 +921,37 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	return nil
 }
 
+type knowledgeProgressRepository interface {
+	ListKnowledgeProgressByKnowledgeBaseID(context.Context, uint64, string) ([]*types.Knowledge, error)
+	ClearTerminalProgressMarkers(context.Context, uint64, string, []string) error
+}
+
+func (s *knowledgeService) ListKnowledgeProgressByKnowledgeBaseID(
+	ctx context.Context, kbID string,
+) ([]*types.Knowledge, error) {
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return nil, werrors.NewUnauthorizedError("Workspace ID not found in context")
+	}
+	repo, ok := s.repo.(knowledgeProgressRepository)
+	if !ok {
+		return s.repo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	}
+	return repo.ListKnowledgeProgressByKnowledgeBaseID(ctx, tenantID, kbID)
+}
+
+func (s *knowledgeService) ClearTerminalProgressMarkers(ctx context.Context, kbID string, ids []string) error {
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return werrors.NewUnauthorizedError("Workspace ID not found in context")
+	}
+	repo, ok := s.repo.(knowledgeProgressRepository)
+	if !ok {
+		return nil
+	}
+	return repo.ClearTerminalProgressMarkers(ctx, tenantID, kbID, ids)
+}
+
 // SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
 // fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {

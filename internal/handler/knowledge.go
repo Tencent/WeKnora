@@ -1792,6 +1792,117 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 	})
 }
 
+// batchCancelKnowledgeParseRequest is the body schema for POST /knowledge/batch-cancel-parse.
+type batchCancelKnowledgeParseRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids" binding:"required"`
+}
+
+// BatchCancelKnowledgeParse cancels all cancellable parses in a single knowledge base.
+// Documents that have already reached a terminal state are skipped so one completed
+// document cannot prevent the remaining selected parsing jobs from being stopped.
+func (h *KnowledgeHandler) BatchCancelKnowledgeParse(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req batchCancelKnowledgeParseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid batch cancel parse request parameters"))
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch cancel parse"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to cancel knowledge parsing in this kb"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge batch for cancellation, kb_id=%s: %v", kbID, err)
+		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		return
+	}
+	if len(knowledgeList) != len(ids) {
+		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		return
+	}
+
+	cancellableIDs := make([]string, 0, len(ids))
+	for _, knowledge := range knowledgeList {
+		if knowledge.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+		if batchParseCancellable(knowledge) {
+			cancellableIDs = append(cancellableIDs, knowledge.ID)
+		}
+	}
+
+	cancelledCount := 0
+	skippedCount := len(ids) - len(cancellableIDs)
+	for _, id := range cancellableIDs {
+		if _, err := h.kgService.CancelKnowledgeParse(ctx, id); err != nil {
+			// A worker may finish between the batch preflight and cancellation.
+			// Keep the batch best-effort and report that document as skipped.
+			logger.Warnf(ctx, "failed to cancel knowledge parse in batch, knowledge_id=%s: %v", secutils.SanitizeForLog(id), err)
+			skippedCount++
+			continue
+		}
+		cancelledCount++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Batch parse cancellation completed",
+		"data": gin.H{
+			"requested_count": len(ids),
+			"cancelled_count": cancelledCount,
+			"skipped_count":   skippedCount,
+		},
+	})
+}
+
+func batchParseCancellable(knowledge *types.Knowledge) bool {
+	if knowledge == nil || knowledge.DeletedAt.Valid {
+		return false
+	}
+	switch knowledge.ParseStatus {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	default:
+		return false
+	}
+}
+
 type knowledgeTagBatchRequest struct {
 	Updates map[string][]string `json:"updates" binding:"required,min=1"`
 	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)

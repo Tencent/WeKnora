@@ -31,6 +31,7 @@ import {
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
+  batchCancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
   getKnowledgeSpans,
@@ -48,6 +49,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
+import { countdownKnowledgeBaseProgress, getKnowledgeBaseProgress } from '@/api/knowledge-base';
 import {
   isKnowledgeParseInFlight,
   knowledgeNeedsStatusPolling,
@@ -79,6 +81,124 @@ const wikiStatus = ref<{ pendingTasks: number; isActive: boolean; pendingIssues:
   isActive: false,
   pendingIssues: 0,
 })
+
+type KnowledgeProgressCounts = {
+  completed: number;
+  deleted: number;
+  stopped: number;
+  incomplete: number;
+};
+const emptyKnowledgeProgressCounts = (): KnowledgeProgressCounts => ({
+  completed: 0, deleted: 0, stopped: 0, incomplete: 0,
+});
+const knowledgeProgress = ref({
+  visible: false,
+  percent: 0,
+  counts: emptyKnowledgeProgressCounts(),
+});
+const knowledgeProgressStats = computed(() => [
+  { key: 'completed', label: t('knowledgeBase.completed'), count: knowledgeProgress.value.counts.completed },
+  { key: 'deleted', label: t('knowledgeBase.deleted'), count: knowledgeProgress.value.counts.deleted },
+  { key: 'stopped', label: t('knowledgeBase.progressStopped'), count: knowledgeProgress.value.counts.stopped },
+  { key: 'incomplete', label: t('knowledgeBase.progressIncomplete'), count: knowledgeProgress.value.counts.incomplete },
+]);
+// Uses the same lifecycle as the server-side 100% countdown. New documents
+// keep the emoji visible; the next 100% response increments the key to replay it.
+const knowledgeProgressCompletionVisible = ref(false);
+let knowledgeProgressCompletionCycle = 0;
+
+// The bar and its counters belong to one progress session. Always replace or
+// clear the full state together so stale counters cannot outlive the bar.
+const clearKnowledgeProgress = () => {
+  knowledgeProgress.value = {
+    visible: false,
+    percent: 0,
+    counts: emptyKnowledgeProgressCounts(),
+  };
+  knowledgeProgressCompletionVisible.value = false;
+};
+
+const updateKnowledgeProgress = (percent: number, rawCounts: Record<string, unknown> = {}) => {
+  knowledgeProgress.value = {
+    visible: true,
+    percent: Math.min(100, Math.max(0, Number(percent) || 0)),
+    counts: {
+      completed: Math.max(0, Number(rawCounts.completed) || 0),
+      deleted: Math.max(0, Number(rawCounts.deleted) || 0),
+      stopped: Math.max(0, Number(rawCounts.stopped) || 0),
+      incomplete: Math.max(0, Number(rawCounts.incomplete) || 0),
+    },
+  };
+};
+let knowledgeProgressTimer: ReturnType<typeof setTimeout> | null = null;
+let knowledgeProgressGeneration = 0;
+const knowledgeProgressCountdowns = new Set<string>();
+
+const stopKnowledgeProgressPolling = () => {
+  if (knowledgeProgressTimer !== null) {
+    clearTimeout(knowledgeProgressTimer);
+    knowledgeProgressTimer = null;
+  }
+};
+
+const finishKnowledgeProgress = async (targetKbId: string, generation: number) => {
+  const countdownKey = `${targetKbId}:${generation}`;
+  if (knowledgeProgressCountdowns.has(countdownKey)) return;
+  knowledgeProgressCountdowns.add(countdownKey);
+  try {
+    const res: any = await countdownKnowledgeBaseProgress(targetKbId);
+    if (targetKbId !== kbId.value || generation !== knowledgeProgressGeneration) return;
+    if (res?.data?.active) {
+      knowledgeProgressTimer = setTimeout(() => fetchKnowledgeProgress(generation), 1000);
+    } else {
+      clearKnowledgeProgress();
+    }
+  } catch {
+    if (targetKbId === kbId.value && generation === knowledgeProgressGeneration) {
+      knowledgeProgressTimer = setTimeout(() => fetchKnowledgeProgress(generation), 1000);
+    }
+  } finally {
+    knowledgeProgressCountdowns.delete(countdownKey);
+  }
+};
+
+const fetchKnowledgeProgress = async (generation = knowledgeProgressGeneration) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId || isFAQ.value || generation !== knowledgeProgressGeneration) return;
+  try {
+    const res: any = await getKnowledgeBaseProgress(targetKbId);
+    if (targetKbId !== kbId.value || generation !== knowledgeProgressGeneration) return;
+    const data = res?.data || {};
+    if (!data.active) {
+      stopKnowledgeProgressPolling();
+      clearKnowledgeProgress();
+      return;
+    }
+    updateKnowledgeProgress(data.percent, data.counts || {});
+    stopKnowledgeProgressPolling();
+    if (data.completed || knowledgeProgress.value.percent === 100) {
+      knowledgeProgress.value.percent = 100;
+      knowledgeProgressCompletionVisible.value = true;
+      knowledgeProgressCompletionCycle += 1;
+      void finishKnowledgeProgress(targetKbId, generation);
+      return;
+    }
+    knowledgeProgressTimer = setTimeout(() => fetchKnowledgeProgress(generation), 1000);
+  } catch {
+    if (generation === knowledgeProgressGeneration) {
+      knowledgeProgressTimer = setTimeout(() => fetchKnowledgeProgress(generation), 1500);
+    }
+  }
+};
+
+const startKnowledgeProgressPolling = (reset = false) => {
+  stopKnowledgeProgressPolling();
+  knowledgeProgressGeneration += 1;
+  if (reset) {
+    clearKnowledgeProgress();
+  }
+  void fetchKnowledgeProgress(knowledgeProgressGeneration);
+};
 const wikiIsIndexing = computed(() => wikiStatus.value.isActive || wikiStatus.value.pendingTasks > 0)
 const wikiIndexingTip = computed(() => {
   if (!wikiIsIndexing.value) return ''
@@ -420,6 +540,7 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchCancelling = ref(false);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -896,6 +1017,9 @@ watch(activeKbTab, (tab) => {
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
+    stopKnowledgeProgressPolling();
+    knowledgeProgressGeneration += 1;
+    clearKnowledgeProgress();
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
@@ -914,6 +1038,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     uiStore.clearSelectedTagIds();
   }
   loadKnowledgeBaseInfo(newKbId);
+  startKnowledgeProgressPolling(newKbId !== oldKbId);
 }, { immediate: true });
 
 watch(selectedTagIds, (newVal, oldVal) => {
@@ -978,6 +1103,7 @@ const handleFileUploaded = (event: CustomEvent) => {
     loadTags(uploadedKbId);
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
+    startKnowledgeProgressPolling();
   }
 };
 
@@ -1066,6 +1192,9 @@ onUnmounted(() => {
   window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
+  stopKnowledgeProgressPolling();
+  knowledgeProgressGeneration += 1;
+  clearKnowledgeProgress();
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1089,6 +1218,7 @@ watch(() => cardList.value, (newValue) => {
   }
   if (analyzeList.length) {
     updateStatus(analyzeList)
+    startKnowledgeProgressPolling();
   }
 
 }, { deep: true })
@@ -1860,6 +1990,34 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
   openCardDetails(item);
 };
 
+const confirmBatchCancelParse = async () => {
+  if (batchCancelling.value || batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  batchCancelling.value = true;
+  try {
+    const res: any = await batchCancelKnowledgeParse(kbId.value, ids);
+    if (res?.success) {
+      const cancelledCount = Math.max(0, Number(res?.data?.cancelled_count) || 0);
+      const skippedCount = Math.max(0, Number(res?.data?.skipped_count) || 0);
+      if (cancelledCount > 0) {
+        MessagePlugin.success(t('knowledgeBase.batchCancelParseSuccess', { count: cancelledCount }));
+      }
+      if (skippedCount > 0) {
+        MessagePlugin.warning(t('knowledgeBase.batchCancelParseSkipped', { count: skippedCount }));
+      }
+      clearSelection();
+      batchMode.value = false;
+      await loadKnowledgeFiles(kbId.value);
+      startKnowledgeProgressPolling();
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.cancelParseFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'));
+  } finally {
+    batchCancelling.value = false;
+  }
+};
 const confirmBatchDelete = async () => {
   if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
@@ -2084,6 +2242,36 @@ async function createNewSession(value: string): Promise<void> {
             <span>{{ $t('knowledgeBase.missingStorageEngine') }}</span>
             <span class="warning-link">{{ $t('knowledgeBase.goToStorageSettings') }} →</span>
           </p>
+        </div>
+        <div v-if="knowledgeProgress.visible" class="knowledge-progress" aria-live="polite">
+          <div class="knowledge-progress-main">
+            <Transition name="knowledge-completion-slogan">
+              <div v-if="knowledgeProgressCompletionVisible" class="knowledge-progress-completion-slogan"
+                role="status" :aria-label="$t('knowledgeBase.completed')">
+                &#23436;&#25104;&#35299;&#26512;
+              </div>
+            </Transition>
+            <div class="knowledge-progress-track" role="progressbar" aria-label="Knowledge processing progress"
+              aria-valuemin="0" aria-valuemax="100" :aria-valuenow="knowledgeProgress.percent">
+              <div class="knowledge-progress-fill" :style="{ width: `${knowledgeProgress.percent}%` }"></div>
+            </div>
+            <span class="knowledge-progress-percent">{{ knowledgeProgress.percent }}%</span>
+          </div>
+          <div class="knowledge-progress-footer">
+            <div class="knowledge-progress-stats">
+              <div v-for="item in knowledgeProgressStats" :key="item.key"
+                :class="['knowledge-progress-stat', `is-${item.key}`]">
+                <span class="knowledge-progress-stat-label">{{ item.label }}</span>
+                <span class="knowledge-progress-stat-count">{{ item.count }}</span>
+              </div>
+            </div>
+            <Transition name="knowledge-completion-emoji">
+              <div v-if="knowledgeProgressCompletionVisible" :key="knowledgeProgressCompletionCycle"
+                class="knowledge-progress-completion" role="status" :aria-label="$t('knowledgeBase.completed')">
+                <span class="knowledge-progress-completion-emoji">&#129395;</span>
+              </div>
+            </Transition>
+          </div>
         </div>
       </div>
 
@@ -2337,8 +2525,9 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :cancel-parse-loading="batchCancelling"
+                  :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
+                  @cancel-parse="confirmBatchCancelParse" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>
@@ -3126,6 +3315,200 @@ async function createNewSession(value: string): Promise<void> {
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
+  }
+
+  .document-header-title {
+    flex: 0 1 520px;
+    min-width: 0;
+  }
+
+  .knowledge-progress {
+    flex: 1 1 560px;
+    min-width: 420px;
+    max-width: 920px;
+    margin-left: auto;
+    padding-top: 2px;
+    align-self: center;
+  }
+
+  .knowledge-progress-main {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+  }
+
+  .knowledge-progress-track {
+    position: relative;
+    flex: 1;
+    height: 14px;
+    overflow: hidden;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 999px;
+    background: var(--td-bg-color-secondarycontainer);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  .knowledge-progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--td-brand-color) 0%, var(--td-success-color) 100%);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--td-brand-color) 35%, transparent);
+    transition: width 0.35s ease;
+  }
+
+  .knowledge-progress-percent {
+    flex: 0 0 54px;
+    color: var(--td-text-color-primary);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 22px;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .knowledge-progress-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 12px;
+  }
+
+  .knowledge-progress-stats {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+  }
+
+  .knowledge-progress-completion-slogan {
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 26px;
+    padding: 0 11px;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--td-success-color) 28%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--td-success-color-light) 72%, var(--td-bg-color-container));
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--td-success-color) 16%, transparent);
+    color: var(--td-success-color);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+
+  .knowledge-progress-completion {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 52px;
+  }
+
+  .knowledge-progress-completion-emoji {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--td-success-color-light);
+    border-radius: 50%;
+    background: var(--td-success-color-light);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-success-color) 28%, transparent);
+    font-size: 27px;
+    line-height: 1;
+  }
+
+  .knowledge-completion-slogan-enter-active {
+    animation: knowledgeCompletionSloganIn 0.28s ease-out;
+  }
+
+  .knowledge-completion-slogan-leave-active {
+    transition: opacity 0.16s ease, transform 0.16s ease;
+  }
+
+  .knowledge-completion-slogan-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  .knowledge-completion-emoji-enter-active {
+    animation: knowledgeCompletionEmojiPop 0.34s cubic-bezier(0.2, 0.9, 0.25, 1.25);
+  }
+
+  .knowledge-completion-emoji-leave-active {
+    transition: opacity 0.16s ease, transform 0.16s ease;
+  }
+
+  .knowledge-completion-emoji-leave-to {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+
+  @keyframes knowledgeCompletionSloganIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes knowledgeCompletionEmojiPop {
+    0% { opacity: 0; transform: scale(0.45) rotate(-12deg); }
+    72% { opacity: 1; transform: scale(1.16) rotate(5deg); }
+    100% { opacity: 1; transform: scale(1) rotate(0); }
+  }
+
+  .knowledge-progress-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+
+  .knowledge-progress-stat-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .knowledge-progress-stat.is-completed .knowledge-progress-stat-count {
+    color: var(--td-success-color);
+    background: var(--td-success-color-light);
+  }
+
+  .knowledge-progress-stat.is-deleted .knowledge-progress-stat-count {
+    color: var(--td-error-color);
+    background: var(--td-error-color-light);
+  }
+
+  .knowledge-progress-stat.is-stopped .knowledge-progress-stat-count {
+    color: var(--td-warning-color);
+    background: var(--td-warning-color-light);
+  }
+
+  .knowledge-progress-stat.is-incomplete .knowledge-progress-stat-count {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
   }
 
   .document-subtitle {

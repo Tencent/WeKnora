@@ -132,6 +132,8 @@ type Knowledge struct {
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status"`
+	// ProgressMarked keeps this document in its knowledge-base progress session.
+	ProgressMarked bool `json:"-" gorm:"not null;default:false"`
 	// PendingSubtasksCount is the outstanding enrichment subtask count
 	// (summary + question + graph chunks). Only meaningful while
 	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.

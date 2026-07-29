@@ -125,6 +125,27 @@ export function createKnowledgeBase(data: {
   return post(`/api/v1/knowledge-bases`, data);
 }
 
+export interface KnowledgeBaseProgress {
+  active: boolean;
+  percent: number;
+  document_count?: number;
+  completed?: boolean;
+  counts?: {
+    completed: number;
+    deleted: number;
+    stopped: number;
+    incomplete: number;
+  };
+}
+
+export function getKnowledgeBaseProgress(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/progress`);
+}
+
+export function countdownKnowledgeBaseProgress(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/progress/countdown`, {});
+}
+
 export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }) {
   const query = new URLSearchParams();
   if (options?.agent_id) query.set('agent_id', options.agent_id);
@@ -297,6 +318,10 @@ export function reparseKnowledge(id: string, data?: { process_config?: Knowledge
 
 export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
+}
+
+export function batchCancelKnowledgeParse(kbId: string, ids: string[]) {
+  return post(`/api/v1/knowledge/batch-cancel-parse`, { kb_id: kbId, ids });
 }
 
 export function getKnowledgeSpans(id: string, attempt?: number) {

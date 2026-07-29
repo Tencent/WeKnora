@@ -50,8 +50,27 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	if knowledge != nil && knowledge.ParseStatus == types.ParseStatusPending {
+		knowledge.ProgressMarked = true
+	}
 	err := r.db.WithContext(ctx).Create(knowledge).Error
 	return err
+}
+
+func (r *knowledgeRepository) ClearTerminalProgressMarkers(
+	ctx context.Context, tenantID uint64, kbID string, ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Unscoped().Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND progress_marked = ?",
+			tenantID, kbID, ids, true).
+		Where("(deleted_at IS NOT NULL OR parse_status IN ?)", []string{
+			types.ParseStatusCompleted, types.ParseStatusFailed,
+			types.ParseStatusCancelled, types.ParseStatusDeleting,
+		}).
+		Update("progress_marked", false).Error
 }
 
 // GetKnowledgeByID gets knowledge
@@ -89,6 +108,20 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	var knowledges []*types.Knowledge
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
 		Order("created_at DESC").Find(&knowledges).Error; err != nil {
+		return nil, err
+	}
+	return knowledges, nil
+}
+
+// ListKnowledgeProgressByKnowledgeBaseID includes soft-deleted marked rows so
+// deleting a running document completes its share instead of shrinking the denominator.
+func (r *knowledgeRepository) ListKnowledgeProgressByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) ([]*types.Knowledge, error) {
+	var knowledges []*types.Knowledge
+	if err := r.db.WithContext(ctx).Unscoped().
+		Where("tenant_id = ? AND knowledge_base_id = ? AND progress_marked = ?", tenantID, kbID, true).
+		Order("created_at ASC").Find(&knowledges).Error; err != nil {
 		return nil, err
 	}
 	return knowledges, nil
