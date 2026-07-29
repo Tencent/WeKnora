@@ -109,7 +109,7 @@ COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoin
 RUN chmod +x ./scripts/*.sh
 
 # Expose ports
-EXPOSE 8080
+EXPOSE 8088
 
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]

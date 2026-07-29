@@ -17,6 +17,6 @@ RUN chmod +x /docker-entrypoint.sh
 
 ENV MAX_FILE_SIZE_MB=50
 
-EXPOSE 80
+EXPOSE 8089
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
