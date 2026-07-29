@@ -33,7 +33,7 @@ const { t } = useI18n();
           </t-button>
         </div>
         <div class="batch-bar-actions">
-          <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchCancelParseDocument', { count })"
+          <t-popconfirm theme="warning" :content="t('knowledgeBase.cancelParseConfirmBody', { title: t('knowledgeBase.selectedCount', { count }) })"
             :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'warning' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('cancel-parse')">
             <t-button theme="warning" variant="outline" size="small"

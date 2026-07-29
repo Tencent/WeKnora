@@ -680,7 +680,6 @@ export default {
     clearSelection: "선택 해제",
     batchDelete: "선택 삭제",
     batchCancelParse: "Stop Parsing",
-    confirmBatchCancelParseDocument: "Stop parsing for the selected {count} documents? Existing content will be preserved and can be rebuilt later.",
     batchCancelParseSuccess: "Stopped parsing for {count} documents",
     batchCancelParseSkipped: "Skipped {count} documents that are not being parsed",
     batchDeleteConfirmation: "일괄 삭제 확인",

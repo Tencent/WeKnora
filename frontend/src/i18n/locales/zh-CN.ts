@@ -678,7 +678,6 @@ export default {
     clearSelection: "取消选择",
     batchDelete: "批量删除",
     batchCancelParse: "\u6279\u91cf\u505c\u6b62\u89e3\u6790",
-    confirmBatchCancelParseDocument: "\u786e\u8ba4\u505c\u6b62\u89e3\u6790\u9009\u4e2d\u7684 {count} \u4e2a\u6587\u6863\uff1f\u5df2\u5199\u5165\u7684\u5185\u5bb9\u4f1a\u4fdd\u7559\uff0c\u53ef\u7a0d\u540e\u901a\u8fc7\u201c\u91cd\u5efa\u201d\u91cd\u65b0\u89e3\u6790\u3002",
     batchCancelParseSuccess: "\u5df2\u505c\u6b62\u89e3\u6790 {count} \u4e2a\u6587\u6863",
     batchCancelParseSkipped: "\u5df2\u8df3\u8fc7 {count} \u4e2a\u672a\u5728\u89e3\u6790\u4e2d\u7684\u6587\u6863",
     batchDeleteConfirmation: "批量删除确认",

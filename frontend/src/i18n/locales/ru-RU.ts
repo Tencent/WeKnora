@@ -602,7 +602,6 @@ export default {
     clearSelection: 'Снять выделение',
     batchDelete: 'Удалить выбранные',
     batchCancelParse: "Stop Parsing",
-    confirmBatchCancelParseDocument: "Stop parsing for the selected {count} documents? Existing content will be preserved and can be rebuilt later.",
     batchCancelParseSuccess: "Stopped parsing for {count} documents",
     batchCancelParseSkipped: "Skipped {count} documents that are not being parsed",
     batchDeleteConfirmation: 'Подтверждение пакетного удаления',
