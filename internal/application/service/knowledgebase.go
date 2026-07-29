@@ -868,15 +868,12 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			logger.Errorf(ctx, "KB delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
 			return asynq.SkipRetry
 		}
-		if errors.Is(err, retriever.ErrVectorStoreUnavailable) {
-			// The store is there but its engine could not be built right now.
-			// Falling through would drop the embeddings this task exists to
-			// remove and report success, so ask for another attempt instead.
+		if err != nil {
+			// Transient failures — store temporarily unavailable, request
+			// cancellation during resolution, or other retryable errors —
+			// must not fall through and report success while embeddings remain.
 			logger.Errorf(ctx, "KB delete task deferred: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
 			return err
-		}
-		if err != nil {
-			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
 		} else {
 			// Group knowledge by embedding model and type
 			type groupKey struct {
