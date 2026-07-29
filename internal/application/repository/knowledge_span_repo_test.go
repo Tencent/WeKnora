@@ -209,3 +209,25 @@ func TestKnowledgeSpanRepo_ListAttemptIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, all, 2, "attempt=0 returns all attempts (used by housekeeping)")
 }
+
+func TestKnowledgeSpanRepo_ListLatestByKnowledgeIDs(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+	for _, row := range []*types.KnowledgeProcessingSpan{
+		{KnowledgeID: "k1", Attempt: 1, SpanID: "old", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now},
+		{KnowledgeID: "k1", Attempt: 2, SpanID: "new", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: "k2", Attempt: 1, SpanID: "only", Name: types.StageEmbedding, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now},
+	} {
+		require.NoError(t, repo.Upsert(ctx, row))
+	}
+
+	batchRepo := repo.(interface {
+		ListLatestByKnowledgeIDs(context.Context, []string) (map[string][]types.KnowledgeProcessingSpan, error)
+	})
+	rows, err := batchRepo.ListLatestByKnowledgeIDs(ctx, []string{"k1", "k2"})
+	require.NoError(t, err)
+	require.Len(t, rows["k1"], 1)
+	assert.Equal(t, "new", rows["k1"][0].SpanID)
+	require.Len(t, rows["k2"], 1)
+}

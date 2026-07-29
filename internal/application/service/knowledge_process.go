@@ -2535,6 +2535,7 @@ func (s *knowledgeService) ReparseKnowledge(
 // previous one.
 func resetKnowledgeForReparse(knowledge *types.Knowledge, kb *types.KnowledgeBase) {
 	knowledge.ParseStatus = types.ParseStatusPending
+	knowledge.ProgressMarked = true
 	knowledge.EnableStatus = "disabled"
 	knowledge.Description = ""
 	knowledge.ProcessedAt = nil

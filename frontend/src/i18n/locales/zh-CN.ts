@@ -607,6 +607,8 @@ export default {
     status: "状态",
     actions: "操作",
     processing: "处理中",
+    progressStopped: "已停止",
+    progressIncomplete: "未完成",
     completed: "已完成",
     failed: "失败",
     noFiles: "暂无文件",

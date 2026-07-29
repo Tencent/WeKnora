@@ -605,6 +605,8 @@ export default {
     status: 'Status',
     actions: 'Actions',
     processing: 'Processing',
+    progressStopped: 'Stopped',
+    progressIncomplete: 'Incomplete',
     completed: 'Completed',
     failed: 'Failed',
     noFiles: 'No files',

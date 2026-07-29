@@ -141,6 +141,37 @@ func (r *knowledgeSpanRepository) ListByAttempt(ctx context.Context, knowledgeID
 	return rows, err
 }
 
+// ListLatestByKnowledgeIDs returns the latest-attempt spans for many documents
+// in one query. Progress polling uses this to avoid two queries per document.
+func (r *knowledgeSpanRepository) ListLatestByKnowledgeIDs(
+	ctx context.Context, knowledgeIDs []string,
+) (map[string][]types.KnowledgeProcessingSpan, error) {
+	grouped := make(map[string][]types.KnowledgeProcessingSpan, len(knowledgeIDs))
+	if len(knowledgeIDs) == 0 {
+		return grouped, nil
+	}
+
+	latest := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Select("knowledge_id, MAX(attempt) AS attempt").
+		Where("knowledge_id IN ?", knowledgeIDs).
+		Group("knowledge_id")
+
+	var rows []types.KnowledgeProcessingSpan
+	err := r.db.WithContext(ctx).
+		Table("knowledge_processing_spans AS spans").
+		Select("spans.*").
+		Joins("JOIN (?) AS latest ON latest.knowledge_id = spans.knowledge_id AND latest.attempt = spans.attempt", latest).
+		Order("spans.knowledge_id ASC, spans.id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		grouped[row.KnowledgeID] = append(grouped[row.KnowledgeID], row)
+	}
+	return grouped, nil
+}
+
 func (r *knowledgeSpanRepository) GetSpan(ctx context.Context, knowledgeID string, attempt int, spanID string) (*types.KnowledgeProcessingSpan, error) {
 	var row types.KnowledgeProcessingSpan
 	err := r.db.WithContext(ctx).

@@ -540,6 +540,8 @@ export default {
     status: 'Статус',
     actions: 'Действия',
     processing: 'Обработка',
+    progressStopped: 'Остановлено',
+    progressIncomplete: 'Не завершено',
     completed: 'Завершено',
     failed: 'Ошибка',
     noFiles: 'Нет файлов',

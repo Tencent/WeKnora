@@ -618,6 +618,8 @@ export default {
     status: "상태",
     actions: "작업",
     processing: "처리 중",
+    progressStopped: "중지됨",
+    progressIncomplete: "미완료",
     completed: "완료",
     failed: "실패",
     noFiles: "파일 없음",
