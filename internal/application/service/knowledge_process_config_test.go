@@ -395,7 +395,7 @@ func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
+func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
@@ -409,7 +409,7 @@ func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
 	kb.SetStorageProvider("cos")
 
 	err := ValidateProcessOverrides(ctx, kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
-	require.Error(t, err)
+	require.NoError(t, err)
 }
 
 func TestMergeParserEngineOverrides(t *testing.T) {

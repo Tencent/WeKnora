@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/url"
-	"os"
 	"path"
 	"slices"
 	"strings"
@@ -82,6 +81,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file",
 		FileName: fileName,
+		FileType: getFileType(fileName),
 		FileSize: file.Size,
 		FileHash: hash,
 	})
@@ -134,44 +134,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			return nil, err
 		}
 	} else {
-		// 检查多模态配置完整性 - 只在图片文件时校验
+		// 图片入库必须由 VLM 解析。存储服务不在这里做 provider-specific
+		// 配置检查：resolveFileService 会在空配置或 legacy 配置不完整时
+		// 按统一语义回退到全局 fileSvc。
 		if IsImageType(getFileType(safeFilename)) {
-			provider := kb.GetStorageProvider()
-			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-				provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-			}
-
-			concreteBackend := kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != ""
-			switch {
-			case concreteBackend:
-				// Registration already validated and tested the concrete instance.
-			case provider == "cos":
-				if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-					tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-					tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
-					logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-				}
-			case provider == "minio":
-				ok := false
-				if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-					m := tenant.StorageEngineConfig.MinIO
-					if m.Mode == "remote" {
-						ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
-					} else {
-						ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-							os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-							(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
-					}
-				}
-				if !ok {
-					logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-				}
-			}
-
-			if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+			if !eff.VLMConfig.IsEnabled() {
 				logger.Error(ctx, "VLM model is not configured")
 				return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 			}

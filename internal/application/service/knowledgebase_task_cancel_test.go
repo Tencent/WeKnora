@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -273,6 +274,102 @@ func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
 	for _, call := range inspector.calls {
 		assert.Equal(t, []string{"knowledge-1", "knowledge-2"}, call.knowledgeIDs)
 	}
+}
+
+// kbDeleteDeferredRegistry reports a retryable engine-resolution failure from
+// the rebuild path, matching what GetOrLoadByStoreID does when the caller
+// goes away or the store engine cannot be produced yet.
+type kbDeleteDeferredRegistry struct {
+	err error
+}
+
+func (kbDeleteDeferredRegistry) Register(interfaces.RetrieveEngineService) error { return nil }
+func (kbDeleteDeferredRegistry) GetRetrieveEngineService(types.RetrieverEngineType) (
+	interfaces.RetrieveEngineService, error,
+) {
+	return nil, nil
+}
+func (kbDeleteDeferredRegistry) GetAllRetrieveEngineServices() []interfaces.RetrieveEngineService {
+	return nil
+}
+func (kbDeleteDeferredRegistry) GetByStoreID(string) (interfaces.RetrieveEngineService, error) {
+	return nil, errors.New("store not in registry")
+}
+func (r kbDeleteDeferredRegistry) GetOrLoadByStoreID(
+	context.Context, uint64, string,
+) (interfaces.RetrieveEngineService, error) {
+	return nil, r.err
+}
+
+type kbDeleteOwnership struct {
+	owned map[string]uint64
+}
+
+func (o *kbDeleteOwnership) StoreOwnedBy(_ context.Context, storeID string, tenantID uint64) (bool, error) {
+	owner, ok := o.owned[storeID]
+	return ok && owner == tenantID, nil
+}
+
+type kbDeleteTrackingKnowledgeRepo struct {
+	populatedKBKnowledgeRepo
+	deleteCalls int
+}
+
+func (r *kbDeleteTrackingKnowledgeRepo) DeleteKnowledgeList(context.Context, uint64, []string) error {
+	r.deleteCalls++
+	return nil
+}
+
+func TestProcessKBDeleteEngineResolutionFailureRetries(t *testing.T) {
+	const storeID = "00000000-0000-0000-0000-0000000000dd"
+	storeIDPtr := storeID
+	repo := &kbDeleteTrackingKnowledgeRepo{populatedKBKnowledgeRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
+		{ID: "knowledge-1", KnowledgeBaseID: "kb-1", EmbeddingModelID: "model-1"},
+	}}}
+	svc := &knowledgeBaseService{
+		kgRepo:         repo,
+		chunkRepo:      kbCleanupChunkRepo{},
+		modelService:   kbCleanupModelService{},
+		retrieveEngine: kbDeleteDeferredRegistry{err: context.Canceled},
+		ownership:      &kbDeleteOwnership{owned: map[string]uint64{storeID: 1}},
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		VectorStoreID:   &storeIDPtr,
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, repo.deleteCalls, "knowledge rows must not be deleted when engine resolution is deferred")
+}
+
+func TestProcessKBDeleteUnavailableStoreRetries(t *testing.T) {
+	const storeID = "00000000-0000-0000-0000-0000000000ee"
+	storeIDPtr := storeID
+	repo := &kbDeleteTrackingKnowledgeRepo{populatedKBKnowledgeRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
+		{ID: "knowledge-1", KnowledgeBaseID: "kb-1", EmbeddingModelID: "model-1"},
+	}}}
+	svc := &knowledgeBaseService{
+		kgRepo:         repo,
+		chunkRepo:      kbCleanupChunkRepo{},
+		modelService:   kbCleanupModelService{},
+		retrieveEngine: kbDeleteDeferredRegistry{err: retriever.ErrVectorStoreUnavailable},
+		ownership:      &kbDeleteOwnership{owned: map[string]uint64{storeID: 1}},
+	}
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		VectorStoreID:   &storeIDPtr,
+	})
+	require.NoError(t, err)
+
+	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
+
+	require.ErrorIs(t, err, retriever.ErrVectorStoreUnavailable)
+	assert.Equal(t, 0, repo.deleteCalls, "knowledge rows must not be deleted when engine resolution is deferred")
 }
 
 func TestCancelTasksForKnowledgeBaseForwardsKnowledgeIDs(t *testing.T) {

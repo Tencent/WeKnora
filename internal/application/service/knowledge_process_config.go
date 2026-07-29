@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 
@@ -118,9 +117,6 @@ func ValidateProcessOverrides(
 	eff := ResolveProcessConfig(kb, overrides)
 
 	if hasImage {
-		if err := validateImageMultimodalConfig(ctx, kb); err != nil {
-			return err
-		}
 		if !eff.VLMConfig.IsEnabled() {
 			return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 		}
@@ -259,45 +255,6 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 		result.CustomInstructions = override.CustomInstructions
 	}
 	return result
-}
-
-func validateImageMultimodalConfig(ctx context.Context, kb *types.KnowledgeBase) error {
-	// Concrete backends are validated and connectivity-tested when registered.
-	// The checks below only apply to unmigrated provider-only bindings.
-	if kb != nil && kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != "" {
-		return nil
-	}
-	provider := kb.GetStorageProvider()
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
-
-	switch provider {
-	case "cos":
-		if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-			tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-			tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
-			return werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-		}
-	case "minio":
-		ok := false
-		if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-			m := tenant.StorageEngineConfig.MinIO
-			if m.Mode == "remote" {
-				ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
-			} else {
-				ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-					os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-					(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
-			}
-		}
-		if !ok {
-			return werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-		}
-	}
-
-	return nil
 }
 
 // MergeParserEngineOverrides merges upload overrides on top of tenant overrides safely.

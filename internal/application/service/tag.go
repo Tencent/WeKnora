@@ -428,6 +428,8 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 		logger.Errorf(ctx, "Index delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
 		return asynq.SkipRetry
 	}
+	// ErrVectorStoreUnavailable deliberately falls through to the retry path
+	// below: the store exists and its engine may build on a later attempt.
 	if err != nil {
 		logger.Warnf(ctx, "Failed to create retrieve engine for index cleanup: %v", err)
 		return err
