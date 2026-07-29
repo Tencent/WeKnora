@@ -2,8 +2,10 @@ package chatpipeline
 
 import (
 	"context"
+	"sort"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -15,6 +17,8 @@ type PluginSearchEntity struct {
 	graphRepo     interfaces.RetrieveGraphRepository
 	chunkRepo     interfaces.ChunkRepository
 	knowledgeRepo interfaces.KnowledgeRepository
+	kbRepo        interfaces.KnowledgeBaseRepository
+	weightEnabled bool
 }
 
 // NewPluginSearchEntity creates a new plugin search entity
@@ -23,11 +27,15 @@ func NewPluginSearchEntity(
 	graphRepository interfaces.RetrieveGraphRepository,
 	chunkRepository interfaces.ChunkRepository,
 	knowledgeRepository interfaces.KnowledgeRepository,
+	knowledgeBaseRepository interfaces.KnowledgeBaseRepository,
+	cfg *config.Config,
 ) *PluginSearchEntity {
 	res := &PluginSearchEntity{
 		graphRepo:     graphRepository,
 		chunkRepo:     chunkRepository,
 		knowledgeRepo: knowledgeRepository,
+		kbRepo:        knowledgeBaseRepository,
+		weightEnabled: cfg != nil && cfg.Feedback != nil && cfg.Feedback.RetrievalWeightEnabled,
 	}
 	eventManager.Register(res)
 	return res
@@ -162,9 +170,13 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	for _, knowledge := range knowledges {
 		knowledgeMap[knowledge.ID] = knowledge
 	}
+	feedbackWeightOptIns := p.loadFeedbackWeightOptIns(ctx, knowledges)
 	var entityResults []*types.SearchResult
 	for _, chunk := range chunks {
-		searchResult := chunk2SearchResult(chunk, knowledgeMap[chunk.KnowledgeID])
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		searchResult := chunk2SearchResult(
+			chunk, knowledge, feedbackWeightOptIns[knowledge.KnowledgeBaseID],
+		)
 		entityResults = append(entityResults, searchResult)
 	}
 	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkRepo, types.MustTenantIDFromContext(ctx), entityResults)
@@ -182,6 +194,42 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		chatManage.SessionID,
 	)
 	return next()
+}
+
+func (p *PluginSearchEntity) loadFeedbackWeightOptIns(
+	ctx context.Context, knowledges []*types.Knowledge,
+) map[string]bool {
+	result := make(map[string]bool)
+	if !p.weightEnabled || p.kbRepo == nil {
+		return result
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge == nil || knowledge.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := seen[knowledge.KnowledgeBaseID]; ok {
+			continue
+		}
+		seen[knowledge.KnowledgeBaseID] = struct{}{}
+		ids = append(ids, knowledge.KnowledgeBaseID)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return result
+	}
+	knowledgeBases, err := p.kbRepo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Feedback weighting disabled for entity results: could not load KB opt-ins: %v", err)
+		return result
+	}
+	for _, kb := range knowledgeBases {
+		if kb != nil {
+			result[kb.ID] = kb.IndexingStrategy.FeedbackWeightEnabled
+		}
+	}
+	return result
 }
 
 // filterSeenChunk filters seen chunks from the graph
@@ -207,26 +255,31 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 }
 
 // chunk2SearchResult converts a chunk to a search result
-func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.SearchResult {
+func chunk2SearchResult(
+	chunk *types.Chunk, knowledge *types.Knowledge, feedbackWeightEnabled bool,
+) *types.SearchResult {
 	return &types.SearchResult{
-		ID:                chunk.ID,
-		Content:           chunk.Content,
-		KnowledgeID:       chunk.KnowledgeID,
-		ChunkIndex:        chunk.ChunkIndex,
-		KnowledgeTitle:    knowledge.Title,
-		StartAt:           chunk.StartAt,
-		EndAt:             chunk.EndAt,
-		Seq:               chunk.ChunkIndex,
-		Score:             1.0,
-		MatchType:         types.MatchTypeGraph,
-		Metadata:          knowledge.GetMetadata(),
-		ChunkType:         string(chunk.ChunkType),
-		ParentChunkID:     chunk.ParentChunkID,
-		ImageInfo:         chunk.ImageInfo,
-		KnowledgeFilename: knowledge.FileName,
-		KnowledgeSource:   knowledge.Source,
-		KnowledgeChannel:  knowledge.Channel,
-		ChunkMetadata:     chunk.Metadata,
-		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
+		ID:                    chunk.ID,
+		Content:               chunk.Content,
+		KnowledgeID:           chunk.KnowledgeID,
+		ChunkIndex:            chunk.ChunkIndex,
+		KnowledgeTitle:        knowledge.Title,
+		StartAt:               chunk.StartAt,
+		EndAt:                 chunk.EndAt,
+		Seq:                   chunk.ChunkIndex,
+		Score:                 1.0,
+		MatchType:             types.MatchTypeGraph,
+		Metadata:              knowledge.GetMetadata(),
+		ChunkType:             string(chunk.ChunkType),
+		ParentChunkID:         chunk.ParentChunkID,
+		ImageInfo:             chunk.ImageInfo,
+		KnowledgeFilename:     knowledge.FileName,
+		KnowledgeSource:       knowledge.Source,
+		KnowledgeChannel:      knowledge.Channel,
+		ChunkMetadata:         chunk.Metadata,
+		KnowledgeBaseID:       knowledge.KnowledgeBaseID,
+		TenantID:              chunk.TenantID,
+		RecallWeight:          chunk.RecallWeight,
+		FeedbackWeightEnabled: feedbackWeightEnabled,
 	}
 }

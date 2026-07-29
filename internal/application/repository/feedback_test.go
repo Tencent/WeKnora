@@ -68,12 +68,13 @@ func setupFeedbackTestRepository(
 		Content: "source", SourceContent: "source", RecallWeight: 1, IsEnabled: true,
 	}
 	require.NoError(t, db.Create(chunk).Error)
-	return &feedbackRepository{db: db}, db, session, message, chunk
+	return &feedbackRepository{db: db, minimumSampleCount: 1}, db, session, message, chunk
 }
 
 func feedbackReference(chunk *types.Chunk) types.References {
 	return types.References{&types.SearchResult{
-		ID: chunk.ID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText,
+		ID: chunk.ID, TenantID: chunk.TenantID,
+		KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText,
 	}}
 }
 
@@ -81,7 +82,8 @@ func feedbackReferences(chunks ...*types.Chunk) types.References {
 	references := make(types.References, 0, len(chunks))
 	for _, chunk := range chunks {
 		references = append(references, &types.SearchResult{
-			ID: chunk.ID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText,
+			ID: chunk.ID, TenantID: chunk.TenantID,
+			KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText,
 		})
 	}
 	return references
@@ -92,6 +94,49 @@ func loadFeedbackChunk(t *testing.T, db *gorm.DB, id string) types.Chunk {
 	var chunk types.Chunk
 	require.NoError(t, db.First(&chunk, "id = ?", id).Error)
 	return chunk
+}
+
+func TestCompleteAssistantMessageRejectsReferenceOutsideCanonicalScope(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	eligible, err := repo.CompleteAssistantMessageWithReferences(
+		context.Background(),
+		session.TenantID,
+		message,
+		types.References{&types.SearchResult{
+			ID:              chunk.ID,
+			TenantID:        chunk.TenantID + 1,
+			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			ChunkType:       types.ChunkTypeText,
+		}},
+	)
+	require.NoError(t, err)
+	assert.False(t, eligible)
+
+	var count int64
+	require.NoError(t, db.Model(&types.MessageChunkReference{}).
+		Where("message_id = ?", message.ID).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestResetChunkFeedbackRequiresExactKnowledgeBaseScope(t *testing.T) {
+	repo, db, session, _, chunk := setupFeedbackTestRepository(t)
+
+	err := repo.ResetChunkFeedback(context.Background(), types.ResetChunkFeedbackInput{
+		ChunkTenantID:   chunk.TenantID,
+		KnowledgeBaseID: "kb-other",
+		ChunkID:         chunk.ID,
+		ActorTenantID:   session.TenantID,
+		ActorUserID:     session.UserID,
+	})
+	require.ErrorIs(t, err, ErrFeedbackChunkNotFound)
+
+	var persisted types.Chunk
+	require.NoError(t, db.Where(
+		"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+		chunk.TenantID, chunk.KnowledgeBaseID, chunk.ID,
+	).First(&persisted).Error)
+	require.Nil(t, persisted.FeedbackResetAt)
+	require.Equal(t, 1.0, persisted.RecallWeight)
 }
 
 func TestHydrateMessagesRequiresAnActiveChunkReference(t *testing.T) {
@@ -259,6 +304,51 @@ func TestFeedbackLifecycleAndResetBaseline(t *testing.T) {
 	assert.Equal(t, types.FeedbackTriggerContentDelete, details.Audits[0].TriggerSource)
 }
 
+func TestFeedbackWeightStaysNeutralUntilMinimumSampleCount(t *testing.T) {
+	repo, db, _, _, chunk := setupFeedbackTestRepository(t)
+	repo.minimumSampleCount = 3
+	ctx := context.Background()
+
+	for index := 1; index <= 3; index++ {
+		sessionID := fmt.Sprintf("sample-session-%d", index)
+		messageID := fmt.Sprintf("sample-message-%d", index)
+		userID := fmt.Sprintf("sample-user-%d", index)
+		require.NoError(t, db.Exec(
+			"INSERT INTO sessions (id, tenant_id, user_id) VALUES (?, ?, ?)",
+			sessionID, 101, userID,
+		).Error)
+		require.NoError(t, db.Exec(
+			"INSERT INTO messages (id, session_id, content, role, is_completed) VALUES (?, ?, ?, ?, ?)",
+			messageID, sessionID, "draft", "assistant", false,
+		).Error)
+		message := &types.Message{
+			ID: messageID, SessionID: sessionID, Role: "assistant", Content: "final",
+		}
+		eligible, err := repo.CompleteAssistantMessageWithReferences(
+			ctx, 101, message, feedbackReference(chunk),
+		)
+		require.NoError(t, err)
+		require.True(t, eligible)
+		_, err = repo.ApplyMessageFeedback(ctx, types.ApplyMessageFeedbackInput{
+			MessageTenantID: 101,
+			ActorTenantID:   101,
+			ActorUserID:     userID,
+			SessionID:       sessionID,
+			MessageID:       messageID,
+			Type:            types.FeedbackTypeLike,
+		})
+		require.NoError(t, err)
+
+		got := loadFeedbackChunk(t, db, chunk.ID)
+		assert.EqualValues(t, index, got.LikeCount)
+		if index < 3 {
+			assert.Equal(t, 1.0, got.RecallWeight)
+		} else {
+			assert.Equal(t, 1.2, got.RecallWeight)
+		}
+	}
+}
+
 func TestFeedbackTransactionRollsBackOnAuditFailure(t *testing.T) {
 	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
 	ctx := context.Background()
@@ -379,16 +469,16 @@ func TestCompletionPersistsCanonicalPrimaryParentAndSubchunks(t *testing.T) {
 		context.Background(), session.TenantID, message,
 		types.References{
 			&types.SearchResult{
-				ID: primary.ID, KnowledgeBaseID: primary.KnowledgeBaseID,
+				ID: primary.ID, TenantID: primary.TenantID, KnowledgeBaseID: primary.KnowledgeBaseID,
 				ParentChunkID: parent.ID, SubChunkID: []string{sub.ID, sub.ID},
 				ChunkType: string(types.ChunkTypeText),
 			},
 			&types.SearchResult{
-				ID: primary.ID, KnowledgeBaseID: primary.KnowledgeBaseID,
+				ID: primary.ID, TenantID: primary.TenantID, KnowledgeBaseID: primary.KnowledgeBaseID,
 				ChunkType: string(types.ChunkTypeText),
 			},
 			&types.SearchResult{
-				ID: history.ID, KnowledgeBaseID: history.KnowledgeBaseID,
+				ID: history.ID, TenantID: history.TenantID, KnowledgeBaseID: history.KnowledgeBaseID,
 				ChunkType: string(types.ChunkTypeText), MatchType: types.MatchTypeHistory,
 			},
 			&types.SearchResult{ID: "web", ChunkType: string(types.ChunkTypeWebSearch)},

@@ -47,7 +47,15 @@ type Config struct {
 // operators can immediately restore legacy ranking without deleting data.
 type FeedbackConfig struct {
 	RetrievalWeightEnabled bool    `yaml:"retrieval_weight_enabled" json:"retrieval_weight_enabled"`
+	MinimumSampleCount     int64   `yaml:"minimum_sample_count"     json:"minimum_sample_count"`
 	OptimizationThreshold  float64 `yaml:"optimization_threshold"   json:"optimization_threshold"`
+}
+
+func (c *FeedbackConfig) EffectiveMinimumSampleCount() int64 {
+	if c == nil || c.MinimumSampleCount <= 0 {
+		return 5
+	}
+	return c.MinimumSampleCount
 }
 
 func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {

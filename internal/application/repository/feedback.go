@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -31,16 +32,25 @@ const messageFeedbackReferenceJoin = "JOIN message_chunk_references AS mcr " +
 	"ON mcr.message_tenant_id = mf.tenant_id AND mcr.message_id = mf.message_id"
 
 type feedbackRepository struct {
-	db *gorm.DB
+	db                 *gorm.DB
+	minimumSampleCount int64
 }
 
 // NewFeedbackRepository creates a repository for feedback attribution and aggregation.
-func NewFeedbackRepository(db *gorm.DB) interfaces.FeedbackRepository {
-	return &feedbackRepository{db: db}
+func NewFeedbackRepository(db *gorm.DB, cfg *config.Config) interfaces.FeedbackRepository {
+	var feedbackConfig *config.FeedbackConfig
+	if cfg != nil {
+		feedbackConfig = cfg.Feedback
+	}
+	return &feedbackRepository{
+		db:                 db,
+		minimumSampleCount: feedbackConfig.EffectiveMinimumSampleCount(),
+	}
 }
 
 type referenceKey struct {
 	tenantID uint64
+	kbID     string
 	chunkID  string
 }
 
@@ -81,14 +91,16 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 		if persisted.IsCompleted {
 			var existing []types.MessageChunkReference
 			if err := tx.Where("message_tenant_id = ? AND message_id = ?", messageTenantID, message.ID).
-				Order("chunk_tenant_id, chunk_id").Find(&existing).Error; err != nil {
+				Order("chunk_tenant_id, chunk_knowledge_base_id, chunk_id").Find(&existing).Error; err != nil {
 				return err
 			}
 			if len(existing) != len(keys) {
 				return ErrFeedbackCompletionState
 			}
 			for i := range existing {
-				if existing[i].ChunkTenantID != keys[i].tenantID || existing[i].ChunkID != keys[i].chunkID {
+				if existing[i].ChunkTenantID != keys[i].tenantID ||
+					existing[i].ChunkKnowledgeBaseID != keys[i].kbID ||
+					existing[i].ChunkID != keys[i].chunkID {
 					return ErrFeedbackCompletionState
 				}
 			}
@@ -98,12 +110,13 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 		now := time.Now()
 		for _, key := range keys {
 			row := &types.MessageChunkReference{
-				ID:              uuid.NewString(),
-				MessageTenantID: messageTenantID,
-				ChunkTenantID:   key.tenantID,
-				MessageID:       message.ID,
-				ChunkID:         key.chunkID,
-				CreatedAt:       now,
+				ID:                   uuid.NewString(),
+				MessageTenantID:      messageTenantID,
+				ChunkTenantID:        key.tenantID,
+				ChunkKnowledgeBaseID: key.kbID,
+				MessageID:            message.ID,
+				ChunkID:              key.chunkID,
+				CreatedAt:            now,
 			}
 			if err := tx.Create(row).Error; err != nil {
 				return err
@@ -131,55 +144,76 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 }
 
 func resolveReferenceKeys(tx *gorm.DB, references types.References) ([]referenceKey, error) {
-	type candidate struct {
-		id   string
-		kbID string
-	}
-	candidates := make(map[string]candidate)
+	candidates := make(map[referenceKey]struct{})
 	for _, ref := range references {
-		if ref == nil || ref.ID == "" ||
+		if ref == nil || ref.ID == "" || ref.TenantID == 0 || ref.KnowledgeBaseID == "" ||
 			ref.ChunkType == string(types.ChunkTypeWebSearch) ||
 			ref.KnowledgeSource == "web_search" ||
 			ref.MatchType == types.MatchTypeHistory {
 			continue
 		}
-		candidates[ref.ID] = candidate{id: ref.ID, kbID: ref.KnowledgeBaseID}
+		candidates[referenceKey{
+			tenantID: ref.TenantID, kbID: ref.KnowledgeBaseID, chunkID: ref.ID,
+		}] = struct{}{}
 		if ref.ParentChunkID != "" {
-			candidates[ref.ParentChunkID] = candidate{id: ref.ParentChunkID, kbID: ref.KnowledgeBaseID}
+			candidates[referenceKey{
+				tenantID: ref.TenantID, kbID: ref.KnowledgeBaseID, chunkID: ref.ParentChunkID,
+			}] = struct{}{}
 		}
 		for _, id := range ref.SubChunkID {
 			if id != "" {
-				candidates[id] = candidate{id: id, kbID: ref.KnowledgeBaseID}
+				candidates[referenceKey{
+					tenantID: ref.TenantID, kbID: ref.KnowledgeBaseID, chunkID: id,
+				}] = struct{}{}
 			}
 		}
 	}
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	ids := make([]string, 0, len(candidates))
-	for id := range candidates {
-		ids = append(ids, id)
+	scopes := make([]referenceKey, 0, len(candidates))
+	for scope := range candidates {
+		scopes = append(scopes, scope)
 	}
-	sort.Strings(ids)
+	sort.Slice(scopes, func(i, j int) bool {
+		if scopes[i].tenantID != scopes[j].tenantID {
+			return scopes[i].tenantID < scopes[j].tenantID
+		}
+		if scopes[i].kbID != scopes[j].kbID {
+			return scopes[i].kbID < scopes[j].kbID
+		}
+		return scopes[i].chunkID < scopes[j].chunkID
+	})
+
+	query := tx.Model(&types.Chunk{})
+	for index, scope := range scopes {
+		condition := "tenant_id = ? AND knowledge_base_id = ? AND id = ?"
+		if index == 0 {
+			query = query.Where(condition, scope.tenantID, scope.kbID, scope.chunkID)
+		} else {
+			query = query.Or(condition, scope.tenantID, scope.kbID, scope.chunkID)
+		}
+	}
 	var chunks []types.Chunk
-	// Every feedback lifecycle path locks chunks in tenant/id order.
-	if err := tx.Where("id IN ?", ids).
-		Order("tenant_id, id").
+	// Every feedback lifecycle path locks chunks in canonical scope order.
+	if err := query.
+		Order("tenant_id, knowledge_base_id, id").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Find(&chunks).Error; err != nil {
 		return nil, err
 	}
 	keys := make([]referenceKey, 0, len(chunks))
 	for _, chunk := range chunks {
-		candidate := candidates[chunk.ID]
-		if candidate.kbID != "" && candidate.kbID != chunk.KnowledgeBaseID {
-			continue
-		}
-		keys = append(keys, referenceKey{tenantID: chunk.TenantID, chunkID: chunk.ID})
+		keys = append(keys, referenceKey{
+			tenantID: chunk.TenantID, kbID: chunk.KnowledgeBaseID, chunkID: chunk.ID,
+		})
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].tenantID != keys[j].tenantID {
 			return keys[i].tenantID < keys[j].tenantID
+		}
+		if keys[i].kbID != keys[j].kbID {
+			return keys[i].kbID < keys[j].kbID
 		}
 		return keys[i].chunkID < keys[j].chunkID
 	})
@@ -208,6 +242,7 @@ func (r *feedbackRepository) HydrateMessages(
 		Select("mcr.message_id, COUNT(*) AS count").
 		Joins(`JOIN chunks AS c
 			ON c.tenant_id = mcr.chunk_tenant_id
+			AND c.knowledge_base_id = mcr.chunk_knowledge_base_id
 			AND c.id = mcr.chunk_id
 			AND c.deleted_at IS NULL`).
 		Joins(`JOIN messages AS m
@@ -262,21 +297,24 @@ func (r *feedbackRepository) HydrateChunks(
 	}
 	type chunkIdentity struct {
 		TenantID uint64
+		KBID     string
 		ID       string
 	}
 	type sessionStat struct {
-		ChunkTenantID uint64
-		ChunkID       string
-		SessionCount  int64
+		ChunkTenantID        uint64
+		ChunkKnowledgeBaseID string
+		ChunkID              string
+		SessionCount         int64
 	}
-	ids := make([]string, 0, len(chunks))
 	byID := make(map[chunkIdentity]*types.Chunk, len(chunks))
+	scopes := make([]chunkIdentity, 0, len(chunks))
 	for _, chunk := range chunks {
 		if chunk == nil {
 			continue
 		}
-		ids = append(ids, chunk.ID)
-		byID[chunkIdentity{TenantID: chunk.TenantID, ID: chunk.ID}] = chunk
+		scope := chunkIdentity{TenantID: chunk.TenantID, KBID: chunk.KnowledgeBaseID, ID: chunk.ID}
+		scopes = append(scopes, scope)
+		byID[scope] = chunk
 		total := chunk.LikeCount + chunk.DislikeCount
 		if total > 0 {
 			rate := float64(chunk.LikeCount) / float64(total)
@@ -287,21 +325,33 @@ func (r *feedbackRepository) HydrateChunks(
 			chunk.NeedsOptimization = false
 		}
 	}
-	if len(ids) == 0 {
+	if len(scopes) == 0 {
 		return nil
 	}
 	var stats []sessionStat
-	if err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Table("message_chunk_references AS r").
-		Select("r.chunk_tenant_id, r.chunk_id, COUNT(DISTINCT m.session_id) AS session_count").
-		Joins("JOIN messages AS m ON m.id = r.message_id AND m.deleted_at IS NULL").
-		Where("r.chunk_id IN ?", ids).
-		Group("r.chunk_tenant_id, r.chunk_id").
+		Select(`r.chunk_tenant_id, r.chunk_knowledge_base_id, r.chunk_id,
+			COUNT(DISTINCT m.session_id) AS session_count`).
+		Joins("JOIN messages AS m ON m.id = r.message_id AND m.deleted_at IS NULL")
+	for index, scope := range scopes {
+		condition := "r.chunk_tenant_id = ? AND r.chunk_knowledge_base_id = ? AND r.chunk_id = ?"
+		if index == 0 {
+			query = query.Where(condition, scope.TenantID, scope.KBID, scope.ID)
+		} else {
+			query = query.Or(condition, scope.TenantID, scope.KBID, scope.ID)
+		}
+	}
+	if err := query.
+		Group("r.chunk_tenant_id, r.chunk_knowledge_base_id, r.chunk_id").
 		Scan(&stats).Error; err != nil {
 		return err
 	}
 	for _, stat := range stats {
-		if chunk := byID[chunkIdentity{TenantID: stat.ChunkTenantID, ID: stat.ChunkID}]; chunk != nil {
+		scope := chunkIdentity{
+			TenantID: stat.ChunkTenantID, KBID: stat.ChunkKnowledgeBaseID, ID: stat.ChunkID,
+		}
+		if chunk := byID[scope]; chunk != nil {
 			chunk.SessionCount = stat.SessionCount
 		}
 	}
@@ -395,7 +445,8 @@ func (r *feedbackRepository) ApplyMessageFeedback(
 			return fmt.Errorf("invalid feedback type %q", input.Type)
 		}
 		return recomputeChunks(
-			tx, keys, input.ActorTenantID, input.ActorUserID, feedbackTriggerSource(input.Type),
+			tx, keys, r.minimumSampleCount,
+			input.ActorTenantID, input.ActorUserID, feedbackTriggerSource(input.Type),
 		)
 	})
 	if err == nil && noAttributableChunks {
@@ -430,7 +481,7 @@ func lockReferencedChunks(
 ) ([]referenceKey, []types.Chunk, error) {
 	var refs []types.MessageChunkReference
 	if err := tx.Where("message_tenant_id = ? AND message_id = ?", messageTenantID, messageID).
-		Order("chunk_tenant_id, chunk_id").Find(&refs).Error; err != nil {
+		Order("chunk_tenant_id, chunk_knowledge_base_id, chunk_id").Find(&refs).Error; err != nil {
 		return nil, nil, err
 	}
 	keys := make([]referenceKey, 0, len(refs))
@@ -438,7 +489,10 @@ func lockReferencedChunks(
 	staleReferenceIDs := make([]string, 0)
 	for _, ref := range refs {
 		var chunk types.Chunk
-		if err := tx.Where("tenant_id = ? AND id = ?", ref.ChunkTenantID, ref.ChunkID).
+		if err := tx.Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			ref.ChunkTenantID, ref.ChunkKnowledgeBaseID, ref.ChunkID,
+		).
 			Clauses(clause.Locking{Strength: "UPDATE"}).First(&chunk).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				staleReferenceIDs = append(staleReferenceIDs, ref.ID)
@@ -446,7 +500,9 @@ func lockReferencedChunks(
 			}
 			return nil, nil, err
 		}
-		keys = append(keys, referenceKey{tenantID: ref.ChunkTenantID, chunkID: ref.ChunkID})
+		keys = append(keys, referenceKey{
+			tenantID: ref.ChunkTenantID, kbID: ref.ChunkKnowledgeBaseID, chunkID: ref.ChunkID,
+		})
 		chunks = append(chunks, chunk)
 	}
 	if len(staleReferenceIDs) > 0 {
@@ -475,13 +531,16 @@ func feedbackTriggerSource(feedbackType types.FeedbackType) types.FeedbackTrigge
 func recomputeChunks(
 	tx *gorm.DB,
 	keys []referenceKey,
+	minimumSampleCount int64,
 	actorTenantID uint64,
 	actorUserID string,
 	triggerSource types.FeedbackTriggerSource,
 ) error {
 	for _, key := range keys {
 		var chunk types.Chunk
-		if err := tx.Where("tenant_id = ? AND id = ?", key.tenantID, key.chunkID).
+		if err := tx.Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id = ?", key.tenantID, key.kbID, key.chunkID,
+		).
 			Clauses(clause.Locking{Strength: "UPDATE"}).First(&chunk).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
@@ -496,7 +555,10 @@ func recomputeChunks(
 			Select("mf.feedback_type, COUNT(*) AS count").
 			Joins(messageFeedbackReferenceJoin).
 			Joins("JOIN messages AS m ON m.id = mf.message_id AND m.deleted_at IS NULL").
-			Where("mcr.chunk_tenant_id = ? AND mcr.chunk_id = ?", key.tenantID, key.chunkID)
+			Where(
+				`mcr.chunk_tenant_id = ? AND mcr.chunk_knowledge_base_id = ? AND mcr.chunk_id = ?`,
+				key.tenantID, key.kbID, key.chunkID,
+			)
 		if chunk.FeedbackResetAt != nil {
 			query = query.Where("mf.updated_at > ?", chunk.FeedbackResetAt.UTC())
 		}
@@ -517,11 +579,13 @@ func recomputeChunks(
 		if total := likes + dislikes; total > 0 {
 			rate := float64(likes) / float64(total)
 			positiveRate = &rate
-			switch {
-			case rate >= 0.8:
-				weight = 1.2
-			case rate < 0.5:
-				weight = 0.8
+			if total >= minimumSampleCount {
+				switch {
+				case rate >= 0.8:
+					weight = 1.2
+				case rate < 0.5:
+					weight = 0.8
+				}
 			}
 		}
 		oldWeight := chunk.RecallWeight
@@ -529,7 +593,10 @@ func recomputeChunks(
 			oldWeight = 1
 		}
 		if err := tx.Model(&types.Chunk{}).
-			Where("tenant_id = ? AND id = ?", key.tenantID, key.chunkID).
+			Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+				key.tenantID, key.kbID, key.chunkID,
+			).
 			Updates(map[string]interface{}{
 				"like_count":    likes,
 				"dislike_count": dislikes,
@@ -575,7 +642,10 @@ func (r *feedbackRepository) ResetChunkFeedback(
 		}
 		if err := tx.Table("message_feedbacks AS mf").
 			Joins(messageFeedbackReferenceJoin).
-			Where("mcr.chunk_tenant_id = ? AND mcr.chunk_id = ?", input.ChunkTenantID, input.ChunkID).
+			Where(
+				`mcr.chunk_tenant_id = ? AND mcr.chunk_knowledge_base_id = ? AND mcr.chunk_id = ?`,
+				input.ChunkTenantID, input.KnowledgeBaseID, input.ChunkID,
+			).
 			Select("mf.updated_at").
 			Order("mf.updated_at DESC").
 			Limit(1).
@@ -594,7 +664,10 @@ func (r *feedbackRepository) ResetChunkFeedback(
 			oldWeight = 1
 		}
 		if err := tx.Model(&types.Chunk{}).
-			Where("tenant_id = ? AND id = ?", input.ChunkTenantID, input.ChunkID).
+			Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+				input.ChunkTenantID, input.KnowledgeBaseID, input.ChunkID,
+			).
 			Updates(map[string]interface{}{
 				"like_count":        0,
 				"dislike_count":     0,
@@ -633,8 +706,11 @@ func (r *feedbackRepository) GetChunkFeedbackDetails(
 		Select("mf.reason_code, COUNT(*) AS count").
 		Joins(messageFeedbackReferenceJoin).
 		Joins("JOIN messages AS m ON m.id = mf.message_id AND m.deleted_at IS NULL").
-		Where("mcr.chunk_tenant_id = ? AND mcr.chunk_id = ? AND mf.feedback_type = ?",
-			tenantID, chunkID, types.FeedbackTypeDislike).
+		Where(
+			`mcr.chunk_tenant_id = ? AND mcr.chunk_knowledge_base_id = ?
+				AND mcr.chunk_id = ? AND mf.feedback_type = ?`,
+			tenantID, chunk.KnowledgeBaseID, chunkID, types.FeedbackTypeDislike,
+		).
 		Where("mf.reason_code IS NOT NULL")
 	if chunk.FeedbackResetAt != nil {
 		query = query.Where("mf.updated_at > ?", chunk.FeedbackResetAt.UTC())
@@ -665,7 +741,9 @@ func (r *feedbackRepository) DeleteMessageWithFeedback(
 			Clauses(clause.Locking{Strength: "UPDATE"}).First(&message).Error; err != nil {
 			return err
 		}
-		return deleteMessagesAndRecompute(tx, tenantID, []string{messageID}, actorUserID)
+		return deleteMessagesAndRecompute(
+			tx, tenantID, []string{messageID}, actorUserID, r.minimumSampleCount,
+		)
 	})
 }
 
@@ -687,7 +765,9 @@ func (r *feedbackRepository) DeleteSessionMessagesWithFeedback(
 		for _, message := range messages {
 			ids = append(ids, message.ID)
 		}
-		if err := deleteMessagesAndRecompute(tx, tenantID, ids, actorUserID); err != nil {
+		if err := deleteMessagesAndRecompute(
+			tx, tenantID, ids, actorUserID, r.minimumSampleCount,
+		); err != nil {
 			return err
 		}
 		if deleteSessions {
@@ -699,40 +779,52 @@ func (r *feedbackRepository) DeleteSessionMessagesWithFeedback(
 
 func deleteMessagesAndRecompute(
 	tx *gorm.DB, actorTenantID uint64, messageIDs []string, actorUserID string,
+	minimumSampleCount int64,
 ) error {
 	if len(messageIDs) == 0 {
 		return nil
 	}
 	var refs []types.MessageChunkReference
-	if err := tx.Where("message_id IN ?", messageIDs).Order("chunk_tenant_id, chunk_id").Find(&refs).Error; err != nil {
+	if err := tx.Where("message_tenant_id = ? AND message_id IN ?", actorTenantID, messageIDs).
+		Order("chunk_tenant_id, chunk_knowledge_base_id, chunk_id").Find(&refs).Error; err != nil {
 		return err
 	}
 	seen := make(map[referenceKey]struct{})
 	keys := make([]referenceKey, 0, len(refs))
 	for _, ref := range refs {
-		key := referenceKey{tenantID: ref.ChunkTenantID, chunkID: ref.ChunkID}
+		key := referenceKey{
+			tenantID: ref.ChunkTenantID, kbID: ref.ChunkKnowledgeBaseID, chunkID: ref.ChunkID,
+		}
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
 			keys = append(keys, key)
 		}
 	}
 	for _, key := range keys {
-		if err := tx.Where("tenant_id = ? AND id = ?", key.tenantID, key.chunkID).
+		if err := tx.Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id = ?",
+			key.tenantID, key.kbID, key.chunkID,
+		).
 			Clauses(clause.Locking{Strength: "UPDATE"}).First(&types.Chunk{}).Error; err != nil &&
 			!errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 	}
-	if err := tx.Where("message_id IN ?", messageIDs).Delete(&types.MessageFeedback{}).Error; err != nil {
+	if err := tx.Where(
+		"tenant_id = ? AND message_id IN ?", actorTenantID, messageIDs,
+	).Delete(&types.MessageFeedback{}).Error; err != nil {
 		return err
 	}
-	if err := tx.Where("message_id IN ?", messageIDs).Delete(&types.MessageChunkReference{}).Error; err != nil {
+	if err := tx.Where(
+		"message_tenant_id = ? AND message_id IN ?", actorTenantID, messageIDs,
+	).Delete(&types.MessageChunkReference{}).Error; err != nil {
 		return err
 	}
 	if err := tx.Where("id IN ?", messageIDs).Delete(&types.Message{}).Error; err != nil {
 		return err
 	}
 	return recomputeChunks(
-		tx, keys, actorTenantID, actorUserID, types.FeedbackTriggerContentDelete,
+		tx, keys, minimumSampleCount,
+		actorTenantID, actorUserID, types.FeedbackTriggerContentDelete,
 	)
 }

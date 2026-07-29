@@ -42,6 +42,7 @@ conversation:
 # remains byte-for-byte compatible until an operator opts in.
 feedback:
   retrieval_weight_enabled: false
+  minimum_sample_count: 5
   optimization_threshold: 0.3
 
 # Knowledge base configuration

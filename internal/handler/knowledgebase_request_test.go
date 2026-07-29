@@ -1,12 +1,59 @@
 package handler
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestFeedbackWeightOptInUpdateRequiresWebAdminOrOwner(t *testing.T) {
+	current := types.IndexingStrategy{VectorEnabled: true}
+	requested := &types.IndexingStrategy{VectorEnabled: true, FeedbackWeightEnabled: true}
+
+	for _, testCase := range []struct {
+		name          string
+		role          types.TenantRole
+		principalType string
+		allowed       bool
+	}{
+		{name: "viewer", role: types.TenantRoleViewer, principalType: types.PrincipalWebUser},
+		{name: "contributor", role: types.TenantRoleContributor, principalType: types.PrincipalWebUser},
+		{name: "api key", role: types.TenantRoleOwner, principalType: types.PrincipalAPITenant},
+		{name: "admin", role: types.TenantRoleAdmin, principalType: types.PrincipalWebUser, allowed: true},
+		{name: "owner", role: types.TenantRoleOwner, principalType: types.PrincipalWebUser, allowed: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := types.WithPrincipal(
+				context.WithValue(context.Background(), types.TenantRoleContextKey, testCase.role),
+				types.Principal{Type: testCase.principalType, ID: "caller"},
+			)
+			if got := feedbackWeightUpdateAllowed(ctx, current, requested); got != testCase.allowed {
+				t.Fatalf("allowed = %v, want %v", got, testCase.allowed)
+			}
+		})
+	}
+
+	if !feedbackWeightUpdateAllowed(context.Background(), current, &current) {
+		t.Fatal("an unchanged opt-in value must not block unrelated KB updates")
+	}
+	if feedbackWeightUpdateAllowed(
+		feedbackGovernanceRequestContext(types.TenantRoleContributor, types.PrincipalWebUser),
+		types.IndexingStrategy{},
+		&types.IndexingStrategy{FeedbackWeightEnabled: true},
+	) {
+		t.Fatal("a contributor must not enable feedback weighting while creating a KB")
+	}
+}
+
+func feedbackGovernanceRequestContext(role types.TenantRole, principalType string) context.Context {
+	return types.WithPrincipal(
+		context.WithValue(context.Background(), types.TenantRoleContextKey, role),
+		types.Principal{Type: principalType, ID: "caller"},
+	)
+}
 
 // TestUpdateKBRequest_DoesNotAcceptVectorStoreID is the structural enforcement
 // behind the vector_store_id immutability contract. The GORM `<-:create`

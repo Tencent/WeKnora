@@ -2,17 +2,24 @@ package chatpipeline
 
 import (
 	"context"
+	"math"
 	"sort"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // PluginFilterTopK is a plugin that filters search results to keep only the top K items
-type PluginFilterTopK struct{}
+type PluginFilterTopK struct {
+	retrievalWeightEnabled bool
+}
 
 // NewPluginFilterTopK creates a new instance of PluginFilterTopK and registers it with the event manager
-func NewPluginFilterTopK(eventManager *EventManager) *PluginFilterTopK {
+func NewPluginFilterTopK(eventManager *EventManager, cfg *config.Config) *PluginFilterTopK {
 	res := &PluginFilterTopK{}
+	if cfg != nil && cfg.Feedback != nil {
+		res.retrievalWeightEnabled = cfg.Feedback.RetrievalWeightEnabled
+	}
 	eventManager.Register(res)
 	return res
 }
@@ -39,7 +46,11 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	})
 
 	filterTopK := func(searchResult []*types.SearchResult, topK int) []*types.SearchResult {
-		sortSearchResultsDeterministically(searchResult)
+		if p.retrievalWeightEnabled {
+			sortSearchResultsWithFeedbackWeights(searchResult)
+		} else {
+			sortSearchResultsDeterministically(searchResult)
+		}
 		if topK > 0 && len(searchResult) > topK {
 			pipelineInfo(ctx, "FilterTopK", "filter", map[string]interface{}{
 				"before": len(searchResult),
@@ -75,22 +86,54 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 // requests reproducible before TopK truncation.
 func sortSearchResultsDeterministically(results []*types.SearchResult) {
 	sort.SliceStable(results, func(i, j int) bool {
+		return searchResultLess(results[i], results[j])
+	})
+}
+
+func sortSearchResultsWithFeedbackWeights(results []*types.SearchResult) {
+	sort.SliceStable(results, func(i, j int) bool {
 		left, right := results[i], results[j]
 		if left == nil || right == nil {
 			return left != nil
 		}
-		if left.Score != right.Score {
-			return left.Score > right.Score
+		leftEffective := left.Score * effectiveFeedbackWeight(left)
+		rightEffective := right.Score * effectiveFeedbackWeight(right)
+		if leftEffective != rightEffective {
+			return leftEffective > rightEffective
 		}
-		if left.KnowledgeID != right.KnowledgeID {
-			return left.KnowledgeID < right.KnowledgeID
-		}
-		if left.ChunkType != right.ChunkType {
-			return left.ChunkType < right.ChunkType
-		}
-		if left.ChunkIndex != right.ChunkIndex {
-			return left.ChunkIndex < right.ChunkIndex
-		}
-		return left.ID < right.ID
+		return searchResultLess(left, right)
 	})
+}
+
+func searchResultLess(left, right *types.SearchResult) bool {
+	if left == nil || right == nil {
+		return left != nil
+	}
+	if left.Score != right.Score {
+		return left.Score > right.Score
+	}
+	if left.KnowledgeID != right.KnowledgeID {
+		return left.KnowledgeID < right.KnowledgeID
+	}
+	if left.ChunkType != right.ChunkType {
+		return left.ChunkType < right.ChunkType
+	}
+	if left.ChunkIndex != right.ChunkIndex {
+		return left.ChunkIndex < right.ChunkIndex
+	}
+	return left.ID < right.ID
+}
+
+func effectiveFeedbackWeight(result *types.SearchResult) float64 {
+	if result == nil || !result.FeedbackWeightEnabled {
+		return 1
+	}
+	return normalizedRecallWeight(result.RecallWeight)
+}
+
+func normalizedRecallWeight(weight float64) float64 {
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0.8 || weight > 1.2 {
+		return 1
+	}
+	return weight
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -30,6 +31,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	feedbackWeightOptIns := s.loadFeedbackWeightOptIns(ctx, knowledgeMap)
 
 	// Batch fetch chunks (include shared KB chunks)
 	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
@@ -82,12 +84,50 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Build final search results
-	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	searchResults := s.assembleSearchResults(
+		ctx, chunks, chunkMap, knowledgeMap, feedbackWeightOptIns, index, skipEnrichment,
+	)
 
 	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
+}
+
+func (s *knowledgeBaseService) loadFeedbackWeightOptIns(
+	ctx context.Context, knowledgeMap map[string]*types.Knowledge,
+) map[string]bool {
+	result := make(map[string]bool)
+	if s.repo == nil || len(knowledgeMap) == 0 {
+		return result
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, knowledge := range knowledgeMap {
+		if knowledge == nil || knowledge.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := seen[knowledge.KnowledgeBaseID]; ok {
+			continue
+		}
+		seen[knowledge.KnowledgeBaseID] = struct{}{}
+		ids = append(ids, knowledge.KnowledgeBaseID)
+	}
+	if len(ids) == 0 {
+		return result
+	}
+	sort.Strings(ids)
+	knowledgeBases, err := s.repo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Feedback weighting disabled for this search: could not load KB opt-ins: %v", err)
+		return result
+	}
+	for _, kb := range knowledgeBases {
+		if kb != nil {
+			result[kb.ID] = kb.IndexingStrategy.FeedbackWeightEnabled
+		}
+	}
+	return result
 }
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
@@ -209,6 +249,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	inputChunks []*types.IndexWithScore,
 	chunkMap map[string]*types.Chunk,
 	knowledgeMap map[string]*types.Knowledge,
+	feedbackWeightOptIns map[string]bool,
 	idx *chunkIndex,
 	skipEnrichment bool,
 ) []*types.SearchResult {
@@ -240,7 +281,10 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			searchResults = append(searchResults, s.buildSearchResult(
+				chunk, knowledge, score, chunk.RecallWeight,
+				feedbackWeightOptIns[knowledge.KnowledgeBaseID], matchType, matchedContent,
+			))
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -274,7 +318,10 @@ func (s *knowledgeBaseService) assembleSearchResults(
 					continue
 				}
 				matchedContent := idx.matchedContents[chunkID]
-				searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+				searchResults = append(searchResults, s.buildSearchResult(
+					chunk, knowledge, score, chunk.RecallWeight,
+					feedbackWeightOptIns[knowledge.KnowledgeBaseID], matchType, matchedContent,
+				))
 			}
 		}
 	}
@@ -303,6 +350,8 @@ func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, proces
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
+	recallWeight float64,
+	feedbackWeightEnabled bool,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
@@ -316,6 +365,8 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		EndAt:                   chunk.EndAt,
 		Seq:                     chunk.ChunkIndex,
 		Score:                   score,
+		RecallWeight:            recallWeight,
+		FeedbackWeightEnabled:   feedbackWeightEnabled,
 		MatchType:               matchType,
 		Metadata:                knowledge.GetMetadata(),
 		ChunkType:               string(chunk.ChunkType),
@@ -329,6 +380,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ChunkMetadata:           chunk.Metadata,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		TenantID:                chunk.TenantID,
 	}
 }
 

@@ -17,6 +17,9 @@ type IndexingStrategy struct {
 	WikiEnabled bool `yaml:"wiki_enabled" json:"wiki_enabled"`
 	// GraphEnabled enables knowledge graph entity/relation extraction
 	GraphEnabled bool `yaml:"graph_enabled" json:"graph_enabled"`
+	// FeedbackWeightEnabled explicitly opts this knowledge base into global
+	// feedback-based retrieval weighting. Missing legacy JSON remains false.
+	FeedbackWeightEnabled bool `yaml:"feedback_weight_enabled" json:"feedback_weight_enabled"`
 }
 
 // DefaultIndexingStrategy returns the default strategy matching the legacy behavior:

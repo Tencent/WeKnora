@@ -1221,6 +1221,12 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	if err != nil {
 		return nil, err
 	}
+	// Feedback weighting is a governance opt-in, not ordinary cloneable KB
+	// content. A Contributor or API key may duplicate a KB, but must not
+	// inherit an enabled rollout flag that only a workspace admin/owner may set.
+	if _, governanceErr := requireFeedbackGovernancePrincipal(ctx); governanceErr != nil {
+		targetKB.IndexingStrategy.FeedbackWeightEnabled = false
+	}
 	targetKB.ID = uuid.New().String()
 	targetKB.TenantID = tenantID
 	targetKB.Name = s.buildDuplicateKnowledgeBaseName(ctx, tenantID, sourceKB.Name)
