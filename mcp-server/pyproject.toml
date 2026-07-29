@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weknora-mcp"
-version = "1.0.1"
+version = "1.1.0"
 description = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,7 +30,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.28,<2",
+    "mcp>=2.0,<3",
     "requests>=2.31.0",
     "starlette>=0.27.0",
     "uvicorn>=0.24.0",
@@ -60,6 +60,9 @@ Changelog = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP/blob/main/CHANG
 [project.scripts]
 weknora-mcp-server = "main:sync_main"
 weknora-server = "run_server:main"
+
+[tool.setuptools.packages.find]
+include = ["weknora_mcp*"]
 
 [tool.setuptools]
 py-modules = ["weknora_mcp_server", "upload_paths", "main", "run_server", "run", "test_module"]

@@ -12,6 +12,7 @@ except ImportError as e:
 
 try:
     from mcp.server import NotificationOptions, Server
+    from mcp.server.context import ServerRequestContext
 
     print("✓ mcp.server 导入成功")
 except ImportError as e:

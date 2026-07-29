@@ -7,8 +7,15 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-29
+
+### 变更
+- 迁移到 MCP Python SDK 2.x（`mcp>=2.0,<3`），使用 v2 low-level `Server` 的 `on_list_tools` / `on_call_tool` 构造器回调
+- 重构为 `weknora_mcp/` 包：`client`、`server`、`transports`、`tools/schemas`、`tools/dispatcher`
+- `weknora_mcp_server.py` 保留为向后兼容的薄封装层
+
 ### 修复
-- 将 `mcp` 依赖上限锁定为 `<2`，避免 `pip install` / `uv sync` 自动安装 MCP Python SDK 2.x 导致 `@app.list_tools()` 启动失败（`AttributeError: 'Server' object has no attribute 'list_tools'`）
+- 避免 `pip install` / `uv sync` 在 MCP SDK 2.x 环境下因 `@app.list_tools()` 装饰器被移除而启动失败
 
 ## [1.0.1] - 2026-07-28
 
