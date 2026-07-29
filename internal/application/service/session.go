@@ -35,12 +35,21 @@ func loadSessionForRead(
 ) (*types.Session, error) {
 	isAdmin := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
 	principal, hasPrincipal := types.PrincipalFromContext(ctx)
-	isIMRuntime := hasPrincipal && principal.Type == types.PrincipalIMUser
+	isChannelRuntime := false
+	if hasPrincipal {
+		switch principal.Type {
+		case types.PrincipalAPITenant,
+			types.PrincipalAPIPlatform,
+			types.PrincipalAPIExternalUser,
+			types.PrincipalIMUser:
+			isChannelRuntime = true
+		}
+	}
 
 	session, err := repo.Get(ctx, tenantID, ownerID, sessionID)
 	if err == nil {
 		imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, sessionID)
-		if types.SessionRequiresAdminConsoleRead(session, imPlatform) && !isAdmin && !isIMRuntime {
+		if types.SessionRequiresAdminConsoleRead(session, imPlatform) && !isAdmin && !isChannelRuntime {
 			return nil, apperrors.ErrSessionNotFound
 		}
 		if imPlatform != "" {

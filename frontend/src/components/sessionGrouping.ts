@@ -11,6 +11,9 @@ export const EMBED_SESSION_MARKER_PREFIX = 'embed_channel:'
 /** Mirrors backend types.SessionOwnerAPITenantKeyPrefix (sessions.user_id owner). */
 export const API_SESSION_OWNER_PREFIX = 'api_tenant_key:'
 
+/** Mirrors backend types.SessionOwnerAPIExternalUserPrefix. */
+export const API_EXTERNAL_USER_SESSION_OWNER_PREFIX = 'api_external_user:'
+
 export interface SessionForGrouping {
   id: string
   title?: string
@@ -92,7 +95,11 @@ export function resolveSessionOrigin(session: SessionForGrouping): SessionOrigin
     const channelId = desc.slice(EMBED_SESSION_MARKER_PREFIX.length).trim()
     if (channelId) return { kind: 'embed', channelId }
   }
-  if ((session.user_id || '').startsWith(API_SESSION_OWNER_PREFIX)) {
+  const ownerId = session.user_id || ''
+  if (
+    ownerId.startsWith(API_SESSION_OWNER_PREFIX) ||
+    ownerId.startsWith(API_EXTERNAL_USER_SESSION_OWNER_PREFIX)
+  ) {
     return { kind: 'api' }
   }
   return { kind: 'web' }
