@@ -201,6 +201,9 @@ const treeFullyLoaded = ref(false)
 // form.config.resource_ids as the single root, then loadResources lists its
 // children. See 飞书云盘数据源设计.md §5.2 / ADR-0004.
 const driveFolderToken = ref('')
+// 必填校验的内联错误文案：非空时输入框显示 error 状态 + 下方 tips,
+// 替代全局 MessagePlugin,与表单字段的就地校验风格一致。
+const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 
@@ -233,9 +236,10 @@ function extractDriveFolderToken(input: string): string {
 async function loadDriveRoot() {
   const token = extractDriveFolderToken(driveFolderToken.value)
   if (!token) {
-    MessagePlugin.warning(t('datasource.drive.folderTokenRequired'))
+    driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
     return
   }
+  driveFolderTokenError.value = ''
   // Normalize the input so the user sees the extracted token, not the full URL.
   driveFolderToken.value = token
   form.value.config.resource_ids = [token]
@@ -617,6 +621,7 @@ watch(visible, async (v) => {
   loadingChildrenIds.value = new Set()
   treeFullyLoaded.value = false
   driveFolderToken.value = ''
+  driveFolderTokenError.value = ''
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
 
@@ -935,6 +940,15 @@ async function nextStep() {
       if ((testResult.value as string) !== 'success') return
     }
   }
+  if (step.value === 2 && isDriveConnector(form.value.type)) {
+    // folder_token 是 Drive 连接器的必填项：为空就地标错并留在本步,
+    // 不允许带着空 token 进入同步策略。
+    if (!driveFolderToken.value.trim()) {
+      driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
+      return
+    }
+    driveFolderTokenError.value = ''
+  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.
@@ -1148,7 +1162,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1492,30 +1506,26 @@ const drawerConfirmText = computed(() => {
            "load"; the tree below stays as a placeholder until load succeeds.
            Other connectors skip this and go straight to the tree. -->
       <div v-if="isDriveConnector(form.type)" class="drive-folder-input">
-        <label class="drive-folder-input__label">{{ t('datasource.drive.folderTokenLabel') }}</label>
+        <label class="drive-folder-input__label required">
+          {{ t('datasource.drive.folderTokenLabel') }}
+          <t-tooltip :content="t('datasource.drive.rootNotSupportedHint')" placement="top">
+            <t-icon name="help-circle" class="drive-folder-input__help" />
+          </t-tooltip>
+        </label>
         <div class="drive-folder-input__row">
           <t-input
             v-model="driveFolderToken"
             :placeholder="t('datasource.drive.folderTokenPlaceholder')"
+            :status="driveFolderTokenError ? 'error' : 'default'"
+            :tips="driveFolderTokenError ? driveFolderTokenError : t('datasource.drive.shareHint')"
             clearable
             @enter="loadDriveRoot"
+            @input="driveFolderTokenError = ''"
           />
           <t-button theme="primary" :loading="loadingResources" @click="loadDriveRoot">
             {{ t('datasource.drive.load') }}
           </t-button>
         </div>
-        <t-alert
-          :message="t('datasource.drive.shareHint')"
-          theme="info"
-          :close="false"
-          class="drive-folder-input__hint"
-        />
-        <t-alert
-          :message="t('datasource.drive.rootNotSupportedHint')"
-          theme="warning"
-          :close="false"
-          class="drive-folder-input__hint"
-        />
       </div>
 
       <!-- Drive placeholder before the first load: the tree cannot render until
@@ -2164,19 +2174,37 @@ const drawerConfirmText = computed(() => {
 }
 
 .drive-folder-input__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary);
+
+  /* 与 .form-label.required 一致的红星必填标记 */
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    font-weight: 500;
+    line-height: 1;
+  }
+}
+
+.drive-folder-input__help {
+  font-size: 15px;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
+  }
 }
 
 .drive-folder-input__row {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-.drive-folder-input__hint {
-  margin: 0;
+  padding-bottom: 20px
 }
 
 /* Drive tree placeholder: shown before the first successful load. */
@@ -2572,5 +2600,46 @@ const drawerConfirmText = computed(() => {
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+/* Step 2「选择范围」:整步不滚动 —— token 输入区固定,下方资源区域
+   (占位 / 加载 / 空态 / 目录树)撑满抽屉剩余高度,树列表内部滚动。 */
+.ds-fixed-step {
+  .t-drawer__body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .setting-drawer__body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-resource-section {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .resource-picker,
+  .ds-drive-placeholder,
+  .ds-loading-center,
+  .ds-resource-empty {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-loading-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .resource-picker__list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
 }
 </style>
