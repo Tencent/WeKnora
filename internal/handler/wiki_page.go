@@ -406,6 +406,7 @@ func (h *WikiPageHandler) recordManualWikiActivity(
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Param        slug   path  string  true  "Page slug"
+// @Param        include_sources query bool false "Include paragraph blocks and their source evidence"
 // @Success      200  {object}  types.WikiPage
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
@@ -420,6 +421,33 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 	slug := getSlugParam(c)
 	if slug == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Page slug is required"})
+		return
+	}
+
+	includeSources := false
+	if raw := strings.TrimSpace(c.Query("include_sources")); raw != "" {
+		includeSources, err = strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "include_sources must be a boolean"})
+			return
+		}
+	}
+	if includeSources {
+		provenanceService, ok := h.wikiService.(interfaces.WikiProvenanceService)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "Wiki paragraph sources are not available"})
+			return
+		}
+		detail, detailErr := provenanceService.GetPageWithSources(c.Request.Context(), kbID, slug)
+		if detailErr != nil {
+			if stderrors.Is(detailErr, repository.ErrWikiPageNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": detailErr.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, detail)
 		return
 	}
 
@@ -666,6 +694,8 @@ func (h *WikiPageHandler) RevertPage(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Wiki page was modified by someone else"})
 		case stderrors.Is(err, service.ErrWikiRevertToCurrentVersion):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case stderrors.Is(err, service.ErrWikiRevertSourcesStale):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}

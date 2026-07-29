@@ -26,6 +26,7 @@ export interface WikiPage {
   depth?: number;
   sort_order?: number;
   source_refs: string[];
+  chunk_refs?: string[];
   in_links: string[];
   out_links: string[];
   page_metadata: Record<string, any>;
@@ -36,6 +37,46 @@ export interface WikiPage {
   last_editor_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+// Wiki paragraph provenance is returned only by the page-detail endpoint when
+// include_sources=true. List/search/index responses intentionally stay light.
+export interface WikiBlockSource {
+  id: string;
+  block_id?: string;
+  citation_key?: string;
+  knowledge_id: string;
+  knowledge_attempt?: number;
+  chunk_id: string;
+  chunk_revision?: number;
+  sort_order?: number;
+  document_title?: string;
+  evidence: string;
+  evidence_hash?: string;
+  chunk_content_hash?: string;
+  validation_status: string;
+  created_at?: string;
+}
+
+export interface WikiPageBlock {
+  id: string;
+  block_set_id?: string;
+  logical_block_id?: string;
+  block_type: string;
+  section_path?: string[];
+  sort_order: number;
+  content: string;
+  content_hash?: string;
+  author_type?: string;
+  provenance_status?: string;
+  sources: WikiBlockSource[];
+  created_at?: string;
+}
+
+export interface WikiPageDetail extends WikiPage {
+  // Missing means sources were not requested. An empty array means the page is
+  // a legacy/manual page without a published structured block set.
+  blocks?: WikiPageBlock[];
 }
 
 export interface WikiPageListResponse {
@@ -177,8 +218,17 @@ export function createWikiPage(kbId: string, data: Partial<WikiPage>) {
   return post(`/api/v1/knowledgebase/${kbId}/wiki/pages`, data);
 }
 
-export function getWikiPage(kbId: string, slug: string) {
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`);
+export function getWikiPage(
+  kbId: string,
+  slug: string,
+  options: { includeSources?: boolean } = {},
+): Promise<WikiPageDetail> {
+  const query = new URLSearchParams();
+  if (options.includeSources) query.set('include_sources', 'true');
+  const qs = query.toString();
+  return get(
+    `/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}${qs ? `?${qs}` : ''}`,
+  );
 }
 
 // WikiPageUpdatePayload is a partial update: absent fields keep their stored

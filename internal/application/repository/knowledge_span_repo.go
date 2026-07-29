@@ -21,6 +21,9 @@ import (
 //     in memory rather than recursing through the DB.
 type KnowledgeSpanRepository interface {
 	Upsert(ctx context.Context, row *types.KnowledgeProcessingSpan) error
+	// CreateAttemptRoot atomically allocates the next attempt and inserts its
+	// root span while holding the same generation lock used by Wiki publish.
+	CreateAttemptRoot(ctx context.Context, row *types.KnowledgeProcessingSpan) (int, error)
 	NextAttempt(ctx context.Context, knowledgeID string) (int, error)
 	LatestAttempt(ctx context.Context, knowledgeID string) (int, error)
 	ListByAttempt(ctx context.Context, knowledgeID string, attempt int) ([]types.KnowledgeProcessingSpan, error)
@@ -52,6 +55,45 @@ type knowledgeSpanRepository struct {
 // NewKnowledgeSpanRepository wires the GORM-backed implementation.
 func NewKnowledgeSpanRepository(db *gorm.DB) KnowledgeSpanRepository {
 	return &knowledgeSpanRepository{db: db}
+}
+
+// lockKnowledgeAttemptGeneration serializes attempt creation with Wiki
+// publication for one knowledge. PostgreSQL advisory transaction locks avoid
+// a range-lock gap when no newer span row exists yet. SQLite has a single
+// writer and both operations perform their writes inside the same transaction,
+// so its database write lock provides the equivalent ordering.
+func lockKnowledgeAttemptGeneration(tx *gorm.DB, knowledgeID string) error {
+	if tx == nil || knowledgeID == "" || tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return tx.Exec(
+		"SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", knowledgeID,
+	).Error
+}
+
+func (r *knowledgeSpanRepository) CreateAttemptRoot(
+	ctx context.Context, row *types.KnowledgeProcessingSpan,
+) (int, error) {
+	if row == nil || row.KnowledgeID == "" || row.SpanID == "" {
+		return 0, errors.New("knowledgeSpanRepository.CreateAttemptRoot: knowledge_id and span_id required")
+	}
+	attempt := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockKnowledgeAttemptGeneration(tx, row.KnowledgeID); err != nil {
+			return err
+		}
+		var maxAttempt int
+		if err := tx.Model(&types.KnowledgeProcessingSpan{}).
+			Where("knowledge_id = ?", row.KnowledgeID).
+			Select("COALESCE(MAX(attempt), 0)").
+			Row().Scan(&maxAttempt); err != nil {
+			return err
+		}
+		attempt = maxAttempt + 1
+		row.Attempt = attempt
+		return tx.Create(row).Error
+	})
+	return attempt, err
 }
 
 func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.KnowledgeProcessingSpan) error {

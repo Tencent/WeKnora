@@ -184,6 +184,10 @@ type WikiPage struct {
 	Content string `json:"content" gorm:"type:text"`
 	// One-line summary for index listing
 	Summary string `json:"summary" gorm:"type:text"`
+	// CurrentBlockSetID points to the published immutable block set that
+	// supplies paragraph-level provenance for this page. Empty means a legacy
+	// or manually rewritten page whose content has no structured provenance.
+	CurrentBlockSetID string `json:"current_block_set_id,omitempty" gorm:"column:current_block_set_id;type:varchar(36);index;default:''"`
 	// Alternate names, abbreviations, acronyms or translated names
 	Aliases StringArray `json:"aliases" gorm:"type:json"`
 	// ParentSlug optionally points at the wiki page that should act as this
@@ -303,6 +307,9 @@ type WikiPageRevision struct {
 	Content         string      `json:"content,omitempty" gorm:"type:text"`
 	Summary         string      `json:"summary" gorm:"type:text"`
 	Aliases         StringArray `json:"aliases" gorm:"type:json"`
+	// BlockSetID identifies the immutable provenance snapshot belonging to
+	// this historical page version. Empty is valid for legacy revisions.
+	BlockSetID string `json:"block_set_id,omitempty" gorm:"type:varchar(36);index;default:''"`
 	// Author of THIS version (same semantics as WikiPage.LastEditSource).
 	EditSource string `json:"edit_source" gorm:"type:varchar(16);default:''"`
 	EditorID   string `json:"editor_id" gorm:"type:varchar(64);default:''"`

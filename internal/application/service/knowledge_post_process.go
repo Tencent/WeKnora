@@ -175,7 +175,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
-	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	// Wiki must also run when a reparse produces zero usable text chunks: that
+	// terminal ingest deterministically removes paragraphs sourced from the old
+	// file. For a brand-new empty document the same operation is a cheap no-op.
+	willSpawnWiki := kb.IndexingStrategy.WikiEnabled
 
 	// Question generation now fans out one subtask per plain text chunk
 	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
@@ -351,20 +354,19 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    worker calls FinalizeSubtask once when the per-knowledge op reaches a
 	//    terminal state, so its single counted slot drains on its own path.
 	//
-	//    KNOWN GAP (TODO): EnqueueWikiIngest is fire-and-forget — it logs and
-	//    swallows both pending-op insert failures and trigger-task enqueue
-	//    failures. If BOTH fail (e.g. Postgres down + Redis down) no wiki
-	//    worker will ever run for this knowledge, so its seeded slot strands
-	//    the row in "finalizing". This is the only un-reconciled hole in the
-	//    counter; folding wiki into the shortfall release above will require
-	//    EnqueueWikiIngest to return (enqueued bool, err error) so we can
-	//    distinguish "no worker will ever run" from "worker will run later
-	//    and drain on its own".
 	enqueuedWiki := false
 	if willSpawnWiki {
-		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
-		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
-		enqueuedWiki = true
+		accepted, enqueueErr := enqueueWikiIngestWithFinalizingSlot(
+			ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID,
+			payload.KnowledgeBaseID, payload.KnowledgeID, attempt,
+		)
+		if enqueueErr != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to persist wiki ingest for %s: %v",
+				payload.KnowledgeID, enqueueErr)
+		} else if accepted {
+			logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
+			enqueuedWiki = true
+		}
 	}
 
 	// Reconcile the seeded counter against what was actually enqueued.
@@ -373,8 +375,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// off, a transient enqueue/marshal failure, a nil enqueuer) has no owner
 	// and would otherwise strand the row in "finalizing". Release exactly the
 	// shortfall — each release is a clamped decrement that promotes the row to
-	// "completed" if it brings the counter to zero. Wiki is excluded (see
-	// above). Safe against fast workers: shortfall slots have no draining
+	// "completed" if it brings the counter to zero. Safe against fast workers:
+	// shortfall slots have no draining
 	// task, so total drains == seeded count regardless of ordering.
 	//
 	// Detached ctx: the same reasoning that motivates finalizeSubtaskDetached
@@ -390,8 +392,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if willSpawnSummary {
 			plannedOwned++
 		}
+		if willSpawnWiki {
+			plannedOwned++
+		}
 		actualOwned := enqueuedQuestionCount + enqueuedGraphCount
 		if enqueuedSummary {
+			actualOwned++
+		}
+		if enqueuedWiki {
 			actualOwned++
 		}
 		if shortfall := plannedOwned - actualOwned; shortfall > 0 {

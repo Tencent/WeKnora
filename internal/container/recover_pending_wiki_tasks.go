@@ -107,3 +107,35 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		logger.Infof(ctx, "[WikiRecovery] recreated %d trigger(s) from durable pending queues", recovered)
 	}
 }
+
+// startPendingWikiRecovery runs the durable-outbox dispatcher once at startup
+// and then periodically. Startup recovery alone still leaves a process that
+// stays healthy after a transient Redis enqueue failure with no wake-up; the
+// periodic pass bounds that delay while duplicate triggers remain harmless.
+func startPendingWikiRecovery(
+	db *gorm.DB,
+	task interfaces.TaskEnqueuer,
+	cleaner interfaces.ResourceCleaner,
+) {
+	recoverPendingWikiTasks(db, task)
+	if db == nil || task == nil || cleaner == nil {
+		return
+	}
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				recoverPendingWikiTasks(db, task)
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("PendingWikiOutboxRecovery", func() error {
+		close(stop)
+		return nil
+	})
+}

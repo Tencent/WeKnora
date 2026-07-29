@@ -40,6 +40,10 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 	page.Summary = stripWikiInlineChunkCitations(page.Summary)
 }
 
+func isWikiManualEditSource(source string) bool {
+	return source == types.WikiEditSourceUser || source == types.WikiEditSourceAgent
+}
+
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
@@ -68,6 +72,11 @@ func NewWikiPageService(
 
 // CreatePage creates a new wiki page
 func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	// The generic CRUD endpoint never publishes provenance. Ignore any pointer
+	// supplied by a client so it cannot create a page that references a staged,
+	// foreign, or nonexistent block set. Structured pages are created only by
+	// SavePageWithProvenance, which switches this pointer transactionally.
+	page.CurrentBlockSetID = ""
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
@@ -80,12 +89,30 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Status == "" {
 		page.Status = types.WikiPageStatusPublished
 	}
-	if page.Version == 0 {
-		page.Version = 1
-	}
+	// A newly created page always starts at revision 1; clients cannot inject
+	// an artificial history counter.
+	page.Version = 1
 	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
 	page.LastEditorID, _ = types.UserIDFromContext(ctx)
 	stripWikiPageInlineChunkCitations(page)
+	// A page created through the UI/agent starts with an immutable block set as
+	// well. Its paragraphs are attributed to the editor and intentionally carry
+	// no knowledge-file evidence, so later document cleanup cannot mistake the
+	// page for a legacy single-source page or delete its manual prose.
+	if isWikiManualEditSource(page.LastEditSource) {
+		blocks := splitWikiMarkdownBlocks(page.Content, nil, page.LastEditSource)
+		if summaryBlock := buildWikiSummaryBlock(page.Summary, nil, page.LastEditSource); summaryBlock != nil {
+			blocks = append([]*types.WikiPageBlock{summaryBlock}, blocks...)
+		}
+		if len(blocks) > 0 {
+			return s.SavePageWithProvenance(ctx, page, &types.WikiPageBlockSet{
+				RenderedContent: page.Content,
+				RenderedSummary: page.Summary,
+				GenerationRunID: "manual:" + page.LastEditSource,
+				Blocks:          blocks,
+			})
+		}
+	}
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
@@ -129,12 +156,55 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 
 	// Snapshot user-visible fields BEFORE mutation so we can decide whether
 	// this is a real content change or just bookkeeping.
+	bodyChanged := existing.Content != page.Content
+	summaryChanged := existing.Summary != page.Summary
 	contentChanged := existing.Title != page.Title ||
-		existing.Content != page.Content ||
-		existing.Summary != page.Summary ||
+		bodyChanged ||
+		summaryChanged ||
 		existing.PageType != page.PageType ||
 		existing.Status != page.Status ||
 		!slices.Equal(existing.Aliases, page.Aliases)
+
+	// A human/agent edit to a structured page is an AST-like block diff, not a
+	// reason to discard provenance for the whole page. Exact unchanged blocks
+	// retain their logical IDs and sources; changed/new blocks are authored by
+	// the editor and intentionally have no source. SavePageWithProvenance then
+	// publishes the mixed snapshot atomically with the page revision.
+	editSource := types.WikiEditSourceFromContext(ctx)
+	if (bodyChanged || summaryChanged) && isWikiManualEditSource(editSource) {
+		var currentSet *types.WikiPageBlockSet
+		if existing.CurrentBlockSetID != "" {
+			provenanceRepo, provenanceErr := s.provenanceRepository()
+			if provenanceErr != nil {
+				return nil, provenanceErr
+			}
+			currentSet, err = provenanceRepo.GetBlockSet(
+				ctx, existing.KnowledgeBaseID, existing.CurrentBlockSetID,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("load current wiki blocks for manual edit: %w", err)
+			}
+		}
+		blocks := splitWikiMarkdownBlocks(page.Content, currentSet, editSource)
+		if summaryBlock := buildWikiSummaryBlock(page.Summary, currentSet, editSource); summaryBlock != nil {
+			blocks = append([]*types.WikiPageBlock{summaryBlock}, blocks...)
+		}
+		if len(blocks) > 0 {
+			return s.SavePageWithProvenance(ctx, page, &types.WikiPageBlockSet{
+				RenderedContent: page.Content,
+				RenderedSummary: page.Summary,
+				GenerationRunID: "manual:" + editSource,
+				Blocks:          blocks,
+			})
+		}
+		// An entirely empty manual page has no representable block set. Fall back
+		// to ordinary storage, but clear compatibility refs together with the
+		// pointer. This also upgrades legacy sourced pages safely: a user rewrite
+		// never keeps stale whole-page source_refs from the previous body.
+		page.CurrentBlockSetID = ""
+		page.SourceRefs = nil
+		page.ChunkRefs = nil
+	}
 
 	// Keep an unmutated copy of the version being replaced: it becomes the
 	// revision snapshot when this turns out to be a real content change.
@@ -168,8 +238,18 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 
 	if contentChanged {
 		// The new version is authored by whoever is driving this write.
-		existing.LastEditSource = types.WikiEditSourceFromContext(ctx)
+		existing.LastEditSource = editSource
 		existing.LastEditorID, _ = types.UserIDFromContext(ctx)
+		// A free-form Markdown edit has no trustworthy paragraph-to-source
+		// mapping. Do not leave the new body pointing at the previous version's
+		// immutable block set: that would display citations for text they no
+		// longer support. Reverts are the exception because the historical
+		// revision records the exact block set that belonged to that body.
+		if existing.LastEditSource == types.WikiEditSourceRevert {
+			existing.CurrentBlockSetID = page.CurrentBlockSetID
+		} else if bodyChanged || summaryChanged {
+			existing.CurrentBlockSetID = ""
+		}
 
 		// Snapshot the superseded version and write the new one atomically,
 		// so the content of every past version is preserved and a failed
@@ -213,6 +293,14 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	if err != nil {
 		return fmt.Errorf("get existing page: %w", err)
 	}
+	// A published block set is immutable and is the canonical sourced body.
+	// Rewriting only wiki_pages.content would make the reader display text that
+	// no longer matches its paragraph records. Until link decoration is moved
+	// to render time, keep structured pages unchanged; links already emitted by
+	// the generation prompt remain available.
+	if existing.CurrentBlockSetID != "" {
+		return nil
+	}
 
 	oldOutLinks := existing.OutLinks
 
@@ -248,6 +336,7 @@ func revisionFromPage(p *types.WikiPage) *types.WikiPageRevision {
 		Content:         p.Content,
 		Summary:         p.Summary,
 		Aliases:         append(types.StringArray(nil), p.Aliases...),
+		BlockSetID:      p.CurrentBlockSetID,
 		EditSource:      types.NormalizeWikiEditSource(p.LastEditSource),
 		EditorID:        p.LastEditorID,
 		EditedAt:        p.UpdatedAt,
@@ -278,6 +367,12 @@ func (s *wikiPageService) pruneRevisions(ctx context.Context, pageID string, cur
 // the page is already on — a client-side mistake (usually a stale history
 // list), not a server fault, so handlers map it to 400.
 var ErrWikiRevertToCurrentVersion = errors.New("cannot revert to the current version")
+
+// ErrWikiRevertSourcesStale prevents a historical structured page from
+// resurrecting text whose original file/chunk has since been deleted,
+// disabled, or edited. The user can still copy the old revision manually,
+// but it must not be presented with trusted source markers.
+var ErrWikiRevertSourcesStale = errors.New("cannot revert: the revision's source evidence is no longer current")
 
 // ListRevisions returns the stored historical snapshots for a page (newest
 // first, content omitted) plus the page's current version.
@@ -312,9 +407,9 @@ func (s *wikiPageService) GetRevision(
 
 // RevertPageToVersion rolls the page back to a stored revision by applying
 // that revision's content fields as a regular edit: the pre-revert state is
-// snapshotted, version advances, links are re-parsed. Placement (folder,
-// sort order) and provenance refs keep their current values — a revert is
-// about content, not about undoing directory moves.
+// snapshotted, version advances, and links are re-parsed. Placement (folder
+// and sort order) remains current. When the historical revision has paragraph
+// provenance, its immutable blocks are copied into a fresh current set.
 func (s *wikiPageService) RevertPageToVersion(
 	ctx context.Context, kbID string, slug string, version int,
 ) (*types.WikiPage, error) {
@@ -337,6 +432,40 @@ func (s *wikiPageService) RevertPageToVersion(
 	target.PageType = rev.PageType
 	target.Status = rev.Status
 	target.Aliases = append(types.StringArray(nil), rev.Aliases...)
+	target.CurrentBlockSetID = ""
+
+	// A sourced historical version is republished as a fresh immutable set.
+	// Pointing directly at the old (superseded) set would leave two versions
+	// sharing status/lifecycle state and make deletion lookups skip the revert.
+	if rev.BlockSetID != "" {
+		provenanceRepo, repoOK := s.repo.(interfaces.WikiProvenanceRepository)
+		if !repoOK {
+			return nil, errWikiProvenanceRepositoryUnavailable
+		}
+		historicalSet, setErr := provenanceRepo.GetBlockSet(ctx, kbID, rev.BlockSetID)
+		if setErr != nil {
+			return nil, fmt.Errorf("load historical wiki sources: %w", setErr)
+		}
+		if historicalSet.PageID != page.ID || historicalSet.KnowledgeBaseID != kbID {
+			return nil, ErrWikiRevertSourcesStale
+		}
+		checked, allFresh, freshnessErr := s.refreshWikiBlockSourceValidation(
+			ctx, page.TenantID, kbID, historicalSet,
+		)
+		if freshnessErr != nil {
+			return nil, fmt.Errorf("validate historical wiki sources: %w", freshnessErr)
+		}
+		if !checked || !allFresh {
+			return nil, ErrWikiRevertSourcesStale
+		}
+		revertSet := cloneWikiBlockSetForRepublish(historicalSet)
+		revertSet.RenderedContent = rev.Content
+		revertSet.RenderedSummary = rev.Summary
+		revertSet.GenerationRunID = fmt.Sprintf("revert:%d", version)
+		return s.SavePageWithProvenance(
+			types.WithWikiEditSource(ctx, types.WikiEditSourceRevert), &target, revertSet,
+		)
+	}
 
 	return s.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceRevert), &target)
 }
@@ -414,6 +543,11 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 	// Best-effort — the page is already deleted and cannot be rolled back.
 	if err := s.repo.DeleteRevisionsByPage(ctx, page.ID); err != nil {
 		logger.Warnf(ctx, "delete wiki page revisions for %s failed: %v", page.ID, err)
+	}
+	if provenanceRepo, ok := s.repo.(interfaces.WikiProvenanceRepository); ok {
+		if err := provenanceRepo.DeleteBlockSetsByPage(ctx, page.ID); err != nil {
+			logger.Warnf(ctx, "delete wiki provenance for %s failed: %v", page.ID, err)
+		}
 	}
 
 	// Delete synced chunk

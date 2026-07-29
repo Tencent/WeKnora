@@ -2272,11 +2272,10 @@ func (s *knowledgeService) ReparseKnowledge(
 	// previous run's "failed" badge lingering; (b) the worker's
 	// fallback path won't double-allocate when payload.Attempt is
 	// already set on the queued task.
-	reparseAttempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, existing.ID, ""); err == nil && root != nil {
-		reparseAttempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
+	reparseAttempt, err := s.openKnowledgeAttempt(ctx, existing.ID, "")
+	if err != nil {
+		logger.Errorf(ctx, "[Reparse] failed to allocate processing attempt for %s: %v", existing.ID, err)
+		return nil, err
 	}
 
 	// Get knowledge base configuration
@@ -2352,7 +2351,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			return nil, err
 		}
 
-		if _, err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		if _, err := s.enqueueManualProcessing(ctx, existing, meta.Content, true, reparseAttempt); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
 			existing.ParseStatus = "failed"
 			existing.ErrorMessage = "Failed to enqueue processing task"
@@ -2983,11 +2982,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	// Without it attemptFromCtx stays 0, so processChunks drops all stage
 	// spans and KnowledgePostProcess falls back to LatestAttempt — piling
 	// this run's summary/wiki subspans onto the previous attempt's trace.
-	attempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-		attempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		attempt, err = s.openKnowledgeAttempt(ctx, knowledge.ID, payload.LangfuseTraceID)
+		if err != nil {
+			logger.Errorf(ctx, "ProcessManualUpdate: failed to allocate processing attempt for %s: %v", knowledge.ID, err)
+			return err
+		}
 	}
 	ctx = withAttempt(ctx, attempt)
 
@@ -3123,8 +3124,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// fall back to OpenAttempt.
 	attempt := payload.Attempt
 	if attempt <= 0 {
-		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-			attempt = n
+		attempt, err = s.openKnowledgeAttempt(ctx, knowledge.ID, payload.LangfuseTraceID)
+		if err != nil {
+			logger.Errorf(ctx, "ProcessDocument: failed to allocate processing attempt for %s: %v", knowledge.ID, err)
+			return err
 		}
 	}
 	ctx = withAttempt(ctx, attempt)

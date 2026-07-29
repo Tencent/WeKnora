@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -70,7 +71,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge failed to mark as deleting")
-		// Continue with deletion even if marking fails
+		return fmt.Errorf("mark knowledge %s as deleting: %w", id, err)
 	} else {
 		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
@@ -101,6 +102,16 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
 	}
 	imageURLs := collectImageURLs(ctx, imageInfoStrs)
+
+	// Persist Wiki reconciliation before any irreversible knowledge cleanup.
+	// Immediate paragraph removal below is useful for latency, but the durable
+	// retract row is the crash/retry safety net. If that row cannot be written,
+	// leave the knowledge and its chunks intact so the caller can retry safely.
+	if kb != nil && kb.IsWikiEnabled() {
+		if err := s.cleanupWikiOnKnowledgeDelete(ctx, knowledge); err != nil {
+			return err
+		}
+	}
 
 	wg := errgroup.Group{}
 	// Delete knowledge embeddings from vector store.
@@ -139,12 +150,6 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		})
 	} else {
 		logger.Infof(ctx, "Knowledge %s has no embedding model, skipping vector store cleanup", knowledge.ID)
-	}
-
-	// Clean wiki pages before deleting chunks so cleanup can still identify
-	// which chunk_refs belonged to this source document.
-	if kb != nil && kb.IsWikiEnabled() {
-		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
 	}
 
 	// Delete all chunks associated with this knowledge
@@ -205,17 +210,20 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 
 // cleanupWikiOnKnowledgeDelete handles wiki pages when a source document is deleted.
 //
-// There are three sources of truth we must keep consistent:
+// There are four sources of truth we must keep consistent:
 //   - The knowledge row (being soft-deleted right now by the caller)
-//   - Wiki pages whose source_refs include this knowledge
+//   - Legacy Wiki pages whose source_refs include this knowledge
+//   - Structured Wiki blocks whose source rows include this knowledge
 //   - Pending/in-flight wiki_ingest tasks that may create *new* pages pointing at it
 //
-// The function is deliberately best-effort and idempotent:
+// The function is idempotent. Its durable retract write is mandatory;
+// synchronous page reconciliation remains a best-effort latency shortcut:
 //   - It writes a tombstone + scrubs pending ingest ops so new pages cannot be
 //     born with a stale source_ref (guards (a) queued ingest and (b) ingest
 //     tasks mid-LLM call — both consult the tombstone before writing).
-//   - It immediately reconciles any pages already present (delete-if-only-ref
-//     or strip-ref-if-multi).
+//   - It immediately reconciles any pages already present (deterministic block
+//     removal for structured pages; delete-if-only-ref or strip-ref-if-multi
+//     for legacy pages).
 //   - It *unconditionally* enqueues a retract task. Crucially we DO NOT gate
 //     enqueue on "pages currently exist": in the ingest/delete race the
 //     knowledge may have pages that exist only after this function returns
@@ -223,14 +231,16 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //     created them). The retract handler re-queries ListPagesBySourceRef at
 //     run time, so even with an empty PageSlugs it will do the right thing —
 //     and at worst it's a cheap no-op.
-func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, knowledge *types.Knowledge) {
+func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(
+	ctx context.Context, knowledge *types.Knowledge,
+) error {
 	if knowledge == nil {
-		return
+		return nil
 	}
 	kbID := knowledge.KnowledgeBaseID
 	knowledgeID := knowledge.ID
 	if kbID == "" || knowledgeID == "" {
-		return
+		return nil
 	}
 
 	// (1) Tombstone + scrub pending ingest — must happen first so any
@@ -254,12 +264,76 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	}
 	docSummary := knowledge.Description
 
-	// (2) Immediate reconciliation for pages already present. If ingest
-	// hasn't run yet this simply finds nothing; that's fine — see (3).
+	// (2) Immediate reconciliation for pages already present. The legacy
+	// page-level source_refs and the structured block-source rows are queried
+	// independently, then unioned by slug. source_refs is a compatibility cache
+	// and may drift; wiki_block_sources is authoritative for structured pages.
+	// If ingest hasn't run yet both lookups simply find nothing; that's fine —
+	// see (3).
 	pages, err := s.wikiRepo.ListBySourceRef(ctx, kbID, knowledgeID)
 	if err != nil {
 		logger.Warnf(ctx, "wiki cleanup: failed to list pages by source ref %s: %v", knowledgeID, err)
 		pages = nil
+	}
+
+	pagesBySlug := make(map[string]*types.WikiPage, len(pages))
+	dedupedPages := make([]*types.WikiPage, 0, len(pages))
+	for _, page := range pages {
+		if page == nil || page.Slug == "" {
+			continue
+		}
+		if _, exists := pagesBySlug[page.Slug]; exists {
+			continue
+		}
+		pagesBySlug[page.Slug] = page
+		dedupedPages = append(dedupedPages, page)
+	}
+	pages = dedupedPages
+
+	if provenanceRepo, ok := s.wikiRepo.(interfaces.WikiProvenanceRepository); ok {
+		blockRefs, provenanceErr := provenanceRepo.ListBlockReferencesByKnowledge(ctx, kbID, knowledgeID)
+		if provenanceErr != nil {
+			logger.Warnf(ctx, "wiki cleanup: failed to list block sources for knowledge %s: %v", knowledgeID, provenanceErr)
+		} else {
+			for _, ref := range blockRefs {
+				if ref == nil || ref.PageSlug == "" {
+					continue
+				}
+				if existing, exists := pagesBySlug[ref.PageSlug]; exists {
+					// The reverse lookup joins through wiki_pages.current_block_set_id,
+					// so it is authoritative even if an older page projection did not
+					// carry the pointer.
+					if existing.CurrentBlockSetID == "" {
+						existing.CurrentBlockSetID = ref.BlockSetID
+					}
+					continue
+				}
+
+				// Load the full page so folder and summary metadata are still
+				// available to the existing cleanup flow. If that read races or
+				// fails, the reverse-reference row still gives us enough identity
+				// to attempt deterministic block cleanup by slug.
+				page := &types.WikiPage{
+					ID:                ref.PageID,
+					KnowledgeBaseID:   kbID,
+					Slug:              ref.PageSlug,
+					CurrentBlockSetID: ref.BlockSetID,
+				}
+				if s.wikiService != nil {
+					loaded, loadErr := s.wikiService.GetPageBySlug(ctx, kbID, ref.PageSlug)
+					if loadErr != nil {
+						logger.Warnf(ctx, "wiki cleanup: failed to load block-sourced page %s: %v", ref.PageSlug, loadErr)
+					} else if loaded != nil {
+						page = loaded
+					}
+				}
+				if page.CurrentBlockSetID == "" {
+					page.CurrentBlockSetID = ref.BlockSetID
+				}
+				pagesBySlug[ref.PageSlug] = page
+				pages = append(pages, page)
+			}
+		}
 	}
 	sourceChunkRefs := s.wikiChunkRefsForKnowledge(ctx, knowledge)
 
@@ -273,15 +347,77 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		}
 	}
 
+	// Persist the retry safety net before changing any Wiki page. We already
+	// completed the read-only legacy+structured discovery above, so include all
+	// known slugs and folders in the op. The worker also re-queries at run time,
+	// which covers pages created after this snapshot or lookups that failed here.
+	knownSlugs := make([]string, 0, len(pages))
+	affectedFolderIDs := make([]string, 0, len(pages))
+	for _, page := range pages {
+		if page == nil || page.Slug == "" || page.PageType == types.WikiPageTypeIndex {
+			continue
+		}
+		knownSlugs = append(knownSlugs, page.Slug)
+		if page.FolderID != "" {
+			affectedFolderIDs = append(affectedFolderIDs, page.FolderID)
+		}
+	}
+	lang, _ := types.LanguageFromContext(ctx)
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	accepted, enqueueErr := EnqueueWikiRetract(ctx, s.task, s.taskPendingRepo, WikiRetractPayload{
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     knowledgeID,
+		DocTitle:        docTitle,
+		DocSummary:      docSummary,
+		Language:        lang,
+		PageSlugs:       knownSlugs,
+		FolderIDs:       uniqueWikiFolderIDs(affectedFolderIDs),
+	})
+	if enqueueErr != nil {
+		return fmt.Errorf("persist Wiki retract for knowledge %s: %w", knowledgeID, enqueueErr)
+	}
+	if !accepted {
+		logger.Infof(ctx, "wiki cleanup: knowledge base %s is no longer active; skip retract", kbID)
+		return nil
+	}
+	logger.Infof(ctx, "wiki cleanup: persisted retract task for knowledge %s (%d known slugs: %v)",
+		knowledgeID, len(knownSlugs), knownSlugs)
+
 	var deletedSlugs []string
 	var retractSlugs []string
-	var affectedFolderIDs []string
+	var provenanceUpdatedSlugs []string
 	for _, page := range pages {
 		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
-		if page.FolderID != "" {
-			affectedFolderIDs = append(affectedFolderIDs, page.FolderID)
+
+		// Structured pages can be cleaned deterministically: remove every
+		// paragraph that cites this document and republish the remaining block
+		// set. Legacy pages keep the historical page-level LLM retract below.
+		if provenanceService, ok := s.wikiService.(interfaces.WikiProvenanceService); ok && page.CurrentBlockSetID != "" {
+			handled, deleted, provenanceErr := provenanceService.RemoveKnowledgeFromPage(
+				ctx, kbID, page.Slug, knowledgeID,
+			)
+			if provenanceErr != nil {
+				// Never run the legacy whole-page path against a structured page:
+				// source_refs is only a compatibility cache and an error here could
+				// otherwise delete unrelated sourced paragraphs. Queue the slug so
+				// the async retract worker retries the same deterministic operation.
+				logger.Warnf(ctx, "wiki cleanup: block-level cleanup failed for page %s: %v; queued for deterministic retry", page.Slug, provenanceErr)
+				retractSlugs = append(retractSlugs, page.Slug)
+				continue
+			} else if handled {
+				if deleted {
+					deletedSlugs = append(deletedSlugs, page.Slug)
+				} else {
+					provenanceUpdatedSlugs = append(provenanceUpdatedSlugs, page.Slug)
+				}
+				continue
+			}
+			logger.Warnf(ctx, "wiki cleanup: structured page %s was not handled; queued for deterministic retry", page.Slug)
+			retractSlugs = append(retractSlugs, page.Slug)
+			continue
 		}
 
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
@@ -307,28 +443,16 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		logger.Infof(ctx, "wiki cleanup: deleted %d pages after knowledge %s deletion: %v",
 			len(deletedSlugs), knowledgeID, deletedSlugs)
 	}
+	if len(provenanceUpdatedSlugs) > 0 {
+		logger.Infof(ctx, "wiki cleanup: removed sourced blocks from %d pages after knowledge %s deletion: %v",
+			len(provenanceUpdatedSlugs), knowledgeID, provenanceUpdatedSlugs)
+	}
 
-	allAffectedSlugs := append(retractSlugs, deletedSlugs...)
-
-	// (3) Unconditionally enqueue the retract task. See function comment —
-	// an empty PageSlugs is not a bug, it's the signal "re-query at run
-	// time". The handler will ListPagesBySourceRef again, pick up any
-	// pages that materialised after we looked, and also rebuild the index
-	// so the knowledge's disappearance is reflected in the UI.
-	lang, _ := types.LanguageFromContext(ctx)
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	EnqueueWikiRetract(ctx, s.task, s.taskPendingRepo, WikiRetractPayload{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		KnowledgeID:     knowledgeID,
-		DocTitle:        docTitle,
-		DocSummary:      docSummary,
-		Language:        lang,
-		PageSlugs:       allAffectedSlugs,
-		FolderIDs:       uniqueWikiFolderIDs(affectedFolderIDs),
-	})
-	logger.Infof(ctx, "wiki cleanup: enqueued retract task for knowledge %s (%d known slugs: %v)",
-		knowledgeID, len(allAffectedSlugs), allAffectedSlugs)
+	if len(retractSlugs) > 0 {
+		logger.Infof(ctx, "wiki cleanup: queued asynchronous content reconciliation for %d legacy/failed pages: %v",
+			len(retractSlugs), retractSlugs)
+	}
+	return nil
 }
 
 func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowledge *types.Knowledge) map[string]bool {
@@ -510,7 +634,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).WithField("knowledge_id", knowledge.ID).
 				Errorf("DeleteKnowledgeList failed to mark as deleting")
-			// Continue with deletion even if marking fails
+			return fmt.Errorf("mark knowledge %s as deleting: %w", knowledge.ID, err)
 		}
 		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
 			inFlightIDs = append(inFlightIDs, knowledge.ID)
@@ -555,6 +679,19 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		kbImageURLs[kbID] = collectImageURLs(ctx, infos)
 	}
 
+	// Persist every required Wiki retract before starting any irreversible
+	// vector/chunk/graph cleanup. cleanupWikiOnKnowledgeDelete itself persists
+	// each row before its synchronous paragraph cleanup, so an outbox failure
+	// cannot leave a page changed without a durable retry path.
+	for _, knowledge := range knowledgeList {
+		kb := knowledgeBases[knowledge.KnowledgeBaseID]
+		if kb != nil && kb.IsWikiEnabled() {
+			if err := s.cleanupWikiOnKnowledgeDelete(ctx, knowledge); err != nil {
+				return fmt.Errorf("prepare Wiki cleanup for knowledge %s: %w", knowledge.ID, err)
+			}
+		}
+	}
+
 	wg := errgroup.Group{}
 	// 2. Delete knowledge embeddings from vector store
 	wg.Go(func() error {
@@ -594,16 +731,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// 3. Clean wiki pages before deleting chunks so cleanup can still identify
-	// which chunk_refs belonged to each source document.
-	for _, knowledge := range knowledgeList {
-		kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-		if kb != nil && kb.IsWikiEnabled() {
-			s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
-		}
-	}
-
-	// 4. Delete all chunks associated with this knowledge
+	// 3. Delete all chunks associated with this knowledge
 	wg.Go(func() error {
 		if err := s.chunkService.DeleteByKnowledgeList(ctx, ids); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete chunks failed")

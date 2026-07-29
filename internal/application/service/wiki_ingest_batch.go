@@ -442,7 +442,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				//     concurrent ingest may have already created pages by now
 				//   - a previous ingest batch created new pages after cleanup
 				//     captured its snapshot
-				// Re-querying ListPagesBySourceRef here unions the caller's
+				// Re-querying both legacy source_refs and structured block sources
+				// here unions the caller's
 				// slugs with whatever currently references the knowledge, so
 				// no page is left un-retracted. It also lets us support
 				// callers that deliberately enqueue retract with empty
@@ -462,24 +463,28 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					}
 				}
 				if op.KnowledgeID != "" {
-					livePages, err := s.wikiService.ListPagesBySourceRef(mapCtx, payload.KnowledgeBaseID, op.KnowledgeID)
+					liveSlugs, err := s.listExistingPageSlugsForKnowledge(
+						mapCtx, payload.KnowledgeBaseID, op.KnowledgeID,
+					)
 					if err != nil {
-						logger.Warnf(mapCtx, "wiki ingest: retract lookup failed for %s: %v", op.KnowledgeID, err)
-					} else {
-						for _, p := range livePages {
-							if p == nil || p.Slug == "" {
-								continue
-							}
-							// Index pages never carry real source_refs;
-							// if they somehow surface here, skip — the
-							// reduce stage would be a no-op anyway.
-							if p.PageType == types.WikiPageTypeIndex {
-								continue
-							}
-							slugSet[p.Slug] = struct{}{}
-							if p.FolderID != "" {
-								folderSet[p.FolderID] = struct{}{}
-							}
+						// Keep the durable row for the normal in-batch retry/dead-letter
+						// path. Returning this error from the goroutine is not enough:
+						// ProcessWikiIngest intentionally waits for all map workers and
+						// settles failures per operation, rather than failing the whole
+						// batch through errgroup.Wait.
+						mapMu.Lock()
+						failedOps = append(failedOps, op)
+						mapMu.Unlock()
+						logger.Warnf(mapCtx, "wiki retract lookup failed for %s: %v", op.KnowledgeID, err)
+						return nil
+					}
+					for slug := range liveSlugs {
+						slugSet[slug] = struct{}{}
+						page, pageErr := s.wikiService.GetPageBySlug(
+							mapCtx, payload.KnowledgeBaseID, slug,
+						)
+						if pageErr == nil && page != nil && page.FolderID != "" {
+							folderSet[page.FolderID] = struct{}{}
 						}
 					}
 				}
@@ -529,7 +534,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
-				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
+				previewAction := "ingest"
+				if result.SourceInvalidated {
+					previewAction = "invalidate"
+				}
+				docPreview = append(docPreview, fmt.Sprintf("%s[%s]: title=%s summary=%s", previewAction, previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
 				for _, u := range updates {
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
 				}
@@ -549,13 +558,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// err == nil && result == nil: mapOneDocument skipped this
 				// doc at a terminal, non-retryable state (knowledge
 				// deleted / no chunks / insufficient text). It produces no
-				// docResult and is not a failedOp, so neither the success
-				// nor the dead-letter drain path will fire. Release the
-				// finalizing slot here so the row doesn't hang in
-				// "finalizing" until the housekeeping sweep marks it
-				// failed. The matching +1 was seeded by
-				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				// docResult and is not a failedOp. Its queue row and any owned
+				// finalizing slot are settled together after trim succeeds.
 			}
 			return nil
 		})
@@ -707,7 +711,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 	for _, r := range docResults {
-		if r != nil {
+		if r == nil {
+			continue
+		}
+		if r.SourceInvalidated {
+			wikiActivityActions["retract"]++
+		} else {
 			wikiActivityActions["ingest"]++
 		}
 	}
@@ -748,8 +757,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if len(allPagesAffected) > 0 || len(docResults) > 0 || retractHandled > 0 || len(retractFolderIDs) > 0 {
 		changes := make([]wikiFinalizeChange, 0, len(docResults)+len(pendingOps))
 		for _, r := range docResults {
+			action := wikiFinalizeAdded
+			if r.SourceInvalidated {
+				action = wikiFinalizeRemoved
+			}
 			changes = append(changes, wikiFinalizeChange{
-				Action: wikiFinalizeAdded, DocTitle: r.DocTitle, DocSummary: r.Summary,
+				Action: action, DocTitle: r.DocTitle, DocSummary: r.Summary,
 			})
 		}
 		for _, op := range pendingOps {
@@ -775,20 +788,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	for _, r := range docResults {
 		if r == nil {
 			continue
-		}
-		// A successfully-mapped doc is terminal for its wiki op, so
-		// release the knowledge's slot in pending_subtasks_count (the row
-		// promotes to completed once the counter hits zero). Done before
-		// the WikiSpan nil-check below so a doc that had no attempt to
-		// attach a span to still drains its counter slot. The matching +1
-		// is seeded by KnowledgePostProcess.SetFinalizing.
-		//
-		// EXCEPT docs with an unapplied slug (contended lock or reduce
-		// error): those are re-queued below, so keep their finalizing slot
-		// held — the retry (or the dead-letter drain in requeueFailedOps)
-		// releases it once the op reaches a real terminal state.
-		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
-			s.finalizeWikiSubtask(ctx, r.KnowledgeID)
 		}
 		if r.WikiSpan == nil {
 			continue
@@ -856,8 +855,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// requeueFailedOps path can decide between retry and dead-letter.
 	failedIDSet := make(map[int64]struct{}, len(failedOps))
 	for _, op := range failedOps {
-		if op.dbID != 0 {
-			failedIDSet[op.dbID] = struct{}{}
+		for _, id := range op.pendingRowIDs() {
+			failedIDSet[id] = struct{}{}
 		}
 	}
 	trimIDs := make([]int64, 0, len(peekedIDs))
@@ -869,6 +868,24 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	settleCtx, settleCancel := wikiIngestCleanupContext(ctx)
 	trimErr := s.trimPendingList(settleCtx, trimIDs)
+	if trimErr == nil {
+		// A finalizing slot is owned by the durable op row, not by every Wiki
+		// refresh. Release it only after every row collapsed into the successful
+		// canonical op has actually been deleted. Failed groups remain queued and
+		// are finalized only if requeueFailedOps later dead-letters them.
+		for _, op := range pendingOps {
+			failed := false
+			for _, id := range op.pendingRowIDs() {
+				if _, exists := failedIDSet[id]; exists {
+					failed = true
+					break
+				}
+			}
+			if !failed {
+				s.finalizeWikiOpSubtasks(settleCtx, op)
+			}
+		}
+	}
 
 	// Process failed ops: increment fail_count and dead-letter once
 	// the cap is hit. Must come AFTER trim so successful siblings are
@@ -1185,10 +1202,11 @@ func (s *wikiIngestService) mapOneDocument(
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
+	chunks = enabledWikiIngestChunks(chunks)
 	if len(chunks) == 0 {
-		logger.Infof(ctx, "wiki ingest: document %s has no chunks, skip", knowledgeID)
-		s.tracker().SkipSpan(ctx, wikiSpan, "no_chunks")
-		return nil, nil, nil
+		return s.mapWikiDocumentWithoutUsableContent(
+			ctx, payload, op, batchCtx, wikiSpan, "no_enabled_chunks",
+		)
 	}
 
 	content := reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks)
@@ -1204,11 +1222,12 @@ func (s *wikiIngestService) mapOneDocument(
 	// only image markup left and would happily fabricate entities/concepts.
 	if !hasSufficientTextContent(content) {
 		logger.Warnf(ctx,
-			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
+			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), retracting stale sourced content",
 			knowledgeID, rawRuneCount,
 		)
-		s.tracker().SkipSpan(ctx, wikiSpan, "insufficient_text_content")
-		return nil, nil, nil
+		return s.mapWikiDocumentWithoutUsableContent(
+			ctx, payload, op, batchCtx, wikiSpan, "insufficient_text_content",
+		)
 	}
 
 	docTitle := knowledgeID
@@ -1231,7 +1250,13 @@ func (s *wikiIngestService) mapOneDocument(
 	// does not leak into citation strings that downstream LLM prompts may
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
-	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	oldPageSlugs, err := s.listExistingPageSlugsForKnowledge(
+		ctx, payload.KnowledgeBaseID, knowledgeID,
+	)
+	if err != nil {
+		s.tracker().FailSpan(ctx, wikiSpan, "LIST_SOURCE_PAGES_FAILED", err.Error(), err)
+		return nil, nil, fmt.Errorf("list existing wiki pages for knowledge %s: %w", knowledgeID, err)
+	}
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
 	// On failure we fall back to the legacy single-shot extractor so the doc
@@ -1438,31 +1463,40 @@ func (s *wikiIngestService) mapOneDocument(
 	if strings.TrimSpace(docSummary) == "" {
 		docSummary = sumLine
 	}
+	allProvenanceChunks := wikiTextChunkIDs(chunks)
 	updates = append(updates, SlugUpdate{
-		Slug:        summarySlug,
-		Type:        types.WikiPageTypeSummary,
-		DocTitle:    docTitle,
-		KnowledgeID: knowledgeID,
-		SourceRef:   sourceRef,
-		Language:    lang,
-		SummaryLine: sumLine,
-		SummaryBody: sumBody,
+		Slug:             summarySlug,
+		Type:             types.WikiPageTypeSummary,
+		DocTitle:         docTitle,
+		KnowledgeID:      knowledgeID,
+		KnowledgeAttempt: op.Attempt,
+		SourceRef:        sourceRef,
+		Language:         lang,
+		SummaryLine:      sumLine,
+		SummaryBody:      sumBody,
+		ProvenanceChunks: allProvenanceChunks,
 	})
 	extractedPages = append(extractedPages, wikiIngestPageRef{Slug: summarySlug, Title: docTitle})
 
 	// Entities
 	for _, item := range extractedEntities {
 		if item.Slug != "" {
+			provenanceChunks := item.SourceChunks
+			if len(provenanceChunks) == 0 {
+				provenanceChunks = allProvenanceChunks
+			}
 			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeEntity,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
+				Slug:             item.Slug,
+				Type:             types.WikiPageTypeEntity,
+				Item:             item,
+				DocTitle:         docTitle,
+				KnowledgeID:      knowledgeID,
+				KnowledgeAttempt: op.Attempt,
+				SourceRef:        sourceRef,
+				Language:         lang,
+				SourceChunks:     item.SourceChunks,
+				ProvenanceChunks: provenanceChunks,
+				DocSummary:       docSummary,
 			})
 		}
 	}
@@ -1470,16 +1504,22 @@ func (s *wikiIngestService) mapOneDocument(
 	// Concepts
 	for _, item := range extractedConcepts {
 		if item.Slug != "" {
+			provenanceChunks := item.SourceChunks
+			if len(provenanceChunks) == 0 {
+				provenanceChunks = allProvenanceChunks
+			}
 			updates = append(updates, SlugUpdate{
-				Slug:         item.Slug,
-				Type:         types.WikiPageTypeConcept,
-				Item:         item,
-				DocTitle:     docTitle,
-				KnowledgeID:  knowledgeID,
-				SourceRef:    sourceRef,
-				Language:     lang,
-				SourceChunks: item.SourceChunks,
-				DocSummary:   docSummary,
+				Slug:             item.Slug,
+				Type:             types.WikiPageTypeConcept,
+				Item:             item,
+				DocTitle:         docTitle,
+				KnowledgeID:      knowledgeID,
+				KnowledgeAttempt: op.Attempt,
+				SourceRef:        sourceRef,
+				Language:         lang,
+				SourceChunks:     item.SourceChunks,
+				ProvenanceChunks: provenanceChunks,
+				DocSummary:       docSummary,
 			})
 		}
 	}
@@ -1535,6 +1575,7 @@ func (s *wikiIngestService) mapOneDocument(
 				RetractDocContent: priorContribution,
 				DocTitle:          docTitle,
 				KnowledgeID:       knowledgeID,
+				KnowledgeAttempt:  op.Attempt,
 				Language:          lang,
 			})
 			continue
@@ -1546,6 +1587,7 @@ func (s *wikiIngestService) mapOneDocument(
 			RetractDocContent: content,
 			DocTitle:          docTitle,
 			KnowledgeID:       knowledgeID,
+			KnowledgeAttempt:  op.Attempt,
 			Language:          lang,
 		})
 	}
@@ -1584,11 +1626,94 @@ func (s *wikiIngestService) mapOneDocument(
 
 	return &docIngestResult{
 		KnowledgeID: knowledgeID,
+		Attempt:     op.Attempt,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
+	}, updates, nil
+}
+
+func enabledWikiIngestChunks(chunks []*types.Chunk) []*types.Chunk {
+	enabled := make([]*types.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil || !chunk.IsEnabled {
+			continue
+		}
+		enabled = append(enabled, chunk)
+	}
+	return enabled
+}
+
+// mapWikiDocumentWithoutUsableContent deterministically invalidates every
+// existing page contribution from a document whose current chunk set contains
+// no usable source text. Returning a successful doc result (rather than a
+// terminal skip) lets reduce remove structured paragraph blocks and lets the
+// normal ingest settlement path drain the queued operation.
+func (s *wikiIngestService) mapWikiDocumentWithoutUsableContent(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	op WikiPendingOp,
+	batchCtx *WikiBatchContext,
+	wikiSpan *Span,
+	reason string,
+) (*docIngestResult, []SlugUpdate, error) {
+	slugSet, err := s.listExistingPageSlugsForKnowledge(
+		ctx, payload.KnowledgeBaseID, op.KnowledgeID,
+	)
+	if err != nil {
+		s.tracker().FailSpan(ctx, wikiSpan, "LIST_SOURCE_PAGES_FAILED", err.Error(), err)
+		return nil, nil, fmt.Errorf("list wiki pages for source invalidation: %w", err)
+	}
+
+	docTitle := op.KnowledgeID
+	if s.knowledgeSvc != nil {
+		if knowledge, getErr := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, op.KnowledgeID); getErr == nil && knowledge != nil && knowledge.Title != "" {
+			docTitle = knowledge.Title
+		}
+	}
+	priorContribution := ""
+	if batchCtx != nil {
+		priorContribution = batchCtx.SummaryContentByKnowledgeID(ctx, op.KnowledgeID)
+	}
+
+	slugs := make([]string, 0, len(slugSet))
+	for slug := range slugSet {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	updates := make([]SlugUpdate, 0, len(slugs))
+	for _, slug := range slugs {
+		if slug == "" || slug == "index" {
+			continue
+		}
+		updates = append(updates, SlugUpdate{
+			Slug:              slug,
+			Type:              "retract",
+			RetractDocContent: priorContribution,
+			DocTitle:          docTitle,
+			KnowledgeID:       op.KnowledgeID,
+			KnowledgeAttempt:  op.Attempt,
+			Language:          types.LanguageLocaleName(op.Language),
+		})
+	}
+
+	logger.Infof(ctx,
+		"wiki ingest: invalidating %d sourced page(s) for knowledge %s (%s)",
+		len(updates), op.KnowledgeID, reason,
+	)
+	return &docIngestResult{
+		KnowledgeID:       op.KnowledgeID,
+		Attempt:           op.Attempt,
+		DocTitle:          docTitle,
+		SourceInvalidated: true,
+		MapStats: types.JSONMap{
+			"source_invalidated":  true,
+			"invalidation_reason": reason,
+			"updates":             len(updates),
+		},
+		WikiSpan: wikiSpan,
 	}, updates, nil
 }
 
@@ -1688,6 +1813,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates, err = s.filterCurrentWikiAttempts(ctx, updates)
+	if err != nil {
+		return false, "", false, err
+	}
 	if len(updates) == 0 {
 		return false, "", false, nil
 	}
@@ -1810,18 +1939,66 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 	}
 
+	provenanceService, _ := provenanceServiceForWikiIngest(s.wikiService)
+	var previousBlockSet *types.WikiPageBlockSet
+	if provenanceService != nil && exists && page.CurrentBlockSetID != "" {
+		previousBlockSet, err = provenanceService.GetCurrentPageBlockSet(ctx, kbID, page.ID)
+		if err != nil {
+			return false, affectedType, false, fmt.Errorf("load current wiki provenance: %w", err)
+		}
+	}
+
+	// A retract-only update on a structured page is deterministic. Remove the
+	// document's paragraph blocks directly instead of asking the editor model
+	// to infer which prose came from the deleted/reparsed source.
+	if summaryUpdate == nil && len(additions) == 0 && len(retracts) > 0 &&
+		provenanceService != nil && exists && page.CurrentBlockSetID != "" {
+		handledAny := false
+		seenKnowledge := make(map[string]struct{}, len(retracts))
+		for _, retract := range retracts {
+			if retract.KnowledgeID == "" {
+				continue
+			}
+			if _, seen := seenKnowledge[retract.KnowledgeID]; seen {
+				continue
+			}
+			seenKnowledge[retract.KnowledgeID] = struct{}{}
+			handled, deleted, removeErr := provenanceService.RemoveKnowledgeFromPage(
+				ctx, kbID, slug, retract.KnowledgeID,
+			)
+			if removeErr != nil {
+				return false, affectedType, false, removeErr
+			}
+			if handled {
+				handledAny = true
+			}
+			if deleted {
+				return true, "retract", false, nil
+			}
+		}
+		if handledAny {
+			return true, "retract", false, nil
+		}
+	}
+
 	if summaryUpdate != nil {
 		page.Title = summaryUpdate.DocTitle + " - Summary"
 		page.Content = summaryUpdate.SummaryBody
 		page.Summary = summaryUpdate.SummaryLine
 		page.PageType = types.WikiPageTypeSummary
 		page.SourceRefs = appendUnique(page.SourceRefs, summaryUpdate.SourceRef)
-		// Summary pages don't carry chunk-level citations (they are document-
-		// level synopses generated from the whole content). Clear any stale
-		// chunk refs that may remain if this slug was once an entity page
-		// and got converted to a summary page.
-		page.ChunkRefs = types.StringArray{}
 		changed = true
+		if provenanceService != nil {
+			blockSet, buildErr := s.buildWikiPageBlockSet(
+				ctx, chatModel, page, previousBlockSet, nil, nil,
+				summaryUpdate, tenantID, summaryUpdate.Language,
+			)
+			if buildErr != nil {
+				return false, affectedType, false, buildErr
+			}
+			page, err = provenanceService.SavePageWithProvenance(ctx, page, blockSet)
+			return err == nil, affectedType, false, err
+		}
 
 		if exists {
 			_, err = s.wikiService.UpdatePage(ctx, page)
@@ -2037,7 +2214,25 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"InstructionScope":        "wiki_content",
 		})
 
-		if err == nil && updatedContent != "" {
+		if err != nil {
+			// Preserve additionFailed for summary dead-link sanitization, but also
+			// propagate the failure so every contributing document stays in the
+			// durable retry/dead-letter lane. Consuming the row here would leave
+			// stale reparse/retract content permanently published.
+			if len(additions) > 0 {
+				additionFailed = true
+			}
+			return false, affectedType, additionFailed,
+				fmt.Errorf("generate wiki update for slug %s: %w", slug, err)
+		}
+		if strings.TrimSpace(updatedContent) == "" {
+			if len(additions) > 0 {
+				additionFailed = true
+			}
+			return false, affectedType, additionFailed,
+				fmt.Errorf("generate wiki update for slug %s: empty model output", slug)
+		}
+		{
 			// Translate request-local handles (ref-N) the model copied from the
 			// encoded context back to their real slugs BEFORE the content is
 			// parsed/stored, so out_links reflect real pages again.
@@ -2052,20 +2247,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 				page.Summary = updatedSummary
 			}
 			changed = true
-		} else if err != nil {
-			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
-			// Flag addition failures so the batch can sanitize stale
-			// [[slug]] references in the doc's summary page and keep the
-			// missing page out of finalize processing.
-			// Retract-only failures don't poison anything (they leave
-			// the existing page unchanged), so don't flag those.
-			if len(additions) > 0 {
-				additionFailed = true
-			}
-			// Don't propagate the LLM error to the named return: it has
-			// already been logged, and the eg.Go caller would otherwise
-			// log it a second time as "reduce failed for slug".
-			err = nil
 		}
 	}
 
@@ -2081,6 +2262,20 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if changed {
+		// New and already-structured pages use paragraph provenance. Legacy or
+		// manually rewritten entity/concept pages keep their old write path until
+		// an explicit rebuild can provide source candidates for every paragraph.
+		if provenanceService != nil && (!exists || page.CurrentBlockSetID != "") {
+			blockSet, buildErr := s.buildWikiPageBlockSet(
+				ctx, chatModel, page, previousBlockSet, additions, retracts,
+				nil, tenantID, language,
+			)
+			if buildErr != nil {
+				return false, affectedType, additionFailed, buildErr
+			}
+			page, err = provenanceService.SavePageWithProvenance(ctx, page, blockSet)
+			return err == nil, affectedType, additionFailed, err
+		}
 		// Refresh chunk refs in-place on the page so they persist alongside
 		// the rest of the row. Retract-only updates (no additions) preserve
 		// the existing refs; addition rounds append the newly-cited chunks

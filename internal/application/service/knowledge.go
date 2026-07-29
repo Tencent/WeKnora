@@ -159,6 +159,44 @@ func (s *knowledgeService) tracker() SpanTracker {
 	return s.spanTracker
 }
 
+type knowledgeAttemptOpener interface {
+	OpenAttempt(ctx context.Context, knowledgeID, langfuseTraceID string) (*Span, int, error)
+}
+
+// openRequiredKnowledgeAttempt converts the tracker's best-effort API into a
+// correctness boundary for source-aware Wiki publication. A document update
+// may only flow into Wiki after its generation has a durable root span.
+func openRequiredKnowledgeAttempt(
+	ctx context.Context, opener knowledgeAttemptOpener, knowledgeID, langfuseTraceID string,
+) (int, error) {
+	root, attempt, err := opener.OpenAttempt(ctx, knowledgeID, langfuseTraceID)
+	if err != nil {
+		return 0, fmt.Errorf("open processing attempt for knowledge %s: %w", knowledgeID, err)
+	}
+	if root == nil || attempt <= 0 {
+		return 0, fmt.Errorf(
+			"open processing attempt for knowledge %s: tracker returned no durable attempt",
+			knowledgeID,
+		)
+	}
+	return attempt, nil
+}
+
+func (s *knowledgeService) openKnowledgeAttempt(
+	ctx context.Context, knowledgeID, langfuseTraceID string,
+) (int, error) {
+	tracker := s.tracker()
+	// Nil tracking is retained for narrow unit-test/custom constructions. Such
+	// runs may process knowledge, but filterCurrentWikiAttempts rejects their
+	// attempt-zero additions so they cannot publish unguarded provenance.
+	switch tracker.(type) {
+	case noopSpanTracker, *noopSpanTracker:
+		return 0, nil
+	default:
+		return openRequiredKnowledgeAttempt(ctx, tracker, knowledgeID, langfuseTraceID)
+	}
+}
+
 // attemptCtxKey scopes the per-task attempt number to a single execution.
 // Set once at the start of ProcessDocument / ProcessManualUpdate /
 // KnowledgePostProcess so every nested tracker call within the same task

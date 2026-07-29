@@ -531,7 +531,15 @@
               </div>
 
               <!-- Content -->
-              <div v-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent"
+              <WikiProvenanceReader
+                v-if="!editingPage && selectedPage.blocks?.length"
+                :blocks="selectedPage.blocks"
+                :knowledge-base-id="props.knowledgeBaseId"
+                @navigate-wiki="navigateToSlug"
+                @open-source-doc="emit('open-source-doc', $event)"
+                @preview-image="previewProvenanceImage"
+              />
+              <div v-else-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent"
                 @click="handleContentClick">
               </div>
 
@@ -571,7 +579,7 @@
               </div>
 
               <!-- Source refs -->
-              <div v-if="parsedSourceRefs.length" class="wiki-reader-sources">
+              <div v-if="!selectedPage.blocks?.length && parsedSourceRefs.length" class="wiki-reader-sources">
                 <span class="wiki-link-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
                 <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-source-ref"
                   @click.prevent="emit('open-source-doc', ref.id)">
@@ -765,13 +773,14 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
-import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
-import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import { hydrateProtectedFileImages } from '@/utils/security'
+import { renderWikiMarkdown } from '@/utils/wikiMarkdown'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import WikiProvenanceReader from './WikiProvenanceReader.vue'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -793,6 +802,7 @@ import {
   listWikiIssues,
   updateWikiIssueStatus,
   type WikiPage,
+  type WikiPageDetail,
   type WikiFolderNode,
   type WikiGraphData,
   type WikiStats,
@@ -824,7 +834,7 @@ const emit = defineEmits<{
   (e: 'view-graph', slug: string): void
 }>()
 const pages = ref<WikiPage[]>([])
-const selectedPage = ref<WikiPage | null>(null)
+const selectedPage = ref<WikiPageDetail | null>(null)
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =
@@ -1095,13 +1105,12 @@ function fitGraphToView() {
 
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
-const navHistory = ref<WikiPage[]>([])
+const navHistory = ref<Array<{ slug: string }>>([])
+let pageDetailRequestSerial = 0
 // navFromSystemView remembers that the user was viewing the Index when they
-// clicked into a slug, so goBack can restore it
-// once the page-level history stack is empty. We keep this parallel to
-// navHistory rather than widening its element type — navHistory is
-// consumed everywhere as `WikiPage[]` and that contract stays cleaner
-// if the system-view sentinel lives in its own ref.
+// clicked into a slug, so goBack can restore it once the slug-only page
+// history stack is empty. Storing only slugs makes every return reload the
+// latest page and source state instead of restoring a stale WikiPage object.
 const navFromSystemView = ref<'' | 'index'>('')
 
 // typeOrder drives the order of groups in the sidebar. Keep in sync
@@ -1240,7 +1249,9 @@ async function hydrateSourceRefTitles(refs: string[]) {
 }
 
 watch(
-  () => selectedPage.value?.source_refs,
+  // Structured source responses already carry a document-title snapshot.
+  // Keep the per-document lookup only for legacy pages without blocks.
+  () => selectedPage.value?.blocks?.length ? undefined : selectedPage.value?.source_refs,
   (refs) => {
     if (refs?.length) hydrateSourceRefTitles(refs)
   },
@@ -1478,16 +1489,7 @@ watch(graphDrawerContent, async () => {
 })
 
 function renderMarkdown(content: string): string {
-  // Pre-process wiki links [[slug|name]] to custom HTML tags
-  let preprocessed = content.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
-    const pipeIdx = inner.indexOf('|')
-    const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim()
-    const display = pipeIdx > 0 ? inner.substring(pipeIdx + 1).trim() : slugDisplayName(slug)
-    return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
-  })
-
-  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
-  return sanitizeMarkdownHTML(html)
+  return renderWikiMarkdown(content)
 }
 
 async function openGraphDrawer(slug: string) {
@@ -1953,7 +1955,7 @@ const renderedContent = computed(() => {
 // page was opened directly from a system view.
 const backLabel = computed(() => {
   if (navHistory.value.length > 0) {
-    return navHistory.value[navHistory.value.length - 1].title
+    return slugDisplayName(navHistory.value[navHistory.value.length - 1].slug)
   }
   if (navFromSystemView.value === 'index') {
     return t('knowledgeEditor.wikiBrowser.indexTitle')
@@ -2007,6 +2009,11 @@ function handleContentClick(e: MouseEvent) {
       imagePreviewVisible.value = true
     }
   }
+}
+
+function previewProvenanceImage(url: string) {
+  imagePreviewUrl.value = url
+  imagePreviewVisible.value = Boolean(url)
 }
 
 // WIKI_SIDEBAR_PAGE_SIZE is the per-type fetch batch. Small enough that
@@ -2854,6 +2861,10 @@ async function savePageEdit(versionOverride?: number) {
     editingPage.value = false
     editConflictVersion.value = null
     updateSidebarPageTitle(slug, updated.title)
+    // PUT intentionally returns the lightweight, backwards-compatible page
+    // shape. Refresh the detail projection so unchanged provenance stays
+    // current and provenance invalidated by a body/summary edit disappears.
+    await refreshSelectedPage()
     MessagePlugin.success(t('knowledgeEditor.wikiBrowser.editSaveSuccess'))
   } catch (e: any) {
     // The request interceptor rejects with a flattened { status, message,
@@ -2913,6 +2924,7 @@ function onPageReverted(page: WikiPage) {
   selectedPage.value = page
   editingPage.value = false
   updateSidebarPageTitle(page.slug, page.title)
+  void refreshSelectedPage()
 }
 
 function openCreatePageDialog() {
@@ -3017,8 +3029,9 @@ async function refreshSelectedPage() {
   if (!selectedPage.value) return
   const slug = selectedPage.value.slug
   try {
-    const res = await getWikiPage(props.knowledgeBaseId, slug)
-    selectedPage.value = (res as any).data || res as any
+    const page = await loadReaderPage(slug)
+    if (!page || selectedPage.value?.slug !== slug) return
+    selectedPage.value = page
     await loadPageIssues(slug)
   } catch (e) {
     console.error(`Failed to refresh wiki page ${slug}:`, e)
@@ -3424,18 +3437,20 @@ async function loadPageIssues(slug: string) {
 
 async function selectPage(page: WikiPage) {
   try {
-    if (selectedPage.value && selectedPage.value.id !== page.id) {
-      navHistory.value.push(selectedPage.value)
-    } else if (!selectedPage.value && activeSystemView.value) {
-      // Jumping out of a system view (Index / Log) onto a page.
-      // navHistory only holds WikiPages, so we stash the origin
-      // system view separately; goBack restores it when the history
-      // stack is empty.
-      navFromSystemView.value = activeSystemView.value
+    const previousPage = selectedPage.value
+    const previousSystemView = activeSystemView.value
+    const detail = await loadReaderPage(page.slug)
+    if (!detail) return
+
+    if (previousPage && previousPage.id !== page.id) {
+      navHistory.value.push({ slug: previousPage.slug })
+    } else if (!previousPage && previousSystemView) {
+      // Keep the system-view origin separate from the slug-only page history;
+      // goBack restores it when the page stack is empty.
+      navFromSystemView.value = previousSystemView
     }
     activeSystemView.value = ''
-    const res = await getWikiPage(props.knowledgeBaseId, page.slug)
-    selectedPage.value = (res as any).data || res as any
+    selectedPage.value = detail
     await loadPageIssues(page.slug)
   } catch (e) {
     console.error('Failed to load wiki page:', e)
@@ -3444,28 +3459,63 @@ async function selectPage(page: WikiPage) {
 
 async function navigateToSlug(slug: string) {
   try {
-    if (selectedPage.value && selectedPage.value.slug !== slug) {
-      navHistory.value.push(selectedPage.value)
-    } else if (!selectedPage.value && activeSystemView.value) {
+    const previousPage = selectedPage.value
+    const previousSystemView = activeSystemView.value
+    const detail = await loadReaderPage(slug)
+    if (!detail) return
+
+    if (previousPage && previousPage.slug !== slug) {
+      navHistory.value.push({ slug: previousPage.slug })
+    } else if (!previousPage && previousSystemView) {
       // Clicking a [[slug]] from inside Index / Log — same rationale
       // as selectPage above: record the system-view origin so the
       // reader's back arrow can return to it.
-      navFromSystemView.value = activeSystemView.value
+      navFromSystemView.value = previousSystemView
     }
     activeSystemView.value = ''
-    const res = await getWikiPage(props.knowledgeBaseId, slug)
-    selectedPage.value = (res as any).data || res as any
+    selectedPage.value = detail
     await loadPageIssues(slug)
   } catch (e) {
     console.error(`Failed to navigate to ${slug}:`, e)
   }
 }
 
-function goBack() {
+function sourceReadCanFallback(error: any): boolean {
+  const status = error?.response?.status ?? error?.status
+  // Only an explicit "not implemented" response means the server lacks the
+  // optional source projection. A 500 can be a block-set consistency or live
+  // evidence validation failure; silently rendering it as a legacy page would
+  // hide broken/stale provenance from the user.
+  return status === 501
+}
+
+async function loadReaderPage(slug: string): Promise<WikiPageDetail | null> {
+  const requestSerial = ++pageDetailRequestSerial
+  let response: any
+  try {
+    response = await getWikiPage(props.knowledgeBaseId, slug, { includeSources: true })
+  } catch (error) {
+    if (!sourceReadCanFallback(error)) throw error
+    // Source enrichment is optional for availability. On an extension error,
+    // show the normal page without citations; never downgrade 401/403/404.
+    response = await getWikiPage(props.knowledgeBaseId, slug)
+  }
+  if (requestSerial !== pageDetailRequestSerial) return null
+  return ((response as any).data || response) as WikiPageDetail
+}
+
+async function goBack() {
   const prev = navHistory.value.pop()
   if (prev) {
-    selectedPage.value = prev
-    loadPageIssues(prev.slug)
+    try {
+      const detail = await loadReaderPage(prev.slug)
+      if (!detail) return
+      selectedPage.value = detail
+      await loadPageIssues(prev.slug)
+    } catch (error) {
+      navHistory.value.push(prev)
+      console.error(`Failed to return to wiki page ${prev.slug}:`, error)
+    }
     return
   }
   // History stack is empty but we remember the page was opened from

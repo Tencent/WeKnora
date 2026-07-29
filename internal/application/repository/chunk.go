@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
@@ -314,25 +315,88 @@ func (r *chunkRepository) SaveChunkRevision(
 	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&types.Chunk{}).
-			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
-			Updates(map[string]interface{}{
-				"content":          common.CleanInvalidUTF8(chunk.Content),
-				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
-				"content_revision": chunk.ContentRevision,
-				"is_enabled":       chunk.IsEnabled,
-				"metadata":         chunk.Metadata,
-				"index_status":     chunk.IndexStatus,
-				"last_editor_id":   chunk.LastEditorID,
-				"updated_at":       chunk.UpdatedAt,
-			})
-		if result.Error != nil {
-			return result.Error
+		return saveChunkRevisionTx(tx, chunk, revision, expectedRevision)
+	})
+}
+
+func saveChunkRevisionTx(
+	tx *gorm.DB, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
+) error {
+	result := tx.Model(&types.Chunk{}).
+		Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
+		Updates(map[string]interface{}{
+			"content":          common.CleanInvalidUTF8(chunk.Content),
+			"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+			"content_revision": chunk.ContentRevision,
+			"is_enabled":       chunk.IsEnabled,
+			"metadata":         chunk.Metadata,
+			"index_status":     chunk.IndexStatus,
+			"last_editor_id":   chunk.LastEditorID,
+			"updated_at":       chunk.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrChunkRevisionConflict
+	}
+	return tx.Create(revision).Error
+}
+
+// SaveChunkRevisionWithPendingOp is the transactional-outbox variant of
+// SaveChunkRevision. It is intentionally an optional repository extension so
+// non-database test doubles and alternate repositories can remain small while
+// the production GORM implementation provides the stronger guarantee.
+func (r *chunkRepository) SaveChunkRevisionWithPendingOp(
+	ctx context.Context,
+	chunk *types.Chunk,
+	revision *types.ChunkRevision,
+	expectedRevision int,
+	op *types.TaskPendingOp,
+) error {
+	if op == nil {
+		return errors.New("chunk revision outbox operation is required")
+	}
+	if err := preparePendingOp(op); err != nil {
+		return err
+	}
+	if chunk == nil || op.TenantID != chunk.TenantID ||
+		op.Scope != types.TaskScopeKnowledgeBase || op.ScopeID != chunk.KnowledgeBaseID ||
+		op.DedupKey != chunk.KnowledgeID {
+		return errors.New("chunk revision outbox operation does not match chunk scope")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize the edit against knowledge deletion before touching the
+		// chunk or its outbox row. If the edit wins this lock, deletion waits
+		// and its subsequent pending-op scrub removes the committed ingest. If
+		// deletion wins, its "deleting" status makes this edit fail closed, so
+		// a later ingest can never overtake and deduplicate away the retract.
+		knowledgeQuery := tx.Select("id", "parse_status").
+			Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+				chunk.KnowledgeID, chunk.TenantID, chunk.KnowledgeBaseID,
+			)
+		if tx.Dialector.Name() == "postgres" {
+			knowledgeQuery = knowledgeQuery.Clauses(clause.Locking{Strength: "SHARE"})
 		}
-		if result.RowsAffected != 1 {
+		var knowledge types.Knowledge
+		if err := knowledgeQuery.First(&knowledge).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrChunkRevisionConflict
+			}
+			return err
+		}
+		// Chunk editing is a maintenance operation for a stable, completed
+		// document. Reject every transitional/terminal state, not only deleting:
+		// this also serializes against post-process finalizing and KB moves, so a
+		// non-owning Wiki refresh cannot overtake an owned parse Wiki op.
+		if knowledge.ParseStatus != types.ParseStatusCompleted {
 			return ErrChunkRevisionConflict
 		}
-		return tx.Create(revision).Error
+		if err := saveChunkRevisionTx(tx, chunk, revision, expectedRevision); err != nil {
+			return err
+		}
+		return tx.Create(op).Error
 	})
 }
 

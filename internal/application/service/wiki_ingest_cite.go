@@ -148,15 +148,14 @@ type chunkBatch struct {
 // The invocation-local table translates model output back to stable chunk IDs
 // before any result reaches application state.
 func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
-	// Only cite text chunks — image/ocr chunks are already merged into the
-	// text content via reconstructEnrichedContent and the LLM doesn't see
-	// them as standalone units.
+	// Cite every textual Wiki source, including OCR and image captions. These
+	// chunks may be the only exact evidence available for scanned documents.
 	filtered := make([]*types.Chunk, 0, len(chunks))
 	for _, c := range chunks {
-		if c == nil || c.Content == "" {
+		if c == nil || !c.IsEnabled || c.Content == "" {
 			continue
 		}
-		if c.ChunkType != types.ChunkTypeText && c.ChunkType != "" {
+		if !types.IsWikiProvenanceChunkType(c.ChunkType) {
 			continue
 		}
 		filtered = append(filtered, c)

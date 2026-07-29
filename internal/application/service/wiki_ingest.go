@@ -290,6 +290,16 @@ const (
 type WikiPendingOp struct {
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
+	// Attempt identifies the document parse generation that produced this
+	// ingest request. It is persisted into paragraph source rows so a reparse
+	// can replace the previous generation instead of appending indistinguishable
+	// citations. Zero keeps legacy/manual enqueue callers compatible.
+	Attempt int `json:"attempt,omitempty"`
+	// OwnsFinalizingSlot is true only when KnowledgePostProcess already counted
+	// this op in pending_subtasks_count. New maintenance refreshes explicitly
+	// store false. A nil pointer means a pre-upgrade row and retains the legacy
+	// behavior (one owned slot) so rolling deployments do not strand work.
+	OwnsFinalizingSlot *bool `json:"owns_finalizing_slot,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -301,6 +311,13 @@ type WikiPendingOp struct {
 	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
 	// constructions made outside the queue (e.g. legacy tests).
 	dbID int64 `json:"-"`
+	// dbIDs contains every queue row collapsed into this last-write-wins op.
+	// They settle as one unit: a failed canonical op retains/releases all rows;
+	// a terminal op trims all rows before releasing their owned counter slots.
+	dbIDs []int64 `json:"-"`
+	// ownedAttempts preserves finalizing-slot ownership from collapsed ingest
+	// rows even when the canonical row is a maintenance refresh or retract.
+	ownedAttempts []int `json:"-"`
 }
 
 // wikiIngestService handles the LLM-powered wiki generation pipeline.
@@ -461,7 +478,42 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
+	attempts ...int,
+) (bool, error) {
+	attempt := 0
+	if len(attempts) > 0 && attempts[0] > 0 {
+		attempt = attempts[0]
+	}
+	return enqueueWikiIngest(ctx, task, pendingRepo, tenantID, kbID, knowledgeID, attempt, false)
+}
+
+// enqueueWikiIngestWithFinalizingSlot is reserved for KnowledgePostProcess,
+// which has already included Wiki in pending_subtasks_count. Maintenance
+// refreshes must use EnqueueWikiIngest so they cannot drain another task's
+// finalizing slot.
+func enqueueWikiIngestWithFinalizingSlot(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	tenantID uint64,
+	kbID, knowledgeID string,
+	attempt int,
+) (bool, error) {
+	return enqueueWikiIngest(ctx, task, pendingRepo, tenantID, kbID, knowledgeID, attempt, true)
+}
+
+func enqueueWikiIngest(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	tenantID uint64,
+	kbID, knowledgeID string,
+	attempt int,
+	ownsFinalizingSlot bool,
+) (bool, error) {
+	if pendingRepo == nil {
+		return false, errors.New("wiki ingest pending repository is unavailable")
+	}
 	lang, _ := types.LanguageFromContext(ctx)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
@@ -470,14 +522,15 @@ func EnqueueWikiIngest(
 	// keeping the LATEST op for each knowledge — matching the legacy
 	// "RPush + reverse-dedupe" semantics.
 	op := WikiPendingOp{
-		Op:          WikiOpIngest,
-		KnowledgeID: knowledgeID,
-		Language:    lang,
+		Op:                 WikiOpIngest,
+		KnowledgeID:        knowledgeID,
+		Attempt:            attempt,
+		OwnsFinalizingSlot: wikiBoolPointer(ownsFinalizingSlot),
+		Language:           lang,
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return false, fmt.Errorf("marshal wiki ingest pending op for %s: %w", knowledgeID, err)
 	}
 	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
 		TenantID: tenantID,
@@ -489,31 +542,45 @@ func EnqueueWikiIngest(
 		Payload:  payloadBytes,
 	})
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-		return
+		return false, fmt.Errorf("enqueue wiki ingest pending op for %s: %w", knowledgeID, err)
 	}
 	if !accepted {
 		logger.Infof(ctx, "wiki ingest: skip enqueue for deleted KB %s", kbID)
-		return
+		return false, nil
 	}
 
-	trigger := WikiIngestPayload{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		Language:        lang,
-	}
-	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
-
-	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue(types.QueueWiki),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(wikiIngestDelay),
-	)
-	if _, err := task.Enqueue(t); err != nil {
+	if err := scheduleWikiIngestTrigger(ctx, task, tenantID, kbID, lang, wikiIngestDelay); err != nil {
+		// The row is already durable. Periodic recovery recreates the ephemeral
+		// trigger, so callers must keep any finalizing slot owned by this op.
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
 	}
+	return true, nil
+}
+
+func wikiBoolPointer(value bool) *bool { return &value }
+
+func (op WikiPendingOp) ownsWikiFinalizingSlot() bool {
+	return op.OwnsFinalizingSlot == nil || *op.OwnsFinalizingSlot
+}
+
+func (op WikiPendingOp) pendingRowIDs() []int64 {
+	if len(op.dbIDs) > 0 {
+		return op.dbIDs
+	}
+	if op.dbID != 0 {
+		return []int64{op.dbID}
+	}
+	return nil
+}
+
+func (op WikiPendingOp) wikiFinalizingAttempts() []int {
+	if len(op.ownedAttempts) > 0 {
+		return op.ownedAttempts
+	}
+	if op.Op == WikiOpIngest && op.ownsWikiFinalizingSlot() {
+		return []int{op.Attempt}
+	}
+	return nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
@@ -528,7 +595,10 @@ func EnqueueWikiRetract(
 	task interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	payload WikiRetractPayload,
-) {
+) (bool, error) {
+	if pendingRepo == nil {
+		return false, errors.New("wiki retract pending repository is unavailable")
+	}
 	op := WikiPendingOp{
 		Op:          WikiOpRetract,
 		KnowledgeID: payload.KnowledgeID,
@@ -540,8 +610,7 @@ func EnqueueWikiRetract(
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
-		logger.Warnf(ctx, "wiki retract: failed to marshal pending op: %v", err)
-		return
+		return false, fmt.Errorf("marshal wiki retract pending op: %w", err)
 	}
 	accepted, err := enqueueWikiPendingOp(ctx, pendingRepo, &types.TaskPendingOp{
 		TenantID: payload.TenantID,
@@ -553,30 +622,21 @@ func EnqueueWikiRetract(
 		Payload:  payloadBytes,
 	})
 	if err != nil {
-		logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
-		return
+		return false, fmt.Errorf("enqueue wiki retract pending op: %w", err)
 	}
 	if !accepted {
 		logger.Infof(ctx, "wiki retract: skip enqueue for deleted KB %s", payload.KnowledgeBaseID)
-		return
+		return false, nil
 	}
 
-	trigger := WikiIngestPayload{
-		TenantID:        payload.TenantID,
-		KnowledgeBaseID: payload.KnowledgeBaseID,
-		Language:        payload.Language,
-	}
-	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
-	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue(types.QueueWiki),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
-	)
-	if _, err := task.Enqueue(t); err != nil {
+	if err := scheduleWikiIngestTrigger(
+		ctx, task, payload.TenantID, payload.KnowledgeBaseID, payload.Language, 5*time.Second,
+	); err != nil {
+		// The operation is already durable. Periodic outbox recovery will
+		// recreate this ephemeral trigger, so deletion can safely continue.
 		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
 	}
+	return true, nil
 }
 
 // Handle implements interfaces.TaskHandler for asynq task processing. The
@@ -1026,6 +1086,56 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 		all = append(all, op)
 	}
 
+	type pendingKnowledgeGroup struct {
+		ids                []int64
+		ownedAttempts      []int
+		seenAttempts       map[int]struct{}
+		hasPositiveAttempt bool
+	}
+	groups := make(map[string]*pendingKnowledgeGroup)
+	for i := range all {
+		op := &all[i]
+		if op.KnowledgeID == "" {
+			op.dbIDs = op.pendingRowIDs()
+			op.ownedAttempts = op.wikiFinalizingAttempts()
+			continue
+		}
+		group := groups[op.KnowledgeID]
+		if group == nil {
+			group = &pendingKnowledgeGroup{seenAttempts: make(map[int]struct{})}
+			groups[op.KnowledgeID] = group
+		}
+		if op.dbID != 0 {
+			group.ids = append(group.ids, op.dbID)
+		}
+		if op.Op != WikiOpIngest || !op.ownsWikiFinalizingSlot() {
+			continue
+		}
+		if _, exists := group.seenAttempts[op.Attempt]; exists {
+			continue
+		}
+		group.seenAttempts[op.Attempt] = struct{}{}
+		group.ownedAttempts = append(group.ownedAttempts, op.Attempt)
+		if op.Attempt > 0 {
+			group.hasPositiveAttempt = true
+		}
+	}
+	for _, group := range groups {
+		// A zero-attempt legacy row cannot be safely associated with a newer
+		// attempt-specific counter. When both coexist, the guarded positive
+		// attempts are authoritative and the ambiguous legacy token is dropped.
+		if !group.hasPositiveAttempt {
+			continue
+		}
+		filtered := group.ownedAttempts[:0]
+		for _, attempt := range group.ownedAttempts {
+			if attempt > 0 {
+				filtered = append(filtered, attempt)
+			}
+		}
+		group.ownedAttempts = filtered
+	}
+
 	// Deduplicate by KnowledgeID, keeping only the *last* operation for
 	// each document. Optimizes out redundant sequences (e.g., upload
 	// then immediate delete: [ingest, retract] → [retract]). The
@@ -1045,6 +1155,10 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 			continue
 		}
 		seen[op.KnowledgeID] = true
+		if group := groups[op.KnowledgeID]; group != nil {
+			op.dbIDs = append([]int64(nil), group.ids...)
+			op.ownedAttempts = append([]int(nil), group.ownedAttempts...)
+		}
 		reversedUnique = append(reversedUnique, op)
 	}
 
@@ -1080,12 +1194,35 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) er
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string, attempt int) {
+	if attemptSuperseded(ctx, s.tracker(), knowledgeID, attempt) {
+		logger.Infof(ctx, "wiki ingest: skip finalizing stale attempt knowledge=%s attempt=%d", knowledgeID, attempt)
+		return
+	}
+	if guarded, ok := s.knowledgeRepo.(interfaces.KnowledgeAttemptSubtaskFinalizer); ok && attempt > 0 {
+		// The service-level check above avoids an unnecessary write in the
+		// common stale-task case. The repository repeats the attempt predicate
+		// inside the UPDATE, which is authoritative if a new attempt starts
+		// after that check.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+		defer cancel()
+		if _, _, err := guarded.FinalizeSubtaskForAttempt(dctx, knowledgeID, attempt); err != nil {
+			logger.Warnf(ctx, "finalize subtask decrement failed source=wiki knowledge=%s attempt=%d err=%v",
+				knowledgeID, attempt, err)
+		}
+		return
+	}
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
 	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+}
+
+func (s *wikiIngestService) finalizeWikiOpSubtasks(ctx context.Context, op WikiPendingOp) {
+	for _, attempt := range op.wikiFinalizingAttempts() {
+		s.finalizeWikiSubtask(ctx, op.KnowledgeID, attempt)
+	}
 }
 
 // requeueFailedOps records in-batch failures.
@@ -1128,7 +1265,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			// wikiClaimStaleAfter. No-op in Lite mode (row was peeked, never
 			// claimed). ReleaseByIDs preserves fail_count, so the retry
 			// budget still counts down.
-			if err := s.pendingRepo.ReleaseByIDs(ctx, []int64{op.dbID}); err != nil {
+			if err := s.pendingRepo.ReleaseByIDs(ctx, op.pendingRowIDs()); err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
 				settleErrs = append(settleErrs, fmt.Errorf("release retry claim id=%d: %w", op.dbID, err))
 			}
@@ -1136,14 +1273,10 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 
-		// Exhausted in-batch retries — archive and remove. This is the
-		// terminal failure point for the op, so release its slot in the
-		// knowledge's finalizing counter (ingest ops only; retracts are
-		// for deleted knowledge that has no counter to drain). The
-		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
-		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
-		}
+		// Exhausted in-batch retries — archive and remove. The operation is
+		// terminal only after both durable settlement steps succeed. Finalizing
+		// before that point would decrement the parent counter even though a
+		// failed archive/delete leaves the pending row eligible for another run.
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
 			payloadBytes, _ := json.Marshal(op)
@@ -1159,12 +1292,18 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			}); dlErr != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to archive op %s to dead letters: %v", op.KnowledgeID, dlErr)
 				settleErrs = append(settleErrs, fmt.Errorf("archive dead letter id=%d: %w", op.dbID, dlErr))
+				continue
 			}
 		}
-		if err := s.pendingRepo.DeleteByIDs(ctx, []int64{op.dbID}); err != nil {
+		if err := s.pendingRepo.DeleteByIDs(ctx, op.pendingRowIDs()); err != nil {
 			logger.Warnf(ctx, "wiki ingest: failed to drop dead-lettered row id=%d: %v", op.dbID, err)
 			settleErrs = append(settleErrs, fmt.Errorf("drop dead-lettered row id=%d: %w", op.dbID, err))
+			continue
 		}
+		// Ingest ops own one finalizing-counter slot; retracts target deleted
+		// knowledge and own none. The matching +1 was seeded by
+		// KnowledgePostProcess.SetFinalizing.
+		s.finalizeWikiOpSubtasks(ctx, op)
 	}
 	return errors.Join(settleErrs...)
 }
@@ -1177,8 +1316,13 @@ type wikiIngestPageRef struct {
 
 type docIngestResult struct {
 	KnowledgeID string
+	Attempt     int
 	DocTitle    string
 	Summary     string // one-line summary of the document (from summary page)
+	// SourceInvalidated marks a successful ingest op that found no usable
+	// current source chunks and therefore removed this document's prior Wiki
+	// contributions instead of adding fresh ones.
+	SourceInvalidated bool
 	// Pages records the wiki pages this document touched, carrying both
 	// the slug used for link/retract bookkeeping and its human-readable title.
 	Pages []wikiIngestPageRef
@@ -1260,6 +1404,7 @@ type SlugUpdate struct {
 	Item              extractedItem // For entity/concept
 	DocTitle          string
 	KnowledgeID       string
+	KnowledgeAttempt  int
 	SourceRef         string
 	Language          string
 	SummaryBody       string // For summary
@@ -1269,6 +1414,11 @@ type SlugUpdate struct {
 	// support this update. Mirrors Item.SourceChunks for convenience — the
 	// Reduce phase reads from here to avoid an extra field hop.
 	SourceChunks []string
+	// ProvenanceChunks is the complete candidate evidence set used to align
+	// final Markdown paragraphs. It normally matches SourceChunks; legacy
+	// extraction fallbacks use all text chunks so provenance stays fail-closed
+	// without changing the narrower content supplied to PageModify.
+	ProvenanceChunks []string
 	// DocSummary is the document-level summary body produced by
 	// WikiSummaryPrompt (everything after the SUMMARY: ... headline, falling
 	// back to the raw output if no headline could be parsed out). Carried
@@ -1885,10 +2035,10 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// getExistingPageSlugsForKnowledge returns all page slugs that currently
-// reference a given knowledge ID in their source_refs. Used to snapshot
-// state before re-ingest so the reduce phase can reconcile additions vs
-// retractions.
+// getExistingPageSlugsForKnowledge returns all legacy or structured pages that
+// currently reference a knowledge ID. The structured source table is
+// authoritative; source_refs remains a compatibility/index cache. Their union
+// lets reparse reconcile stale pages even if that cache drifted.
 //
 // Backed by idx_wiki_pages_source_refs (GIN jsonb_path_ops, migration
 // 000041) and the legacy text-index fallback for "kid|title" entries.
@@ -1901,13 +2051,32 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 // stamped a system page with a knowledge ref would otherwise show up
 // in the reparse "old set" and confuse the reduce stage.
 func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context, kbID, knowledgeID string) map[string]bool {
+	out, err := s.listExistingPageSlugsForKnowledge(ctx, kbID, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: source lookup (%s) was incomplete: %v", knowledgeID, err)
+	}
+	return out
+}
+
+// listExistingPageSlugsForKnowledge performs the same legacy+structured union
+// as getExistingPageSlugsForKnowledge, but returns lookup failures. Cleanup
+// paths use this strict form so a transient failure cannot be mistaken for
+// "this document has no Wiki pages" and permanently settle the operation.
+func (s *wikiIngestService) listExistingPageSlugsForKnowledge(
+	ctx context.Context, kbID, knowledgeID string,
+) (map[string]bool, error) {
+	var lookupErrs []error
 	slugs, err := s.wikiService.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: ListSlugsBySourceRef(%s) failed: %v", knowledgeID, err)
-		return nil
+		lookupErrs = append(lookupErrs, fmt.Errorf("legacy source refs: %w", err))
 	}
-	if len(slugs) == 0 {
-		return nil
+	if provenance, ok := s.wikiService.(interfaces.WikiProvenanceService); ok {
+		structuredSlugs, provenanceErr := provenance.ListPageSlugsByKnowledgeSource(ctx, kbID, knowledgeID)
+		if provenanceErr != nil {
+			lookupErrs = append(lookupErrs, fmt.Errorf("structured block sources: %w", provenanceErr))
+		} else {
+			slugs = append(slugs, structuredSlugs...)
+		}
 	}
 	out := make(map[string]bool, len(slugs))
 	for _, slug := range slugs {
@@ -1918,7 +2087,10 @@ func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context
 		}
 		out[slug] = true
 	}
-	return out
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, errors.Join(lookupErrs...)
 }
 
 // retractStalePages handles pages that were previously linked to this document
@@ -2526,6 +2698,8 @@ func wikiPromptPurpose(promptTpl string) string {
 		return "wiki_page_modify"
 	case agent.WikiChunkCitationPrompt:
 		return "wiki_chunk_citation"
+	case agent.WikiBlockCitationPrompt:
+		return "wiki_block_citation"
 	case agent.WikiCandidateSlugPrompt:
 		return "wiki_candidate_slug"
 	case agent.WikiSummaryPrompt:
@@ -2628,30 +2802,44 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 
 // --- Helpers ---
 
-// isKnowledgeGone returns true if the given knowledge has been deleted or is
-// in the middle of being deleted. It first consults the Redis tombstone
-// (written by cleanupWikiOnKnowledgeDelete) as a fast path, then falls back
-// to the DB. A nil result from GetKnowledgeByIDOnly also counts as gone: the
-// repo layer uses GORM First() which filters soft-deleted rows, so a
-// soft-deleted knowledge surfaces as "not found" here — exactly what we want.
+// isKnowledgeGone returns true if the given knowledge has been deleted, is in
+// the middle of being deleted, or no longer belongs to this knowledge base.
+// The DB ownership check is authoritative: move cleanup writes a short-lived
+// tombstone for the old KB, and that tombstone must not reject a later move
+// back into the same KB. A nil result from GetKnowledgeByIDOnly also counts as
+// gone because normal GORM reads hide soft-deleted rows.
 func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) bool {
 	if knowledgeID == "" {
 		return true
 	}
+	tombstoned := false
 	if s.redisClient != nil {
 		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil && exists > 0 {
-			return true
+			tombstoned = true
 		}
 	}
 	kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil || kn == nil {
+	if err != nil || knowledgeUnavailableForWikiScope(kn, kbID) {
+		return true
+	}
+	if tombstoned && s.redisClient != nil {
+		// The live row belongs to this KB and is not deleting, so this is a
+		// stale move tombstone rather than an active delete marker.
+		_ = s.redisClient.Del(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Err()
+	}
+	return false
+}
+
+func knowledgeUnavailableForWikiScope(kn *types.Knowledge, kbID string) bool {
+	if kn == nil || kbID == "" || kn.KnowledgeBaseID != kbID {
 		return true
 	}
 	switch kn.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // filterLiveUpdates drops additions/summaries whose source knowledge has been

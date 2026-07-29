@@ -121,6 +121,20 @@ type ChunkRepository interface {
 	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
 }
 
+// ChunkRevisionOutboxRepository is an optional transactional extension used
+// when a chunk mutation must also persist downstream reconciliation work. The
+// chunk row, immutable revision, and pending operation either all commit or
+// all roll back, preventing a successful edit from losing its Wiki refresh.
+type ChunkRevisionOutboxRepository interface {
+	SaveChunkRevisionWithPendingOp(
+		ctx context.Context,
+		chunk *types.Chunk,
+		revision *types.ChunkRevision,
+		expectedRevision int,
+		op *types.TaskPendingOp,
+	) error
+}
+
 // ChunkService defines the interface for chunk service operations
 type ChunkService interface {
 	// CreateChunks creates chunks

@@ -247,10 +247,6 @@ func (t *spanTracker) takeStart(spanID string) (time.Time, bool) {
 }
 
 func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTraceID string) (*Span, int, error) {
-	attempt, err := t.repo.NextAttempt(ctx, knowledgeID)
-	if err != nil {
-		return nil, 0, err
-	}
 	now := time.Now()
 	rootID := newSpanID()
 	meta := types.JSONMap{}
@@ -260,7 +256,6 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID: knowledgeID,
-		Attempt:     attempt,
 		SpanID:      rootID,
 		Name:        "knowledge_processing",
 		Kind:        types.SpanKindRoot,
@@ -268,7 +263,8 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 		Metadata:    meta,
 		StartedAt:   &now,
 	}
-	if err := t.repo.Upsert(ctx, row); err != nil {
+	attempt, err := t.repo.CreateAttemptRoot(ctx, row)
+	if err != nil {
 		logger.Warnf(ctx, "[SpanTracker] OpenAttempt failed kid=%s: %v", knowledgeID, err)
 		return nil, attempt, err
 	}
@@ -286,12 +282,20 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 }
 
 func (t *spanTracker) LatestAttempt(ctx context.Context, knowledgeID string) int {
-	n, err := t.repo.LatestAttempt(ctx, knowledgeID)
+	n, err := t.LatestAttemptWithError(ctx, knowledgeID)
 	if err != nil {
 		logger.Warnf(ctx, "[SpanTracker] LatestAttempt failed kid=%s: %v", knowledgeID, err)
 		return 0
 	}
 	return n
+}
+
+// LatestAttemptWithError exposes the repository error to correctness-critical
+// callers. Most tracing call sites intentionally use LatestAttempt's
+// best-effort behaviour, but Wiki publication must fail closed when it cannot
+// prove that an update belongs to the current parse attempt.
+func (t *spanTracker) LatestAttemptWithError(ctx context.Context, knowledgeID string) (int, error) {
+	return t.repo.LatestAttempt(ctx, knowledgeID)
 }
 
 func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attempt int, stage string, input types.JSONMap) *Span {
@@ -861,6 +865,9 @@ func (noopSpanTracker) OpenAttempt(_ context.Context, _, _ string) (*Span, int, 
 	return nil, 0, nil
 }
 func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0 }
+func (noopSpanTracker) LatestAttemptWithError(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {
 	return nil
 }

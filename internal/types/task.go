@@ -463,6 +463,10 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	// Attempt is allocated before a reparse is queued. Initial/manual update
+	// tasks may leave it at zero and let the worker allocate the first durable
+	// attempt. Once set, Asynq retries keep using the same generation.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.

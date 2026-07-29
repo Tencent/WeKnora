@@ -289,3 +289,14 @@ type KnowledgeRepository interface {
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
 }
+
+// KnowledgeAttemptSubtaskFinalizer is an optional extension implemented by
+// repositories that can guard a finalizing-counter decrement with the parse
+// attempt in the same database statement. Callers handling delayed async work
+// should prefer this over a separate LatestAttempt check followed by
+// FinalizeSubtask, because a new attempt can start between those two calls.
+//
+// attempt <= 0 retains the legacy unguarded FinalizeSubtask behavior.
+type KnowledgeAttemptSubtaskFinalizer interface {
+	FinalizeSubtaskForAttempt(ctx context.Context, id string, attempt int) (int, bool, error)
+}

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -111,6 +112,26 @@ func TestKnowledgeSpanRepo_NextAttempt(t *testing.T) {
 	other, err := repo.NextAttempt(ctx, "kid-other")
 	require.NoError(t, err)
 	assert.Equal(t, 1, other, "NextAttempt must scope to the knowledge_id")
+}
+
+func TestKnowledgeSpanRepo_CreateAttemptRootAllocatesAndPersists(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	ctx := context.Background()
+	for want := 1; want <= 2; want++ {
+		row := &types.KnowledgeProcessingSpan{
+			KnowledgeID: "kid-atomic-attempt", SpanID: fmt.Sprintf("root-%d", want),
+			Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning,
+		}
+		got, err := repo.CreateAttemptRoot(ctx, row)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Equal(t, want, row.Attempt)
+	}
+	rows, err := repo.ListByAttempt(ctx, "kid-atomic-attempt", 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, 1, rows[0].Attempt)
+	require.Equal(t, 2, rows[1].Attempt)
 }
 
 // TestKnowledgeSpanRepo_CancelDescendants verifies the cascade walk:

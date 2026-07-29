@@ -315,6 +315,57 @@ If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": 
 
 Now apply the instructions above to the chunks and output ONLY the JSON.`
 
+// WikiBlockCitationPrompt aligns already-generated wiki content blocks with
+// exact evidence from one batch of source chunks. The prompt deliberately uses
+// short, invocation-local block, claim and chunk handles: callers resolve those
+// handles back to durable IDs and validate every evidence quote before storing
+// a source relationship.
+//
+// Block order matters for provider prefix caching. The stable rules and page
+// blocks precede the varying chunk batch so all citation calls for one page
+// share the longest possible prompt prefix.
+const WikiBlockCitationPrompt = `You are a precise provenance alignment system. Match every supplied claim unit to the source chunks that directly support the complete claim.
+
+<instructions>
+**IMPORTANT: The wiki blocks are written in {{.Language}}. Evidence MUST be copied verbatim from the source chunk, regardless of language.**
+
+### Grounding rules
+1. Each <claim> is a deterministic sentence or clause from its parent block. Evaluate EVERY claim independently; never treat one cited claim as coverage for its siblings.
+2. For each claim, identify every chunk in <chunks> that directly supports the complete factual content of that claim. If a quote supports only part of a compound claim, it does not cover that claim.
+3. Cite only chunk handles that appear in the current <chunks> block and only claim handles that appear on <claim> elements. Block handles provide context only and MUST NOT be returned as citation keys.
+4. The parent <context> is supplied only to disambiguate short clauses. A citation still has to support the specific claim, not merely another statement in the same block.
+5. For every citation, return a short, contiguous, verbatim quote in "evidence". Do not paraphrase, translate, normalize, join non-contiguous passages, or add ellipses.
+6. A passing mention is not support. The evidence must state the concrete fact, attribute, step, date, number, relationship, definition, or conclusion expressed by that claim.
+7. One claim may cite several chunks, and one chunk may support several claims.
+8. If this chunk batch does not support a claim completely, omit that claim from the result. Never return an empty citation array.
+
+### JSON formatting rules
+- Output ONLY valid JSON, with no Markdown fence or preamble.
+- Do not put literal newlines inside JSON strings; use escaped \n when the evidence itself spans lines.
+- Preserve claim and chunk handles exactly as supplied.
+</instructions>
+
+Output format:
+{
+  "citations": {
+    "q000": [
+      {"chunk": "c001", "evidence": "an exact contiguous quote from c001"}
+    ]
+  }
+}
+
+If this batch contains no supporting evidence, return exactly: {"citations": {}}
+
+<page_blocks>
+{{.BlocksXML}}
+</page_blocks>
+
+<chunks>
+{{.ChunksXML}}
+</chunks>
+
+Now align the blocks to the chunks and output ONLY the JSON.`
+
 // WikiPageModifySystemPrompt contains only rules shared by every page update.
 // Keeping page identity and source data out of this message gives providers a
 // long byte-stable prefix to cache across a reduce batch.

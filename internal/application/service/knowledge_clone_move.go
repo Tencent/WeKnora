@@ -1115,11 +1115,13 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	}
 
 	// Process each knowledge item
+	var moveErrors []error
 	for i, knowledgeID := range payload.KnowledgeIDs {
 		err := s.moveOneKnowledge(ctx, knowledgeID, sourceKB, targetKB, payload.Mode)
 		if err != nil {
 			logger.Errorf(ctx, "ProcessKnowledgeMove: failed to move knowledge %s: %v", knowledgeID, err)
 			progress.Failed++
+			moveErrors = append(moveErrors, fmt.Errorf("move knowledge %s: %w", knowledgeID, err))
 		}
 		progress.Processed = i + 1
 		if progress.Total > 0 {
@@ -1157,7 +1159,11 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 			map[string]any{"source_kb_id": payload.SourceKBID, "target_kb_id": payload.TargetKBID,
 				"task_id": payload.TaskID, "count": progress.Total, "failed": progress.Failed, "mode": payload.Mode})
 	}
-	return nil
+	// Returning the per-item failures is essential: Asynq only retries a task
+	// when its handler returns an error. The move operation is idempotent below,
+	// so already-moved items are reconciled while failed items get another
+	// chance instead of being permanently recorded as a successful task run.
+	return errors.Join(moveErrors...)
 }
 
 // moveOneKnowledge moves a single knowledge item from source KB to target KB.
@@ -1168,11 +1174,27 @@ func (s *knowledgeService) moveOneKnowledge(
 	mode string,
 ) error {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if mode != "reuse_vectors" && mode != "reparse" {
+		return fmt.Errorf("unknown move mode: %s", mode)
+	}
 
 	// Get the knowledge item
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		return fmt.Errorf("failed to get knowledge %s: %w", knowledgeID, err)
+	}
+	// A previous attempt may have completed the database move and then failed
+	// while persisting the target Wiki refresh (or the reparse task). Treat that
+	// state as a resumable checkpoint rather than trying to move the item out of
+	// the source KB a second time.
+	if knowledge.KnowledgeBaseID == targetKB.ID {
+		return s.resumeMovedKnowledge(ctx, knowledge, sourceKB, targetKB, mode)
+	}
+	if knowledge.KnowledgeBaseID != sourceKB.ID {
+		return fmt.Errorf(
+			"knowledge %s belongs to %s, expected source %s or target %s",
+			knowledge.ID, knowledge.KnowledgeBaseID, sourceKB.ID, targetKB.ID,
+		)
 	}
 
 	// Only move completed items
@@ -1198,33 +1220,131 @@ func (s *knowledgeService) moveOneKnowledge(
 		return fmt.Errorf("failed to mark knowledge as processing: %w", err)
 	}
 
-	// From the source KB's point of view the document is leaving for good, so it
-	// needs the same wiki reconciliation a delete performs: wiki_pages carry
-	// source_refs back to this knowledge and are what the folder tree and the
-	// wiki graph are built from, and nothing below touches them. This must run
-	// while KnowledgeBaseID still points at the source and before any chunk is
-	// removed, since the cleanup matches pages by chunk_refs.
-	if sourceKB.IsWikiEnabled() {
-		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
-	}
-
 	switch mode {
 	case "reuse_vectors":
 		if err := s.moveKnowledgeReuseVectors(ctx, knowledge, sourceKB, targetKB); err != nil {
-			return err
+			return s.restoreSourceMoveFailure(ctx, knowledge.ID, sourceKB, err)
 		}
-		// reparse re-ingests through KnowledgePostProcess once the new chunks
-		// land; reuse_vectors keeps the existing chunks and never re-enters that
-		// pipeline, so the target KB has to be told about the document here.
-		if targetKB.IsWikiEnabled() {
-			EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
-		}
-		return nil
+		// The ownership change is the durable move checkpoint. Only after it
+		// commits do we persist the target rebuild and remove the source Wiki
+		// contribution. A failure before this point leaves the source Wiki intact.
+		return s.resumeMovedKnowledge(ctx, knowledge, sourceKB, targetKB, mode)
 	case "reparse":
-		return s.moveKnowledgeReparse(ctx, knowledge, sourceKB, targetKB)
+		if err := s.moveKnowledgeReparse(ctx, knowledge, sourceKB, targetKB); err != nil {
+			return s.restoreSourceMoveFailure(ctx, knowledge.ID, sourceKB, err)
+		}
+		// moveKnowledgeReparse already persisted the target parsing task. Source
+		// cleanup is deliberately last so a failure can be retried from the
+		// target-owned Pending checkpoint without losing the source Wiki first.
+		return s.cleanupMovedKnowledgeSourceWiki(ctx, knowledge, sourceKB)
+	}
+	return nil
+}
+
+// enqueueMovedKnowledgeWiki persists the target/source rebuild before treating
+// a move checkpoint as complete. Trigger scheduling itself may fail after the
+// row is durable; periodic Wiki recovery handles that case.
+func (s *knowledgeService) enqueueMovedKnowledgeWiki(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, knowledgeID string,
+) error {
+	accepted, err := EnqueueWikiIngest(
+		ctx, s.task, s.taskPendingRepo, tenantID, kbID, knowledgeID,
+	)
+	if err != nil {
+		return fmt.Errorf("persist Wiki refresh for moved knowledge %s in KB %s: %w", knowledgeID, kbID, err)
+	}
+	if !accepted {
+		return fmt.Errorf("knowledge base %s no longer accepts Wiki refreshes", kbID)
+	}
+	return nil
+}
+
+// restoreSourceMoveFailure restores the source-visible processing status when
+// the ownership update did not commit. Source Wiki cleanup runs only after the
+// ownership checkpoint, so there is no Wiki deletion to compensate here. If
+// ownership already reached the target, a task retry resumes that checkpoint.
+func (s *knowledgeService) restoreSourceMoveFailure(
+	ctx context.Context,
+	knowledgeID string,
+	sourceKB *types.KnowledgeBase,
+	cause error,
+) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	current, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("reload knowledge for move compensation: %w", err))
+	}
+	if current.KnowledgeBaseID == sourceKB.ID {
+		current.ParseStatus = types.ParseStatusCompleted
+		if err := s.repo.UpdateKnowledge(ctx, current); err != nil {
+			return errors.Join(cause, fmt.Errorf("restore source knowledge status: %w", err))
+		}
+	}
+	return cause
+}
+
+func (s *knowledgeService) cleanupMovedKnowledgeSourceWiki(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	sourceKB *types.KnowledgeBase,
+) error {
+	if !sourceKB.IsWikiEnabled() {
+		return nil
+	}
+	// cleanupWikiOnKnowledgeDelete scopes its reverse lookup by the knowledge's
+	// KB id. Keep the target-owned record untouched and pass a source-scoped
+	// snapshot for deterministic source-page reconciliation.
+	sourceView := *knowledge
+	sourceView.KnowledgeBaseID = sourceKB.ID
+	if err := s.cleanupWikiOnKnowledgeDelete(ctx, &sourceView); err != nil {
+		return fmt.Errorf("cleanup source Wiki for moved knowledge %s: %w", knowledge.ID, err)
+	}
+	return nil
+}
+
+// resumeMovedKnowledge makes ProcessKnowledgeMove safe to retry after a
+// partially completed attempt. reuse_vectors only needs to persist the target
+// Wiki ingest. A reparse that is still Pending needs its parsing task restored;
+// Processing/Completed means that task was already accepted.
+func (s *knowledgeService) resumeMovedKnowledge(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	sourceKB *types.KnowledgeBase,
+	targetKB *types.KnowledgeBase,
+	mode string,
+) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	switch mode {
+	case "reuse_vectors":
+		if knowledge.ParseStatus != types.ParseStatusCompleted {
+			return fmt.Errorf(
+				"moved knowledge %s is not completed (current: %s)", knowledge.ID, knowledge.ParseStatus,
+			)
+		}
+		if targetKB.IsWikiEnabled() {
+			if err := s.enqueueMovedKnowledgeWiki(ctx, tenantID, targetKB.ID, knowledge.ID); err != nil {
+				return err
+			}
+		}
+	case "reparse":
+		switch knowledge.ParseStatus {
+		case types.ParseStatusPending:
+			if err := s.enqueueMovedKnowledgeReparse(ctx, targetKB, knowledge); err != nil {
+				return err
+			}
+		case types.ParseStatusProcessing, types.ParseStatusCompleted:
+		default:
+			return fmt.Errorf(
+				"moved knowledge %s cannot resume reparse from status %s",
+				knowledge.ID, knowledge.ParseStatus,
+			)
+		}
 	default:
 		return fmt.Errorf("unknown move mode: %s", mode)
 	}
+	return s.cleanupMovedKnowledgeSourceWiki(ctx, knowledge, sourceKB)
 }
 
 // moveKnowledgeReuseVectors moves knowledge by copying vector indices and updating DB references.
@@ -1322,8 +1442,6 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	knowledge *types.Knowledge,
 	_, targetKB *types.KnowledgeBase,
 ) error {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-
 	// 1. Clean up existing chunks and vector indices
 	if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
 		logger.Warnf(ctx, "moveKnowledgeReparse: cleanup partial error for knowledge %s: %v", knowledge.ID, err)
@@ -1345,7 +1463,19 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
 
-	// 3. Enqueue document processing task with target KB's configuration
+	// 3. Enqueue document processing task with target KB's configuration.
+	return s.enqueueMovedKnowledgeReparse(ctx, targetKB, knowledge)
+}
+
+// enqueueMovedKnowledgeReparse is split from the destructive reparse setup so
+// an Asynq retry can restore only a task that failed to enqueue after the
+// knowledge record had already moved to the target KB.
+func (s *knowledgeService) enqueueMovedKnowledgeReparse(
+	ctx context.Context,
+	targetKB *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	if knowledge.IsManual() {
 		meta, err := knowledge.ManualMetadata()
 		if err != nil || meta == nil {

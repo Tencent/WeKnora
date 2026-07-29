@@ -440,13 +440,44 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
+	return r.finalizeSubtask(ctx, id, 0, false)
+}
+
+// FinalizeSubtaskForAttempt is the attempt-aware counterpart to
+// FinalizeSubtask. For tracked attempts, both the decrement and promotion are
+// conditioned on the supplied attempt still being the latest persisted span
+// attempt for this knowledge. Keeping that predicate inside each UPDATE closes
+// the check-then-decrement window where a delayed task from attempt N could
+// consume attempt N+1's freshly seeded counter.
+//
+// attempt <= 0 is a compatibility path for legacy tasks that predate attempt
+// tracking and intentionally retains FinalizeSubtask's unguarded behavior.
+func (r *knowledgeRepository) FinalizeSubtaskForAttempt(
+	ctx context.Context, id string, attempt int,
+) (int, bool, error) {
+	if attempt <= 0 {
+		return r.FinalizeSubtask(ctx, id)
+	}
+	return r.finalizeSubtask(ctx, id, attempt, true)
+}
+
+func (r *knowledgeRepository) finalizeSubtask(
+	ctx context.Context, id string, attempt int, guardAttempt bool,
+) (int, bool, error) {
 	now := time.Now()
 	// 1) Atomic decrement, clamped at zero. The `pending_subtasks_count > 0`
 	//    guard is purely a safety net for accounting bugs — under normal
 	//    operation each subtask handler decrements at most once per task,
 	//    so the counter cannot go negative.
-	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ? AND pending_subtasks_count > 0", id).
+	decrement := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND pending_subtasks_count > 0", id)
+	if guardAttempt {
+		decrement = decrement.Where(
+			"? = (SELECT COALESCE(MAX(attempt), 0) FROM knowledge_processing_spans WHERE knowledge_id = ?)",
+			attempt, id,
+		)
+	}
+	res := decrement.
 		Updates(map[string]interface{}{
 			"pending_subtasks_count": gorm.Expr("pending_subtasks_count - 1"),
 			"updated_at":             now,
@@ -467,9 +498,16 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    the single authoritative, atomic check on the live row: only the
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
-	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	promote := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
-			id, types.ParseStatusFinalizing).
+			id, types.ParseStatusFinalizing)
+	if guardAttempt {
+		promote = promote.Where(
+			"? = (SELECT COALESCE(MAX(attempt), 0) FROM knowledge_processing_spans WHERE knowledge_id = ?)",
+			attempt, id,
+		)
+	}
+	promoteRes := promote.
 		Updates(map[string]interface{}{
 			"parse_status": types.ParseStatusCompleted,
 			"processed_at": now,

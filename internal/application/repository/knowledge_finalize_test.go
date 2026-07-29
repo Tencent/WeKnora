@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS knowledges (
 );
 `
 
+const knowledgeProcessingSpansFinalizeTestDDL = `
+CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_id VARCHAR(36) NOT NULL,
+    attempt INT NOT NULL DEFAULT 1
+);
+`
+
 // setupKnowledgeTestDB returns an in-memory SQLite db with the knowledges
 // table. SQLite has a single-writer constraint, so we cap MaxOpenConns at 1
 // and set a busy timeout: concurrent goroutines line up on the same
@@ -66,8 +74,17 @@ func setupKnowledgeTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec(knowledgesTestDDL).Error)
+	require.NoError(t, db.Exec(knowledgeProcessingSpansFinalizeTestDDL).Error)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
+}
+
+func insertKnowledgeAttempt(t *testing.T, db *gorm.DB, knowledgeID string, attempt int) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledge_processing_spans (knowledge_id, attempt)
+		VALUES (?, ?)
+	`, knowledgeID, attempt).Error)
 }
 
 // insertProcessingKnowledge seeds a row in `processing` state ready for a
@@ -204,6 +221,56 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
+}
+
+// TestFinalizeSubtaskForAttempt_RejectsSupersededAttempt covers the Wiki
+// worker race: attempt 1 finishes late after attempt 2 has already seeded a
+// fresh finalizing counter. The stale completion must neither decrement that
+// counter nor promote the knowledge row.
+func TestFinalizeSubtaskForAttempt_RejectsSupersededAttempt(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	insertKnowledgeAttempt(t, db, id, 1)
+	insertKnowledgeAttempt(t, db, id, 2)
+	transitioned, err := repo.SetFinalizing(ctx, id, 2)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 1)
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 2, count, "stale attempt must not consume the current attempt's counter")
+
+	_, promoted, err = repo.FinalizeSubtaskForAttempt(ctx, id, 2)
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "current attempt should consume exactly one slot")
+}
+
+func TestFinalizeSubtaskForAttempt_CurrentAttemptPromotes(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	insertKnowledgeAttempt(t, db, id, 7)
+	transitioned, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+
+	_, promoted, err := repo.FinalizeSubtaskForAttempt(ctx, id, 7)
+	require.NoError(t, err)
+	assert.True(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Equal(t, 0, count)
 }
 
 // TestUpdateKnowledge_DoesNotClobberPendingCounter is the regression test

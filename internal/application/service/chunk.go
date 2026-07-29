@@ -33,6 +33,7 @@ type chunkService struct {
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
 	task            interfaces.TaskEnqueuer
+	pendingRepo     interfaces.TaskPendingOpsRepository
 	spanTracker     SpanTracker
 }
 
@@ -51,6 +52,7 @@ func NewChunkService(
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 ) interfaces.ChunkService {
 	return &chunkService{
@@ -61,6 +63,7 @@ func NewChunkService(
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
 		task:            task,
+		pendingRepo:     pendingRepo,
 		spanTracker:     spanTracker,
 	}
 }
@@ -459,8 +462,56 @@ func (s *chunkService) UpdateDocumentChunk(
 	chunk.LastEditorID = actorID
 	chunk.IndexStatus = "processing"
 	chunk.UpdatedAt = now
-	if err := s.chunkRepository.SaveChunkRevision(ctx, chunk, revision, oldRevision); err != nil {
+	wikiAttempt := 0
+	if s.spanTracker != nil {
+		wikiAttempt = s.spanTracker.LatestAttempt(ctx, chunk.KnowledgeID)
+	}
+	wikiPendingOp, wikiEnabled, err := s.chunkWikiPendingOp(ctx, chunk, wikiAttempt)
+	if err != nil {
 		return nil, err
+	}
+	outboxPersisted := false
+	if wikiPendingOp != nil {
+		if outboxRepo, ok := s.chunkRepository.(interfaces.ChunkRevisionOutboxRepository); ok {
+			err = outboxRepo.SaveChunkRevisionWithPendingOp(
+				ctx, chunk, revision, oldRevision, wikiPendingOp,
+			)
+			outboxPersisted = err == nil
+		} else {
+			err = s.chunkRepository.SaveChunkRevision(ctx, chunk, revision, oldRevision)
+		}
+	} else {
+		err = s.chunkRepository.SaveChunkRevision(ctx, chunk, revision, oldRevision)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The chunk row is authoritative from this point onward. Queue the Wiki
+	// rebuild on every subsequent exit path (including parent/image/vector
+	// synchronization failures) so a successfully persisted edit can never
+	// leave published paragraph sources pointing at the previous revision.
+	// Production repositories commit the durable Wiki op in the same DB
+	// transaction as the chunk revision. Test doubles/alternate repositories
+	// retain the previous post-commit enqueue path as a compatibility fallback.
+	if outboxPersisted {
+		lang, _ := types.LanguageFromContext(ctx)
+		if triggerErr := scheduleWikiIngestTrigger(
+			ctx, s.task, chunk.TenantID, chunk.KnowledgeBaseID, lang, wikiIngestDelay,
+		); triggerErr != nil {
+			logger.Warnf(ctx,
+				"Chunk %s saved with durable Wiki refresh row, but trigger enqueue failed: %v",
+				chunk.ID, triggerErr,
+			)
+		}
+	} else if wikiEnabled {
+		defer func() {
+			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			EnqueueWikiIngest(
+				refreshCtx, s.task, s.pendingRepo, chunk.TenantID,
+				chunk.KnowledgeBaseID, chunk.KnowledgeID, wikiAttempt,
+			)
+		}()
 	}
 
 	if bodyChanged && chunk.ParentChunkID != "" {
@@ -500,6 +551,57 @@ func (s *chunkService) UpdateDocumentChunk(
 		return nil, err
 	}
 	return chunk, nil
+}
+
+func (s *chunkService) chunkWikiPendingOp(
+	ctx context.Context, chunk *types.Chunk, attempt int,
+) (*types.TaskPendingOp, bool, error) {
+	if chunk == nil || chunk.KnowledgeBaseID == "" || chunk.KnowledgeID == "" || s.kbRepository == nil {
+		return nil, false, nil
+	}
+	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
+	if err != nil {
+		return nil, false, fmt.Errorf("load knowledge base before chunk Wiki outbox: %w", err)
+	}
+	if !kb.IsWikiEnabled() {
+		return nil, false, nil
+	}
+	op, err := newWikiIngestPendingRow(ctx, chunk.TenantID, chunk.KnowledgeBaseID, chunk.KnowledgeID, attempt)
+	if err != nil {
+		return nil, true, fmt.Errorf("build chunk Wiki outbox operation: %w", err)
+	}
+	return op, true, nil
+}
+
+// enqueueChunkWikiRefresh reuses the durable per-KB Wiki ingest lane after a
+// manual chunk mutation. It is deliberately best-effort because the chunk
+// revision has already committed and returning an error would falsely imply
+// that the edit itself was rolled back. EnqueueWikiIngest persists a
+// per-knowledge op and its consumer coalesces repeated edits.
+func (s *chunkService) enqueueChunkWikiRefresh(ctx context.Context, chunk *types.Chunk, attempt int) {
+	if chunk == nil || chunk.KnowledgeBaseID == "" || chunk.KnowledgeID == "" {
+		return
+	}
+	if s.kbRepository == nil {
+		logger.Warnf(ctx, "Chunk %s saved but wiki refresh KB repository is unavailable", chunk.ID)
+		return
+	}
+	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
+	if err != nil {
+		logger.Warnf(ctx, "Chunk %s saved but wiki refresh KB lookup failed: %v", chunk.ID, err)
+		return
+	}
+	if !kb.IsWikiEnabled() {
+		return
+	}
+	if s.task == nil || s.pendingRepo == nil {
+		logger.Warnf(ctx, "Chunk %s saved but wiki refresh queue dependencies are unavailable", chunk.ID)
+		return
+	}
+	EnqueueWikiIngest(
+		ctx, s.task, s.pendingRepo, chunk.TenantID,
+		chunk.KnowledgeBaseID, chunk.KnowledgeID, attempt,
+	)
 }
 
 func validateEditedChunkImages(sourceContent, editedContent string) error {

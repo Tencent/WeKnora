@@ -12,7 +12,49 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func TestKnowledgeUnavailableForWikiScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		knowledge *types.Knowledge
+		kbID      string
+		want      bool
+	}{
+		{name: "missing row", kbID: "kb-a", want: true},
+		{
+			name: "live row in requested kb",
+			knowledge: &types.Knowledge{
+				ID: "knowledge-1", KnowledgeBaseID: "kb-a", ParseStatus: types.ParseStatusCompleted,
+			},
+			kbID: "kb-a",
+		},
+		{
+			name: "row moved to another kb",
+			knowledge: &types.Knowledge{
+				ID: "knowledge-1", KnowledgeBaseID: "kb-b", ParseStatus: types.ParseStatusCompleted,
+			},
+			kbID: "kb-a",
+			want: true,
+		},
+		{
+			name: "row is deleting",
+			knowledge: &types.Knowledge{
+				ID: "knowledge-1", KnowledgeBaseID: "kb-a", ParseStatus: types.ParseStatusDeleting,
+			},
+			kbID: "kb-a",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := knowledgeUnavailableForWikiScope(tt.knowledge, tt.kbID); got != tt.want {
+				t.Fatalf("knowledgeUnavailableForWikiScope() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestSlugify(t *testing.T) {
 	tests := []struct {
@@ -530,6 +572,203 @@ func TestRequeueFailedOpsReturnsReleaseError(t *testing.T) {
 	}
 }
 
+type wikiAttemptFinalizeKnowledgeRepo struct {
+	interfaces.KnowledgeRepository
+	mu              sync.Mutex
+	attempts        []int
+	legacyCallCount int
+}
+
+func (r *wikiAttemptFinalizeKnowledgeRepo) FinalizeSubtask(
+	context.Context, string,
+) (int, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.legacyCallCount++
+	return 0, false, nil
+}
+
+func (r *wikiAttemptFinalizeKnowledgeRepo) FinalizeSubtaskForAttempt(
+	_ context.Context, _ string, attempt int,
+) (int, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attempts = append(r.attempts, attempt)
+	return 0, false, nil
+}
+
+type wikiAttemptFinalizeTracker struct {
+	SpanTracker
+	latest int
+}
+
+func (t wikiAttemptFinalizeTracker) LatestAttempt(context.Context, string) int {
+	return t.latest
+}
+
+func TestFinalizeWikiSubtaskSkipsSupersededAttempt(t *testing.T) {
+	repo := &wikiAttemptFinalizeKnowledgeRepo{}
+	svc := &wikiIngestService{
+		knowledgeRepo: repo,
+		spanTracker:   wikiAttemptFinalizeTracker{latest: 6},
+	}
+
+	svc.finalizeWikiSubtask(context.Background(), "knowledge-1", 5)
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.attempts) != 0 || repo.legacyCallCount != 0 {
+		t.Fatalf("superseded attempt reached repository: attempts=%v legacy_calls=%d", repo.attempts, repo.legacyCallCount)
+	}
+}
+
+func TestRequeueFailedOpsDeadLetterPreservesAttemptForFinalize(t *testing.T) {
+	pendingRepo := &wikiPendingRepoForCleanupTest{incrCount: wikiMaxFailRetries + 1}
+	knowledgeRepo := &wikiAttemptFinalizeKnowledgeRepo{}
+	svc := &wikiIngestService{
+		pendingRepo:   pendingRepo,
+		knowledgeRepo: knowledgeRepo,
+	}
+
+	err := svc.requeueFailedOps(context.Background(), WikiIngestPayload{}, []WikiPendingOp{{
+		Op:          WikiOpIngest,
+		KnowledgeID: "knowledge-1",
+		Attempt:     12,
+		DocTitle:    "doc",
+		dbID:        99,
+	}})
+	if err != nil {
+		t.Fatalf("requeueFailedOps() error = %v", err)
+	}
+
+	knowledgeRepo.mu.Lock()
+	defer knowledgeRepo.mu.Unlock()
+	if len(knowledgeRepo.attempts) != 1 || knowledgeRepo.attempts[0] != 12 {
+		t.Fatalf("dead-letter finalize attempts = %v, want [12]", knowledgeRepo.attempts)
+	}
+	if knowledgeRepo.legacyCallCount != 0 {
+		t.Fatalf("legacy unguarded FinalizeSubtask called %d time(s)", knowledgeRepo.legacyCallCount)
+	}
+}
+
+func TestRequeueFailedOpsFinalizesOnlyAfterDeadLetterSettlement(t *testing.T) {
+	tests := []struct {
+		name           string
+		archiveErr     error
+		deleteErr      error
+		wantDeleteCall int
+	}{
+		{
+			name:           "archive failure keeps pending row and counter",
+			archiveErr:     errors.New("archive failed"),
+			wantDeleteCall: 0,
+		},
+		{
+			name:           "delete failure keeps counter",
+			deleteErr:      errors.New("delete failed"),
+			wantDeleteCall: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pendingRepo := &wikiPendingRepoForCleanupTest{
+				incrCount: wikiMaxFailRetries + 1,
+				deleteErr: tt.deleteErr,
+			}
+			knowledgeRepo := &wikiAttemptFinalizeKnowledgeRepo{}
+			deadLetterRepo := &wikiDeadLetterRepoForCleanupTest{insertErr: tt.archiveErr}
+			svc := &wikiIngestService{
+				pendingRepo:    pendingRepo,
+				deadLetterRepo: deadLetterRepo,
+				knowledgeRepo:  knowledgeRepo,
+			}
+
+			err := svc.requeueFailedOps(context.Background(), WikiIngestPayload{}, []WikiPendingOp{{
+				Op:          WikiOpIngest,
+				KnowledgeID: "knowledge-1",
+				Attempt:     12,
+				DocTitle:    "doc",
+				dbID:        99,
+			}})
+			if err == nil {
+				t.Fatal("requeueFailedOps() error = nil, want settlement failure")
+			}
+			if pendingRepo.deleteCalls != tt.wantDeleteCall {
+				t.Fatalf("DeleteByIDs calls = %d, want %d", pendingRepo.deleteCalls, tt.wantDeleteCall)
+			}
+			knowledgeRepo.mu.Lock()
+			defer knowledgeRepo.mu.Unlock()
+			if len(knowledgeRepo.attempts) != 0 || knowledgeRepo.legacyCallCount != 0 {
+				t.Fatalf("unsettled dead letter finalized parent: attempts=%v legacy_calls=%d",
+					knowledgeRepo.attempts, knowledgeRepo.legacyCallCount)
+			}
+		})
+	}
+}
+
+func TestDecodePendingRowsPreservesCollapsedFinalizingOwnership(t *testing.T) {
+	svc := &wikiIngestService{}
+	rows := []*types.TaskPendingOp{
+		{ID: 10, Payload: []byte(`{"op":"ingest","knowledge_id":"knowledge-1"}`)},
+		{ID: 11, Payload: []byte(`{"op":"ingest","knowledge_id":"knowledge-1","attempt":3,"owns_finalizing_slot":true}`)},
+		{ID: 12, Payload: []byte(`{"op":"ingest","knowledge_id":"knowledge-1","attempt":4,"owns_finalizing_slot":false}`)},
+		{ID: 13, Payload: []byte(`{"op":"ingest","knowledge_id":"knowledge-1","attempt":4,"owns_finalizing_slot":true}`)},
+		{ID: 14, Payload: []byte(`{"op":"retract","knowledge_id":"knowledge-1"}`)},
+	}
+
+	ops, peeked := svc.decodePendingRows(context.Background(), rows)
+	if len(ops) != 1 {
+		t.Fatalf("decodePendingRows() ops = %d, want 1", len(ops))
+	}
+	if ops[0].Op != WikiOpRetract {
+		t.Fatalf("canonical op = %q, want %q", ops[0].Op, WikiOpRetract)
+	}
+	wantIDs := []int64{10, 11, 12, 13, 14}
+	gotIDs := ops[0].pendingRowIDs()
+	if len(gotIDs) != len(wantIDs) || len(peeked) != len(wantIDs) {
+		t.Fatalf("collapsed ids = %v, peeked = %v, want %v", gotIDs, peeked, wantIDs)
+	}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] || peeked[i] != wantIDs[i] {
+			t.Fatalf("collapsed ids = %v, peeked = %v, want %v", gotIDs, peeked, wantIDs)
+		}
+	}
+	wantAttempts := []int{3, 4}
+	gotAttempts := ops[0].wikiFinalizingAttempts()
+	if len(gotAttempts) != len(wantAttempts) {
+		t.Fatalf("owned attempts = %v, want %v", gotAttempts, wantAttempts)
+	}
+	for i := range wantAttempts {
+		if gotAttempts[i] != wantAttempts[i] {
+			t.Fatalf("owned attempts = %v, want %v", gotAttempts, wantAttempts)
+		}
+	}
+}
+
+type wikiDeadLetterRepoForCleanupTest struct {
+	insertErr error
+}
+
+func (r *wikiDeadLetterRepoForCleanupTest) Insert(context.Context, *types.TaskDeadLetter) error {
+	return r.insertErr
+}
+
+func (r *wikiDeadLetterRepoForCleanupTest) ListByScope(
+	context.Context, string, string, string, int,
+) ([]*types.TaskDeadLetter, string, error) {
+	return nil, "", nil
+}
+
+func (r *wikiDeadLetterRepoForCleanupTest) ListByTaskType(
+	context.Context, string, string, int,
+) ([]*types.TaskDeadLetter, string, error) {
+	return nil, "", nil
+}
+
+func (r *wikiDeadLetterRepoForCleanupTest) DeleteByID(context.Context, int64) error {
+	return nil
+}
+
 type wikiPendingRepoForCleanupTest struct {
 	deleteErr     error
 	releaseErr    error
@@ -538,6 +777,7 @@ type wikiPendingRepoForCleanupTest struct {
 	deleteCtxErr  error
 	releaseCtxErr error
 	incrCtxErr    error
+	deleteCalls   int
 }
 
 func (r *wikiPendingRepoForCleanupTest) Enqueue(context.Context, *types.TaskPendingOp) error {
@@ -575,6 +815,7 @@ func (r *wikiPendingRepoForCleanupTest) ReleaseByIDs(ctx context.Context, _ []in
 
 func (r *wikiPendingRepoForCleanupTest) DeleteByIDs(ctx context.Context, _ []int64) error {
 	r.deleteCtxErr = ctx.Err()
+	r.deleteCalls++
 	if r.deleteErr != nil {
 		return r.deleteErr
 	}

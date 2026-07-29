@@ -82,7 +82,17 @@ func (r *wikiPageRepository) UpdateWithRevision(
 				return err
 			}
 		}
-		return updateWikiPageRow(tx, page)
+		if err := updateWikiPageRow(tx, page); err != nil {
+			return err
+		}
+		if rev != nil && rev.BlockSetID != "" && rev.BlockSetID != page.CurrentBlockSetID {
+			if err := tx.Model(&types.WikiPageBlockSet{}).
+				Where("id = ? AND page_id = ?", rev.BlockSetID, page.ID).
+				Update("status", types.WikiBlockSetStatusSuperseded).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -97,26 +107,27 @@ func updateWikiPageRow(db *gorm.DB, page *types.WikiPage) error {
 		Model(page).
 		Where("id = ? AND version = ?", page.ID, expectedVersion).
 		Updates(map[string]interface{}{
-			"title":            page.Title,
-			"content":          page.Content,
-			"summary":          page.Summary,
-			"page_type":        page.PageType,
-			"status":           page.Status,
-			"aliases":          page.Aliases,
-			"out_links":        page.OutLinks,
-			"source_refs":      page.SourceRefs,
-			"chunk_refs":       page.ChunkRefs,
-			"page_metadata":    page.PageMetadata,
-			"parent_slug":      page.ParentSlug,
-			"folder_id":        page.FolderID,
-			"category_path":    page.CategoryPath,
-			"wiki_path":        page.WikiPath,
-			"depth":            page.Depth,
-			"sort_order":       page.SortOrder,
-			"last_edit_source": page.LastEditSource,
-			"last_editor_id":   page.LastEditorID,
-			"version":          page.Version,
-			"updated_at":       page.UpdatedAt,
+			"title":                page.Title,
+			"content":              page.Content,
+			"summary":              page.Summary,
+			"page_type":            page.PageType,
+			"status":               page.Status,
+			"aliases":              page.Aliases,
+			"out_links":            page.OutLinks,
+			"source_refs":          page.SourceRefs,
+			"chunk_refs":           page.ChunkRefs,
+			"page_metadata":        page.PageMetadata,
+			"parent_slug":          page.ParentSlug,
+			"folder_id":            page.FolderID,
+			"category_path":        page.CategoryPath,
+			"wiki_path":            page.WikiPath,
+			"depth":                page.Depth,
+			"sort_order":           page.SortOrder,
+			"last_edit_source":     page.LastEditSource,
+			"last_editor_id":       page.LastEditorID,
+			"current_block_set_id": page.CurrentBlockSetID,
+			"version":              page.Version,
+			"updated_at":           page.UpdatedAt,
 		})
 	if result.Error != nil {
 		page.Version = expectedVersion
@@ -138,7 +149,7 @@ func updateWikiPageRow(db *gorm.DB, page *types.WikiPage) error {
 // wikiRevisionListColumns is the projection for revision listings — every
 // column except the potentially multi-hundred-KB content body.
 const wikiRevisionListColumns = "id, tenant_id, knowledge_base_id, page_id, slug, version, " +
-	"title, page_type, status, summary, aliases, edit_source, editor_id, edited_at, created_at"
+	"title, page_type, status, summary, aliases, block_set_id, edit_source, editor_id, edited_at, created_at"
 
 // ListRevisions returns snapshots for a page newest-first, content omitted.
 func (r *wikiPageRepository) ListRevisions(

@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // TestMergeCitationsIntoItems_PopulatesSourceChunksOnCandidates verifies that
@@ -130,6 +134,7 @@ func TestSplitChunksIntoCitationBatches_RespectsBudgetAndOrder(t *testing.T) {
 			ChunkIndex: idx,
 			Content:    repeatRune('a', runes),
 			ChunkType:  types.ChunkTypeText,
+			IsEnabled:  true,
 		}
 	}
 	chunks := []*types.Chunk{
@@ -161,6 +166,211 @@ func TestSplitChunksIntoCitationBatches_RespectsBudgetAndOrder(t *testing.T) {
 		if b.handles.Len() != len(b.chunks) {
 			t.Errorf("batch %d handle count %d != chunk count %d", bi, b.handles.Len(), len(b.chunks))
 		}
+	}
+}
+
+func TestWikiCitationInputsIncludeEnabledTextualSources(t *testing.T) {
+	chunks := []*types.Chunk{
+		{ID: "enabled", ChunkIndex: 0, Content: "current fact", ChunkType: types.ChunkTypeText, IsEnabled: true},
+		{ID: "disabled", ChunkIndex: 1, Content: "removed fact", ChunkType: types.ChunkTypeText, IsEnabled: false},
+		{ID: "image", ChunkIndex: 2, Content: "caption", ChunkType: types.ChunkTypeImageCaption, IsEnabled: true},
+	}
+
+	ids := wikiTextChunkIDs(chunks)
+	if !equalStrings(ids, []string{"enabled", "image"}) {
+		t.Fatalf("wikiTextChunkIDs() = %v, want enabled text and caption chunks", ids)
+	}
+
+	batches := splitChunksIntoCitationBatches(chunks)
+	if len(batches) != 1 || len(batches[0].chunks) != 2 ||
+		batches[0].chunks[0].ID != "enabled" || batches[0].chunks[1].ID != "image" {
+		t.Fatalf("citation batches did not retain enabled textual sources: %+v", batches)
+	}
+
+	enabled := enabledWikiIngestChunks(chunks)
+	if len(enabled) != 2 || enabled[0].ID != "enabled" || enabled[1].ID != "image" {
+		t.Fatalf("enabledWikiIngestChunks() = %+v, want enabled chunks only", enabled)
+	}
+}
+
+type wikiSourceInvalidationPageService struct {
+	interfaces.WikiPageService
+	slugs []string
+}
+
+func (s wikiSourceInvalidationPageService) ListSlugsBySourceRef(
+	context.Context, string, string,
+) ([]string, error) {
+	return append([]string(nil), s.slugs...), nil
+}
+
+type wikiReparseSlugUnionService struct {
+	interfaces.WikiPageService
+	interfaces.WikiProvenanceService
+	legacy        []string
+	structured    []string
+	legacyErr     error
+	structuredErr error
+}
+
+func (s wikiReparseSlugUnionService) ListSlugsBySourceRef(
+	context.Context, string, string,
+) ([]string, error) {
+	return append([]string(nil), s.legacy...), s.legacyErr
+}
+
+func (s wikiReparseSlugUnionService) ListPageSlugsByKnowledgeSource(
+	context.Context, string, string,
+) ([]string, error) {
+	return append([]string(nil), s.structured...), s.structuredErr
+}
+
+func TestReparsePageSnapshotUnionsLegacyAndStructuredSources(t *testing.T) {
+	svc := &wikiIngestService{wikiService: wikiReparseSlugUnionService{
+		legacy:     []string{"entity/legacy", "entity/shared", "index"},
+		structured: []string{"entity/shared", "concept/structured"},
+	}}
+	got := svc.getExistingPageSlugsForKnowledge(context.Background(), "kb-1", "knowledge-1")
+	if len(got) != 3 || !got["entity/legacy"] || !got["entity/shared"] || !got["concept/structured"] {
+		t.Fatalf("reparse source union = %v, want three unique non-index slugs", got)
+	}
+}
+
+func TestReparsePageSnapshotFailsClosedOnEitherSourceLookupError(t *testing.T) {
+	tests := []struct {
+		name string
+		svc  wikiReparseSlugUnionService
+	}{
+		{
+			name: "legacy lookup",
+			svc: wikiReparseSlugUnionService{
+				legacyErr: errors.New("legacy lookup unavailable"),
+			},
+		},
+		{
+			name: "structured lookup",
+			svc: wikiReparseSlugUnionService{
+				structuredErr: errors.New("structured lookup unavailable"),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := &wikiIngestService{wikiService: test.svc}
+			if _, err := svc.listExistingPageSlugsForKnowledge(
+				context.Background(), "kb-1", "knowledge-1",
+			); err == nil {
+				t.Fatal("strict source lookup unexpectedly succeeded")
+			}
+		})
+	}
+}
+
+type wikiStrictReparseChunkRepository struct {
+	interfaces.ChunkRepository
+}
+
+func (wikiStrictReparseChunkRepository) ListChunksByKnowledgeID(
+	context.Context, uint64, string,
+) ([]*types.Chunk, error) {
+	return []*types.Chunk{{
+		ID: "chunk-current", TenantID: 7, KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1",
+		ChunkType: types.ChunkTypeText, Content: "enough current source text", IsEnabled: true,
+	}}, nil
+}
+
+func (wikiStrictReparseChunkRepository) ListChunksByParentIDs(
+	context.Context, uint64, []string,
+) ([]*types.Chunk, error) {
+	return nil, nil
+}
+
+func TestMapOneDocumentRetriesWhenExistingPageLookupIsIncomplete(t *testing.T) {
+	svc := &wikiIngestService{
+		chunkRepo: wikiStrictReparseChunkRepository{},
+		wikiService: wikiReparseSlugUnionService{
+			legacyErr: errors.New("temporary source index failure"),
+		},
+		knowledgeSvc: wikiSourceInvalidationKnowledgeService{},
+	}
+	result, updates, err := svc.mapOneDocument(
+		context.Background(), nil,
+		WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"},
+		WikiPendingOp{KnowledgeID: "knowledge-1", Attempt: 3, Language: "en-US"},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "list existing wiki pages") {
+		t.Fatalf("mapOneDocument() error = %v, want strict reverse-lookup failure", err)
+	}
+	if result != nil || len(updates) != 0 {
+		t.Fatalf("failed strict lookup produced output: result=%+v updates=%+v", result, updates)
+	}
+}
+
+type wikiSourceInvalidationKnowledgeService struct {
+	interfaces.KnowledgeService
+}
+
+func (wikiSourceInvalidationKnowledgeService) GetKnowledgeByIDOnly(
+	context.Context, string,
+) (*types.Knowledge, error) {
+	return &types.Knowledge{
+		Title: "Edited document", KnowledgeBaseID: "kb-1", ParseStatus: types.ParseStatusCompleted,
+	}, nil
+}
+
+func TestMapWikiDocumentWithoutUsableContentRetractsExistingSources(t *testing.T) {
+	svc := &wikiIngestService{
+		wikiService: wikiSourceInvalidationPageService{
+			slugs: []string{"entity/a", "index", "concept/b", "entity/a"},
+		},
+		knowledgeSvc: wikiSourceInvalidationKnowledgeService{},
+	}
+	result, updates, err := svc.mapWikiDocumentWithoutUsableContent(
+		context.Background(),
+		WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"},
+		WikiPendingOp{KnowledgeID: "knowledge-1", Attempt: 12, Language: "en-US"},
+		nil, nil, "no_enabled_chunks",
+	)
+	if err != nil {
+		t.Fatalf("mapWikiDocumentWithoutUsableContent() error = %v", err)
+	}
+	if result == nil || result.KnowledgeID != "knowledge-1" || result.Attempt != 12 || result.DocTitle != "Edited document" || !result.SourceInvalidated {
+		t.Fatalf("unexpected invalidation result: %+v", result)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("invalidation updates = %+v, want two unique non-index slugs", updates)
+	}
+	for _, update := range updates {
+		if update.Type != "retract" || update.KnowledgeID != "knowledge-1" || update.KnowledgeAttempt != 12 {
+			t.Fatalf("unexpected invalidation update: %+v", update)
+		}
+	}
+}
+
+func TestMapWikiDocumentWithoutUsableContentUnionsStructuredSources(t *testing.T) {
+	svc := &wikiIngestService{
+		wikiService: wikiReparseSlugUnionService{
+			legacy:     []string{"entity/legacy", "entity/shared"},
+			structured: []string{"entity/shared", "concept/structured"},
+		},
+		knowledgeSvc: wikiSourceInvalidationKnowledgeService{},
+	}
+	_, updates, err := svc.mapWikiDocumentWithoutUsableContent(
+		context.Background(),
+		WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"},
+		WikiPendingOp{KnowledgeID: "knowledge-1", Attempt: 12, Language: "en-US"},
+		nil, nil, "no_enabled_chunks",
+	)
+	if err != nil {
+		t.Fatalf("mapWikiDocumentWithoutUsableContent() error = %v", err)
+	}
+	got := make(map[string]bool, len(updates))
+	for _, update := range updates {
+		got[update.Slug] = true
+	}
+	if len(got) != 3 || !got["entity/legacy"] || !got["entity/shared"] || !got["concept/structured"] {
+		t.Fatalf("source invalidation union = %v, want legacy and structured slugs", got)
 	}
 }
 
