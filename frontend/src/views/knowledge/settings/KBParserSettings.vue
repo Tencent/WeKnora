@@ -46,6 +46,14 @@
               :label="opt.selectLabel"
             />
           </t-select>
+          <t-checkbox
+            v-if="group.extensions.includes('xlsx') && getEngineForGroup(group.extensions) === 'builtin'"
+            class="xlsx-header-option"
+            :checked="getXLSXFirstRowAsHeader(group.extensions)"
+            @change="(checked: boolean) => handleXLSXFirstRowAsHeaderChange(group.extensions, checked)"
+          >
+            {{ $t('kbSettings.parser.xlsxFirstRowAsHeader') }}
+          </t-checkbox>
           <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
             <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
           </div>
@@ -75,6 +83,7 @@ function getEngineDisplayName(engineName: string): string {
 export interface ParserEngineRule {
   file_types: string[]
   engine: string
+  xlsx_first_row_as_header?: boolean
 }
 
 interface EngineOption {
@@ -217,14 +226,41 @@ function getEngineForGroup(extensions: string[]): string {
 }
 
 function handleEngineChange(extensions: string[], engine: string) {
+  const currentRule = getRuleForGroup(extensions)
   const otherRules = localEngineRules.value.filter(
     r => !r.file_types.some(ft => extensions.includes(ft))
   )
   if (engine) {
-    otherRules.push({ file_types: [...extensions], engine })
+    otherRules.push({
+      file_types: [...extensions],
+      engine,
+      ...(currentRule?.xlsx_first_row_as_header !== undefined
+        ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
+        : {}),
+    })
   }
   localEngineRules.value = otherRules
   emit('update:parserEngineRules', buildCompleteRules())
+}
+
+function getRuleForGroup(extensions: string[]): ParserEngineRule | undefined {
+  return localEngineRules.value.find(
+    rule => rule.file_types.some(fileType => extensions.includes(fileType))
+  )
+}
+
+function getXLSXFirstRowAsHeader(extensions: string[]): boolean {
+  return getRuleForGroup(extensions)?.xlsx_first_row_as_header === true
+}
+
+function handleXLSXFirstRowAsHeaderChange(extensions: string[], checked: boolean) {
+  const rules = buildCompleteRules()
+  const rule = rules.find(item => item.file_types.some(fileType => extensions.includes(fileType)))
+  if (!rule) return
+
+  rule.xlsx_first_row_as_header = checked
+  localEngineRules.value = rules
+  emit('update:parserEngineRules', rules)
 }
 
 function buildCompleteRules(): ParserEngineRule[] {
@@ -232,7 +268,14 @@ function buildCompleteRules(): ParserEngineRule[] {
   for (const group of fileTypeGroups.value) {
     const engine = getEngineForGroup(group.extensions)
     if (engine) {
-      rules.push({ file_types: [...group.extensions], engine })
+      const currentRule = getRuleForGroup(group.extensions)
+      rules.push({
+        file_types: [...group.extensions],
+        engine,
+        ...(currentRule?.xlsx_first_row_as_header !== undefined
+          ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
+          : {}),
+      })
     }
   }
   return rules
@@ -388,6 +431,11 @@ watch(() => props.parserEngineRules, (v) => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+}
+
+.xlsx-header-option {
+  margin-top: 10px;
+  text-align: right;
 }
 
 .no-engine-warning {

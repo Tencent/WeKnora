@@ -8,7 +8,7 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/llmreference"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -274,7 +274,7 @@ func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
 
 func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *testing.T) {
 	engine := &AgentEngine{
-		sourceRefs: llmreference.NewRegistry(),
+		modelContext: modelcontext.NewRegistry(true),
 		knowledgeBasesInfo: []*KnowledgeBaseInfo{{
 			ID:   "kb-real-id",
 			Name: "Docs",
@@ -298,7 +298,7 @@ func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *t
 	assert.Contains(t, userContent, `knowledge_base id="b1"`)
 	assert.Contains(t, userContent, `knowledge_id="d1"`)
 	assert.Contains(t, userContent, `knowledge_id="d2"`)
-	assert.Equal(t, "c1", engine.sourceRefs.ChunkAlias("chunk-real-id"))
+	assert.Equal(t, "c1", engine.modelContext.ChunkHandle("chunk-real-id"))
 	assert.NotContains(t, userContent, "kb-real-id")
 	assert.NotContains(t, userContent, "chunk-real-id")
 	assert.NotContains(t, userContent, "doc-real-id")

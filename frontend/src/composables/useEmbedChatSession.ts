@@ -312,7 +312,6 @@ export function useEmbedChatSession(options: {
       agent_enabled: agentEnabled,
       agent_id: options.agentId,
       web_search_enabled: (options.allowWebSearch ?? false) && visitorWebSearchEnabled,
-      enable_memory: false,
       summary_model_id: '',
       mcp_service_ids: [],
       mentioned_items: [],

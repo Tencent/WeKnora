@@ -1,0 +1,207 @@
+/* 共享到空间添加弹层（对齐空间设置里的添加成员 / 权限升级 popup） */
+.share-add-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--td-component-stroke);
+    box-shadow: var(--td-shadow-2), 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .share-add-popup-inner {
+    width: min(360px, calc(100vw - 32px));
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .member-invite-popup-title {
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+  }
+
+  .add-member-tip {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+    line-height: 1.5;
+  }
+
+  .org-upgrade-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .org-upgrade-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+
+    &--last {
+      margin-bottom: 0;
+    }
+  }
+
+  .org-upgrade-field-label {
+    display: block;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  .org-upgrade-field .t-select,
+  .org-upgrade-field .share-org-select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .member-form-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    line-height: 1.45;
+  }
+
+  .invite-popup-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+}
+
+/* 空间选择下拉（挂到 body，避免嵌套在共享 popup 内产生双层阴影） */
+.share-org-select-popup {
+  z-index: 3060 !important;
+
+  .t-popup__content {
+    padding: 4px !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--td-component-stroke) !important;
+    background: var(--td-bg-color-container) !important;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1) !important;
+    overflow: hidden;
+  }
+
+  .t-select__dropdown {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    max-height: min(280px, 40vh);
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .t-select-option {
+    height: 36px !important;
+    min-height: 36px;
+    align-items: center;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 6px !important;
+    transition: background-color 0.15s ease;
+
+    &:hover,
+    &.t-is-hover {
+      background: var(--td-bg-color-secondarycontainer) !important;
+    }
+
+    &.t-is-selected {
+      background: transparent !important;
+      font-weight: 500;
+
+      .share-org-option-name {
+        color: var(--td-brand-color);
+      }
+    }
+  }
+
+  .t-select-option__content {
+    width: 100%;
+    padding: 0 10px;
+    box-sizing: border-box;
+  }
+
+  .share-org-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    width: 100%;
+    line-height: 1.4;
+  }
+
+  .share-org-option-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .share-org-option-role {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+/* 共享说明提示弹出层（t-popup 挂到 body，须全局样式） */
+.share-hint-popup-overlay {
+  z-index: 3050 !important;
+
+  .t-popup__content {
+    padding: 0 !important;
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    overflow: hidden;
+  }
+
+  .share-hint-popover {
+    padding: 14px 16px;
+
+    .share-hint-title {
+      margin: 0 0 6px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+      line-height: 1.35;
+    }
+
+    .share-hint-desc {
+      margin: 0 0 8px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--td-text-color-secondary);
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
+}

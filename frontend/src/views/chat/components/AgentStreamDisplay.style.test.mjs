@@ -20,18 +20,23 @@ test('agent steps use compact muted timeline styling', () => {
   assert.doesNotMatch(source, /\.action-title \.action-title-icon,\s*\n\s*\.icon-mask\s*\{/)
 })
 
-test('expanded agent step log hides raw thinking narration', () => {
-  assert.match(source, /visibleIntermediateEvents\s*=\s*computed/)
-  assert.match(source, /e\.type === 'thinking'\)\s*return false/)
-  assert.match(source, /e\.type === 'tool_call' && e\.tool_name === 'thinking'\)\s*return false/)
+test('expanded agent step log keeps model thinking in the tool timeline', () => {
+  assert.match(source, /visibleIntermediateEvents\s*=\s*computed\(\(\) => intermediateEvents\.value\)/)
   assert.match(source, /v-for="\(event, index\) in visibleIntermediateEvents"/)
 })
 
-test('streaming log also hides raw thinking narration', () => {
-  assert.match(source, /if \(!isConversationDone\.value\)\s*\{\s*return result\.filter/)
-  assert.match(source, /e\.type === 'thinking'\) return false/)
-  assert.match(source, /e\.type === 'tool_call' && e\.tool_name === 'thinking'\) return false/)
-  assert.doesNotMatch(source, /if \(!isConversationDone\.value\)\s*\{\s*return result;\s*\}/)
+test('streaming log renders reasoning alongside tool calls', () => {
+  assert.match(source, /if \(!isConversationDone\.value\)\s*\{\s*return result;\s*\}/)
+})
+
+test('expanded model reasoning stays inline without a separate thinking title', () => {
+  assert.match(source, /class="thinking-inline-content markdown-content"/)
+  assert.match(source, /class="thinking-inline-markdown" v-html="renderMarkdownContent\(event\.content\)"/)
+  assert.match(source, /event\.title && event\.content && isEventExpanded\(event\.event_id\)/)
+  assert.match(source, /\.thinking-inline-title\s*\{[\s\S]*align-items:\s*flex-start/)
+  assert.match(source, /\.thinking-inline-content\s*\{[\s\S]*margin-top:\s*0/)
+  assert.doesNotMatch(source, /\.thinking-inline-title > \.action-title-icon/)
+  assert.match(source, /\.tree-child \.thinking-event-card \.action-title\s*\{[\s\S]*position:\s*static/)
 })
 
 test('streaming tool log uses the same timeline structure', () => {
@@ -95,6 +100,7 @@ test('agent mode shows a native placeholder before answer whenever nothing is pe
   assert.match(source, /if \(isConversationDone\.value\) return false/)
   assert.match(source, /return !hasPendingStreamingActivity\.value/)
   assert.match(source, /const hasPendingStreamingActivity = computed/)
+  assert.match(source, /event\.thinking === true \|\| isThinkingActive\(event\.event_id\)/)
   assert.match(source, /event\.type === 'tool_approval_required' \|\| event\.type === 'mcp_oauth_required'/)
   assert.match(source, /class="action-card action-pending"/)
   assert.match(source, /t\('chat\.thinkingAlt'\)/)

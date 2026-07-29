@@ -39,7 +39,7 @@ func (f *fakeEmbedChannelService) ListByTenant(
 
 func (f *fakeEmbedChannelService) Update(
 	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
-	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowMemory *bool, allowFileUpload *bool,
+	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool,
 	defaultLocale *string, webhookURL *string, webhookSecret *string,
 ) (*types.EmbedChannel, error) {
 	return nil, nil

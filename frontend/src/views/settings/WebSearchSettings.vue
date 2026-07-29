@@ -206,7 +206,7 @@
 
         <!-- Section 2 — 连接配置（base url / api key / engine id），仅当任意字段需要时渲染 -->
         <section
-          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url"
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url || selectedProviderType?.config_fields?.length"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
@@ -252,6 +252,30 @@
               v-model="providerForm.parameters.engine_id"
               :placeholder="t('webSearchSettings.engineIdLabel')"
             />
+          </div>
+
+          <div
+            v-for="field in selectedProviderType?.config_fields || []"
+            :key="field.key"
+            class="form-item"
+          >
+            <label class="form-label" :class="{ required: field.required }">
+              {{ configFieldText(field.label_key, field.label) }}
+            </label>
+            <t-select
+              v-if="field.type === 'select'"
+              v-model="providerForm.parameters.extra_config[field.key]"
+            >
+              <t-option
+                v-for="option in field.options || []"
+                :key="option.value"
+                :value="option.value"
+                :label="configFieldText(option.label_key, option.label)"
+              />
+            </t-select>
+            <p v-if="field.description" class="form-desc">
+              {{ configFieldText(field.description_key, field.description) }}
+            </p>
           </div>
         </section>
 
@@ -334,13 +358,19 @@ const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: { api_key?: string; engine_id?: string; base_url?: string; proxy_url?: string }
+  parameters: {
+    api_key?: string
+    engine_id?: string
+    base_url?: string
+    proxy_url?: string
+    extra_config: Record<string, string>
+  }
   is_default: boolean
 }>({
   name: '',
   provider: 'duckduckgo',
   description: '',
-  parameters: {},
+  parameters: { extra_config: {} },
   is_default: false,
 })
 
@@ -355,6 +385,7 @@ watch(
     providerForm.value.parameters?.api_key,
     providerForm.value.parameters?.engine_id,
     providerForm.value.parameters?.base_url,
+    JSON.stringify(providerForm.value.parameters?.extra_config || {}),
   ],
   () => { lastTestOk.value = null },
 )
@@ -425,6 +456,7 @@ const canTestConnection = computed(() => {
   if (pt.requires_api_key && !providerForm.value.parameters.api_key) return false
   if (pt.requires_engine_id && !providerForm.value.parameters.engine_id) return false
   if (pt.requires_base_url && !providerForm.value.parameters.base_url) return false
+  if (pt.config_fields?.some(field => field.required && !providerForm.value.parameters.extra_config?.[field.key])) return false
   return true
 })
 
@@ -455,9 +487,24 @@ const providerTypeLabel = (providerId: string) => {
   return providerTypes.value.find(p => p.id === providerId)?.name || providerId
 }
 
+const configFieldText = (key: string | undefined, fallback: string) => {
+  return key ? t(key, fallback) : fallback
+}
+
+const providerConfigDefaults = (providerId: string) => {
+  const fields = providerTypes.value.find(p => p.id === providerId)?.config_fields || []
+  return Object.fromEntries(
+    fields
+      .filter(field => field.default !== undefined)
+      .map(field => [field.key, field.default as string]),
+  )
+}
+
 // ===== Methods =====
 const onProviderTypeChange = () => {
-  providerForm.value.parameters = {}
+  providerForm.value.parameters = {
+    extra_config: providerConfigDefaults(providerForm.value.provider),
+  }
   lastTestOk.value = null
 }
 
@@ -486,7 +533,9 @@ const openAddDialog = () => {
     name: '',
     provider: providerTypes.value[0]?.id || 'duckduckgo',
     description: '',
-    parameters: {},
+    parameters: {
+      extra_config: providerConfigDefaults(providerTypes.value[0]?.id || 'duckduckgo'),
+    },
     is_default: providerEntities.value.length === 0
   }
   lastTestOk.value = null
@@ -506,6 +555,10 @@ const editProvider = (entity: WebSearchProviderEntity) => {
       engine_id: entity.parameters?.engine_id || '',
       base_url: entity.parameters?.base_url || '',
       proxy_url: entity.parameters?.proxy_url || '',
+      extra_config: {
+        ...providerConfigDefaults(entity.provider),
+        ...(entity.parameters?.extra_config || {}),
+      },
     },
     is_default: entity.is_default || false,
   }
@@ -530,6 +583,13 @@ const saveProvider = async () => {
       engine_id: providerForm.value.parameters.engine_id,
       base_url: providerForm.value.parameters.base_url,
       proxy_url: providerForm.value.parameters.proxy_url,
+    }
+    const extraConfig = Object.fromEntries(
+      Object.entries(providerForm.value.parameters.extra_config || {})
+        .filter(([, value]) => value !== ''),
+    )
+    if (Object.keys(extraConfig).length > 0) {
+      paramsOut.extra_config = extraConfig
     }
     if (!editingProvider.value && providerForm.value.parameters.api_key) {
       paramsOut.api_key = providerForm.value.parameters.api_key
@@ -855,6 +915,10 @@ onMounted(async () => {
   background: rgba(20, 158, 130, 0.12);
   color: #149E82;
 }
+.provider-card--zhipu .provider-card__badge {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563EB;
+}
 
 .provider-card__body {
   flex: 1;
@@ -1132,5 +1196,9 @@ onMounted(async () => {
 .websearch-drawer--keenable .setting-drawer__header-icon {
   background: rgba(20, 158, 130, 0.12);
   color: #149E82;
+}
+.websearch-drawer--zhipu .setting-drawer__header-icon {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563EB;
 }
 </style>

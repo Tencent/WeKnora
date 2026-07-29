@@ -55,6 +55,17 @@ func TestRequireSystemAdmin_RejectsAPIKey(t *testing.T) {
 	}
 }
 
+func TestRequireSystemAdmin_AllowsPlatformAPIKeyAfterRouteGate(t *testing.T) {
+	w := apiKeyRBACHarness(
+		types.TenantAPIKeyScope{ScopeType: types.APIKeyScopePlatform},
+		types.TenantRoleViewer,
+		RequireSystemAdmin(cfgRBAC(true)),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("platform API key should pass the system-admin role guard after route authorization, got %d", w.Code)
+	}
+}
+
 // TestRequireOwnershipOrRole_ShortCircuitsAPIKey is the core regression for
 // review #1: an API key writing to a KB it does not
 // "own" (synthetic system user never matches creator_id) must not be 403'd by
@@ -79,6 +90,37 @@ func TestRequireOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
 	}
 	if lookupCalled {
 		t.Fatal("ownership lookup must not run for API-key principals")
+	}
+}
+
+// TestEvaluateOwnershipOrRole_ShortCircuitsAPIKey mirrors
+// TestRequireOwnershipOrRole_ShortCircuitsAPIKey for the handler-side twin used
+// when the KB id is carried in the request body (MoveKnowledge /
+// BatchDeleteKnowledge via requireKBOwnershipOrAdmin). A scoped ingest key that
+// the APIKeyGate + KB allow-list already admitted must not be re-rejected here
+// just because it is synthesized as a Viewer for legacy-guard compatibility.
+func TestEvaluateOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+		Capabilities:     types.StringArray{string(types.APIKeyCapabilityIngest)},
+	})
+	// Synthesized Viewer role + a foreign creator would 403 a human caller.
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+
+	if err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true),
+		types.TenantRoleAdmin, "some-other-human-user", nil); err != nil {
+		t.Fatalf("API-key principal should short-circuit EvaluateOwnershipOrRole, got %v", err)
+	}
+}
+
+// Sanity: a JWT Viewer with a foreign creator is still forbidden — the
+// short-circuit must be scoped to API-key principals only.
+func TestEvaluateOwnershipOrRole_JWTViewerStillDenied(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
+	err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true),
+		types.TenantRoleAdmin, "some-other-human-user", nil)
+	if err == nil {
+		t.Fatal("JWT Viewer with foreign creator must be denied by EvaluateOwnershipOrRole")
 	}
 }
 

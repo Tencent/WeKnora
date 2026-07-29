@@ -282,6 +282,9 @@ const canManage = computed(() => {
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// The activity feed exposes owner-side actor and configuration summaries.
+// It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
+
 // Can mutate knowledge (move / batch-delete): the backend gate for these
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
 // in their tenant on top of having KB edit permission. Without the extra
@@ -299,6 +302,16 @@ const canMutateKnowledge = computed(() => {
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
+// Downloading returns the original source file, which is intentionally more
+// restrictive than viewing parsed content or using the preview tab. A tenant
+// Viewer can never download; for cross-tenant KBs the effective share
+// permission must additionally be Editor or Admin.
+const canDownloadKnowledge = computed(() => {
+  if (!authStore.hasRole('contributor')) return false;
+  const permission = effectiveKBPermission.value;
+  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
@@ -980,6 +993,16 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
+// Global file drops are captured by the platform shell. Route them back into
+// the same confirmation flow as the page upload button so tags and per-batch
+// processing settings are never skipped.
+const handleKnowledgeFileDrop = (event: CustomEvent) => {
+  const eventKbId = event.detail?.kbId;
+  const files = Array.isArray(event.detail?.files) ? event.detail.files : [];
+  if (eventKbId !== kbId.value || isFAQ.value || files.length === 0) return;
+  handleUploadSourceFiles(files);
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -1033,12 +1056,14 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
@@ -1394,14 +1419,16 @@ const showUploadResultMessages = (
 
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: { processConfig?: KnowledgeProcessOverrides; tagIds?: string[] } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = options.tagIds && options.tagIds.length > 0
+    ? [...options.tagIds]
+    : undefined;
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
@@ -1466,14 +1493,18 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
+const executeUrlImport = async (
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
@@ -1515,6 +1546,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
     const hasFolderPaths = files.some((file) => {
@@ -1524,11 +1556,11 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
     if (hasFolderPaths) {
       MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
     }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, { processConfig, tagIds });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, tagIds);
   }
 };
 
@@ -1539,6 +1571,7 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
     const result = await uploadConfirmStore.open({
       mode: 'file',
       kbInfo: kbInfo.value,
+      tagIds: [...selectedTagIds.value],
       files,
       urls,
       acceptFileTypes: acceptFileTypes.value,
@@ -1717,6 +1750,18 @@ const handleScroll = () => {
 };
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
+};
+
+const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {
+  if (!state?.id) return;
+  const card = cardList.value.find((item: KnowledgeCard) => item.id === state.id);
+  if (!card) return;
+  if (typeof state.summary_status === 'string' && state.summary_status) {
+    card.summary_status = state.summary_status;
+  }
+  if (typeof state.description === 'string') {
+    card.description = state.description;
+  }
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
@@ -2301,8 +2346,9 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
   </template>
@@ -2327,6 +2373,7 @@ async function createNewSession(value: string): Promise<void> {
     @open-manage="openTagManageFromEditDialog" />
 
   <KbTagManageDrawer
+    v-if="!isFAQ"
     v-model:visible="tagManageDrawerVisible"
     :kb-id="kbId"
     :is-faq="isFAQ"

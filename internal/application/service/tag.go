@@ -29,6 +29,7 @@ type knowledgeTagService struct {
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
 	kbShareService interfaces.KBShareService
+	audit          interfaces.AuditLogService
 }
 
 // NewKnowledgeTagService creates a new tag service.
@@ -42,6 +43,7 @@ func NewKnowledgeTagService(
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	kbShareService interfaces.KBShareService,
+	audit interfaces.AuditLogService,
 ) (interfaces.KnowledgeTagService, error) {
 	return &knowledgeTagService{
 		kbService:      kbService,
@@ -53,6 +55,7 @@ func NewKnowledgeTagService(
 		modelService:   modelService,
 		task:           task,
 		kbShareService: kbShareService,
+		audit:          audit,
 	}, nil
 }
 
@@ -183,6 +186,8 @@ func (s *knowledgeTagService) CreateTag(
 	if err := s.repo.Create(ctx, tag); err != nil {
 		return nil, err
 	}
+	recordKBActivity(ctx, s.audit, tag.TenantID, tag.KnowledgeBaseID, types.AuditActionTagCreated,
+		"knowledge_tag", tag.ID, types.AuditOutcomeSuccess, map[string]any{"name": tag.Name})
 	return tag, nil
 }
 
@@ -220,6 +225,8 @@ func (s *knowledgeTagService) UpdateTag(
 	if err := s.repo.Update(ctx, tag); err != nil {
 		return nil, err
 	}
+	recordKBActivity(ctx, s.audit, tag.TenantID, tag.KnowledgeBaseID, types.AuditActionTagUpdated,
+		"knowledge_tag", tag.ID, types.AuditOutcomeSuccess, map[string]any{"name": tag.Name})
 	return tag, nil
 }
 
@@ -286,6 +293,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 		payload := types.KnowledgeListDeletePayload{
 			TenantID:     tenantID,
 			KnowledgeIDs: knowledgeIDs,
+			Initiator:    types.TaskInitiatorFromContext(ctx),
 		}
 		langfuse.InjectTracing(ctx, &payload)
 		payloadBytes, err := json.Marshal(payload)
@@ -317,6 +325,9 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 				return err
 			}
 		}
+		recordKBActivity(ctx, s.audit, tenantID, tag.KnowledgeBaseID, types.AuditActionTagUpdated,
+			"knowledge_tag", tag.ID, types.AuditOutcomeSuccess,
+			map[string]any{"name": tag.Name, "content_cleared": true, "excluded_count": len(excludeIDs)})
 		return nil
 	}
 
@@ -341,9 +352,18 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 
 	// If there are excludeIDs, we cannot delete the tag itself as it still has content
 	if len(excludeIDs) > 0 {
+		recordKBActivity(ctx, s.audit, tenantID, tag.KnowledgeBaseID, types.AuditActionTagUpdated,
+			"knowledge_tag", tag.ID, types.AuditOutcomeSuccess,
+			map[string]any{"name": tag.Name, "content_cleared": true, "excluded_count": len(excludeIDs)})
 		return nil
 	}
-	return s.repo.Delete(ctx, tenantID, id)
+	if err := s.repo.Delete(ctx, tenantID, id); err != nil {
+		return err
+	}
+	recordKBActivity(ctx, s.audit, tenantID, tag.KnowledgeBaseID, types.AuditActionTagDeleted,
+		"knowledge_tag", tag.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": tag.Name, "force": force})
+	return nil
 }
 
 // enqueueIndexDeleteTask enqueues an async task for index deletion (low priority).

@@ -10,8 +10,8 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -27,11 +27,10 @@ func (s *sessionService) KnowledgeQA(
 ) error {
 	logger.Infof(
 		ctx,
-		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v, enableMemory: %v",
+		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
 		req.Session.ID,
 		req.Query,
 		req.WebSearchEnabled,
-		req.EnableMemory,
 	)
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -103,15 +102,11 @@ func (s *sessionService) KnowledgeQA(
 		len(searchTargets),
 	)
 
-	// Scope memory and pipeline attribution to the same owner as the session.
-	userID := types.SessionOwnerIDFromContext(ctx)
-
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
 			Query:                   req.Query,
 			SessionID:               req.Session.ID,
-			UserID:                  userID,
-			EnableMemory:            req.EnableMemory,
+			UserID:                  types.SessionOwnerIDFromContext(ctx),
 			MaxRounds:               s.cfg.Conversation.MaxRounds,
 			KnowledgeBaseIDs:        knowledgeBaseIDs,
 			KnowledgeIDs:            knowledgeIDs,
@@ -184,9 +179,7 @@ func (s *sessionService) KnowledgeQA(
 
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
-			AddIf(chatManage.EnableMemory, types.MEMORY_RETRIEVAL).
 			Add(types.CHAT_COMPLETION_STREAM).
-			AddIf(chatManage.EnableMemory, types.MEMORY_STORAGE).
 			Build()
 	} else {
 		// RAG — dynamically assemble based on feature flags.
@@ -979,7 +972,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start streaming response
-	fallbackMessages, sourceRefs := prepareFallbackMessages(chatManage, promptContent)
+	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
@@ -994,22 +987,22 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan, sourceRefs)
+	go s.consumeFallbackStream(ctx, chatManage, responseChan, modelContext)
 }
 
 func prepareFallbackMessages(
 	chatManage *types.ChatManage,
 	promptContent string,
-) ([]chat.Message, *llmreference.Registry) {
+) ([]chat.Message, *modelcontext.Registry) {
 	messages := buildFallbackMessages(chatManage, promptContent)
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
-	refs := llmreference.NewRegistry(citationsEnabled)
+	registry := modelcontext.NewRegistry(citationsEnabled)
 	if len(messages) > 0 && messages[0].Role == "system" {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
 	} else {
-		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled))}}, messages...)
+		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(registry.ProtocolPrompt())}}, messages...)
 	}
-	return refs.EncodeMessages(messages), refs
+	return registry.EncodeMessages(messages), registry
 }
 
 func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
@@ -1142,20 +1135,20 @@ func (s *sessionService) consumeFallbackStream(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	responseChan <-chan types.StreamResponse,
-	sourceRefs *llmreference.Registry,
+	modelContext *modelcontext.Registry,
 ) {
 	fallbackID := generateEventID("fallback")
 	eventBus := chatManage.EventBus
 	var finalContent string
 	streamCompleted := false
-	refExpander := llmreference.NewStreamExpander(sourceRefs)
+	decoder := modelContext.StreamDecoder()
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
-			response.Content = refExpander.Feed(response.Content)
+			response.Content = decoder.Feed(response.Content)
 			if response.Done {
-				response.Content += refExpander.Flush()
+				response.Content += decoder.Flush()
 			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
@@ -1216,7 +1209,7 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 		return
 	}
 	if !chatManage.CitationsEnabled() {
-		content = llmreference.NewRegistry(false).ExpandText(content)
+		content = modelcontext.NewRegistry(false).DecodeOutputText(content)
 	}
 
 	fallbackID := generateEventID("fallback")

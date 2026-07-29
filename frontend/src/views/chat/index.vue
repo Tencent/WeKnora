@@ -4,7 +4,7 @@
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
     }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" />
+        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -314,7 +314,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams(6));
+        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -781,13 +781,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
 
-    // Memory toggle is now a server-side per-user preference (see PUT
-    // /auth/me/preferences). For the normal logged-in chat we leave the
-    // field unset so the backend reads `user.preferences.enable_memory`;
-    // for embedded widgets we still send an explicit `false` so a user's
-    // personal "memory on" setting doesn't leak into a KB-embed context.
-    const enableMemoryOverride = props.embeddedMode ? false : undefined;
-
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
     const sidebarKbIds = props.embeddedMode ? props.kbIds : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
@@ -826,7 +819,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
-        enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
@@ -1063,6 +1055,10 @@ onBeforeRouteUpdate((to, from, next) => {
         @media (min-width: 960px) {
             padding-right: 420px;
             box-sizing: border-box;
+
+            .chat_scroll_box {
+                padding-top: 0;
+            }
         }
     }
 
@@ -1185,7 +1181,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     gap: 20px;
-    max-width: 800px;
+    max-width: 960px;
     padding: 16px 0;
     animation: contentFadeIn 0.3s ease-out;
 }
@@ -1207,7 +1203,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
-    max-width: 800px;
+    max-width: 960px;
     box-sizing: border-box;
     position: relative;
 
@@ -1226,7 +1222,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-width: 800px;
+    max-width: 960px;
     flex: 1;
     margin: 0 auto;
     width: 100%;
