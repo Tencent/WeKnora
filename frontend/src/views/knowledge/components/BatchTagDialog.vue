@@ -75,10 +75,10 @@
         {{ $t('knowledgeBase.tagSelectedCount', { count: selectedSet.size }) }}
       </span>
       <div class="batch-tag-footer-right">
-        <t-button variant="outline" size="small" @click="handleClose">
+        <t-button variant="outline" size="small" :disabled="confirmLoading" @click="handleClose">
           {{ $t('common.cancel') }}
         </t-button>
-        <t-button theme="primary" size="small" :loading="saving" @click="handleConfirm">
+        <t-button theme="primary" size="small" :loading="confirmLoading" @click="handleConfirm">
           {{ $t('common.confirm') }}
         </t-button>
       </div>
@@ -106,6 +106,7 @@ const props = defineProps<{
   tagList: Tag[];
   preSelectedTagIds?: string[];
   canManage?: boolean;
+  confirmLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -120,7 +121,6 @@ const { t } = useI18n();
 const searchQuery = ref('');
 const selectedSet = ref<Set<string>>(new Set());
 const creatingTag = ref(false);
-const saving = ref(false);
 const newTagName = ref('');
 
 watch(
@@ -213,14 +213,9 @@ async function handleAddNewTag() {
   }
 }
 
-async function handleConfirm() {
-  saving.value = true;
-  try {
-    emit('confirm', Array.from(selectedSet.value));
-    emit('update:visible', false);
-  } finally {
-    saving.value = false;
-  }
+function handleConfirm() {
+  if (props.confirmLoading) return;
+  emit('confirm', Array.from(selectedSet.value));
 }
 
 function handleClose() {
