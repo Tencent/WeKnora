@@ -1,0 +1,135 @@
+x-docker-log-rotation: &docker-log-rotation
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  frontend:
+    image: wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    environment:
+      APP_HOST: app
+      APP_PORT: "8080"
+      APP_SCHEME: http
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+  app:
+    image: wechatopenai/weknora-app:${WEKNORA_VERSION:-latest}
+    # Build from this checkout so a fork can validate MySQL support before a
+    # release image containing the change is published.
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+      args:
+        APK_MIRROR_ARG: ${APK_MIRROR_ARG:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    env_file:
+      - path: .env.mysql
+        required: false
+    environment:
+      DB_DRIVER: mysql
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-weknora}
+      DB_PASSWORD: ${DB_PASSWORD:-weknora_change_me}
+      DB_NAME: ${DB_NAME:-weknora}
+      RETRIEVE_DRIVER: ${RETRIEVE_DRIVER:-qdrant}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6334"
+      REDIS_ADDR: redis:6379
+      DOCREADER_ADDR: docreader:50051
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+    volumes:
+      - data-files:/data/files
+      - type: bind
+        source: ${BACKUP_HOST_DIR:-D:/WeKnoraBackups}
+        target: /data/backups
+      - docreader-tmp:/tmp/docreader:ro
+      - ./config/config.yaml:/app/config/config.yaml:ro
+      - ./skills/preloaded:/app/skills/preloaded:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-weknora}
+      MYSQL_USER: ${DB_USER:-weknora}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-weknora_change_me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_this_root_password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+  docreader:
+    image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
+    volumes:
+      - docreader-tmp:/tmp/docreader
+    networks:
+      - weknora-mysql
+    logging: *docker-log-rotation
+    restart: unless-stopped
+
+networks:
+  weknora-mysql:
+
+volumes:
+  data-files:
+  docreader-tmp:
+  mysql-data:
+  qdrant-data:
+  redis-data:

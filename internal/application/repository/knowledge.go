@@ -584,10 +584,15 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+		Where("metadata->>? = ?", key, value)
+	if r.db.Dialector.Name() == "mysql" {
+		query = r.db.WithContext(ctx).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
+			Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, CONCAT('$.', ?))) = ?", key, value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

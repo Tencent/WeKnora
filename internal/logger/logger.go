@@ -10,10 +10,12 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -27,6 +29,54 @@ var (
 	activeLogFile io.WriteCloser
 	ansiEscapeRE  = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 )
+
+const (
+	defaultLogFileMaxSizeMB  = 50
+	defaultLogFileMaxBackups = 3
+	defaultLogFileMaxAgeDays = 28
+	defaultLogFileCompress   = true
+
+	defaultLogDiskWarningFreePercent  = 20
+	defaultLogDiskCriticalFreePercent = 10
+	defaultLogDiskMinFreeGB           = 5
+)
+
+type logFileRotationConfig struct {
+	maxSizeMB  int
+	maxBackups int
+	maxAgeDays int
+	compress   bool
+}
+
+type logDiskThresholds struct {
+	warningFreePercent  int
+	criticalFreePercent int
+	minFreeGB           int
+}
+
+type logDiskUsage struct {
+	totalBytes uint64
+	freeBytes  uint64
+}
+
+type logDiskState string
+
+const (
+	logDiskStateHealthy  logDiskState = "healthy"
+	logDiskStateWarning  logDiskState = "warning"
+	logDiskStateCritical logDiskState = "critical"
+	logDiskStateUnknown  logDiskState = "unknown"
+)
+
+// FileLogRuntimeStatus contains log-file storage measurements without exposing
+// the configured path. It is intended for operational status and metrics APIs.
+type FileLogRuntimeStatus struct {
+	Enabled        bool
+	SizeBytes      int64
+	DiskFreeBytes  uint64
+	DiskTotalBytes uint64
+	DiskState      string
+}
 
 // ansiStripWriter removes ANSI color/style sequences so file logs stay plain text
 // while stdout can still render colors in a terminal.
@@ -250,12 +300,17 @@ func ConfigureFromEnv() {
 	writer := io.Writer(os.Stdout)
 	logPath := resolveLogPathFromEnv()
 	if logPath != "" {
-		file, err := openLogFile(logPath)
+		rotationConfig, rotationWarnings := resolveLogFileRotationConfigFromEnv()
+		diskThresholds, diskWarnings := resolveLogDiskThresholdsFromEnv()
+		writeLoggerConfigWarnings(append(rotationWarnings, diskWarnings...))
+
+		file, err := openLogFile(logPath, rotationConfig)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "logger: failed to open log file %s: %v\n", logPath, err)
 		} else {
 			activeLogFile = file
 			writer = io.MultiWriter(os.Stdout, &ansiStripWriter{w: file})
+			reportLogDiskSpace(logPath, diskThresholds)
 		}
 	}
 
@@ -375,7 +430,7 @@ func defaultMacAppLogPath() string {
 	return filepath.Join(homeDir, "Library", "Logs", appName, appName+".log")
 }
 
-func openLogFile(logPath string) (io.WriteCloser, error) {
+func openLogFile(logPath string, config logFileRotationConfig) (io.WriteCloser, error) {
 	dir := filepath.Dir(logPath)
 	if dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -384,11 +439,188 @@ func openLogFile(logPath string) (io.WriteCloser, error) {
 	}
 	return &lumberjack.Logger{
 		Filename:   logPath,
-		MaxSize:    50, // megabytes
-		MaxBackups: 3,
-		MaxAge:     28, // days
-		Compress:   true,
+		MaxSize:    config.maxSizeMB,
+		MaxBackups: config.maxBackups,
+		MaxAge:     config.maxAgeDays,
+		Compress:   config.compress,
 	}, nil
+}
+
+func resolveLogFileRotationConfigFromEnv() (logFileRotationConfig, []string) {
+	maxSizeMB, maxSizeWarning := parsePositiveIntEnv("LOG_FILE_MAX_SIZE_MB", defaultLogFileMaxSizeMB)
+	maxBackups, maxBackupsWarning := parsePositiveIntEnv("LOG_FILE_MAX_BACKUPS", defaultLogFileMaxBackups)
+	maxAgeDays, maxAgeWarning := parsePositiveIntEnv("LOG_FILE_MAX_AGE_DAYS", defaultLogFileMaxAgeDays)
+	compress, compressWarning := parseBoolEnv("LOG_FILE_COMPRESS", defaultLogFileCompress)
+
+	return logFileRotationConfig{
+		maxSizeMB:  maxSizeMB,
+		maxBackups: maxBackups,
+		maxAgeDays: maxAgeDays,
+		compress:   compress,
+	}, compactWarnings(maxSizeWarning, maxBackupsWarning, maxAgeWarning, compressWarning)
+}
+
+func resolveLogDiskThresholdsFromEnv() (logDiskThresholds, []string) {
+	warningFreePercent, warningWarning := parsePercentageEnv(
+		"LOG_DISK_WARNING_FREE_PERCENT", defaultLogDiskWarningFreePercent,
+	)
+	criticalFreePercent, criticalWarning := parsePercentageEnv(
+		"LOG_DISK_CRITICAL_FREE_PERCENT", defaultLogDiskCriticalFreePercent,
+	)
+	minFreeGB, minFreeWarning := parseNonNegativeIntEnv("LOG_DISK_MIN_FREE_GB", defaultLogDiskMinFreeGB)
+	warnings := compactWarnings(warningWarning, criticalWarning, minFreeWarning)
+
+	if warningFreePercent <= criticalFreePercent {
+		warnings = append(warnings, fmt.Sprintf(
+			"LOG_DISK_WARNING_FREE_PERCENT must be greater than LOG_DISK_CRITICAL_FREE_PERCENT; using defaults %d and %d",
+			defaultLogDiskWarningFreePercent,
+			defaultLogDiskCriticalFreePercent,
+		))
+		warningFreePercent = defaultLogDiskWarningFreePercent
+		criticalFreePercent = defaultLogDiskCriticalFreePercent
+	}
+
+	return logDiskThresholds{
+		warningFreePercent:  warningFreePercent,
+		criticalFreePercent: criticalFreePercent,
+		minFreeGB:           minFreeGB,
+	}, warnings
+}
+
+func parsePositiveIntEnv(name string, defaultValue int) (int, string) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, ""
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return defaultValue, fmt.Sprintf("%s must be a positive integer; using default %d", name, defaultValue)
+	}
+	return value, ""
+}
+
+func parseNonNegativeIntEnv(name string, defaultValue int) (int, string) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, ""
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return defaultValue, fmt.Sprintf("%s must be a non-negative integer; using default %d", name, defaultValue)
+	}
+	return value, ""
+}
+
+func parsePercentageEnv(name string, defaultValue int) (int, string) {
+	value, warning := parsePositiveIntEnv(name, defaultValue)
+	if warning != "" || value > 100 {
+		return defaultValue, fmt.Sprintf("%s must be an integer from 1 to 100; using default %d", name, defaultValue)
+	}
+	return value, ""
+}
+
+func parseBoolEnv(name string, defaultValue bool) (bool, string) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, ""
+	}
+
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return defaultValue, fmt.Sprintf("%s must be a boolean; using default %t", name, defaultValue)
+	}
+	return value, ""
+}
+
+func compactWarnings(candidates ...string) []string {
+	warnings := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate != "" {
+			warnings = append(warnings, candidate)
+		}
+	}
+	return warnings
+}
+
+func writeLoggerConfigWarnings(warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(os.Stderr, "logger: %s\n", warning)
+	}
+}
+
+func reportLogDiskSpace(logPath string, thresholds logDiskThresholds) {
+	directory := filepath.Dir(logPath)
+	usage, err := disk.Usage(directory)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logger: failed to inspect free space for log directory %s: %v\n", directory, err)
+		return
+	}
+
+	state := evaluateLogDiskState(logDiskUsage{totalBytes: usage.Total, freeBytes: usage.Free}, thresholds)
+	if state == logDiskStateHealthy || state == logDiskStateUnknown {
+		return
+	}
+
+	freePercent := float64(usage.Free) * 100 / float64(usage.Total)
+	severity := "warning"
+	if state == logDiskStateCritical {
+		severity = "critical"
+	}
+	fmt.Fprintf(
+		os.Stderr,
+		"logger: log disk space %s for %s: %.1f%% free (%d GiB available)\n",
+		severity,
+		directory,
+		freePercent,
+		usage.Free/(1024*1024*1024),
+	)
+}
+
+func evaluateLogDiskState(usage logDiskUsage, thresholds logDiskThresholds) logDiskState {
+	if usage.totalBytes == 0 {
+		return logDiskStateUnknown
+	}
+
+	freePercent := float64(usage.freeBytes) * 100 / float64(usage.totalBytes)
+	minimumFreeBytes := uint64(thresholds.minFreeGB) * 1024 * 1024 * 1024
+	if freePercent < float64(thresholds.criticalFreePercent) || usage.freeBytes < minimumFreeBytes {
+		return logDiskStateCritical
+	}
+	if freePercent < float64(thresholds.warningFreePercent) {
+		return logDiskStateWarning
+	}
+	return logDiskStateHealthy
+}
+
+// GetFileLogRuntimeStatus returns best-effort measurements for the filesystem
+// that holds LOG_PATH. A disabled file log is not an error.
+func GetFileLogRuntimeStatus() (FileLogRuntimeStatus, error) {
+	logPath := resolveLogPathFromEnv()
+	if logPath == "" {
+		return FileLogRuntimeStatus{}, nil
+	}
+
+	status := FileLogRuntimeStatus{Enabled: true}
+	if info, err := os.Stat(logPath); err == nil {
+		status.SizeBytes = info.Size()
+	} else if !os.IsNotExist(err) {
+		return status, err
+	}
+
+	usage, err := disk.Usage(filepath.Dir(logPath))
+	if err != nil {
+		return status, err
+	}
+	status.DiskFreeBytes = usage.Free
+	status.DiskTotalBytes = usage.Total
+	thresholds, _ := resolveLogDiskThresholdsFromEnv()
+	status.DiskState = string(evaluateLogDiskState(logDiskUsage{
+		totalBytes: usage.Total,
+		freeBytes:  usage.Free,
+	}, thresholds))
+	return status, nil
 }
 
 // 添加调用者字段

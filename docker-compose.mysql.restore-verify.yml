@@ -1,0 +1,39 @@
+# This override is loaded only by scripts/verify_mysql_restore.ps1. Keeping it
+# separate prevents the restore-only password requirement from affecting normal
+# MySQL Compose deployments.
+x-docker-log-rotation: &docker-log-rotation
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  # Deliberately not connected to weknora-mysql: it has no route to the active
+  # application database, no published port, no persistent data volume, and
+  # can read the selected backup directory only.
+  mysql-restore-verify:
+    profiles: ["restore-verify"]
+    image: mysql:8.4
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--skip-log-bin"]
+    environment:
+      MYSQL_DATABASE: ${RESTORE_VERIFY_BOOTSTRAP_DB:-weknora_restore_verify}
+      MYSQL_ROOT_PASSWORD: ${RESTORE_VERIFY_ROOT_PASSWORD:?verify_mysql_restore.ps1 must set a temporary restore password}
+    volumes:
+      - type: bind
+        source: ${BACKUP_HOST_DIR:-D:/WeKnoraBackups}
+        target: /data/backups
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    networks:
+      - weknora-restore-verify
+    logging: *docker-log-rotation
+    restart: "no"
+
+networks:
+  weknora-restore-verify:
+    internal: true

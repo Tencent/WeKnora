@@ -205,9 +205,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 				if isPostgres {
 					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
 				} else {
-					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
-					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+					db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) LIKE ?", like)
 				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata

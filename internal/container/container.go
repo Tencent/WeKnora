@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -632,6 +634,32 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		dbHost := os.Getenv("DB_HOST")
+		dbPort := os.Getenv("DB_PORT")
+		dbUser := os.Getenv("DB_USER")
+		dbPassword := os.Getenv("DB_PASSWORD")
+		dbName := os.Getenv("DB_NAME")
+		gormDSN := fmt.Sprintf(
+			"%s:%s@tcp(%s)/%s?charset=utf8mb4&collation=utf8mb4_0900_ai_ci&parseTime=true&loc=UTC",
+			dbUser, dbPassword, net.JoinHostPort(dbHost, dbPort), dbName,
+		)
+		dialector = gormmysql.Open(gormDSN)
+
+		// golang-migrate executes a migration file as one statement. The MySQL
+		// baseline contains multiple DDL statements, so enable this only on the
+		// migration connection rather than on the application's GORM connection.
+		// Its MySQL driver expects a go-sql-driver DSN after the mysql:// prefix;
+		// a URL host would be interpreted as a MySQL network name (for example,
+		// "mysql:3306") rather than tcp(host:port).
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s)/%s?x-migrations-table=schema_migrations&multiStatements=true",
+			url.QueryEscape(dbUser),
+			url.QueryEscape(dbPassword),
+			net.JoinHostPort(dbHost, dbPort),
+			dbName,
+		)
+		logger.Infof(context.Background(), "DB Config: driver=mysql host=%s port=%s dbname=%s", dbHost, dbPort, dbName)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
@@ -644,16 +672,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// Sanity check: dialect-specific code in services (notably the
-	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
-	// "sqlite" string literals. A future driver swap that produces a
-	// different name (e.g., a wrapper dialect for managed PG) would silently
-	// fall back to the SQLite path, dropping the row-level X-lock. Catching
-	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	// Guard the supported dialect set because several services choose SQL
+	// expressions and lock behavior based on Dialector.Name().
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
-				"(see vectorStoreService.isPostgres for impact)", name)
+			"unsupported gorm dialector %q; expected postgres, sqlite, or mysql", name)
 	}
 
 	if os.Getenv("DB_DRIVER") == "sqlite" {
@@ -676,6 +699,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
+			Driver:           os.Getenv("DB_DRIVER"),
 		}
 
 		// Run base migrations (all versioned migrations including embeddings)
@@ -733,10 +757,12 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	}
 	storageType = strings.ToLower(storageType)
 
-	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
-		fmt.Sprintf(`{"provider":"%s"}`, storageType),
-	)
+	providerConfig := fmt.Sprintf(`{"provider":"%s"}`, storageType)
+	query := `UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`
+	if db.Dialector.Name() == "mysql" {
+		query = `UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(storage_provider_config, '$.provider')) = '__pending_env__'`
+	}
+	result := db.Exec(query, providerConfig)
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
 	} else if result.RowsAffected > 0 {

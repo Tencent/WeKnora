@@ -7147,6 +7147,38 @@ export default {
       generic: 'Something went wrong. Please try again.',
     },
   },
+  operations: {
+    title: 'Operations',
+    description: 'Inspect runtime health and create an audited MySQL backup.',
+    refresh: 'Refresh', retry: 'Retry', updatedAt: 'Updated {value}', enabled: 'Enabled', disabled: 'Disabled', unknown: 'Unknown', cancel: 'Cancel', close: 'Close',
+    overview: {
+      uptime: 'Uptime', database: 'Database', migration: 'Migration', ready: 'Operational', notReady: 'Attention required',
+      readyDescription: 'Configured dependencies are currently reachable.', notReadyDescription: 'One or more required dependencies need investigation.',
+      uptimeDays: '{days}d {hours}h', uptimeHours: '{hours}h {minutes}m', uptimeMinutes: '{minutes}m',
+    },
+    dependencies: {
+      title: 'Dependencies', description: 'Live reachability checks from this application instance.', database: 'Database', redis: 'Redis',
+      states: { ok: 'Available', disabled: 'Not configured', failed: 'Unavailable', unknown: 'Unknown' },
+    },
+    database: {
+      title: 'Database and Schema', connections: 'Connections in use', waits: 'Pool waits', schema: 'Schema state',
+      drivers: { mysql: 'MySQL', postgres: 'PostgreSQL', sqlite: 'SQLite', unknown: 'Unknown' },
+      migrationClean: 'v{version} · clean', migrationDirty: 'v{version} · dirty',
+    },
+    storage: {
+      title: 'Application Log Storage', fileLog: 'File logging', logSize: 'Current log size', freeSpace: 'Free space',
+      states: { normal: 'Normal', warning: 'Low space', critical: 'Critical', disabled: 'Disabled' },
+    },
+    backups: {
+      title: 'MySQL Backups', description: 'Create an audited logical backup. Restore and rollback remain CLI-only operations.', create: 'Create backup',
+      schedule: 'Schedule', lastSuccess: 'Last success', lastFailure: 'Latest issue', retention: 'Retention',
+      mysqlOnly: 'Manual backups are available only for a MySQL deployment.', databaseUnavailable: 'The database must be available before a backup can start.', migrationDirty: 'Resolve the dirty migration state before creating a backup.',
+      notScheduled: 'Not scheduled', scheduled: 'Scheduled', retentionValue: '{days} days', retentionDisabled: 'Disabled', configurationError: 'Configuration error', retentionFailure: 'Retention cleanup failed', failed: 'Backup failed', none: 'None',
+      dialogTitle: 'Create manual backup', dialogDescription: 'Provide an operational reason. Do not include passwords, tokens, or other secrets; this reason is recorded in the audit trail.', reasonPlaceholder: 'For example: before upgrading the application image',
+      confirm: 'Create this backup now? The operation is audited and may take several minutes.', confirmAction: 'Create backup', resultTitle: 'Backup created', success: 'The backup completed successfully.',
+      backupId: 'Backup ID', archive: 'Archive', manifest: 'Manifest', size: 'Size', migration: 'Migration', requestFailed: 'Unable to create the backup.',
+    },
+  },
   platformApiKeys: {
     title: 'Platform API Keys',
     description: 'Create platform credentials for cross-workspace automation. Use X-Tenant-ID for workspace APIs.',

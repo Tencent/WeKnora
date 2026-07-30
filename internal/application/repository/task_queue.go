@@ -238,7 +238,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
@@ -362,6 +362,24 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
+	if r.db.Dialector.Name() == "mysql" {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				UpdateColumn("fail_count", gorm.Expr("fail_count + ?", 1))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return nil
+			}
+			return tx.Model(&types.TaskPendingOp{}).
+				Select("fail_count").
+				Where("id = ?", id).
+				Scan(&newCount).Error
+		})
+		return newCount, err
+	}
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
 		id,

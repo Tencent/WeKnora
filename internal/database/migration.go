@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -95,6 +96,10 @@ type MigrationOptions struct {
 	// parsing a URL-based DSN, which avoids breakage when the path contains
 	// spaces (e.g. macOS "Application Support").
 	SQLiteDBPath string
+
+	// Driver selects a database-specific migration baseline. Existing callers
+	// retain the legacy PostgreSQL/SQLite selection when it is empty.
+	Driver string
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
@@ -104,7 +109,11 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	logger.Infof(ctx, "Starting database migration...")
 
 	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
+	if opts.Driver == "mysql" {
+		// MySQL deployments start from the current schema because the
+		// PostgreSQL history contains PostgreSQL-only DDL.
+		migrationsPath = "file://migrations/mysql"
+	} else if opts.Driver == "sqlite" || strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
 	}
 
