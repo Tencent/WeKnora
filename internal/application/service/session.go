@@ -41,6 +41,13 @@ func runtimeMayBypassAdminConsoleRead(
 	case types.PrincipalAPITenant, types.PrincipalAPIExternalUser:
 		ownerID := types.SessionOwnerIDFromContext(ctx)
 		return types.IsAPISessionOwnerID(session.UserID) && session.UserID == ownerID
+	case types.PrincipalEmbedSession:
+		// An embed widget runs as a Viewer but is the legitimate owner of its own
+		// channel session (verified upstream by ensureEmbedSession, including the
+		// signed handle). Allow it to read exactly the session it owns; the owner
+		// scope in repo.Get already confines it to that single row.
+		ownerID := types.SessionOwnerIDFromContext(ctx)
+		return session.UserID == ownerID
 	default:
 		return false
 	}
