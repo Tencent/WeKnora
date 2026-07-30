@@ -415,6 +415,23 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/document/orgapp-server/dingtalk-document-overview',
+    permissionDocUrl: 'https://open.dingtalk.com/document/orgapp-server/dingtalk-document-overview',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+    ],
+    fields: [
+      { key: 'app_key', labelKey: 'datasource.field.appKey', placeholder: '', secret: true },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.dingtalkOperatorId', placeholder: '', hintKey: 'datasource.field.dingtalkOperatorIdHint' },
+      { key: 'base_url', labelKey: 'datasource.field.dingtalkBaseUrl', placeholder: 'https://api.dingtalk.com', optional: true, hintKey: 'datasource.field.dingtalkBaseUrlHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -1416,7 +1433,7 @@ const drawerConfirmText = computed(() => {
             rel="noopener"
             class="doc-link"
           >
-            {{ t('datasource.permissionDocLink') }}
+            {{ t(`datasource.permissionDocLink_${form.type}`, t('datasource.permissionDocLink')) }}
             <t-icon name="link" class="link-icon" />
           </a>
         </div>
