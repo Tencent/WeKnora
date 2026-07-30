@@ -175,6 +175,20 @@ type Chunk struct {
 	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
 	// It is persisted so a later content edit can rebuild the same index input.
 	ContextHeader string `json:"-" gorm:"type:text"`
+	// Feedback projections are written exclusively by FeedbackRepository.
+	LikeCount    int64    `json:"like_count" gorm:"not null;default:0"`
+	DislikeCount int64    `json:"dislike_count" gorm:"not null;default:0"`
+	PositiveRate *float64 `json:"positive_rate" gorm:"default:null"`
+	// RecallWeight is the stored audit snapshot. Governance DTOs expose it as
+	// stored_recall_weight and compute the effective value from current policy.
+	RecallWeight    float64    `json:"-" gorm:"column:recall_weight;not null;default:1"`
+	FeedbackResetAt *time.Time `json:"-" gorm:"default:null"`
+	// Read-only feedback details are populated by the feedback repository.
+	NeedsOptimization     bool    `json:"needs_optimization" gorm:"-"`
+	SessionCount          int64   `json:"session_count" gorm:"-"`
+	StoredRecallWeight    float64 `json:"stored_recall_weight" gorm:"-"`
+	EffectiveRecallWeight float64 `json:"effective_recall_weight" gorm:"-"`
+	FeedbackWeightApplied bool    `json:"-" gorm:"-"`
 }
 
 // ChunkRevision is an immutable snapshot of a superseded chunk revision.

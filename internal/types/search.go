@@ -44,6 +44,10 @@ type SearchTarget struct {
 	// user-selected scope. The reranker still orders candidates, but vector and
 	// keyword thresholds cannot erase the whole explicit scope before reranking.
 	DisableRecallThresholds bool `json:"disable_recall_thresholds,omitempty"`
+	// FeedbackRetrievalWeightEnabled carries the owning workspace's explicit
+	// opt-in into standard and Agent retrieval without another per-candidate
+	// tenant lookup. It is runtime-only and defaults false.
+	FeedbackRetrievalWeightEnabled bool `json:"-"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point
@@ -207,6 +211,15 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// StoredRecallWeight is the persisted feedback projection snapshot. It is
+	// audit data, not the retrieval-time source of truth.
+	StoredRecallWeight float64 `json:"-"`
+	// EffectiveRecallWeight is derived from current counts and the active
+	// policy. It remains 1 unless feedback weighting is successfully applied.
+	EffectiveRecallWeight float64 `json:"-"`
+	// FeedbackWeightApplied prevents the same candidate from being weighted
+	// twice when it crosses retrieval adapters.
+	FeedbackWeightApplied bool `json:"-"`
 }
 
 // SearchParams represents the search parameters

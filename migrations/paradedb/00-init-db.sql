@@ -175,6 +175,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     image_info TEXT,
     relation_chunks JSONB,
     indirect_relation_chunks JSONB,
+    like_count BIGINT NOT NULL DEFAULT 0 CHECK (like_count >= 0),
+    dislike_count BIGINT NOT NULL DEFAULT 0 CHECK (dislike_count >= 0),
+    positive_rate DOUBLE PRECISION CHECK (positive_rate IS NULL OR (positive_rate >= 0 AND positive_rate <= 1)),
+    recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (recall_weight > 0),
+    feedback_reset_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -183,6 +188,55 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE IF NOT EXISTS message_chunk_references (
+    id VARCHAR(36) PRIMARY KEY,
+    message_tenant_id BIGINT NOT NULL,
+    chunk_tenant_id BIGINT NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (message_tenant_id, message_id, chunk_tenant_id, chunk_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_reference_message ON message_chunk_references (message_tenant_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reference_chunk ON message_chunk_references (chunk_tenant_id, chunk_id);
+
+CREATE TABLE IF NOT EXISTS message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    feedback_type VARCHAR(16) NOT NULL CHECK (feedback_type IN ('like', 'dislike')),
+    reason_code VARCHAR(16) CHECK (
+        (feedback_type = 'like' AND reason_code IS NULL)
+        OR
+        (feedback_type = 'dislike' AND reason_code IS NOT NULL
+            AND reason_code IN ('inaccurate', 'irrelevant', 'incomplete', 'outdated', 'other'))
+    ),
+    feedback_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, user_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_session ON message_feedbacks (tenant_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_message ON message_feedbacks (tenant_id, message_id);
+
+CREATE TABLE IF NOT EXISTS chunk_feedback_audits (
+    id BIGSERIAL PRIMARY KEY,
+    chunk_tenant_id BIGINT NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    actor_tenant_id BIGINT NOT NULL,
+    actor_user_id VARCHAR(64) NOT NULL,
+    action VARCHAR(32) NOT NULL CHECK (action IN ('feedback_weight_changed', 'feedback_reset')),
+    trigger_source VARCHAR(16) NOT NULL DEFAULT 'legacy' CHECK (
+        trigger_source IN ('like', 'dislike', 'cancel', 'admin_reset', 'content_delete', 'legacy')
+    ),
+    old_weight DOUBLE PRECISION NOT NULL,
+    new_weight DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_feedback_audit_chunk ON chunk_feedback_audits (chunk_tenant_id, chunk_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,

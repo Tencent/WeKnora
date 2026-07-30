@@ -177,13 +177,14 @@ func (c *ChatManage) Clone() *ChatManage {
 			scopeTagIDsCopy := make([]string, len(t.ScopeTagIDs))
 			copy(scopeTagIDsCopy, t.ScopeTagIDs)
 			searchTargets[i] = &SearchTarget{
-				Type:                    t.Type,
-				KnowledgeBaseID:         t.KnowledgeBaseID,
-				TenantID:                t.TenantID,
-				KnowledgeIDs:            kidsCopy,
-				TagIDs:                  tagIDsCopy,
-				ScopeTagIDs:             scopeTagIDsCopy,
-				DisableRecallThresholds: t.DisableRecallThresholds,
+				Type:                           t.Type,
+				KnowledgeBaseID:                t.KnowledgeBaseID,
+				TenantID:                       t.TenantID,
+				KnowledgeIDs:                   kidsCopy,
+				TagIDs:                         tagIDsCopy,
+				ScopeTagIDs:                    scopeTagIDsCopy,
+				DisableRecallThresholds:        t.DisableRecallThresholds,
+				FeedbackRetrievalWeightEnabled: t.FeedbackRetrievalWeightEnabled,
 			}
 		}
 	}

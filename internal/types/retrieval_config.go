@@ -12,6 +12,11 @@ import (
 // Stored as a JSONB column on the tenants table, managed via the settings UI
 // at /tenants/kv/retrieval-config.
 type RetrievalConfig struct {
+	// FeedbackRetrievalWeightEnabled is an explicit workspace opt-in. The
+	// server-wide feedback and retrieval switches must also be enabled before
+	// this setting can affect ranking. Missing JSON fields decode to false.
+	FeedbackRetrievalWeightEnabled bool `json:"feedback_retrieval_weight_enabled"`
+
 	// EmbeddingTopK is the maximum number of chunks returned by vector search (default: 50)
 	EmbeddingTopK int `json:"embedding_top_k"`
 	// VectorThreshold is the minimum vector similarity score (0-1, default: 0.15)

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,12 +35,129 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Feedback        *FeedbackConfig        `yaml:"feedback"         json:"feedback"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// FeedbackConfig separates feedback collection from its optional influence on
+// retrieval. Collection defaults on; retrieval weighting defaults off and also
+// requires an explicit workspace opt-in.
+type FeedbackConfig struct {
+	Enabled                bool    `yaml:"enabled"                  json:"enabled"`
+	RetrievalWeightEnabled bool    `yaml:"retrieval_weight_enabled" json:"retrieval_weight_enabled"`
+	HighRateThreshold      float64 `yaml:"high_rate_threshold"      json:"high_rate_threshold"`
+	LowRateThreshold       float64 `yaml:"low_rate_threshold"       json:"low_rate_threshold"`
+	OptimizationThreshold  float64 `yaml:"optimization_threshold"   json:"optimization_threshold"`
+	MinimumSampleCount     int64   `yaml:"minimum_sample_count"     json:"minimum_sample_count"`
+	HighRecallWeight       float64 `yaml:"high_recall_weight"       json:"high_recall_weight"`
+	NormalRecallWeight     float64 `yaml:"normal_recall_weight"     json:"normal_recall_weight"`
+	LowRecallWeight        float64 `yaml:"low_recall_weight"        json:"low_recall_weight"`
+}
+
+// DefaultFeedbackConfig returns the secure-by-default feedback policy.
+func DefaultFeedbackConfig() *FeedbackConfig {
+	return &FeedbackConfig{
+		Enabled:                true,
+		RetrievalWeightEnabled: false,
+		HighRateThreshold:      0.8,
+		LowRateThreshold:       0.5,
+		OptimizationThreshold:  0.2,
+		MinimumSampleCount:     5,
+		HighRecallWeight:       1.2,
+		NormalRecallWeight:     1.0,
+		LowRecallWeight:        0.8,
+	}
+}
+
+// FeedbackCollectionEnabled treats a missing section as the documented
+// collection-enabled default. Retrieval weighting has a stricter nil contract
+// and is evaluated by the feedbackweight package.
+func FeedbackCollectionEnabled(c *FeedbackConfig) bool {
+	return c == nil || c.Enabled
+}
+
+// EffectiveOptimizationThreshold returns the configured governance threshold
+// or the default when a partial runtime configuration omits it.
+func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
+	if c == nil || c.OptimizationThreshold <= 0 || c.OptimizationThreshold > 1 {
+		return DefaultFeedbackConfig().OptimizationThreshold
+	}
+	return c.OptimizationThreshold
+}
+
+// Validate rejects ambiguous policies at startup. Runtime retrieval errors are
+// handled separately with a fail-open contract.
+func (c *FeedbackConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"high_rate_threshold", c.HighRateThreshold},
+		{"low_rate_threshold", c.LowRateThreshold},
+		{"optimization_threshold", c.OptimizationThreshold},
+		{"high_recall_weight", c.HighRecallWeight},
+		{"normal_recall_weight", c.NormalRecallWeight},
+		{"low_recall_weight", c.LowRecallWeight},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) {
+			return fmt.Errorf("feedback.%s must be finite", item.name)
+		}
+	}
+	if c.LowRateThreshold < 0 || c.HighRateThreshold > 1 ||
+		c.LowRateThreshold > c.HighRateThreshold {
+		return fmt.Errorf("feedback thresholds must satisfy 0 <= low_rate_threshold <= high_rate_threshold <= 1")
+	}
+	if c.OptimizationThreshold < 0 || c.OptimizationThreshold > 1 {
+		return fmt.Errorf("feedback.optimization_threshold must be between 0 and 1")
+	}
+	if c.MinimumSampleCount < 1 {
+		return fmt.Errorf("feedback.minimum_sample_count must be at least 1")
+	}
+	if c.HighRecallWeight <= 0 || c.NormalRecallWeight <= 0 || c.LowRecallWeight <= 0 {
+		return fmt.Errorf("feedback recall weights must be positive")
+	}
+	return nil
+}
+
+// PolicyFingerprint returns a stable, bounded identifier suitable for
+// structured logs and traces. It deliberately excludes tenant and content
+// identifiers and is not intended as a Prometheus label.
+func (c *FeedbackConfig) PolicyFingerprint() string {
+	if c == nil {
+		return "feedback-policy:nil"
+	}
+	payload, _ := json.Marshal(struct {
+		HighRateThreshold     float64 `json:"high_rate_threshold"`
+		LowRateThreshold      float64 `json:"low_rate_threshold"`
+		OptimizationThreshold float64 `json:"optimization_threshold"`
+		MinimumSampleCount    int64   `json:"minimum_sample_count"`
+		HighRecallWeight      float64 `json:"high_recall_weight"`
+		NormalRecallWeight    float64 `json:"normal_recall_weight"`
+		LowRecallWeight       float64 `json:"low_recall_weight"`
+	}{
+		HighRateThreshold:     c.HighRateThreshold,
+		LowRateThreshold:      c.LowRateThreshold,
+		OptimizationThreshold: c.OptimizationThreshold,
+		MinimumSampleCount:    c.MinimumSampleCount,
+		HighRecallWeight:      c.HighRecallWeight,
+		NormalRecallWeight:    c.NormalRecallWeight,
+		LowRecallWeight:       c.LowRecallWeight,
+	})
+	var hash uint64 = 14695981039346656037
+	for _, b := range payload {
+		hash ^= uint64(b)
+		hash *= 1099511628211
+	}
+	return fmt.Sprintf("feedback-policy:%016x", hash)
 }
 
 // AgentConfig represents the global agent settings.
@@ -489,6 +608,8 @@ func ConfigDir() string {
 
 // LoadConfig 从配置文件加载配置
 func LoadConfig() (*Config, error) {
+	setFeedbackConfigDefaults()
+
 	// 设置配置文件名和路径
 	viper.SetConfigName("config")         // 配置文件名称(不带扩展名)
 	viper.SetConfigType("yaml")           // 配置文件类型
@@ -534,6 +655,7 @@ func LoadConfig() (*Config, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("unable to decode config into struct: %w", err)
 	}
+	applyFeedbackConfig(&cfg)
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 
 	// 加载提示词模板（从目录或配置文件）
@@ -671,6 +793,12 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
+	if cfg.Feedback != nil {
+		if err := cfg.Feedback.Validate(); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
 	if cfg.Server != nil {
 		if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 			errs = append(errs, "server.port must be between 1 and 65535")
@@ -681,6 +809,38 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("config validation errors: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func setFeedbackConfigDefaults() {
+	defaults := DefaultFeedbackConfig()
+	viper.SetDefault("feedback.enabled", defaults.Enabled)
+	viper.SetDefault("feedback.retrieval_weight_enabled", defaults.RetrievalWeightEnabled)
+	viper.SetDefault("feedback.high_rate_threshold", defaults.HighRateThreshold)
+	viper.SetDefault("feedback.low_rate_threshold", defaults.LowRateThreshold)
+	viper.SetDefault("feedback.optimization_threshold", defaults.OptimizationThreshold)
+	viper.SetDefault("feedback.minimum_sample_count", defaults.MinimumSampleCount)
+	viper.SetDefault("feedback.high_recall_weight", defaults.HighRecallWeight)
+	viper.SetDefault("feedback.normal_recall_weight", defaults.NormalRecallWeight)
+	viper.SetDefault("feedback.low_recall_weight", defaults.LowRecallWeight)
+	_ = viper.BindEnv("feedback.enabled", "WEKNORA_FEEDBACK_ENABLED")
+	_ = viper.BindEnv("feedback.retrieval_weight_enabled", "WEKNORA_FEEDBACK_RETRIEVAL_WEIGHT_ENABLED")
+}
+
+func applyFeedbackConfig(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	cfg.Feedback = &FeedbackConfig{
+		Enabled:                viper.GetBool("feedback.enabled"),
+		RetrievalWeightEnabled: viper.GetBool("feedback.retrieval_weight_enabled"),
+		HighRateThreshold:      viper.GetFloat64("feedback.high_rate_threshold"),
+		LowRateThreshold:       viper.GetFloat64("feedback.low_rate_threshold"),
+		OptimizationThreshold:  viper.GetFloat64("feedback.optimization_threshold"),
+		MinimumSampleCount:     viper.GetInt64("feedback.minimum_sample_count"),
+		HighRecallWeight:       viper.GetFloat64("feedback.high_recall_weight"),
+		NormalRecallWeight:     viper.GetFloat64("feedback.normal_recall_weight"),
+		LowRecallWeight:        viper.GetFloat64("feedback.low_recall_weight"),
+	}
 }
 
 func applyOIDCEnvOverrides(cfg *Config) {
