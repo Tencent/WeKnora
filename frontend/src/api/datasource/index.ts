@@ -106,6 +106,17 @@ export function updateDataSource(id: string, data: Partial<DataSource>) {
   return put(`/api/v1/datasource/${id}`, data)
 }
 
+export function reconfigureDataSource(
+  id: string,
+  dataSource: Partial<DataSource>,
+  credentials: Record<string, unknown>,
+) {
+  return put(`/api/v1/datasource/${id}/reconfigure`, {
+    data_source: dataSource,
+    credentials,
+  })
+}
+
 export function deleteDataSource(id: string) {
   return del(`/api/v1/datasource/${id}`)
 }
@@ -117,6 +128,29 @@ export function validateConnection(id: string) {
 // Validate credentials without persisting (for "Test Connection" during creation)
 export function validateCredentials(type: string, credentials: Record<string, any>) {
   return post('/api/v1/datasource/validate-credentials', { type, credentials })
+}
+
+// previewResources lists the candidate identity's resource tree without
+// mutating the stored data source. This is required while replacing credentials
+// because the existing row still authenticates as the previous identity.
+export interface PreviewResourcesRequest {
+  type: string
+  credentials: Record<string, any> | null
+  settings: Record<string, any>
+  dataSourceId?: string
+  parentId?: string
+  validateOnly?: boolean
+}
+
+export function previewResources(request: PreviewResourcesRequest) {
+  return post('/api/v1/datasource/preview-resources', {
+    type: request.type,
+    credentials: request.credentials,
+    settings: request.settings,
+    data_source_id: request.dataSourceId || '',
+    parent_id: request.parentId || '',
+    validate_only: request.validateOnly === true,
+  }, { timeout: 120000 })
 }
 
 // listResources lists selectable resources for a data source. Pass parentId to

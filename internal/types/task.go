@@ -42,6 +42,12 @@ const (
 	QueueSync           = "sync"
 	QueueMaintenance    = "low"
 	QueueWiki           = "wiki"
+
+	// DataSourceSyncMaxRetry gives asynchronous knowledge parsing enough time
+	// to finish while a data-source run retains its overlap/cursor barrier.
+	// The worker applies a fixed 30-second delay to that one retryable state,
+	// so this budget is approximately one hour.
+	DataSourceSyncMaxRetry = 120
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker

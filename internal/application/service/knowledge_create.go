@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/url"
@@ -21,6 +22,37 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
+
+// rollbackCreatedKnowledge removes a row that was persisted but could not be
+// fully initialized before its parse task was enqueued (for example, tag
+// relation persistence failed). If row deletion itself fails, mark the row
+// failed so data-source reconciliation can safely delete and recreate it
+// instead of treating a pending row with no worker as acknowledged.
+func (s *knowledgeService) rollbackCreatedKnowledge(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) (bool, error) {
+	if knowledge == nil || knowledge.ID == "" {
+		return true, nil
+	}
+	var rollbackErrors []error
+	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("delete tag relations: %w", err))
+	}
+	if err := s.repo.DeleteKnowledge(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("delete knowledge row: %w", err))
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = "initialization failed before processing task enqueue"
+		if markErr := s.repo.UpdateKnowledge(ctx, knowledge); markErr != nil {
+			rollbackErrors = append(
+				rollbackErrors,
+				fmt.Errorf("mark orphaned knowledge failed: %w", markErr),
+			)
+		}
+		return false, errors.Join(rollbackErrors...)
+	}
+	return true, errors.Join(rollbackErrors...)
+}
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
@@ -202,6 +234,15 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		rowDeleted, rollbackErr := s.rollbackCreatedKnowledge(ctx, knowledge)
+		if rowDeleted {
+			if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
+				logger.Errorf(ctx, "Failed to delete stored file after tag rollback, path: %s, error: %v", filePath, deleteErr)
+			}
+		}
+		if rollbackErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("rollback knowledge after tag failure: %w", rollbackErr))
+		}
 		return nil, err
 	}
 
@@ -403,6 +444,9 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		if _, rollbackErr := s.rollbackCreatedKnowledge(ctx, knowledge); rollbackErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("rollback knowledge after tag failure: %w", rollbackErr))
+		}
 		return nil, err
 	}
 
@@ -657,6 +701,9 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	// Set tag relations
 	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		if _, rollbackErr := s.rollbackCreatedKnowledge(ctx, knowledge); rollbackErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("rollback knowledge after tag failure: %w", rollbackErr))
+		}
 		return nil, err
 	}
 

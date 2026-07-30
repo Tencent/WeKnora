@@ -97,6 +97,32 @@ func (s *Scheduler) AddOrUpdate(ds *types.DataSource) error {
 	return s.addEntryLocked(ds)
 }
 
+// Refresh reloads a data source while holding the scheduler mutex, then makes
+// the cron entry match that authoritative database state. Service mutations
+// use this instead of passing snapshots read before a concurrent pause/resume;
+// otherwise a late stale callback could remove a newly resumed schedule.
+func (s *Scheduler) Refresh(ctx context.Context, dataSourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ds, err := s.dsRepo.FindByID(ctx, dataSourceID)
+	if err != nil {
+		return fmt.Errorf("reload data source %s: %w", dataSourceID, err)
+	}
+	if ds == nil {
+		return fmt.Errorf("reload data source %s: not found", dataSourceID)
+	}
+
+	if entryID, ok := s.entries[dataSourceID]; ok {
+		s.cron.Remove(entryID)
+		delete(s.entries, dataSourceID)
+	}
+	if ds.Status != types.DataSourceStatusActive || ds.SyncSchedule == "" {
+		return nil
+	}
+	return s.addEntryLocked(ds)
+}
+
 // Remove removes the cron entry for a data source.
 func (s *Scheduler) Remove(dataSourceID string) {
 	s.mu.Lock()
@@ -164,11 +190,12 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	}
 
 	payload := &types.DataSourceSyncPayload{
-		DataSourceID: dataSourceID,
-		TenantID:     tenantID,
-		SyncLogID:    syncLog.ID,
-		ForceFull:    false,
-		Trigger:      "schedule",
+		DataSourceID:      dataSourceID,
+		TenantID:          tenantID,
+		SyncLogID:         syncLog.ID,
+		ConfigFingerprint: ds.SyncConfigFingerprint(),
+		ForceFull:         false,
+		Trigger:           "schedule",
 	}
 	langfuse.InjectTracing(ctx, payload)
 	payloadJSON, _ := json.Marshal(payload)
@@ -179,7 +206,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 
 	_, err = s.taskEnqueuer.Enqueue(task,
 		asynq.Queue(types.QueueSync),
-		asynq.MaxRetry(5),
+		asynq.MaxRetry(types.DataSourceSyncMaxRetry),
 		asynq.Timeout(2*time.Hour),
 		asynq.TaskID(taskID),
 	)

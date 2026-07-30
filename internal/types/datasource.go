@@ -1,6 +1,8 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"strings"
@@ -122,6 +124,37 @@ type DataSource struct {
 // TableName specifies the table name for DataSource
 func (d *DataSource) TableName() string {
 	return "data_sources"
+}
+
+// SyncConfigFingerprint is a non-secret generation token for the complete
+// configuration that determines what a sync may fetch and how it is applied.
+// It is embedded in queued task payloads so a task created before an atomic
+// reconfiguration cannot later run against a different external identity.
+func (d *DataSource) SyncConfigFingerprint() string {
+	if d == nil {
+		return ""
+	}
+	snapshot, _ := json.Marshal(struct {
+		ID               string `json:"id"`
+		TenantID         uint64 `json:"tenant_id"`
+		KnowledgeBaseID  string `json:"knowledge_base_id"`
+		Type             string `json:"type"`
+		Config           JSON   `json:"config"`
+		SyncMode         string `json:"sync_mode"`
+		ConflictStrategy string `json:"conflict_strategy"`
+		SyncDeletions    bool   `json:"sync_deletions"`
+	}{
+		ID:               d.ID,
+		TenantID:         d.TenantID,
+		KnowledgeBaseID:  d.KnowledgeBaseID,
+		Type:             d.Type,
+		Config:           d.Config,
+		SyncMode:         d.SyncMode,
+		ConflictStrategy: d.ConflictStrategy,
+		SyncDeletions:    d.SyncDeletions,
+	})
+	sum := sha256.Sum256(snapshot)
+	return hex.EncodeToString(sum[:])
 }
 
 // BeforeCreate hook to generate UUID
@@ -267,6 +300,10 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 		if len(d.Credentials) == 0 {
 			d.Credentials = nil
 		}
+	case ConnectorTypeDingTalk:
+		// DingTalk credentials must only ever be sent to the fixed official
+		// endpoint. Drop legacy/client-supplied overrides before persistence.
+		delete(d.Credentials, "base_url")
 	}
 }
 
@@ -416,11 +453,20 @@ type SyncResult struct {
 	// Items deleted
 	Deleted int `json:"deleted"`
 
+	// Source deletions observed while deletion sync was disabled. The previous
+	// cursor is retained so enabling deletion later can reconcile them.
+	SuppressedDeletions int `json:"suppressed_deletions,omitempty"`
+
 	// Items skipped (no changes)
 	Skipped int `json:"skipped"`
 
 	// Items that failed
 	Failed int `json:"failed"`
+
+	// Items whose asynchronous knowledge parsing has not completed yet. A
+	// data-source task keeps its sync log running and retries these without
+	// advancing the source cursor.
+	Pending int `json:"pending,omitempty"`
 
 	// Per-item failure samples (capped), shown in the sync-log UI.
 	Errors []SyncItemError `json:"errors,omitempty"`
@@ -491,6 +537,10 @@ type DataSourceSyncPayload struct {
 
 	// Sync log ID (for tracking)
 	SyncLogID string `json:"sync_log_id"`
+
+	// Non-secret generation of the data-source configuration captured before
+	// enqueue. Workers cancel stale tasks whose generation no longer matches.
+	ConfigFingerprint string `json:"config_fingerprint,omitempty"`
 
 	// Force full sync even if incremental mode is configured
 	ForceFull bool `json:"force_full"`

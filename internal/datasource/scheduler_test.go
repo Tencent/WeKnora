@@ -254,6 +254,35 @@ func TestScheduler_AddOrUpdate(t *testing.T) {
 	}
 }
 
+func TestSchedulerRefreshIgnoresStalePausedSnapshot(t *testing.T) {
+	repo := newFakeDataSourceRepo()
+	current := &types.DataSource{
+		ID:           "ds-refresh-current",
+		TenantID:     1,
+		Status:       types.DataSourceStatusActive,
+		SyncSchedule: "0 0 * * * *",
+	}
+	if err := repo.Create(context.Background(), current); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	scheduler := NewScheduler(repo, newFakeSyncLogRepo(), &fakeTaskEnqueuer{})
+	scheduler.cron.Start()
+	defer scheduler.Stop()
+
+	// A service callback may still hold this pre-resume snapshot. Refresh takes
+	// only the ID and therefore cannot remove the authoritative active schedule.
+	stalePaused := *current
+	stalePaused.Status = types.DataSourceStatusPaused
+	_ = stalePaused
+
+	if err := scheduler.Refresh(context.Background(), current.ID); err != nil {
+		t.Fatalf("Refresh() error: %v", err)
+	}
+	if scheduler.EntryCount() != 1 {
+		t.Fatalf("EntryCount() = %d, want active database state scheduled", scheduler.EntryCount())
+	}
+}
+
 func TestScheduler_AddOrUpdate_PausedIsNoop(t *testing.T) {
 	enqueuer := &fakeTaskEnqueuer{}
 	scheduler := NewScheduler(newFakeDataSourceRepo(), newFakeSyncLogRepo(), enqueuer)

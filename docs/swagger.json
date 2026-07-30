@@ -1810,7 +1810,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                             }
                         }
                     },
@@ -1852,7 +1852,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "400": {
@@ -1928,6 +1928,52 @@
                 }
             }
         },
+        "/datasource/preview-resources": {
+            "post": {
+                "description": "List resources without creating or mutating a data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSource"
+                ],
+                "summary": "Preview resources using candidate credentials",
+                "parameters": [
+                    {
+                        "description": "type, credentials, settings, and optional parent_id",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Resource"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/datasource/validate-credentials": {
             "post": {
                 "description": "Validate connectivity to an external data source using type + credentials",
@@ -1997,7 +2043,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "404": {
@@ -2012,7 +2058,7 @@
                 }
             },
             "put": {
-                "description": "Update an existing data source configuration",
+                "description": "Update non-secret data source settings. Credentials in this payload are ignored; use the atomic reconfigure endpoint to replace credentials.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2045,7 +2091,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "400": {
@@ -2167,6 +2213,56 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/datasource/{id}/reconfigure": {
+            "put": {
+                "description": "Validate candidate credentials and configuration together, then persist them in one update",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSource"
+                ],
+                "summary": "Atomically reconfigure a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "data_source and credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse"
                         }
                     },
                     "400": {
@@ -14843,6 +14939,110 @@
                 "ErrVectorStoreBindingInvalid",
                 "ErrVectorStoreUnavailable"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO": {
+            "type": "object",
+            "properties": {
+                "resource_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO"
+                },
+                "conflict_strategy": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credentials": {
+                    "description": "Single logical credential field. DataSource credentials are a\nper-connector atomic map, so \"configured?\" applies to the whole set.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata"
+                    }
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "last_sync_at": {
+                    "type": "string"
+                },
+                "last_sync_cursor": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "last_sync_result": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "latest_sync_log": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "sync_deletions": {
+                    "type": "boolean"
+                },
+                "sync_log_retention_days": {
+                    "type": "integer"
+                },
+                "sync_mode": {
+                    "type": "string"
+                },
+                "sync_schedule": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "total_items_synced": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile": {
             "type": "object",

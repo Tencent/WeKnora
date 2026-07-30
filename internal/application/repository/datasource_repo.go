@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -13,6 +14,18 @@ import (
 // DataSourceRepository provides data access for data sources
 type DataSourceRepository struct {
 	db *gorm.DB
+}
+
+const dataSourceSyncLockPrefix = "weknora:datasource-sync:"
+
+func acquireDataSourceSyncLock(tx *gorm.DB, dataSourceID string) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return tx.Exec(
+		"SELECT pg_advisory_xact_lock(hashtext(?))",
+		dataSourceSyncLockPrefix+dataSourceID,
+	).Error
 }
 
 // NewDataSourceRepository creates a new data source repository
@@ -74,11 +87,120 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 		return errors.New("data source id is empty")
 	}
 	if err := r.db.WithContext(ctx).
-		Model(ds).
-		Updates(ds).Error; err != nil {
+		Model(&types.DataSource{}).
+		Where("id = ?", ds.ID).
+		Updates(dataSourceMutableFields(ds, false)).Error; err != nil {
 		return err
 	}
 	return nil
+}
+
+func dataSourceMutableFields(ds *types.DataSource, includeCursor bool) map[string]interface{} {
+	fields := map[string]interface{}{
+		"name":                    ds.Name,
+		"type":                    ds.Type,
+		"config":                  ds.Config,
+		"sync_schedule":           ds.SyncSchedule,
+		"sync_mode":               ds.SyncMode,
+		"conflict_strategy":       ds.ConflictStrategy,
+		"sync_deletions":          ds.SyncDeletions,
+		"sync_log_retention_days": ds.SyncLogRetentionDays,
+		"updated_at":              time.Now().UTC(),
+	}
+	if includeCursor {
+		fields["last_sync_cursor"] = ds.LastSyncCursor
+	}
+	return fields
+}
+
+// UpdateStatus changes only the operator-controlled lifecycle state. Keeping
+// this separate from configuration writes prevents a pause/resume request that
+// read an old snapshot from restoring stale credentials, resources, or schedule.
+func (r *DataSourceRepository) UpdateStatus(
+	ctx context.Context,
+	id string,
+	status string,
+) error {
+	if id == "" {
+		return errors.New("data source id is empty")
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]interface{}{
+			"status":     status,
+			"updated_at": time.Now().UTC(),
+		}).Error
+}
+
+// UpdateValidationStateIfConfigUnchanged persists a connection-test outcome
+// only when both the exact configuration and lifecycle state tested are still
+// current. Network validation can overlap reconfiguration and pause/resume; a
+// stale result must never label a new credential generation or undo an
+// operator-controlled lifecycle transition.
+func (r *DataSourceRepository) UpdateValidationStateIfConfigUnchanged(
+	ctx context.Context,
+	id string,
+	expectedConfig types.JSON,
+	expectedStatus string,
+	status string,
+	errorMessage string,
+) (bool, error) {
+	if id == "" {
+		return false, errors.New("data source id is empty")
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Where("config = ?", expectedConfig).
+		Where("status = ?", expectedStatus).
+		Updates(map[string]interface{}{
+			"status":        status,
+			"error_message": errorMessage,
+			"updated_at":    time.Now().UTC(),
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+// UpdateIfNoRunningSync atomically serializes sync startup and sync-affecting
+// configuration changes in PostgreSQL. SyncLogRepository.Create takes the same
+// transaction-scoped advisory lock before inserting a running log, so either
+// the new generation commits first or the mutation observes the running task.
+func (r *DataSourceRepository) UpdateIfNoRunningSync(
+	ctx context.Context,
+	ds *types.DataSource,
+) (bool, error) {
+	if ds == nil {
+		return false, errors.New("data source is nil")
+	}
+	if ds.ID == "" {
+		return false, errors.New("data source id is empty")
+	}
+
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := acquireDataSourceSyncLock(tx, ds.ID); err != nil {
+			return err
+		}
+		var running int64
+		if err := tx.Model(&types.SyncLog{}).
+			Where("data_source_id = ?", ds.ID).
+			Where("status = ?", types.SyncLogStatusRunning).
+			Count(&running).Error; err != nil {
+			return err
+		}
+		if running > 0 {
+			return nil
+		}
+		if err := tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			Updates(dataSourceMutableFields(ds, true)).Error; err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
 }
 
 // UpdateSyncState updates only fields managed by sync execution. GORM's
@@ -96,6 +218,41 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 		Where("id = ?", ds.ID).
 		Updates(map[string]interface{}{
 			"status":           ds.Status,
+			"last_sync_at":     ds.LastSyncAt,
+			"last_sync_cursor": ds.LastSyncCursor,
+			"last_sync_result": ds.LastSyncResult,
+			"error_message":    ds.ErrorMessage,
+			"updated_at":       time.Now().UTC(),
+		}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateSyncStateIfStatusUnchanged persists sync-owned fields while applying
+// the run outcome only if the data-source status still matches the value seen
+// when the run started. Pause/resume can race with a long-running sync; the SQL
+// CASE keeps that newer operator decision atomic with the state update.
+func (r *DataSourceRepository) UpdateSyncStateIfStatusUnchanged(
+	ctx context.Context,
+	ds *types.DataSource,
+	expectedStatus string,
+) error {
+	if ds == nil {
+		return errors.New("data source is nil")
+	}
+	if ds.ID == "" {
+		return errors.New("data source id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ?", ds.ID).
+		Updates(map[string]interface{}{
+			"status": gorm.Expr(
+				"CASE WHEN status = ? THEN ? ELSE status END",
+				expectedStatus,
+				ds.Status,
+			),
 			"last_sync_at":     ds.LastSyncAt,
 			"last_sync_cursor": ds.LastSyncCursor,
 			"last_sync_result": ds.LastSyncResult,
@@ -150,10 +307,27 @@ func (r *SyncLogRepository) Create(ctx context.Context, log *types.SyncLog) erro
 	if log == nil {
 		return errors.New("sync log is nil")
 	}
-	if err := r.db.WithContext(ctx).Create(log).Error; err != nil {
-		return err
+	if log.DataSourceID == "" {
+		return errors.New("data source id is empty")
 	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := acquireDataSourceSyncLock(tx, log.DataSourceID); err != nil {
+			return err
+		}
+		if log.Status == types.SyncLogStatusRunning {
+			var count int64
+			if err := tx.Model(&types.SyncLog{}).
+				Where("data_source_id = ?", log.DataSourceID).
+				Where("status = ?", types.SyncLogStatusRunning).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return datasource.ErrSyncInProgress
+			}
+		}
+		return tx.Create(log).Error
+	})
 }
 
 // FindByID retrieves a sync log by ID

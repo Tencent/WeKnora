@@ -105,6 +105,11 @@ func NewAsyncqClient() (*asynq.Client, error) {
 // burning through retries; but short enough that users don't feel the stall.
 const wikiIngestRetryDelay = 15 * time.Second
 
+// dataSourceIngestPendingRetryDelay avoids exponential backoff while a
+// successfully enqueued knowledge parse is the only remaining work. The
+// data-source sync log stays running, so retries remain overlap-safe.
+const dataSourceIngestPendingRetryDelay = 30 * time.Second
+
 // asynqRetryDelayFunc customizes per-task retry backoff.
 //
 // Default asynq backoff is exponential (≈10s, 40s, 90s, 2.5m, ...), which
@@ -118,6 +123,9 @@ const wikiIngestRetryDelay = 15 * time.Second
 func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 	if errors.Is(e, service.ErrWikiIngestConcurrent) {
 		return wikiIngestRetryDelay
+	}
+	if errors.Is(e, service.ErrDataSourceIngestPending) {
+		return dataSourceIngestPendingRetryDelay
 	}
 	return asynq.DefaultRetryDelayFunc(n, e, t)
 }

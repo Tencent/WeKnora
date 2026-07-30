@@ -43,7 +43,7 @@
         </div>
         <div class="setting-drawer__footer-right">
           <slot name="footer-right">
-            <t-button theme="default" variant="outline" @click="handleCancel">
+            <t-button theme="default" variant="outline" :disabled="cancelDisabled" @click="handleCancel">
               {{ cancelText || t('common.cancel') }}
             </t-button>
             <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
@@ -89,6 +89,7 @@ interface Props {
   confirmDisabled?: boolean
   confirmText?: string
   cancelText?: string
+  cancelDisabled?: boolean
   hideFooter?: boolean
 }
 
@@ -106,6 +107,7 @@ const props = withDefaults(defineProps<Props>(), {
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
+  cancelDisabled: false,
   hideFooter: false
 })
 
@@ -241,6 +243,7 @@ onUnmounted(() => {
 
 const handleConfirm = () => emit('confirm')
 const handleCancel = () => {
+  if (props.cancelDisabled) return
   emit('cancel')
   emit('update:visible', false)
 }

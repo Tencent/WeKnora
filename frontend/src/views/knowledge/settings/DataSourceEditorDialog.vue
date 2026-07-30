@@ -5,13 +5,10 @@ import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
   updateDataSource,
+  reconfigureDataSource,
   triggerSync,
-  validateConnection,
-  validateCredentials,
-  listResources,
+  previewResources,
   resolveResourceAncestors,
-  deleteDataSource,
-  putDataSourceCredentials,
   deleteDataSourceCredentials,
   type DataSource,
   type Resource,
@@ -19,6 +16,19 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import {
+  DINGTALK_CONNECTOR_DEF,
+  connectorRequiresCredentials,
+  connectionValidationMode,
+  createLatestRequestGate,
+  credentialsForMainPayload,
+  hasCandidateCredentialValues,
+  mergeLazyResources,
+  missingRequiredCredentialField,
+  requiresResourceSelection,
+  usesCandidateResourcePreview,
+  type ConnectorDef,
+} from './datasourceEditorLogic'
 
 const props = defineProps<{
   kbId: string
@@ -32,6 +42,15 @@ const { t } = useI18n()
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+const dialogSessionGate = createLatestRequestGate()
+const connectionTestGate = createLatestRequestGate()
+const drawerVisible = computed({
+  get: () => visible.value,
+  set: (next: boolean) => {
+    if (!next && submitting.value) return
+    visible.value = next
+  },
+})
 
 // In edit mode the credential "configured?" flag travels on the main
 // DataSource response (DataSource.credentials.credentials.configured —
@@ -44,6 +63,7 @@ const credentialsConfigured = ref(false)
 // Remove actions. Toggling Replace reveals the credential inputs so the
 // user can type a new set. Untoggling discards anything typed.
 const replaceCredentialsMode = ref(false)
+const initialSettingsFingerprint = ref('')
 
 // Whether the credential input section is interactive right now. In create
 // mode it's always shown; in edit mode only when the user opted in to
@@ -91,6 +111,8 @@ async function confirmRemoveCredentials() {
     replaceCredentialsMode.value = false
     pendingRemoveCredentials.value = false
     form.value.config.credentials = {}
+    selectionBeforeCredentialReplace.value = null
+    resetResourcePicker(connectorRequiresCredentials(currentDef.value))
     MessagePlugin.success(t('credential.removedToast'))
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('credential.removeFailed'))
@@ -104,6 +126,11 @@ function cancelReplaceCredentials() {
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
+  resetResourcePicker(false)
+  if (selectionBeforeCredentialReplace.value) {
+    selectedResourceIds.value = [...selectionBeforeCredentialReplace.value]
+  }
+  selectionBeforeCredentialReplace.value = null
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
 }
@@ -156,12 +183,28 @@ function removeRssAuthHeader(idx: number) {
 }
 
 function needsConnectionTest(): boolean {
-  return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
+  return connectionValidationMode(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+  ) === 'stateless'
+}
+
+function isCandidateResourcePreview(): boolean {
+  return usesCandidateResourcePreview(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+    connectorRequiresCredentials(currentDef.value),
+    hasCandidateCredentialValues(form.value.config.credentials),
+  )
 }
 
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
+  selectionBeforeCredentialReplace.value = [...selectedResourceIds.value]
   replaceCredentialsMode.value = true
+  resetResourcePicker(true)
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -185,6 +228,10 @@ const form = ref({
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
 const selectedResourceIds = ref<string[]>([])
+// Credential replacement changes the external identity namespace. Keep the
+// stored selection only as a cancel backup; candidate browsing always starts
+// empty so old opaque IDs can never leak into the final configuration.
+const selectionBeforeCredentialReplace = ref<string[] | null>(null)
 const expandedResourceIds = ref(new Set<string>())
 // Lazy loading: parents whose children have already been fetched, and parents
 // currently being fetched. Used to load hierarchical sources (e.g. Feishu wiki)
@@ -195,6 +242,21 @@ const loadingChildrenIds = ref(new Set<string>())
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
+const resourceLoadGate = createLatestRequestGate()
+
+function resetResourcePicker(clearSelection: boolean) {
+  resourceLoadGate.invalidate()
+  loadingResources.value = false
+  resources.value = []
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
+  if (clearSelection) {
+    selectedResourceIds.value = []
+    form.value.config.resource_ids = []
+  }
+}
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -230,6 +292,10 @@ const checkStates = computed(() => {
   // in the cover set; otherwise `indeterminate` if any descendant is checked;
   // otherwise `unchecked`. Returns whether the subtree contains a checked node.
   function walk(node: Resource, ancestorChecked: boolean): boolean {
+    if (!isResourceSelectable(node)) {
+      states.set(node.external_id, 'unchecked')
+      return false
+    }
     const selfChecked = ancestorChecked || cover.has(node.external_id)
     let descendantChecked = false
     for (const c of childrenMap.value.get(node.external_id) || []) {
@@ -261,36 +327,42 @@ function toggleExpand(id: string) {
 // no-op when the connector already delivered the whole tree in one call (e.g.
 // Notion) or when this node's children have already been fetched.
 async function ensureChildrenLoaded(id: string) {
-  if (!tempDsId.value) return
+  if (isEdit.value && !tempDsId.value) return
   if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
   if (treeFullyLoaded.value) {
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
     return
   }
 
+  const generation = resourceLoadGate.current()
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
   try {
-    const res = await listResources(tempDsId.value, id)
+    const res = await previewResources({
+      type: form.value.type,
+      credentials: credentialsForPreviewRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+      parentId: id,
+    })
+    if (!resourceLoadGate.isCurrent(generation)) return
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
-      const existing = new Set(resources.value.map(r => r.external_id))
-      const merged = resources.value.slice()
-      for (const c of children) {
-        if (!existing.has(c.external_id)) merged.push(c)
-      }
-      resources.value = merged
+      resources.value = mergeLazyResources(resources.value, children)
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
     expandedResourceIds.value = next
   } finally {
-    const s = new Set(loadingChildrenIds.value)
-    s.delete(id)
-    loadingChildrenIds.value = s
+    if (resourceLoadGate.isCurrent(generation)) {
+      const s = new Set(loadingChildrenIds.value)
+      s.delete(id)
+      loadingChildrenIds.value = s
+    }
   }
 }
 
@@ -318,7 +390,8 @@ const testErrorMsg = ref('')
 const prereqExpanded = ref(false)
 
 
-// Temp data source for resource listing
+// Existing data-source ID in edit mode. Create-mode resource browsing is
+// stateless and never persists a credential-bearing draft.
 const tempDsId = ref('')
 
 // Schedule presets
@@ -331,25 +404,6 @@ const schedulePresets = computed(() => [
 ])
 
 // --- Connector definitions ---
-interface ConnectorDef {
-  type: string
-  available: boolean
-  docUrl: string
-  permissionDocUrl: string
-  permissionPageUrl: string
-  requiredPermissions: string[]
-  fields: {
-    key: string
-    labelKey: string
-    placeholder: string
-    secret?: boolean
-    optional?: boolean
-    hintKey?: string
-    multiline?: boolean
-    fieldType?: 'custom_headers'
-  }[]
-}
-
 const connectorDefs = computed<ConnectorDef[]>(() => [
   {
     type: 'feishu',
@@ -414,6 +468,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://www.yuque.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
+  DINGTALK_CONNECTOR_DEF,
   {
     type: 'rss',
     available: true,
@@ -431,30 +486,30 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
 
 // --- Drawer lifecycle ---
-watch(visible, async (v) => {
+watch(visible, (v) => {
   if (!v) {
-    if (!isEdit.value && tempDsId.value) {
-      try {
-        await deleteDataSource(tempDsId.value)
-      } catch {
-        // Ignore cleanup errors
-      }
-      tempDsId.value = ''
-    }
+    dialogSessionGate.invalidate()
+    connectionTestGate.invalidate()
+    testing.value = false
+    resourceLoadGate.invalidate()
+    loadingResources.value = false
+    loadingChildrenIds.value = new Set()
     return
   }
+  dialogSessionGate.begin()
+  connectionTestGate.invalidate()
+  testing.value = false
+  submitting.value = false
   step.value = isEdit.value ? 1 : 0
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
   prereqExpanded.value = false
   pendingRemoveCredentials.value = false
-  resources.value = []
+  selectionBeforeCredentialReplace.value = null
+  initialSettingsFingerprint.value = ''
   selectedResourceIds.value = []
-  expandedResourceIds.value = new Set()
-  loadedChildrenIds.value = new Set()
-  loadingChildrenIds.value = new Set()
-  treeFullyLoaded.value = false
+  resetResourcePicker(false)
   rssAuthHeaders.value = []
 
   if (isEdit.value && props.dataSource) {
@@ -482,6 +537,10 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
+    if (isCandidateResourcePreview()) {
+      selectedResourceIds.value = []
+    }
     tempDsId.value = props.dataSource.id
   } else {
     replaceCredentialsMode.value = false
@@ -495,15 +554,21 @@ watch(visible, async (v) => {
       conflict_strategy: 'overwrite',
       sync_deletions: true,
     }
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
   }
 })
 
 watch(
   () => form.value.config.credentials,
   () => {
+    connectionTestGate.invalidate()
+    testing.value = false
     if (needsConnectionTest()) {
       testResult.value = ''
       testErrorMsg.value = ''
+    }
+    if (!isEdit.value || isCandidateResourcePreview()) {
+      resetResourcePicker(true)
     }
   },
   { deep: true },
@@ -513,6 +578,8 @@ watch(
   rssAuthHeaders,
   () => {
     syncRssAuthHeadersToCredentials()
+    connectionTestGate.invalidate()
+    testing.value = false
     if (needsConnectionTest()) {
       testResult.value = ''
       testErrorMsg.value = ''
@@ -522,17 +589,26 @@ watch(
 )
 
 watch(
-  () => form.value.config.settings.feed_urls,
-  () => {
-    if (needsConnectionTest()) {
-      testResult.value = ''
-      testErrorMsg.value = ''
+  () => form.value.config.settings,
+  (settings) => {
+    connectionTestGate.invalidate()
+    testing.value = false
+    testResult.value = ''
+    testErrorMsg.value = ''
+    if (
+      (isEdit.value || resources.value.length > 0) &&
+      JSON.stringify(settings) !== initialSettingsFingerprint.value
+    ) {
+      resetResourcePicker(true)
     }
   },
+  { deep: true },
 )
 
 function selectType(def: ConnectorDef) {
   if (!def.available) return
+  connectionTestGate.invalidate()
+  testing.value = false
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
@@ -544,65 +620,89 @@ function selectType(def: ConnectorDef) {
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
-  if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
-    for (const f of fields) {
-      if (f.optional || f.fieldType === 'custom_headers') continue
-      if (!form.value.config.credentials[f.key]) {
-        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-        return
-      }
+  const validationMode = connectionValidationMode(
+    isEdit.value,
+    credentialsConfigured.value,
+    replaceCredentialsMode.value,
+  )
+  if (validationMode === 'stateless') {
+    const missing = missingRequiredCredentialField(
+      currentDef.value,
+      form.value.config.credentials,
+    )
+    if (missing) {
+      MessagePlugin.warning(`${t(missing.labelKey)} ${t('datasource.isRequired')}`)
+      return
     }
   }
 
+  const requestGeneration = connectionTestGate.begin()
+  const sessionGeneration = dialogSessionGate.current()
   testing.value = true
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-      await validateConnection(tempDsId.value)
-    } else {
-      const creds = { ...form.value.config.credentials }
-      if (form.value.type === 'rss') {
-        // validate-credentials is credentials-only; feed URLs live in settings.
-        creds.feed_urls = form.value.config.settings.feed_urls
-      }
-      await validateCredentials(form.value.type, creds)
-    }
+    await previewResources({
+      type: form.value.type,
+      credentials: validationMode === 'stored'
+        ? null
+        : candidateCredentialsForRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+      validateOnly: true,
+    })
+    if (
+      !connectionTestGate.isCurrent(requestGeneration) ||
+      !dialogSessionGate.isCurrent(sessionGeneration)
+    ) return
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
+    if (
+      !connectionTestGate.isCurrent(requestGeneration) ||
+      !dialogSessionGate.isCurrent(sessionGeneration)
+    ) return
     testResult.value = 'error'
     testErrorMsg.value = e?.message || e?.error || ''
     MessagePlugin.error(t('datasource.testFailed'))
+  } finally {
+    if (
+      connectionTestGate.isCurrent(requestGeneration) &&
+      dialogSessionGate.isCurrent(sessionGeneration)
+    ) {
+      testing.value = false
+    }
   }
-  testing.value = false
+}
+
+function candidateCredentialsForRequest(): Record<string, unknown> {
+  syncRssAuthHeadersToCredentials()
+  return Object.fromEntries(
+    Object.entries(form.value.config.credentials).filter(
+      ([, value]) => typeof value === 'string' ? value.trim() !== '' : value != null,
+    ),
+  )
+}
+
+function credentialsForPreviewRequest(): Record<string, unknown> | null {
+  return !isEdit.value || isCandidateResourcePreview()
+    ? candidateCredentialsForRequest()
+    : null
 }
 
 // --- Load resources ---
 async function loadResources() {
+  const generation = resourceLoadGate.begin()
   loadingResources.value = true
   try {
-    if (!tempDsId.value) {
-      const res = await createDataSource({
-        ...form.value,
-        knowledge_base_id: props.kbId,
-        status: 'paused',
-      } as any)
-      const created = res?.data || res
-      tempDsId.value = created.id
-    } else if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+    const res = await previewResources({
+      type: form.value.type,
+      credentials: credentialsForPreviewRequest(),
+      settings: form.value.config.settings,
+      dataSourceId: isEdit.value ? tempDsId.value : undefined,
+    })
 
-    const res = await listResources(tempDsId.value)
+    if (!resourceLoadGate.isCurrent(generation)) return false
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -622,17 +722,24 @@ async function loadResources() {
         .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
         .map(r => r.external_id),
     )
+    initialSettingsFingerprint.value = JSON.stringify(form.value.config.settings)
     // When editing a lazily-loaded source, reveal pre-existing selections that
     // live below the (not-yet-loaded) tree so they are visible and checked.
-    if (isEdit.value && !treeFullyLoaded.value) {
+    if (isEdit.value && !isCandidateResourcePreview() && !treeFullyLoaded.value) {
       const loaded = new Set(resources.value.map(r => r.external_id))
       const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
       if (hidden.length > 0) void revealExistingSelections(hidden)
     }
+    return true
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return false
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    return false
+  } finally {
+    if (resourceLoadGate.isCurrent(generation)) {
+      loadingResources.value = false
+    }
   }
-  loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -640,8 +747,10 @@ async function loadResources() {
 // so the saved selection becomes visible and correctly checked in the tree.
 async function revealExistingSelections(hiddenIds: string[]) {
   if (!tempDsId.value || hiddenIds.length === 0) return
+  const generation = resourceLoadGate.current()
   try {
     const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
+    if (!resourceLoadGate.isCurrent(generation)) return
     const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
     if (ancestors.length === 0) return
     const expanded = new Set(expandedResourceIds.value)
@@ -651,6 +760,7 @@ async function revealExistingSelections(hiddenIds: string[]) {
     // selection itself); calls are independent and dedup on merge.
     await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
   } catch (e: any) {
+    if (!resourceLoadGate.isCurrent(generation)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
 }
@@ -704,7 +814,9 @@ function uncheckResource(id: string, cover: Set<string>) {
       const parent = chain[i]
       const next = chain[i - 1]
       for (const sib of childrenMap.value.get(parent) || []) {
-        if (sib.external_id !== next) cover.add(sib.external_id)
+        if (sib.external_id !== next && isResourceSelectable(sib)) {
+          cover.add(sib.external_id)
+        }
       }
     }
   }
@@ -716,6 +828,9 @@ function uncheckResource(id: string, cover: Set<string>) {
 }
 
 function toggleResource(id: string) {
+  const resource = resources.value.find(item => item.external_id === id)
+  if (!resource) return
+  if (!isResourceSelectable(resource)) return
   const cover = new Set(selectedResourceIds.value)
   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
     checkResource(id, cover)
@@ -741,13 +856,13 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
-  for (const f of fields) {
-    if (f.optional || f.fieldType === 'custom_headers') continue
-    if (!form.value.config.credentials[f.key]) {
-      MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-      return false
-    }
+  const missing = missingRequiredCredentialField(
+    currentDef.value,
+    form.value.config.credentials,
+  )
+  if (missing) {
+    MessagePlugin.warning(`${t(missing.labelKey)} ${t('datasource.isRequired')}`)
+    return false
   }
   return true
 }
@@ -755,18 +870,29 @@ function validateStep1Fields(): boolean {
 async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
-    if (needsConnectionTest() && testResult.value !== 'success') {
+    if (testResult.value !== 'success') {
       await testConnection()
       if ((testResult.value as string) !== 'success') return
     }
   }
+  if (
+    step.value === 2 &&
+    requiresResourceSelection(form.value.type) &&
+    selectedResourceCount.value === 0
+  ) {
+    MessagePlugin.warning(t('datasource.resourceRequired'))
+    return
+  }
   step.value++
   if (step.value === 2) {
-    loadResources()
+    await loadResources()
   }
 }
 
 function prevStep() {
+  if (loadingResources.value) return
+  resourceLoadGate.invalidate()
+  loadingChildrenIds.value = new Set()
   step.value--
 }
 
@@ -776,106 +902,96 @@ function prevStep() {
 // already carries them.
 //
 // Edit mode: credentials NEVER flow through the main PUT — they go via the
-// /credentials subresource, committed before the main submit (see
-// commitCredentialsIfNeeded). Sending an empty map keeps the backend
-// validator happy.
+// Candidate credential replacement instead uses the atomic reconfigure
+// endpoint; an empty map here keeps ordinary edit payloads secret-free.
 function buildConfigPayload(): Record<string, unknown> {
   return {
-    credentials: isEdit.value ? {} : { ...form.value.config.credentials },
+    credentials: credentialsForMainPayload(
+      isEdit.value,
+      form.value.config.credentials,
+    ),
     resource_ids: form.value.config.resource_ids,
     settings: form.value.config.settings,
   }
 }
 
-// In edit mode, when the user opted in to Replace credentials and typed at
-// least one value, commit it to /credentials before the main PUT. Aborts
-// the whole submit on failure so we don't leave the row partially saved.
-async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
-  if (!isEdit.value || !replaceCredentialsMode.value) return true
-  syncRssAuthHeadersToCredentials()
-  const filled = Object.entries(form.value.config.credentials).filter(
-    ([, v]) => typeof v === 'string' ? v !== '' : v != null,
-  )
-  if (filled.length === 0) return true
-  try {
-    await putDataSourceCredentials(dsId, Object.fromEntries(filled))
-    credentialsConfigured.value = true
-    replaceCredentialsMode.value = false
-    form.value.config.credentials = {}
-    rssAuthHeaders.value = []
-    return true
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
-    return false
-  }
-}
-
+// In edit mode, credential replacement and candidate data-source settings are
+// submitted together through the atomic reconfigure endpoint. A validation or
+// persistence failure therefore leaves both the stored config and secret intact.
 // --- Final submit ---
 async function handleSubmit() {
   form.value.config.resource_ids = selectedResourceIds.value
+  const sessionGeneration = dialogSessionGate.current()
+  const editing = isEdit.value
+  const existingID = editing ? tempDsId.value : ''
+  const dataSourcePayload = {
+    ...form.value,
+    config: buildConfigPayload(),
+    knowledge_base_id: props.kbId,
+    status: editing ? (props.dataSource?.status || 'active') : 'active',
+  } as any
   submitting.value = true
   try {
-    let dataSourceId = tempDsId.value
+    let dataSourceId = existingID
 
-    if (tempDsId.value) {
-      // Commit credential replacement BEFORE the main PUT so a validation
-      // failure on credentials doesn't leave us with an updated row that
-      // still points at the old broken token.
-      const credsOk = await commitCredentialsIfNeeded(tempDsId.value)
-      if (!credsOk) {
-        submitting.value = false
-        return
+    if (editing) {
+      if (isCandidateResourcePreview()) {
+        await reconfigureDataSource(
+          existingID,
+          dataSourcePayload,
+          candidateCredentialsForRequest(),
+        )
+      } else {
+        await updateDataSource(existingID, dataSourcePayload)
       }
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        config: buildConfigPayload(),
-        knowledge_base_id: props.kbId,
-        status: 'active',
-      } as any)
     } else {
-      const res = await createDataSource({
-        ...form.value,
-        config: buildConfigPayload(),
-        knowledge_base_id: props.kbId,
-        status: 'active',
-      } as any)
+      const res = await createDataSource(dataSourcePayload)
       const created = res?.data || res
       dataSourceId = created.id
-      tempDsId.value = created.id
+    }
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
+    if (editing && isCandidateResourcePreview()) {
+      credentialsConfigured.value = true
     }
 
-    if (isEdit.value) {
+    if (editing) {
       MessagePlugin.warning(t('datasource.updateSuccessSyncHint'))
     } else {
       try {
         await triggerSync(dataSourceId)
+        if (!dialogSessionGate.isCurrent(sessionGeneration)) return
         MessagePlugin.success(t('datasource.createAndSyncSuccess'))
       } catch (e: any) {
+        if (!dialogSessionGate.isCurrent(sessionGeneration)) return
         MessagePlugin.warning(e?.message || e?.error || t('datasource.createButSyncFailed'))
       }
     }
 
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
     emit('saved')
-    // Clear before close — otherwise the visible watcher treats the just-saved
-    // row as an abandoned temp draft and DELETEs it (loadResources creates the
-    // row early at step 2 with tempDsId).
-    tempDsId.value = ''
+    submitting.value = false
     visible.value = false
   } catch (e: any) {
+    if (!dialogSessionGate.isCurrent(sessionGeneration)) return
     MessagePlugin.error(e?.message || e?.error || t('datasource.saveFailed'))
+  } finally {
+    if (dialogSessionGate.isCurrent(sessionGeneration)) {
+      submitting.value = false
+    }
   }
-  submitting.value = false
 }
 
 function handleClose() {
+  if (submitting.value) return
   visible.value = false
 }
 
 async function handleDrawerConfirm() {
+  if (loadingResources.value || submitting.value) return
   if (step.value === 1 || step.value === 2) {
     await nextStep()
   } else if (step.value === 3) {
-    handleSubmit()
+    await handleSubmit()
   }
 }
 
@@ -920,6 +1036,11 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  unsupported: 'datasource.resourceType.unsupported',
+}
+
+function isResourceSelectable(resource: Resource): boolean {
+  return resource.type !== 'unsupported'
 }
 
 function resourceTypeLabel(type: string): string {
@@ -960,13 +1081,14 @@ const drawerConfirmText = computed(() => {
 
 <template>
   <SettingDrawer
-    v-model:visible="visible"
+    v-model:visible="drawerVisible"
     :title="drawerTitle"
     :description="drawerDescription"
     :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
-    :confirm-loading="submitting || (step === 1 && testing)"
+    :confirm-loading="submitting || loadingResources || (step === 1 && testing)"
+    :cancel-disabled="submitting"
     storage-key="setting-drawer:width:datasource-editor"
     width="640px"
     @confirm="handleDrawerConfirm"
@@ -1013,7 +1135,7 @@ const drawerConfirmText = computed(() => {
     </template>
 
     <template v-else-if="step === 2 || step === 3" #footer-left>
-      <t-button variant="outline" @click="prevStep">
+      <t-button variant="outline" :disabled="loadingResources" @click="prevStep">
         {{ t('datasource.back') }}
       </t-button>
     </template>
@@ -1325,10 +1447,12 @@ const drawerConfirmText = computed(() => {
             :class="{
               'is-checked': resourceRowState(r.external_id) === 'checked',
               'is-indeterminate': resourceRowState(r.external_id) === 'indeterminate',
+              'is-disabled': !isResourceSelectable(r),
             }"
             :style="{ '--depth': depth }"
             role="treeitem"
             :aria-expanded="r.has_children ? expandedResourceIds.has(r.external_id) : undefined"
+            :aria-disabled="!isResourceSelectable(r)"
             @click="toggleResource(r.external_id)"
           >
             <button
@@ -2006,6 +2130,15 @@ const drawerConfirmText = computed(() => {
 .resource-picker__row.is-checked,
 .resource-picker__row.is-indeterminate {
   background: var(--td-bg-color-secondarycontainer);
+}
+
+.resource-picker__row.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.resource-picker__row.is-disabled:hover {
+  background: transparent;
 }
 
 .resource-picker__expand,

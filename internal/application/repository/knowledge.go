@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -595,6 +596,71 @@ func (r *knowledgeRepository) FindByMetadataKey(
 		return nil, err
 	}
 	return &knowledge, nil
+}
+
+// FindByMetadataKeys finds one active knowledge row matching every supplied
+// metadata key. Data-source sync uses the compound
+// (external_id, datasource_id) identity so two connectors in one KB cannot
+// update or delete each other's documents when their upstream IDs collide.
+func (r *knowledgeRepository) FindByMetadataKeys(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	values map[string]string,
+) (*types.Knowledge, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	for _, key := range keys {
+		query = query.Where("metadata->>? = ?", key, values[key])
+	}
+	var knowledge types.Knowledge
+	if err := query.First(&knowledge).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
+// FindAllByMetadataKeys finds every active row matching the supplied compound
+// metadata identity. Data-source replacement reconciliation needs the complete
+// set because a successfully enqueued asynchronous replacement deliberately
+// coexists with the last known-good row until parsing has completed.
+func (r *knowledgeRepository) FindAllByMetadataKeys(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	values map[string]string,
+) ([]*types.Knowledge, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	for _, key := range keys {
+		query = query.Where("metadata->>? = ?", key, values[key])
+	}
+	var knowledges []*types.Knowledge
+	if err := query.Order("created_at ASC").Order("id ASC").Find(&knowledges).Error; err != nil {
+		return nil, err
+	}
+	return knowledges, nil
 }
 
 // FindByMetadataKeyPrefix finds knowledge items whose metadata[key] starts with
