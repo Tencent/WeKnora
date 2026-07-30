@@ -497,6 +497,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -517,6 +518,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -536,6 +538,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -553,6 +556,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
