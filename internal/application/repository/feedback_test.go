@@ -343,6 +343,125 @@ func TestHydrateMessagesRequiresExactSessionOwner(t *testing.T) {
 	}
 }
 
+func TestAgentCanonicalCompletionFiltersScopeDeduplicatesAndIsIdempotent(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	ctx := context.Background()
+	other := &types.Chunk{
+		ID: "chunk-cross", TenantID: 303, KnowledgeBaseID: "kb-cross", KnowledgeID: "knowledge-cross",
+		Content: "cross", SourceContent: "cross", RecallWeight: 1, IsEnabled: true,
+	}
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, title) VALUES (?, ?, ?, ?)",
+		other.KnowledgeID, other.TenantID, other.KnowledgeBaseID, "Cross tenant",
+	).Error)
+	require.NoError(t, db.Create(other).Error)
+
+	message.Content = "agent answer"
+	message.KnowledgeReferences = types.References{
+		{ID: chunk.ID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText},
+		{ID: chunk.ID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText},
+		{ID: other.ID, KnowledgeBaseID: other.KnowledgeBaseID, ChunkType: types.ChunkTypeText},
+	}
+	message.CanonicalChunkReferencesSet = true
+	message.CanonicalChunkReferences = []types.ChunkFeedbackScope{
+		{TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkID: chunk.ID},
+		{TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkID: chunk.ID},
+		// The tool result claims an unauthorized tenant for this chunk. Exact
+		// tenant+KB+chunk validation must filter it.
+		{TenantID: 999, KnowledgeBaseID: other.KnowledgeBaseID, ChunkID: other.ID},
+	}
+
+	eligible, err := repo.CompleteAssistantMessageWithReferences(
+		ctx, session.TenantID, message, message.KnowledgeReferences,
+	)
+	require.NoError(t, err)
+	assert.True(t, eligible)
+
+	var stored []types.MessageChunkReference
+	require.NoError(t, db.Where("message_id = ?", message.ID).Find(&stored).Error)
+	require.Len(t, stored, 1)
+	assert.Equal(t, chunk.TenantID, stored[0].ChunkTenantID)
+	assert.Equal(t, chunk.ID, stored[0].ChunkID)
+
+	var persisted types.Message
+	require.NoError(t, db.First(&persisted, "id = ?", message.ID).Error)
+	require.Len(t, persisted.KnowledgeReferences, 1)
+	assert.Equal(t, chunk.ID, persisted.KnowledgeReferences[0].ID)
+
+	// Reordered and duplicate canonical input is the same immutable completion.
+	message.KnowledgeReferences = types.References{
+		{ID: chunk.ID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkType: types.ChunkTypeText},
+	}
+	message.CanonicalChunkReferences = []types.ChunkFeedbackScope{
+		{TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkID: chunk.ID},
+	}
+	eligible, err = repo.CompleteAssistantMessageWithReferences(
+		ctx, session.TenantID, message, message.KnowledgeReferences,
+	)
+	require.NoError(t, err)
+	assert.True(t, eligible)
+	require.NoError(t, db.Where("message_id = ?", message.ID).Find(&stored).Error)
+	assert.Len(t, stored, 1)
+}
+
+func TestAgentWebOnlyCompletionIsNotFeedbackEligible(t *testing.T) {
+	repo, db, session, _, _ := setupFeedbackTestRepository(t)
+	message := &types.Message{
+		ID: "message-web", SessionID: session.ID, Role: "assistant", Content: "web answer",
+		KnowledgeReferences: types.References{{
+			ID: "web-result", ChunkType: string(types.ChunkTypeWebSearch), KnowledgeSource: "web_search",
+		}},
+		CanonicalChunkReferencesSet: true,
+	}
+	require.NoError(t, db.Exec(
+		"INSERT INTO messages (id, session_id, content, role, is_completed) VALUES (?, ?, ?, ?, ?)",
+		message.ID, message.SessionID, "draft", message.Role, false,
+	).Error)
+
+	eligible, err := repo.CompleteAssistantMessageWithReferences(
+		context.Background(), session.TenantID, message, message.KnowledgeReferences,
+	)
+	require.NoError(t, err)
+	assert.False(t, eligible)
+
+	var count int64
+	require.NoError(t, db.Model(&types.MessageChunkReference{}).
+		Where("message_id = ?", message.ID).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestAgentCanonicalCompletionRollsBackMessageWhenReferenceInsertFails(t *testing.T) {
+	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER reject_agent_reference
+		BEFORE INSERT ON message_chunk_references
+		BEGIN SELECT RAISE(ABORT, 'agent reference insert failed'); END;
+	`).Error)
+	message.Content = "agent answer"
+	message.KnowledgeReferences = feedbackReference(chunk)
+	message.CanonicalChunkReferencesSet = true
+	message.CanonicalChunkReferences = []types.ChunkFeedbackScope{{
+		TenantID:        chunk.TenantID,
+		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		ChunkID:         chunk.ID,
+	}}
+
+	eligible, err := repo.CompleteAssistantMessageWithReferences(
+		context.Background(), session.TenantID, message, message.KnowledgeReferences,
+	)
+	require.ErrorContains(t, err, "agent reference insert failed")
+	assert.False(t, eligible)
+
+	var persisted types.Message
+	require.NoError(t, db.First(&persisted, "id = ?", message.ID).Error)
+	assert.False(t, persisted.IsCompleted)
+	assert.Equal(t, "draft", persisted.Content)
+	var referenceCount int64
+	require.NoError(t, db.Model(&types.MessageChunkReference{}).
+		Where("message_id = ?", message.ID).Count(&referenceCount).Error)
+	assert.Zero(t, referenceCount)
+}
+
 func TestFeedbackLifecycleAndResetBaseline(t *testing.T) {
 	repo, db, session, message, chunk := setupFeedbackTestRepository(t)
 	ctx := context.Background()

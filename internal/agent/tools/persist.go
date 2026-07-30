@@ -86,6 +86,7 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
+			result.FeedbackReferences = nil
 			if ShouldOmitRawToolOutput(tc.Name, result.Data) {
 				result.Output = compactToolSummary(result.Success, result.Error, result.Data)
 				result.Data = SanitizeToolDataForPersist(result.Data)

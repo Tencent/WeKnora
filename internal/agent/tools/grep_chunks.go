@@ -222,23 +222,45 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 
 	output := t.formatOutput(ctx, finalResults, queries, compiled)
 
+	data := map[string]interface{}{
+		"query":              query,
+		"queries":            queries, // legacy alias for older frontends
+		"patterns":           queries, // legacy alias for older frontends
+		"chunk_results":      chunkResults,
+		"knowledge_results":  knowledgeResultsForUI,
+		"result_count":       len(chunkResults),
+		"document_count":     documentCount,
+		"total_matches":      len(finalResults),
+		"knowledge_base_ids": kbIDsForMeta,
+		"limit":              limit,
+		"max_results":        limit, // legacy alias
+		"display_type":       "grep_results",
+	}
+	feedbackReferences := make([]types.AgentFeedbackReference, 0, len(finalResults))
+	for i := range finalResults {
+		result := &finalResults[i]
+		if result.TenantID == 0 || result.ID == "" || result.KnowledgeBaseID == "" {
+			continue
+		}
+		feedbackReferences = append(feedbackReferences, types.AgentFeedbackReference{
+			TenantID: result.TenantID,
+			Result: &types.SearchResult{
+				ID:              result.ID,
+				Content:         result.Content,
+				KnowledgeID:     result.KnowledgeID,
+				ChunkIndex:      result.ChunkIndex,
+				KnowledgeTitle:  result.KnowledgeTitle,
+				Score:           result.MatchScore,
+				ChunkType:       string(result.ChunkType),
+				KnowledgeBaseID: result.KnowledgeBaseID,
+			},
+		})
+	}
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data: map[string]interface{}{
-			"query":              query,
-			"queries":            queries, // legacy alias for older frontends
-			"patterns":           queries, // legacy alias for older frontends
-			"chunk_results":      chunkResults,
-			"knowledge_results":  knowledgeResultsForUI,
-			"result_count":       len(chunkResults),
-			"document_count":     documentCount,
-			"total_matches":      len(finalResults),
-			"knowledge_base_ids": kbIDsForMeta,
-			"limit":              limit,
-			"max_results":        limit, // legacy alias
-			"display_type":       "grep_results",
-		},
+		Success:            true,
+		Output:             output,
+		Data:               data,
+		FeedbackReferences: feedbackReferences,
 	}, nil
 }
 

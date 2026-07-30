@@ -1,5 +1,7 @@
 package event
 
+import "github.com/Tencent/WeKnora/internal/types"
+
 // EventData contains common event data structures for different stages
 
 // QueryData represents query-related event data
@@ -176,6 +178,8 @@ type AgentToolResultData struct {
 	Duration   int64                  `json:"duration_ms,omitempty"`
 	Iteration  int                    `json:"iteration"`
 	Data       map[string]interface{} `json:"data,omitempty"` // Structured data from tool result (e.g., display_type, formatted results)
+	// FeedbackReferences is server-only attribution metadata.
+	FeedbackReferences []types.AgentFeedbackReference `json:"-"`
 }
 
 // AgentReferencesData represents knowledge references data

@@ -261,6 +261,11 @@ type Message struct {
 	// Feedback fields are hydrated for the current web user on reads.
 	MyFeedback       *MessageFeedbackState `json:"my_feedback,omitempty" gorm:"-"`
 	FeedbackEligible bool                  `json:"feedback_eligible" gorm:"-"`
+	// CanonicalChunkReferences is request-local, server-derived attribution
+	// from the final Agent tool results exposed to the user. The Set bit
+	// distinguishes an Agent answer with no KB references from standard QA.
+	CanonicalChunkReferences    []ChunkFeedbackScope `json:"-" gorm:"-"`
+	CanonicalChunkReferencesSet bool                 `json:"-" gorm:"-"`
 }
 
 // MessageExecutionContext is a message-level snapshot of the non-secret

@@ -556,10 +556,15 @@ type sseStreamContext struct {
 	asyncCtx         context.Context
 	cancel           context.CancelFunc
 	assistantMessage *types.Message
+	streamHandler    *AgentStreamHandler
 }
 
 // setupSSEStream sets up the SSE streaming context
-func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *sseStreamContext {
+func (h *Handler) setupSSEStream(
+	reqCtx *qaRequestContext,
+	generateTitle bool,
+	deferCompletion bool,
+) *sseStreamContext {
 	// Set SSE headers
 	setSSEHeaders(reqCtx.c)
 
@@ -601,8 +606,11 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	h.startStopWatcher(logger.CloneContext(baseCtx), reqCtx.sessionID, reqCtx.assistantMessage.ID, eventBus)
 
 	// Setup stream handler
-	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
-		reqCtx.requestID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus)
+	streamCtx.streamHandler = h.setupStreamHandler(
+		asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
+		reqCtx.requestID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus,
+		deferCompletion,
+	)
 
 	// Generate title if needed
 	if generateTitle && reqCtx.session.Title == "" {
@@ -857,7 +865,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	}
 
 	// Setup SSE stream
-	streamCtx := h.setupSSEStream(reqCtx, generateTitle)
+	streamCtx := h.setupSSEStream(reqCtx, generateTitle, mode == qaModeAgent)
 
 	// Normal mode: register completion handler on EventAgentFinalAnswer
 	// (Agent mode handles completion in the defer block instead)
@@ -939,7 +947,18 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					context.WithoutCancel(streamCtx.asyncCtx),
 					types.TenantIDContextKey, reqCtx.session.TenantID,
 				)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				if streamCtx.asyncCtx.Err() != nil {
+					logger.Infof(streamCtx.asyncCtx, "Agent completion skipped after explicit cancellation")
+					return
+				}
+				streamCtx.streamHandler.PrepareAgentCompletion()
+				feedbackEligible, completionErr := h.completeKnowledgeAssistantMessage(
+					updateCtx, streamCtx.assistantMessage, reqCtx.query,
+				)
+				if completionErr != nil {
+					logger.Errorf(updateCtx, "Failed to atomically complete Agent message: %v", completionErr)
+				}
+				streamCtx.streamHandler.CompleteAfterPersistence(feedbackEligible, completionErr)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
 		}()
@@ -1358,9 +1377,9 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	h.afterAssistantMessageCompleted(ctx, assistantMessage, userQuery)
 }
 
-// completeKnowledgeAssistantMessage is used only by standard knowledge QA. It
-// publishes completion to the client only after the final answer and its chunk
-// attribution have committed together.
+// completeKnowledgeAssistantMessage is shared by standard knowledge QA and
+// Agent QA. Callers publish completion only after the final answer and its
+// server-derived chunk attribution have committed together.
 func (h *Handler) completeKnowledgeAssistantMessage(
 	ctx context.Context,
 	assistantMessage *types.Message,

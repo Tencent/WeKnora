@@ -52,6 +52,20 @@ type referenceKey struct {
 	chunkID  string
 }
 
+type canonicalReferenceScopeKey struct {
+	tenantID        uint64
+	knowledgeBaseID string
+	chunkID         string
+}
+
+func canonicalScopeKey(scope types.ChunkFeedbackScope) canonicalReferenceScopeKey {
+	return canonicalReferenceScopeKey{
+		tenantID:        scope.TenantID,
+		knowledgeBaseID: scope.KnowledgeBaseID,
+		chunkID:         scope.ChunkID,
+	}
+}
+
 func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 	ctx context.Context,
 	messageTenantID uint64,
@@ -80,7 +94,16 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 			return ErrFeedbackNotEligible
 		}
 
-		keys, err := resolveReferenceKeys(tx, references)
+		completionReferences := references
+		var keys []referenceKey
+		var err error
+		if message.CanonicalChunkReferencesSet {
+			keys, completionReferences, err = resolveCanonicalReferenceKeys(
+				tx, references, message.CanonicalChunkReferences,
+			)
+		} else {
+			keys, err = resolveReferenceKeys(tx, references)
+		}
 		if err != nil {
 			return err
 		}
@@ -121,7 +144,7 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 			Where("id = ? AND session_id = ? AND is_completed = ?", message.ID, message.SessionID, false).
 			Updates(map[string]interface{}{
 				"content":              message.Content,
-				"knowledge_references": references,
+				"knowledge_references": completionReferences,
 				"agent_steps":          message.AgentSteps,
 				"is_completed":         true,
 				"is_fallback":          message.IsFallback,
@@ -135,7 +158,103 @@ func (r *feedbackRepository) CompleteAssistantMessageWithReferences(
 		}
 		return nil
 	})
-	return eligible, err
+	if err != nil {
+		return false, err
+	}
+	return eligible, nil
+}
+
+func resolveCanonicalReferenceKeys(
+	tx *gorm.DB,
+	references types.References,
+	scopes []types.ChunkFeedbackScope,
+) ([]referenceKey, types.References, error) {
+	referenceIDs := make(map[string]map[string]struct{}, len(references))
+	for _, ref := range references {
+		if ref == nil || ref.ID == "" || ref.KnowledgeBaseID == "" ||
+			ref.ChunkType == string(types.ChunkTypeWebSearch) ||
+			ref.KnowledgeSource == "web_search" ||
+			ref.MatchType == types.MatchTypeHistory {
+			continue
+		}
+		if referenceIDs[ref.ID] == nil {
+			referenceIDs[ref.ID] = make(map[string]struct{})
+		}
+		referenceIDs[ref.ID][ref.KnowledgeBaseID] = struct{}{}
+	}
+
+	requested := make(map[canonicalReferenceScopeKey]types.ChunkFeedbackScope, len(scopes))
+	ids := make([]string, 0, len(scopes))
+	seenIDs := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		if scope.TenantID == 0 || scope.KnowledgeBaseID == "" || scope.ChunkID == "" {
+			continue
+		}
+		allowedKBs := referenceIDs[scope.ChunkID]
+		if _, exists := allowedKBs[scope.KnowledgeBaseID]; !exists {
+			continue
+		}
+		key := canonicalScopeKey(scope)
+		requested[key] = scope
+		if _, exists := seenIDs[scope.ChunkID]; !exists {
+			seenIDs[scope.ChunkID] = struct{}{}
+			ids = append(ids, scope.ChunkID)
+		}
+	}
+	if len(requested) == 0 {
+		return nil, nil, nil
+	}
+	sort.Strings(ids)
+
+	var chunks []types.Chunk
+	if err := tx.Where("id IN ?", ids).
+		Order("tenant_id, id").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Find(&chunks).Error; err != nil {
+		return nil, nil, err
+	}
+
+	validScopes := make(map[canonicalReferenceScopeKey]struct{}, len(chunks))
+	keys := make([]referenceKey, 0, len(chunks))
+	for _, chunk := range chunks {
+		scope := types.ChunkFeedbackScope{
+			TenantID: chunk.TenantID, KnowledgeBaseID: chunk.KnowledgeBaseID, ChunkID: chunk.ID,
+		}
+		key := canonicalScopeKey(scope)
+		if _, allowed := requested[key]; !allowed {
+			continue
+		}
+		validScopes[key] = struct{}{}
+		keys = append(keys, referenceKey{tenantID: chunk.TenantID, chunkID: chunk.ID})
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].tenantID != keys[j].tenantID {
+			return keys[i].tenantID < keys[j].tenantID
+		}
+		return keys[i].chunkID < keys[j].chunkID
+	})
+
+	validReferences := make(types.References, 0, len(keys))
+	seenReferences := make(map[string]struct{}, len(keys))
+	for _, ref := range references {
+		if ref == nil {
+			continue
+		}
+		for scope := range validScopes {
+			if ref.ID != scope.chunkID || ref.KnowledgeBaseID != scope.knowledgeBaseID {
+				continue
+			}
+			key := fmt.Sprintf("%d\x00%s", scope.tenantID, scope.chunkID)
+			if _, exists := seenReferences[key]; exists {
+				break
+			}
+			seenReferences[key] = struct{}{}
+			referenceCopy := *ref
+			validReferences = append(validReferences, &referenceCopy)
+			break
+		}
+	}
+	return keys, validReferences, nil
 }
 
 func resolveReferenceKeys(tx *gorm.DB, references types.References) ([]referenceKey, error) {

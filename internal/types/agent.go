@@ -191,6 +191,16 @@ type ToolResult struct {
 	Data    map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
 	Error   string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
+	// FeedbackReferences contains only final KB chunks exposed by a retrieval
+	// tool. It is server-only and never enters model context, SSE, or storage.
+	FeedbackReferences []AgentFeedbackReference `json:"-"`
+}
+
+// AgentFeedbackReference binds a displayed KB result to its trusted retrieval
+// scope so completion can reject cross-workspace attribution.
+type AgentFeedbackReference struct {
+	TenantID uint64
+	Result   *SearchResult
 }
 
 // ToolCall represents a single tool invocation within an agent step

@@ -1255,8 +1255,23 @@ func (t *KnowledgeSearchTool) formatOutput(
 
 	// Count results by KB
 	kbCounts := make(map[string]int)
+	feedbackReferences := make([]types.AgentFeedbackReference, 0, len(results))
 	for _, r := range results {
+		if r == nil {
+			continue
+		}
 		kbCounts[r.KnowledgeBaseID]++
+		if r.SearchResult != nil {
+			tenantID := t.searchTargets.GetTenantIDForKB(r.KnowledgeBaseID)
+			if tenantID != 0 {
+				resultCopy := *r.SearchResult
+				resultCopy.KnowledgeBaseID = r.KnowledgeBaseID
+				feedbackReferences = append(feedbackReferences, types.AgentFeedbackReference{
+					TenantID: tenantID,
+					Result:   &resultCopy,
+				})
+			}
+		}
 	}
 
 	// Format individual results as XML. Tag names are kept in sync with
@@ -1506,9 +1521,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 	}
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data:    data,
+		Success:            true,
+		Output:             output,
+		Data:               data,
+		FeedbackReferences: feedbackReferences,
 	}, nil
 }
 

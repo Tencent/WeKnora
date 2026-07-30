@@ -36,6 +36,11 @@ type AgentStreamHandler struct {
 	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
 	mu              sync.Mutex
+
+	deferCompletion bool
+	pendingComplete *event.AgentCompleteData
+	pendingEventID  string
+	canonicalScopes []types.ChunkFeedbackScope
 }
 
 // answerSegment accumulates the streamed content of a single final-answer event
@@ -80,6 +85,7 @@ func NewAgentStreamHandler(
 	assistantMessage *types.Message,
 	streamManager interfaces.StreamManager,
 	eventBus *event.EventBus,
+	deferCompletion bool,
 ) *AgentStreamHandler {
 	return &AgentStreamHandler{
 		ctx:                ctx,
@@ -92,6 +98,8 @@ func NewAgentStreamHandler(
 		eventBus:           eventBus,
 		knowledgeRefs:      make([]*types.SearchResult, 0),
 		eventStartTimes:    make(map[string]time.Time),
+		deferCompletion:    deferCompletion,
+		canonicalScopes:    make([]types.ChunkFeedbackScope, 0),
 	}
 }
 
@@ -226,6 +234,12 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 		// Fallback to provided duration if start time not tracked
 		durationMs = data.Duration
 	}
+	if data.Success {
+		references, scopes := agenttools.ExtractFeedbackReferences(
+			data.ToolName, data.FeedbackReferences,
+		)
+		h.appendCanonicalFeedbackReferencesLocked(references, scopes)
+	}
 	h.mu.Unlock()
 
 	// Send SSE response (both success and failure)
@@ -270,6 +284,48 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	}
 
 	return nil
+}
+
+func (h *AgentStreamHandler) appendCanonicalFeedbackReferencesLocked(
+	references types.References,
+	scopes []types.ChunkFeedbackScope,
+) {
+	for i, scope := range scopes {
+		if i >= len(references) || references[i] == nil {
+			break
+		}
+		duplicate := false
+		for _, existing := range h.canonicalScopes {
+			if existing.TenantID == scope.TenantID &&
+				existing.KnowledgeBaseID == scope.KnowledgeBaseID &&
+				existing.ChunkID == scope.ChunkID {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		h.canonicalScopes = append(h.canonicalScopes, scope)
+		h.knowledgeRefs = append(h.knowledgeRefs, references[i])
+	}
+	h.assistantMessage.KnowledgeReferences = append(
+		types.References(nil), h.knowledgeRefs...,
+	)
+}
+
+// PrepareAgentCompletion freezes the server-derived, displayed KB references
+// into the message passed to the transactional completion service.
+func (h *AgentStreamHandler) PrepareAgentCompletion() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.assistantMessage.KnowledgeReferences = append(
+		types.References(nil), h.knowledgeRefs...,
+	)
+	h.assistantMessage.CanonicalChunkReferences = append(
+		[]types.ChunkFeedbackScope(nil), h.canonicalScopes...,
+	)
+	h.assistantMessage.CanonicalChunkReferencesSet = true
 }
 
 func toolApprovalDataToMap(v interface{}) map[string]interface{} {
@@ -666,9 +722,26 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		}
 	}
 
-	// Send completion event to stream manager so SSE can detect completion
+	if h.deferCompletion {
+		completionCopy := data
+		h.pendingComplete = &completionCopy
+		h.pendingEventID = evt.ID
+		return nil
+	}
+	h.appendCompletionEvent(evt.ID, data, data.FeedbackEligible)
+	return nil
+}
+
+func (h *AgentStreamHandler) appendCompletionEvent(
+	eventID string,
+	data event.AgentCompleteData,
+	feedbackEligible bool,
+) {
+	if eventID == "" {
+		eventID = fmt.Sprintf("complete-after-persist-%d", time.Now().UnixMilli())
+	}
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID:        evt.ID,
+		ID:        eventID,
 		Type:      types.ResponseTypeComplete,
 		Content:   "",
 		Done:      true,
@@ -676,10 +749,40 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		Data: map[string]interface{}{
 			"total_steps":       data.TotalSteps,
 			"total_duration_ms": data.TotalDurationMs,
+			"feedback_eligible": feedbackEligible,
 		},
 	}); err != nil {
 		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)
 	}
+}
 
-	return nil
+// CompleteAfterPersistence publishes Agent completion only after the answer
+// and canonical chunk attribution transaction has committed.
+func (h *AgentStreamHandler) CompleteAfterPersistence(feedbackEligible bool, persistErr error) {
+	h.mu.Lock()
+	data := event.AgentCompleteData{MessageID: h.assistantMessageID}
+	if h.pendingComplete != nil {
+		data = *h.pendingComplete
+	}
+	eventID := h.pendingEventID
+	h.pendingComplete = nil
+	h.pendingEventID = ""
+	h.mu.Unlock()
+
+	if persistErr != nil {
+		if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+			ID:        fmt.Sprintf("agent-completion-error-%d", time.Now().UnixMilli()),
+			Type:      types.ResponseTypeError,
+			Content:   "Failed to persist agent completion",
+			Done:      true,
+			Timestamp: time.Now(),
+			Data: map[string]interface{}{
+				"stage": "agent_completion_persistence",
+			},
+		}); err != nil {
+			logger.GetLogger(h.ctx).Errorf("Append agent completion persistence error failed: %v", err)
+		}
+		feedbackEligible = false
+	}
+	h.appendCompletionEvent(eventID, data, feedbackEligible)
 }
