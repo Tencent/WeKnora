@@ -1180,6 +1180,9 @@ func (s *wikiIngestService) mapOneDocument(
 	op WikiPendingOp,
 	batchCtx *WikiBatchContext,
 ) (*docIngestResult, []SlugUpdate, error) {
+	if s.artifactRepo != nil && !wikiMapCacheBypassed(ctx) {
+		return s.mapOneDocumentCached(ctx, chatModel, payload, op, batchCtx)
+	}
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
 	lang := types.LanguageLocaleName(op.Language)
@@ -1210,6 +1213,7 @@ func (s *wikiIngestService) mapOneDocument(
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
+	chunks = wikiMapConsumedChunks(chunks)
 	if len(chunks) == 0 {
 		logger.Infof(ctx, "wiki ingest: document %s has no chunks, skip", knowledgeID)
 		s.tracker().SkipSpan(ctx, wikiSpan, "no_chunks")
@@ -1648,6 +1652,10 @@ func (s *wikiIngestService) mapOneDocument(
 		"classify_batches": batchCount,
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
+	if s.artifactRepo == nil {
+		mapStats["cache_status"] = types.IngestionCacheStatusNotSupported
+		mapStats["cache_supported"] = false
+	}
 
 	return &docIngestResult{
 		KnowledgeID: knowledgeID,
@@ -1672,7 +1680,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// in the extraction output, so including them just wastes tokens and risks
 	// confusing the model.
 	var prevSlugsText string
-	if len(oldPageSlugs) > 0 {
+	if !wikiCanonicalMap(ctx) && len(oldPageSlugs) > 0 {
 		var sb strings.Builder
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
@@ -1710,9 +1718,11 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// lands the dedup pre-filter degrades to "no dedup" which is the
 	// safe default — the LLM merge call simply doesn't get a candidate
 	// list and the items pass through unchanged.
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
-	)
+	if !wikiCanonicalMap(ctx) {
+		result.Entities, result.Concepts = s.deduplicateExtractedBatch(
+			ctx, chatModel, kbID, result.Entities, result.Concepts,
+		)
+	}
 
 	slugItems := make(map[string]extractedItem)
 	for _, item := range result.Entities {

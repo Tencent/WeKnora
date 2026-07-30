@@ -77,7 +77,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	batchCtx *WikiBatchContext,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
 	var prevSlugsText string
-	if len(oldPageSlugs) > 0 {
+	if !wikiCanonicalMap(ctx) && len(oldPageSlugs) > 0 {
 		var sb strings.Builder
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
@@ -113,9 +113,11 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
 	}
 
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
-	)
+	if !wikiCanonicalMap(ctx) {
+		result.Entities, result.Concepts = s.deduplicateExtractedBatch(
+			ctx, chatModel, kbID, result.Entities, result.Concepts,
+		)
+	}
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
 	for _, item := range result.Entities {

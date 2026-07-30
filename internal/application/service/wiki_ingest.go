@@ -329,6 +329,8 @@ type wikiIngestService struct {
 	logEntrySvc    interfaces.WikiLogEntryService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
+	artifactRepo   interfaces.DerivedArtifactRepository
+	wikiMapTiming  wikiMapArtifactTiming
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
@@ -358,6 +360,7 @@ func NewWikiIngestService(
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	artifactRepo interfaces.DerivedArtifactRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -372,6 +375,7 @@ func NewWikiIngestService(
 		logEntrySvc:    logEntrySvc,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
+		artifactRepo:   artifactRepo,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
 	}
