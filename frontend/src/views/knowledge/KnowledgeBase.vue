@@ -1922,6 +1922,7 @@ const handleBatchTag = () => {
 };
 
 const onBatchTagConfirm = async (tagIds: string[]) => {
+  if (batchTagging.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
   const updateMap: Record<string, string[]> = {};
   for (const id of ids) {
@@ -1931,8 +1932,10 @@ const onBatchTagConfirm = async (tagIds: string[]) => {
   try {
     await updateKnowledgeTagBatch({ updates: updateMap });
     MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    batchTagDialogVisible.value = false;
     clearSelection();
     batchMode.value = false;
+    resetPage();
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value, true);
   } catch (e: any) {
@@ -2427,6 +2430,7 @@ async function createNewSession(value: string): Promise<void> {
   <BatchTagDialog :visible="batchTagDialogVisible"
     :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
     :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
+    :confirm-loading="batchTagging"
     @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
     @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
 
