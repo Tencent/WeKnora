@@ -9,7 +9,7 @@
   </teleport>
   <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
     attach="body" destroy-on-close :footer="!hideFooter"
-    :class="drawerClass">
+    :class="drawerClass" @before-close="blurActiveElementBeforeClose">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -42,12 +42,14 @@
           <slot name="footer-left" />
         </div>
         <div class="setting-drawer__footer-right">
-          <t-button theme="default" variant="outline" @click="handleCancel">
-            {{ cancelText || t('common.cancel') }}
-          </t-button>
-          <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
-            {{ confirmText || t('common.save') }}
-          </t-button>
+          <slot name="footer-right">
+            <t-button theme="default" variant="outline" @click="handleCancel">
+              {{ cancelText || t('common.cancel') }}
+            </t-button>
+            <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
+              {{ confirmText || t('common.save') }}
+            </t-button>
+          </slot>
         </div>
       </div>
     </template>
@@ -237,8 +239,18 @@ onUnmounted(() => {
   cleanupResize()
 })
 
+function blurActiveElementBeforeClose() {
+  // TDesign textarea autosize calls getComputedStyle on blur/resize; if the
+  // drawer is already tearing down (destroy-on-close), that node may no longer
+  // be an Element and the promise rejects uncaught.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+}
+
 const handleConfirm = () => emit('confirm')
 const handleCancel = () => {
+  blurActiveElementBeforeClose()
   emit('cancel')
   emit('update:visible', false)
 }

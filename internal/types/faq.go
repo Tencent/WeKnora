@@ -26,8 +26,27 @@ type FAQChunkMetadata struct {
 
 // GeneratedQuestion 表示AI生成的单个问题
 type GeneratedQuestion struct {
-	ID       string `json:"id"`       // 唯一标识，用于构造 source_id
-	Question string `json:"question"` // 问题内容
+	ID              string `json:"id"`                         // 唯一标识，用于构造 source_id
+	Question        string `json:"question"`                   // 问题内容
+	ContentRevision *int   `json:"content_revision,omitempty"` // 该问题对应的 Chunk 内容版本
+}
+
+const maxGeneratedQuestionSourceIDLength = 64
+
+// GeneratedQuestionSourceID builds the retrieval source identifier for a
+// generated question. PostgreSQL stores source_id as varchar(64), while a
+// chunk UUID plus a question UUID would be 73 bytes. Preserve the historical
+// representation for short IDs and hash only oversized question IDs so
+// existing index rows remain addressable by delete/reindex operations.
+func GeneratedQuestionSourceID(chunkID, questionID string) string {
+	candidate := chunkID + "-" + questionID
+	if len(candidate) <= maxGeneratedQuestionSourceIDLength {
+		return candidate
+	}
+	digest := sha256.Sum256([]byte(questionID))
+	// UUID chunk IDs use 36 bytes; "-q" plus 24 hex characters keeps the
+	// complete identifier at 62 bytes while retaining ample collision space.
+	return chunkID + "-q" + hex.EncodeToString(digest[:12])
 }
 
 // DocumentChunkMetadata 定义文档 Chunk 的元数据结构
@@ -36,6 +55,19 @@ type DocumentChunkMetadata struct {
 	// GeneratedQuestions 存储AI为该Chunk生成的相关问题
 	// 这些问题会被独立索引以提高召回率
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
+	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
+	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+}
+
+// IsQuestionCurrent reports whether a generated question was authored for the
+// current chunk body. This is advisory metadata for the UI: questions remain
+// valid retrieval aliases across chunk edits. Legacy rows fall back to the
+// metadata-level revision.
+func (m *DocumentChunkMetadata) IsQuestionCurrent(question GeneratedQuestion, chunkRevision int) bool {
+	if question.ContentRevision != nil {
+		return *question.ContentRevision == chunkRevision
+	}
+	return m != nil && m.GeneratedQuestionsRevision == chunkRevision
 }
 
 // GetQuestionStrings 返回问题内容字符串列表（兼容旧代码）
@@ -251,6 +283,21 @@ type FAQEntry struct {
 	MatchedQuestion string `json:"matched_question,omitempty"`
 }
 
+// FAQExportEntry 表示 JSON 导出的 FAQ 条目，与 FAQEntryPayload 的导入格式兼容，
+// 便于"导出 → 编辑 → 重新导入"循环。新增字段时务必保留 omitempty，避免破坏
+// 历史导出文件的兼容性。
+type FAQExportEntry struct {
+	ID                int64          `json:"id"`
+	TagName           string         `json:"tag_name,omitempty"`
+	StandardQuestion  string         `json:"standard_question"`
+	SimilarQuestions  []string       `json:"similar_questions,omitempty"`
+	NegativeQuestions []string       `json:"negative_questions,omitempty"`
+	Answers           []string       `json:"answers,omitempty"`
+	AnswerStrategy    AnswerStrategy `json:"answer_strategy,omitempty"`
+	IsEnabled         bool           `json:"is_enabled"`
+	IsRecommended     bool           `json:"is_recommended"`
+}
+
 // FAQEntryPayload 用于创建/更新 FAQ 条目的 payload
 type FAQEntryPayload struct {
 	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
@@ -284,6 +331,7 @@ type FAQBatchUpsertPayload struct {
 type FAQFailedEntry struct {
 	Index             int      `json:"index"`                        // 条目在批次中的索引（从0开始）
 	Reason            string   `json:"reason"`                       // 失败原因
+	FailureType       string   `json:"failure_type,omitempty"`       // 失败类型：pre_validation / post_validation
 	IsPartialFailure  bool     `json:"is_partial_failure,omitempty"` // 是否为部分失败（相似问/反例被移除，但整条仍可导入）
 	TagName           string   `json:"tag_name,omitempty"`           // 分类
 	StandardQuestion  string   `json:"standard_question"`            // 标准问题
@@ -295,6 +343,15 @@ type FAQFailedEntry struct {
 	// 部分失败详情（当 IsPartialFailure 为 true 时）
 	RemovedSimilarQuestions  []string `json:"removed_similar_questions,omitempty"`  // 被移除的相似问及原因
 	RemovedNegativeQuestions []string `json:"removed_negative_questions,omitempty"` // 被移除的反例及原因
+}
+
+// FAQMergeDetail 表示一条 FAQ 在 append 模式下与已有 chunk 合并的结果摘要。
+type FAQMergeDetail struct {
+	Index            int    `json:"index"`              // 行号（在批次中的索引）
+	StandardQuestion string `json:"standard_question"`  // 标准问
+	AnswerChanged    bool   `json:"answer_changed"`     // 答案是否变更
+	NewSimilarCount  int    `json:"new_similar_count"`  // 新增相似问数量
+	NewNegativeCount int    `json:"new_negative_count"` // 新增反例数量
 }
 
 // FAQSuccessEntry 表示导入成功的条目简单信息
@@ -381,6 +438,10 @@ type FAQImportProgress struct {
 	FailedEntriesURL   string              `json:"failed_entries_url,omitempty"`   // 失败条目CSV下载URL（大量时返回URL）
 	SuccessEntries     []FAQSuccessEntry   `json:"success_entries,omitempty"`      // 成功条目简单信息（少量时直接返回）
 	ValidEntryIndices  []int               `json:"valid_entry_indices,omitempty"`  // 验证通过的条目索引（用于重试时跳过验证）
+	MergeEntryIndices  []int               `json:"merge_entry_indices,omitempty"`  // 需要合并的条目索引（内部使用，用于重试时跳过识别）
+	MergedCount        int                 `json:"merged_count,omitempty"`         // 合并更新的条目数
+	AddedCount         int                 `json:"added_count,omitempty"`          // 新增的条目数
+	MergeDetails       []FAQMergeDetail    `json:"merge_details,omitempty"`        // 合并详情
 	Message            string              `json:"message"`                        // Status message
 	Error              string              `json:"error"`                          // Error message if failed
 	CreatedAt          int64               `json:"created_at"`                     // Task creation timestamp
@@ -411,6 +472,8 @@ type FAQImportResult struct {
 	FailedCount        int `json:"failed_count"`         // 完全失败的条目数
 	PartialFailedCount int `json:"partial_failed_count"` // 部分失败的条目数（相似问/反例被移除但已导入）
 	SkippedCount       int `json:"skipped_count"`        // 跳过的条目数（如重复等）
+	MergedCount        int `json:"merged_count"`         // 合并更新的条目数
+	AddedCount         int `json:"added_count"`          // 新增的条目数
 
 	// 导入模式和时间信息
 	ImportMode string    `json:"import_mode"` // 导入模式：append 或 replace

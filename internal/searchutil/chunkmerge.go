@@ -2,13 +2,76 @@ package searchutil
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// JoinChunkContent joins two current chunk bodies without relying on parser
+// offsets. Exact containment is collapsed, a real suffix/prefix overlap is
+// removed, and otherwise both bodies are retained with separator between
+// them. The conservative fallback intentionally prefers small duplication
+// over silently dropping edited content.
+func JoinChunkContent(acc, next, separator string) string {
+	if acc == "" {
+		return next
+	}
+	if next == "" {
+		return acc
+	}
+	if ContainsChunkContent(acc, next) {
+		return acc
+	}
+	if ContainsChunkContent(next, acc) {
+		return next
+	}
+
+	accRunes := []rune(acc)
+	nextRunes := []rune(next)
+	maxOverlap := minInt(len(accRunes), len(nextRunes))
+	// Editable chunks may be much larger than parser-produced chunks. Bound
+	// suffix matching so an adversarial 200 KB edit cannot turn retrieval into
+	// quadratic work. Parser overlap windows are normally far below this cap;
+	// larger unmatched overlap is safely retained as duplication.
+	if maxOverlap > defaultSearchSpan {
+		maxOverlap = defaultSearchSpan
+	}
+	for overlap := maxOverlap; overlap >= minOverlapRunes; overlap-- {
+		if runeSlicesEqual(accRunes[len(accRunes)-overlap:], nextRunes[:overlap]) {
+			return acc + string(nextRunes[overlap:])
+		}
+	}
+	return acc + separator + next
+}
+
+// ContainsChunkContent reports whether the complete current body is safely
+// represented by another body. Very short substrings are not treated as
+// containment because common words and punctuation would create false drops.
+func ContainsChunkContent(container, contained string) bool {
+	if container == "" || contained == "" {
+		return false
+	}
+	if container == contained {
+		return true
+	}
+	return len([]rune(contained)) >= minOverlapRunes && strings.Contains(container, contained)
+}
+
+func runeSlicesEqual(left, right []rune) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // 这里实现 chunk 内容的「重叠拼接」公共逻辑，供文档重建（reconstructContent）、
-// 知识图谱内容合并（graph mergeChunkContents）、检索结果重叠合并
-// （chat_pipeline mergeOverlappingChunks）等多处复用。
+// 知识图谱内容合并（graph mergeChunkContents）等路径复用。聊天检索链路允许
+// 用户编辑 Chunk，使用上面的 JoinChunkContent，避免依赖原文位置坐标。
 //
 // 历史上各处都用「按位置」的公式裁剪重叠（offset = len(content) - (EndAt -
 // lastEndAt) 之类），它默认 len([]rune(Content)) == EndAt-StartAt。但有两类

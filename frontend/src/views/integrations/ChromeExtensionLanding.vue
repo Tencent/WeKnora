@@ -119,8 +119,8 @@ const openChromeStore = () => {
 }
 
 const openApiSettings = () => {
-  router.push('/platform/knowledge-bases')
-  uiStore.openSettings('api')
+  router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  uiStore.openSettings('integration-api')
 }
 
 const copyApiUrl = async () => {

@@ -37,7 +37,7 @@ Explores relationships between entities in knowledge bases that have graph extra
 - Need exact document content → use knowledge_search
 
 ## Parameters
-- **knowledge_base_ids** (required): Array of knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
+- **knowledge_base_ids** (required): Array of short bN knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
 - **query** (required): Query content - can be entity name, relationship query, or concept search.
 
 ## Graph Configuration
@@ -61,22 +61,45 @@ If KB is not configured with graph, tool will return regular search results.
 
 // QueryKnowledgeGraphInput defines the input parameters for query knowledge graph tool
 type QueryKnowledgeGraphInput struct {
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of knowledge base IDs to query"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of short bN knowledge base IDs to query"`
 	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
 }
 
 // QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships
 type QueryKnowledgeGraphTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeBaseService
+	scopeKnowledgeService interfaces.KnowledgeService
+	searchTargets         types.SearchTargets
+	scopeEnforced         bool
+}
+
+// WithKnowledgeScope enables document/tag-level result filtering for Agent
+// calls. The graph backend queries by KB, so the tool must enforce narrower
+// SearchTargets before returning any result to the model.
+func (t *QueryKnowledgeGraphTool) WithKnowledgeScope(
+	knowledgeService interfaces.KnowledgeService,
+) *QueryKnowledgeGraphTool {
+	t.scopeKnowledgeService = knowledgeService
+	return t
 }
 
 // NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
-func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService) *QueryKnowledgeGraphTool {
-	return &QueryKnowledgeGraphTool{
+func NewQueryKnowledgeGraphTool(
+	knowledgeService interfaces.KnowledgeBaseService,
+	searchTargets ...types.SearchTargets,
+) *QueryKnowledgeGraphTool {
+	tool := &QueryKnowledgeGraphTool{
 		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
 	}
+	// Presence of the variadic argument — not its length — enables the Agent
+	// authorization boundary, so an empty scope fails closed.
+	if len(searchTargets) > 0 {
+		tool.searchTargets = searchTargets[0]
+		tool.scopeEnforced = true
+	}
+	return tool
 }
 
 // Execute performs the knowledge graph query with concurrent KB processing
@@ -104,6 +127,11 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			Success: false,
 			Error:   "knowledge_base_ids must contain at most 10 KB IDs",
 		}, fmt.Errorf("too many KB IDs")
+	}
+	if t.scopeEnforced {
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, input.KnowledgeBaseIDs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 	}
 
 	query := input.Query
@@ -137,7 +165,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			defer wg.Done()
 
 			// Get knowledge base to check graph configuration
-			kb, err := t.knowledgeService.GetKnowledgeBaseByID(ctx, id)
+			kb, err := t.knowledgeService.GetKnowledgeBaseByIDOnly(ctx, id)
 			if err != nil {
 				mu.Lock()
 				kbResults[id] = &graphQueryResult{kbID: id, err: fmt.Errorf("failed to get knowledge base: %v", err)}
@@ -160,6 +188,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: fmt.Errorf("query failed: %v", err)}
 				mu.Unlock()
 				return
+			}
+			if t.scopeEnforced {
+				results, err = filterSearchResultsInSearchTargets(
+					ctx, t.searchTargets, id, results, t.scopeKnowledgeService,
+				)
+				if err != nil {
+					mu.Lock()
+					kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: err}
+					mu.Unlock()
+					return
+				}
 			}
 
 			mu.Lock()
@@ -299,14 +338,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		output += fmt.Sprintf("  🆔 chunk_id: %s\n\n", result.ID)
 
 		formattedResults = append(formattedResults, map[string]interface{}{
-			"result_index":    i + 1,
-			"chunk_id":        result.ID,
-			"content":         result.Content,
-			"score":           result.Score,
-			"relevance_level": relevanceLevel,
-			"knowledge_id":    result.KnowledgeID,
-			"knowledge_title": result.KnowledgeTitle,
-			"match_type":      FormatMatchType(result.MatchType),
+			"result_index":      i + 1,
+			"chunk_id":          result.ID,
+			"chunk_index":       result.ChunkIndex,
+			"chunk_type":        result.ChunkType,
+			"content":           result.Content,
+			"score":             result.Score,
+			"relevance_level":   relevanceLevel,
+			"knowledge_id":      result.KnowledgeID,
+			"knowledge_base_id": result.KnowledgeBaseID,
+			"knowledge_title":   result.KnowledgeTitle,
+			"match_type":        FormatMatchType(result.MatchType),
 		})
 	}
 

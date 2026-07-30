@@ -1,10 +1,106 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+	createFolder := func(id, parentID, name, path string, depth int) {
+		require.NoError(t, repo.CreateFolder(ctx, &types.WikiFolder{
+			ID: id, TenantID: 1, KnowledgeBaseID: "kb-prune", ParentID: parentID,
+			Name: name, Path: path, Depth: depth, CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+	createFolder("topic", "", "Topic", "Topic", 1)
+	createFolder("empty-leaf", "topic", "Empty", "Topic/Empty", 2)
+	createFolder("occupied-leaf", "topic", "Occupied", "Topic/Occupied", 2)
+	createFolder("empty-chain", "", "Empty chain", "Empty chain", 1)
+	createFolder("empty-chain-leaf", "empty-chain", "Leaf", "Empty chain/Leaf", 2)
+	createFolder("unrelated-empty", "", "Keep me", "Keep me", 1)
+
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-1", TenantID: 1, KnowledgeBaseID: "kb-prune", Slug: "entity/occupied",
+		Title: "Occupied", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		FolderID: "occupied-leaf", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	deleted, err := svc.PruneEmptyFolderChains(ctx, "kb-prune", []string{"empty-leaf", "empty-chain-leaf"})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"empty-leaf", "empty-chain-leaf", "empty-chain"}, deleted)
+
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "topic")
+	require.NoError(t, err, "ancestor with another occupied child must remain")
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "occupied-leaf")
+	require.NoError(t, err)
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "unrelated-empty")
+	require.NoError(t, err, "empty folders outside the affected chains must remain")
+}
+
+func TestStripWikiInlineChunkCitations(t *testing.T) {
+	input := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械[c003]。手柄便于操作 [c003]。多个来源[c003, c1000]。"
+	want := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械。手柄便于操作。多个来源。"
+
+	if got := stripWikiInlineChunkCitations(input); got != want {
+		t.Fatalf("stripWikiInlineChunkCitations() = %q, want %q", got, want)
+	}
+}
+
+func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
+	input := "保留 [citation]、[C003]、[c12] 和 [[concept/c003|页面链接]]。"
+	if got := stripWikiInlineChunkCitations(input); got != input {
+		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
+	}
+}
+
+func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	page, err := svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: "kb-alias", Slug: "concept/alias",
+		Title: "Alias", Summary: "summary", Content: "content",
+		PageType: types.WikiPageTypeConcept, Aliases: types.StringArray{"old"},
+	})
+	require.NoError(t, err)
+
+	page.Aliases = types.StringArray{"new", "alternate"}
+	updated, err := svc.UpdatePage(ctx, page)
+	require.NoError(t, err)
+	require.Equal(t, types.StringArray{"new", "alternate"}, updated.Aliases)
+	require.Equal(t, 2, updated.Version)
+
+	updated.Aliases = types.StringArray{}
+	cleared, err := svc.UpdatePage(ctx, updated)
+	require.NoError(t, err)
+	require.Empty(t, cleared.Aliases)
+	require.Equal(t, 3, cleared.Version)
+
+	stored, err := svc.GetPageBySlug(ctx, "kb-alias", "concept/alias")
+	require.NoError(t, err)
+	require.Empty(t, stored.Aliases)
+}
 
 func TestParseOutLinks(t *testing.T) {
 	svc := &wikiPageService{}
@@ -75,6 +171,60 @@ func TestParseOutLinks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRepairContentLinks(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	const kbID = "kb-repair"
+	now := time.Now()
+
+	seed := func(slug, title, pageType string) {
+		require.NoError(t, repo.Create(ctx, &types.WikiPage{
+			ID: uuid.New().String(), TenantID: 1, KnowledgeBaseID: kbID,
+			Slug: slug, Title: title, PageType: pageType,
+			Status: types.WikiPageStatusPublished, Version: 1,
+			CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+
+	// Real summary page (clean UUID slug) + a distractor summary + an entity.
+	realSummary := "summary/07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	seed(realSummary, "Weknora 试错记录.md - Summary", types.WikiPageTypeSummary)
+	seed("summary/fcadcaab-e094-4037-b71c-9edfdcdba058", "Another Doc - Summary", types.WikiPageTypeSummary)
+	seed("entity/mongodb", "MongoDB", types.WikiPageTypeEntity)
+
+	t.Run("mangled uuid summary link repaired via bigram", func(t *testing.T) {
+		// One hex digit inserted into the last group — 404s on exact lookup.
+		content := "See [[summary/07a20bb1-a662-47cf-9929-06fb14d5b14b14e|Weknora 试错记录.md - Summary]] for context."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.True(t, changed, "expected the mangled summary link to be rewritten")
+		require.Contains(t, got, "[["+realSummary+"|Weknora 试错记录.md - Summary]]")
+		require.NotContains(t, got, "06fb14d5b14b14e")
+	})
+
+	t.Run("live links untouched", func(t *testing.T) {
+		content := "Fine: [[entity/mongodb]] and [[" + realSummary + "]]."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, content, got)
+	})
+
+	t.Run("unresolvable dead link left as-is, never stripped", func(t *testing.T) {
+		// A future entity page that doesn't exist and isn't similar to anything.
+		content := "Pending: [[entity/some-brand-new-topic|New Topic]]."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, content, got, "unresolvable links must be preserved verbatim, not stripped")
+	})
 }
 
 func TestNormalizeSlug(t *testing.T) {

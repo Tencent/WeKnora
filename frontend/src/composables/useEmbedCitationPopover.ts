@@ -4,6 +4,12 @@ import {
   getCitationChunkCache,
   setCitationChunkCache,
 } from '@/utils/citationChunkCache'
+import { resolveCitationChunkId, type CitationKnowledgeRef } from '@/utils/citationMarkdown'
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+
+type EmbedCitationPopoverOptions = {
+  getKnowledgeReferences?: () => CitationKnowledgeRef[] | null | undefined
+}
 
 type FloatState = {
   visible: boolean
@@ -21,7 +27,9 @@ export function useEmbedCitationPopover(
   rootRef: Ref<HTMLElement | null>,
   channelId: MaybeRef<string>,
   token: MaybeRef<string>,
+  options?: EmbedCitationPopoverOptions,
 ) {
+  const referencesDrawer = useChatReferencesDrawer()
   const float = ref<FloatState>({
     visible: false,
     type: 'kb',
@@ -126,12 +134,42 @@ export function useEmbedCitationPopover(
     scheduleClose()
   }
 
+  const openDrawerForCitation = (payload: { url?: string; chunkId?: string }) => {
+    const refs = options?.getKnowledgeReferences?.() || []
+    if (!referencesDrawer || !refs.length) return false
+    referencesDrawer.open({
+      references: refs,
+      highlight: payload,
+    })
+    return true
+  }
+
   const onClick = (e: Event) => {
     const target = e.target as HTMLElement
+    const webEl = target.closest?.('.citation-web') as HTMLElement | null
+    if (webEl) {
+      e.preventDefault()
+      e.stopPropagation()
+      const url = webEl.getAttribute('data-url') || ''
+      if (openDrawerForCitation({ url })) return
+      openWeb(webEl)
+      return
+    }
+
     const kbEl = target.closest?.('.citation-kb') as HTMLElement | null
     if (kbEl) {
       e.preventDefault()
       e.stopPropagation()
+      const rawChunkId = kbEl.getAttribute('data-chunk-id') || ''
+      const title = kbEl.getAttribute('data-doc') || ''
+      const kbId = kbEl.getAttribute('data-kb-id') || ''
+      const chunkId =
+        resolveCitationChunkId(
+          rawChunkId,
+          { doc: title, kbId },
+          options?.getKnowledgeReferences?.(),
+        ) || rawChunkId
+      if (openDrawerForCitation({ chunkId })) return
       void openKb(kbEl)
       return
     }

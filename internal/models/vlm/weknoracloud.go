@@ -36,6 +36,10 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 	if config.AppSecret == "" {
 		return nil, fmt.Errorf("WeKnoraCloud VLM: AppSecret is required")
 	}
+	baseURL := strings.TrimRight(config.BaseURL, "/")
+	if err := validateVLMBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 	remoteModelName := ""
 	if config.Extra != nil {
 		if v, ok := config.Extra["remote_model_name"]; ok {
@@ -50,15 +54,15 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 		modelID:         config.ModelID,
 		appID:           config.AppID,
 		apiKey:          config.AppSecret,
-		baseURL:         strings.TrimRight(config.BaseURL, "/"),
-		client:          &http.Client{Timeout: vlmHTTPTimeout()},
+		baseURL:         baseURL,
+		client:          newVLMHTTPClient(vlmHTTPTimeout()),
 	}, nil
 }
 
 type weKnoraCloudVLMContentPart struct {
-	Type     string                      `json:"type"`
-	Text     string                      `json:"text,omitempty"`
-	ImageURL *weKnoraCloudVLMImageURL    `json:"image_url,omitempty"`
+	Type     string                   `json:"type"`
+	Text     string                   `json:"text,omitempty"`
+	ImageURL *weKnoraCloudVLMImageURL `json:"image_url,omitempty"`
 }
 
 type weKnoraCloudVLMImageURL struct {

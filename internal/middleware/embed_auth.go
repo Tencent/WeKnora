@@ -150,7 +150,7 @@ func EmbedAuth(
 
 		tenant, err := tenantSvc.GetTenantByID(c.Request.Context(), ch.TenantID)
 		if err != nil || tenant == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant unavailable"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace unavailable"})
 			c.Abort()
 			return
 		}
@@ -162,30 +162,17 @@ func EmbedAuth(
 			TenantID: ch.TenantID,
 			IsActive: true,
 		}
-		principal := types.Principal{
-			Type: types.PrincipalEmbedChannel,
-			ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
-		}
-
-		c.Set(types.TenantIDContextKey.String(), ch.TenantID)
-		c.Set(types.TenantInfoContextKey.String(), tenant)
-		c.Set(types.UserContextKey.String(), user)
-		c.Set(types.UserIDContextKey.String(), user.ID)
-		c.Set(types.PrincipalContextKey.String(), principal)
-		c.Set(types.TenantRoleContextKey.String(), types.TenantRoleViewer)
-		c.Set(types.SystemAdminContextKey.String(), false)
-		c.Set(string(EmbedChannelContextKey), ch)
-
-		ctx := c.Request.Context()
-		ctx = context.WithValue(ctx, types.TenantIDContextKey, ch.TenantID)
-		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-		ctx = context.WithValue(ctx, types.UserContextKey, user)
-		ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
-		ctx = types.WithPrincipal(ctx, principal)
-		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
-		ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
-		ctx = context.WithValue(ctx, EmbedChannelContextKey, ch)
-		c.Request = c.Request.WithContext(ctx)
+		applyAuthSession(c, authSession{
+			User: user,
+			Principal: types.Principal{
+				Type: types.PrincipalEmbedChannel,
+				ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
+			},
+			TenantID: ch.TenantID,
+			Tenant:   tenant,
+			Role:     types.TenantRoleViewer,
+			Extra:    map[types.ContextKey]any{EmbedChannelContextKey: ch},
+		})
 		c.Next()
 	}
 }

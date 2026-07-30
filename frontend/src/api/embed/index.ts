@@ -17,7 +17,6 @@ export interface EmbedChannel {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   default_locale?: string
   webhook_url?: string
@@ -42,7 +41,6 @@ export interface EmbedChannelPublicConfig {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   agent_web_search_enabled?: boolean
   agent_image_upload_enabled?: boolean
@@ -71,20 +69,56 @@ export function embedVisitorStorageKey(channelId: string): string {
   return `${EMBED_VISITOR_STORAGE_PREFIX}${channelId}`
 }
 
+/**
+ * 生成符合 UUID v4 格式的随机 ID。
+ * 优先使用 crypto.randomUUID()，在不支持的浏览器中回退到 crypto.getRandomValues()，
+ * 最终兜底使用 Math.random()。
+ */
+export function generateUUID(): string {
+  // 优先使用原生 API（HTTPS 环境下可用）
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  // 回退：使用 crypto.getRandomValues()
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const buf = new Uint8Array(16)
+    crypto.getRandomValues(buf)
+    // 设置 UUID v4 标志位
+    buf[6] = (buf[6] & 0x0f) | 0x40
+    buf[8] = (buf[8] & 0x3f) | 0x80
+    const hex = Array.from(buf, (b) => b.toString(16).padStart(2, '0'))
+    return [
+      hex[0], hex[1], hex[2], hex[3], '-',
+      hex[4], hex[5], '-',
+      hex[6], hex[7], '-',
+      hex[8], hex[9], '-',
+      hex[10], hex[11], hex[12], hex[13], hex[14], hex[15],
+    ].join('')
+  }
+
+  // 最终兜底：Math.random()（随机性较弱，仅保证格式正确）
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 /** Stable anonymous id for this browser on the given channel. */
 export function getOrCreateEmbedVisitorId(channelId: string): string {
   if (typeof localStorage === 'undefined' || !channelId) {
-    return crypto.randomUUID()
+    return generateUUID()
   }
   const key = embedVisitorStorageKey(channelId)
   try {
     const existing = localStorage.getItem(key)?.trim()
     if (existing) return existing
-    const id = crypto.randomUUID()
+    const id = generateUUID()
     localStorage.setItem(key, id)
     return id
   } catch {
-    return crypto.randomUUID()
+    return generateUUID()
   }
 }
 
@@ -170,6 +204,20 @@ export interface SuggestedQuestion {
   source?: string
 }
 
+export interface EmbedMessageSuggestionItem {
+  id: string
+  text: string
+  category?: string
+  source: string
+}
+
+export interface EmbedMessageSuggestionSet {
+  id: string
+  status: 'generating' | 'ready' | 'suppressed' | 'failed'
+  allow_regenerate: boolean
+  questions: EmbedMessageSuggestionItem[]
+}
+
 export async function getEmbedChunkById(channelId: string, token: string, chunkId: string) {
   return get<{ success: boolean; data: { content?: string } }>(
     `/api/v1/embed/${channelId}/chunks/${chunkId}`,
@@ -177,10 +225,59 @@ export async function getEmbedChunkById(channelId: string, token: string, chunkI
   )
 }
 
-export async function getEmbedSuggestedQuestions(channelId: string, token: string, limit = 6) {
+export async function getEmbedSuggestedQuestions(channelId: string, token: string, limit?: number) {
+  // Omit limit to let the channel agent's configured starter count apply.
+  const qs = typeof limit === 'number' && limit > 0 ? `?limit=${limit}` : ''
   return get<{ success: boolean; data: { questions: SuggestedQuestion[] } }>(
-    `/api/v1/embed/${channelId}/suggested-questions?limit=${limit}`,
+    `/api/v1/embed/${channelId}/suggested-questions${qs}`,
     { headers: { Authorization: `Embed ${token}` } },
+  )
+}
+
+export async function ensureEmbedMessageSuggestions(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  messageId: string,
+  sessionSig: string,
+  visitorId: string,
+  regenerate = false,
+) {
+  return post<{ success: boolean; data: EmbedMessageSuggestionSet }>(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/messages/${messageId}/suggestions`,
+    { regenerate },
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function getEmbedMessageSuggestions(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  messageId: string,
+  sessionSig: string,
+  visitorId: string,
+) {
+  return get<{ success: boolean; data: EmbedMessageSuggestionSet }>(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/messages/${messageId}/suggestions`,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function recordEmbedMessageSuggestionEvent(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  suggestionSetId: string,
+  eventType: 'impression' | 'click' | 'dismiss',
+  questionId = '',
+) {
+  return post(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/suggestion-events`,
+    { suggestion_set_id: suggestionSetId, question_id: questionId, event_type: eventType },
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
 }
 
@@ -270,13 +367,17 @@ export async function getEmbedMCPOAuthAuthorizeURL(
   visitorId: string,
   serviceId: string,
   body: { redirect_uri: string; frontend_redirect?: string },
-): Promise<string> {
+): Promise<{ authorizationUrl: string; authorizationAttempt: string }> {
   const response: any = await post(
     `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/authorize-url`,
     body,
     { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
-  return (response.data ?? response)?.authorization_url ?? ''
+  const data = response.data ?? response
+  return {
+    authorizationUrl: data?.authorization_url ?? '',
+    authorizationAttempt: data?.authorization_attempt ?? '',
+  }
 }
 
 export async function getEmbedMCPOAuthStatus(
@@ -286,9 +387,13 @@ export async function getEmbedMCPOAuthStatus(
   sessionSig: string,
   visitorId: string,
   serviceId: string,
+  authorizationAttempt?: string,
 ): Promise<boolean> {
+  const query = authorizationAttempt
+    ? `?authorization_attempt=${encodeURIComponent(authorizationAttempt)}`
+    : ''
   const response: any = await get(
-    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/status`,
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/status${query}`,
     { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
   return Boolean((response.data ?? response)?.authorized)

@@ -19,7 +19,10 @@
         </div>
         <!-- 显示上传的附件 -->
         <div v-if="hasAttachments" class="user_attachments">
-            <div v-for="(att, idx) in props.attachments" :key="idx" class="user_attachment_card">
+            <div v-for="(att, idx) in props.attachments" :key="idx"
+                class="user_attachment_card"
+                :class="{ 'is-previewable': canPreviewAttachment(att) }"
+                @click="openAttachmentPreview(att)">
                 <div class="attachment_card_icon">
                     <svg viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="36" height="44">
                         <rect width="40" height="48" rx="4" fill="#4A90D9" />
@@ -48,6 +51,8 @@ import { computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
 import { useI18n } from 'vue-i18n';
+import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 
 const { t } = useI18n();
 
@@ -91,8 +96,14 @@ const props = defineProps({
     embeddedMode: {
         type: Boolean,
         default: false
+    },
+    sessionId: {
+        type: String,
+        default: ''
     }
 });
+
+const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
 const channelLabelMap = {
     web: () => t('chat.channelWeb'),
@@ -132,6 +143,20 @@ const formatFileSize = (bytes) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+const canPreviewAttachment = (attachment) => {
+    return Boolean(props.sessionId) && isPreviewableAttachment(attachment);
+};
+
+const openAttachmentPreview = (attachment) => {
+    if (!canPreviewAttachment(attachment) || !attachmentPreviewDrawer) return;
+    attachmentPreviewDrawer.open({
+        sessionId: props.sessionId,
+        attachmentId: attachment.id,
+        fileName: attachment.file_name,
+        fileType: resolveAttachmentFileType(attachment.file_name, attachment.file_type),
+    });
 };
 
 const hydrateImages = async () => {
@@ -187,7 +212,7 @@ const closePreImg = () => {
 
 .user_msg {
     width: max-content;
-    max-width: min(76%, 680px);
+    max-width: min(76%, 820px);
     display: flex;
     padding: 8px 12px;
     flex-direction: column;
@@ -236,6 +261,16 @@ const closePreImg = () => {
     max-width: 260px;
     min-width: 160px;
     cursor: default;
+
+    &.is-previewable {
+        cursor: pointer;
+        transition: border-color 0.2s, box-shadow 0.2s;
+
+        &:hover {
+            border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.25));
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+    }
 
     .attachment_card_icon {
         flex-shrink: 0;

@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	stderrors "errors"
-	"strings"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -190,9 +189,13 @@ func KBIDFromChunkIDParam(param string, chunkService ChunkLookup) KBIDResolver {
 // from forcing every service to standardise on a single error type
 // before this refactor is useful.
 func isResourceNotFound(err error) bool {
+	// ErrChunkNotFound is defined in the repository layer and aliased by the
+	// service; match the canonical repo sentinel so this predicate depends
+	// only on the repository package (KB / Knowledge / Chunk are all here).
 	return stderrors.Is(err, apprepo.ErrKnowledgeBaseNotFound) ||
-		stderrors.Is(err, ErrResourceNotFound) ||
-		strings.TrimSpace(err.Error()) == "chunk not found"
+		stderrors.Is(err, apprepo.ErrKnowledgeNotFound) ||
+		stderrors.Is(err, apprepo.ErrChunkNotFound) ||
+		stderrors.Is(err, ErrResourceNotFound)
 }
 
 // RequireKBAccess returns a gin.HandlerFunc that resolves KB access
@@ -238,6 +241,11 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
 
 		// Rollout window: enforcement off -> log the would-be check and
 		// pass through. We still resolve the KB (best-effort) so the
@@ -272,6 +280,10 @@ func RequireKBAccess(
 				return
 			}
 			_ = c.Error(apperrors.NewForbiddenError("Permission denied to access this knowledge base"))
+			c.Abort()
+			return
+		case stderrors.Is(err, errKBAccessBadRequest):
+			_ = c.Error(apperrors.NewBadRequestError("invalid agent_source_tenant_id"))
 			c.Abort()
 			return
 		case err != nil:
@@ -361,7 +373,11 @@ func resolveKBAccessOnce(
 
 	// 3. Shared agent that carries this KB — only ever grants read.
 	if requiredPermission == types.OrgRoleViewer && agentShareService != nil {
-		if access := resolveSharedAgentAccess(ctx, c, tenantID, callerTenantRole, kb, agentShareService); access != nil {
+		access, agentErr := resolveSharedAgentAccess(ctx, c, tenantID, callerTenantRole, kb, agentShareService)
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if access != nil {
 			return access, nil
 		}
 	}
@@ -388,17 +404,21 @@ func resolveSharedAgentAccess(
 	callerTenantRole types.TenantRole,
 	kb *types.KnowledgeBase,
 	agentShareService interfaces.AgentShareService,
-) *KBAccess {
+) (*KBAccess, error) {
 	agentID := c.Query("agent_id")
 	if agentID != "" {
-		agent, err := agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID)
+		sourceTenantID, err := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if err != nil {
+			return nil, errKBAccessBadRequest
+		}
+		agent, err := agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID, sourceTenantID)
 		if err != nil || agent == nil {
-			return nil
+			return nil, nil
 		}
 		if kb.TenantID != agent.TenantID {
-			logger.Warnf(ctx, "[kb_access] shared agent tenant mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
+			logger.Warnf(ctx, "[kb_access] shared agent workspace mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
 				kb.ID, kb.TenantID, agent.TenantID)
-			return nil
+			return nil, nil
 		}
 		switch agent.Config.KBSelectionMode {
 		case "all":
@@ -408,7 +428,7 @@ func resolveSharedAgentAccess(
 				KnowledgeBase:     kb,
 				EffectiveTenantID: kb.TenantID,
 				Permission:        types.OrgRoleViewer,
-			}
+			}, nil
 		case "selected":
 			for _, allowedID := range agent.Config.KnowledgeBases {
 				if allowedID == kb.ID {
@@ -418,11 +438,11 @@ func resolveSharedAgentAccess(
 						KnowledgeBase:     kb,
 						EffectiveTenantID: kb.TenantID,
 						Permission:        types.OrgRoleViewer,
-					}
+					}, nil
 				}
 			}
 		}
-		return nil
+		return nil, nil
 	}
 
 	can, err := agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, tenantID, callerTenantRole, kb)
@@ -432,13 +452,14 @@ func resolveSharedAgentAccess(
 			KnowledgeBase:     kb,
 			EffectiveTenantID: kb.TenantID,
 			Permission:        types.OrgRoleViewer,
-		}
+		}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 var (
 	errKBAccessUnauthorized = stderrors.New("kb_access: unauthorized")
 	errKBAccessNotFound     = stderrors.New("kb_access: not found")
 	errKBAccessForbidden    = stderrors.New("kb_access: forbidden")
+	errKBAccessBadRequest   = stderrors.New("kb_access: bad request")
 )

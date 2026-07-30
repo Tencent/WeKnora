@@ -1,8 +1,33 @@
 package chatpipeline
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestGetEnrichedPassageKeepsQuestionsFromEarlierRevision(t *testing.T) {
+	metadata, err := json.Marshal(types.DocumentChunkMetadata{
+		GeneratedQuestionsRevision: 1,
+		GeneratedQuestions: []types.GeneratedQuestion{{
+			ID: "old", Question: "question generated before the edit",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	passage := getEnrichedPassage(context.Background(), &types.SearchResult{
+		Content:       "edited chunk body",
+		ChunkMetadata: types.JSON(metadata),
+	})
+	if !strings.Contains(passage, "question generated before the edit") {
+		t.Fatalf("earlier generated question was excluded from rerank passage: %q", passage)
+	}
+}
 
 func TestCleanPassageForRerank(t *testing.T) {
 	tests := []struct {

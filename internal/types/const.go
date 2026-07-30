@@ -18,6 +18,8 @@ const (
 	UserIDContextKey ContextKey = "UserID"
 	// PrincipalContextKey is the context key for the terminal caller principal.
 	PrincipalContextKey ContextKey = "Principal"
+	// TenantAPIKeyScopeContextKey carries per-API-key operation and KB scopes.
+	TenantAPIKeyScopeContextKey ContextKey = "TenantAPIKeyScope"
 	// TenantRoleContextKey is the context key for the caller's TenantRole
 	// in the currently active tenant (loaded by the auth middleware from
 	// the tenant_members table). See TenantRoleFromContext.
@@ -27,6 +29,10 @@ const (
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
 	// EmbedQueryContextKey is the context key for embedding query text
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
+	// WikiEditSourceContextKey carries who is authoring the current wiki
+	// page write (user / agent / revert). Absent means the wiki ingest
+	// pipeline. See types.WithWikiEditSource.
+	WikiEditSourceContextKey ContextKey = "WikiEditSource"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.
@@ -37,6 +43,18 @@ const (
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
 	// SystemAdminContextKey is the context key indicating whether the user is a system administrator
 	SystemAdminContextKey ContextKey = "SystemAdmin"
+	// BackgroundTaskContextKey marks a context whose model calls originate from
+	// an asynq background worker (document parse / summary / question / graph /
+	// multimodal enrichment) rather than a user-facing HTTP request. The chat
+	// concurrency governor uses this to throttle only background LLM traffic,
+	// leaving interactive chat latency untouched. See WithBackgroundTask.
+	BackgroundTaskContextKey ContextKey = "BackgroundTask"
+	// LLMCallPurposeContextKey labels the product-level reason for a model
+	// request (for example agent_round or wiki_page_modify).
+	LLMCallPurposeContextKey ContextKey = "LLMCallPurpose"
+	// LLMPromptPrefixFingerprintContextKey carries a non-sensitive hash of the
+	// intended reusable prompt prefix for cache diagnostics.
+	LLMPromptPrefixFingerprintContextKey ContextKey = "LLMPromptPrefixFingerprint"
 	// MCPOAuthNonInteractiveContextKey marks a request whose channel cannot
 	// resolve an in-conversation MCP OAuth prompt (e.g. an IM bot: there is no
 	// live client to click "Authorize" and call the resolve endpoint). When set,

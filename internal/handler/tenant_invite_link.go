@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -54,12 +56,12 @@ type createInviteLinkRequest struct {
 
 // CreateInviteLink godoc
 // @Summary      生成共享邀请链接
-// @Description  生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。
+// @Description  生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前空间。
 // @Description  链接持续有效，直到过期或被撤销。
-// @Tags         租户邀请
+// @Tags         空间邀请
 // @Accept       json
 // @Produce      json
-// @Param        id       path  string                   true  "租户 ID"
+// @Param        id       path  string                   true  "空间 ID"
 // @Param        request  body  createInviteLinkRequest  true  "共享链接配置"
 // @Success      201  {object}  map[string]interface{}
 // @Security     Bearer
@@ -88,6 +90,10 @@ func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {
 
 	inv, _, err := h.invitationService.CreateShareLink(ctx, tenantID, req.Role, invitedBy, req.Message)
 	if err != nil {
+		if errors.Is(err, service.ErrAPIKeyCannotAssignOwner) {
+			c.Error(apperrors.NewForbiddenError(err.Error()))
+			return
+		}
 		logger.Errorf(ctx, "CreateShareLink failed: tenant=%d err=%v", tenantID, err)
 		c.Error(apperrors.NewInternalServerError("failed to create share link").WithDetails(err.Error()))
 		return

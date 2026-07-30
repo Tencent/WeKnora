@@ -14,6 +14,15 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
+
+// ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
+// sentinel (matching the ErrXNotFound convention used by the other repos)
+// so callers can errors.Is it safely through wrapping — replacing the
+// previous bare errors.New("chunk not found") that forced fragile
+// string-equality matching in the service layer.
+var ErrChunkNotFound = errors.New("chunk not found")
+
 // chunkRepository implements the ChunkRepository interface
 type chunkRepository struct {
 	db *gorm.DB
@@ -33,6 +42,12 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+		if chunk.SourceContent == "" {
+			chunk.SourceContent = chunk.Content
+		}
+		if chunk.IndexStatus == "" {
+			chunk.IndexStatus = "ready"
+		}
 	}
 
 	db := r.db.WithContext(ctx)
@@ -58,7 +73,7 @@ func (r *chunkRepository) GetChunkByID(ctx context.Context, tenantID uint64, id 
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}
@@ -70,7 +85,7 @@ func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*typ
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}
@@ -82,7 +97,7 @@ func (r *chunkRepository) GetChunkBySeqID(ctx context.Context, tenantID uint64, 
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND seq_id = ?", tenantID, seqID).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}
@@ -151,11 +166,12 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	knowledgeID string,
 	page *types.Pagination,
 	chunkType []types.ChunkType,
-	tagID string,
+	tagIDs []string,
 	keyword string,
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	isEnabled *bool,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -164,8 +180,11 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
-		if tagID != "" {
-			db = db.Where("tag_id = ?", tagID)
+		if len(tagIDs) > 0 {
+			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if isEnabled != nil {
+			db = db.Where("is_enabled = ?", *isEnabled)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
@@ -289,6 +308,71 @@ func (r *chunkRepository) ListChunksByParentIDs(
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
 func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) error {
 	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
+}
+
+func (r *chunkRepository) CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error {
+	return r.db.WithContext(ctx).Create(revision).Error
+}
+
+func (r *chunkRepository) SaveChunkRevision(
+	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.Chunk{}).
+			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
+			Updates(map[string]interface{}{
+				"content":          common.CleanInvalidUTF8(chunk.Content),
+				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+				"content_revision": chunk.ContentRevision,
+				"is_enabled":       chunk.IsEnabled,
+				"metadata":         chunk.Metadata,
+				"index_status":     chunk.IndexStatus,
+				"last_editor_id":   chunk.LastEditorID,
+				"updated_at":       chunk.UpdatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrChunkRevisionConflict
+		}
+		return tx.Create(revision).Error
+	})
+}
+
+func (r *chunkRepository) ListChunkRevisions(
+	ctx context.Context, tenantID uint64, chunkID string,
+) ([]*types.ChunkRevision, error) {
+	var revisions []*types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Order("revision DESC").Find(&revisions).Error
+	return revisions, err
+}
+
+func (r *chunkRepository) GetChunkRevision(
+	ctx context.Context, tenantID uint64, chunkID string, revision int,
+) (*types.ChunkRevision, error) {
+	var item types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ? AND revision = ?", tenantID, chunkID, revision).
+		First(&item).Error
+	return &item, err
+}
+
+// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, chunk := range chunks {
+			if err := tx.Omit("SeqID").Save(chunk).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // UpdateChunks updates chunks in batch using raw SQL for efficiency.
@@ -909,60 +993,187 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	return affectedIDs, nil
 }
 
+type chunkIDHash struct {
+	ID          string `gorm:"column:id"`
+	ContentHash string `gorm:"column:content_hash"`
+}
+
+const faqChunkDiffBatchSize = 5000
+
+// listFAQChunkIDHashesByKB loads id/content_hash pairs for all FAQ chunks in a KB.
+func (r *chunkRepository) listFAQChunkIDHashesByKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) ([]chunkIDHash, error) {
+	var all []chunkIDHash
+	var lastID string
+
+	for {
+		var batch []chunkIDHash
+		query := r.db.WithContext(ctx).Model(&types.Chunk{}).
+			Select("id, content_hash").
+			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
+				tenantID, kbID, types.ChunkTypeFAQ).
+			Order("id ASC").
+			Limit(faqChunkDiffBatchSize)
+		if lastID != "" {
+			query = query.Where("id > ?", lastID)
+		}
+		if err := query.Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		lastID = batch[len(batch)-1].ID
+		if len(batch) < faqChunkDiffBatchSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+func diffFAQChunkIDsByContentHash(src, dst []chunkIDHash) (
+	chunksToAdd, chunksToDelete []string,
+	matched []types.FAQChunkSyncPair,
+) {
+	dstHashes := make(map[string]struct{}, len(dst))
+	dstIDByHash := make(map[string]string, len(dst))
+	dstIDsByHash := make(map[string][]string, len(dst))
+	for _, pair := range dst {
+		dstHashes[pair.ContentHash] = struct{}{}
+		if _, ok := dstIDByHash[pair.ContentHash]; !ok {
+			dstIDByHash[pair.ContentHash] = pair.ID
+		}
+		dstIDsByHash[pair.ContentHash] = append(dstIDsByHash[pair.ContentHash], pair.ID)
+	}
+	srcHashes := make(map[string]struct{}, len(src))
+	for _, pair := range src {
+		srcHashes[pair.ContentHash] = struct{}{}
+	}
+
+	for _, pair := range src {
+		if _, exists := dstHashes[pair.ContentHash]; !exists {
+			chunksToAdd = append(chunksToAdd, pair.ID)
+			continue
+		}
+		if dstID, ok := dstIDByHash[pair.ContentHash]; ok {
+			matched = append(matched, types.FAQChunkSyncPair{
+				SrcChunkID: pair.ID,
+				DstChunkID: dstID,
+			})
+		}
+	}
+	for _, pair := range dst {
+		if _, exists := srcHashes[pair.ContentHash]; !exists {
+			chunksToDelete = append(chunksToDelete, pair.ID)
+		}
+	}
+	for hash, ids := range dstIDsByHash {
+		if hash == "" || len(ids) <= 1 {
+			continue
+		}
+		if _, inSrc := srcHashes[hash]; !inSrc {
+			continue
+		}
+		canonical := dstIDByHash[hash]
+		for _, id := range ids {
+			if id != canonical {
+				chunksToDelete = append(chunksToDelete, id)
+			}
+		}
+	}
+	return chunksToAdd, chunksToDelete, matched
+}
+
 // FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
 // Returns: chunksToAdd (IDs of chunks in src whose content_hash is not in dst),
 //
-//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src)
+//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src, plus
+//	duplicate dst chunks that share a content_hash with another dst chunk when
+//	that hash still exists in src)
 func (r *chunkRepository) FAQChunkDiff(
 	ctx context.Context,
 	srcTenantID uint64, srcKBID string,
 	dstTenantID uint64, dstKBID string,
-) (chunksToAdd []string, chunksToDelete []string, err error) {
-	// Get content_hash set from destination KB
-	dstHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
-
-	// Find chunks in source that don't exist in destination (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", dstHashSubQuery).
-		Pluck("id", &chunksToAdd).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to add: %w", err)
+) (*types.FAQChunkDiffResult, error) {
+	srcPairs, err := r.listFAQChunkIDHashesByKB(ctx, srcTenantID, srcKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list source FAQ chunks: %w", err)
+	}
+	dstPairs, err := r.listFAQChunkIDHashesByKB(ctx, dstTenantID, dstKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list destination FAQ chunks: %w", err)
 	}
 
-	// Get content_hash set from source KB
-	srcHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
+	add, del, matched := diffFAQChunkIDsByContentHash(srcPairs, dstPairs)
+	return &types.FAQChunkDiffResult{
+		ChunksToAdd:    add,
+		ChunksToDelete: del,
+		MatchedPairs:   matched,
+	}, nil
+}
 
-	// Find chunks in destination that don't exist in source (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", srcHashSubQuery).
-		Pluck("id", &chunksToDelete).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to delete: %w", err)
+// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+func (r *chunkRepository) ListFAQChunkStatusByIDs(
+	ctx context.Context,
+	tenantID uint64,
+	ids []string,
+) (map[string]*types.FAQChunkStatus, error) {
+	if len(ids) == 0 {
+		return map[string]*types.FAQChunkStatus{}, nil
 	}
-
-	return chunksToAdd, chunksToDelete, nil
+	const batchSize = 5000
+	var chunks []*types.Chunk
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var batch []*types.Chunk
+		if err := r.db.WithContext(ctx).
+			Select("id, tag_id, is_enabled, flags, metadata").
+			Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).
+			Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, batch...)
+	}
+	out := make(map[string]*types.FAQChunkStatus, len(chunks))
+	for _, chunk := range chunks {
+		strategy := types.AnswerStrategyAll
+		if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+			strategy = meta.AnswerStrategy
+		}
+		out[chunk.ID] = &types.FAQChunkStatus{
+			ID:             chunk.ID,
+			TagID:          chunk.TagID,
+			IsEnabled:      chunk.IsEnabled,
+			Flags:          chunk.Flags,
+			AnswerStrategy: strategy,
+			Metadata:       chunk.Metadata,
+		}
+	}
+	return out, nil
 }
 
 // ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
-// Filter by kbIDs and/or knowledgeIDs (OR relationship). At least one must be non-empty.
+// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs (OR relationship).
 // Returns up to `limit` chunks sorted by updated_at descending.
 func (r *chunkRepository) ListRecommendedFAQChunks(
 	ctx context.Context,
 	tenantID uint64,
 	kbIDs []string,
 	knowledgeIDs []string,
+	tagIDs []string,
 	limit int,
 ) ([]*types.Chunk, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 && len(tagIDs) == 0 {
 		return nil, nil
 	}
 	var chunks []*types.Chunk
@@ -970,12 +1181,21 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
 			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended))
-	if len(knowledgeIDs) > 0 {
-		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
-		query = query.Where("knowledge_id IN ?", knowledgeIDs)
-	} else {
-		query = query.Where("knowledge_base_id IN ?", kbIDs)
+	var scopeClauses []string
+	var scopeArgs []interface{}
+	if len(kbIDs) > 0 {
+		scopeClauses = append(scopeClauses, "knowledge_base_id IN ?")
+		scopeArgs = append(scopeArgs, kbIDs)
 	}
+	if len(knowledgeIDs) > 0 {
+		scopeClauses = append(scopeClauses, "knowledge_id IN ?")
+		scopeArgs = append(scopeArgs, knowledgeIDs)
+	}
+	if len(tagIDs) > 0 {
+		scopeClauses = append(scopeClauses, "tag_id IN ?")
+		scopeArgs = append(scopeArgs, tagIDs)
+	}
+	query = query.Where("("+strings.Join(scopeClauses, " OR ")+")", scopeArgs...)
 
 	orderClause := "RANDOM()"
 	if r.db.Dialector.Name() == "mysql" {

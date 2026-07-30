@@ -124,7 +124,7 @@
 
         <!-- Graph page detail drawer -->
         <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
-          :footer="false" placement="right" :attach="false" :show-overlay="false" :close-btn="true" destroy-on-close
+          :footer="false" placement="right" :show-overlay="false" :close-btn="true" destroy-on-close
           class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
             <div class="wiki-reader-meta" style="margin-bottom: 8px;">
@@ -210,15 +210,7 @@
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
 
-            <!-- Log feed (pinned). Events live in wiki_log_entries and
-                 are loaded lazily when the user clicks this entry. -->
-            <div v-if="logAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
-              @click="openLogView">
-              <t-icon name="history" class="wiki-nav-icon" />
-              <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
-            </div>
-
-            <div class="wiki-sidebar-divider" v-if="indexAvailable || logAvailable"></div>
+            <div class="wiki-sidebar-divider" v-if="indexAvailable"></div>
 
             <!-- Tab bar + tree share one horizontal inset so the "new folder"
                  action lines up with the folder rows below. -->
@@ -257,6 +249,12 @@
                       :aria-label="$t('knowledgeEditor.wikiBrowser.newRootFolder')"
                       @click.stop="startCreateRootFolder">
                       <t-icon name="folder-add" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.newPageBtn')" placement="top">
+                    <button type="button" class="wiki-tab-bar-action"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.newPageBtn')" @click.stop="openCreatePageDialog">
+                      <t-icon name="file-add" />
                     </button>
                   </t-tooltip>
                 </div>
@@ -322,7 +320,7 @@
                       <t-loading v-if="item.loading" size="small" />
                       <template v-else>
                         <t-icon name="chevron-down" />
-                        <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
+                        <span>{{ $t('knowledgeEditor.wikiBrowser.loadMoreShort') }}</span>
                       </template>
                     </div>
                     <div v-else
@@ -397,10 +395,11 @@
 
               <!-- Page header -->
               <div class="wiki-reader-header">
-                <h2 class="wiki-reader-title" style="display: flex; align-items: center;">
-                  {{ selectedPage.title }}
+                <div class="wiki-reader-title-row">
+                  <h2 class="wiki-reader-title">
+                    <span class="wiki-reader-title-text">{{ selectedPage.title }}</span>
 
-                  <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left" trigger="click"
+                    <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left" trigger="click"
                     :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }">
                     <span class="wiki-issue-trigger"
                       :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })">
@@ -462,7 +461,33 @@
                       </div>
                     </template>
                   </t-popup>
-                </h2>
+                  </h2>
+                  <div class="wiki-reader-header-actions">
+                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.historyBtn')" placement="top">
+                      <button type="button" class="wiki-reader-action-btn"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.historyBtn')" @click="openRevisionDrawer">
+                        <t-icon name="history" />
+                      </button>
+                    </t-tooltip>
+                    <t-tooltip v-if="props.canEdit && !editingPage"
+                      :content="$t('knowledgeEditor.wikiBrowser.editBtn')" placement="top">
+                      <button type="button" class="wiki-reader-action-btn"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.editBtn')" @click="startEditPage">
+                        <t-icon name="edit" />
+                      </button>
+                    </t-tooltip>
+                    <t-popconfirm v-if="props.canEdit" theme="danger"
+                      :content="$t('knowledgeEditor.wikiBrowser.deletePageConfirm', { title: selectedPage.title })"
+                      @confirm="confirmDeletePage">
+                      <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.deletePageBtn')" placement="top">
+                        <button type="button" class="wiki-reader-action-btn wiki-reader-action-btn--danger"
+                          :aria-label="$t('knowledgeEditor.wikiBrowser.deletePageBtn')">
+                          <t-icon name="delete" />
+                        </button>
+                      </t-tooltip>
+                    </t-popconfirm>
+                  </div>
+                </div>
                 <div v-if="selectedPage.aliases && selectedPage.aliases.length" class="wiki-reader-aliases">
                   <span class="wiki-alias-label">{{ $t('knowledgeEditor.wikiBrowser.aliases') }}:</span>
                   <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light"
@@ -479,6 +504,13 @@
                       selectedPage.version
                   })
                   }}</span>
+                  <!-- Provenance of the current version; only surfaced when a
+                       human / agent / revert touched it — pipeline is the
+                       default and would just be noise. -->
+                  <t-tag v-if="editSourceVisible(selectedPage.last_edit_source)" size="small"
+                    :theme="editSourceTheme(selectedPage.last_edit_source)" variant="light">
+                    {{ editSourceLabel(selectedPage.last_edit_source) }}
+                  </t-tag>
                   <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
                   <t-link theme="primary" hover="color" class="wiki-reader-graph-link"
                     @click="emit('view-graph', selectedPage.slug)">
@@ -499,7 +531,43 @@
               </div>
 
               <!-- Content -->
-              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick">
+              <div v-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent"
+                @click="handleContentClick">
+              </div>
+
+              <!-- Inline markdown editor (canEdit only). Saves are guarded by
+                   the page version captured at edit start; the backend answers
+                   409 when someone (or the pipeline) edited in between. -->
+              <div v-else class="wiki-page-editor">
+                <t-input v-model="editForm.title" class="wiki-page-editor-title"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editTitlePlaceholder')" />
+                <t-textarea v-model="editForm.summary" class="wiki-page-editor-summary"
+                  :autosize="{ minRows: 2, maxRows: 4 }"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editSummaryPlaceholder')" />
+                <t-textarea v-model="editForm.content" class="wiki-page-editor-content"
+                  :autosize="{ minRows: 16, maxRows: 40 }"
+                  :placeholder="$t('knowledgeEditor.wikiBrowser.editContentPlaceholder')" />
+                <t-alert v-if="editConflictVersion !== null" theme="warning" class="wiki-page-editor-conflict"
+                  :message="t('knowledgeEditor.wikiBrowser.editConflictHint', { ver: editConflictVersion })">
+                  <template #operation>
+                    <span class="wiki-page-editor-conflict-actions">
+                      <t-link theme="primary" hover="color" @click="reloadLatestIntoEditor">
+                        {{ $t('knowledgeEditor.wikiBrowser.editConflictReload') }}
+                      </t-link>
+                      <t-link theme="warning" hover="color" @click="overwriteSavePage">
+                        {{ $t('knowledgeEditor.wikiBrowser.editConflictOverwrite') }}
+                      </t-link>
+                    </span>
+                  </template>
+                </t-alert>
+                <div class="wiki-page-editor-footer">
+                  <t-button theme="primary" :loading="savingPage" @click="savePageEdit()">
+                    {{ $t('common.save') }}
+                  </t-button>
+                  <t-button variant="outline" :disabled="savingPage" @click="cancelEditPage">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                </div>
               </div>
 
               <!-- Source refs -->
@@ -530,57 +598,19 @@
                 </div>
               </div>
               <div v-if="indexLoading && !indexMarkdown" class="wiki-reader-empty">
-                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.logLoading') }}</p>
+                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.loading') }}</p>
               </div>
               <template v-else-if="indexMarkdown">
                 <div ref="indexBodyRef" class="wiki-reader-body wiki-index-body" v-html="renderedIndexMarkdown"
                   @click="handleContentClick"></div>
                 <div v-if="indexHasMore" ref="indexSentinelRef" class="wiki-index-sentinel">
                   <span v-if="indexLoading" class="wiki-index-loading">
-                    {{ $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                    {{ $t('knowledgeEditor.wikiBrowser.loading') }}
                   </span>
                 </div>
               </template>
               <div v-else-if="!indexLoading" class="wiki-reader-empty">
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.indexEmpty') }}</p>
-              </div>
-            </template>
-
-            <!-- System view: log feed. Mutually exclusive with selectedPage. -->
-            <template v-else-if="activeSystemView === 'log'">
-              <div class="wiki-reader-header">
-                <h2 class="wiki-reader-title">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</h2>
-                <div class="wiki-reader-meta">
-                  <t-tag size="small" theme="default" variant="light-outline">
-                    {{ $t('knowledgeEditor.wikiBrowser.logFeedTag') }}
-                  </t-tag>
-                </div>
-              </div>
-              <div class="wiki-log-feed">
-                <div v-if="logEntries.length === 0 && logInitialized" class="wiki-log-empty">
-                  {{ $t('knowledgeEditor.wikiBrowser.logEmpty') }}
-                </div>
-                <div v-for="entry in logEntries" :key="entry.id" class="wiki-log-entry">
-                  <div class="wiki-log-entry-header">
-                    <t-tag size="small" :theme="entry.action === 'retract' ? 'danger' : 'primary'" variant="light">
-                      {{ entry.action }}
-                    </t-tag>
-                    <span class="wiki-log-entry-title">{{ entry.doc_title || entry.knowledge_id || '—' }}</span>
-                    <span class="wiki-log-entry-time">{{ formatDate(entry.created_at) }}</span>
-                  </div>
-                  <div v-if="entry.summary" class="wiki-log-entry-summary">{{ entry.summary }}</div>
-                  <div v-if="entry.pages_affected && entry.pages_affected.length" class="wiki-log-entry-pages">
-                    <a v-for="ref in entry.pages_affected" :key="entry.id + ':' + ref.slug" href="#"
-                      class="wiki-log-entry-page" :title="ref.slug" @click.prevent="navigateToSlug(ref.slug)">{{
-                        ref.title || ref.slug }}</a>
-                  </div>
-                </div>
-                <div v-if="logNextCursor || !logInitialized" class="wiki-log-load-more">
-                  <t-button size="small" variant="outline" theme="default" :loading="logLoading" @click="loadMoreLog">
-                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') :
-                      $t('knowledgeEditor.wikiBrowser.logLoading') }}
-                  </t-button>
-                </div>
               </div>
             </template>
 
@@ -664,6 +694,45 @@
         :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
     </t-drawer>
 
+    <!-- Revision history drawer -->
+    <WikiRevisionDrawer v-model:visible="showRevisionDrawer" :kb-id="props.knowledgeBaseId"
+      :slug="selectedPage?.slug || ''" :current-page="selectedPage" :can-edit="props.canEdit"
+      @reverted="onPageReverted" />
+
+    <!-- Create page dialog -->
+    <t-dialog v-model:visible="showCreatePageDialog" :header="$t('knowledgeEditor.wikiBrowser.newPageTitle')"
+      :confirm-btn="{ content: $t('common.confirm'), loading: creatingPage }" :cancel-btn="$t('common.cancel')"
+      width="520px" @confirm="submitCreatePage">
+      <div class="wiki-create-page-form">
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageTitleLabel') }}</label>
+          <t-input v-model="createPageForm.title"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.newPageTitlePlaceholder')" @input="syncCreatePageSlug" />
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageSlugLabel') }}</label>
+          <t-input v-model="createPageForm.slug"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.newPageSlugPlaceholder')"
+            @input="createPageSlugTouched = true" />
+          <div class="wiki-create-page-hint">{{ $t('knowledgeEditor.wikiBrowser.newPageSlugHint') }}</div>
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageTypeLabel') }}</label>
+          <t-select v-model="createPageForm.pageType">
+            <t-option value="concept" :label="$t('knowledgeEditor.wikiBrowser.filterConcept')" />
+            <t-option value="entity" :label="$t('knowledgeEditor.wikiBrowser.filterEntity')" />
+            <t-option value="synthesis" :label="$t('knowledgeEditor.wikiBrowser.filterSynthesis')" />
+            <t-option value="comparison" :label="$t('knowledgeEditor.wikiBrowser.filterComparison')" />
+          </t-select>
+        </div>
+        <div class="wiki-create-page-field">
+          <label>{{ $t('knowledgeEditor.wikiBrowser.newPageContentLabel') }}</label>
+          <t-textarea v-model="createPageForm.content" :autosize="{ minRows: 6, maxRows: 16 }"
+            :placeholder="$t('knowledgeEditor.wikiBrowser.editContentPlaceholder')" />
+        </div>
+      </div>
+    </t-dialog>
+
     <!-- In-place move confirmation, anchored at the drop point. Confirming runs
          the actual move API; cancelling discards the staged move. -->
     <teleport to="body">
@@ -691,7 +760,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
@@ -699,9 +768,15 @@ import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
-import { hydrateProtectedFileImages } from '@/utils/security'
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
+import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import {
+  expandedWikiDirectoryPaths,
+  expandWikiDirectoryPath,
+} from './wikiDirectoryState'
+import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
@@ -711,9 +786,11 @@ import {
   updateWikiFolder,
   deleteWikiFolder,
   moveWikiPage,
+  createWikiPage,
+  updateWikiPage,
+  deleteWikiPage,
   getWikiPage,
   getWikiIndex,
-  getWikiLog,
   getWikiGraph,
   getWikiStats,
   searchWikiPages,
@@ -724,7 +801,6 @@ import {
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
-  type WikiLogEntry,
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
@@ -852,27 +928,10 @@ const INDEX_SECTION_ORDER = [
   'synthesis',
   'comparison',
 ] as const
-// logAvailable is a flag: the sidebar "Log" entry is always shown once a
-// KB exists, because the backing wiki_log_entries table is KB-independent
-// and `GET /wiki/log` returns an empty entries list when nothing has been
-// logged yet. We don't need a full WikiPage object anymore — selecting
-// Log swaps the reader into a dedicated feed view below.
-const logAvailable = ref(true)
-
-// activeSystemView lets the reader toggle between a regular wiki page
-// (selectedPage) and a "virtual" system view — index overview and log
-// feed. These modes are mutually exclusive: entering a system view
-// clears selectedPage, and picking a page clears the system view flag.
-const activeSystemView = ref<'' | 'index' | 'log'>('')
-
-// Paginated state for the log view. `entries` grows as the user scrolls;
-// `nextCursor` is the opaque cursor returned by the backend and empty
-// signals end-of-feed. `loading` is the guard that prevents overlapping
-// loadMore calls while a request is in flight.
-const logEntries = ref<WikiLogEntry[]>([])
-const logNextCursor = ref('')
-const logLoading = ref(false)
-const logInitialized = ref(false)
+// activeSystemView lets the reader toggle between a regular wiki page and the
+// virtual index overview. Entering the index clears the selected page, and
+// picking a page clears the system view flag.
+const activeSystemView = ref<'' | 'index'>('')
 
 // When the user types into the search box we leave pagination mode and
 // show a flat result list instead. Bucketed state is preserved behind
@@ -897,7 +956,7 @@ const graphReady = ref(false)
 const showArrows = ref(true)
 
 // Graph filtering
-const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']))
+const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
 
 // Graph slicing state. The backend caps an overview fetch at 500 nodes —
 // tens-of-thousands-page wikis would otherwise crash the browser trying to
@@ -1041,17 +1100,13 @@ function fitGraphToView() {
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
 const navHistory = ref<WikiPage[]>([])
-// navFromSystemView remembers which system view (Index / Log) the user
-// was viewing when they clicked into a slug, so goBack can restore it
+// navFromSystemView remembers that the user was viewing the Index when they
+// clicked into a slug, so goBack can restore it
 // once the page-level history stack is empty. We keep this parallel to
 // navHistory rather than widening its element type — navHistory is
 // consumed everywhere as `WikiPage[]` and that contract stays cleaner
 // if the system-view sentinel lives in its own ref.
-const navFromSystemView = ref<'' | 'index' | 'log'>('')
-// Index and log pages are now state refs (loaded by their own endpoints
-// at startup) rather than computed over the full page list. The old
-// computed implementation required pulling every page into memory just
-// to pluck two system pages.
+const navFromSystemView = ref<'' | 'index'>('')
 
 // typeOrder drives the order of groups in the sidebar. Keep in sync
 // with WIKI_PAGE_TYPES on the backend; unknown types fall through to
@@ -1129,7 +1184,7 @@ const groupedPages = computed(() => {
   // order so the sidebar doesn't suddenly hide a future tab.
   for (const tab of Object.keys(pagesByType.value)) {
     if (seen.has(tab)) continue
-    if (tab === 'index' || tab === 'log') continue
+    if (tab === 'index') continue
     push(tab)
   }
   return out
@@ -1146,18 +1201,55 @@ const hasContentPages = computed(() => {
   return false
 })
 
-// Parse source refs in "id|title" format
+// Pipeline ingest stores source_refs as bare knowledge IDs (see wiki_ingest_batch)
+// so filenames do not leak into LLM citation strings. Resolve titles for display.
+const sourceRefTitleCache = reactive<Record<string, string>>({})
+let sourceRefTitleRequestSeq = 0
+
+function parseSourceRefEntry(ref: string): { id: string; title: string } {
+  const pipeIdx = ref.indexOf('|')
+  if (pipeIdx > 0) {
+    return { id: ref.substring(0, pipeIdx), title: ref.substring(pipeIdx + 1) }
+  }
+  const cached = sourceRefTitleCache[ref]
+  if (cached) {
+    return { id: ref, title: cached }
+  }
+  return {
+    id: ref,
+    title: ref.length > 20 ? ref.substring(0, 8) + '...' : ref,
+  }
+}
+
 const parsedSourceRefs = computed(() => {
   if (!selectedPage.value?.source_refs?.length) return []
-  return selectedPage.value.source_refs.map(ref => {
-    const pipeIdx = ref.indexOf('|')
-    if (pipeIdx > 0) {
-      return { id: ref.substring(0, pipeIdx), title: ref.substring(pipeIdx + 1) }
-    }
-    // Fallback: show raw ref (backwards compat with old data)
-    return { id: ref, title: ref.length > 20 ? ref.substring(0, 8) + '...' : ref }
-  })
+  return selectedPage.value.source_refs.map(parseSourceRefEntry)
 })
+
+async function hydrateSourceRefTitles(refs: string[]) {
+  const ids = refs.filter((ref) => ref.indexOf('|') < 0 && !sourceRefTitleCache[ref])
+  if (!ids.length) return
+  const seq = ++sourceRefTitleRequestSeq
+  for (const id of ids) {
+    try {
+      const res = await getKnowledgeDetails(id)
+      if (seq !== sourceRefTitleRequestSeq) return
+      const data = (res as any)?.data ?? res
+      const title = data?.title || data?.file_name || data?.fileName
+      if (title) sourceRefTitleCache[id] = title
+    } catch {
+      // Keep truncated-ID fallback when the doc was deleted or is inaccessible.
+    }
+  }
+}
+
+watch(
+  () => selectedPage.value?.source_refs,
+  (refs) => {
+    if (refs?.length) hydrateSourceRefTitles(refs)
+  },
+  { immediate: true },
+)
 
 // Rendered content for graph drawer
 const graphDrawerContent = computed(() => {
@@ -1385,7 +1477,7 @@ function closeImagePreview() {
 watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
-    await hydrateProtectedFileImages(drawerBodyRef.value)
+    await hydrateProtectedFileImages(drawerBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -1398,8 +1490,8 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  // Use marked to render the markdown to HTML
-  return marked.parse(preprocessed, { breaks: true, async: false }) as string
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
+  return sanitizeMarkdownHTML(html)
 }
 
 async function openGraphDrawer(slug: string) {
@@ -1823,7 +1915,7 @@ watch([activeTreeRows, treeListRef], () => {
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
     summary: 'primary', entity: 'success', concept: 'warning',
-    synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
+    synthesis: 'primary', comparison: 'danger', index: 'default',
   }
   return map[type] || 'default'
 }
@@ -1837,7 +1929,6 @@ function getTypeLabel(type: string): string {
     synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
     comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
     index: 'Index',
-    log: 'Log',
   }
   return map[type] || type
 }
@@ -1862,7 +1953,7 @@ const renderedContent = computed(() => {
 
 // Label shown next to the back arrow on page headers. Prefers the
 // nearest page-history entry when available so the user sees where
-// they'll land; falls back to the Index/Log label when the current
+// they'll land; falls back to the Index label when the current
 // page was opened directly from a system view.
 const backLabel = computed(() => {
   if (navHistory.value.length > 0) {
@@ -1870,9 +1961,6 @@ const backLabel = computed(() => {
   }
   if (navFromSystemView.value === 'index') {
     return t('knowledgeEditor.wikiBrowser.indexTitle')
-  }
-  if (navFromSystemView.value === 'log') {
-    return t('knowledgeEditor.wikiBrowser.logTitle')
   }
   return ''
 })
@@ -1896,7 +1984,7 @@ const indexHasMore = computed(() => {
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
-    await hydrateProtectedFileImages(readerBodyRef.value)
+    await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -1906,7 +1994,7 @@ watch(renderedContent, async () => {
 watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
-    await hydrateProtectedFileImages(indexBodyRef.value)
+    await hydrateProtectedFileImages(indexBodyRef.value, undefined, props.knowledgeBaseId)
   }
 })
 
@@ -2073,11 +2161,28 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
 // pages for one tab. Used after a structural mutation (move page, create /
 // rename / delete folder) so the tree reflects the new layout authoritatively
 // instead of guessing at the optimistic delta.
-async function reloadDirectoryForType(type: string) {
+async function reloadDirectoryForType(
+  type: string,
+  opts: { preserveDirectoryState?: boolean } = {},
+) {
   const refreshFlatList = sidebarViewMode.value === 'list' || ensureBucket(type).flatInitialized
-  clearDirectoryStateForType(type)
-  await loadPagesForType(type, { reset: true })
+  const expandedPaths = opts.preserveDirectoryState
+    ? expandedWikiDirectoryPaths(type, collapsedDirectories.value, touchedDirectories.value)
+    : []
+  if (!opts.preserveDirectoryState) clearDirectoryStateForType(type)
+  await loadPagesForType(type, {
+    reset: true,
+    preserveDirectoryState: opts.preserveDirectoryState,
+  })
   await loadCategoriesForType(type, { reset: true })
+  // Folder data is fetched one level at a time. Reload preserved paths in
+  // parent-first order so each child request can resolve its parent folder id.
+  for (const path of expandedPaths) {
+    await Promise.all([
+      loadPagesForType(type, { categoryPath: path }),
+      loadCategoriesForType(type, { parentPath: path }),
+    ])
+  }
   if (refreshFlatList) await loadFlatPagesForType(type, true)
 }
 
@@ -2206,7 +2311,7 @@ async function confirmPendingMove() {
   } catch (e: any) {
     console.error('Failed to move wiki folder:', e)
     MessagePlugin.error(
-      e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
+      e?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
     )
   }
 }
@@ -2217,19 +2322,31 @@ async function confirmPendingMove() {
 // the API call, surface a toast, and reload the affected tab so the tree
 // reflects the new layout authoritatively.
 async function createFolder(parentId: string, parentPath: string[], name: string) {
+  const type = activeTab.value
+  const scrollTop = pageListRef.value?.scrollTop
   try {
     await createWikiFolder(props.knowledgeBaseId, parentId, name)
     MessagePlugin.success(t('knowledgeEditor.wikiBrowser.createFolderSuccess'))
-    // Keep the parent expanded so the new child is visible.
+    // Keep the current path expanded so refreshing the authoritative tree does
+    // not collapse it and clamp the sidebar scroll position back to the root.
     if (parentPath.length > 0) {
-      collapsedDirectories.value = new Set(
-        [...collapsedDirectories.value].filter(k => k !== directoryPathKey(activeTab.value, parentPath)),
+      const state = expandWikiDirectoryPath(
+        type,
+        parentPath,
+        collapsedDirectories.value,
+        touchedDirectories.value,
       )
+      collapsedDirectories.value = state.collapsed
+      touchedDirectories.value = state.touched
     }
-    await reloadDirectoryForType(activeTab.value)
+    await reloadDirectoryForType(type, { preserveDirectoryState: true })
+    await nextTick()
+    if (activeTab.value === type && scrollTop !== undefined && pageListRef.value) {
+      pageListRef.value.scrollTop = scrollTop
+    }
   } catch (e: any) {
     console.error('Failed to create wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
   }
 }
 
@@ -2292,7 +2409,7 @@ async function commitRenameFolder(folderId: string, originalName: string) {
     await reloadDirectoryForType(activeTab.value)
   } catch (e: any) {
     console.error('Failed to rename wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
   }
 }
 
@@ -2304,7 +2421,7 @@ async function deleteFolder(folderId: string) {
     await reloadDirectoryForType(activeTab.value)
   } catch (e: any) {
     console.error('Failed to delete wiki folder:', e)
-    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
   }
 }
 
@@ -2313,7 +2430,10 @@ async function deleteFolder(folderId: string) {
 // checks work without another round-trip. Guard against concurrent
 // invocations for the same type (e.g. scroll event fires rapidly while
 // a network request is still in flight).
-async function loadPagesForType(type: string, opts: { reset?: boolean; categoryPath?: string[] } = {}) {
+async function loadPagesForType(
+  type: string,
+  opts: { reset?: boolean; categoryPath?: string[]; preserveDirectoryState?: boolean } = {},
+) {
   const bucket = ensureBucket(type)
   const categoryPath = opts.categoryPath || []
   const scopedToCategory = categoryPath.length > 0
@@ -2362,7 +2482,7 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
         bucket.items = batch
         bucket.nextPage = 2
         bucket.directoryPages = {}
-        clearDirectoryStateForType(type)
+        if (!opts.preserveDirectoryState) clearDirectoryStateForType(type)
       } else {
         const seenItems = new Set(bucket.items.map(p => p.id))
         for (const p of batch) {
@@ -2416,17 +2536,11 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
   await nextTick()
 }
 
-// loadIndexAndLog probes the wiki index so the sidebar knows to show
-// the pinned Index/Log entries. We ask the backend for intro only (zero
+// loadIndex probes the wiki index so the sidebar knows to show the pinned
+// Index entry. We ask the backend for intro only (zero
 // group types) — a bounded response regardless of KB size. Sections are
 // fetched lazily after the user actually opens the Index view; see
 // loadMoreIndexSection.
-//
-// The log "page" is no longer stored in wiki_pages — it lives in the
-// dedicated wiki_log_entries table. We don't need to pre-fetch anything
-// here to decide whether to render the sidebar Log entry; the flag is
-// always on, and the actual feed is fetched lazily when the user clicks
-// the entry (see openLogView / loadMoreLog).
 // stripLegacyIndexDirectory removes the inline "## Summary (N)\n[[...]]
 // ..." directory listing from a legacy index row. Old wiki_pages rows
 // stored "intro + directory markdown" in content; after the refactor
@@ -2442,7 +2556,7 @@ function stripLegacyIndexDirectory(intro: string): string {
   return intro.slice(0, idx).trim()
 }
 
-async function loadIndexAndLog() {
+async function loadIndex() {
   try {
     // We only need intro on the initial probe — the directory groups
     // are fetched lazily once the user opens the Index view. Passing
@@ -2457,7 +2571,6 @@ async function loadIndexAndLog() {
     indexAvailable.value = true
     indexSections.value = {}
     indexSectionIdx.value = 0
-    logAvailable.value = true
   } catch (e) {
     console.error('Failed to load wiki index:', e)
   }
@@ -2472,7 +2585,7 @@ async function openIndexView() {
   if (!indexMarkdown.value) {
     indexLoading.value = true
     try {
-      await loadIndexAndLog()
+      await loadIndex()
     } finally {
       indexLoading.value = false
     }
@@ -2630,44 +2743,6 @@ onUnmounted(() => {
   }
 })
 
-// openLogView switches the reader into the log feed and (re)loads the
-// first page. Called when the user clicks the sidebar Log entry.
-async function openLogView() {
-  selectedPage.value = null
-  activeSystemView.value = 'log'
-  logEntries.value = []
-  logNextCursor.value = ''
-  logInitialized.value = false
-  await loadMoreLog()
-}
-
-// loadMoreLog appends the next page of log entries using the cursor from
-// the previous response. Guarded so overlapping scroll events don't fire
-// multiple requests and double-append entries.
-async function loadMoreLog() {
-  if (logLoading.value) return
-  // Once a previous request reported end-of-feed (empty next_cursor), we
-  // stop — but only after the first fetch, so a fresh KB still runs the
-  // initial empty request to populate logInitialized.
-  if (logInitialized.value && !logNextCursor.value) return
-  logLoading.value = true
-  try {
-    const res = await getWikiLog(props.knowledgeBaseId, {
-      cursor: logNextCursor.value || undefined,
-      limit: 50,
-    })
-    const body: any = (res as any).data || res
-    const entries: WikiLogEntry[] = body?.entries || []
-    logEntries.value.push(...entries)
-    logNextCursor.value = body?.next_cursor || ''
-    logInitialized.value = true
-  } catch (e) {
-    console.error('Failed to load wiki log:', e)
-  } finally {
-    logLoading.value = false
-  }
-}
-
 // loadPages is the sidebar's top-level initialization. It wires up the
 // empty buckets (so groupedPages produces stable group slots even
 // before any fetch completes), pulls the pinned system pages, and then
@@ -2683,7 +2758,7 @@ async function loadPages() {
   try {
     searchResults.value = null
     for (const tab of CONTENT_TABS) ensureBucket(tab)
-    await loadIndexAndLog()
+    await loadIndex()
     await Promise.all(CONTENT_TABS.map(async tab => {
       await loadPagesForType(tab, { reset: true })
       await loadCategoriesForType(tab, { reset: true })
@@ -2758,6 +2833,221 @@ async function loadStats() {
   } catch (e) { /* ignore */ }
 }
 
+// --- Manual page editing / version management ---------------------------
+
+const editingPage = ref(false)
+const savingPage = ref(false)
+const editForm = ref({ title: '', summary: '', content: '' })
+// Version the user started editing from — the optimistic-lock guard sent
+// with the save. 409 → someone (or the pipeline) edited in between.
+const editBaseVersion = ref(0)
+const editConflictVersion = ref<number | null>(null)
+
+const showRevisionDrawer = ref(false)
+
+const showCreatePageDialog = ref(false)
+const creatingPage = ref(false)
+const createPageForm = ref({ title: '', slug: '', pageType: 'concept', content: '' })
+const createPageSlugTouched = ref(false)
+
+// Navigating to another page (or view) silently drops an in-progress edit;
+// the editor is inline, so a route-level guard would be overkill here.
+watch(() => selectedPage.value?.slug, () => {
+  editingPage.value = false
+  editConflictVersion.value = null
+})
+
+function startEditPage() {
+  if (!selectedPage.value) return
+  editForm.value = {
+    title: selectedPage.value.title,
+    summary: selectedPage.value.summary || '',
+    content: selectedPage.value.content || '',
+  }
+  editBaseVersion.value = selectedPage.value.version
+  editConflictVersion.value = null
+  editingPage.value = true
+}
+
+function cancelEditPage() {
+  editingPage.value = false
+  editConflictVersion.value = null
+}
+
+async function savePageEdit(versionOverride?: number) {
+  if (!selectedPage.value) return
+  const slug = selectedPage.value.slug
+  savingPage.value = true
+  try {
+    const res = await updateWikiPage(props.knowledgeBaseId, slug, {
+      title: editForm.value.title,
+      summary: editForm.value.summary,
+      content: editForm.value.content,
+      version: versionOverride ?? editBaseVersion.value,
+    })
+    const updated = ((res as any).data || res) as WikiPage
+    selectedPage.value = updated
+    editingPage.value = false
+    editConflictVersion.value = null
+    updateSidebarPageTitle(slug, updated.title)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.editSaveSuccess'))
+  } catch (e: any) {
+    // The request interceptor rejects with a flattened { status, message,
+    // ...body } object, so the conflict payload sits on `e` directly.
+    if (e?.status === 409) {
+      editConflictVersion.value = e?.current_version ?? 0
+    } else {
+      MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.editSaveFailed'))
+    }
+  } finally {
+    savingPage.value = false
+  }
+}
+
+// overwriteSavePage resolves an edit conflict by re-saving on top of the
+// server's current version (last write wins, but the loser's version stays
+// in the revision history, so nothing is destroyed).
+async function overwriteSavePage() {
+  if (!selectedPage.value) return
+  try {
+    const res = await getWikiPage(props.knowledgeBaseId, selectedPage.value.slug)
+    const latest = ((res as any).data || res) as WikiPage
+    await savePageEdit(latest.version)
+  } catch (e) {
+    console.error('Failed to fetch latest version for overwrite save:', e)
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.editSaveFailed'))
+  }
+}
+
+// reloadLatestIntoEditor resolves an edit conflict by discarding the local
+// draft and re-opening the editor on the server's current content.
+async function reloadLatestIntoEditor() {
+  await refreshSelectedPage()
+  startEditPage()
+}
+
+async function confirmDeletePage() {
+  if (!selectedPage.value) return
+  const slug = selectedPage.value.slug
+  try {
+    await deleteWikiPage(props.knowledgeBaseId, slug)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.deletePageSuccess'))
+    selectedPage.value = null
+    editingPage.value = false
+    loadPages()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.deletePageFailed'))
+  }
+}
+
+function openRevisionDrawer() {
+  if (!selectedPage.value) return
+  showRevisionDrawer.value = true
+}
+
+function onPageReverted(page: WikiPage) {
+  selectedPage.value = page
+  editingPage.value = false
+  updateSidebarPageTitle(page.slug, page.title)
+}
+
+function openCreatePageDialog() {
+  createPageForm.value = { title: '', slug: '', pageType: 'concept', content: '' }
+  createPageSlugTouched.value = false
+  showCreatePageDialog.value = true
+}
+
+// syncCreatePageSlug derives "<type>/<slugified-title>" while the user has
+// not touched the slug field themselves. Only ASCII-ish titles produce a
+// usable slug automatically; otherwise the user types one.
+function syncCreatePageSlug() {
+  if (createPageSlugTouched.value) return
+  const base = createPageForm.value.title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s_-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+  createPageForm.value.slug = base ? `${createPageForm.value.pageType}/${base}` : ''
+}
+
+async function submitCreatePage() {
+  const title = createPageForm.value.title.trim()
+  const slug = createPageForm.value.slug.trim().replace(/^\/+|\/+$/g, '')
+  if (!title || !slug) {
+    MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.newPageMissingFields'))
+    return
+  }
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s_\-/]*$/u.test(slug)) {
+    MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.newPageSlugHint'))
+    return
+  }
+  creatingPage.value = true
+  try {
+    await createWikiPage(props.knowledgeBaseId, {
+      slug,
+      title,
+      page_type: createPageForm.value.pageType,
+      content: createPageForm.value.content,
+    })
+    showCreatePageDialog.value = false
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.newPageSuccess'))
+    loadPages()
+    navigateToSlug(slug)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.newPageFailed'))
+  } finally {
+    creatingPage.value = false
+  }
+}
+
+// updateSidebarPageTitle patches the already-loaded sidebar entries in place
+// after a rename so the tree reflects the edit without a full reload.
+function updateSidebarPageTitle(slug: string, title: string) {
+  for (const p of pages.value) {
+    if (p.slug === slug) p.title = title
+  }
+  for (const bucket of Object.values(pagesByType.value)) {
+    for (const p of bucket.items) {
+      if (p.slug === slug) p.title = title
+    }
+    for (const p of bucket.flatItems) {
+      if (p.slug === slug) p.title = title
+    }
+  }
+}
+
+function editSourceVisible(source?: string): boolean {
+  return source === 'user' || source === 'agent' || source === 'revert'
+}
+
+function editSourceLabel(source?: string): string {
+  switch (source) {
+    case 'user':
+      return t('knowledgeEditor.wikiBrowser.editSourceUser')
+    case 'agent':
+      return t('knowledgeEditor.wikiBrowser.editSourceAgent')
+    case 'revert':
+      return t('knowledgeEditor.wikiBrowser.editSourceRevert')
+    default:
+      return t('knowledgeEditor.wikiBrowser.editSourcePipeline')
+  }
+}
+
+function editSourceTheme(source?: string): 'primary' | 'success' | 'warning' | 'default' {
+  switch (source) {
+    case 'user':
+      return 'success'
+    case 'agent':
+      return 'primary'
+    case 'revert':
+      return 'warning'
+    default:
+      return 'default'
+  }
+}
+
 // Refresh the currently selected page's content without touching navigation history
 async function refreshSelectedPage() {
   if (!selectedPage.value) return
@@ -2779,7 +3069,7 @@ async function refreshSelectedPage() {
 // there (empty == no filter == return everything, the opposite of what
 // the user meant).
 function graphFilterTypesToArray(): string[] | undefined {
-  const all = ['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']
+  const all = ['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']
   if (all.every(t => graphFilterTypes.value.has(t))) {
     return undefined
   }
@@ -3052,7 +3342,7 @@ const GROW_FRONTIER_CONCURRENCY = 6
 // interesting neighborhood"). We keep them visible and individually
 // expandable (double-click / shift-click / ⊕ all still work), but they
 // don't participate in batch expansion.
-const GRAPH_SYSTEM_PAGE_TYPES = new Set(['index', 'log'])
+const GRAPH_SYSTEM_PAGE_TYPES = new Set(['index'])
 
 function isFrontierCandidate(
   node: { slug: string; page_type: string; link_count: number },
@@ -3220,11 +3510,7 @@ function goBack() {
     const view = navFromSystemView.value
     navFromSystemView.value = ''
     selectedPage.value = null
-    if (view === 'index') {
-      openIndexView()
-    } else if (view === 'log') {
-      openLogView()
-    }
+    if (view === 'index') openIndexView()
   }
 }
 
@@ -3373,7 +3659,7 @@ const graphSelectedSlug = ref<string | null>(null)
 // Color map for node types
 const nodeColorMap: Record<string, string> = {
   summary: '#0052d9', entity: '#2ba471', concept: '#e37318',
-  synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c', log: '#8c8c8c',
+  synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c',
 }
 
 // RenderGraphOpts tweaks how renderGraph initializes node positions when
@@ -4449,7 +4735,7 @@ watch(() => props.view, (v) => {
   } else if (v === 'browser') {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
-        await hydrateProtectedFileImages(readerBodyRef.value)
+        await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
       }
     })
   }
@@ -4502,6 +4788,10 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   background: var(--td-bg-color-container);
+  // Align list rows with the session sidebar grid (menu.vue).
+  --wiki-list-inset-x: 10px;
+  --wiki-list-row-radius: 6px;
+  --wiki-list-row-min-height: 30px;
 }
 
 // ── Left Sidebar ──
@@ -4516,10 +4806,12 @@ onUnmounted(() => {
 }
 
 .wiki-sidebar-header {
-  padding: 16px 16px 12px;
+  padding: 0 10px 8px 0;
+  margin-left: -8px;
+  padding-left: 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .wiki-queue-status {
@@ -4562,7 +4854,9 @@ onUnmounted(() => {
 .wiki-page-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 12px 12px;
+  padding: 0 8px 12px 0;
+  margin-left: -8px;
+  padding-left: 8px;
 }
 
 .wiki-tree-list {
@@ -4573,7 +4867,7 @@ onUnmounted(() => {
 // left-aligned; only folder rows reserve trailing space for count / actions.
 .wiki-tree-panel {
   --wiki-tree-depth-indent: 14px;
-  padding: 0 8px;
+  padding: 0;
 }
 
 .wiki-tab-bar {
@@ -4612,7 +4906,8 @@ onUnmounted(() => {
   align-items: center;
   padding: 2px;
   border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
 }
 
 .wiki-view-toggle-btn {
@@ -4702,22 +4997,23 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  min-height: var(--wiki-list-row-min-height);
+  padding: 0 10px 0 var(--wiki-list-inset-x);
+  border-radius: var(--wiki-list-row-radius);
   cursor: pointer;
-  margin-bottom: 4px;
-  transition: all 0.15s;
+  margin-bottom: 0;
+  transition: background 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background: var(--td-bg-color-container-hover);
 
     .wiki-nav-text {
       color: var(--td-brand-color);
-      font-weight: 600;
+      font-weight: 400;
     }
 
     .wiki-nav-icon {
@@ -4732,7 +5028,8 @@ onUnmounted(() => {
 
   .wiki-nav-text {
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 400;
+    line-height: 20px;
     color: var(--td-text-color-primary);
   }
 }
@@ -4740,7 +5037,7 @@ onUnmounted(() => {
 .wiki-sidebar-divider {
   height: 1px;
   background: var(--td-component-stroke);
-  margin: 8px 12px;
+  margin: 6px 0;
 }
 
 .wiki-tab {
@@ -4791,24 +5088,26 @@ onUnmounted(() => {
 }
 
 .wiki-page-item {
-  min-height: 64px;
+  min-height: var(--wiki-list-row-min-height);
   box-sizing: border-box;
   overflow: hidden;
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: 6px 10px 6px var(--wiki-list-inset-x);
+  border-radius: var(--wiki-list-row-radius);
   cursor: pointer;
-  margin-bottom: 2px;
-  // Without this, mousedown-drag on the title text starts a text selection
-  // instead of an HTML5 drag, so the page never picks up.
+  margin-bottom: 0;
   user-select: none;
-  transition: background 0.15s;
+  transition: background 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background: var(--td-bg-color-container-hover);
+
+    .wiki-page-item-title {
+      color: var(--td-brand-color);
+    }
   }
 }
 
@@ -4819,14 +5118,17 @@ onUnmounted(() => {
 
 .wiki-page-item--list {
   height: 98px;
-  padding: 10px 2px;
+  padding: 8px 10px 8px var(--wiki-list-inset-x);
 }
 
 .wiki-page-item--list .wiki-page-item-title {
   display: block;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
   margin-bottom: 4px;
+  color: var(--td-text-color-primary);
+  transition: color 0.15s ease;
 }
 
 .wiki-page-item-summary {
@@ -4855,14 +5157,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
-  border-radius: 6px;
+  padding: 0 10px 0 calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px) + var(--wiki-list-inset-x));
+  border-radius: var(--wiki-list-row-radius);
   cursor: pointer;
-  margin: 1px 0;
+  margin: 0;
   color: var(--td-text-color-secondary);
   background: transparent;
   user-select: none;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -4986,14 +5288,12 @@ onUnmounted(() => {
 
 .wiki-directory-count {
   flex: 0 0 auto;
-  min-width: 22px;
-  text-align: center;
+  min-width: 16px;
+  text-align: right;
   font-size: 11px;
   line-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
   color: var(--td-text-color-placeholder);
-  background: var(--td-bg-color-secondarycontainer);
+  font-variant-numeric: tabular-nums;
 }
 
 .wiki-directory-load-more {
@@ -5020,14 +5320,23 @@ onUnmounted(() => {
   gap: 6px;
   height: 34px;
   min-height: 34px;
-  padding: 0;
-  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
-  border-radius: 6px;
-  margin: 1px 0;
+  padding: 4px 10px 4px calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px) + var(--wiki-list-inset-x));
+  border-radius: var(--wiki-list-row-radius);
+  margin: 0;
+
+  &.active {
+    .wiki-page-file-icon {
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .wiki-page-item--tree .wiki-page-item-title {
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--td-text-color-primary);
+  transition: color 0.15s ease;
 }
 
 // ── Right Content ──
@@ -5042,7 +5351,7 @@ onUnmounted(() => {
 .wiki-reader {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 24px;
+  padding: 0 24px 16px;
 }
 
 .wiki-reader-inner {
@@ -5050,11 +5359,11 @@ onUnmounted(() => {
 }
 
 .wiki-reader-header {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .wiki-nav-bar {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .wiki-nav-back {
@@ -5075,12 +5384,67 @@ onUnmounted(() => {
   }
 }
 
+.wiki-reader-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .wiki-reader-title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 26px;
   font-weight: 600;
   line-height: 1.3;
   color: var(--td-text-color-primary);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wiki-reader-title-text {
+  min-width: 0;
+}
+
+.wiki-reader-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.wiki-reader-action-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  .t-icon {
+    font-size: 16px;
+  }
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.wiki-reader-action-btn--danger:hover {
+    color: var(--td-error-color);
+    background: var(--td-error-color-1);
+  }
 }
 
 .wiki-reader-aliases {
@@ -5108,6 +5472,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .wiki-reader-meta-text {
@@ -5118,6 +5483,76 @@ onUnmounted(() => {
 .wiki-reader-graph-link {
   margin-left: auto;
   font-size: 13px;
+}
+
+.wiki-page-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 16px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+
+  .wiki-page-editor-title :deep(.t-input__inner) {
+    font-size: 18px;
+    font-weight: 600;
+    background: transparent;
+  }
+
+  .wiki-page-editor-title :deep(.t-input) {
+    background: transparent;
+  }
+
+  .wiki-page-editor-summary :deep(textarea) {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .wiki-page-editor-content :deep(textarea) {
+    font-family: var(--td-font-family-mono, monospace);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+}
+
+.wiki-page-editor-conflict {
+  margin-bottom: 0;
+}
+
+.wiki-page-editor-conflict-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wiki-page-editor-footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.wiki-create-page-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .wiki-create-page-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    label {
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  .wiki-create-page-hint {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .wiki-reader-links {
@@ -5394,14 +5829,15 @@ onUnmounted(() => {
   padding: 2px 10px;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
-  color: var(--td-brand-color);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: color 0.15s, background 0.15s;
 
   &:hover {
-    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
   }
 }
 
@@ -5414,17 +5850,6 @@ onUnmounted(() => {
   justify-content: center;
   padding: 60px 20px;
   text-align: center;
-}
-
-// ── Log feed (system view) ──
-// Rendered when activeSystemView === 'log'. Sits where the markdown body
-// would be for a regular wiki page — so the header/meta rules above
-// already apply. We just style the feed list itself.
-.wiki-log-feed {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
 }
 
 // ── Index overview (system view) ──
@@ -5444,72 +5869,6 @@ onUnmounted(() => {
 
 .wiki-index-loading {
   opacity: 0.7;
-}
-
-.wiki-log-empty {
-  color: var(--td-text-color-placeholder);
-  text-align: center;
-  padding: 40px 0;
-  font-size: 13px;
-}
-
-.wiki-log-entry {
-  border: 1px solid var(--td-border-level-1-color);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--td-bg-color-container);
-}
-
-.wiki-log-entry-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.wiki-log-entry-title {
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.wiki-log-entry-time {
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.wiki-log-entry-summary {
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  margin: 4px 0;
-}
-
-.wiki-log-entry-pages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
-}
-
-.wiki-log-entry-page {
-  color: var(--td-brand-color);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.wiki-log-entry-page:hover {
-  text-decoration: underline;
-}
-
-.wiki-log-load-more {
-  display: flex;
-  justify-content: center;
-  padding: 12px 0;
 }
 
 .wiki-empty-icon {

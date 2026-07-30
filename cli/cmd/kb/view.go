@@ -27,8 +27,11 @@ var kbViewFields = []string{
 type ViewOptions struct{}
 
 // ViewService is the narrow SDK surface this command depends on.
+// ListKnowledgeBases is used only to enrich is_pinned (the single-KB GET
+// doesn't carry per-user pin state — pin is a per-user list concept).
 type ViewService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
+	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
 }
 
 // NewCmdView builds `weknora kb view <id>`.
@@ -69,6 +72,18 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 	kb, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get knowledge base %q", id)
+	}
+	// The single-KB GET doesn't stamp per-user pin state, so is_pinned would
+	// always read false here. Enrich it from the list (the canonical pin
+	// source) so the field is accurate. Best-effort: a list error leaves the
+	// (unstamped) value rather than failing the view.
+	if kbs, lerr := svc.ListKnowledgeBases(ctx); lerr == nil {
+		for i := range kbs {
+			if kbs[i].ID == id {
+				kb.IsPinned = kbs[i].IsPinned
+				break
+			}
+		}
 	}
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, kb, nil)

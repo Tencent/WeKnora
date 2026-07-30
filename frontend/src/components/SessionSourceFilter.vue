@@ -6,9 +6,9 @@
     <button ref="triggerRef" type="button" class="session-source-filter__trigger" :aria-expanded="open"
       aria-haspopup="listbox" @click.stop="toggleOpen">
       <span class="session-source-filter__leading">
-        <img v-if="!inline && currentOption?.logo" :src="currentOption.logo" :alt="currentOption.label"
+        <img v-if="currentOption?.logo" :src="currentOption.logo" :alt="currentOption.label"
           class="session-source-filter__logo" />
-        <t-icon v-else-if="!inline" :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
+        <t-icon v-else :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
         <span class="session-source-filter__label" :title="currentOption?.label">{{ currentOption?.label }}</span>
       </span>
       <t-icon v-if="inline" name="chevron-down" class="session-source-filter__chevron"
@@ -75,6 +75,7 @@ const currentOption = computed(() =>
 const iconFor = (item: SourceItem | undefined): string => {
   if (!item) return 'chat'
   if (item.value === DEFAULT_SESSION_BUCKET_KEY) return 'chat'
+  if (item.value === 'api') return 'server'
   if (item.value.startsWith('embed:')) return 'code'
   return 'link'
 }
@@ -153,7 +154,7 @@ onBeforeUnmount(() => {
     max-width: 100%;
 
     .session-source-filter__leading {
-      gap: 0;
+      gap: 4px;
       flex: 0 1 auto;
     }
   }

@@ -66,3 +66,24 @@ test('getRagPipelineStepTitle uses query-aware search labels', () => {
   })
   assert.equal(title, 'searching 讯飞开放平台')
 })
+
+test('getRagPipelineStepTitle uses web labels when search_source is web', () => {
+  const title = getRagPipelineStepTitle(t, {
+    tool_name: 'knowledge_search',
+    pending: false,
+    success: true,
+    arguments: { search_source: 'web' },
+  })
+  assert.equal(title, 'agentStream.toolStatus.webSearch')
+})
+
+test('getRagPipelineStepTitle uses attachment parsing labels', () => {
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: true }),
+    'agentStream.toolStatus.attachmentParsing',
+  )
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: false, success: true }),
+    'agentStream.toolStatus.attachmentParsingDone',
+  )
+})

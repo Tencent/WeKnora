@@ -101,14 +101,10 @@ func TestPublicConfigIncludesCapabilityFlags(t *testing.T) {
 		ID:             "ch-cap",
 		AgentID:        "agent-cap",
 		AllowWebSearch: true,
-		AllowMemory:    true,
 		WidgetPosition: "top-left",
 	})
 	if !cfg.AllowWebSearch {
 		t.Fatalf("allow_web_search = false, want true")
-	}
-	if !cfg.AllowMemory {
-		t.Fatalf("allow_memory = false, want true")
 	}
 	if !cfg.AgentWebSearchEnabled {
 		t.Fatalf("agent_web_search_enabled = false, want true")

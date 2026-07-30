@@ -39,12 +39,14 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- consumer (e.g. wiki ingest batch handler) uses PeekBatch to pull the head
 -- of the list, processes the ops, then DeleteByIDs the consumed rows.
 --
--- claimed_at is intentionally added but unused in this revision: the wiki
--- ingest pipeline guarantees per-KB serialization via its own active-batch
--- lock (Redis SetNX wiki:active:<kbID>), so PeekBatch doesn't need
--- SELECT ... FOR UPDATE. Future task types that don't carry an external
--- lock can flip claimed_at = NOW() inside a row-level lock and rely on the
--- column to detect orphaned claims after a worker crash.
+-- claimed_at backs the concurrent-claim workflow (ClaimBatch): standard-mode
+-- wiki ingest dropped the exclusive per-KB lock in favour of multiple batches
+-- claiming DISJOINT dedup_keys via SELECT ... FOR UPDATE SKIP LOCKED, stamping
+-- claimed_at = NOW() on the rows they take. A claim older than the consumer's
+-- stale threshold (a crashed/abandoned worker) is recoverable by the next
+-- claimer; a fresh claim blocks its whole dedup_key so same-document ops never
+-- split across concurrent batches. Lite mode (no Redis) still serializes per
+-- KB in-process and leaves claimed_at NULL.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS task_pending_ops (
     id          BIGSERIAL PRIMARY KEY,
@@ -65,7 +67,7 @@ COMMENT ON COLUMN task_pending_ops.task_type IS 'Free-form task identifier, e.g.
 COMMENT ON COLUMN task_pending_ops.scope IS 'Logical scope, e.g. "knowledge_base" / "knowledge" / "tenant". Read together with scope_id.';
 COMMENT ON COLUMN task_pending_ops.dedup_key IS 'Optional service-defined key used by the consumer to de-duplicate equivalent ops within a single batch peek. Empty means no de-dup.';
 COMMENT ON COLUMN task_pending_ops.fail_count IS 'In-batch retry counter: the consumer increments it via IncrFailCount and dead-letters once it exceeds a service-defined cap.';
-COMMENT ON COLUMN task_pending_ops.claimed_at IS 'Reserved for future locking workflows; consumers in this revision rely on external mutual exclusion and ignore the column.';
+COMMENT ON COLUMN task_pending_ops.claimed_at IS 'Concurrent-claim marker: set to NOW() when a consumer claims the row (SELECT ... FOR UPDATE SKIP LOCKED). NULL = unclaimed; a value older than the consumer stale threshold is a crashed/abandoned claim and is recoverable. A fresh claim blocks its whole dedup_key so same-document ops never split across concurrent batches.';
 
 -- Cover the PeekBatch query: the consumer scans rows for one
 -- (task_type, scope, scope_id) tuple ordered by id ASC.

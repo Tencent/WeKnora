@@ -3,7 +3,6 @@ package chunkcmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -101,7 +100,9 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 				opts.ChunkID = args[0]
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter())
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "chunk", len(args), "chunk.delete", "weknora chunk delete "+strings.Join(args, " ")+" --doc "+opts.DocID+" -y"); err != nil {
+			batchRetry := append([]string{"weknora", "chunk", "delete"}, args...)
+			batchRetry = append(batchRetry, "--doc", opts.DocID, "-y")
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "chunk", len(args), "chunk.delete", batchRetry); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -123,6 +124,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Parent document id (SDK knowledge_id) the chunks live under")
 	_ = cmd.MarkFlagRequired("doc")
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, chunkDeleteFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, "chunk.delete")
@@ -134,6 +136,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			"weknora chunk delete c1 c2 c3 --doc doc_xyz -y",
 			"weknora chunk delete chunk_abc --doc doc_xyz -y --format json",
 		},
+		Output: "envelope.data shape depends on the form: a single chunk id -> {id, deleted:true}; multiple ids -> batch envelope (top-level status success|partial|error, ok=(failures==0), data per-item [{id, ok, error?}], meta.successes/failures — read data[].ok per id).",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
 			"chunk delete is irreversible; loses the chunk + breaks RAG retrieval coherence for downstream queries.",
@@ -143,7 +146,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "chunk", opts.ChunkID, "chunk.delete", "weknora chunk delete "+opts.ChunkID+" --doc "+opts.DocID+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "chunk", opts.ChunkID, "chunk.delete", []string{"weknora", "chunk", "delete", opts.ChunkID, "--doc", opts.DocID, "-y"}); err != nil {
 		return err
 	}
 	if err := svc.DeleteChunk(ctx, opts.DocID, opts.ChunkID); err != nil {

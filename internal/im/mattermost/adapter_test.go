@@ -1,16 +1,29 @@
 package mattermost
 
 import (
+	"context"
 	"encoding/json"
+	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func withMattermostSSRFWhitelist(t *testing.T, whitelist string) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", whitelist)
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
 
 func TestParseOutgoingBody_ThreadRoot(t *testing.T) {
 	tests := []struct {
-		name           string
-		payload        outgoingPayload
+		name            string
+		payload         outgoingPayload
 		postReplyToMain bool
-		wantThreadRoot string
+		wantThreadRoot  string
 	}{
 		{
 			name: "threaded reply has RootID",
@@ -57,6 +70,35 @@ func TestParseOutgoingBody_ThreadRoot(t *testing.T) {
 				t.Errorf("threadRoot = %q, want %q", threadRoot, tt.wantThreadRoot)
 			}
 		})
+	}
+}
+
+func TestNewClientRejectsPrivateSiteURL(t *testing.T) {
+	withMattermostSSRFWhitelist(t, "")
+
+	if _, err := NewClient("http://127.0.0.1:8065", "bot-token"); err == nil {
+		t.Fatal("expected private Mattermost site_url to be rejected")
+	}
+}
+
+func TestMattermostClientBlocksRedirectToInternalURL(t *testing.T) {
+	withMattermostSSRFWhitelist(t, "127.0.0.1")
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	client, err := NewClient(origin.URL, "bot-token")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	_, err = client.CreatePost(context.Background(), "channel", "", "hello")
+	if err == nil {
+		t.Fatal("expected redirect to link-local metadata endpoint to be blocked")
+	}
+	if !stderrors.Is(err, secutils.ErrSSRFRedirectBlocked) {
+		t.Fatalf("error = %v, want ErrSSRFRedirectBlocked", err)
 	}
 }
 
