@@ -6726,7 +6726,7 @@ export default {
 	      capabilityManageVectorStores: 'Manage retrieval infrastructure',
 	      capabilityManageVectorStoresHint: 'Manage vector-store configuration plus parser, document reader, and storage engine connectivity checks.',
 	      capabilityManageStorageBackends: 'Manage storage backends',
-	      capabilityManageStorageBackendsHint: 'Manage object/file storage backend instances (e.g. S3-compatible or local file storage): their CRUD lifecycle, connectivity tests, and the tenant default selection.',
+	      capabilityManageStorageBackendsHint: 'Manage object/file storage backend instances (e.g. S3-compatible or local file storage): their CRUD lifecycle, connectivity tests, and the workspace default selection.',
 	      capabilityManageWebSearch: 'Manage web search',
 	      capabilityManageWebSearchHint: 'Manage web-search provider configurations, credentials, and connection tests.',
 	      capabilityRunEvaluations: 'Run evaluations',

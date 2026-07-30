@@ -2,7 +2,7 @@
 
 > 更推荐使用`uv`来运行基于python的MCP服务。
 >
-> 也可通过 PyPI 安装：`pip install weknora-mcp`（包名 `weknora-mcp`，非 `weknora-mcp-server`）。
+> 也可通过 PyPI 安装：`pip install tencent-weknora-mcp`，或使用 `uvx --from tencent-weknora-mcp weknora-mcp-server`（官方包名 `tencent-weknora-mcp`，由 [Tencent/WeKnora](https://github.com/Tencent/WeKnora) 维护）。
 
 ## 1. 安装 uv
 
