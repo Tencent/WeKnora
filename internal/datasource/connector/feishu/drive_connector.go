@@ -226,7 +226,7 @@ func buildDriveAncestorChain(rootFolderToken, cur string, parentChain map[string
 
 // FetchAll performs a full sync of all documents from the selected Drive
 // folders. Defensive fallback path - the service prefers FetchStream when the
-// connector implements StreamingConnector. Mirrors wiki Connector.FetchAll.
+// connector implements StreamingConnector.
 func (c *DriveConnector) FetchAll(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]types.FetchedItem, error) {
@@ -235,55 +235,13 @@ func (c *DriveConnector) FetchAll(
 		return nil, err
 	}
 	client := NewClient(feishuConfig)
-
-	var allItems []types.FetchedItem
-
-	for _, resourceID := range resourceIDs {
-		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
-		if err != nil {
-			var partialErr *partialDriveFileListError
-			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
-			}
-			allItems = appendDriveFileListFailureItems(allItems, resourceID, c.driveChannel(), partialErr.Failures)
-		}
-
-		tally := newFetchTally(len(files))
-		for i, file := range files {
-			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
-			if ferr != nil {
-				tally.fail()
-				allItems = append(allItems, types.FetchedItem{
-					ExternalID:       file.Token,
-					Title:            file.Name,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(ferr, nil),
-				})
-				continue
-			}
-			if len(items) > 0 {
-				tally.fetch()
-				for _, it := range items {
-					allItems = append(allItems, *it)
-				}
-			} else {
-				tally.skip(file.Type)
-			}
-			if n := i + 1; n%100 == 0 {
-				logger.Infof(ctx, "[FeishuDrive] sync progress resource=%s %d/%d (%s)",
-					resourceID, n, len(files), tally.summary())
-			}
-		}
-		logger.Infof(ctx, "[FeishuDrive] sync summary resource=%s %s", resourceID, tally.summary())
-	}
-
-	return allItems, nil
+	return FetchAllEngine(ctx, client, config, resourceIDs, driveOps{region: c.region})
 }
 
 // FetchIncremental performs an incremental sync by comparing file modified_time
-// against the previously recorded state. Defensive fallback path. Mirrors wiki
-// Connector.FetchIncremental. See ADR-0002 (modified_time comes from the list
-// API directly, no batch_query).
+// against the previously recorded state. Defensive fallback path - the service
+// prefers FetchStream. Routed through the same engine as FetchStream, so the
+// #2136 failure-doesn't-advance-cursor semantics apply here too.
 func (c *DriveConnector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
@@ -292,95 +250,11 @@ func (c *DriveConnector) FetchIncremental(
 		return nil, nil, err
 	}
 	client := NewClient(feishuConfig)
-
-	var prevCursor feishuDriveCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		cursorBytes, _ := json.Marshal(cursor.ConnectorCursor)
-		_ = json.Unmarshal(cursorBytes, &prevCursor)
+	ops := driveOps{region: c.region}
+	if len(config.ResourceIDs) == 0 {
+		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
-
-	newCursor := feishuDriveCursor{
-		LastSyncTime: time.Now(),
-		FileTimes:    make(map[string]map[string]string),
-	}
-
-	var changedItems []types.FetchedItem
-
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
-		return nil, nil, fmt.Errorf("no resource IDs (Drive folder tokens) configured")
-	}
-
-	for _, resourceID := range resourceIDs {
-		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
-		var partialErr *partialDriveFileListError
-		if err != nil {
-			if !errors.As(err, &partialErr) {
-				return nil, nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
-			}
-			changedItems = appendDriveFileListFailureItems(changedItems, resourceID, c.driveChannel(), partialErr.Failures)
-		}
-
-		newCursor.FileTimes[resourceID] = make(map[string]string)
-		if partialErr != nil && prevCursor.FileTimes != nil {
-			if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-				for ft, mt := range prevTimes {
-					newCursor.FileTimes[resourceID][ft] = mt
-				}
-			}
-		}
-
-		currentFiles := make(map[string]bool)
-		for _, file := range files {
-			currentFiles[file.Token] = true
-			// Use ModifiedTime (document content edit time) for change detection.
-			// The list API returns this directly (verified) - equivalent to the
-			// wiki node's obj_edit_time. See ADR-0002.
-			modifyTimeStr := file.ModifiedTime
-			newCursor.FileTimes[resourceID][file.Token] = modifyTimeStr
-
-			if prevCursor.FileTimes != nil {
-				if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-					if prevModify, exists := prevTimes[file.Token]; exists {
-						if prevModify == modifyTimeStr {
-							continue
-						}
-					}
-				}
-			}
-
-			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
-			if ferr != nil {
-				changedItems = append(changedItems, types.FetchedItem{
-					ExternalID:       file.Token,
-					Title:            file.Name,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(ferr, nil),
-				})
-				continue
-			}
-			for _, it := range items {
-				changedItems = append(changedItems, *it)
-			}
-		}
-
-		// Detect deleted files (only when the full tree was listed successfully).
-		if partialErr == nil && prevCursor.FileTimes != nil {
-			if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-				for ft := range prevTimes {
-					if !currentFiles[ft] {
-						changedItems = append(changedItems, types.FetchedItem{
-							ExternalID:       ft,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	return changedItems, newCursor.toSyncCursor(), nil
+	return FetchIncrementalEngine(ctx, client, config, cursor, ops)
 }
 
 // FetchStream performs a resumable, memory-bounded sync. It unifies the full
@@ -389,12 +263,8 @@ func (c *DriveConnector) FetchIncremental(
 // mechanism that lets a sync which timed out mid-traversal resume from the last
 // checkpoint instead of restarting (Tencent/WeKnora#2136).
 //
-// Mirrors the wiki Connector.FetchStream. The three cursor semantics that MUST
-// be preserved (ADR-0001):
-//  1. Resume fast-path: prevModify == curModify -> skip, keep cursor.
-//  2. Failure does NOT advance the cursor: retain prevModify so the file is
-//     retried next run instead of being permanently skipped.
-//  3. toSyncCursor() JSON-marshals for snapshot isolation.
+// The per-node loop lives in the shared engine (engine.go); this shell only
+// wires the Drive NodeOps adapter.
 func (c *DriveConnector) FetchStream(
 	ctx context.Context, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler,
@@ -404,156 +274,75 @@ func (c *DriveConnector) FetchStream(
 		return nil, err
 	}
 	client := NewClient(feishuConfig)
-
-	var prevCursor feishuDriveCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		cursorBytes, _ := json.Marshal(cursor.ConnectorCursor)
-		_ = json.Unmarshal(cursorBytes, &prevCursor)
+	ops := driveOps{region: c.region}
+	if len(config.ResourceIDs) == 0 {
+		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
-
-	newCursor := feishuDriveCursor{
-		LastSyncTime: time.Now(),
-		FileTimes:    make(map[string]map[string]string),
-	}
-
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
-		return nil, fmt.Errorf("no resource IDs (Drive folder tokens) configured")
-	}
-
-	processed := 0
-	lastCheckpoint := time.Now()
-	for _, resourceID := range resourceIDs {
-		files, err := c.listDriveFilesForResource(ctx, client, resourceID)
-		var partialErr *partialDriveFileListError
-		if err != nil {
-			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list files for resource %s: %w", resourceID, err)
-			}
-			for _, item := range appendDriveFileListFailureItems(nil, resourceID, c.driveChannel(), partialErr.Failures) {
-				if eerr := h.Emit(ctx, item); eerr != nil {
-					return nil, eerr
-				}
-			}
-		}
-
-		newCursor.FileTimes[resourceID] = make(map[string]string)
-		// On a partial listing, carry prior modify times forward so a later full
-		// listing can still detect changes and deletions.
-		if partialErr != nil && prevCursor.FileTimes != nil {
-			if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-				for ft, mt := range prevTimes {
-					newCursor.FileTimes[resourceID][ft] = mt
-				}
-			}
-		}
-
-		currentFiles := make(map[string]bool)
-		tally := newFetchTally(len(files))
-		for i, file := range files {
-			currentFiles[file.Token] = true
-			modifyTimeStr := file.ModifiedTime
-
-			var prevModify string
-			var hadPrev bool
-			if prevCursor.FileTimes != nil {
-				if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-					prevModify, hadPrev = prevTimes[file.Token]
-				}
-			}
-
-			// Resume/incremental fast-path: a file recorded at its current modify
-			// time is unchanged (or already synced this run) - keep the record
-			// and skip re-fetching.
-			if hadPrev && prevModify == modifyTimeStr {
-				newCursor.FileTimes[resourceID][file.Token] = modifyTimeStr
-				continue
-			}
-
-			items, ferr := c.fetchDriveFileContent(ctx, client, file, resourceID, config.MultimodalEnabled)
-			if ferr != nil {
-				tally.fail()
-				// Do NOT advance the cursor: the content was never fetched.
-				// Retain the prior modify time (if any) so prev != current next
-				// run and the file is retried, instead of being permanently
-				// skipped on a transient export failure (Tencent/WeKnora#2136).
-				if hadPrev {
-					newCursor.FileTimes[resourceID][file.Token] = prevModify
-				}
-				if eerr := h.Emit(ctx, types.FetchedItem{
-					ExternalID:       file.Token,
-					Title:            file.Name,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(ferr, nil),
-				}); eerr != nil {
-					return nil, eerr
-				}
-			} else {
-				// Fetched, or an unsupported type (nothing to fetch): record the
-				// current modify time so the file is not re-processed next run.
-				newCursor.FileTimes[resourceID][file.Token] = modifyTimeStr
-				if len(items) > 0 {
-					tally.fetch()
-					for _, it := range items {
-						if eerr := h.Emit(ctx, *it); eerr != nil {
-							return nil, eerr
-						}
-					}
-				} else {
-					// Unsupported type (mindnote/slides/…): no item.
-					tally.skip(file.Type)
-				}
-			}
-
-			processed++
-			if processed%feishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= feishuStreamCheckpointMaxInterval {
-				if cerr := h.Checkpoint(ctx, newCursor.toSyncCursor()); cerr != nil {
-					logger.Warnf(ctx, "[FeishuDrive] stream checkpoint failed: %v", cerr)
-				}
-				lastCheckpoint = time.Now()
-			}
-			if n := i + 1; n%100 == 0 {
-				logger.Infof(ctx, "[FeishuDrive] stream progress resource=%s %d/%d (%s)",
-					resourceID, n, len(files), tally.summary())
-			}
-		}
-
-		// Detect deleted files (only when the full tree was listed successfully).
-		// Partial == nil guard: a partial listing did not enumerate the whole
-		// subtree, so deletion detection would false-positive.
-		if partialErr == nil && prevCursor.FileTimes != nil {
-			if prevTimes, ok := prevCursor.FileTimes[resourceID]; ok {
-				for ft := range prevTimes {
-					if !currentFiles[ft] {
-						if eerr := h.Emit(ctx, types.FetchedItem{
-							ExternalID:       ft,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-						}); eerr != nil {
-							return nil, eerr
-						}
-					}
-				}
-			}
-		}
-		logger.Infof(ctx, "[FeishuDrive] stream summary resource=%s %s", resourceID, tally.summary())
-	}
-
-	return newCursor.toSyncCursor(), nil
+	return FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
-// toSyncCursor converts the connector-specific feishuDriveCursor into the
-// generic SyncCursor persisted by the service. JSON marshal for snapshot
-// isolation, decoupled from later mutation of the connector's maps. Mirrors
-// feishuCursor.toSyncCursor (ADR-0001 §3).
-func (fc feishuDriveCursor) toSyncCursor() *types.SyncCursor {
-	m := make(map[string]interface{})
-	cursorBytes, _ := json.Marshal(fc)
-	_ = json.Unmarshal(cursorBytes, &m)
-	return &types.SyncCursor{
-		LastSyncTime:    fc.LastSyncTime,
-		ConnectorCursor: m,
+// driveOps adapts the Drive DriveConnector to the generic sync engine. It
+// carries the region (for channel + URL) and encodes/decodes the Drive cursor
+// wire format (feishuDriveCursor / file_times) so the engine stays format-agnostic.
+type driveOps struct {
+	region Region
+}
+
+func (o driveOps) List(ctx context.Context, client *Client, resourceID string) ([]driveFile, error, error) {
+	files, err := listDriveFilesForResource(ctx, client, resourceID)
+	if err == nil {
+		return files, nil, nil
 	}
+	var partial *partialDriveFileListError
+	if errors.As(err, &partial) {
+		return files, err, nil
+	}
+	return files, nil, err
+}
+
+func (o driveOps) Token(n driveFile) string    { return n.Token }
+func (o driveOps) Title(n driveFile) string    { return n.Name }
+func (o driveOps) ObjType(n driveFile) string  { return n.Type }
+func (o driveOps) EditTime(n driveFile) string { return n.ModifiedTime }
+
+func (o driveOps) Fetch(ctx context.Context, client *Client, n driveFile, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+	return fetchDriveFileContent(ctx, client, n, resourceID, multimodal, o.region)
+}
+
+func (o driveOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
+	var pe *partialDriveFileListError
+	if errors.As(partial, &pe) {
+		return appendDriveFileListFailureItems(nil, resourceID, o.channel(), pe.Failures)
+	}
+	return nil
+}
+
+func (o driveOps) channel() string {
+	if o.region.ConnectorType == types.ConnectorTypeLarkDrive {
+		return types.ChannelLarkDrive
+	}
+	return types.ChannelFeishuDrive
+}
+
+func (o driveOps) ResourceNoun() string { return "files" }
+func (o driveOps) EmptyResourceIDsError() string {
+	return "no resource IDs (Drive folder tokens) configured"
+}
+func (o driveOps) LogTag() string { return "[FeishuDrive]" }
+
+func (o driveOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
+	var prev feishuDriveCursor
+	b, _ := json.Marshal(m)
+	_ = json.Unmarshal(b, &prev)
+	return prev.FileTimes
+}
+
+func (o driveOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
+	fc := feishuDriveCursor{LastSyncTime: lastSync, FileTimes: times}
+	m := make(map[string]interface{})
+	b, _ := json.Marshal(fc)
+	_ = json.Unmarshal(b, &m)
+	return &types.SyncCursor{LastSyncTime: lastSync, ConnectorCursor: m}
 }
 
 // fetchDriveFileContent fetches the content of a single Drive file and converts
@@ -565,8 +354,8 @@ func (fc feishuDriveCursor) toSyncCursor() *types.SyncCursor {
 //   - doc/sheet/bitable      -> ExportAndDownload -> docx/xlsx
 //   - file                   -> DownloadDriveFile -> original file
 //   - mindnote/slides/board  -> skip (no API), returns (nil, nil)
-func (c *DriveConnector) fetchDriveFileContent(
-	ctx context.Context, client *Client, file driveFile, resourceID string, multimodalEnabled bool,
+func fetchDriveFileContent(
+	ctx context.Context, client *Client, file driveFile, resourceID string, multimodalEnabled bool, region Region,
 ) ([]*types.FetchedItem, error) {
 	if !isSupportedDocType(file.Type) {
 		return nil, nil
@@ -577,7 +366,7 @@ func (c *DriveConnector) fetchDriveFileContent(
 	// (feishu_drive / lark_drive) so Drive docs show "飞书云盘" / "Lark 云盘"
 	// distinct from the wiki connector's "飞书".
 	channel := types.ChannelFeishuDrive
-	if c.region.ConnectorType == types.ConnectorTypeLarkDrive {
+	if region.ConnectorType == types.ConnectorTypeLarkDrive {
 		channel = types.ChannelLarkDrive
 	}
 	baseMeta := map[string]string{
@@ -615,13 +404,11 @@ func (c *DriveConnector) fetchDriveFileContent(
 		}
 
 		return []*types.FetchedItem{{
-			// Drive uses file token as external_id
-			ExternalID:  file.Token,
-			Title:       file.Name,
-			Content:     data,
-			ContentType: "application/octet-stream",
-			FileName:    fileName,
-			// list API returns the absolute url
+			ExternalID:       file.Token,
+			Title:            file.Name,
+			Content:          data,
+			ContentType:      "application/octet-stream",
+			FileName:         fileName,
 			URL:              file.URL,
 			UpdatedAt:        editTime,
 			SourceResourceID: resourceID,
@@ -688,33 +475,22 @@ func parseDriveResourceID(resourceID string) (rootFolderToken, fileToken string)
 // A sub-folder selection (fileToken is itself a folder) is handled by walking
 // that sub-folder's subtree directly - ListDriveFilesRecursiveFrom accepts a
 // folder token, so no filtering is needed there.
-func (c *DriveConnector) listDriveFilesForResource(
+func listDriveFilesForResource(
 	ctx context.Context, client *Client, resourceID string,
 ) ([]driveFile, error) {
 	rootFolderToken, fileToken := parseDriveResourceID(resourceID)
 	if fileToken == "" {
-		// Whole root subtree.
 		return client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
 	}
-
-	// fileToken may be a file or a folder. Try walking it as a folder first; if
-	// that succeeds it was a folder (sync its subtree). If it fails with a
-	// params error it is a file - fall back to walking the root and filtering.
 	files, err := client.ListDriveFilesRecursiveFrom(ctx, fileToken)
 	if err == nil {
 		return files, nil
 	}
-	// Heuristic: a 1061002 (params error) means fileToken is not a folder. Any
-	// other error (auth, not found, ...) propagates as a real failure.
 	if !isDriveNotFolderError(err) {
 		return nil, err
 	}
-
-	// fileToken is a file: walk the root subtree and keep only the match.
 	all, walkErr := client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
 	if walkErr != nil {
-		// If the recursive walk itself partially failed, still search the
-		// successfully-listed subset; the selected file may be among them.
 		var partialErr *partialDriveFileListError
 		if !errors.As(walkErr, &partialErr) {
 			return nil, walkErr
@@ -816,14 +592,6 @@ func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveF
 			"folder_token": file.ParentToken,
 		},
 	}
-}
-
-// driveChannel returns the knowledge channel for this connector's region.
-func (c *DriveConnector) driveChannel() string {
-	if c.region.ConnectorType == types.ConnectorTypeLarkDrive {
-		return types.ChannelLarkDrive
-	}
-	return types.ChannelFeishuDrive
 }
 
 // appendDriveFileListFailureItems converts Drive listing failures into error

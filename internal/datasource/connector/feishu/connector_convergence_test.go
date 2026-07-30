@@ -46,21 +46,13 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{Items: nodes},
+			Data:        wikiNodeListData{Items: nodes},
 		})
 	})
 	// Export create: ticket == obj_token so the poll below can key on it.
@@ -71,9 +63,7 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		writeJSON(w, exportTaskCreateResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Ticket string `json:"ticket"`
-			}{Ticket: body.Token},
+			Data:        exportTaskCreateData{Ticket: body.Token},
 		})
 	})
 	// Export status poll: /open-apis/drive/v1/export_tasks/<ticket>?token=<objToken>

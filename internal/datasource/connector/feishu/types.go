@@ -118,14 +118,17 @@ type tokenResponse struct {
 	Expire            int    `json:"expire"` // seconds
 }
 
+// wikiSpaceListData is the data payload of wikiSpaceListResponse.
+type wikiSpaceListData struct {
+	Items     []wikiSpace `json:"items"`
+	HasMore   bool        `json:"has_more"`
+	PageToken string      `json:"page_token"`
+}
+
 // wikiSpaceListResponse is the response for GET /open-apis/wiki/v2/spaces.
 type wikiSpaceListResponse struct {
 	apiResponse
-	Data struct {
-		Items     []wikiSpace `json:"items"`
-		HasMore   bool        `json:"has_more"`
-		PageToken string      `json:"page_token"`
-	} `json:"data"`
+	Data wikiSpaceListData `json:"data"`
 }
 
 // wikiSpace represents a Feishu Wiki space.
@@ -136,14 +139,17 @@ type wikiSpace struct {
 	Visibility  string `json:"visibility"` // "public" or "private"
 }
 
+// wikiNodeListData is the data payload of wikiNodeListResponse.
+type wikiNodeListData struct {
+	Items     []wikiNode `json:"items"`
+	HasMore   bool       `json:"has_more"`
+	PageToken string     `json:"page_token"`
+}
+
 // wikiNodeListResponse is the response for GET /open-apis/wiki/v2/spaces/:space_id/nodes.
 type wikiNodeListResponse struct {
 	apiResponse
-	Data struct {
-		Items     []wikiNode `json:"items"`
-		HasMore   bool       `json:"has_more"`
-		PageToken string     `json:"page_token"`
-	} `json:"data"`
+	Data wikiNodeListData `json:"data"`
 }
 
 // wikiNode represents a node (document or folder) in a Feishu Wiki space.
@@ -166,60 +172,81 @@ type wikiNode struct {
 	NodeEditTime   string `json:"node_edit_time"`   // node edit time (unix timestamp string) — only tracks node attribute changes
 }
 
+// wikiNodeInfoData is the data payload of wikiNodeInfoResponse.
+type wikiNodeInfoData struct {
+	Node wikiNode `json:"node"`
+}
+
 // wikiNodeInfoResponse is the response for GET /open-apis/wiki/v2/spaces/get_node.
 type wikiNodeInfoResponse struct {
 	apiResponse
-	Data struct {
-		Node wikiNode `json:"node"`
-	} `json:"data"`
+	Data wikiNodeInfoData `json:"data"`
 }
 
 // --- Export task API responses ---
+
+// docRawContentData is the data payload of docRawContentResponse.
+type docRawContentData struct {
+	Content string `json:"content"`
+}
 
 // docRawContentResponse is the response for GET /open-apis/docx/v1/documents/:document_id/raw_content.
 // Deprecated: prefer export API for full-fidelity document export.
 type docRawContentResponse struct {
 	apiResponse
-	Data struct {
-		Content string `json:"content"`
-	} `json:"data"`
+	Data docRawContentData `json:"data"`
+}
+
+// exportTaskCreateData is the data payload of exportTaskCreateResponse.
+type exportTaskCreateData struct {
+	Ticket string `json:"ticket"`
 }
 
 // exportTaskCreateResponse is the response for POST /drive/v1/export_tasks.
 type exportTaskCreateResponse struct {
 	apiResponse
-	Data struct {
-		Ticket string `json:"ticket"`
-	} `json:"data"`
+	Data exportTaskCreateData `json:"data"`
+}
+
+// exportTaskResult is the per-task result inside exportTaskStatusData.
+type exportTaskResult struct {
+	FileToken string `json:"file_token"`
+	FileSize  int64  `json:"file_size"`
+	// JobStatus: 0=success, 1=initializing, 2=processing
+	JobStatus   int    `json:"job_status"`
+	JobErrorMsg string `json:"job_error_msg"`
+	FileName    string `json:"file_name"`
+}
+
+// exportTaskStatusData is the data payload of exportTaskStatusResponse.
+type exportTaskStatusData struct {
+	Result exportTaskResult `json:"result"`
 }
 
 // exportTaskStatusResponse is the response for GET /drive/v1/export_tasks/{ticket}.
 type exportTaskStatusResponse struct {
 	apiResponse
-	Data struct {
-		Result struct {
-			FileToken string `json:"file_token"`
-			FileSize  int64  `json:"file_size"`
-			// JobStatus: 0=success, 1=initializing, 2=processing
-			JobStatus   int    `json:"job_status"`
-			JobErrorMsg string `json:"job_error_msg"`
-			FileName    string `json:"file_name"`
-		} `json:"result"`
-	} `json:"data"`
+	Data exportTaskStatusData `json:"data"`
 }
 
 // --- File download response ---
 
+// driveFileMeta is one entry of driveFileMetaData.Metas.
+type driveFileMeta struct {
+	DocToken string `json:"doc_token"`
+	DocType  string `json:"doc_type"`
+	Title    string `json:"title"`
+}
+
+// driveFileMetaData is the data payload of driveFileMetaResponse.
+type driveFileMetaData struct {
+	Metas []driveFileMeta `json:"metas"`
+}
+
 // driveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
 type driveFileMetaResponse struct {
 	apiResponse
-	Data struct {
-		Metas []struct {
-			DocToken string `json:"doc_token"`
-			DocType  string `json:"doc_type"`
-			Title    string `json:"title"`
-		} `json:"metas"`
-	} `json:"data"`
+	Data driveFileMetaData `json:"data"`
 }
 
 // feishuCursor stores incremental sync state for Feishu.
@@ -261,14 +288,28 @@ type driveShortcutInfo struct {
 	TargetType  string `json:"target_type"`
 }
 
+// driveFileListData is the data payload of driveFileListResponse.
+type driveFileListData struct {
+	Files         []driveFile `json:"files"`
+	HasMore       bool        `json:"has_more"`
+	NextPageToken string      `json:"next_page_token"`
+}
+
 // driveFileListResponse is the response for GET /open-apis/drive/v1/files.
 type driveFileListResponse struct {
 	apiResponse
-	Data struct {
-		Files         []driveFile `json:"files"`
-		HasMore       bool        `json:"has_more"`
-		NextPageToken string      `json:"next_page_token"`
-	} `json:"data"`
+	Data driveFileListData `json:"data"`
+}
+
+// driveFolderMetaData is the data payload of driveFolderMetaResponse.
+type driveFolderMetaData struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Token     string `json:"token"`
+	CreateUid string `json:"createUid"`
+	EditUid   string `json:"editUid"`
+	ParentID  string `json:"parentId"`
+	OwnUid    string `json:"ownUid"`
 }
 
 // driveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
@@ -276,15 +317,7 @@ type driveFileListResponse struct {
 // the folder's children, not the folder itself).
 type driveFolderMetaResponse struct {
 	apiResponse
-	Data struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Token     string `json:"token"`
-		CreateUid string `json:"createUid"`
-		EditUid   string `json:"editUid"`
-		ParentID  string `json:"parentId"`
-		OwnUid    string `json:"ownUid"`
-	} `json:"data"`
+	Data driveFolderMetaData `json:"data"`
 }
 
 // driveFileListFailure records a single sub-folder listing that failed during a

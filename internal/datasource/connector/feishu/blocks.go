@@ -39,15 +39,41 @@ const (
 const maxDocumentBlocks = 50000
 
 // textElement is one inline run inside a text-bearing block.
+// textRun is the text_run payload of a textElement.
+type textRun struct {
+	Content string `json:"content"`
+}
+
 type textElement struct {
-	TextRun *struct {
-		Content string `json:"content"`
-	} `json:"text_run"`
+	TextRun *textRun `json:"text_run"`
 }
 
 // blockText is the shared shape of text-bearing blocks (text, headingN, bullet…).
 type blockText struct {
 	Elements []textElement `json:"elements"`
+}
+
+// blockTokenRef is the shared shape of sheet/bitable/image block payloads
+// (the JSON tag differs per field; only the token matters).
+type blockTokenRef struct {
+	Token string `json:"token"`
+}
+
+// blockFileRef is the file block payload: the attachment token plus its name.
+type blockFileRef struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+}
+
+// blockTableProperty carries the table grid shape.
+type blockTableProperty struct {
+	ColumnSize int `json:"column_size"`
+}
+
+// blockTable is the table block payload: cell block IDs plus grid property.
+type blockTable struct {
+	Cells    []string            `json:"cells"`
+	Property *blockTableProperty `json:"property"`
 }
 
 // docxBlock is one node in the flat block array returned by the blocks API.
@@ -74,36 +100,25 @@ type docxBlock struct {
 	Todo     *blockText `json:"todo"`
 	Callout  *blockText `json:"callout"`
 
-	Sheet *struct {
-		Token string `json:"token"`
-	} `json:"sheet"`
-	Bitable *struct {
-		Token string `json:"token"`
-	} `json:"bitable"`
-	File *struct {
-		Token string `json:"token"`
-		Name  string `json:"name"`
-	} `json:"file"`
-	Image *struct {
-		Token string `json:"token"`
-	} `json:"image"`
+	Sheet   *blockTokenRef `json:"sheet"`
+	Bitable *blockTokenRef `json:"bitable"`
+	File    *blockFileRef  `json:"file"`
+	Image   *blockTokenRef `json:"image"`
 
-	Table *struct {
-		Cells    []string `json:"cells"`
-		Property *struct {
-			ColumnSize int `json:"column_size"`
-		} `json:"property"`
-	} `json:"table"`
+	Table *blockTable `json:"table"`
+}
+
+// docxBlocksData is the data payload of docxBlocksResponse.
+type docxBlocksData struct {
+	Items     []docxBlock `json:"items"`
+	HasMore   bool        `json:"has_more"`
+	PageToken string      `json:"page_token"`
 }
 
 // docxBlocksResponse is the response for GET .../documents/:id/blocks.
 type docxBlocksResponse struct {
 	apiResponse
-	Data struct {
-		Items     []docxBlock `json:"items"`
-		HasMore   bool        `json:"has_more"`
-		PageToken string      `json:"page_token"`
-	} `json:"data"`
+	Data docxBlocksData `json:"data"`
 }
 
 // ListDocumentBlocks returns every block of a docx document as a flat,
@@ -148,14 +163,20 @@ func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]d
 // is truncated and the caller annotates the omission.
 const maxTableRows = 500
 
+// sheetValueRange is the valueRange payload of sheetValuesData.
+type sheetValueRange struct {
+	Values [][]any `json:"values"`
+}
+
+// sheetValuesData is the data payload of sheetValuesResponse.
+type sheetValuesData struct {
+	ValueRange sheetValueRange `json:"valueRange"`
+}
+
 // sheetValuesResponse is the response for sheets-v2 values read.
 type sheetValuesResponse struct {
 	apiResponse
-	Data struct {
-		ValueRange struct {
-			Values [][]any `json:"values"`
-		} `json:"valueRange"`
-	} `json:"data"`
+	Data sheetValuesData `json:"data"`
 }
 
 // ReadSheetRange reads the cell values of an embedded spreadsheet block.
@@ -293,20 +314,29 @@ func bitableCellToString(v any) string {
 	}
 }
 
+// bitableFieldProperty carries a field's type-specific settings.
+type bitableFieldProperty struct {
+	// DateFormatter distinguishes a date-only column from a datetime one.
+	DateFormatter string `json:"date_formatter"`
+}
+
+// bitableField is one entry of bitableFieldsData.Items.
+type bitableField struct {
+	FieldName string                `json:"field_name"`
+	Type      int                   `json:"type"`
+	Property  *bitableFieldProperty `json:"property"`
+}
+
+// bitableFieldsData is the data payload of bitableFieldsResponse.
+type bitableFieldsData struct {
+	HasMore   bool           `json:"has_more"`
+	PageToken string         `json:"page_token"`
+	Items     []bitableField `json:"items"`
+}
+
 type bitableFieldsResponse struct {
 	apiResponse
-	Data struct {
-		HasMore   bool   `json:"has_more"`
-		PageToken string `json:"page_token"`
-		Items     []struct {
-			FieldName string `json:"field_name"`
-			Type      int    `json:"type"`
-			Property  *struct {
-				// DateFormatter distinguishes a date-only column from a datetime one.
-				DateFormatter string `json:"date_formatter"`
-			} `json:"property"`
-		} `json:"items"`
-	} `json:"data"`
+	Data bitableFieldsData `json:"data"`
 }
 
 // maxBitableFieldPageSize is the documented per-page cap for the bitable
@@ -314,15 +344,21 @@ type bitableFieldsResponse struct {
 // page_size here is rejected, so fields must be fetched 100 at a time and paged.
 const maxBitableFieldPageSize = 100
 
+// bitableRecord is one entry of bitableRecordsData.Items.
+type bitableRecord struct {
+	Fields map[string]any `json:"fields"`
+}
+
+// bitableRecordsData is the data payload of bitableRecordsResponse.
+type bitableRecordsData struct {
+	HasMore   bool            `json:"has_more"`
+	PageToken string          `json:"page_token"`
+	Items     []bitableRecord `json:"items"`
+}
+
 type bitableRecordsResponse struct {
 	apiResponse
-	Data struct {
-		HasMore   bool   `json:"has_more"`
-		PageToken string `json:"page_token"`
-		Items     []struct {
-			Fields map[string]any `json:"fields"`
-		} `json:"items"`
-	} `json:"data"`
+	Data bitableRecordsData `json:"data"`
 }
 
 // ReadBitableRecords reads an embedded bitable block as a table: a header row of

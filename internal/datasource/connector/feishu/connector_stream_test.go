@@ -24,21 +24,13 @@ func fakeFeishuFailingExport(nodes []wikiNode) (*httptest.Server, *Config) {
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{Items: nodes},
+			Data:        wikiNodeListData{Items: nodes},
 		})
 	})
 	// Export creation fails for every document.
@@ -379,21 +371,13 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{Items: nodes},
+			Data:        wikiNodeListData{Items: nodes},
 		})
 	})
 
@@ -409,9 +393,7 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 		if r.Method == http.MethodPost {
 			writeJSON(w, exportTaskCreateResponse{
 				apiResponse: apiResponse{Code: 0},
-				Data: struct {
-					Ticket string `json:"ticket"`
-				}{Ticket: "ticket-fb"},
+				Data:        exportTaskCreateData{Ticket: "ticket-fb"},
 			})
 			return
 		}
@@ -421,22 +403,8 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-fb", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, exportTaskStatusResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Result struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				} `json:"result"`
-			}{
-				Result: struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				}{
+			Data: exportTaskStatusData{
+				Result: exportTaskResult{
 					FileToken: "ft-export-fallback",
 					FileSize:  512,
 					JobStatus: 0, // done

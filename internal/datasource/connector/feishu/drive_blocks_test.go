@@ -41,11 +41,7 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 	mux.HandleFunc("/open-apis/drive/v1/files", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, driveFileListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Files         []driveFile `json:"files"`
-				HasMore       bool        `json:"has_more"`
-				NextPageToken string      `json:"next_page_token"`
-			}{Files: files},
+			Data:        driveFileListData{Files: files},
 		})
 	})
 
@@ -61,22 +57,14 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 		mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, docxBlocksResponse{
 				apiResponse: apiResponse{Code: 0},
-				Data: struct {
-					Items     []docxBlock `json:"items"`
-					HasMore   bool        `json:"has_more"`
-					PageToken string      `json:"page_token"`
-				}{Items: []docxBlock{{BlockID: "b1", BlockType: blockTypePage}}},
+				Data:        docxBlocksData{Items: []docxBlock{{BlockID: "b1", BlockType: blockTypePage}}},
 			})
 		})
 	default: // "ok"
 		mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, docxBlocksResponse{
 				apiResponse: apiResponse{Code: 0},
-				Data: struct {
-					Items     []docxBlock `json:"items"`
-					HasMore   bool        `json:"has_more"`
-					PageToken string      `json:"page_token"`
-				}{Items: blocks},
+				Data:        docxBlocksData{Items: blocks},
 			})
 		})
 	}
@@ -95,30 +83,14 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, exportTaskCreateResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Ticket string `json:"ticket"`
-			}{Ticket: "ticket-drv"},
+			Data:        exportTaskCreateData{Ticket: "ticket-drv"},
 		})
 	})
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-drv", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, exportTaskStatusResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Result struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				} `json:"result"`
-			}{
-				Result: struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				}{FileToken: "ft-export-drv", FileSize: 512, JobStatus: 0, FileName: "drive-fallback.docx"},
+			Data: exportTaskStatusData{
+				Result: exportTaskResult{FileToken: "ft-export-drv", FileSize: 512, JobStatus: 0, FileName: "drive-fallback.docx"},
 			},
 		})
 	})
@@ -136,14 +108,9 @@ func driveDocxBlocks(attToken, attName string) []docxBlock {
 	return []docxBlock{
 		{BlockID: "b1", BlockType: blockTypePage},
 		{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-			Elements: []textElement{{TextRun: &struct {
-				Content string `json:"content"`
-			}{Content: "Hello drive"}}},
+			Elements: []textElement{{TextRun: &textRun{Content: "Hello drive"}}},
 		}},
-		{BlockID: "b3", BlockType: blockTypeFile, File: &struct {
-			Token string `json:"token"`
-			Name  string `json:"name"`
-		}{Token: attToken, Name: attName}},
+		{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
 	}
 }
 
@@ -275,13 +242,9 @@ func TestDriveFetchStream_DocxImageMultimodalOff(t *testing.T) {
 	blocks := []docxBlock{
 		{BlockID: "b1", BlockType: blockTypePage},
 		{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-			Elements: []textElement{{TextRun: &struct {
-				Content string `json:"content"`
-			}{Content: "has image"}}},
+			Elements: []textElement{{TextRun: &textRun{Content: "has image"}}},
 		}},
-		{BlockID: "b3", BlockType: blockTypeImage, Image: &struct {
-			Token string `json:"token"`
-		}{Token: imgToken}},
+		{BlockID: "b3", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
 	}
 	_, cfg := fakeFeishuDriveDocx(t, []driveFile{driveDocxFile()}, driveDocxFileToken, blocks, "ok", nil)
 

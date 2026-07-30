@@ -22,25 +22,19 @@ import (
 
 // blk constructors kept local to this file to keep the fixture readable.
 func sheetBlk(id, token string) docxBlock {
-	return docxBlock{BlockID: id, BlockType: blockTypeSheet, Sheet: &struct {
-		Token string `json:"token"`
-	}{Token: token}}
+	return docxBlock{BlockID: id, BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: token}}
 }
+
 func bitableBlk(id, token string) docxBlock {
-	return docxBlock{BlockID: id, BlockType: blockTypeBitable, Bitable: &struct {
-		Token string `json:"token"`
-	}{Token: token}}
+	return docxBlock{BlockID: id, BlockType: blockTypeBitable, Bitable: &blockTokenRef{Token: token}}
 }
+
 func imageBlk(id, token string) docxBlock {
-	return docxBlock{BlockID: id, BlockType: blockTypeImage, Image: &struct {
-		Token string `json:"token"`
-	}{Token: token}}
+	return docxBlock{BlockID: id, BlockType: blockTypeImage, Image: &blockTokenRef{Token: token}}
 }
+
 func fileBlk(id, token, name string) docxBlock {
-	return docxBlock{BlockID: id, BlockType: blockTypeFile, File: &struct {
-		Token string `json:"token"`
-		Name  string `json:"name"`
-	}{Token: token, Name: name}}
+	return docxBlock{BlockID: id, BlockType: blockTypeFile, File: &blockFileRef{Token: token, Name: name}}
 }
 
 // cellBlk builds a table_cell container. A real Feishu table_cell holds no
@@ -54,41 +48,28 @@ func cellBlk(id string) docxBlock {
 func cellTextBlk(id, text string) docxBlock {
 	return docxBlock{BlockID: id + "_txt", BlockType: blockTypeText, Text: txt(text)}
 }
+
 func tableBlk(id string, cols int, cellIDs ...string) docxBlock {
 	b := docxBlock{BlockID: id, BlockType: blockTypeTable}
-	b.Table = &struct {
-		Cells    []string `json:"cells"`
-		Property *struct {
-			ColumnSize int `json:"column_size"`
-		} `json:"property"`
-	}{Cells: cellIDs}
-	b.Table.Property = &struct {
-		ColumnSize int `json:"column_size"`
-	}{ColumnSize: cols}
+	b.Table = &blockTable{Cells: cellIDs}
+	b.Table.Property = &blockTableProperty{ColumnSize: cols}
 	return b
 }
 
 // fakeFeishuGolden serves the full API surface a rich docx node needs.
 func fakeFeishuGolden(nodes []wikiNode, docToken string, blocks []docxBlock,
-	mediaByToken map[string][]byte) (*httptest.Server, *Config) {
+	mediaByToken map[string][]byte,
+) (*httptest.Server, *Config) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{apiResponse: apiResponse{Code: 0}, Data: struct {
-			Items     []wikiSpace `json:"items"`
-			HasMore   bool        `json:"has_more"`
-			PageToken string      `json:"page_token"`
-		}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}}})
+		writeJSON(w, wikiSpaceListResponse{apiResponse: apiResponse{Code: 0}, Data: wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}}})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{apiResponse: apiResponse{Code: 0}, Data: struct {
-			Items     []wikiNode `json:"items"`
-			HasMore   bool       `json:"has_more"`
-			PageToken string     `json:"page_token"`
-		}{Items: nodes}})
+		writeJSON(w, wikiNodeListResponse{apiResponse: apiResponse{Code: 0}, Data: wikiNodeListData{Items: nodes}})
 	})
 
 	// docx blocks — paginated across two pages to exercise the paging glue.
@@ -104,11 +85,7 @@ func fakeFeishuGolden(nodes []wikiNode, docToken string, blocks []docxBlock,
 		if !hasMore {
 			nextTok = ""
 		}
-		writeJSON(w, docxBlocksResponse{apiResponse: apiResponse{Code: 0}, Data: struct {
-			Items     []docxBlock `json:"items"`
-			HasMore   bool        `json:"has_more"`
-			PageToken string      `json:"page_token"`
-		}{Items: page, HasMore: hasMore, PageToken: nextTok}})
+		writeJSON(w, docxBlocksResponse{apiResponse: apiResponse{Code: 0}, Data: docxBlocksData{Items: page, HasMore: hasMore, PageToken: nextTok}})
 	})
 
 	// sheets-v2 values: sht_spread_0 → spreadsheet "sht_spread", sheet "0".

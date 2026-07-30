@@ -9,9 +9,7 @@ import (
 
 // txt builds a text-bearing blockText from plain content.
 func txt(s string) *blockText {
-	return &blockText{Elements: []textElement{{TextRun: &struct {
-		Content string `json:"content"`
-	}{Content: s}}}}
+	return &blockText{Elements: []textElement{{TextRun: &textRun{Content: s}}}}
 }
 
 type fakeReader struct {
@@ -26,6 +24,7 @@ type fakeReader struct {
 func (f fakeReader) ReadSheetRange(_ context.Context, _ string) ([][]string, bool, error) {
 	return f.sheet, f.sheetTruncated, f.sheetErr
 }
+
 func (f fakeReader) ReadBitableRecords(_ context.Context, _ string) ([][]string, bool, error) {
 	return f.bitable, f.bitableTruncated, f.bitableErr
 }
@@ -33,16 +32,9 @@ func (f fakeReader) ReadBitableRecords(_ context.Context, _ string) ([][]string,
 func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	blocks := []docxBlock{
 		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &struct {
-			Token string `json:"token"`
-		}{Token: "sht_a_0"}},
-		{BlockID: "img", BlockType: blockTypeImage, Image: &struct {
-			Token string `json:"token"`
-		}{Token: "img_t"}},
-		{BlockID: "f", BlockType: blockTypeFile, File: &struct {
-			Token string `json:"token"`
-			Name  string `json:"name"`
-		}{Token: "file_t", Name: "报表.pdf"}},
+		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
+		{BlockID: "img", BlockType: blockTypeImage, Image: &blockTokenRef{Token: "img_t"}},
+		{BlockID: "f", BlockType: blockTypeFile, File: &blockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
 	md, atts, err := blocksToMarkdown(context.Background(), fr, blocks)
@@ -69,9 +61,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 	blocks := []docxBlock{
 		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &struct {
-			Token string `json:"token"`
-		}{Token: "sht_a_0"}},
+		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
 	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
@@ -86,9 +76,7 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 	blocks := []docxBlock{
 		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &struct {
-			Token string `json:"token"`
-		}{Token: "sht_a_0"}},
+		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
 	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
@@ -104,9 +92,7 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 	mk := func(fr fakeReader) string {
 		blocks := []docxBlock{
 			{BlockID: "root", BlockType: blockTypePage},
-			{BlockID: "bt", BlockType: blockTypeBitable, Bitable: &struct {
-				Token string `json:"token"`
-			}{Token: "bascabc_tblxyz"}},
+			{BlockID: "bt", BlockType: blockTypeBitable, Bitable: &blockTokenRef{Token: "bascabc_tblxyz"}},
 		}
 		md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 		if err != nil {
@@ -159,10 +145,7 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 		{BlockID: "root", BlockType: blockTypePage},
 		tableBlk("t", 1, "c1"),
 		{BlockID: "c1", BlockType: blockTypeTableCell, Children: []string{"f1"}},
-		{BlockID: "f1", BlockType: blockTypeFile, File: &struct {
-			Token string `json:"token"`
-			Name  string `json:"name"`
-		}{Token: "tok-in-cell", Name: "内嵌.pdf"}},
+		{BlockID: "f1", BlockType: blockTypeFile, File: &blockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
 	_, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
@@ -222,12 +205,7 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 	blocks := []docxBlock{
 		{BlockID: "root", BlockType: blockTypePage},
 		// tableBlk sets Property (renderable); here we want an UNrenderable one.
-		{BlockID: "t", BlockType: blockTypeTable, Table: &struct {
-			Cells    []string `json:"cells"`
-			Property *struct {
-				ColumnSize int `json:"column_size"`
-			} `json:"property"`
-		}{Cells: []string{"c1"}}},
+		{BlockID: "t", BlockType: blockTypeTable, Table: &blockTable{Cells: []string{"c1"}}},
 		{BlockID: "c1", BlockType: blockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}

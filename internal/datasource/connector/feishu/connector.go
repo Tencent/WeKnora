@@ -162,197 +162,43 @@ func (c *Connector) ResolveResourceAncestors(
 }
 
 // FetchAll performs a full sync of all documents from the specified wiki spaces.
+// Defensive fallback path - the service prefers FetchStream when the connector
+// implements StreamingConnector.
 func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
 	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-
 	client := NewClient(feishuConfig)
-
-	var allItems []types.FetchedItem
-
-	for _, resourceID := range resourceIDs {
-		spaceID, nodeToken := parseWikiResourceID(resourceID)
-		// List all nodes in this wiki space or selected node subtree recursively
-		nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
-		if err != nil {
-			var partialErr *partialWikiNodeListError
-			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
-			}
-			allItems = appendWikiNodeListFailureItems(allItems, spaceID, resourceID, partialErr.Failures)
-		}
-
-		// Fetch content for each document node, tallying outcomes so a single
-		// summary line explains where every discovered node went.
-		tally := newFetchTally(len(nodes))
-		for i, node := range nodes {
-			items, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
-			if err != nil {
-				tally.fail()
-				// Log error but continue with other nodes
-				allItems = append(allItems, types.FetchedItem{
-					ExternalID:       node.NodeToken,
-					Title:            node.Title,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(err, nil),
-				})
-				continue
-			}
-			if len(items) > 0 {
-				tally.fetch()
-				for _, it := range items {
-					allItems = append(allItems, *it)
-				}
-			} else {
-				// Unsupported obj_type (mindnote/slides/…): skipped with no item.
-				tally.skip(node.ObjType)
-			}
-			if n := i + 1; n%100 == 0 {
-				logger.Infof(ctx, "[Feishu] sync progress resource=%s %d/%d (%s)",
-					resourceID, n, len(nodes), tally.summary())
-			}
-		}
-		logger.Infof(ctx, "[Feishu] sync summary resource=%s %s", resourceID, tally.summary())
-	}
-
-	return allItems, nil
+	return FetchAllEngine(ctx, client, config, resourceIDs, wikiOps{region: c.region})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
-// against the previously recorded state.
+// against the previously recorded state. Defensive fallback path - the service
+// prefers FetchStream. Routed through the same engine, so the #2136
+// failure-doesn't-advance-cursor semantics apply here too (previously this path
+// advanced the cursor before fetching, a latent #2136 bug).
 func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
 	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	client := NewClient(feishuConfig)
-
-	// Parse the previous cursor state
-	var prevCursor feishuCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		cursorBytes, _ := json.Marshal(cursor.ConnectorCursor)
-		_ = json.Unmarshal(cursorBytes, &prevCursor)
+	ops := wikiOps{region: c.region}
+	if len(config.ResourceIDs) == 0 {
+		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
-
-	// Build new cursor to track current state
-	newCursor := feishuCursor{
-		LastSyncTime:   time.Now(),
-		SpaceNodeTimes: make(map[string]map[string]string),
-	}
-
-	var changedItems []types.FetchedItem
-
-	// Get resource IDs from config
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
-		return nil, nil, fmt.Errorf("no resource IDs (wiki space IDs or wiki node IDs) configured")
-	}
-
-	for _, resourceID := range resourceIDs {
-		spaceID, nodeToken := parseWikiResourceID(resourceID)
-		// List all nodes in this wiki space or selected node subtree
-		nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
-		var partialErr *partialWikiNodeListError
-		if err != nil {
-			if !errors.As(err, &partialErr) {
-				return nil, nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
-			}
-			changedItems = appendWikiNodeListFailureItems(changedItems, spaceID, resourceID, partialErr.Failures)
-		}
-
-		newCursor.SpaceNodeTimes[resourceID] = make(map[string]string)
-		if partialErr != nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-				for nodeToken, editTime := range prevTimes {
-					newCursor.SpaceNodeTimes[resourceID][nodeToken] = editTime
-				}
-			}
-		}
-
-		// Build a set of current node tokens for deletion detection
-		currentNodes := make(map[string]bool)
-
-		for _, node := range nodes {
-			currentNodes[node.NodeToken] = true
-			// Use ObjEditTime (document content edit time) for change detection,
-			// NOT NodeEditTime which only tracks node attribute changes (title, position).
-			editTimeStr := node.ObjEditTime
-			if editTimeStr == "" {
-				editTimeStr = node.NodeEditTime // fallback for nodes that don't have obj_edit_time
-			}
-			newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = editTimeStr
-
-			// Check if node has changed since last sync
-			if prevCursor.SpaceNodeTimes != nil {
-				if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-					if prevEditTime, exists := prevTimes[node.NodeToken]; exists {
-						if prevEditTime == editTimeStr {
-							// Node unchanged, skip
-							continue
-						}
-					}
-				}
-			}
-
-			// Node is new or changed — fetch its content
-			fetchedItems, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
-			if err != nil {
-				// Record failed items
-				changedItems = append(changedItems, types.FetchedItem{
-					ExternalID:       node.NodeToken,
-					Title:            node.Title,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(err, nil),
-				})
-				continue
-			}
-			for _, it := range fetchedItems {
-				changedItems = append(changedItems, *it)
-			}
-		}
-
-		// Detect deleted nodes
-		if partialErr == nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-				for nodeToken := range prevTimes {
-					if !currentNodes[nodeToken] {
-						// Node was deleted
-						changedItems = append(changedItems, types.FetchedItem{
-							ExternalID:       nodeToken,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// Build next sync cursor
-	nextCursorMap := make(map[string]interface{})
-	cursorBytes, _ := json.Marshal(newCursor)
-	_ = json.Unmarshal(cursorBytes, &nextCursorMap)
-
-	nextSyncCursor := &types.SyncCursor{
-		LastSyncTime:    time.Now(),
-		ConnectorCursor: nextCursorMap,
-	}
-
-	return changedItems, nextSyncCursor, nil
+	return FetchIncrementalEngine(ctx, client, config, cursor, ops)
 }
 
 // FetchStream performs a resumable, memory-bounded sync. It unifies the full
 // and incremental paths: with cursor == nil it fetches everything, and with a
-// cursor it skips nodes whose recorded edit time is unchanged — the same
+// cursor it skips nodes whose recorded edit time is unchanged - the same
 // mechanism that lets a sync which timed out mid-traversal resume from the last
 // checkpoint instead of restarting (Tencent/WeKnora#2136).
 //
-// Instead of accumulating every item in memory (FetchAll), it Emits each item
-// as it is fetched and Checkpoints the cursor every feishuStreamCheckpointInterval
-// processed nodes, so progress is durable across the Asynq task's 2h timeout.
+// The per-node loop lives in the shared engine (engine.go); this shell only
+// wires the wiki NodeOps adapter.
 func (c *Connector) FetchStream(
 	ctx context.Context, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler,
@@ -362,158 +208,82 @@ func (c *Connector) FetchStream(
 		return nil, err
 	}
 	client := NewClient(feishuConfig)
-
-	var prevCursor feishuCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		cursorBytes, _ := json.Marshal(cursor.ConnectorCursor)
-		_ = json.Unmarshal(cursorBytes, &prevCursor)
+	ops := wikiOps{region: c.region}
+	if len(config.ResourceIDs) == 0 {
+		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
-
-	newCursor := feishuCursor{
-		LastSyncTime:   time.Now(),
-		SpaceNodeTimes: make(map[string]map[string]string),
-	}
-
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
-		return nil, fmt.Errorf("no resource IDs (wiki space IDs or wiki node IDs) configured")
-	}
-
-	processed := 0
-	lastCheckpoint := time.Now()
-	for _, resourceID := range resourceIDs {
-		spaceID, nodeToken := parseWikiResourceID(resourceID)
-		nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
-		var partialErr *partialWikiNodeListError
-		if err != nil {
-			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
-			}
-			for _, item := range appendWikiNodeListFailureItems(nil, spaceID, resourceID, partialErr.Failures) {
-				if eerr := h.Emit(ctx, item); eerr != nil {
-					return nil, eerr
-				}
-			}
-		}
-
-		newCursor.SpaceNodeTimes[resourceID] = make(map[string]string)
-		// On a partial listing, carry prior edit times forward so a later full
-		// listing can still detect changes and deletions.
-		if partialErr != nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-				for tok, et := range prevTimes {
-					newCursor.SpaceNodeTimes[resourceID][tok] = et
-				}
-			}
-		}
-
-		currentNodes := make(map[string]bool)
-		tally := newFetchTally(len(nodes))
-		for i, node := range nodes {
-			currentNodes[node.NodeToken] = true
-			editTimeStr := node.ObjEditTime
-			if editTimeStr == "" {
-				editTimeStr = node.NodeEditTime
-			}
-
-			// Prior recorded edit time for this node, if any.
-			var prevEdit string
-			var hadPrev bool
-			if prevCursor.SpaceNodeTimes != nil {
-				if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-					prevEdit, hadPrev = prevTimes[node.NodeToken]
-				}
-			}
-
-			// Resume/incremental fast-path: a node recorded at its current edit
-			// time is unchanged (or already synced this run) — keep the record
-			// and skip re-fetching.
-			if hadPrev && prevEdit == editTimeStr {
-				newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = editTimeStr
-				continue
-			}
-
-			items, ferr := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
-			if ferr != nil {
-				tally.fail()
-				// Do NOT advance the cursor: the content was never fetched.
-				// Retain the prior edit time (if any) so prev != current next
-				// run and the node is retried, instead of being permanently
-				// skipped on a transient export failure (Tencent/WeKnora#2136).
-				if hadPrev {
-					newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = prevEdit
-				}
-				if eerr := h.Emit(ctx, types.FetchedItem{
-					ExternalID:       node.NodeToken,
-					Title:            node.Title,
-					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(ferr, nil),
-				}); eerr != nil {
-					return nil, eerr
-				}
-			} else {
-				// Fetched, or an unsupported obj_type (nothing to fetch): record
-				// the current edit time so the node is not re-processed next run.
-				newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = editTimeStr
-				if len(items) > 0 {
-					tally.fetch()
-					for _, it := range items {
-						if eerr := h.Emit(ctx, *it); eerr != nil {
-							return nil, eerr
-						}
-					}
-				} else {
-					// Unsupported obj_type (mindnote/slides/…): no item.
-					tally.skip(node.ObjType)
-				}
-			}
-
-			processed++
-			if processed%feishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= feishuStreamCheckpointMaxInterval {
-				if cerr := h.Checkpoint(ctx, newCursor.toSyncCursor()); cerr != nil {
-					logger.Warnf(ctx, "[Feishu] stream checkpoint failed: %v", cerr)
-				}
-				lastCheckpoint = time.Now()
-			}
-			if n := i + 1; n%100 == 0 {
-				logger.Infof(ctx, "[Feishu] stream progress resource=%s %d/%d (%s)",
-					resourceID, n, len(nodes), tally.summary())
-			}
-		}
-
-		// Detect deleted nodes (only when the full tree was listed successfully).
-		if partialErr == nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
-				for tok := range prevTimes {
-					if !currentNodes[tok] {
-						if eerr := h.Emit(ctx, types.FetchedItem{
-							ExternalID:       tok,
-							IsDeleted:        true,
-							SourceResourceID: resourceID,
-						}); eerr != nil {
-							return nil, eerr
-						}
-					}
-				}
-			}
-		}
-		logger.Infof(ctx, "[Feishu] stream summary resource=%s %s", resourceID, tally.summary())
-	}
-
-	return newCursor.toSyncCursor(), nil
+	return FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
-// toSyncCursor converts the connector-specific feishuCursor into the generic
-// SyncCursor persisted by the service. It marshals through JSON so the returned
-// value is a snapshot, decoupled from later mutation of the connector's maps.
-func (fc feishuCursor) toSyncCursor() *types.SyncCursor {
-	m := make(map[string]interface{})
-	cursorBytes, _ := json.Marshal(fc)
-	_ = json.Unmarshal(cursorBytes, &m)
-	return &types.SyncCursor{
-		LastSyncTime:    fc.LastSyncTime,
-		ConnectorCursor: m,
+// wikiOps adapts the wiki Connector to the generic sync engine. It carries the
+// region (for URL rendering) and encodes/decodes the wiki cursor wire format
+// (feishuCursor / space_node_times) so the engine can stay format-agnostic.
+type wikiOps struct {
+	region Region
+}
+
+func (o wikiOps) List(ctx context.Context, client *Client, resourceID string) ([]wikiNode, error, error) {
+	spaceID, nodeToken := parseWikiResourceID(resourceID)
+	nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
+	if err == nil {
+		return nodes, nil, nil
 	}
+	var partial *partialWikiNodeListError
+	if errors.As(err, &partial) {
+		// Partial listing: nodes are still usable; the failed sub-trees are
+		// surfaced via ListFailureItems, and the sync continues.
+		return nodes, err, nil
+	}
+	return nodes, nil, err
+}
+
+func (o wikiOps) Token(n wikiNode) string   { return n.NodeToken }
+func (o wikiOps) Title(n wikiNode) string   { return n.Title }
+func (o wikiOps) ObjType(n wikiNode) string { return n.ObjType }
+
+// EditTime is the change-detection timestamp: ObjEditTime (document content)
+// with a NodeEditTime fallback for nodes that lack obj_edit_time. This drives
+// the cursor comparison, NOT FetchedItem.UpdatedAt (which uses NodeEditTime).
+func (o wikiOps) EditTime(n wikiNode) string {
+	if n.ObjEditTime != "" {
+		return n.ObjEditTime
+	}
+	return n.NodeEditTime
+}
+
+func (o wikiOps) Fetch(ctx context.Context, client *Client, n wikiNode, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+	spaceID, _ := parseWikiResourceID(resourceID)
+	return fetchNodeContent(ctx, client, n, spaceID, resourceID, multimodal, o.region)
+}
+
+func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
+	spaceID, _ := parseWikiResourceID(resourceID)
+	var pe *partialWikiNodeListError
+	if errors.As(partial, &pe) {
+		return appendWikiNodeListFailureItems(nil, spaceID, resourceID, pe.Failures)
+	}
+	return nil
+}
+
+func (o wikiOps) ResourceNoun() string { return "nodes" }
+func (o wikiOps) EmptyResourceIDsError() string {
+	return "no resource IDs (wiki space IDs or wiki node IDs) configured"
+}
+func (o wikiOps) LogTag() string { return "[Feishu]" }
+
+func (o wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
+	var prev feishuCursor
+	b, _ := json.Marshal(m)
+	_ = json.Unmarshal(b, &prev)
+	return prev.SpaceNodeTimes
+}
+
+func (o wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
+	fc := feishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
+	m := make(map[string]interface{})
+	b, _ := json.Marshal(fc)
+	_ = json.Unmarshal(b, &m)
+	return &types.SyncCursor{LastSyncTime: lastSync, ConnectorCursor: m}
 }
 
 func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []wikiNodeListFailure) []types.FetchedItem {
@@ -547,7 +317,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → skip (no API)
 //   - slides     → skip (no API)
-func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string, multimodalEnabled bool) ([]*types.FetchedItem, error) {
+func fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string, multimodalEnabled bool, region Region) ([]*types.FetchedItem, error) {
 	if !isSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -569,20 +339,20 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 			docToken:          node.NodeToken,
 			objToken:          node.ObjToken,
 			title:             node.Title,
-			url:               c.region.wikiURL(node.NodeToken),
+			url:               region.wikiURL(node.NodeToken),
 			resourceID:        resourceID,
 			editTime:          editTime,
 			baseMeta:          baseMeta,
 			multimodalEnabled: multimodalEnabled,
 		})
 	case "doc", "sheet", "bitable":
-		item, err := c.fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta)
+		item, err := fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta, region)
 		if err != nil {
 			return nil, err
 		}
 		return []*types.FetchedItem{item}, nil
 	case "file":
-		item, err := c.fetchDriveFile(ctx, client, node, resourceID, editTime, baseMeta)
+		item, err := fetchDriveFile(ctx, client, node, resourceID, editTime, baseMeta, region)
 		if err != nil {
 			return nil, err
 		}
@@ -594,7 +364,7 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 
 // fetchViaExport exports a doc/sheet/bitable node via the async export API and
 // returns a single FetchedItem containing the exported binary.
-func (c *Connector) fetchViaExport(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string) (*types.FetchedItem, error) {
+func fetchViaExport(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region Region) (*types.FetchedItem, error) {
 	// Export as a file via the async export API
 	data, fileName, err := client.ExportAndDownload(ctx, node.ObjToken, node.ObjType)
 	if err != nil {
@@ -606,7 +376,7 @@ func (c *Connector) fetchViaExport(ctx context.Context, client *Client, node wik
 	if fileName == "" {
 		fileName = sanitizeFileName(node.Title) + ext
 	} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
-		// Feishu often returns the doc title without extension — append it
+		// Feishu often returns the doc title without extension - append it
 		fileName = sanitizeFileName(fileName) + ext
 	}
 
@@ -616,7 +386,7 @@ func (c *Connector) fetchViaExport(ctx context.Context, client *Client, node wik
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
-		URL:              c.region.wikiURL(node.NodeToken),
+		URL:              region.wikiURL(node.NodeToken),
 		UpdatedAt:        editTime,
 		SourceResourceID: resourceID,
 		Metadata:         baseMeta,
@@ -625,7 +395,7 @@ func (c *Connector) fetchViaExport(ctx context.Context, client *Client, node wik
 
 // fetchDriveFile downloads an original uploaded file from Drive and returns a
 // single FetchedItem containing the raw bytes.
-func (c *Connector) fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string) (*types.FetchedItem, error) {
+func fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region Region) (*types.FetchedItem, error) {
 	// Download the original uploaded file from Drive
 	data, err := client.DownloadDriveFile(ctx, node.ObjToken)
 	if err != nil {
@@ -644,7 +414,7 @@ func (c *Connector) fetchDriveFile(ctx context.Context, client *Client, node wik
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
-		URL:              c.region.wikiURL(node.NodeToken),
+		URL:              region.wikiURL(node.NodeToken),
 		UpdatedAt:        editTime,
 		SourceResourceID: resourceID,
 		Metadata:         baseMeta,

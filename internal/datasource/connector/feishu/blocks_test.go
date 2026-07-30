@@ -209,12 +209,14 @@ func TestReadBitableRecords_DateColumnUsesFormatterAndTimezone(t *testing.T) {
 				"items": []map[string]any{
 					{"field_name": "截止日期", "type": 5, "property": map[string]any{"date_formatter": "yyyy/MM/dd"}},
 					{"field_name": "提醒时间", "type": 5, "property": map[string]any{"date_formatter": "yyyy-MM-dd HH:mm"}},
-				}}})
+				},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 				"has_more": false, "items": []map[string]any{
 					{"fields": map[string]any{"截止日期": float64(1711900800000), "提醒时间": float64(1719802800000)}},
-				}}})
+				},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -242,7 +244,8 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "任务"}, {"field_name": "状态"}}}})
+				"items": []map[string]any{{"field_name": "任务"}, {"field_name": "状态"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			// Must use the current Search-records endpoint (POST), not the
 			// deprecated GET .../records legacy interface.
@@ -256,7 +259,8 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 				"has_more": false,
 				"items": []map[string]any{
 					{"fields": map[string]any{"任务": "写文档", "状态": "进行中"}},
-				}}})
+				},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -305,10 +309,12 @@ func TestReadBitableRecords_PaginatesFieldsAtMax100(t *testing.T) {
 				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": items, "has_more": hasMore, "page_token": nextTok}})
+				"items": items, "has_more": hasMore, "page_token": nextTok,
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": []map[string]any{}}})
+				"has_more": false, "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -352,17 +358,20 @@ func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			if tok := r.URL.Query().Get("page_token"); tok == "" {
 				// Page 1: 300 records, more to come.
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-					"has_more": true, "page_token": "r2", "items": bitableRows(300)}})
+					"has_more": true, "page_token": "r2", "items": bitableRows(300),
+				}})
 			} else {
 				secondPageToken = tok
 				// Page 2: 250 more → 550 total, capped to maxTableRows.
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-					"has_more": false, "items": bitableRows(250)}})
+					"has_more": false, "items": bitableRows(250),
+				}})
 			}
 		}
 	}))
@@ -393,10 +402,12 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": bitableRows(maxTableRows)}})
+				"has_more": false, "items": bitableRows(maxTableRows),
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -427,11 +438,13 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"items": []map[string]any{{"field_name": "col"}}}})
+				"items": []map[string]any{{"field_name": "col"}},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			recordCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -462,10 +475,12 @@ func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/fields"):
 			fieldCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": []map[string]any{}}})
+				"has_more": false, "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()
@@ -491,7 +506,8 @@ func TestListDocumentBlocks_EmptyPageTerminates(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/blocks"):
 			blockCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": true, "page_token": "loop", "items": []map[string]any{}}})
+				"has_more": true, "page_token": "loop", "items": []map[string]any{},
+			}})
 		}
 	}))
 	defer srv.Close()

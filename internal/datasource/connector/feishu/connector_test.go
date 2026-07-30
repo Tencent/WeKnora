@@ -47,11 +47,7 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: wikiSpaceListData{
 				Items: []wikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
@@ -63,11 +59,7 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{
+			Data: wikiNodeListData{
 				Items: nodes,
 			},
 		})
@@ -78,31 +70,15 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 		if r.Method == http.MethodPost {
 			writeJSON(w, exportTaskCreateResponse{
 				apiResponse: apiResponse{Code: 0},
-				Data: struct {
-					Ticket string `json:"ticket"`
-				}{Ticket: "ticket-123"},
+				Data:        exportTaskCreateData{Ticket: "ticket-123"},
 			})
 			return
 		}
 		// GET /open-apis/drive/v1/export_tasks/ticket-123
 		writeJSON(w, exportTaskStatusResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Result struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				} `json:"result"`
-			}{
-				Result: struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				}{
+			Data: exportTaskStatusData{
+				Result: exportTaskResult{
 					FileToken: "ft-abc",
 					FileSize:  100,
 					JobStatus: 0, // success
@@ -116,22 +92,8 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-123", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, exportTaskStatusResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Result struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				} `json:"result"`
-			}{
-				Result: struct {
-					FileToken   string `json:"file_token"`
-					FileSize    int64  `json:"file_size"`
-					JobStatus   int    `json:"job_status"`
-					JobErrorMsg string `json:"job_error_msg"`
-					FileName    string `json:"file_name"`
-				}{
+			Data: exportTaskStatusData{
+				Result: exportTaskResult{
 					FileToken: "ft-abc",
 					FileSize:  100,
 					JobStatus: 0,
@@ -198,11 +160,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: wikiSpaceListData{
 				Items: []wikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
@@ -231,11 +189,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		}
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{
+			Data: wikiNodeListData{
 				Items: nodes,
 			},
 		})
@@ -252,9 +206,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		}
 		writeJSON(w, wikiNodeInfoResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Node wikiNode `json:"node"`
-			}{Node: node},
+			Data:        wikiNodeInfoData{Node: node},
 		})
 	})
 
@@ -815,7 +767,7 @@ func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"sync summary",
+		"stream summary",
 		"discovered=3",
 		"fetched=1",
 		"skipped_unsupported=2",
@@ -1290,21 +1242,13 @@ func fakeFeishuWithBlocks(nodes []wikiNode, docToken, attToken, attName string, 
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{Items: nodes},
+			Data:        wikiNodeListData{Items: nodes},
 		})
 	})
 
@@ -1313,22 +1257,13 @@ func fakeFeishuWithBlocks(nodes []wikiNode, docToken, attToken, attName string, 
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, docxBlocksResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []docxBlock `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: docxBlocksData{
 				Items: []docxBlock{
 					{BlockID: "b1", BlockType: blockTypePage},
 					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &struct {
-							Content string `json:"content"`
-						}{Content: "Hello blocks"}}},
+						Elements: []textElement{{TextRun: &textRun{Content: "Hello blocks"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeFile, File: &struct {
-						Token string `json:"token"`
-						Name  string `json:"name"`
-					}{Token: attToken, Name: attName}},
+					{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
 				},
 			},
 		})
@@ -1424,21 +1359,13 @@ func fakeFeishuWithBlocksAndDownloadStatus(nodes []wikiNode, docToken, attToken,
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiSpaceListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiSpace `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []wikiNode `json:"items"`
-				HasMore   bool       `json:"has_more"`
-				PageToken string     `json:"page_token"`
-			}{Items: nodes},
+			Data:        wikiNodeListData{Items: nodes},
 		})
 	})
 
@@ -1447,22 +1374,13 @@ func fakeFeishuWithBlocksAndDownloadStatus(nodes []wikiNode, docToken, attToken,
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, docxBlocksResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []docxBlock `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: docxBlocksData{
 				Items: []docxBlock{
 					{BlockID: "b1", BlockType: blockTypePage},
 					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &struct {
-							Content string `json:"content"`
-						}{Content: "Hello"}}},
+						Elements: []textElement{{TextRun: &textRun{Content: "Hello"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeFile, File: &struct {
-						Token string `json:"token"`
-						Name  string `json:"name"`
-					}{Token: attToken, Name: attName}},
+					{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
 				},
 			},
 		})
@@ -1591,21 +1509,13 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, docxBlocksResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []docxBlock `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: docxBlocksData{
 				Items: []docxBlock{
 					{BlockID: "b1", BlockType: blockTypePage},
 					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &struct {
-							Content string `json:"content"`
-						}{Content: "Hello"}}},
+						Elements: []textElement{{TextRun: &textRun{Content: "Hello"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeImage, Image: &struct {
-						Token string `json:"token"`
-					}{Token: imgToken}},
+					{BlockID: "b3", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
 				},
 			},
 		})
@@ -1724,16 +1634,10 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, docxBlocksResponse{
 			apiResponse: apiResponse{Code: 0},
-			Data: struct {
-				Items     []docxBlock `json:"items"`
-				HasMore   bool        `json:"has_more"`
-				PageToken string      `json:"page_token"`
-			}{
+			Data: docxBlocksData{
 				Items: []docxBlock{
 					{BlockID: "b1", BlockType: blockTypePage},
-					{BlockID: "b2", BlockType: blockTypeImage, Image: &struct {
-						Token string `json:"token"`
-					}{Token: imgToken}},
+					{BlockID: "b2", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
 				},
 			},
 		})
