@@ -1,21 +1,23 @@
 # PR #1977 verification evidence
 
-This folder contains PR-local visual evidence for the final validation pass of
-`codex/issue-1679-content-cache`.
+Final HEAD: `HEAD (this commit)`
+
+Latest official main: `f7ef782d585f149613b0e443e8575689bb2d3ab9`
+
+Merge-base after merge: `f7ef782d585f149613b0e443e8575689bb2d3ab9`
+
+Branch: `codex/issue-1679-content-cache`
 
 ## Assets
 
-- `status.png` — final status snapshot for the audited implementation commit.
-- `verification-matrix.png` — command/result matrix for the validation run.
-- `cache-flow.gif` — short visual summary of the cache hit/miss and invalidation flow.
-- `cache-flow-final.png` — final frame of the GIF for static renderers.
+- `status.png` - final status snapshot for the current implementation.
+- `verification-matrix.png` - current command/result matrix for this validation pass.
+- `cache-flow.gif` - visual summary of cache reuse, invalidation, stale cleanup, and attempt fences.
+- `cache-flow-final.png` - final GIF frame for static renderers.
 
 ## Validation environment
 
-All Go build/test cache, module cache, temporary files, and CGO artifacts were kept
-on `D:\agent` because the default `C:` drive was space-constrained.
-
-Key local settings used for the successful validation pass:
+All Go build/test cache, module cache, temporary files, and CGO artifacts were kept on `D:\agent`.
 
 - Go: `D:\agent\tools\go`
 - GCC: `D:\agent\tools\winlibs-gcc-16.1.0-ucrt\bin`
@@ -27,20 +29,15 @@ Key local settings used for the successful validation pass:
 - CGO: `CGO_ENABLED=1`, `CC=gcc`, `CXX=g++`
 - SQLite headers: `D:\agent\tools\sqlite-headers-1977`
 
-## Commands represented by the evidence
+## Current verification
 
-- `go test ./internal/application/service/...`
-- `go test ./internal/models/... ./internal/contentcache ./internal/types`
-- `go test -race ./internal/models/embedding ./internal/contentcache`
-- `go test -race ./internal/application/service -run "TestReparseKnowledgeContentCache|TestReparseKnowledgeCache|TestEmbeddingCache"`
-- `go test ./cmd/server`
-- `go test ./internal/container`
-- `go test ./internal/application/repository/retriever/sqlite`
-- `go test ./internal/agent/tools`
-- `git diff --check`
+- `go test ./internal/contentcache ./internal/application/repository/retriever/sqlite ./internal/application/repository/retriever/postgres -run 'Test(StableChunkID|CacheKeys|SQLite|Postgres)' -count=1` - PASS
+- `go test ./internal/application/service -run 'Test(NextStableChunkID|MultimodalPendingKey|StableGeneratedQuestionID|GraphExtractCache|WikiMapCache|UpsertStableChunks|CollectReparse|DeleteReparse|KnowledgePostProcessSkipsSupersededAttempt|EnqueueImageMultimodalTasks|ImageMultimodalFinalizeFallbacks)' -count=1` - PASS
+- `go test ./internal/models/embedding -run 'TestCachedEmbedder(ReusesRedisCacheAcrossWrapperRebuild|InvalidatesOnConcreteModelMetadata|SingleflightsConcurrentMissSet|SingleflightsConcurrentBatchMissSet)' -count=1` - PASS
+- `go test ./internal/contentcache ./internal/models/embedding ./internal/application/repository/retriever/sqlite ./internal/application/repository/retriever/postgres ./internal/application/service -run '^$' -count=1` - PASS
+- `git diff --check` - PASS
+- `git diff --cached --check` - PASS
 
-The wider `go test ./internal/...` sweep was attempted after the D-drive CGO fix
-but exceeded the local execution window. The remaining isolated failures were in
-pre-existing Windows/local-environment paths outside the PR #1977 content-cache
-production path: Feishu/Notion connector fixtures and SSRF-localhost behavior,
-docparser localhost-image SSRF behavior, and sandbox Python execution on Windows.
+## Not run
+
+Per task scope, known unrelated Feishu fixture, Notion/docparser localhost SSRF, and Windows sandbox/Python failure paths were not rerun.
