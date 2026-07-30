@@ -464,6 +464,7 @@ onBeforeUnmount(stopPolling)
   &--feishu .ds-card__badge,
   &--notion .ds-card__badge,
   &--yuque .ds-card__badge,
+  &--dingtalk .ds-card__badge,
   &--rss .ds-card__badge {
     background: var(--td-bg-color-container, #fff);
     box-shadow: inset 0 0 0 1px var(--td-component-stroke);

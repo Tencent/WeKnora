@@ -2,6 +2,7 @@ import feishuIcon from '@/assets/img/datasource-feishu.ico'
 import larkIcon from '@/assets/img/datasource-lark.svg'
 import notionIcon from '@/assets/img/datasource-notion.ico'
 import yuqueIcon from '@/assets/img/datasource-yuque.ico'
+import dingtalkIcon from '@/assets/img/datasource-dingtalk.svg'
 import rssIcon from '@/assets/img/datasource-rss.svg'
 
 export const datasourceIconMap: Record<string, string> = {
@@ -9,6 +10,7 @@ export const datasourceIconMap: Record<string, string> = {
   lark: larkIcon,
   notion: notionIcon,
   yuque: yuqueIcon,
+  dingtalk: dingtalkIcon,
   rss: rssIcon,
 }
 
