@@ -56,6 +56,10 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// SharedAgentReadOnly prevents a shared agent from mutating resources in
+	// its source workspace. It is set from the verified share relation, never
+	// inferred from a client-provided tenant ID.
+	SharedAgentReadOnly bool `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 

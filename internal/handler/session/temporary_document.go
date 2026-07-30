@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -40,10 +41,16 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	}
 	defer file.Close()
 
-	agent, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"))
+	sourceTenantID, _ := strconv.ParseUint(strings.TrimSpace(c.PostForm("agent_source_tenant_id")), 10, 64)
+	agent, resourceTenantID, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"), sourceTenantID)
+	if sourceTenantID != 0 && agent == nil {
+		c.Error(apperrors.NewNotFoundError("Shared agent not found"))
+		return
+	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), ".")
 	options := types.TemporaryDocumentCreateOptions{ParserEngine: strings.TrimSpace(c.PostForm("parser_engine"))}
 	if agent != nil {
+		options.ResourceTenantID = resourceTenantID
 		if len(agent.Config.SupportedFileTypes) > 0 && !containsFileType(agent.Config.SupportedFileTypes, ext) {
 			c.Error(apperrors.NewBadRequestError("file type is not supported by this agent"))
 			return
