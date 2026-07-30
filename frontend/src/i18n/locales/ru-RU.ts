@@ -3503,6 +3503,8 @@ export default {
         createdAt: 'Время',
       },
       status: {
+        high_quality: 'Высокое качество',
+        low_quality: 'Низкое качество',
         normal: 'Нормальный',
         pending_optimization: 'Требует улучшения',
         needs_optimization: 'Требует улучшения',

@@ -2794,6 +2794,8 @@ export default {
         createdAt: 'Time',
       },
       status: {
+        high_quality: 'High Quality',
+        low_quality: 'Low Quality',
         normal: 'Normal',
         pending_optimization: 'Needs Optimization',
         needs_optimization: 'Needs Optimization',

@@ -497,6 +497,8 @@ const getRateTheme = (rate: number) => {
 
 const getStatusTheme = (status: string) => {
   const map: Record<string, string> = {
+    high_quality: 'success',
+    low_quality: 'danger',
     normal: 'default',
     pending_optimization: 'warning',
     needs_optimization: 'danger',

@@ -4033,6 +4033,8 @@ export default {
         createdAt: "시간",
       },
       status: {
+        high_quality: "고품질",
+        low_quality: "저품질",
         normal: "정상",
         pending_optimization: "최적화 필요",
         needs_optimization: "최적화 필요",

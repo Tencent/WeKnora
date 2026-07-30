@@ -53,7 +53,16 @@ test('chunk feedback i18n contains keys used by the settings page', () => {
     assert.match(source, /weightLogsLoadFailed:/)
     assert.match(source, /feedbackSubmitted:/)
     assert.match(source, /feedbackCanceled:/)
+    assert.match(source, /high_quality:/)
+    assert.match(source, /low_quality:/)
   }
+})
+
+test('legacy high and low quality statuses remain presentation-safe', () => {
+  const source = read('src/views/knowledge/settings/ChunkFeedbackSettings.vue')
+
+  assert.match(source, /high_quality:\s*'success'/)
+  assert.match(source, /low_quality:\s*'danger'/)
 })
 
 test('overview labels total_chunks as all chunks in every locale', () => {

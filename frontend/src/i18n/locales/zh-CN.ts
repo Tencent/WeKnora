@@ -4097,6 +4097,8 @@ export default {
         createdAt: "时间",
       },
       status: {
+        high_quality: "高质量",
+        low_quality: "低质量",
         normal: "正常",
         pending_optimization: "待优化",
         needs_optimization: "待优化",
