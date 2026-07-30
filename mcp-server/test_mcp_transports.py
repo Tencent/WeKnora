@@ -46,11 +46,11 @@ class TransportRegressionTest(unittest.TestCase):
 
         client = WeKnoraClient("http://localhost:8080/api/v1", "test-key")
         barrier = threading.Barrier(2)
-        sessions: dict[str, int] = {}
+        sessions: dict[str, object] = {}
 
         def worker(name: str) -> None:
             barrier.wait()
-            sessions[name] = id(client.session)
+            sessions[name] = client.session
 
         threads = [
             threading.Thread(target=worker, args=(name,))
@@ -62,7 +62,7 @@ class TransportRegressionTest(unittest.TestCase):
             thread.join()
 
         self.assertEqual(len(sessions), 2)
-        self.assertNotEqual(sessions["a"], sessions["b"])
+        self.assertIsNot(sessions["a"], sessions["b"])
 
 
 class StdioToolsListTest(unittest.TestCase):
