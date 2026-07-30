@@ -137,6 +137,10 @@ func TestChunkFeedbackPostgresMigrationFreshUpDownUp(t *testing.T) {
 	}
 	schema, scopedDSN, cleanup := createFeedbackPostgresSchema(t, dsn)
 	defer cleanup()
+	// Native PostgreSQL intentionally does not provide ParadeDB's vector and
+	// pg_search extensions. Exercise the complete versioned migration chain
+	// with its documented extension-independent mode.
+	scopedDSN = postgresDSNWithRuntimeSetting(t, scopedDSN, "app.skip_embedding", "true")
 
 	source := "file://" + filepath.ToSlash(filepath.Join(feedbackMigrationRoot(t), "versioned"))
 	migrator, err := migrate.New(source, scopedDSN)
@@ -527,6 +531,18 @@ func postgresDSNWithSearchPath(t *testing.T, dsn, searchPath string) string {
 	}
 	query := parsed.Query()
 	query.Set("search_path", searchPath)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func postgresDSNWithRuntimeSetting(t *testing.T, dsn, name, value string) string {
+	t.Helper()
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("options", "-c "+name+"="+value)
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
 }

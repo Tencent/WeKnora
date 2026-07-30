@@ -139,13 +139,13 @@ jobs:
           go test -race ./internal/agent/tools -run 'Feedback' -count=1
           go test -race ./internal/router -run 'FeedbackRoutes' -count=1
 
-  migration-postgres:
-    name: PostgreSQL migration and reset
+  backend-postgres17:
+    name: Backend PostgreSQL 17
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
       postgres:
-        image: paradedb/paradedb:v0.22.2-pg17
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: feedback-ci
@@ -159,7 +159,6 @@ jobs:
           --health-retries 20
     env:
       WEKNORA_TEST_POSTGRES_DSN: postgres://postgres:feedback-ci@localhost:5432/weknora_feedback?sslmode=disable
-      WEKNORA_TEST_PARADEDB_DSN: postgres://postgres:feedback-ci@localhost:5432/weknora_feedback?sslmode=disable
     steps:
       - uses: actions/checkout@v6
 
@@ -171,10 +170,10 @@ jobs:
       - name: Download modules
         run: go mod download
 
-      - name: Verify fresh, upgrade, down, and up migrations
+      - name: Verify native PostgreSQL fresh, upgrade, down, and up migrations
         run: >-
           go test ./internal/database
-          -run '^TestChunkFeedback(Postgres|ParadeDB)'
+          -run '^TestChunkFeedbackPostgres'
           -count=1
           -v
 
@@ -182,6 +181,69 @@ jobs:
         run: >-
           go test ./internal/application/repository
           -run '^TestFeedbackPostgres'
+          -count=1
+          -v
+
+      - name: Verify Agent feedback router-to-PostgreSQL integration
+        run: >-
+          go test ./internal/handler
+          -run '^TestAgentFeedbackPostgresRouterIntegration$'
+          -count=1
+          -v
+
+  backend-paradedb:
+    name: Backend ParadeDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      paradedb:
+        image: paradedb/paradedb:v0.22.2-pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: feedback-ci
+          POSTGRES_DB: weknora_feedback
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d weknora_feedback"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      WEKNORA_TEST_PARADEDB_DSN: postgres://postgres:feedback-ci@localhost:5433/weknora_feedback?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify ParadeDB feedback schema and migration compatibility
+        run: >-
+          go test ./internal/database
+          -run '^TestChunkFeedbackParadeDB'
+          -count=1
+          -v
+
+      - name: Verify feedback repository compatibility on ParadeDB
+        env:
+          WEKNORA_TEST_POSTGRES_DSN: ${{ env.WEKNORA_TEST_PARADEDB_DSN }}
+        run: >-
+          go test ./internal/application/repository
+          -run '^TestFeedbackPostgres'
+          -count=1
+          -v
+
+      - name: Verify Agent feedback router compatibility on ParadeDB
+        env:
+          WEKNORA_TEST_POSTGRES_DSN: ${{ env.WEKNORA_TEST_PARADEDB_DSN }}
+        run: >-
+          go test ./internal/handler
+          -run '^TestAgentFeedbackPostgresRouterIntegration$'
           -count=1
           -v
 

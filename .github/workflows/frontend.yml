@@ -61,8 +61,8 @@ jobs:
       - name: Build
         run: npm run build
 
-  feedback-browser-e2e:
-    name: Feedback browser E2E
+  feedback-browser-component-integration:
+    name: Feedback browser component integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -83,7 +83,7 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund
 
-      - name: Run feedback browser E2E
+      - name: Run mock-backed feedback browser component integration
         env:
           CHROME_BIN: /usr/bin/google-chrome
-        run: go test -tags feedback_e2e ./e2e -count=1 -v
+        run: go test -tags feedback_component_integration ./e2e -count=1 -v
