@@ -894,11 +894,20 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				feedbackEligible, err := h.completeKnowledgeAssistantMessage(
+					updateCtx, streamCtx.assistantMessage, reqCtx.query,
+				)
+				if err != nil {
+					logger.Errorf(updateCtx, "Failed to atomically complete assistant message: %v", err)
+					return err
+				}
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventAgentComplete,
 					SessionID: sessionID,
-					Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
+					Data: event.AgentCompleteData{
+						FinalAnswer:      streamCtx.assistantMessage.Content,
+						FeedbackEligible: feedbackEligible,
+					},
 				})
 			}
 			return nil
@@ -1346,7 +1355,33 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
 	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	h.afterAssistantMessageCompleted(ctx, assistantMessage, userQuery)
+}
 
+// completeKnowledgeAssistantMessage is used only by standard knowledge QA. It
+// publishes completion to the client only after the final answer and its chunk
+// attribution have committed together.
+func (h *Handler) completeKnowledgeAssistantMessage(
+	ctx context.Context,
+	assistantMessage *types.Message,
+	userQuery string,
+) (bool, error) {
+	assistantMessage.UpdatedAt = time.Now()
+	assistantMessage.IsCompleted = true
+	eligible, err := h.messageService.CompleteAssistantMessageWithReferences(ctx, assistantMessage)
+	if err != nil {
+		return false, err
+	}
+	assistantMessage.FeedbackEligible = eligible
+	h.afterAssistantMessageCompleted(ctx, assistantMessage, userQuery)
+	return eligible, nil
+}
+
+func (h *Handler) afterAssistantMessageCompleted(
+	ctx context.Context,
+	assistantMessage *types.Message,
+	userQuery string,
+) {
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)

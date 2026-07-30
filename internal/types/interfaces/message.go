@@ -29,6 +29,10 @@ type MessageService interface {
 	// UpdateMessage updates a message
 	UpdateMessage(ctx context.Context, message *types.Message) error
 
+	// CompleteAssistantMessageWithReferences atomically freezes the standard-QA
+	// answer and its server-side chunk attribution.
+	CompleteAssistantMessageWithReferences(ctx context.Context, message *types.Message) (bool, error)
+
 	// UpdateMessageImages updates only the images JSONB column for a message.
 	UpdateMessageImages(ctx context.Context, sessionID, messageID string, images types.MessageImages) error
 
