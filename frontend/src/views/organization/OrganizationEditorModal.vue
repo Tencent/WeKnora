@@ -911,4 +911,10 @@ watch(() => props.mode, () => {
     color: var(--td-brand-color);
   }
 }
-</style>
+
+/* ===== Mobile & Tablet responsive ===== */
+@media (max-width: 767px) {
+  .content-wrapper {
+    padding: 16px !important;
+  }
+}</style>

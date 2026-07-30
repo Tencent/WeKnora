@@ -1950,7 +1950,40 @@ onUnmounted(() => {
     }
   }
 }
-</style>
+
+/* ===== Mobile & Tablet responsive ===== */
+@media (max-width: 1023px) {
+  .org-list-container {
+    flex-direction: column !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+  .org-list-content {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 12px 12px 0 12px !important;
+  }
+  .org-card-wrap {
+    gap: 8px !important;
+  }
+}
+@media (max-width: 767px) {
+  .org-list-content {
+    padding: 8px 4px 0 4px !important;
+  }
+  .header-title h2 {
+    font-size: 18px !important;
+  }
+  .header-subtitle {
+    font-size: 12px !important;
+  }
+  .org-card-wrap {
+    gap: 8px !important;
+  }
+  .org-card {
+    padding: 12px !important;
+  }
+}</style>
 
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
