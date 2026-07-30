@@ -21,7 +21,7 @@ import (
 const FeishuWikiNodeResourceSeparator = ":"
 
 // shared.go holds the helpers used by BOTH the wiki Connector (connector.go)
-// and the Drive DriveConnector (drive_connector.go): error classification,
+// and the Drive DriveConnector (connector.go): error classification,
 // config parsing, stream-Checkpoint tuning, the fetch tally, filename/time
 // utilities, attachment rules, and the docx blocks fetch path. Anything that
 // is specific to one connector stays in that connector's own file.
