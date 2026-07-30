@@ -124,7 +124,7 @@
 
         <!-- Graph page detail drawer -->
         <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
-          :footer="false" placement="right" :attach="false" :show-overlay="false" :close-btn="true" destroy-on-close
+          :footer="false" placement="right" :show-overlay="false" :close-btn="true" destroy-on-close
           class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
             <div class="wiki-reader-meta" style="margin-bottom: 8px;">
