@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/feedbackweight"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,6 +36,8 @@ type chunkService struct {
 	ownership       retriever.TenantStoreOwnership
 	task            interfaces.TaskEnqueuer
 	spanTracker     SpanTracker
+	feedbackRepo    interfaces.FeedbackRepository
+	feedbackConfig  *config.FeedbackConfig
 }
 
 // NewChunkService creates a new chunk service
@@ -52,7 +56,13 @@ func NewChunkService(
 	ownership retriever.TenantStoreOwnership,
 	task interfaces.TaskEnqueuer,
 	spanTracker SpanTracker,
+	feedbackRepo interfaces.FeedbackRepository,
+	cfg *config.Config,
 ) interfaces.ChunkService {
+	var feedbackConfig *config.FeedbackConfig
+	if cfg != nil {
+		feedbackConfig = cfg.Feedback
+	}
 	return &chunkService{
 		chunkRepository: chunkRepository,
 		knowledgeRepo:   knowledgeRepo,
@@ -62,10 +72,35 @@ func NewChunkService(
 		ownership:       ownership,
 		task:            task,
 		spanTracker:     spanTracker,
+		feedbackRepo:    feedbackRepo,
+		feedbackConfig:  feedbackConfig,
 	}
 }
 
 const maxEditableChunkLength = 200000
+
+func (s *chunkService) hydrateChunkFeedback(ctx context.Context, chunks []*types.Chunk) error {
+	if s.feedbackRepo == nil {
+		return nil
+	}
+	threshold := s.feedbackConfig.EffectiveOptimizationThreshold()
+	if err := s.feedbackRepo.HydrateChunks(ctx, chunks, threshold); err != nil {
+		return err
+	}
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		weight, _, err := feedbackweight.EffectiveWeight(
+			s.feedbackConfig, chunk.LikeCount, chunk.DislikeCount,
+		)
+		if err != nil {
+			weight = 1
+		}
+		chunk.EffectiveRecallWeight = weight
+	}
+	return nil
+}
 
 // GetRepository gets the chunk repository
 // Parameters:
@@ -93,7 +128,6 @@ func (s *chunkService) CreateChunks(ctx context.Context, chunks []*types.Chunk) 
 		})
 		return err
 	}
-
 	logger.Infof(ctx, "Add %d chunks successfully", len(chunks))
 	return nil
 }
@@ -118,6 +152,9 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 		})
 		return nil, err
 	}
+	if err := s.hydrateChunkFeedback(ctx, []*types.Chunk{chunk}); err != nil {
+		return nil, err
+	}
 
 	logger.Info(ctx, "Chunk retrieved successfully")
 	return chunk, nil
@@ -133,6 +170,9 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 			return nil, ErrChunkNotFound
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": id})
+		return nil, err
+	}
+	if err := s.hydrateChunkFeedback(ctx, []*types.Chunk{chunk}); err != nil {
 		return nil, err
 	}
 	return chunk, nil
@@ -160,6 +200,9 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 			"knowledge_id": knowledgeID,
 			"tenant_id":    tenantID,
 		})
+		return nil, err
+	}
+	if err := s.hydrateChunkFeedback(ctx, chunks); err != nil {
 		return nil, err
 	}
 
@@ -199,6 +242,9 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 			"knowledge_id": knowledgeID,
 			"tenant_id":    tenantID,
 		})
+		return nil, err
+	}
+	if err := s.hydrateChunkFeedback(ctx, chunks); err != nil {
 		return nil, err
 	}
 
