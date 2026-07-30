@@ -150,7 +150,11 @@ func (s *temporaryDocumentService) Create(
 		return nil, fmt.Errorf("unsafe file name: %w", err)
 	}
 	ext := strings.ToLower(filepath.Ext(baseName))
-	if !s.supportsExtension(ctx, tenantID, ext) {
+	resourceTenantID := options.ResourceTenantID
+	if resourceTenantID == 0 {
+		resourceTenantID = tenantID
+	}
+	if !s.supportsExtension(ctx, resourceTenantID, ext) {
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
@@ -288,9 +292,15 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	if err := s.repo.MarkProcessing(ctx, payload.TenantID, payload.DocumentID, startedAt); err != nil {
 		return err
 	}
-	// Ensure model resolution (VLM/ASR) has a tenant ID in context.
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if tenant, tenantErr := s.tenantService.GetTenantByID(ctx, payload.TenantID); tenantErr == nil && tenant != nil {
+	// The attachment row and file remain scoped to payload.TenantID, while
+	// parser/model dependencies may belong to a verified shared-agent source.
+	resourceTenantID := payload.TenantID
+	var options types.TemporaryDocumentCreateOptions
+	if json.Unmarshal(document.ProcessingOptions, &options) == nil && options.ResourceTenantID != 0 {
+		resourceTenantID = options.ResourceTenantID
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, resourceTenantID)
+	if tenant, tenantErr := s.tenantService.GetTenantByID(ctx, resourceTenantID); tenantErr == nil && tenant != nil {
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	}
 	content, images, metadata, parseErr := s.parse(ctx, document)

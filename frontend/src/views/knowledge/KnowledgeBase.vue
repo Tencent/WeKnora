@@ -43,6 +43,7 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -420,6 +421,24 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchTagging = ref(false);
+const batchTagDialogVisible = ref(false);
+const batchTagPreSelectedIds = computed(() => {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return [];
+  const cards = ids
+    .map((id) => cardList.value.find((c) => c.id === id))
+    .filter((c): c is KnowledgeCard => Boolean(c));
+  if (cards.length === 0) return [];
+  const firstTagIds = new Set((cards[0].tags || []).map((t) => t.id));
+  for (let i = 1; i < cards.length; i++) {
+    const cur = new Set((cards[i].tags || []).map((t) => t.id));
+    for (const tid of firstTagIds) {
+      if (!cur.has(tid)) firstTagIds.delete(tid);
+    }
+  }
+  return Array.from(firstTagIds);
+});
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -776,6 +795,11 @@ const openTagManageDrawer = () => {
 
 const openTagManageFromEditDialog = () => {
   tagEditDialogVisible.value = false;
+  tagManageDrawerVisible.value = true;
+};
+
+const openTagManageFromBatchDialog = () => {
+  batchTagDialogVisible.value = false;
   tagManageDrawerVisible.value = true;
 };
 
@@ -1892,6 +1916,35 @@ const confirmBatchDelete = async () => {
   }
 };
 
+const handleBatchTag = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  batchTagDialogVisible.value = true;
+};
+
+const onBatchTagConfirm = async (tagIds: string[]) => {
+  if (batchTagging.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  const updateMap: Record<string, string[]> = {};
+  for (const id of ids) {
+    updateMap[id] = tagIds;
+  }
+  batchTagging.value = true;
+  try {
+    await updateKnowledgeTagBatch({ updates: updateMap });
+    MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    batchTagDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+    loadTags(kbId.value, true);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchTagFailed'));
+  } finally {
+    batchTagging.value = false;
+  }
+};
+
 const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
   try {
@@ -2337,8 +2390,9 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :visible="batchMode || selectedIds.size > 0"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @batch-tag="handleBatchTag" />
               </div>
             </div>
           </div>
@@ -2371,6 +2425,14 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
     @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
     @open-manage="openTagManageFromEditDialog" />
+
+  <!-- 批量打标签弹窗 -->
+  <BatchTagDialog :visible="batchTagDialogVisible"
+    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
+    :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
+    :confirm-loading="batchTagging"
+    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
+    @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
 
   <KbTagManageDrawer
     v-if="!isFAQ"

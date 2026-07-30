@@ -22,6 +22,30 @@ func sessionUserIDFromContext(ctx context.Context) string {
 	return types.SessionOwnerIDFromContext(ctx)
 }
 
+// runtimeMayBypassAdminConsoleRead reports whether a non-admin caller on the
+// owner-scoped read path may open a channel-managed session. Admin console reads
+// use the GetByID fallback in loadSessionForRead and never call this helper.
+func runtimeMayBypassAdminConsoleRead(
+	ctx context.Context,
+	session *types.Session,
+	imPlatform string,
+) bool {
+	principal, ok := types.PrincipalFromContext(ctx)
+	if !ok || session == nil {
+		return false
+	}
+
+	switch principal.Type {
+	case types.PrincipalIMUser:
+		return strings.TrimSpace(imPlatform) != ""
+	case types.PrincipalAPITenant, types.PrincipalAPIExternalUser:
+		ownerID := types.SessionOwnerIDFromContext(ctx)
+		return types.IsAPISessionOwnerID(session.UserID) && session.UserID == ownerID
+	default:
+		return false
+	}
+}
+
 // loadSessionForRead loads a session honoring the caller's per-user scope, with
 // an Admin+ fallback that additionally permits reading tenant channel sessions
 // (API-key, IM, and embed) from the Web console. Non-admin callers must not
@@ -34,13 +58,13 @@ func loadSessionForRead(
 	ownerID, sessionID string,
 ) (*types.Session, error) {
 	isAdmin := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
-	principal, hasPrincipal := types.PrincipalFromContext(ctx)
-	isIMRuntime := hasPrincipal && principal.Type == types.PrincipalIMUser
 
 	session, err := repo.Get(ctx, tenantID, ownerID, sessionID)
 	if err == nil {
 		imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, sessionID)
-		if types.SessionRequiresAdminConsoleRead(session, imPlatform) && !isAdmin && !isIMRuntime {
+		if types.SessionRequiresAdminConsoleRead(session, imPlatform) &&
+			!isAdmin &&
+			!runtimeMayBypassAdminConsoleRead(ctx, session, imPlatform) {
 			return nil, apperrors.ErrSessionNotFound
 		}
 		if imPlatform != "" {
