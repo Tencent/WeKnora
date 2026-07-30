@@ -1,4 +1,4 @@
-//go:build feedback_e2e
+//go:build feedback_component_integration
 
 package e2e
 
@@ -32,7 +32,7 @@ type browserFeedbackState struct {
 	reset    bool
 }
 
-func TestIssue1248FeedbackBrowserE2E(t *testing.T) {
+func TestIssue1248FeedbackBrowserComponentIntegration(t *testing.T) {
 	state := &browserFeedbackState{likes: 2, dislikes: 1}
 	backend := httptest.NewServer(feedbackBrowserHandler(t, state))
 	defer backend.Close()
@@ -118,7 +118,7 @@ func TestIssue1248FeedbackBrowserE2E(t *testing.T) {
 		chromedp.Text(`body`, &initialBody, chromedp.ByQuery),
 		chromedp.OuterHTML(`html`, &initialHTML, chromedp.ByQuery),
 	)
-	if !strings.Contains(initialBody, "Issue 1248 feedback E2E") {
+	if !strings.Contains(initialBody, "Issue 1248 feedback component integration") {
 		diagnosticsMu.Lock()
 		browserDiagnostics := diagnostics.String()
 		diagnosticsMu.Unlock()
@@ -128,6 +128,32 @@ func TestIssue1248FeedbackBrowserE2E(t *testing.T) {
 	runBrowserStep("load feedback harness",
 		chromedp.WaitVisible(`#answer-feedback`, chromedp.ByQuery),
 		chromedp.WaitVisible(`#governance`, chromedp.ByQuery),
+	)
+	runBrowserStep("hide ineligible Agent feedback controls",
+		chromedp.Evaluate(`globalThis.__feedbackHarnessMessage.feedback_eligible = false`, nil),
+		chromedp.Poll(`!document.querySelector('#answer-feedback button[title="Like"]')`, nil),
+	)
+	runBrowserStep("restore eligible Agent feedback controls",
+		chromedp.Evaluate(`globalThis.__feedbackHarnessMessage.feedback_eligible = true`, nil),
+		chromedp.Poll(`Boolean(document.querySelector('#answer-feedback button[title="Like"]'))`, nil),
+	)
+	runBrowserStep("hide controls while Agent answer is streaming",
+		chromedp.Evaluate(`
+			globalThis.__feedbackHarnessMessage.agentEventStream =
+				globalThis.__feedbackHarnessMessage.agentEventStream
+					.filter((event) => event.type !== 'complete')
+					.map((event) => event.type === 'answer' ? {...event, done: false} : event)
+		`, nil),
+		chromedp.Poll(`!document.querySelector('#answer-feedback button[title="Like"]')`, nil),
+	)
+	runBrowserStep("restore completed Agent answer",
+		chromedp.Evaluate(`
+			globalThis.__feedbackHarnessMessage.agentEventStream = [
+				{event_id: 'answer-final', type: 'answer', content: 'Agent answer backed by knowledge.', done: true},
+				{event_id: 'complete-final', type: 'complete', content: '', done: true, feedback_eligible: true},
+			]
+		`, nil),
+		chromedp.Poll(`Boolean(document.querySelector('#answer-feedback button[title="Like"]'))`, nil),
 	)
 	runBrowserStep("load governance list",
 		chromedp.Poll(`document.body.textContent.includes("Browser chunk")`, nil),
@@ -299,9 +325,8 @@ func feedbackBrowserHandler(t *testing.T, state *browserFeedbackState) http.Hand
 		state.likes = 0
 		state.dislikes = 0
 		state.reset = true
-		detail := feedbackBrowserChunk(state, true)
 		state.mu.Unlock()
-		feedbackBrowserJSON(w, map[string]any{"success": true, "data": detail})
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/api/v1/knowledge-bases/kb-e2e/chunk-feedback/chunk-e2e", func(w http.ResponseWriter, r *http.Request) {
 		state.mu.Lock()

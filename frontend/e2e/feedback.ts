@@ -1,8 +1,10 @@
 import { createApp, defineComponent, h, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
+import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import TDesign from 'tdesign-vue-next'
 import 'tdesign-vue-next/es/style/index.css'
-import AnswerFeedbackControls from '@/views/chat/components/AnswerFeedbackControls.vue'
+import BotMessage from '@/views/chat/components/botmsg.vue'
 import ChunkFeedbackGovernance from '@/views/knowledge/settings/ChunkFeedbackGovernance.vue'
 
 const messages = {
@@ -69,9 +71,29 @@ const messages = {
 
 const message = reactive<Record<string, any>>({
   id: 'message-e2e',
+  content: 'Agent answer backed by knowledge.',
+  isAgentMode: true,
+  is_completed: true,
   feedback_eligible: true,
   my_feedback: null,
+  agentEventStream: [
+    {
+      event_id: 'answer-final',
+      type: 'answer',
+      content: 'Agent answer backed by knowledge.',
+      done: true,
+    },
+    {
+      event_id: 'complete-final',
+      type: 'complete',
+      content: '',
+      done: true,
+      feedback_eligible: true,
+    },
+  ],
 })
+
+;(globalThis as any).__feedbackHarnessMessage = message
 
 const Harness = defineComponent({
   name: 'FeedbackE2EHarness',
@@ -80,12 +102,13 @@ const Harness = defineComponent({
       message.my_feedback = feedback
     }
     return () => h('main', [
-      h('h1', 'Issue 1248 feedback E2E'),
+      h('h1', 'Issue 1248 feedback component integration'),
       h('section', { id: 'answer-feedback' }, [
-        h(AnswerFeedbackControls, {
+        h(BotMessage, {
+          session: message,
           sessionId: 'session-e2e',
-          message,
-          'onUpdate:feedback': updateFeedback,
+          userQuery: 'Which chunks support this answer?',
+          onFeedbackChange: updateFeedback,
         }),
         h('output', { id: 'feedback-state' }, message.my_feedback?.type || 'none'),
       ]),
@@ -96,7 +119,14 @@ const Harness = defineComponent({
   },
 })
 
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [{ path: '/', component: { render: () => null } }],
+})
+
 createApp(Harness)
   .use(TDesign)
+  .use(createPinia())
+  .use(router)
   .use(createI18n({ legacy: false, locale: 'en', messages }))
   .mount('#app')

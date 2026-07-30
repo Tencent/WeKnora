@@ -315,6 +315,12 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <AnswerFeedbackControls
+                  v-if="feedbackEligible && sessionId && session.id"
+                  :session-id="sessionId"
+                  :message="session"
+                  @update:feedback="emit('feedback-change', $event)"
+                />
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -490,6 +496,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import AnswerFeedbackControls from './AnswerFeedbackControls.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -782,8 +789,11 @@ interface SessionData {
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
+  is_completed?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  feedback_eligible?: boolean;
+  my_feedback?: { type: 'like' | 'dislike'; reason_code?: string } | null;
   [key: string]: unknown;
 }
 
@@ -802,6 +812,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
+  (event: 'feedback-change', feedback: unknown): void;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -815,6 +826,9 @@ const embedAuthProps = computed(() => ({
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
+);
+const feedbackEligible = computed(
+  () => props.session?.is_completed === true && props.session?.feedback_eligible === true,
 );
 
 const {
