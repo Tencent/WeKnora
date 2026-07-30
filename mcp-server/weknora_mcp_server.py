@@ -287,6 +287,7 @@ class WeKnoraClient:
                 headers=headers,
                 files=files,
                 data=data,
+                verify=self.verify_ssl,
             )
             response.raise_for_status()
             return response.json()
@@ -555,7 +556,7 @@ class WeKnoraClient:
 # Initialize MCP server instance (mcp 2.x high-level API).
 # MCPServer (formerly FastMCP) builds input schemas from function type hints
 # and serializes plain return values automatically.
-mcp = MCPServer("weknora-server", version="1.1.0")
+mcp = MCPServer("weknora-server", version="1.1.1")
 # Initialize WeKnora API client with configuration
 client = WeKnoraClient(WEKNORA_BASE_URL, WEKNORA_API_KEY)
 

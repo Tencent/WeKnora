@@ -32,14 +32,14 @@ def read_requirements():
 
 
 setup(
-    name="weknora-mcp",
-    version="1.1.0",
+    name="tencent-weknora-mcp",
+    version="1.1.1",
     author="WeKnora Team",
     author_email="support@weknora.com",
     description="WeKnora MCP Server - Model Context Protocol server for WeKnora API",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/NannaOlympicBroadcast/WeKnoraMCP",
+    url="https://github.com/Tencent/WeKnora/tree/main/mcp-server",
     py_modules=["weknora_mcp_server", "upload_paths", "main", "run_server", "run", "test_module"],
     classifiers=[
         "Development Status :: 4 - Beta",
