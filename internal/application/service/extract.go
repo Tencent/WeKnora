@@ -164,6 +164,8 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	artifactRepo      interfaces.DerivedArtifactRepository
+	graphCacheTiming  graphExtractArtifactTiming
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -179,6 +181,7 @@ func NewChunkExtractService(
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	spanTracker SpanTracker,
+	artifactRepo interfaces.DerivedArtifactRepository,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
@@ -188,6 +191,7 @@ func NewChunkExtractService(
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
 		spanTracker:       spanTracker,
+		artifactRepo:      artifactRepo,
 	}
 }
 
@@ -336,8 +340,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	graph, graphObservation, err := extractGraphWithObservation(
+	graph, graphObservation, err := s.extractGraphCached(
 		ctx,
+		p.TenantID,
 		chatModel,
 		template,
 		chunk.Content,
