@@ -15,6 +15,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/inferencecache"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
@@ -60,6 +61,7 @@ type knowledgeService struct {
 	taskInspector   interfaces.TaskInspector
 	graphEngine     interfaces.RetrieveGraphRepository
 	redisClient     *redis.Client
+	inferenceCache  inferencecache.Cache
 	kbShareService  interfaces.KBShareService
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
@@ -103,6 +105,7 @@ func NewKnowledgeService(
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	redisClient *redis.Client,
+	inferenceCache inferencecache.Cache,
 	kbShareService interfaces.KBShareService,
 	imageResolver *docparser.ImageResolver,
 	wikiRepo interfaces.WikiPageRepository,
@@ -129,6 +132,7 @@ func NewKnowledgeService(
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
 		redisClient:     redisClient,
+		inferenceCache:  inferenceCache,
 		kbShareService:  kbShareService,
 		imageResolver:   imageResolver,
 		wikiRepo:        wikiRepo,

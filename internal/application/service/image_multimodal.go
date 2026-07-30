@@ -14,6 +14,7 @@ import (
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/inferencecache"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -74,6 +75,7 @@ type ImageMultimodalService struct {
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
+	inferenceCache inferencecache.Cache
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
@@ -97,6 +99,7 @@ func NewImageMultimodalService(
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
+	inferenceCache inferencecache.Cache,
 	fileSvc interfaces.FileService,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -111,6 +114,7 @@ func NewImageMultimodalService(
 		ollamaService:  ollamaService,
 		taskEnqueuer:   taskEnqueuer,
 		redisClient:    redisClient,
+		inferenceCache: inferenceCache,
 		fileSvc:        fileSvc,
 		spanTracker:    spanTracker,
 	}
@@ -260,7 +264,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrHit, ocrErr := s.predictVLM(ctx, payload.TenantID, "ocr", vlmModel, [][]byte{imgBytes}, prompt)
+		imgOut["ocr_cache_hit"] = ocrHit
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -278,7 +283,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	caption, captionHit, capErr := s.predictVLM(ctx, payload.TenantID, "caption", vlmModel, [][]byte{imgBytes}, captionPrompt)
+	imgOut["caption_cache_hit"] = captionHit
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -355,6 +362,41 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// all images are processed before triggering summary/question generation.
 	// Deferred finalize handles the parent knowledge counter.
 	return nil
+}
+
+// predictVLM reuses successful OCR/caption output for the exact image bytes,
+// prompt, tenant and VLM configuration. Provider errors are never cached and
+// cache failures fail open through inferencecache.Cache.
+func (s *ImageMultimodalService) predictVLM(
+	ctx context.Context,
+	tenantID uint64,
+	operation string,
+	model vlm.VLM,
+	images [][]byte,
+	prompt string,
+) (string, bool, error) {
+	if s.inferenceCache == nil {
+		value, err := model.Predict(ctx, images, prompt)
+		return value, false, err
+	}
+	parts := make([][]byte, 0, len(images)+1)
+	parts = append(parts, []byte(prompt))
+	parts = append(parts, images...)
+	key := inferencecache.Key("vlm."+operation, tenantID, vlm.FingerprintOf(model), parts...)
+	raw, stats, err := s.inferenceCache.Resolve(ctx, key, func(loadCtx context.Context) ([]byte, error) {
+		value, predictErr := model.Predict(loadCtx, images, prompt)
+		return []byte(value), predictErr
+	})
+	if stats.ReadError != nil {
+		logger.Warnf(ctx, "[InferenceCache] VLM %s read failed, using provider: %v", operation, stats.ReadError)
+	}
+	if stats.WriteError != nil {
+		logger.Warnf(ctx, "[InferenceCache] VLM %s write failed: %v", operation, stats.WriteError)
+	}
+	if err == nil {
+		logger.Infof(ctx, "[InferenceCache] stage=vlm.%s hit=%v coalesced=%v", operation, stats.Hit, stats.Coalesced)
+	}
+	return string(raw), stats.Hit || stats.Coalesced, err
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without

@@ -861,7 +861,7 @@ func (r *wikiPageRepository) FindSimilarPages(
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
+		Select("slug, title, page_type, status, aliases, out_links, source_refs, similarity(lower(title), ?) AS sim", q).
 		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
 			kbID, pageTypes, types.WikiPageStatusArchived, q).
 		Order("sim DESC").

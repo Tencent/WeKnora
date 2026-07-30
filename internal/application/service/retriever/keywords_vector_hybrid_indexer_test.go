@@ -107,6 +107,47 @@ func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	}
 }
 
+func TestSanitizeForEmbeddingCanonicalizesImageURLs(t *testing.T) {
+	ctx := context.Background()
+	first := "text ![Figure 2: Architecture](local://10000/exports/random-a_111.jpg) end"
+	second := "text ![Figure 2: Architecture](https://minio.example/random-b.jpg?signature=222) end"
+	if gotFirst, gotSecond := sanitizeForEmbedding(ctx, first), sanitizeForEmbedding(ctx, second); gotFirst != gotSecond {
+		t.Fatalf("same image caption produced different model inputs: %q != %q", gotFirst, gotSecond)
+	}
+
+	differentCaption := "text ![Figure 3: Results](local://10000/exports/random-a_111.jpg) end"
+	if sanitizeForEmbedding(ctx, first) == sanitizeForEmbedding(ctx, differentCaption) {
+		t.Fatal("different image captions must remain distinguishable")
+	}
+
+	ordinaryLink := "read [the paper](https://example.com/paper.pdf)"
+	if got := sanitizeForEmbedding(ctx, ordinaryLink); got != ordinaryLink {
+		t.Fatalf("ordinary link changed: %q", got)
+	}
+}
+
+func TestBatchIndexCanonicalizesHTMLImageSource(t *testing.T) {
+	ctx := context.Background()
+	embedder := &capturingEmbedder{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}
+	content := `<img alt="plot" src="provider://exports/random.png" width="200">`
+
+	err := service.BatchIndex(ctx, embedder, []*types.IndexInfo{{
+		Content:  content,
+		SourceID: "source-1",
+	}}, []types.RetrieverType{types.VectorRetrieverType})
+	if err != nil {
+		t.Fatalf("BatchIndex returned error: %v", err)
+	}
+	if len(embedder.batchTexts) != 1 {
+		t.Fatalf("expected one embedding input, got %d", len(embedder.batchTexts))
+	}
+	want := `<img alt="plot" src="[image]" width="200">`
+	if embedder.batchTexts[0] != want {
+		t.Fatalf("embedding input = %q, want %q", embedder.batchTexts[0], want)
+	}
+}
+
 func assertImagePayloadRemoved(t *testing.T, content string, payload string) {
 	t.Helper()
 	if strings.Contains(content, "data:image/png;base64") || strings.Contains(content, payload) {

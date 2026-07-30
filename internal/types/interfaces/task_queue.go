@@ -46,10 +46,23 @@ type TaskPendingOpsRepository interface {
 	// locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
 	// disjoint key sets without blocking or double-claiming.
 	//
-	// Claimed rows are NOT removed: the consumer must DeleteByIDs on
-	// success, or ReleaseByIDs to hand a still-retryable row back to the
-	// pool (otherwise it stays claimed until staleBefore elapses).
+	// Claimed rows are NOT removed: the consumer must use the returned
+	// ClaimToken with DeleteClaims on success, or ReleaseClaims to hand a
+	// still-retryable row back to the pool. Token-scoped mutation fences out
+	// a former worker after a stale claim is reclaimed by a new owner.
 	ClaimBatch(ctx context.Context, taskType, scope, scopeID string, limit int, staleBefore time.Time) ([]*types.TaskPendingOp, error)
+
+	// RenewClaims advances claimed_at only for rows still owned by
+	// claimToken. The affected-row count lets the consumer detect a lost
+	// lease and cancel its work before it can race a replacement worker.
+	RenewClaims(ctx context.Context, ids []int64, claimToken string) (int64, error)
+
+	// ReleaseClaims and DeleteClaims are ownership-scoped counterparts of
+	// ReleaseByIDs and DeleteByIDs. A stale worker cannot settle rows after a
+	// replacement worker has reclaimed them under a different token.
+	ReleaseClaims(ctx context.Context, ids []int64, claimToken string) error
+	DeleteClaims(ctx context.Context, ids []int64, claimToken string) error
+	IncrClaimFailCount(ctx context.Context, id int64, claimToken string) (int, error)
 
 	// ReleaseByIDs clears claimed_at (back to NULL) for the given rows so
 	// a claimed-but-not-consumed row becomes immediately eligible for the

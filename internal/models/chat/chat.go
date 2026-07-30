@@ -154,7 +154,11 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	c, err = wrapChatLangfuse(c, err)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapChatConcurrency(c, config.MaxConcurrency, err)
+	c, err = wrapChatConcurrency(c, config.MaxConcurrency, err)
+	if err == nil && c != nil {
+		c = &fingerprintedChat{chatDelegate: c, fingerprint: ModelFingerprint(config)}
+	}
+	return c, err
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

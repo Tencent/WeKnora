@@ -619,12 +619,15 @@ type WikiIndexResponse struct {
 // Aliases is included because dedup and cross-link injection both treat
 // the alias surface forms as first-class match targets; OutLinks is
 // included so dead-link cleanup can determine which pages reference a
-// given dead slug without a second query.
+// given dead slug without a second query. SourceRefs is selected only by
+// dedup-state queries so map caching can distinguish this document's own
+// reduce output from pages contributed by other documents.
 type WikiPageLite struct {
-	Slug     string      `json:"slug"`
-	Title    string      `json:"title"`
-	PageType string      `json:"page_type"`
-	Status   string      `json:"status"`
-	Aliases  StringArray `json:"aliases,omitempty"`
-	OutLinks StringArray `json:"out_links,omitempty"`
+	Slug       string      `json:"slug"`
+	Title      string      `json:"title"`
+	PageType   string      `json:"page_type"`
+	Status     string      `json:"status"`
+	Aliases    StringArray `json:"aliases,omitempty"`
+	OutLinks   StringArray `json:"out_links,omitempty"`
+	SourceRefs StringArray `json:"source_refs,omitempty"`
 }

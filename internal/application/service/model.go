@@ -29,6 +29,7 @@ type modelService struct {
 	agentRepo     interfaces.CustomAgentRepository
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
+	vectorCache   embedding.VectorCache
 	tenantService interfaces.TenantService
 }
 
@@ -38,6 +39,7 @@ func NewModelService(repo interfaces.ModelRepository,
 	agentRepo interfaces.CustomAgentRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
+	vectorCache embedding.VectorCache,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
 	return &modelService{
@@ -46,6 +48,7 @@ func NewModelService(repo interfaces.ModelRepository,
 		agentRepo:     agentRepo,
 		ollamaService: ollamaService,
 		pooler:        pooler,
+		vectorCache:   vectorCache,
 		tenantService: tenantService,
 	}
 }
@@ -423,7 +426,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embedConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -432,8 +436,11 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		return nil, err
 	}
 
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Info(ctx, "Embedding model initialized successfully")
-	return embedder, nil
+	return embedding.NewCachedEmbedder(
+		embedder, s.vectorCache, tenantID, embedding.ModelFingerprint(embedConfig),
+	), nil
 }
 
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
@@ -470,7 +477,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embedConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -481,7 +489,9 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
-	return embedder, nil
+	return embedding.NewCachedEmbedder(
+		embedder, s.vectorCache, tenantID, embedding.ModelFingerprint(embedConfig),
+	), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/inferencecache"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -161,6 +164,7 @@ func NewDataTableSummaryTask(
 type ChunkExtractService struct {
 	template          *types.PromptTemplateStructured
 	modelService      interfaces.ModelService
+	inferenceCache    inferencecache.Cache
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
@@ -175,6 +179,7 @@ type ChunkExtractService struct {
 func NewChunkExtractService(
 	config *config.Config,
 	modelService interfaces.ModelService,
+	inferenceCache inferencecache.Cache,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
@@ -184,6 +189,7 @@ func NewChunkExtractService(
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
 		modelService:      modelService,
+		inferenceCache:    inferenceCache,
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
@@ -330,8 +336,30 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	templateJSON, _ := json.Marshal(template)
+	modelInput := searchutil.CanonicalizeImageURLsForModel(chunk.Content)
+	graphKey := inferencecache.Key(
+		"graphrag.extract", p.TenantID, chat.FingerprintOf(chatModel),
+		[]byte(types.LanguageNameFromContext(ctx)), templateJSON, []byte(modelInput),
+	)
+	graph, cacheStats, err := inferencecache.ResolveJSON(ctx, s.inferenceCache, graphKey,
+		func(loadCtx context.Context) (*types.GraphData, error) {
+			extractor := chatpipeline.NewExtractor(chatModel, template)
+			result, extractErr := extractor.Extract(loadCtx, modelInput)
+			if extractErr == nil && result == nil {
+				return nil, errors.New("graph extractor returned nil result")
+			}
+			return result, extractErr
+		})
+	if cacheStats.ReadError != nil {
+		logger.Warnf(ctx, "[InferenceCache] GraphRAG read failed, using provider: %v", cacheStats.ReadError)
+	}
+	if cacheStats.WriteError != nil {
+		logger.Warnf(ctx, "[InferenceCache] GraphRAG write failed: %v", cacheStats.WriteError)
+	}
+	graphOut["cache_hit"] = cacheStats.Hit || cacheStats.Coalesced
+	logger.Infof(ctx, "[InferenceCache] stage=graphrag.extract hit=%v coalesced=%v",
+		cacheStats.Hit, cacheStats.Coalesced)
 	if err != nil {
 		handleErr = err
 		return err

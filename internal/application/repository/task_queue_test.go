@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
     payload     TEXT NOT NULL DEFAULT '{}',
     fail_count  INTEGER NOT NULL DEFAULT 0,
     enqueued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    claimed_at  DATETIME
+    claimed_at  DATETIME,
+    claim_token VARCHAR(64) NOT NULL DEFAULT ''
 );
 `
 
@@ -294,6 +295,8 @@ func TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint(t *testing.T) {
 	assert.Equal(t, "k1", first[0].DedupKey)
 	assert.Equal(t, "k2", first[1].DedupKey)
 	assert.NotNil(t, first[0].ClaimedAt, "claimed_at should be stamped")
+	require.NotEmpty(t, first[0].ClaimToken, "claim_token should identify the lease owner")
+	assert.Equal(t, first[0].ClaimToken, first[1].ClaimToken, "one batch must share one owner token")
 
 	// Second claim skips the two already-claimed rows and returns the last.
 	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
@@ -435,6 +438,78 @@ func TestTaskPendingOps_ClaimBatch_ReclaimsStale(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1, "stale claim must be recoverable")
 	assert.Equal(t, "k1", got[0].DedupKey)
+}
+
+// TestTaskPendingOps_ClaimLeaseOwnership verifies that a reclaimed row gets a
+// new owner token and that the former owner can no longer renew, release,
+// mutate, or delete it. This is the fencing guarantee that makes short claim
+// leases safe when a crashed worker resumes after another worker took over.
+func TestTaskPendingOps_ClaimLeaseOwnership(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	op := makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)
+	require.NoError(t, repo.Enqueue(ctx, op))
+
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	oldToken := first[0].ClaimToken
+	require.NotEmpty(t, oldToken)
+
+	n, err := repo.RenewClaims(ctx, []int64{op.ID}, oldToken)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+
+	n, err = repo.RenewClaims(ctx, []int64{op.ID}, "wrong-token")
+	require.NoError(t, err)
+	assert.Zero(t, n)
+
+	// Force the current lease stale and reclaim it under a new token.
+	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	newToken := second[0].ClaimToken
+	require.NotEmpty(t, newToken)
+	assert.NotEqual(t, oldToken, newToken)
+
+	// Every mutation from the stale owner is fenced out.
+	n, err = repo.RenewClaims(ctx, []int64{op.ID}, oldToken)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+
+	count, err := repo.IncrClaimFailCount(ctx, op.ID, oldToken)
+	require.NoError(t, err)
+	assert.Zero(t, count)
+	require.NoError(t, repo.ReleaseClaims(ctx, []int64{op.ID}, oldToken))
+	require.NoError(t, repo.DeleteClaims(ctx, []int64{op.ID}, oldToken))
+
+	var owned types.TaskPendingOp
+	require.NoError(t, db.First(&owned, op.ID).Error)
+	assert.Equal(t, newToken, owned.ClaimToken)
+	assert.NotNil(t, owned.ClaimedAt)
+	assert.Zero(t, owned.FailCount)
+
+	// The current owner can mutate and release the row.
+	count, err = repo.IncrClaimFailCount(ctx, op.ID, newToken)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	require.NoError(t, repo.ReleaseClaims(ctx, []int64{op.ID}, newToken))
+	owned = types.TaskPendingOp{}
+	require.NoError(t, db.First(&owned, op.ID).Error)
+	assert.Empty(t, owned.ClaimToken)
+	assert.Nil(t, owned.ClaimedAt)
+
+	// A subsequent owner can claim and consume it.
+	third, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, third, 1)
+	require.NotEmpty(t, third[0].ClaimToken)
+	require.NoError(t, repo.DeleteClaims(ctx, []int64{op.ID}, third[0].ClaimToken))
+	var remaining int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("id = ?", op.ID).Count(&remaining).Error)
+	assert.Zero(t, remaining)
 }
 
 // TestTaskPendingOps_ReleaseByIDs_ReturnsToPool verifies a released row

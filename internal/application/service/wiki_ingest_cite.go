@@ -71,18 +71,23 @@ type citationPipelineOutcome struct {
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
-	kbID string,
+	kbID, knowledgeID string,
 	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
-) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
+) ([]extractedItem, []extractedItem, map[string]extractedItem, string, error) {
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		slugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+		for _, slug := range slugs {
 			fmt.Fprintf(&sb, "- %s\n", slug)
 		}
 		prevSlugsText = sb.String()
@@ -92,7 +97,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+	requestData := map[string]string{
 		"Content":             content,
 		"Language":            lang,
 		"PreviousSlugs":       prevSlugsText,
@@ -100,22 +105,32 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
 		"CustomInstructions":  batchCtx.ExtractionInstructions,
 		"InstructionScope":    "wiki_extraction",
-	})
+	}
+	result, err := resolveWikiCachedJSON(ctx, s.inferenceCache, "candidate_slugs", chatModel,
+		agent.WikiCandidateSlugPrompt, requestData, func(loadCtx context.Context, maskedData map[string]string) (combinedExtraction, error) {
+			raw, generateErr := s.generateWithTemplateMasked(loadCtx, chatModel, agent.WikiCandidateSlugPrompt, maskedData)
+			if generateErr != nil {
+				return combinedExtraction{}, generateErr
+			}
+			raw = cleanLLMJSON(raw)
+			var parsed combinedExtraction
+			if parseErr := json.Unmarshal([]byte(raw), &parsed); parseErr != nil {
+				logger.Warnf(loadCtx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", parseErr, raw)
+				return combinedExtraction{}, fmt.Errorf("parse candidate slug JSON: %w", parseErr)
+			}
+			return parsed, nil
+		})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("candidate slug extraction failed: %w", err)
 	}
 
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
-	}
-
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+	var dedupState string
+	result.Entities, result.Concepts, dedupState, err = s.deduplicateExtractedBatch(
+		ctx, chatModel, kbID, knowledgeID, result.Entities, result.Concepts,
 	)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("resolve dedup candidates: %w", err)
+	}
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
 	for _, item := range result.Entities {
@@ -129,7 +144,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		}
 	}
 
-	return result.Entities, result.Concepts, slugItems, nil
+	return result.Entities, result.Concepts, slugItems, dedupState, nil
 }
 
 // chunkBatch groups chunks that will be sent in a single WikiChunkCitationPrompt call.
@@ -302,21 +317,27 @@ func (s *wikiIngestService) classifyChunkCitations(
 		batchIdx := bi
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
-			raw, err := s.generateWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
+			requestData := map[string]string{
 				"CandidateSlugs": candidatesXML,
 				"ChunksXML":      chunksXML,
 				"Language":       lang,
-			})
+			}
+			parsed, err := resolveWikiCachedJSON(ectx, s.inferenceCache, "citations", chatModel,
+				agent.WikiChunkCitationPrompt, requestData, func(loadCtx context.Context, maskedData map[string]string) (citationBatchResult, error) {
+					raw, generateErr := s.generateWithTemplateMasked(loadCtx, chatModel, agent.WikiChunkCitationPrompt, maskedData)
+					if generateErr != nil {
+						return citationBatchResult{}, generateErr
+					}
+					raw = cleanLLMJSON(raw)
+					var result citationBatchResult
+					if parseErr := json.Unmarshal([]byte(raw), &result); parseErr != nil {
+						return citationBatchResult{}, fmt.Errorf("parse citation JSON: %w", parseErr)
+					}
+					return result, nil
+				})
 			if err != nil {
 				logger.Warnf(ectx, "wiki ingest: citation batch %d failed: %v", batchIdx, err)
 				return nil // don't abort peer batches
-			}
-			raw = cleanLLMJSON(raw)
-
-			var parsed citationBatchResult
-			if jerr := json.Unmarshal([]byte(raw), &parsed); jerr != nil {
-				logger.Warnf(ectx, "wiki ingest: citation batch %d parse failed: %v\nRaw: %s", batchIdx, jerr, raw)
-				return nil
 			}
 
 			// Translate aliases → real chunk UUIDs; drop unknown aliases.

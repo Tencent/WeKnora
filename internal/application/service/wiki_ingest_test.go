@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/inferencecache"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -329,9 +330,86 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	}
 }
 
+func TestGenerateWithTemplateCachedRebindsCurrentImageURL(t *testing.T) {
+	t.Setenv("WEKNORA_INFERENCE_CACHE_ENABLED", "true")
+	const firstURL = "local://10000/exports/first-random.jpg"
+	const secondURL = "local://10000/exports/second-random.jpg"
+	model := &templateCaptureChatModel{
+		response: `summary ![caption](wkimg:0001)`,
+	}
+	service := &wikiIngestService{inferenceCache: inferencecache.New(nil)}
+	template := `Content={{.Content}}`
+
+	first, err := service.generateWithTemplateCached(context.Background(), "summary", model, template,
+		map[string]string{"Content": "![alt](" + firstURL + ")"})
+	if err != nil {
+		t.Fatalf("first generateWithTemplateCached() error = %v", err)
+	}
+	second, err := service.generateWithTemplateCached(context.Background(), "summary", model, template,
+		map[string]string{"Content": "![alt](" + secondURL + ")"})
+	if err != nil {
+		t.Fatalf("second generateWithTemplateCached() error = %v", err)
+	}
+
+	if model.calls != 1 {
+		t.Fatalf("model calls = %d, want 1 cache miss followed by one hit", model.calls)
+	}
+	if !strings.Contains(first, firstURL) {
+		t.Fatalf("first result does not contain first URL: %q", first)
+	}
+	if !strings.Contains(second, secondURL) || strings.Contains(second, firstURL) {
+		t.Fatalf("cache hit did not bind current URL: %q", second)
+	}
+}
+
+func TestResolveWikiCachedJSONRebindsCurrentImageURL(t *testing.T) {
+	t.Setenv("WEKNORA_INFERENCE_CACHE_ENABLED", "true")
+	type result struct {
+		Details string `json:"details"`
+	}
+
+	const firstURL = "minio://bucket/exports/first-random.jpg"
+	const secondURL = "minio://bucket/exports/second-random.jpg"
+	cache := inferencecache.New(nil)
+	model := &templateCaptureChatModel{}
+	loaderCalls := 0
+	loader := func(_ context.Context, maskedData map[string]string) (result, error) {
+		loaderCalls++
+		if strings.Contains(maskedData["Content"], "exports/") || !strings.Contains(maskedData["Content"], "wkimg:0001") {
+			t.Fatalf("loader received unmasked data: %q", maskedData["Content"])
+		}
+		return result{Details: `keep ![current](wkimg:0001), drop ![unknown](wkimg:9999)`}, nil
+	}
+
+	first, err := resolveWikiCachedJSON(context.Background(), cache, "candidate_slugs", model, "{{.Content}}",
+		map[string]string{"Content": "![alt](" + firstURL + ")"}, loader)
+	if err != nil {
+		t.Fatalf("first resolveWikiCachedJSON() error = %v", err)
+	}
+	second, err := resolveWikiCachedJSON(context.Background(), cache, "candidate_slugs", model, "{{.Content}}",
+		map[string]string{"Content": "![alt](" + secondURL + ")"}, loader)
+	if err != nil {
+		t.Fatalf("second resolveWikiCachedJSON() error = %v", err)
+	}
+
+	if loaderCalls != 1 {
+		t.Fatalf("loader calls = %d, want 1", loaderCalls)
+	}
+	if !strings.Contains(first.Details, firstURL) {
+		t.Fatalf("first typed result does not contain first URL: %q", first.Details)
+	}
+	if !strings.Contains(second.Details, secondURL) || strings.Contains(second.Details, firstURL) {
+		t.Fatalf("typed cache hit did not bind current URL: %q", second.Details)
+	}
+	if strings.Contains(second.Details, "wkimg:9999") || strings.Contains(second.Details, "![unknown]") {
+		t.Fatalf("unknown placeholder was not dropped: %q", second.Details)
+	}
+}
+
 type templateCaptureChatModel struct {
 	prompt   string
 	response string
+	calls    int
 }
 
 func (m *templateCaptureChatModel) Chat(
@@ -339,6 +417,7 @@ func (m *templateCaptureChatModel) Chat(
 	messages []chat.Message,
 	_ *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
+	m.calls++
 	if len(messages) > 0 {
 		m.prompt = messages[0].Content
 	}

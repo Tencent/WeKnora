@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/inferencecache"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -740,10 +741,10 @@ func checkSufficientSummaryContent(ctx context.Context, knowledgeID, content str
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
+) (string, inferencecache.Stats, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
-		return "", fmt.Errorf("no chunks provided for summary generation")
+		return "", inferencecache.Stats{}, fmt.Errorf("no chunks provided for summary generation")
 	}
 
 	// Determine max input chars from config
@@ -799,6 +800,11 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		}
 	}
 
+	// Export filenames and signed URLs are transport metadata and may change on
+	// every parse. Canonicalize them before sampling so URL length/entropy cannot
+	// shift the sampled text or invalidate an otherwise identical summary.
+	chunkContents = searchutil.CanonicalizeImageURLsForModel(chunkContents)
+
 	// Apply length limit: sample long content to fit within maxInputChars
 	chunkContents = sampleLongContent(chunkContents, maxInputChars)
 
@@ -812,7 +818,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
 	if err := checkSufficientSummaryContent(ctx, knowledge.ID, chunkContents); err != nil {
-		return "", err
+		return "", inferencecache.Stats{}, err
 	}
 
 	// Pass the raw chunk text to the LLM with no filename / file-type framing.
@@ -824,31 +830,63 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		maxTokens = s.config.Conversation.Summary.MaxCompletionTokens
 	}
 
-	// Generate summary using AI model
+	// Generate or reuse the summary. The key includes the fully rendered prompt,
+	// final provider input, model fingerprint and all request-affecting options.
 	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
 	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
-		{
-			Role:    "system",
-			Content: summaryPrompt,
-		},
-		{
-			Role:    "user",
-			Content: contentWithMetadata,
-		},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   maxTokens,
-		Thinking:    &thinking,
-	})
+	const summaryTemperature = 0.3
+	cacheInput := documentSummaryCacheInput{
+		Language:            types.LanguageNameFromContext(ctx),
+		Prompt:              summaryPrompt,
+		Content:             contentWithMetadata,
+		MaxInputChars:       maxInputChars,
+		MaxCompletionTokens: maxTokens,
+		Temperature:         summaryTemperature,
+		Thinking:            thinking,
+	}
+	cacheKey := documentSummaryCacheKey(ctx, summaryModel, cacheInput)
+	summary, cacheStats, err := resolveDocumentSummaryValue(ctx, s.inferenceCache, cacheKey,
+		func(loadCtx context.Context) (string, error) {
+			response, chatErr := summaryModel.Chat(loadCtx, []chat.Message{
+				{
+					Role:    "system",
+					Content: summaryPrompt,
+				},
+				{
+					Role:    "user",
+					Content: contentWithMetadata,
+				},
+			}, &chat.ChatOptions{
+				Temperature: summaryTemperature,
+				MaxTokens:   maxTokens,
+				Thinking:    &thinking,
+			})
+			if chatErr != nil {
+				return "", chatErr
+			}
+			if response == nil {
+				return "", errors.New("summary model returned nil response")
+			}
+			return response.Content, nil
+		})
+	if cacheStats.ReadError != nil {
+		logger.Warnf(ctx, "[InferenceCache] document summary read failed, using provider: %v", cacheStats.ReadError)
+	}
+	if cacheStats.WriteError != nil {
+		logger.Warnf(ctx, "[InferenceCache] document summary write failed: %v", cacheStats.WriteError)
+	}
+	if err == nil {
+		logger.Infof(ctx, "[InferenceCache] stage=document.summary key=%s hit=%v coalesced=%v",
+			inferenceCacheKeyID(cacheKey), cacheStats.Hit, cacheStats.Coalesced)
+	}
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
-		return "", err
+		return "", cacheStats, err
 	}
-	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
-	return summary.Content, nil
+	logger.GetLogger(ctx).WithField("summary", summary).Infof("GetSummary success")
+	return summary, cacheStats, nil
 }
 
 // sampleLongContent returns content that fits within maxChars.
@@ -1050,7 +1088,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summary, summaryCacheStats, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summaryOut["cache_hit"] = summaryCacheStats.Hit || summaryCacheStats.Coalesced
+	summaryOut["cache_coalesced"] = summaryCacheStats.Coalesced
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1927,24 +1967,67 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		"language":       langName,
 	})
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
+	// Export paths and signed image URLs are transport metadata. Removing them
+	// before both the provider call and cache lookup makes the question input
+	// stable across an otherwise identical reparse while preserving OCR,
+	// captions, alt text and surrounding prose.
+	prompt = searchutil.CanonicalizeImageURLsForModel(prompt)
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{
-			Role:    "user",
-			Content: prompt,
-		},
-	}, &chat.ChatOptions{
-		Temperature: 0.7,
-		MaxTokens:   512,
-		Thinking:    &thinking,
+	const (
+		questionTemperature = 0.7
+		questionMaxTokens   = 512
+	)
+	cacheKey := documentQuestionCacheKey(ctx, chatModel, documentQuestionCacheInput{
+		Prompt:        prompt,
+		QuestionCount: questionCount,
+		Temperature:   questionTemperature,
+		MaxTokens:     questionMaxTokens,
+		Thinking:      thinking,
 	})
+	questions, cacheStats, err := resolveDocumentQuestionsValue(ctx, s.inferenceCache, cacheKey,
+		func(loadCtx context.Context) ([]string, error) {
+			response, chatErr := chatModel.Chat(loadCtx, []chat.Message{
+				{
+					Role:    "user",
+					Content: prompt,
+				},
+			}, &chat.ChatOptions{
+				Temperature: questionTemperature,
+				MaxTokens:   questionMaxTokens,
+				Thinking:    &thinking,
+			})
+			if chatErr != nil {
+				return nil, chatErr
+			}
+			if response == nil {
+				return nil, errors.New("question model returned nil response")
+			}
+			return parseGeneratedQuestions(response.Content, questionCount), nil
+		})
+	if cacheStats.ReadError != nil {
+		logger.Warnf(ctx, "[InferenceCache] document questions read failed, using provider: %v", cacheStats.ReadError)
+	}
+	if cacheStats.WriteError != nil {
+		logger.Warnf(ctx, "[InferenceCache] document questions write failed: %v", cacheStats.WriteError)
+	}
+	if err == nil {
+		logger.Infof(ctx, "[InferenceCache] stage=document.questions key=%s hit=%v coalesced=%v",
+			inferenceCacheKeyID(cacheKey), cacheStats.Hit, cacheStats.Coalesced)
+	}
 	if err != nil {
+		if errors.Is(err, errEmptyDocumentQuestions) {
+			// Preserve the existing behavior: an empty model response is a
+			// successful no-op for this chunk, but is deliberately not cached.
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
+	return questions, nil
+}
 
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
+func parseGeneratedQuestions(content string, questionCount int) []string {
+	lines := strings.Split(content, "\n")
 	questions := make([]string, 0, questionCount)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1960,8 +2043,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 			}
 		}
 	}
-
-	return questions, nil
+	return questions
 }
 
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.

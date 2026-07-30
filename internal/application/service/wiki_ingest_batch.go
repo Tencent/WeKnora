@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -339,9 +340,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// batches); Lite mode peeks under its in-process lock.
 	var pendingOps []WikiPendingOp
 	var peekedIDs []int64
+	var claimToken string
+	var stopClaimHeartbeat func()
+	claimParentCtx := ctx
 	var loadErr error
 	if s.redisClient != nil {
-		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
+		pendingOps, peekedIDs, claimToken, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	} else {
 		pendingOps, peekedIDs, loadErr = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	}
@@ -371,11 +375,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	logger.Infof(ctx, "wiki ingest: batch processing %d ops for KB %s", len(pendingOps), payload.KnowledgeBaseID)
 
+	// Keep the short DB claim lease alive for however long Map/Reduce takes.
+	// A killed process stops this heartbeat and becomes reclaimable within
+	// wikiClaimStaleAfter instead of waiting for the full task timeout.
+	if s.redisClient != nil && len(peekedIDs) > 0 && claimToken != "" {
+		ctx, stopClaimHeartbeat = s.keepClaimsAlive(ctx, payload.KnowledgeBaseID, peekedIDs, claimToken)
+		defer stopClaimHeartbeat()
+	}
+
 	// Crash/abort safety net (standard/claim mode only). If this batch exits
 	// abnormally — panic, ctx timeout, or an early error return — BEFORE it
 	// settles its claimed rows (trim + requeueFailedOps), release the claims
 	// so the next trigger can re-claim within seconds instead of waiting out
-	// wikiClaimStaleAfter (~90m). On the normal path claimsSettled flips true
+	// the short renewable lease. On the normal path claimsSettled flips true
 	// once the rows reach their terminal state, making this a no-op. Uses a
 	// background context because ctx may already be cancelled on the timeout
 	// path. Lite mode peeks without claiming, so there is nothing to release.
@@ -385,7 +397,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			if claimsSettled {
 				return
 			}
-			if err := s.pendingRepo.ReleaseByIDs(context.Background(), peekedIDs); err != nil {
+			if err := s.pendingRepo.ReleaseClaims(context.Background(), peekedIDs, claimToken); err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to release %d claims on abnormal exit for KB %s: %v", len(peekedIDs), payload.KnowledgeBaseID, err)
 				return
 			}
@@ -875,14 +887,22 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 		trimIDs = append(trimIDs, id)
 	}
-	s.trimPendingList(ctx, trimIDs)
+	// Model and reduce work is complete. Stop renewing before settlement so
+	// the heartbeat cannot mistake rows deleted below for a lost lease. Use
+	// the pre-lease context for the short DB settlement because stopping the
+	// heartbeat also cancels the derived processing context.
+	if stopClaimHeartbeat != nil {
+		stopClaimHeartbeat()
+		ctx = claimParentCtx
+	}
+	s.trimPendingList(ctx, trimIDs, claimToken)
 
 	// Process failed ops: increment fail_count and dead-letter once
 	// the cap is hit. Must come AFTER trim so successful siblings are
 	// already gone from the queue — otherwise a follow-up batch could
 	// re-pick them up.
 	if len(failedOps) > 0 {
-		s.requeueFailedOps(ctx, payload, failedOps)
+		s.requeueFailedOps(ctx, payload, failedOps, claimToken)
 	}
 	// All claimed rows have now reached a terminal state (deleted on success,
 	// released for retry, or dead-lettered), so disarm the abnormal-exit
@@ -1162,142 +1182,30 @@ func (s *wikiIngestService) mapOneDocument(
 	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
-	// Pass 0: lightweight candidate slug extraction (skeleton only).
-	// On failure we fall back to the legacy single-shot extractor so the doc
-	// still gets ingested, just without chunk-level citations.
-	var (
-		extractedEntities []extractedItem
-		extractedConcepts []extractedItem
-		slugItems         map[string]extractedItem
-		pass0Failed       bool
+	artifact, mapCacheHit, err := s.resolveWikiDocMapArtifact(
+		ctx, chatModel, payload.KnowledgeBaseID, knowledgeID, content, lang,
+		chunks, oldPageSlugs, batchCtx, wikiSpan,
 	)
-	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
-	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
-		"content_chars": utf8.RuneCountInString(content),
-		"old_pages":     len(oldPageSlugs),
-	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
-		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
-		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
-			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
-			return nil, nil, err
-		}
+		logger.Errorf(ctx, "wiki ingest: document map failed for %s: %v", knowledgeID, err)
+		s.tracker().FailSpan(ctx, wikiSpan, "MAP_FAILED", err.Error(), err)
+		return nil, nil, err
 	}
-	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
-		"entities":         len(extractedEntities),
-		"concepts":         len(extractedConcepts),
-		"pass0_fallback":   pass0Failed,
-		"entities_preview": previewExtractedItems(extractedEntities, 8),
-		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
-	})
+	extractedEntities := artifact.Entities
+	extractedConcepts := artifact.Concepts
+	summaryContent := artifact.Summary
+	pass0Failed := artifact.Pass0Fallback
+	batchCount := artifact.BatchCount
+	uncited := artifact.UncitedCount
+	newSlugCount := artifact.NewSlugCount
 
-	// Build slug listing for Summary's wiki-link input.
-	var summaryExtractedPages []string
-	for slug := range slugItems {
-		summaryExtractedPages = append(summaryExtractedPages, slug)
-	}
-	// Wiki summary slug is derived from the knowledge ID rather than the
-	// docTitle (which is typically the upload filename). Filename-based slugs
-	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
-	// that downstream LLM prompts read; a UUID-based slug is uglier but
-	// hallucination-safe.
+	// The summary page slug is source-owned and therefore stays outside the
+	// cached artifact; it is deterministic for the current knowledge row.
 	summarySlug := fmt.Sprintf("summary/%s", slugify(knowledgeID))
-	var slugListing string
-	for _, slug := range summaryExtractedPages {
-		if item, ok := slugItems[slug]; ok {
-			aliases := ""
-			if len(item.Aliases) > 0 {
-				aliases = fmt.Sprintf(" (Aliases: %s)", strings.Join(item.Aliases, ", "))
-			}
-			slugListing += fmt.Sprintf("- [[%s]] = %s%s\n", slug, item.Name, aliases)
-		} else {
-			slugListing += fmt.Sprintf("- [[%s]]\n", slug)
-		}
-	}
 
-	// Summary and chunk classification are independent given Pass 0 output —
-	// run them in parallel. Summary handles wiki-link injection; classification
-	// attaches concrete chunk IDs to each candidate slug.
-	var (
-		summaryContent string
-		summaryErr     error
-		citations      map[string][]string
-		newSlugs       []newSlugFromCitation
-		batchCount     int
-	)
-
-	// Both calls run in parallel goroutines under the same wikiSpan
-	// parent — their subspans will visually overlap in the trace view,
-	// which correctly reflects their wall-clock concurrency.
-	summarySpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.summary", types.SpanKindSubSpan, types.JSONMap{
-		"content_chars":   utf8.RuneCountInString(content),
-		"extracted_slugs": len(summaryExtractedPages),
-	})
-	var classifySpan *Span
-	if !pass0Failed {
-		classifySpan = s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.classify", types.SpanKindSubSpan, types.JSONMap{
-			"chunks":     len(chunks),
-			"candidates": len(extractedEntities) + len(extractedConcepts),
-		})
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Content":            content,
-			"Language":           lang,
-			"ExtractedSlugs":     slugListing,
-			"CustomInstructions": batchCtx.ContentInstructions,
-			"InstructionScope":   "wiki_content",
-		})
-		if summaryErr != nil {
-			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
-		} else {
-			sumLine, sumBody := splitSummaryLine(summaryContent)
-			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
-				"chars":        utf8.RuneCountInString(summaryContent),
-				"summary_line": previewText(sumLine, 160),
-				"body_preview": previewText(sumBody, 320),
-			})
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		// Skip citation pass when Pass 0 has fallen back to the legacy path —
-		// the legacy output already contains paraphrased Details, so chunk
-		// citations would be redundant and we'd spend LLM calls for nothing.
-		if pass0Failed {
-			citations = map[string][]string{}
-			return
-		}
-		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
-		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
-			"cited_slugs":      len(citations),
-			"new_slugs":        len(newSlugs),
-			"batches":          batchCount,
-			"top_cited":        topCitedSlugs(citations, 8),
-			"new_slugs_sample": previewNewSlugs(newSlugs, 8),
-		})
-	}()
-	wg.Wait()
-
-	// Merge citations back into the item structs (non-failing; items without
-	// citations simply keep their Description+Details fallback).
-	var uncited int
-	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
-
-	// Rebuild slugItems so stale entries (for slugs that did not survive the
-	// merge) and brand-new slugs discovered by the citation pass are both
-	// reflected in summaryExtractedPages tracking.
-	slugItems = make(map[string]extractedItem, len(extractedEntities)+len(extractedConcepts))
+	// Rebuild the lookup from the canonical artifact. This includes slugs
+	// discovered by citation classification as well as initial candidates.
+	slugItems := make(map[string]extractedItem, len(extractedEntities)+len(extractedConcepts))
 	for _, item := range extractedEntities {
 		if item.Slug != "" && item.Name != "" {
 			slugItems[item.Slug] = item
@@ -1323,10 +1231,11 @@ func (s *wikiIngestService) mapOneDocument(
 		extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: slug, Title: title})
 	}
 
-	// Count total distinct chunks cited across all slugs for logging.
+	// Count total distinct chunks cited across all slugs for logging. The
+	// artifact already carries merged source-chunk references.
 	citedChunkSet := make(map[string]bool)
-	for _, ids := range citations {
-		for _, id := range ids {
+	for _, item := range append(append([]extractedItem(nil), extractedEntities...), extractedConcepts...) {
+		for _, id := range item.SourceChunks {
 			citedChunkSet[id] = true
 		}
 	}
@@ -1338,24 +1247,6 @@ func (s *wikiIngestService) mapOneDocument(
 	// update so the editor model gets rich framing in <source_context>.
 	var docSummaryLine string
 	var docSummary string
-
-	if summaryErr != nil {
-		// Summary is the headline artifact of an ingested document — a
-		// document with no summary page is half-ingested and leaves the
-		// entity/concept updates hanging without a root to link back to
-		// from the index. Historically we just logged and moved on,
-		// which meant a single transient 504 permanently dropped the
-		// summary page for that document.
-		//
-		// Returning an error here sends the op to failedOps (see the
-		// map-phase loop in ProcessWikiIngest), which requeueFailedOps
-		// appends back onto the pending list so the next batch retries.
-		// The internal retries in generateWithTemplate already exhaust
-		// the LLM's own transient-error budget before we give up here.
-		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s, will requeue: %v", knowledgeID, summaryErr)
-		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
-		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
-	}
 	sumLine, sumBody := splitSummaryLine(summaryContent)
 	if sumBody == "" {
 		sumBody = summaryContent
@@ -1483,7 +1374,7 @@ func (s *wikiIngestService) mapOneDocument(
 	logger.Infof(ctx,
 		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
 		knowledgeID, previewText(docTitle, 80),
-		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
+		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, newSlugCount,
 		len(updates), reparseOverlap, staleCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
@@ -1501,7 +1392,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"candidate_slugs":  len(slugItems),
 		"cited_chunks":     len(citedChunkSet),
 		"uncited_slugs":    uncited,
-		"new_slugs":        len(newSlugs),
+		"new_slugs":        newSlugCount,
 		"updates":          len(updates),
 		"reparse_slugs":    reparseOverlap,
 		"stale_slugs":      staleCount,
@@ -1509,6 +1400,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"summary_chars":    utf8.RuneCountInString(docSummary),
 		"pass0_fallback":   pass0Failed,
 		"classify_batches": batchCount,
+		"map_cache_hit":    mapCacheHit,
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
 
@@ -1525,11 +1417,11 @@ func (s *wikiIngestService) mapOneDocument(
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	ctx context.Context,
 	chatModel chat.Chat,
-	kbID string,
+	kbID, knowledgeID string,
 	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
-) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
+) ([]extractedItem, []extractedItem, map[string]extractedItem, string, error) {
 	// Only entity/* and concept/* slugs are relevant for LLM slug-continuity —
 	// summary slugs are code-generated from the knowledge ID and never appear
 	// in the extraction output, so including them just wastes tokens and risks
@@ -1537,10 +1429,15 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		slugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+		for _, slug := range slugs {
 			fmt.Fprintf(&sb, "- %s\n", slug)
 		}
 		prevSlugsText = sb.String()
@@ -1549,23 +1446,29 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
+	requestData := map[string]string{
 		"Content":            content,
 		"Language":           lang,
 		"PreviousSlugs":      prevSlugsText,
 		"CustomInstructions": batchCtx.ExtractionInstructions,
 		"InstructionScope":   "wiki_extraction",
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("combined extraction failed: %w", err)
 	}
-
-	extractionJSON = cleanLLMJSON(extractionJSON)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(extractionJSON), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse combined extraction JSON: %v\nRaw: %s", err, extractionJSON)
-		return nil, nil, nil, fmt.Errorf("parse combined extraction JSON: %w", err)
+	result, err := resolveWikiCachedJSON(ctx, s.inferenceCache, "legacy_extraction", chatModel,
+		agent.WikiKnowledgeExtractPrompt, requestData, func(loadCtx context.Context, maskedData map[string]string) (combinedExtraction, error) {
+			extractionJSON, generateErr := s.generateWithTemplateMasked(loadCtx, chatModel, agent.WikiKnowledgeExtractPrompt, maskedData)
+			if generateErr != nil {
+				return combinedExtraction{}, generateErr
+			}
+			extractionJSON = cleanLLMJSON(extractionJSON)
+			var parsed combinedExtraction
+			if parseErr := json.Unmarshal([]byte(extractionJSON), &parsed); parseErr != nil {
+				logger.Warnf(loadCtx, "wiki ingest: failed to parse combined extraction JSON: %v\nRaw: %s", parseErr, extractionJSON)
+				return combinedExtraction{}, fmt.Errorf("parse combined extraction JSON: %w", parseErr)
+			}
+			return parsed, nil
+		})
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("combined extraction failed: %w", err)
 	}
 
 	// Dedup pre-filter is dispatched against the wiki page repo via
@@ -1573,9 +1476,13 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// lands the dedup pre-filter degrades to "no dedup" which is the
 	// safe default — the LLM merge call simply doesn't get a candidate
 	// list and the items pass through unchanged.
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+	var dedupState string
+	result.Entities, result.Concepts, dedupState, err = s.deduplicateExtractedBatch(
+		ctx, chatModel, kbID, knowledgeID, result.Entities, result.Concepts,
 	)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("resolve dedup candidates: %w", err)
+	}
 
 	slugItems := make(map[string]extractedItem)
 	for _, item := range result.Entities {
@@ -1589,7 +1496,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		}
 	}
 
-	return result.Entities, result.Concepts, slugItems, nil
+	return result.Entities, result.Concepts, slugItems, dedupState, nil
 }
 
 // reduceSlugUpdates returns:

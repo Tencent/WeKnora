@@ -2,15 +2,14 @@ package retriever
 
 import (
 	"context"
-	"regexp"
 	"slices"
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"golang.org/x/sync/errgroup"
@@ -29,13 +28,6 @@ const (
 	embedRetryAttempts  = 5
 	embedRetryBaseDelay = 200 * time.Millisecond
 )
-
-var embeddingImagePayloadPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?is)<img\b[^>]*\bsrc=["']\s*data:image/[a-z0-9.+-]+;base64,[^"']+["'][^>]*>`),
-	regexp.MustCompile(`(?is)!\[[^\]]*\]\(\s*data:image/[a-z0-9.+-]+;base64,[^)]+\)`),
-	regexp.MustCompile(`(?i)data:image/[a-z0-9.+-]+;base64,[a-z0-9+/=]{200,}`),
-	regexp.MustCompile(`(?i)data:[a-z0-9.+/-]+;base64,[a-z0-9+/=]{200,}`),
-}
 
 // KeywordsVectorHybridRetrieveEngineService implements a hybrid retrieval engine
 // that supports both keyword-based and vector-based retrieval
@@ -157,14 +149,7 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 // truncation point is char-based, not token-based, so it sits well above any
 // realistic token limit. We log a warning whenever truncation kicks in.
 func sanitizeForEmbedding(ctx context.Context, content string) string {
-	sanitized := content
-	// Scrubbing only matters when an inline base64 payload is present; skip the
-	// regex passes otherwise so the common (no-image) path stays cheap.
-	if strings.Contains(content, "base64,") {
-		for _, pattern := range embeddingImagePayloadPatterns {
-			sanitized = pattern.ReplaceAllString(sanitized, "[image]")
-		}
-	}
+	sanitized := searchutil.CanonicalizeImageURLsForModel(content)
 
 	if utf8.RuneCountInString(sanitized) <= safetyMaxChars {
 		return sanitized

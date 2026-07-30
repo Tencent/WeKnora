@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -119,6 +120,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		limit = 1000
 	}
 	now := time.Now()
+	claimToken := uuid.NewString()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
@@ -193,7 +195,10 @@ FOR UPDATE SKIP LOCKED`
 		}
 		if err := tx.Model(&types.TaskPendingOp{}).
 			Where("id IN ?", ids).
-			Update("claimed_at", now).Error; err != nil {
+			Updates(map[string]interface{}{
+				"claimed_at":  now,
+				"claim_token": claimToken,
+			}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id IN ?", ids).Order("id ASC").Find(&claimed).Error
@@ -202,6 +207,60 @@ FOR UPDATE SKIP LOCKED`
 		return nil, err
 	}
 	return claimed, nil
+}
+
+// RenewClaims refreshes a live claim lease without allowing a stale owner to
+// take back rows that have already been reclaimed under another token.
+func (r *taskPendingOpsRepository) RenewClaims(ctx context.Context, ids []int64, claimToken string) (int64, error) {
+	if len(ids) == 0 || claimToken == "" {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("id IN ? AND claim_token = ?", ids, claimToken).
+		Update("claimed_at", time.Now())
+	return result.RowsAffected, result.Error
+}
+
+// ReleaseClaims returns only rows owned by claimToken to the unclaimed pool.
+func (r *taskPendingOpsRepository) ReleaseClaims(ctx context.Context, ids []int64, claimToken string) error {
+	if len(ids) == 0 || claimToken == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("id IN ? AND claim_token = ?", ids, claimToken).
+		Updates(map[string]interface{}{
+			"claimed_at":  nil,
+			"claim_token": "",
+		}).Error
+}
+
+// DeleteClaims consumes only rows still owned by claimToken.
+func (r *taskPendingOpsRepository) DeleteClaims(ctx context.Context, ids []int64, claimToken string) error {
+	if len(ids) == 0 || claimToken == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Where("id IN ? AND claim_token = ?", ids, claimToken).
+		Delete(&types.TaskPendingOp{}).Error
+}
+
+// IncrClaimFailCount increments retry state only while the caller still owns
+// the row. A zero result means the row disappeared or the lease was lost.
+func (r *taskPendingOpsRepository) IncrClaimFailCount(ctx context.Context, id int64, claimToken string) (int, error) {
+	if id == 0 || claimToken == "" {
+		return 0, nil
+	}
+	var newCount int
+	err := r.db.WithContext(ctx).Raw(
+		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? AND claim_token = ? RETURNING fail_count`,
+		id, claimToken,
+	).Scan(&newCount).Error
+	if err != nil {
+		return 0, err
+	}
+	return newCount, nil
 }
 
 // ReleaseByIDs clears claimed_at for the given rows, returning them to the
@@ -214,7 +273,10 @@ func (r *taskPendingOpsRepository) ReleaseByIDs(ctx context.Context, ids []int64
 	return r.db.WithContext(ctx).
 		Model(&types.TaskPendingOp{}).
 		Where("id IN ?", ids).
-		Update("claimed_at", nil).Error
+		Updates(map[string]interface{}{
+			"claimed_at":  nil,
+			"claim_token": "",
+		}).Error
 }
 
 // DeleteByIDs removes the given rows in one statement. Empty input is a

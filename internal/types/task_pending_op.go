@@ -49,12 +49,13 @@ type TaskPendingOp struct {
 	// but useful for ops queries like "rows older than 1h that never
 	// drained".
 	EnqueuedAt time.Time `json:"enqueued_at"`
-	// Optional claim timestamp for future locking workflows. Not used
-	// in the current revision: consumers rely on external mutual
-	// exclusion (e.g. wiki:active:<kbID> Redis SetNX). Reserved column
-	// so future no-lock parallel workers can flip it inside a row-level
-	// lock without another migration.
+	// Claim timestamp. Long-running consumers renew it as a lease; a value
+	// older than their stale threshold is eligible for crash recovery.
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// ClaimToken identifies the current lease owner. It prevents a worker
+	// that resumes after losing its lease from renewing, releasing, or
+	// deleting rows already reclaimed by another worker.
+	ClaimToken string `json:"claim_token,omitempty" gorm:"type:varchar(64);default:''"`
 }
 
 // TableName binds TaskPendingOp to the `task_pending_ops` table.
