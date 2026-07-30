@@ -83,7 +83,7 @@ class MHTMLParser(BaseParser):
         html_content = main_html["content"]
 
         try:
-            markdown_text = self._html_to_markdown(
+            markdown_text = self.html_to_markdown(
                 html_content,
                 image_aliases=image_aliases,
                 base_location=main_html.get("location", ""),
@@ -118,11 +118,15 @@ class MHTMLParser(BaseParser):
             return non_ad[0]
 
         largest = max(html_parts, key=lambda part: part["size"])
-        logger.warning("Only ad content found, using largest: %d bytes", largest["size"])
+        logger.warning(
+            "Only ad content found, using largest: %d bytes", largest["size"]
+        )
         return largest
 
     @staticmethod
-    def _add_image_aliases(image_aliases: Dict[str, str], part, image_path: str) -> None:
+    def _add_image_aliases(
+        image_aliases: Dict[str, str], part, image_path: str
+    ) -> None:
         """Register the refs an MHTML document may use for an image part."""
         for raw in (
             part.get("Content-Location", ""),
@@ -192,19 +196,30 @@ class MHTMLParser(BaseParser):
             return ""
         return filename
 
-    def _html_to_markdown(
+    def html_to_markdown(
         self,
         html_content: str,
         image_aliases: Dict[str, str] | None = None,
         base_location: str = "",
+        *,
+        strip_internal_links: bool = True,
+        fallback_to_raw_html: bool = True,
     ) -> str:
+        """Convert HTML to Markdown with explicit link and fallback policies."""
+
+        def raw_html_fallback() -> str:
+            if not fallback_to_raw_html:
+                return ""
+            return f"```html\n{html_content[:50000]}\n```"
+
         try:
             from markdownify import markdownify as md
 
             soup = BeautifulSoup(html_content, "lxml")
             for tag in soup(["script", "style", "noscript", "iframe"]):
                 tag.decompose()
-            self._strip_internal_links(soup)
+            if strip_internal_links:
+                self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             text_fallback = soup.get_text(separator="\n", strip=True)
@@ -214,14 +229,23 @@ class MHTMLParser(BaseParser):
                 logger.warning("Markdown empty, falling back to text extraction")
                 return text_fallback
             if not result:
-                return f"```html\n{html_content[:50000]}\n```"
+                return raw_html_fallback()
             return result
         except ImportError:
             logger.warning("markdownify not available, returning raw HTML")
-            return f"```html\n{html_content}\n```"
+            return raw_html_fallback()
         except Exception as e:
             logger.error("HTML to Markdown conversion failed: %s", e)
-            return f"```html\n{html_content}\n```"
+            return raw_html_fallback()
+
+    def _html_to_markdown(
+        self,
+        html_content: str,
+        image_aliases: Dict[str, str] | None = None,
+        base_location: str = "",
+    ) -> str:
+        """Backward-compatible wrapper for existing internal callers and tests."""
+        return self.html_to_markdown(html_content, image_aliases, base_location)
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:

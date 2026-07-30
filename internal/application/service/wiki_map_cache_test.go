@@ -31,3 +31,20 @@ func TestWikiMapCacheRejectsCorruptOrEmptyValues(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "{}", got)
 }
+
+func TestWikiMapCacheKeyIgnoresPreviousSlugs(t *testing.T) {
+	base := map[string]string{
+		"Title":         "Architecture Notes",
+		"Content":       "same document content",
+		"PreviousSlugs": "",
+	}
+	reparse := map[string]string{
+		"Title":         "Architecture Notes",
+		"Content":       "same document content",
+		"PreviousSlugs": "summary/architecture-notes,entity/cache",
+	}
+
+	firstKey := wikiMapLLMCacheKey(nil, "prompt {{.Content}}", base, "map", "wiki-map-v1")
+	reparseKey := wikiMapLLMCacheKey(nil, "prompt {{.Content}}", reparse, "map", "wiki-map-v1")
+	require.Equal(t, firstKey, reparseKey)
+}

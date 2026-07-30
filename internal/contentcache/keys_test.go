@@ -36,6 +36,24 @@ func TestStableChunkIDIsContentAddressedWithinKnowledge(t *testing.T) {
 	}
 }
 
+func TestStableChunkIDNormalizesUnicode(t *testing.T) {
+	composed := ChunkIDInput{
+		KnowledgeID: "knowledge-1",
+		ChunkType:   "text",
+		Occurrence:  1,
+		Content:     "café",
+	}
+	decomposed := composed
+	decomposed.Content = "cafe\u0301"
+
+	if StableChunkID(composed) != StableChunkID(decomposed) {
+		t.Fatal("StableChunkID must normalize canonically equivalent Unicode")
+	}
+	if TextHash(composed.Content) != TextHash(decomposed.Content) {
+		t.Fatal("TextHash must normalize canonically equivalent Unicode")
+	}
+}
+
 func TestStableChunkIDIgnoresSourceSequence(t *testing.T) {
 	base := ChunkIDInput{
 		KnowledgeID: "knowledge-1",
@@ -141,6 +159,18 @@ func TestCacheKeysIncludeLayerInvalidationInputs(t *testing.T) {
 	vlmB := VLMKey(ImageHash([]byte("image bytes")), "vlm-a", "ocr-v2")
 	if vlmA == vlmB {
 		t.Fatal("VLMKey must include prompt version")
+	}
+	vlmC := VLMKey(ImageHash([]byte("different image bytes")), "vlm-a", "ocr-v1")
+	if vlmA == vlmC {
+		t.Fatal("VLMKey must include image bytes hash")
+	}
+	vlmD := VLMKey(ImageHash([]byte("image bytes")), "vlm-b", "ocr-v1")
+	if vlmA == vlmD {
+		t.Fatal("VLMKey must include model identity")
+	}
+	vlmSameBytesDifferentURL := VLMKey(ImageHash([]byte("image bytes")), "vlm-a", "ocr-v1")
+	if vlmA != vlmSameBytesDifferentURL {
+		t.Fatal("VLMKey should be driven by image bytes, not transient serving URL")
 	}
 
 	wikiA := WikiMapKey(TextHash("document"), "standard", "chat-a", "wiki-v1")

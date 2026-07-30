@@ -55,12 +55,19 @@ func wikiMapLLMCacheKey(
 	layer string,
 	promptVersion string,
 ) string {
+	keyData := make(map[string]string, len(data))
+	for k, v := range data {
+		if k == "PreviousSlugs" {
+			continue
+		}
+		keyData[k] = v
+	}
 	payloadHash := stableJSONHash(struct {
 		PromptTemplate string            `json:"prompt_template"`
 		Data           map[string]string `json:"data"`
 	}{
 		PromptTemplate: promptTpl,
-		Data:           data,
+		Data:           keyData,
 	})
 	return contentcache.WikiMapKey(payloadHash, layer, chatModelCacheKey(chatModel), promptVersion)
 }

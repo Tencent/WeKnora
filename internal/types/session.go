@@ -159,7 +159,7 @@ func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
 	if s == nil {
 		return false
 	}
-	if strings.HasPrefix(s.UserID, SessionOwnerAPITenantKeyPrefix) {
+	if IsAPISessionOwnerID(s.UserID) {
 		return true
 	}
 	if strings.HasPrefix(s.Description, EmbedSessionMarkerPrefix) ||

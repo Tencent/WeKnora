@@ -11,8 +11,8 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -377,7 +377,7 @@ func commonStringPrefix(a, b string) string {
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
-	runtimeCtx = e.sourceRefs.CompactKnownText(runtimeCtx)
+	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
 }
@@ -385,22 +385,22 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 // registerRuntimeReferences makes bound KBs, pinned documents and recent
 // chunks addressable without exposing their durable IDs to the model.
 func (e *AgentEngine) registerRuntimeReferences() {
-	if e == nil || e.sourceRefs == nil {
+	if e == nil || e.modelContext == nil {
 		return
 	}
 	for _, kb := range e.knowledgeBasesInfo {
 		if kb == nil {
 			continue
 		}
-		e.sourceRefs.RegisterKnowledgeBase(kb.ID)
+		e.modelContext.RegisterKnowledgeBase(kb.ID)
 		for _, doc := range kb.RecentDocs {
-			e.sourceRefs.RegisterDocument(doc.KnowledgeID)
+			e.modelContext.RegisterDocument(doc.KnowledgeID)
 			if doc.ChunkID != "" {
 				title := doc.Title
 				if title == "" {
 					title = doc.FileName
 				}
-				e.sourceRefs.RegisterChunk(llmreference.ChunkReference{
+				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
@@ -414,8 +414,8 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		if doc == nil {
 			continue
 		}
-		e.sourceRefs.RegisterDocument(doc.KnowledgeID)
-		e.sourceRefs.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+		e.modelContext.RegisterDocument(doc.KnowledgeID)
+		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
 	}
 }
 
@@ -512,7 +512,7 @@ func (e *AgentEngine) appendToolResults(
 
 	// Add tool result messages (role: "tool", following OpenAI format)
 	for _, toolCall := range step.ToolCalls {
-		resultContent := e.sourceRefs.ModelOutput(toolCall.Result)
+		resultContent := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
 
 		toolMsg := chat.Message{
 			Role:       "tool",

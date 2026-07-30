@@ -124,6 +124,65 @@ func TestUpsertStableChunksHardDeletesSoftDeletedIDBeforeCreate(t *testing.T) {
 	require.Equal(t, "recreated content", got.Content)
 }
 
+func TestUpsertStableChunksPreservesEditedRevisionFields(t *testing.T) {
+	ctx := context.Background()
+	repo := setupStableChunkSyncRepo(t)
+
+	edited := stableSyncTestChunk("chunk-edited", "user edited content")
+	edited.ChunkType = types.ChunkTypeText
+	edited.SourceContent = "original parser content"
+	edited.ContentRevision = 3
+	edited.IndexStatus = "failed"
+	edited.LastEditorID = "user-123"
+	edited.IsEnabled = true
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{edited}))
+	edited.IsEnabled = false
+	require.NoError(t, repo.UpdateChunk(ctx, edited))
+
+	incoming := stableSyncTestChunk("chunk-edited", "fresh parser content")
+	incoming.ChunkType = types.ChunkTypeText
+	incoming.SourceContent = "fresh parser content"
+	incoming.ContentRevision = 0
+	incoming.IndexStatus = "ready"
+	incoming.LastEditorID = ""
+	incoming.IsEnabled = true
+
+	stats, err := upsertStableChunks(ctx, repo, 1, []*types.Chunk{incoming})
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Reused)
+
+	got, err := repo.GetChunkByID(ctx, 1, "chunk-edited")
+	require.NoError(t, err)
+	require.Equal(t, "user edited content", got.Content)
+	require.Equal(t, "original parser content", got.SourceContent)
+	require.Equal(t, 3, got.ContentRevision)
+	require.Equal(t, "failed", got.IndexStatus)
+	require.Equal(t, "user-123", got.LastEditorID)
+	require.False(t, got.IsEnabled)
+}
+
+func TestCollectReparseStaleDerivedChunkIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := setupStableChunkSyncRepo(t)
+
+	summary := stableSyncTestChunk("summary-1", "old summary")
+	summary.ChunkType = types.ChunkTypeSummary
+	image := stableSyncTestChunk("image-1", "old image ocr")
+	image.ChunkType = types.ChunkTypeImageOCR
+	text := stableSyncTestChunk("text-1", "text")
+	text.ChunkType = types.ChunkTypeText
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{summary, image, text}))
+
+	svc := &knowledgeService{chunkRepo: repo}
+	ids, err := svc.collectReparseStaleDerivedChunkIDs(ctx, 1, "knowledge-1", true, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"summary-1", "image-1"}, ids)
+
+	ids, err = svc.collectReparseStaleDerivedChunkIDs(ctx, 1, "knowledge-1", false, true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"image-1"}, ids)
+}
+
 func TestSyncReparseBaseChunksDefersStaleDeletionUntilVectorCleanupCanRun(t *testing.T) {
 	ctx := context.Background()
 	repo := setupStableChunkSyncRepo(t)

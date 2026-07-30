@@ -444,12 +444,7 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 	default:
 		sourceWeight = 1.0
 	}
-	positionPrior := 1.0
-	if sr.StartAt >= 0 {
-		positionPrior += searchutil.ClampFloat(1.0-float64(sr.StartAt)/float64(sr.EndAt+1), -0.05, 0.05)
-	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
 	if composite < 0 {
 		composite = 0
 	}

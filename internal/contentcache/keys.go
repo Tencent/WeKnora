@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -40,7 +41,7 @@ func NormalizeText(s string) string {
 	for i := range lines {
 		lines[i] = strings.TrimRight(lines[i], " \t")
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	return norm.NFC.String(strings.TrimSpace(strings.Join(lines, "\n")))
 }
 
 // TextHash returns a SHA-256 hash for normalized text.

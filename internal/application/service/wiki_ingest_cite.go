@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
@@ -141,7 +142,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 // chunkBatch groups chunks that will be sent in a single WikiChunkCitationPrompt call.
 type chunkBatch struct {
 	chunks       []*types.Chunk
-	aliasToID    map[string]string
+	handles      *modelcontext.HandleTable
 	totalRuneLen int
 }
 
@@ -149,9 +150,9 @@ type chunkBatch struct {
 // rune count stays under maxRunesPerCitationBatch. Chunk order (by ChunkIndex)
 // is preserved, and a chunk that by itself exceeds the budget occupies its
 // own batch so we never silently drop content. Each chunk is assigned a short
-// alias ("c000", "c001", ...) that the prompt uses in place of the raw UUID;
-// the alias → real ID map is kept on the batch so the caller can translate
-// LLM responses back to stable chunk IDs.
+// handle ("c000", "c001", ...) that the prompt uses in place of the raw UUID.
+// The invocation-local table translates model output back to stable chunk IDs
+// before any result reaches application state.
 func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
 	// Only cite text chunks — image/ocr chunks are already merged into the
 	// text content via reconstructEnrichedContent and the LLM doesn't see
@@ -179,15 +180,17 @@ func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
 	})
 
 	var batches []chunkBatch
-	current := chunkBatch{aliasToID: make(map[string]string)}
-	aliasCounter := 0
+	newBatch := func() chunkBatch {
+		return chunkBatch{handles: modelcontext.NewHandleTable("c", 3, 0)}
+	}
+	current := newBatch()
 
 	flush := func() {
 		if len(current.chunks) == 0 {
 			return
 		}
 		batches = append(batches, current)
-		current = chunkBatch{aliasToID: make(map[string]string)}
+		current = newBatch()
 	}
 
 	for _, c := range filtered {
@@ -200,25 +203,11 @@ func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
 			flush()
 		}
 
-		alias := fmt.Sprintf("c%03d", aliasCounter)
-		aliasCounter++
-		current.aliasToID[alias] = c.ID
+		current.handles.Register(c.ID)
 		current.chunks = append(current.chunks, c)
 		current.totalRuneLen += runeLen
 	}
 	flush()
-
-	// Restart alias numbering per batch so the LLM sees a small, local ID
-	// space (helps it follow exact-match citation rules). We do this by
-	// rebuilding the alias map in a second pass.
-	for bi := range batches {
-		newAliasToID := make(map[string]string, len(batches[bi].chunks))
-		for idx, c := range batches[bi].chunks {
-			alias := fmt.Sprintf("c%03d", idx)
-			newAliasToID[alias] = c.ID
-		}
-		batches[bi].aliasToID = newAliasToID
-	}
 
 	return batches
 }
@@ -251,23 +240,12 @@ func renderCandidateSlugsXML(entities, concepts []extractedItem) string {
 }
 
 // renderChunksXML formats one batch's chunks into the <chunks> block, using
-// per-batch aliases (c000, c001, ...) instead of raw UUIDs.
+// per-batch handles (c000, c001, ...) instead of raw UUIDs.
 func renderChunksXML(batch chunkBatch) string {
-	aliases := make([]string, 0, len(batch.aliasToID))
-	for a := range batch.aliasToID {
-		aliases = append(aliases, a)
-	}
-	sort.Strings(aliases)
-
-	idToAlias := make(map[string]string, len(batch.aliasToID))
-	for a, id := range batch.aliasToID {
-		idToAlias[id] = a
-	}
-
 	var sb strings.Builder
 	for _, c := range batch.chunks {
-		alias := idToAlias[c.ID]
-		fmt.Fprintf(&sb, "<c id=%q index=\"%d\">\n%s\n</c>\n", alias, c.ChunkIndex, c.Content)
+		handle, _ := batch.handles.Handle(c.ID)
+		fmt.Fprintf(&sb, "<c id=%q index=\"%d\">\n%s\n</c>\n", handle, c.ChunkIndex, c.Content)
 	}
 	return sb.String()
 }
@@ -279,7 +257,7 @@ func renderChunksXML(batch chunkBatch) string {
 // "new_slugs" that Pass 0 missed are collected separately.
 //
 // Returns (citations, newSlugs, batchCount). citations is keyed by slug and
-// contains real chunk UUIDs (already translated from batch aliases). newSlugs
+// contains real chunk UUIDs (already translated from batch handles). newSlugs
 // likewise carry real chunk UUIDs in SourceChunks.
 func (s *wikiIngestService) classifyChunkCitations(
 	ctx context.Context,
@@ -334,11 +312,11 @@ func (s *wikiIngestService) classifyChunkCitations(
 				return nil
 			}
 
-			// Translate aliases → real chunk UUIDs; drop unknown aliases.
+			// Translate handles → real chunk UUIDs; drop unknown handles.
 			mu.Lock()
 			defer mu.Unlock()
 
-			for slug, aliasList := range parsed.Citations {
+			for slug, handleList := range parsed.Citations {
 				if slug == "" {
 					continue
 				}
@@ -347,10 +325,10 @@ func (s *wikiIngestService) classifyChunkCitations(
 					set = make(map[string]bool)
 					citationSet[slug] = set
 				}
-				for _, alias := range aliasList {
-					realID, known := batch.aliasToID[alias]
+				for _, handle := range handleList {
+					realID, known := batch.handles.Resolve(handle)
 					if !known {
-						logger.Warnf(ectx, "wiki ingest: citation batch %d referenced unknown chunk alias %q for slug %s", batchIdx, alias, slug)
+						logger.Warnf(ectx, "wiki ingest: citation batch %d referenced unknown chunk handle %q for slug %s", batchIdx, handle, slug)
 						continue
 					}
 					set[realID] = true
@@ -362,8 +340,8 @@ func (s *wikiIngestService) classifyChunkCitations(
 					continue
 				}
 				real := make([]string, 0, len(ns.SourceChunks))
-				for _, alias := range ns.SourceChunks {
-					if id, ok := batch.aliasToID[alias]; ok {
+				for _, handle := range ns.SourceChunks {
+					if id, ok := batch.handles.Resolve(handle); ok {
 						real = append(real, id)
 					}
 				}

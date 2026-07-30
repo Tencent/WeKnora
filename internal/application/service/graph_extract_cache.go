@@ -45,14 +45,14 @@ func (s *ChunkExtractService) getCachedGraphExtract(ctx context.Context, key str
 	if cached.Graph == nil {
 		return nil, false
 	}
-	if cached.CachedAt <= 0 || (len(cached.Graph.Node) == 0 && len(cached.Graph.Relation) == 0) {
+	if cached.CachedAt <= 0 {
 		return nil, false
 	}
 	return cloneGraphDataWithoutChunkOwnership(cached.Graph), true
 }
 
 func (s *ChunkExtractService) setCachedGraphExtract(ctx context.Context, key string, graph *types.GraphData) {
-	if s.redisClient == nil || graph == nil || (len(graph.Node) == 0 && len(graph.Relation) == 0) {
+	if s.redisClient == nil || graph == nil {
 		return
 	}
 	data, err := json.Marshal(cachedGraphExtract{

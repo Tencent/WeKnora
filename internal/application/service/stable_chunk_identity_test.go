@@ -33,6 +33,55 @@ func TestNextStableChunkIDIgnoresSourceSequenceAndTracksDuplicates(t *testing.T)
 	require.NotEqual(t, alphaID, duplicateAlphaID)
 }
 
+func TestNextStableChunkIDDuplicateReorderPreservesIDSet(t *testing.T) {
+	duplicate := contentcache.ChunkIDInput{
+		KnowledgeID: "knowledge-1",
+		ChunkType:   types.ChunkTypeText,
+		Content:     "repeat me",
+	}
+	other := duplicate
+	other.Content = "middle"
+
+	first := map[string]int{}
+	idsBefore := []string{
+		nextStableChunkID(first, duplicate),
+		nextStableChunkID(first, other),
+		nextStableChunkID(first, duplicate),
+	}
+
+	reordered := map[string]int{}
+	idsAfter := []string{
+		nextStableChunkID(reordered, duplicate),
+		nextStableChunkID(reordered, duplicate),
+		nextStableChunkID(reordered, other),
+	}
+
+	require.ElementsMatch(t, idsBefore, idsAfter)
+}
+
+func TestNextStableChunkIDDeletingFirstDuplicateKeepsLargestOverlap(t *testing.T) {
+	duplicate := contentcache.ChunkIDInput{
+		KnowledgeID: "knowledge-1",
+		ChunkType:   types.ChunkTypeText,
+		Content:     "identical paragraph",
+	}
+
+	seen := map[string]int{}
+	idsBefore := map[string]struct{}{
+		nextStableChunkID(seen, duplicate): {},
+		nextStableChunkID(seen, duplicate): {},
+		nextStableChunkID(seen, duplicate): {},
+	}
+
+	afterDelete := map[string]int{}
+	for i := 0; i < 2; i++ {
+		id := nextStableChunkID(afterDelete, duplicate)
+		if _, ok := idsBefore[id]; !ok {
+			t.Fatalf("remaining duplicate id %s was not present before delete", id)
+		}
+	}
+}
+
 func TestMultimodalPendingKeySeparatesAttempts(t *testing.T) {
 	require.Equal(t, "multimodal:pending:knowledge-1", multimodalPendingKey("knowledge-1", 0))
 	require.Equal(t, "multimodal:pending:knowledge-1:1", multimodalPendingKey("knowledge-1", 1))

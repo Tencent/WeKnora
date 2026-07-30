@@ -29,6 +29,10 @@ const (
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
 	// EmbedQueryContextKey is the context key for embedding query text
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
+	// WikiEditSourceContextKey carries who is authoring the current wiki
+	// page write (user / agent / revert). Absent means the wiki ingest
+	// pipeline. See types.WithWikiEditSource.
+	WikiEditSourceContextKey ContextKey = "WikiEditSource"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.

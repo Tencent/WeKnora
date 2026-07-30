@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // sqliteEmbedding stores metadata alongside the vec0 virtual table rows
@@ -147,12 +147,45 @@ func (r *sqliteRepository) Save(ctx context.Context, indexInfo *types.IndexInfo,
 	if len(emb) > 0 {
 		row.Dimension = len(emb)
 	}
-	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error; err != nil {
+	return r.saveOrReplace(ctx, row, emb)
+}
+
+func (r *sqliteRepository) saveOrReplace(ctx context.Context, row *sqliteEmbedding, emb []float32) error {
+	var existing sqliteEmbedding
+	err := r.db.WithContext(ctx).
+		Where("source_id = ? AND source_type = ?", row.SourceID, row.SourceType).
+		First(&existing).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
+	}
+	if err == nil {
+		row.ID = existing.ID
+		r.deleteRowsAndVecs(ctx, []sqliteEmbedding{existing})
+		updates := map[string]any{
+			"chunk_id":          row.ChunkID,
+			"knowledge_id":      row.KnowledgeID,
+			"knowledge_base_id": row.KnowledgeBaseID,
+			"tag_id":            row.TagID,
+			"content":           row.Content,
+			"dimension":         row.Dimension,
+			"is_enabled":        row.IsEnabled,
+			"updated_at":        time.Now(),
+		}
+		if err := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
+			Where("id = ?", existing.ID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+	} else {
+		if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
+			return err
+		}
 	}
 	r.syncFTS5Insert(ctx, row)
 	if len(emb) > 0 && row.ID > 0 {
-		r.insertVec(ctx, row.ID, row.Dimension, emb)
+		if err := r.insertVec(ctx, row.ID, row.Dimension, emb); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -171,13 +204,9 @@ func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types
 			rows[i].Dimension = len(emb)
 		}
 	}
-	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(rows).Error; err != nil {
-		return err
-	}
 	for i, row := range rows {
-		r.syncFTS5Insert(ctx, row)
-		if len(embs[i]) > 0 && row.ID > 0 {
-			r.insertVec(ctx, row.ID, row.Dimension, embs[i])
+		if err := r.saveOrReplace(ctx, row, embs[i]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -494,14 +523,14 @@ func extractEmbedding(params map[string]any, sourceID string) []float32 {
 	return embMap[sourceID]
 }
 
-func (r *sqliteRepository) insertVec(_ context.Context, rowID uint, dim int, emb []float32) {
+func (r *sqliteRepository) insertVec(ctx context.Context, rowID uint, dim int, emb []float32) error {
 	r.ensureVecTable(dim)
 	blob, err := sqlite_vec.SerializeFloat32(emb)
 	if err != nil {
-		return
+		return err
 	}
 	sql := fmt.Sprintf("INSERT INTO %s(rowid, embedding) VALUES (?, ?)", vecTableName(dim))
-	r.db.Exec(sql, rowID, blob)
+	return r.db.WithContext(ctx).Exec(sql, rowID, blob).Error
 }
 
 func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmbedding) {

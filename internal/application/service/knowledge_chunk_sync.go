@@ -104,6 +104,54 @@ func (s *knowledgeService) deleteReparseStaleChunks(
 	return s.chunkRepo.HardDeleteChunks(ctx, tenantID, staleIDs)
 }
 
+func (s *knowledgeService) collectReparseStaleDerivedChunkIDs(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	baseChanged bool,
+	refreshImages bool,
+) ([]string, error) {
+	if !baseChanged && !refreshImages {
+		return nil, nil
+	}
+	existingChunks, err := s.chunkRepo.ListAllChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0)
+	for _, chunk := range existingChunks {
+		switch chunk.ChunkType {
+		case types.ChunkTypeSummary:
+			if baseChanged {
+				ids = append(ids, chunk.ID)
+			}
+		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
+			if baseChanged || refreshImages {
+				ids = append(ids, chunk.ID)
+			}
+		}
+	}
+	return ids, nil
+}
+
+func mergeUniqueIDs(idLists ...[]string) []string {
+	seen := make(map[string]struct{})
+	merged := make([]string, 0)
+	for _, ids := range idLists {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			merged = append(merged, id)
+		}
+	}
+	return merged
+}
+
 type staleVectorDeleter interface {
 	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int, knowledgeType string) error
 }
@@ -195,6 +243,15 @@ func preserveExistingChunkIdentity(desired *types.Chunk, existing *types.Chunk) 
 	desired.SeqID = existing.SeqID
 	desired.CreatedAt = existing.CreatedAt
 	desired.DeletedAt = existing.DeletedAt
+	desired.SourceContent = existing.SourceContent
+	desired.ContentRevision = existing.ContentRevision
+	desired.IndexStatus = existing.IndexStatus
+	desired.LastEditorID = existing.LastEditorID
+	if existing.ContentRevision > 0 {
+		desired.Content = existing.Content
+		desired.ContentHash = existing.ContentHash
+		desired.IsEnabled = existing.IsEnabled
+	}
 }
 
 func persistedChunkEqual(a *types.Chunk, b *types.Chunk) bool {
