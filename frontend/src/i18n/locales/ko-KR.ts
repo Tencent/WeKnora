@@ -6647,7 +6647,7 @@ export default {
 	      capabilityManageVectorStores: "검색 인프라 관리",
 	      capabilityManageVectorStoresHint: "벡터 스토어 설정과 파서, 문서 리더, 스토리지 엔진 연결 검사를 관리합니다.",
 	      capabilityManageStorageBackends: "스토리지 백엔드 관리",
-	      capabilityManageStorageBackendsHint: "객체/파일 스토리지 백엔드 인스턴스(예: S3 호환 또는 로컬 파일 스토리지)의 CRUD, 연결 테스트 및 테넌트 기본 스토리지 설정을 관리합니다.",
+	      capabilityManageStorageBackendsHint: "객체/파일 스토리지 백엔드 인스턴스(예: S3 호환 또는 로컬 파일 스토리지)의 CRUD, 연결 테스트 및 워크스페이스 기본 스토리지 설정을 관리합니다.",
 	      capabilityManageWebSearch: "웹 검색 관리",
 	      capabilityManageWebSearchHint: "웹 검색 공급자 설정, 자격 증명 및 연결 테스트를 관리합니다.",
 	      capabilityRunEvaluations: "평가 실행",

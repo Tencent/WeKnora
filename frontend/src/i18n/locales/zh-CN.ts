@@ -6706,7 +6706,7 @@ export default {
 	      capabilityManageVectorStores: "管理检索基础设施",
 	      capabilityManageVectorStoresHint: "允许管理向量库配置，以及解析器、文档读取器和存储引擎连通性检查。",
 	      capabilityManageStorageBackends: "管理存储后端",
-	      capabilityManageStorageBackendsHint: "允许管理对象/文件存储后端实例（如 S3 兼容或本地文件存储）的增删改查、连通性测试及租户默认存储设置。",
+	      capabilityManageStorageBackendsHint: "允许管理对象/文件存储后端实例（如 S3 兼容或本地文件存储）的增删改查、连通性测试及空间默认存储设置。",
 	      capabilityManageWebSearch: "管理联网搜索",
 	      capabilityManageWebSearchHint: "允许管理联网搜索供应商配置、凭据和连接测试。",
 	      capabilityRunEvaluations: "运行评测",

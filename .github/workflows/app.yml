@@ -1,0 +1,87 @@
+name: App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "!cli/**"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yml"
+      - "Makefile"
+      - "config/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "skills/preloaded/**"
+      - "docker/Dockerfile.app"
+      - ".github/workflows/app.yml"
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "!cli/**"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yml"
+      - "Makefile"
+      - "config/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "skills/preloaded/**"
+      - "docker/Dockerfile.app"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  # Keep tests independent of a developer machine's custom log template.
+  LOG_FORMAT: ""
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+jobs:
+  verify:
+    name: Format, vet, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+            base=$(git rev-parse HEAD^)
+          fi
+          unformatted=$(
+            git diff --name-only --diff-filter=ACMR -z "$base" "$GITHUB_SHA" -- '*.go' ':!cli/**' |
+              xargs -0 -r gofmt -l
+          )
+          if [ -n "$unformatted" ]; then
+            echo "The following Go files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build server
+        run: go build ./cmd/server
