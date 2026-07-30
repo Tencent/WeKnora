@@ -444,7 +444,7 @@
         <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
           <t-input
             v-model="passwordResetForm.email"
-            type="email"
+            type="text"
             clearable
             autocomplete="off"
             :disabled="passwordResetSubmitting"
