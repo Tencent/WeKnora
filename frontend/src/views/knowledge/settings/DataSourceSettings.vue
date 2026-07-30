@@ -202,7 +202,14 @@ onBeforeUnmount(stopPolling)
           v-for="ds in dataSources"
           :key="ds.id"
           :type="canManageDataSource ? 'button' : undefined"
-          :class="['ds-card', `ds-card--${ds.type}`, { 'ds-card--clickable': canManageDataSource }]"
+          :class="[
+            'ds-card',
+            `ds-card--${ds.type}`,
+            {
+              'ds-card--clickable': canManageDataSource,
+              'ds-card--active': editorVisible && editingDs?.id === ds.id,
+            },
+          ]"
           @click="canManageDataSource ? openEdit(ds) : undefined"
         >
           <div class="ds-card__badge">
@@ -314,6 +321,7 @@ onBeforeUnmount(stopPolling)
           v-if="canManageDataSource"
           type="button"
           class="ds-card ds-card--add"
+          :class="{ 'ds-card--active': editorVisible && !editingDs }"
           @click="openCreate"
         >
           <span class="ds-card--add__icon" aria-hidden="true">
@@ -373,7 +381,7 @@ onBeforeUnmount(stopPolling)
 
 .ds-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 12px;
 
   .ds-card--add {
@@ -400,6 +408,12 @@ onBeforeUnmount(stopPolling)
     .ds-surface-card--interactive();
   }
 
+  &--active {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 5%, var(--td-bg-color-container));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 15%, transparent);
+  }
+
   &--add {
     flex-direction: column;
     align-items: center;
@@ -408,20 +422,20 @@ onBeforeUnmount(stopPolling)
     min-height: 68px;
     border-style: dashed;
     background: transparent;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     cursor: pointer;
     width: 100%;
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
+      color: var(--td-brand-color-8, var(--td-brand-color-active));
       border-color: var(--td-brand-color);
       background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
     &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
+      outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
       outline-offset: 2px;
     }
 
@@ -433,7 +447,7 @@ onBeforeUnmount(stopPolling)
       height: 32px;
       border-radius: 8px;
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
+      color: var(--td-brand-color-7, var(--td-brand-color));
       font-size: 18px;
     }
 
@@ -513,7 +527,7 @@ onBeforeUnmount(stopPolling)
     gap: 4px;
 
     &--active {
-      color: var(--td-success-color);
+      color: var(--td-success-color-7, var(--td-success-color));
     }
 
     &--paused {
@@ -533,7 +547,7 @@ onBeforeUnmount(stopPolling)
     margin: 4px 0 0;
     font-size: 12px;
     line-height: 1.45;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     min-width: 0;
   }
 
@@ -542,7 +556,7 @@ onBeforeUnmount(stopPolling)
     color: var(--td-text-color-secondary);
 
     &--success {
-      color: var(--td-success-color);
+      color: var(--td-success-color-7, var(--td-success-color));
     }
 
     &--failed {
@@ -550,7 +564,7 @@ onBeforeUnmount(stopPolling)
     }
 
     &--running {
-      color: var(--td-brand-color);
+      color: var(--td-brand-color-7, var(--td-brand-color));
     }
 
     &--partial {
@@ -595,7 +609,7 @@ onBeforeUnmount(stopPolling)
     flex-shrink: 0;
     padding: 2px;
     opacity: 0;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     transition: opacity 0.15s ease, color 0.15s ease;
 
     &:hover,
@@ -608,6 +622,12 @@ onBeforeUnmount(stopPolling)
   &:hover .ds-card__action-btn,
   &:focus-within .ds-card__action-btn,
   &__actions:focus-within .ds-card__action-btn {
+    opacity: 1;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .ds-card__action-btn {
     opacity: 1;
   }
 }

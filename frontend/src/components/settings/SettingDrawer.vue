@@ -2,7 +2,10 @@
   <teleport to="body">
     <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
-      :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
+      :style="{
+        right: `${resizeHandleRightPx}px`,
+        '--setting-drawer-travel': `${visibleDrawerWidthPx}px`,
+      }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
       <div class="setting-drawer-resize-line" />
     </div>
@@ -13,9 +16,8 @@
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
-      keeping the body uncluttered. The close affordance is the slide-out drawer
-      itself + the underlying overlay click — TDesign already wires those up,
-      so we don't need a redundant X button.
+      keeping the body uncluttered. Keep an explicit close button as a predictable
+      keyboard, touch, and desktop affordance instead of relying on overlay clicks.
     -->
     <template #header>
       <div class="setting-drawer__header">
@@ -30,6 +32,16 @@
             <slot name="subtitle">{{ description }}</slot>
           </div>
         </div>
+        <button
+          type="button"
+          class="setting-drawer__close"
+          :aria-label="t('common.close')"
+          :title="t('common.close')"
+          :disabled="cancelDisabled"
+          @click="handleCancel"
+        >
+          <t-icon name="close" />
+        </button>
       </div>
     </template>
 
@@ -171,6 +183,19 @@ const drawerWidthPx = computed(() =>
   userWidthPx.value ?? parseWidthToPx(props.width)
 )
 
+const viewportWidthPx = ref(
+  typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerWidth,
+)
+
+// The drawer itself is capped by max-width: 100vw. Keep the separately
+// teleported resize handle attached to that visible edge as well.
+const visibleDrawerWidthPx = computed(() =>
+  Math.min(drawerWidthPx.value, viewportWidthPx.value)
+)
+const resizeHandleRightPx = computed(() =>
+  Math.max(0, visibleDrawerWidthPx.value - 6)
+)
+
 const persistWidth = (width: number) => {
   const next = clampWidth(width)
   userWidthPx.value = next
@@ -227,6 +252,7 @@ function cleanupResize() {
 }
 
 function onWindowResize() {
+  viewportWidthPx.value = window.innerWidth
   if (userWidthPx.value != null) {
     userWidthPx.value = clampWidth(userWidthPx.value)
   }
@@ -257,6 +283,7 @@ const handleCancel = () => {
   gap: 10px;
   flex: 1;
   min-width: 0;
+  width: 100%;
   padding: 2px 0;
 }
 
@@ -269,7 +296,7 @@ const handleCancel = () => {
   align-items: center;
   justify-content: center;
   background: rgba(7, 192, 95, 0.1);
-  color: var(--td-brand-color);
+  color: var(--td-brand-color-7, var(--td-brand-color));
   font-size: 16px;
   transition: background 0.2s ease;
 }
@@ -279,6 +306,7 @@ const handleCancel = () => {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 
 .setting-drawer__title {
@@ -295,6 +323,41 @@ const handleCancel = () => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.setting-drawer__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  margin-right: -4px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.setting-drawer__close:hover:not(:disabled),
+.setting-drawer__close:focus-visible {
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container-hover);
+}
+
+.setting-drawer__close:focus-visible {
+  outline: 2px solid var(--td-brand-color-7, var(--td-brand-color));
+  outline-offset: 1px;
+}
+
+.setting-drawer__close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 /* ---------- Body ---------- */
@@ -359,6 +422,17 @@ const handleCancel = () => {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .setting-drawer__body,
+  .setting-drawer__body :deep(.setting-drawer__section) {
+    animation: none;
+  }
+
+  .setting-drawer__close {
+    transition: none;
+  }
+}
+
 .setting-drawer__body :deep(.setting-drawer__section-title) {
   font-size: 13px;
   font-weight: 600;
@@ -386,6 +460,7 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   width: 100%;
 }
@@ -394,15 +469,17 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .setting-drawer__footer-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
 }
 </style>
 
@@ -414,6 +491,10 @@ const handleCancel = () => {
 -->
 <style lang="less">
 .setting-drawer {
+  .t-drawer__content-wrapper {
+    max-width: 100vw;
+  }
+
   .t-drawer__header {
     padding: 14px 18px;
     border-bottom: 1px solid var(--td-component-stroke);
@@ -436,7 +517,6 @@ const handleCancel = () => {
   top: 0;
   bottom: 0;
   width: 12px;
-  margin-left: -6px;
   cursor: col-resize;
   z-index: 2501;
   display: flex;
@@ -475,5 +555,17 @@ const handleCancel = () => {
 
 .t-drawer.setting-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+@media (max-width: 720px) {
+  .setting-drawer-resize-handle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting-drawer-resize-handle {
+    animation: none;
+  }
 }
 </style>

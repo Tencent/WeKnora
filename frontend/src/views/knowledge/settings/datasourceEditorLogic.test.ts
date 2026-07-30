@@ -172,6 +172,28 @@ test('all supported locales and icon routing contain DingTalk UI contracts', () 
     'field.operatorId',
     'field.operatorIdHint',
     'resourceRequired',
+    'resourceLoadFailedDesc',
+    'noResources_dingtalk',
+    'noResourcesDesc_dingtalk',
+    'guideStep1_dingtalk',
+    'guideStep2_dingtalk',
+    'guideStep3_dingtalk',
+    'permissionDocLink_dingtalk',
+    'selectedScopeCount',
+    'createTitleWithType',
+    'editTitleWithType',
+    'stepDescription.selectType',
+    'stepDescription.credentials',
+    'stepDescription.resources',
+    'stepDescription.strategy',
+    'stepProgress',
+    'syncMode.incrementalDesc',
+    'syncMode.fullDesc',
+    'conflict.overwriteDesc',
+    'conflict.skipDesc',
+    'resourceType.space',
+    'resourceType.folder',
+    'resourceType.document',
     'prereqBarText_dingtalk',
     'prereqStep1Brief_dingtalk',
     'prereqStep1Desc_dingtalk',
@@ -202,6 +224,7 @@ test('all supported locales and icon routing contain DingTalk UI contracts', () 
 test('the editor wires stateless tests, stored tests, and credential replacement separately', () => {
   const sourceDir = dirname(fileURLToPath(import.meta.url))
   const dialogSource = readFileSync(resolve(sourceDir, 'DataSourceEditorDialog.vue'), 'utf8')
+  const settingsSource = readFileSync(resolve(sourceDir, 'DataSourceSettings.vue'), 'utf8')
 
   assert.match(dialogSource, /DINGTALK_CONNECTOR_DEF/)
   assert.match(dialogSource, /credentials:\s*validationMode === 'stored'[\s\S]*\?\s*null[\s\S]*candidateCredentialsForRequest\(\)/)
@@ -226,6 +249,43 @@ test('the editor wires stateless tests, stored tests, and credential replacement
   assert.match(dialogSource, /sib\.external_id !== next && isResourceSelectable\(sib\)/)
   assert.match(dialogSource, /credentialsForMainPayload\(/)
   assert.match(dialogSource, /unsupported:\s*'datasource\.resourceType\.unsupported'/)
+  assert.match(dialogSource, /space:\s*'datasource\.resourceType\.space'/)
+  assert.match(dialogSource, /folder:\s*'datasource\.resourceType\.folder'/)
+  assert.match(dialogSource, /document:\s*'datasource\.resourceType\.document'/)
+  assert.match(dialogSource, /selectedResourceIds\.value\.length/)
+  assert.match(dialogSource, /resourceLoadError\.value = true/)
+  assert.match(dialogSource, /resourceLoadError \? 'error-circle' : 'search'/)
+  assert.match(dialogSource, /resourceLoadError \|\|[\s\S]*requiresResourceSelection\(form\.type\)/)
+  assert.match(dialogSource, /step\.value === 2 && resourceLoadError\.value/)
+  assert.match(dialogSource, /v-else-if="!resourceLoadError && resources\.length > 0"/)
   assert.match(dialogSource, /:aria-disabled="!isResourceSelectable\(r\)"/)
+  assert.match(dialogSource, /:aria-label="t\('datasource\.step\.resources'\)"/)
+  assert.match(dialogSource, /resourceTabIndex\(r\.external_id\)/)
+  assert.match(dialogSource, /tabindex="-1"/)
+  assert.match(dialogSource, /\? 'mixed'/)
+  assert.match(dialogSource, /@keydown\.enter\.stop/)
+  assert.match(dialogSource, /@keydown\.space\.stop/)
+  assert.match(dialogSource, /:aria-expanded="expandedResourceIds\.has\(r\.external_id\)"/)
+  assert.match(dialogSource, /@keydown\.enter\.prevent\.stop="toggleResource\(r\.external_id\)"/)
+  assert.match(dialogSource, /@keydown\.space\.prevent\.stop="toggleResource\(r\.external_id\)"/)
+  assert.match(dialogSource, /@keydown\.down\.prevent\.stop="moveResourceFocus\(r\.external_id, 1\)"/)
+  assert.match(dialogSource, /@keydown\.right\.prevent\.stop="handleResourceArrowRight\(r\)"/)
+  assert.match(dialogSource, /v-native-control/)
+  assert.match(dialogSource, /:for="credentialFieldId\(field\.key\)"/)
+  assert.match(dialogSource, /var\(--td-brand-color-7, var\(--td-brand-color\)\)/)
+  assert.match(dialogSource, /var\(--td-brand-color-8, var\(--td-brand-color-active\)\)/)
+  assert.match(dialogSource, /stroke="currentColor"/)
+  assert.match(dialogSource, /\.ds-step\.active \.ds-step-num \{[\s\S]*color:\s*var\(--td-bg-color-container\)/)
+  assert.match(
+    dialogSource,
+    /\.ds-setup-guide__toggle:focus-visible \{[\s\S]*outline:\s*2px solid var\(--td-brand-color-7/,
+  )
+  assert.match(
+    dialogSource,
+    /\.ds-setup-step::before \{[\s\S]*color:\s*color-mix\(in srgb, #1677ff 60%, var\(--td-text-color-primary\)\)/,
+  )
+  assert.doesNotMatch(dialogSource, /color:\s*var\(--td-text-color-placeholder\)/)
+  assert.match(settingsSource, /var\(--td-brand-color-7, var\(--td-brand-color\)\)/)
+  assert.doesNotMatch(settingsSource, /color:\s*var\(--td-text-color-placeholder\)/)
   assert.match(dialogSource, /if \(!isResourceSelectable\(resource\)\) return/)
 })
