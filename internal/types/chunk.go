@@ -62,6 +62,28 @@ const (
 	// ChunkFlagHot    ChunkFlags = 1 << 2  // 热门
 )
 
+// 默认权重配置常量
+const (
+	// DefaultRecallWeight 默认召回权重
+	DefaultRecallWeight float64 = 1.0
+	// MinRecallWeight 最小召回权重
+	MinRecallWeight float64 = 0.1
+	// MaxRecallWeight 最大召回权重
+	MaxRecallWeight float64 = 2.0
+	// DefaultLikeRateHighThreshold 好评率高阈值
+	DefaultLikeRateHighThreshold float64 = 0.80
+	// DefaultLikeRateLowThreshold 好评率低阈值
+	DefaultLikeRateLowThreshold float64 = 0.50
+	// DefaultLikeRateOptimizeThreshold 待优化阈值
+	DefaultLikeRateOptimizeThreshold float64 = 0.30
+	// DefaultWeightBoostFactor 好评时权重提升系数
+	DefaultWeightBoostFactor float64 = 1.20
+	// DefaultWeightPenaltyFactor 差评时权重降低系数
+	DefaultWeightPenaltyFactor float64 = 0.80
+	// DefaultMinFeedbackCount 触发权重调整的最小评价数
+	DefaultMinFeedbackCount int = 5
+)
+
 // HasFlag 检查是否设置了指定标志
 func (f ChunkFlags) HasFlag(flag ChunkFlags) bool {
 	return f&flag != 0
@@ -166,6 +188,16 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount 点赞数
+	LikeCount int `json:"like_count" gorm:"default:0"`
+	// DislikeCount 点踩数
+	DislikeCount int `json:"dislike_count" gorm:"default:0"`
+	// LikeRate 好评率 (点赞/(点赞+点踩))
+	LikeRate float64 `json:"like_rate" gorm:"type:decimal(5,4);default:0"`
+	// RecallWeight 召回权重，默认1.0
+	RecallWeight float64 `json:"recall_weight" gorm:"type:decimal(5,2);default:1.00"`
+	// IsPendingOptimization 是否标记为待优化
+	IsPendingOptimization bool `json:"is_pending_optimization" gorm:"default:false"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time
@@ -208,6 +240,43 @@ func (c *Chunk) EmbeddingContent() string {
 		return body
 	}
 	return c.ContextHeader + "\n\n" + body
+}
+
+// CalculateLikeRate 计算并更新好评率
+func (c *Chunk) CalculateLikeRate() {
+	total := c.LikeCount + c.DislikeCount
+	if total == 0 {
+		c.LikeRate = 0
+		return
+	}
+	c.LikeRate = float64(c.LikeCount) / float64(total)
+}
+
+// ShouldBoostWeight 判断是否应该提升权重
+func (c *Chunk) ShouldBoostWeight(highThreshold float64, minFeedbackCount int) bool {
+	total := c.LikeCount + c.DislikeCount
+	if total < minFeedbackCount {
+		return false
+	}
+	return c.LikeRate >= highThreshold
+}
+
+// ShouldPenalizeWeight 判断是否应该降低权重
+func (c *Chunk) ShouldPenalizeWeight(lowThreshold float64, minFeedbackCount int) bool {
+	total := c.LikeCount + c.DislikeCount
+	if total < minFeedbackCount {
+		return false
+	}
+	return c.LikeRate < lowThreshold
+}
+
+// ShouldMarkPendingOptimization 判断是否应该标记为待优化
+func (c *Chunk) ShouldMarkPendingOptimization(optimizeThreshold float64) bool {
+	total := c.LikeCount + c.DislikeCount
+	if total < DefaultMinFeedbackCount {
+		return false
+	}
+	return c.LikeRate < optimizeThreshold
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.

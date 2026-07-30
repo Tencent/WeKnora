@@ -52,6 +52,13 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <!-- 点赞/点踩反馈组件 -->
+                <ChunkFeedback
+                    v-if="session.id"
+                    :session-id="sessionId"
+                    :message-id="session.id"
+                    :show-count="true"
+                />
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
@@ -81,6 +88,7 @@ import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import ChunkFeedback from '@/components/chunk-feedback/ChunkFeedback.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';

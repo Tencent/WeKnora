@@ -373,6 +373,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
+	// Chunk feedback handler
+	must(container.Provide(service.NewChunkFeedbackService))
+	must(container.Provide(handler.NewChunkFeedbackHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
