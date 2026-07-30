@@ -323,6 +323,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			"",
 			"",
 			nil,
+			nil,
 		)
 		chunkPage++
 		if err != nil {

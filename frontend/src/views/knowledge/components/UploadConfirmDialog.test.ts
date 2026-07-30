@@ -30,3 +30,15 @@ test('routes global knowledge file drops through the upload confirmation flow', 
   assert.match(knowledgeBase, /handleKnowledgeFileDrop/)
   assert.match(knowledgeBase, /handleUploadSourceFiles\(files\)/)
 })
+
+test('uses section navigation with inline chunking controls and advanced options grouped', () => {
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.strategy"/)
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.chunkSize"/)
+  assert.match(dialog, /v-model="uiState\.chunkingConfig\.chunkOverlap"/)
+  assert.match(dialog, /chunkingMoreOpen/)
+  assert.match(dialog, /activeSection === 'graph'/)
+  assert.match(dialog, /class="files-panel"/)
+  assert.match(dialog, /statusFull/)
+  assert.match(dialog, /data-section="multimodal"/)
+  assert.doesNotMatch(dialog, /<KBChunkingSettings/)
+})

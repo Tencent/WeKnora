@@ -216,6 +216,37 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	assert.Equal(t, "updated content", saved.Content)
 }
 
+func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	enabledChunk := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
+	disabledChunk := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{enabledChunk, disabledChunk}))
+	require.NoError(t, db.Model(&types.Chunk{}).
+		Where("id = ?", disabledChunk.ID).
+		Update("is_enabled", false).Error)
+
+	enabled := true
+	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil, &enabled,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, chunks, 1)
+	assert.Equal(t, enabledChunk.ID, chunks[0].ID)
+
+	allChunks, allTotal, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), allTotal)
+	assert.Len(t, allChunks, 2)
+}
+
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
 	t.Helper()
 	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
@@ -327,7 +358,7 @@ func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
 	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
 		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
-		&types.ChunkFeedbackFilter{MaxPositiveRate: &maxRate},
+		&types.ChunkFeedbackFilter{MaxPositiveRate: &maxRate}, nil,
 	)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
@@ -338,7 +369,7 @@ func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
 	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
 		[]types.ChunkType{types.ChunkTypeText}, nil, "", "", "", "",
-		&types.ChunkFeedbackFilter{NeedsOptimization: &needsOptimization},
+		&types.ChunkFeedbackFilter{NeedsOptimization: &needsOptimization}, nil,
 	)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)

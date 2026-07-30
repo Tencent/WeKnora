@@ -23,7 +23,12 @@ def read_requirements():
                 line.strip() for line in f if line.strip() and not line.startswith("#")
             ]
     except FileNotFoundError:
-        return ["mcp>=1.0.0", "requests>=2.31.0"]
+        return [
+            "mcp>=1.28,<2",
+            "requests>=2.31.0",
+            "starlette>=0.27.0",
+            "uvicorn>=0.24.0",
+        ]
 
 
 setup(

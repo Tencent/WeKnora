@@ -144,7 +144,7 @@ WeKnoraMCP/
 ### 测试
 ```bash
 # 运行基本测试
-python test_imports.py
+python check_imports.py
 
 # 测试环境配置
 python main.py --check-only

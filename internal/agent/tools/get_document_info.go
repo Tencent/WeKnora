@@ -122,6 +122,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	results := make(map[string]*docInfo)
+	enabled := true
 
 	for _, faqID := range faqIDs {
 		faqID = strings.TrimSpace(faqID)
@@ -174,7 +175,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
 					Page:     1,
 					PageSize: 1,
-				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", nil)
+				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", nil, &enabled)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{

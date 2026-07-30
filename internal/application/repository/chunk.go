@@ -172,6 +172,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	sortOrder string,
 	knowledgeType string,
 	feedbackFilter *types.ChunkFeedbackFilter,
+	isEnabled *bool,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -190,6 +191,9 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			if feedbackFilter.NeedsOptimization != nil {
 				db = db.Where("needs_optimization = ?", *feedbackFilter.NeedsOptimization)
 			}
+		}
+		if isEnabled != nil {
+			db = db.Where("is_enabled = ?", *isEnabled)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"

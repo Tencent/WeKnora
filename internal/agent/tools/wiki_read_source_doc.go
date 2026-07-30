@@ -206,6 +206,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	for {
+		enabled := true
 		pagination := &types.Pagination{
 			Page:     page,
 			PageSize: pageSize,
@@ -217,7 +218,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			knowledgeID,
 			pagination,
 			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
-			nil, "", "", "", "", nil,
+			nil, "", "", "", "", nil, &enabled,
 		)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to list chunks: %v", err)}, nil

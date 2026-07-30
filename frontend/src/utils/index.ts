@@ -1,5 +1,6 @@
 import { MessagePlugin } from "tdesign-vue-next";
 import i18n from '@/i18n';
+import { shouldRejectKnowledgeFileType } from "./fileTypeVerification";
 
 // 声明全局运行时配置类型
 declare global {
@@ -40,8 +41,6 @@ export function formatStringDate(date: any) {
     year + "-" + month + "-" + day + " " + hour + ":" + minute + ":" + second
   );
 }
-const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "epub", "mhtml", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
-
 /** Returns true when the file exceeds the deploy-time upload limit. */
 export function fileSizeVerification(file: Pick<File, 'size'>, silent = false) {
   if (file.size <= MAX_FILE_SIZE_BYTES) return false;
@@ -56,15 +55,7 @@ export function fileSizeVerification(file: Pick<File, 'size'>, silent = false) {
  * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
  */
 export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
-  const provided = validTypes
-    ? (validTypes instanceof Set ? validTypes : new Set(validTypes))
-    : undefined;
-  // An empty whitelist means the engine registry hasn't loaded yet; fall back to
-  // the default set rather than rejecting every file.
-  const allowed = provided && provided.size > 0 ? provided : DEFAULT_VALID_TYPES;
-
-  const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
-  if (!allowed.has(type)) {
+  if (shouldRejectKnowledgeFileType(file.name, validTypes)) {
     if (!silent) {
       MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
     }

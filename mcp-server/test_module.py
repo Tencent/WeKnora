@@ -2,264 +2,91 @@
 """
 WeKnora MCP Server 模组测试脚本
 
-测试模组的各种启动方式和功能
+测试模组的各种启动方式和功能。unittest discover 会收集本文件中的 TestCase；
+也可直接运行: python test_module.py
 """
 
 import os
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
+MCP_SERVER_DIR = Path(__file__).resolve().parent
 
-def test_imports():
-    """测试模块导入"""
-    print("=== 测试模块导入 ===")
-
-    try:
-        # 测试基础依赖
-        import mcp
-
-        print("✓ mcp 模块导入成功")
-
-        import requests
-
-        print("✓ requests 模块导入成功")
-
-        # 测试主模块
-        import weknora_mcp_server
-
-        print("✓ weknora_mcp_server 模块导入成功")
-
-        # 测试包导入
-        from weknora_mcp_server import WeKnoraClient, run
-
-        print("✓ WeKnoraClient 和 run 函数导入成功")
-
-        # 测试主入口点
-        import main
-
-        print("✓ main 模块导入成功")
-
-        return True
-
-    except ImportError as e:
-        print(f"✗ 导入失败: {e}")
-        return False
+REQUIRED_FILES = [
+    "__init__.py",
+    "main.py",
+    "run_server.py",
+    "weknora_mcp_server.py",
+    "requirements.txt",
+    "setup.py",
+    "pyproject.toml",
+    "README.md",
+    "INSTALL.md",
+    "LICENSE",
+    "MANIFEST.in",
+]
 
 
-def test_environment():
-    """测试环境配置"""
-    print("\n=== 测试环境配置 ===")
+class ModuleIntegrationTest(unittest.TestCase):
+    def test_imports(self):
+        import mcp  # noqa: F401
+        import requests  # noqa: F401
+        import weknora_mcp_server  # noqa: F401
+        from weknora_mcp_server import WeKnoraClient, run  # noqa: F401
+        import main  # noqa: F401
 
-    base_url = os.getenv("WEKNORA_BASE_URL")
-    api_key = os.getenv("WEKNORA_API_KEY")
+    def test_environment_optional_vars(self):
+        os.getenv("WEKNORA_BASE_URL")
+        os.getenv("WEKNORA_API_KEY")
 
-    print(f"WEKNORA_BASE_URL: {base_url or '未设置 (将使用默认值)'}")
-    print(f"WEKNORA_API_KEY: {'已设置' if api_key else '未设置'}")
-
-    if not base_url:
-        print("提示: 可以设置环境变量 WEKNORA_BASE_URL")
-
-    if not api_key:
-        print("提示: 建议设置环境变量 WEKNORA_API_KEY")
-
-    return True
-
-
-def test_client_creation():
-    """测试客户端创建"""
-    print("\n=== 测试客户端创建 ===")
-
-    try:
+    def test_client_creation(self):
         from weknora_mcp_server import WeKnoraClient
 
         base_url = os.getenv("WEKNORA_BASE_URL", "http://localhost:8080/api/v1")
         api_key = os.getenv("WEKNORA_API_KEY", "test_key")
-
         client = WeKnoraClient(base_url, api_key)
-        print("✓ WeKnoraClient 创建成功")
+        self.assertEqual(client.base_url, base_url)
+        self.assertEqual(client.api_key, api_key)
 
-        # 检查客户端属性
-        assert client.base_url == base_url
-        assert client.api_key == api_key
-        print("✓ 客户端配置正确")
+    def test_required_files_exist(self):
+        missing = [name for name in REQUIRED_FILES if not (MCP_SERVER_DIR / name).exists()]
+        self.assertEqual(missing, [], f"Missing files: {missing}")
 
-        return True
-
-    except Exception as e:
-        print(f"✗ 客户端创建失败: {e}")
-        return False
-
-
-def test_file_structure():
-    """测试文件结构"""
-    print("\n=== 测试文件结构 ===")
-
-    required_files = [
-        "__init__.py",
-        "main.py",
-        "run_server.py",
-        "weknora_mcp_server.py",
-        "requirements.txt",
-        "setup.py",
-        "pyproject.toml",
-        "README.md",
-        "INSTALL.md",
-        "LICENSE",
-        "MANIFEST.in",
-    ]
-
-    missing_files = []
-    for file in required_files:
-        if Path(file).exists():
-            print(f"✓ {file}")
-        else:
-            print(f"✗ {file} (缺失)")
-            missing_files.append(file)
-
-    if missing_files:
-        print(f"缺失文件: {missing_files}")
-        return False
-
-    print("✓ 所有必需文件都存在")
-    return True
-
-
-def test_entry_points():
-    """测试入口点"""
-    print("\n=== 测试入口点 ===")
-
-    # 测试 main.py 的帮助选项
-    try:
+    def test_main_help(self):
         result = subprocess.run(
             [sys.executable, "main.py", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
+            cwd=MCP_SERVER_DIR,
         )
-        if result.returncode == 0:
-            print("✓ main.py --help 工作正常")
-        else:
-            print(f"✗ main.py --help 失败: {result.stderr}")
-            return False
-    except subprocess.TimeoutExpired:
-        print("✗ main.py --help 超时")
-        return False
-    except Exception as e:
-        print(f"✗ main.py --help 错误: {e}")
-        return False
+        self.assertEqual(result.returncode, 0, result.stderr)
 
-    # 测试环境检查
-    try:
+    def test_main_check_only(self):
         result = subprocess.run(
             [sys.executable, "main.py", "--check-only"],
             capture_output=True,
             text=True,
             timeout=10,
+            cwd=MCP_SERVER_DIR,
         )
-        if result.returncode == 0:
-            print("✓ main.py --check-only 工作正常")
-        else:
-            print(f"✗ main.py --check-only 失败: {result.stderr}")
-            return False
-    except subprocess.TimeoutExpired:
-        print("✗ main.py --check-only 超时")
-        return False
-    except Exception as e:
-        print(f"✗ main.py --check-only 错误: {e}")
-        return False
+        self.assertEqual(result.returncode, 0, result.stderr)
 
-    return True
-
-
-def test_wiki_tools():
-    """测试 Wiki 工具注册和 Client 方法"""
-    print("\n=== 测试 Wiki 工具 ===")
-
-    try:
+    def test_wiki_tools(self):
         import weknora_mcp_server
 
-        # 验证 Client 方法存在
         client = weknora_mcp_server.WeKnoraClient("http://localhost:8080/api/v1", "test")
         for method in ["wiki_search", "wiki_read_page", "wiki_index_view"]:
-            assert hasattr(client, method), f"WeKnoraClient 缺少方法: {method}"
-            assert callable(getattr(client, method)), f"{method} 不可调用"
-            print(f"✓ WeKnoraClient.{method} 存在")
+            self.assertTrue(hasattr(client, method), f"WeKnoraClient missing: {method}")
+            self.assertTrue(callable(getattr(client, method)), f"{method} not callable")
 
-        return True
-
-    except Exception as e:
-        print(f"✗ Wiki 工具测试失败: {e}")
-        return False
-
-
-def test_package_installation():
-    """测试包安装 (开发模式)"""
-    print("\n=== 测试包安装 ===")
-
-    try:
-        # 检查是否可以以开发模式安装
-        result = subprocess.run(
-            [sys.executable, "setup.py", "check"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        if result.returncode == 0:
-            print("✓ setup.py 检查通过")
-        else:
-            print(f"✗ setup.py 检查失败: {result.stderr}")
-            return False
-
-    except subprocess.TimeoutExpired:
-        print("✗ setup.py 检查超时")
-        return False
-    except Exception as e:
-        print(f"✗ setup.py 检查错误: {e}")
-        return False
-
-    return True
-
-
-def main():
-    """运行所有测试"""
-    print("WeKnora MCP Server 模组测试")
-    print("=" * 50)
-
-    tests = [
-        ("模块导入", test_imports),
-        ("环境配置", test_environment),
-        ("客户端创建", test_client_creation),
-        ("文件结构", test_file_structure),
-        ("入口点", test_entry_points),
-        ("Wiki 工具", test_wiki_tools),
-        ("包安装", test_package_installation),
-    ]
-
-    passed = 0
-    total = len(tests)
-
-    for test_name, test_func in tests:
-        try:
-            if test_func():
-                passed += 1
-            else:
-                print(f"测试失败: {test_name}")
-        except Exception as e:
-            print(f"测试异常: {test_name} - {e}")
-
-    print("\n" + "=" * 50)
-    print(f"测试结果: {passed}/{total} 通过")
-
-    if passed == total:
-        print("✓ 所有测试通过！模组可以正常使用。")
-        return True
-    else:
-        print("✗ 部分测试失败，请检查上述错误。")
-        return False
+    def test_pyproject_metadata(self):
+        text = (MCP_SERVER_DIR / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn("weknora-mcp", text)
+        self.assertIn("weknora-mcp-server", text)
 
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    unittest.main(verbosity=2)
