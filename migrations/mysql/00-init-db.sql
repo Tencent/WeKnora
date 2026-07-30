@@ -207,3 +207,25 @@ CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
 CREATE INDEX idx_chunks_stable_identity ON chunks(tenant_id, knowledge_id, stable_identity);
+
+CREATE TABLE derived_artifacts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    artifact_key VARCHAR(64) NOT NULL,
+    artifact_kind VARCHAR(64) NOT NULL,
+    input_digest VARCHAR(64) NOT NULL,
+    model_id VARCHAR(255) NOT NULL DEFAULT '', model_revision VARCHAR(128) NOT NULL DEFAULT '',
+    prompt_version VARCHAR(128) NOT NULL DEFAULT '', config_digest VARCHAR(64) NOT NULL DEFAULT '',
+    producer_version VARCHAR(128) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL,
+    payload LONGBLOB NULL, payload_encoding VARCHAR(32) NOT NULL DEFAULT '', object_uri TEXT,
+    payload_digest VARCHAR(64) NOT NULL DEFAULT '', error_code VARCHAR(128) NOT NULL DEFAULT '',
+    error_message VARCHAR(2048) NOT NULL DEFAULT '', attempt_count INT NOT NULL DEFAULT 0,
+    owner_token VARCHAR(128) NOT NULL DEFAULT '', lease_expires_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    completed_at DATETIME(6) NULL,
+    UNIQUE KEY uk_derived_artifacts_tenant_key (tenant_id, artifact_key),
+    KEY idx_derived_artifacts_kind_status (artifact_kind, status),
+    KEY idx_derived_artifacts_lease (status, lease_expires_at),
+    CONSTRAINT chk_derived_artifacts_status CHECK (status IN ('pending','computing','succeeded','failed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

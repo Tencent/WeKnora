@@ -100,6 +100,10 @@ type IngestionOperationObservation struct {
 	InputDigestPrefix      string
 	DependencyDigestPrefix string
 	ArtifactSchemaVersion  string
+	// ArtifactCacheEvent is an optional infrastructure-level detail such as
+	// claimed, busy, computed, failed, or lease_takeover. CacheStatus keeps its
+	// original PR1 hit/miss/error meaning.
+	ArtifactCacheEvent string
 }
 
 // ToJSONMap converts the observation into the JSON representation stored in a
@@ -161,6 +165,9 @@ func (o IngestionOperationObservation) ToJSONMap() JSONMap {
 	}
 	if o.ArtifactSchemaVersion != "" {
 		output["artifact_schema_version"] = o.ArtifactSchemaVersion
+	}
+	if o.ArtifactCacheEvent != "" {
+		output["artifact_cache_event"] = o.ArtifactCacheEvent
 	}
 
 	return output
