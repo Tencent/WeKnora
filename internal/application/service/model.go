@@ -30,6 +30,7 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	artifactRepo  interfaces.DerivedArtifactRepository
 }
 
 // NewModelService creates a new model service instance
@@ -39,6 +40,7 @@ func NewModelService(repo interfaces.ModelRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
+	artifactRepo interfaces.DerivedArtifactRepository,
 ) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
@@ -47,6 +49,7 @@ func NewModelService(repo interfaces.ModelRepository,
 		ollamaService: ollamaService,
 		pooler:        pooler,
 		tenantService: tenantService,
+		artifactRepo:  artifactRepo,
 	}
 }
 
@@ -423,7 +426,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embeddingConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embeddingConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -432,6 +436,10 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		return nil, err
 	}
 
+	embedder, err = newArtifactCachedEmbedder(embedder, s.artifactRepo, embeddingConfig)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Embedding model initialized successfully")
 	return embedder, nil
 }
@@ -470,7 +478,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embeddingConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embeddingConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -480,6 +489,10 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		return nil, err
 	}
 
+	embedder, err = newArtifactCachedEmbedder(embedder, s.artifactRepo, embeddingConfig)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
 	return embedder, nil
 }

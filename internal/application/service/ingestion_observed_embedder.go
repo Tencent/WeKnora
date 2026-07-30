@@ -12,27 +12,33 @@ import (
 // embeddingRequestSnapshot is an immutable copy of the embedding requests
 // observed by ingestionObservedEmbedder.
 type embeddingRequestSnapshot struct {
-	RequestCount int
-	BatchCount   int
-	TotalItems   int
-	InputChars   int
+	RequestCount   int
+	BatchCount     int
+	TotalItems     int
+	ComputedItems  int
+	ReusedItems    int
+	InputChars     int
+	CacheStatus    types.IngestionCacheStatus
+	CacheSupported bool
 }
 
 // ingestionObservedEmbedder records calls entering the embedding model
 // interface while delegating all actual work to the wrapped embedder.
 //
-// It does not cache, skip, retry, or alter embedding results. Its only purpose
-// is to provide request and input counts for knowledge-processing spans.
+// It does not itself cache, skip, retry, or alter embedding results. When its
+// inner model is the ingestion artifact-cache decorator, it receives cache and
+// real-provider counters through an internal recorder.
 type ingestionObservedEmbedder struct {
 	inner     embedding.Embedder
 	operation types.IngestionOperation
 
 	mu sync.Mutex
 
-	requestCount int
-	batchCount   int
-	totalItems   int
-	inputChars   int
+	requestCount  int
+	batchCount    int
+	totalItems    int
+	inputChars    int
+	cacheRecorder *embeddingCacheRecorder
 }
 
 var _ embedding.Embedder = (*ingestionObservedEmbedder)(nil)
@@ -43,10 +49,21 @@ func newIngestionObservedEmbedder(
 	inner embedding.Embedder,
 	operation types.IngestionOperation,
 ) *ingestionObservedEmbedder {
-	return &ingestionObservedEmbedder{
+	observed := &ingestionObservedEmbedder{
 		inner:     inner,
 		operation: operation,
 	}
+	if _, ok := inner.(embeddingArtifactCacheMarker); ok {
+		observed.cacheRecorder = &embeddingCacheRecorder{}
+	}
+	return observed
+}
+
+func embeddingInitialCacheStatus(model embedding.Embedder) types.IngestionCacheStatus {
+	if _, ok := model.(embeddingArtifactCacheMarker); ok {
+		return types.IngestionCacheStatusUnavailable
+	}
+	return types.IngestionCacheStatusNotSupported
 }
 
 // Embed records one single-text embedding request and delegates it to the
@@ -60,7 +77,11 @@ func (e *ingestionObservedEmbedder) Embed(
 		e.operation,
 	)
 
-	e.recordRequest([]string{text})
+	if e.cacheRecorder != nil {
+		ctx = withEmbeddingCacheRecorder(ctx, e.cacheRecorder)
+	} else {
+		e.recordRequest([]string{text})
+	}
 
 	return e.inner.Embed(ctx, text)
 }
@@ -79,7 +100,11 @@ func (e *ingestionObservedEmbedder) BatchEmbed(
 		e.operation,
 	)
 
-	e.recordRequest(texts)
+	if e.cacheRecorder != nil {
+		ctx = withEmbeddingCacheRecorder(ctx, e.cacheRecorder)
+	} else {
+		e.recordRequest(texts)
+	}
 
 	return e.inner.BatchEmbed(ctx, texts)
 }
@@ -98,6 +123,9 @@ func (e *ingestionObservedEmbedder) BatchEmbedWithPool(
 		ctx,
 		e.operation,
 	)
+	if e.cacheRecorder != nil {
+		ctx = withEmbeddingCacheRecorder(ctx, e.cacheRecorder)
+	}
 
 	return e.inner.BatchEmbedWithPool(
 		ctx,
@@ -123,14 +151,18 @@ func (e *ingestionObservedEmbedder) GetModelID() string {
 
 // Snapshot returns an immutable copy of the recorded counters.
 func (e *ingestionObservedEmbedder) Snapshot() embeddingRequestSnapshot {
+	if e.cacheRecorder != nil {
+		return e.cacheRecorder.snapshot()
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	return embeddingRequestSnapshot{
-		RequestCount: e.requestCount,
-		BatchCount:   e.batchCount,
-		TotalItems:   e.totalItems,
-		InputChars:   e.inputChars,
+		RequestCount:  e.requestCount,
+		BatchCount:    e.batchCount,
+		TotalItems:    e.totalItems,
+		ComputedItems: e.totalItems,
+		InputChars:    e.inputChars,
 	}
 }
 
@@ -189,9 +221,13 @@ func embeddingOperationOutput(
 	storageBytes int64,
 	success bool,
 ) types.JSONMap {
-	computedItems := 0
-	if success {
-		computedItems = observation.TotalItems
+	computedItems := observation.ComputedItems
+	if !success && !observation.CacheSupported {
+		computedItems = 0
+	}
+	cacheStatus := observation.CacheStatus
+	if !observation.CacheSupported {
+		cacheStatus = types.IngestionCacheStatusNotSupported
 	}
 
 	output := types.IngestionOperationObservation{
@@ -207,13 +243,17 @@ func embeddingOperationOutput(
 
 		TotalItems:    observation.TotalItems,
 		ComputedItems: computedItems,
-		ReusedItems:   0,
+		ReusedItems:   observation.ReusedItems,
 
 		InputChars: observation.InputChars,
 
-		CacheStatus: types.IngestionCacheStatusNotSupported,
+		CacheStatus: cacheStatus,
 		Success:     success,
 	}.ToJSONMap()
+	if observation.CacheSupported {
+		output["artifact_kind"] = embeddingArtifactKind
+		output["artifact_schema_version"] = embeddingArtifactSchemaVersion
+	}
 
 	output["vectors_written"] = vectorsWritten
 	output["storage_bytes"] = storageBytes
@@ -353,9 +393,7 @@ func observePostprocessEmbeddingBatch(
 		"items_planned": len(indexInfoList),
 		"model_id":      model.GetModelID(),
 		"dimensions":    model.GetDimensions(),
-		"cache_status": string(
-			types.IngestionCacheStatusNotSupported,
-		),
+		"cache_status":  string(embeddingInitialCacheStatus(model)),
 	}
 	embeddingSpan := tracker.BeginSubSpan(
 		ctx,

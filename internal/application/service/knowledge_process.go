@@ -504,9 +504,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			"operation":       string(types.IngestionOperationEmbeddingChunk),
 			"chunks_to_embed": len(textChunks),
 			"model_id":        kb.EmbeddingModelID,
-			"cache_status": string(
-				types.IngestionCacheStatusNotSupported,
-			),
+			"cache_status":    string(embeddingInitialCacheStatus(embeddingModel)),
 		}
 		if dim := embeddingModel.GetDimensions(); dim > 0 {
 			embedInput["dim"] = dim
