@@ -186,7 +186,6 @@ func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) erro
 	return nil
 }
 
-
 // Cleanup releases all sandbox resources
 func (m *DefaultManager) Cleanup(ctx context.Context) error {
 	m.mu.RLock()

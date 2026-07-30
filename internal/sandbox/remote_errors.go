@@ -148,7 +148,6 @@ func IsRemoteNotFound(err error) bool {
 	}
 }
 
-
 // IsRemoteInvalidRequest reports whether err classifies as a caller-side
 // error (bad template, oversized payload, malformed path, etc.).
 func IsRemoteInvalidRequest(err error) bool {
@@ -166,7 +165,6 @@ func CanReplaceRemoteBinding(err error) bool {
 		return false
 	}
 }
-
 
 // httpErrorKind maps an HTTP status code to a RemoteErrorKind. It is shared
 // by all remote sandbox adapter backends (Cube, E2B).

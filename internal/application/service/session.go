@@ -668,8 +668,6 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	}
 }
 
-
-
 // GenerateTitle generates a title for the current conversation content
 // modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 func (s *sessionService) GenerateTitle(ctx context.Context,

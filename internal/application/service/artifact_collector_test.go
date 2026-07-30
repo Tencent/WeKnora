@@ -144,7 +144,9 @@ type fakeCatalog struct {
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
 	return "", nil
 }
-func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) { return nil, nil }
+func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
+	return nil, nil
+}
 func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
 	return v, nil, nil
 }
