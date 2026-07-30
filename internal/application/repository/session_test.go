@@ -246,7 +246,7 @@ func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
 	require.Equal(t, []string{embed.ID}, listItemIDsForTest(embedItems))
 }
 
-// The "web" source is user chats only; tenant API-key sessions live in the
+// The "web" source is user chats only; API-key sessions live in the
 // admin-only "api" bucket and must never leak into a tenant-wide web listing.
 // Legacy tenant-level rows (user_id "") must still show up in web.
 func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
@@ -256,6 +256,7 @@ func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
 
 	legacy := createSessionForTest(t, db, 1, "") // legacy tenant web row
 	_ = createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:10")
+	_ = createSessionForTest(t, db, 1, types.SessionOwnerAPIExternalUserPrefix+"1:alice")
 
 	items, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
 		TenantID: 1, UserID: "", Source: "web", Page: 1, PageSize: 50,
@@ -295,11 +296,15 @@ func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *t
 	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
 	ctx := context.Background()
 
-	// Two different API keys plus a web user and a cross-tenant API session.
+	// API requests without and with external-user identity, plus a web user and
+	// cross-tenant API sessions.
 	key1 := createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:10")
 	key2 := createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:20")
+	directHeader := createSessionForTest(t, db, 1, types.SessionOwnerAPIExternalUserPrefix+"1:alice")
+	signedToken := createSessionForTest(t, db, 1, types.SessionOwnerAPIExternalUserPrefix+"1:bob")
 	_ = createSessionForTest(t, db, 1, "alice")
 	_ = createSessionForTest(t, db, 2, types.SessionOwnerAPITenantKeyPrefix+"2:30")
+	_ = createSessionForTest(t, db, 2, types.SessionOwnerAPIExternalUserPrefix+"2:mallory")
 
 	// The admin view clears UserID, so every API-key session in the tenant is
 	// returned regardless of which key created it.
@@ -307,6 +312,10 @@ func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *t
 		TenantID: 1, UserID: "", Source: types.SessionSourceAPI, Page: 1, PageSize: 50,
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, total)
-	require.ElementsMatch(t, []string{key1.ID, key2.ID}, listItemIDsForTest(items))
+	require.EqualValues(t, 4, total)
+	require.ElementsMatch(
+		t,
+		[]string{key1.ID, key2.ID, directHeader.ID, signedToken.ID},
+		listItemIDsForTest(items),
+	)
 }

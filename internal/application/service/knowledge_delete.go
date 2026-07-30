@@ -277,7 +277,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	var retractSlugs []string
 	var affectedFolderIDs []string
 	for _, page := range pages {
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 		if page.FolderID != "" {
@@ -313,7 +313,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	// (3) Unconditionally enqueue the retract task. See function comment —
 	// an empty PageSlugs is not a bug, it's the signal "re-query at run
 	// time". The handler will ListPagesBySourceRef again, pick up any
-	// pages that materialised after we looked, and also rebuild index/log
+	// pages that materialised after we looked, and also rebuild the index
 	// so the knowledge's disappearance is reflected in the UI.
 	lang, _ := types.LanguageFromContext(ctx)
 	tenantID, _ := types.TenantIDFromContext(ctx)

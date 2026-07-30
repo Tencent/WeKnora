@@ -437,7 +437,7 @@ func (s *wikiPageService) GetIndex(ctx context.Context, kbID string) (*types.Wik
 }
 
 // wikiIndexContentPageTypes enumerates the page types that make up a wiki's
-// user-visible directory. System pages (index/log) are excluded; any
+// user-visible directory. The index page is excluded; any
 // LLM-created type we do not recognize surfaces under a generic "other"
 // bucket.
 var wikiIndexContentPageTypes = []string{
@@ -542,26 +542,6 @@ func (s *wikiPageService) GetIndexView(
 		Version: indexPage.Version,
 		Groups:  groups,
 	}, nil
-}
-
-// GetLog returns the wiki_pages row for slug='log' if it exists.
-//
-// Log events are now stored in the dedicated `wiki_log_entries` table and
-// paginated via wikiLogEntryService — the per-KB log is no longer a single
-// TEXT column on a wiki_pages row (that model caused O(n^2) write
-// amplification as logs grew). This method is retained for callers that
-// still probe the legacy row (wiki_lint, knowledge delete, etc.), but it
-// no longer auto-creates the placeholder page on miss; a missing row is a
-// normal state and the helper returns `nil, nil`.
-func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiPage, error) {
-	page, err := s.repo.GetBySlug(ctx, kbID, "log")
-	if err != nil {
-		if errors.Is(err, repository.ErrWikiPageNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return page, nil
 }
 
 // GetGraph returns a slice of the wiki link graph for visualization.
@@ -1242,7 +1222,7 @@ func (s *wikiPageService) deleteChunkForPage(ctx context.Context, page *types.Wi
 	}
 }
 
-// createDefaultPage creates a default system page (index, log)
+// createDefaultPage creates the default index page.
 func (s *wikiPageService) createDefaultPage(ctx context.Context, kbID string, slug string, title string, pageType string, content string) (*types.WikiPage, error) {
 	// Get KB to get tenant ID
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
@@ -1857,7 +1837,7 @@ func (s *wikiPageService) InjectCrossLinks(ctx context.Context, kbID string, aff
 		if !affectedSet[p.Slug] {
 			continue
 		}
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if p.PageType == types.WikiPageTypeIndex {
 			continue
 		}
 

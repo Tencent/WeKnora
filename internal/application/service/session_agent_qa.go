@@ -233,6 +233,7 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -260,7 +261,7 @@ func (s *sessionService) buildAgentConfig(
 	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
 	// whitelist to the mentioned items and records the pinned set used for the
 	// <must_use> hint, keeping all scope logic in one place per resource type.
-	isSharedAgent := req.Session != nil && req.Session.TenantID != customAgent.TenantID
+	isSharedAgent := req.SharedAgentReadOnly
 	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
 	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 

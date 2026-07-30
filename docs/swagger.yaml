@@ -4217,67 +4217,6 @@ definitions:
       version:
         type: integer
     type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogEntry:
-    properties:
-      action:
-        description: |-
-          Short operation tag: "ingest", "retract", etc. Matches the `action`
-          argument historically passed to appendLogEntry.
-        type: string
-      created_at:
-        description: Server-side timestamp (UTC).
-        type: string
-      doc_title:
-        description: |-
-          Document title at the time of the event. Stored verbatim rather than
-          joined at read time so deleted knowledge still has a human-readable
-          label in the log.
-        type: string
-      id:
-        description: |-
-          Auto-increment identifier. Monotonic within a single database, so
-          frontend pagination uses it as a stable cursor without needing to
-          disambiguate identical created_at values.
-        type: integer
-      knowledge_base_id:
-        description: Knowledge base this event belongs to.
-        type: string
-      knowledge_id:
-        description: Knowledge ID the event was about (may be empty for KB-level events).
-        type: string
-      pages_affected:
-        description: |-
-          Wiki pages affected by this event. Each ref carries both slug (for
-          navigation) and title (for display) so the log renders human-
-          readable text without a post-hoc slug→title lookup that might fail
-          for now-deleted pages.
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogPageRef'
-        type: array
-      summary:
-        description: One-line summary of the change, as it was when the event was
-          logged.
-        type: string
-      tenant_id:
-        description: Workspace scope, mirrored from the enclosing knowledge base.
-        type: integer
-    type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse:
-    properties:
-      entries:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntry'
-        type: array
-      next_cursor:
-        type: string
-    type: object
-  github_com_Tencent_WeKnora_internal_types.WikiLogPageRef:
-    properties:
-      slug:
-        type: string
-      title:
-        type: string
-    type: object
   github_com_Tencent_WeKnora_internal_types.WikiPage:
     properties:
       aliases:
@@ -4337,6 +4276,18 @@ definitions:
       knowledge_base_id:
         description: Knowledge base this page belongs to
         type: string
+      last_edit_source:
+        description: |-
+          LastEditSource records who authored the CURRENT version: pipeline |
+          agent | user | revert. Empty for legacy rows (treated as pipeline).
+          When the version is superseded this value travels into the revision
+          snapshot, so each historical version keeps its own author kind.
+        type: string
+      last_editor_id:
+        description: |-
+          LastEditorID is the user id of the caller that produced the current
+          version (empty for background pipeline writes).
+        type: string
       out_links:
         description: Slugs of pages this page links to (outbound links)
         items:
@@ -4348,8 +4299,7 @@ definitions:
           type: integer
         type: array
       page_type:
-        description: 'Page type: summary, entity, concept, index, log, synthesis,
-          comparison'
+        description: 'Page type: summary, entity, concept, index, synthesis, comparison'
         type: string
       parent_slug:
         description: |-
@@ -4457,6 +4407,89 @@ definitions:
         type: string
     required:
     - slug
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest:
+    properties:
+      slug:
+        type: string
+      version:
+        type: integer
+    required:
+    - slug
+    - version
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevision:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      created_at:
+        type: string
+      edit_source:
+        description: Author of THIS version (same semantics as WikiPage.LastEditSource).
+        type: string
+      edited_at:
+        description: When this version was authored (the page's updated_at while current).
+        type: string
+      editor_id:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      page_id:
+        type: string
+      page_type:
+        type: string
+      slug:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      tenant_id:
+        type: integer
+      title:
+        type: string
+      version:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse:
+    properties:
+      current_version:
+        type: integer
+      revisions:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevision'
+        type: array
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      page_type:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      version:
+        description: |-
+          Version is the optimistic-lock guard: when > 0 the update is rejected
+          with a conflict if the stored version differs (someone else edited the
+          page since the client loaded it). 0 skips the check (legacy clients).
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiStats:
     properties:
@@ -10593,38 +10626,6 @@ paths:
       summary: Run wiki lint
       tags:
       - Wiki
-  /knowledgebase/{kb_id}/wiki/log:
-    get:
-      description: |-
-        Returns a paginated feed of wiki operation events (ingest, retract, ...)
-        newest-first. Pagination is cursor-based: pass `next_cursor` from the
-        previous response back as `cursor` to fetch the next page.
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Opaque cursor from the previous page (empty = newest)
-        in: query
-        name: cursor
-        type: string
-      - description: Page size, 1-200 (default 50)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse'
-      security:
-      - Bearer: []
-      summary: Get wiki operation log
-      tags:
-      - Wiki
   /knowledgebase/{kb_id}/wiki/move-page:
     put:
       consumes:
@@ -10802,7 +10803,12 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update an existing wiki page by slug
+      description: |-
+        Partially update a wiki page by slug. Absent fields keep
+        their stored value. When `version` is > 0 it acts as an
+        optimistic-lock guard: a mismatch with the stored version
+        returns 409 together with the current version so the client
+        can reload and re-apply.
       parameters:
       - description: Knowledge base ID
         in: path
@@ -10814,12 +10820,12 @@ paths:
         name: slug
         required: true
         type: string
-      - description: Updated wiki page data
+      - description: Fields to update
         in: body
         name: page
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest'
       produces:
       - application/json
       responses:
@@ -10827,8 +10833,16 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -10855,6 +10869,96 @@ paths:
       security:
       - Bearer: []
       summary: Rebuild wiki links
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/revert:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Rolls the page (slug in the body, like move-page) back to
+        the content of the given stored revision. Applied as a
+        regular edit: the pre-revert state is snapshotted and the
+        version advances.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Revert target
+        in: body
+        name: revert
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Revert a wiki page to an earlier revision
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/revisions/{slug}:
+    get:
+      description: |-
+        Returns the stored historical snapshots for a page, newest
+        first (content omitted), plus the current version. Passing
+        `version` returns that single snapshot with full content.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Page slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Return this single revision with content
+        in: query
+        name: version
+        type: integer
+      - description: Page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Offset into the newest-first list
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List wiki page revisions
       tags:
       - Wiki
   /knowledgebase/{kb_id}/wiki/search:

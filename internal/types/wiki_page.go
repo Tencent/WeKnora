@@ -118,8 +118,6 @@ const (
 	WikiPageTypeConcept = "concept"
 	// WikiPageTypeIndex represents the wiki index page (index.md)
 	WikiPageTypeIndex = "index"
-	// WikiPageTypeLog represents the operation log page (log.md)
-	WikiPageTypeLog = "log"
 	// WikiPageTypeSynthesis represents a synthesis/analysis page.
 	// NOT auto-created by ingest — Agent creates these via wiki_write_page tool
 	// when it generates cross-document analysis, trends, or insights during conversations.
@@ -146,7 +144,7 @@ const (
 func IsValidWikiPageType(pageType string) bool {
 	switch pageType {
 	case WikiPageTypeSummary, WikiPageTypeEntity, WikiPageTypeConcept,
-		WikiPageTypeIndex, WikiPageTypeLog, WikiPageTypeSynthesis, WikiPageTypeComparison:
+		WikiPageTypeIndex, WikiPageTypeSynthesis, WikiPageTypeComparison:
 		return true
 	default:
 		return false
@@ -178,7 +176,7 @@ type WikiPage struct {
 	Slug string `json:"slug" gorm:"type:varchar(255);uniqueIndex:idx_kb_slug"`
 	// Human-readable title
 	Title string `json:"title" gorm:"type:varchar(512)"`
-	// Page type: summary, entity, concept, index, log, synthesis, comparison
+	// Page type: summary, entity, concept, index, synthesis, comparison
 	PageType string `json:"page_type" gorm:"type:varchar(32);index"`
 	// Page status: draft, published, archived
 	Status string `json:"status" gorm:"type:varchar(32);default:'published'"`
@@ -770,8 +768,7 @@ type WikiIndexResponse struct {
 //
 // Use cases:
 //
-//   - SlugTitleFetcher: resolve slug -> title for log entries and
-//     cross-link injection.
+//   - SlugTitleFetcher: resolve slug -> title for cross-link injection.
 //   - cleanDeadLinks: read out_links + status without pulling content.
 //   - dedup pre-filter: title + aliases + page_type for the trgm /
 //     surface-similarity comparisons.

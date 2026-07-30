@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -238,7 +241,7 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		// summary line explains where every discovered node went.
 		tally := newFetchTally(len(nodes))
 		for i, node := range nodes {
-			item, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID)
+			items, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
 			if err != nil {
 				tally.fail()
 				// Log error but continue with other nodes
@@ -250,9 +253,11 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 				})
 				continue
 			}
-			if item != nil {
+			if len(items) > 0 {
 				tally.fetch()
-				allItems = append(allItems, *item)
+				for _, it := range items {
+					allItems = append(allItems, *it)
+				}
 			} else {
 				// Unsupported obj_type (mindnote/slides/…): skipped with no item.
 				tally.skip(node.ObjType)
@@ -346,7 +351,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			}
 
 			// Node is new or changed — fetch its content
-			item, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID)
+			fetchedItems, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
 			if err != nil {
 				// Record failed items
 				changedItems = append(changedItems, types.FetchedItem{
@@ -357,8 +362,8 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 				})
 				continue
 			}
-			if item != nil {
-				changedItems = append(changedItems, *item)
+			for _, it := range fetchedItems {
+				changedItems = append(changedItems, *it)
 			}
 		}
 
@@ -481,7 +486,7 @@ func (c *Connector) FetchStream(
 				continue
 			}
 
-			item, ferr := c.fetchNodeContent(ctx, client, node, spaceID, resourceID)
+			items, ferr := c.fetchNodeContent(ctx, client, node, spaceID, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
 				tally.fail()
 				// Do NOT advance the cursor: the content was never fetched.
@@ -503,10 +508,12 @@ func (c *Connector) FetchStream(
 				// Fetched, or an unsupported obj_type (nothing to fetch): record
 				// the current edit time so the node is not re-processed next run.
 				newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = editTimeStr
-				if item != nil {
+				if len(items) > 0 {
 					tally.fetch()
-					if eerr := h.Emit(ctx, *item); eerr != nil {
-						return nil, eerr
+					for _, it := range items {
+						if eerr := h.Emit(ctx, *it); eerr != nil {
+							return nil, eerr
+						}
 					}
 				} else {
 					// Unsupported obj_type (mindnote/slides/…): no item.
@@ -654,15 +661,26 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 	return items
 }
 
-// fetchNodeContent fetches the content of a single wiki node and converts it to FetchedItem.
-// Dispatches to different retrieval strategies based on obj_type:
-//   - docx/doc   → export API → .docx file
-//   - sheet      → export API → .xlsx file
-//   - bitable    → export API → .xlsx file
+// parseableAttachmentExts are attachment extensions worth ingesting as their
+// own knowledge entries; other files (icons, tiny decor) are skipped.
+var parseableAttachmentExts = map[string]bool{
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+	".ppt": true, ".pptx": true, ".txt": true, ".md": true, ".csv": true,
+}
+
+// minAttachmentBytes filters out decorative micro-files.
+const minAttachmentBytes = 2 * 1024
+
+// fetchNodeContent fetches the content of a single wiki node and converts it to a
+// slice of FetchedItems. For docx nodes it fans out into a main Markdown document
+// plus optional attachment sub-items. Dispatches to different retrieval strategies
+// based on obj_type:
+//   - docx       → blocks API (Markdown) with export fallback; may return attachments
+//   - doc/sheet/bitable → export API → binary file
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → skip (no API)
 //   - slides     → skip (no API)
-func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string) (*types.FetchedItem, error) {
+func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string, multimodalEnabled bool) ([]*types.FetchedItem, error) {
 	if !isSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -679,61 +697,299 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 	}
 
 	switch node.ObjType {
-	case "docx", "doc", "sheet", "bitable":
-		// Export as a file via the async export API
-		data, fileName, err := client.ExportAndDownload(ctx, node.ObjToken, node.ObjType)
+	case "docx":
+		return c.fetchDocxWithBlocks(ctx, client, node, resourceID, editTime, baseMeta, multimodalEnabled)
+	case "doc", "sheet", "bitable":
+		item, err := c.fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta)
 		if err != nil {
-			return nil, fmt.Errorf("export %s (%s): %w", node.Title, node.ObjType, err)
+			return nil, err
 		}
-
-		// Ensure a reasonable file name with correct extension
-		ext := exportFileExtToSuffix[objTypeToExportFileExtension[node.ObjType]]
-		if fileName == "" {
-			fileName = sanitizeFileName(node.Title) + ext
-		} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
-			// Feishu often returns the doc title without extension — append it
-			fileName = sanitizeFileName(fileName) + ext
-		}
-
-		return &types.FetchedItem{
-			ExternalID:       node.NodeToken,
-			Title:            node.Title,
-			Content:          data,
-			ContentType:      "application/octet-stream",
-			FileName:         fileName,
-			URL:              c.region.wikiURL(node.NodeToken),
-			UpdatedAt:        editTime,
-			SourceResourceID: resourceID,
-			Metadata:         baseMeta,
-		}, nil
-
+		return []*types.FetchedItem{item}, nil
 	case "file":
-		// Download the original uploaded file from Drive
-		data, err := client.DownloadDriveFile(ctx, node.ObjToken)
+		item, err := c.fetchDriveFile(ctx, client, node, resourceID, editTime, baseMeta)
 		if err != nil {
-			return nil, fmt.Errorf("download file %s (%s): %w", node.Title, node.ObjToken, err)
+			return nil, err
 		}
-
-		// Use the node title as file name; it usually preserves the original extension
-		fileName := node.Title
-		if fileName == "" {
-			fileName = node.ObjToken
-		}
-
-		return &types.FetchedItem{
-			ExternalID:       node.NodeToken,
-			Title:            node.Title,
-			Content:          data,
-			ContentType:      "application/octet-stream",
-			FileName:         fileName,
-			URL:              c.region.wikiURL(node.NodeToken),
-			UpdatedAt:        editTime,
-			SourceResourceID: resourceID,
-			Metadata:         baseMeta,
-		}, nil
-
+		return []*types.FetchedItem{item}, nil
 	default:
 		return nil, nil
+	}
+}
+
+// fetchViaExport exports a doc/sheet/bitable node via the async export API and
+// returns a single FetchedItem containing the exported binary.
+func (c *Connector) fetchViaExport(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string) (*types.FetchedItem, error) {
+	// Export as a file via the async export API
+	data, fileName, err := client.ExportAndDownload(ctx, node.ObjToken, node.ObjType)
+	if err != nil {
+		return nil, fmt.Errorf("export %s (%s): %w", node.Title, node.ObjType, err)
+	}
+
+	// Ensure a reasonable file name with correct extension
+	ext := exportFileExtToSuffix[objTypeToExportFileExtension[node.ObjType]]
+	if fileName == "" {
+		fileName = sanitizeFileName(node.Title) + ext
+	} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
+		// Feishu often returns the doc title without extension — append it
+		fileName = sanitizeFileName(fileName) + ext
+	}
+
+	return &types.FetchedItem{
+		ExternalID:       node.NodeToken,
+		Title:            node.Title,
+		Content:          data,
+		ContentType:      "application/octet-stream",
+		FileName:         fileName,
+		URL:              c.region.wikiURL(node.NodeToken),
+		UpdatedAt:        editTime,
+		SourceResourceID: resourceID,
+		Metadata:         baseMeta,
+	}, nil
+}
+
+// fetchDriveFile downloads an original uploaded file from Drive and returns a
+// single FetchedItem containing the raw bytes.
+func (c *Connector) fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string) (*types.FetchedItem, error) {
+	// Download the original uploaded file from Drive
+	data, err := client.DownloadDriveFile(ctx, node.ObjToken)
+	if err != nil {
+		return nil, fmt.Errorf("download file %s (%s): %w", node.Title, node.ObjToken, err)
+	}
+
+	// Use the node title as file name; it usually preserves the original extension
+	fileName := node.Title
+	if fileName == "" {
+		fileName = node.ObjToken
+	}
+
+	return &types.FetchedItem{
+		ExternalID:       node.NodeToken,
+		Title:            node.Title,
+		Content:          data,
+		ContentType:      "application/octet-stream",
+		FileName:         fileName,
+		URL:              c.region.wikiURL(node.NodeToken),
+		UpdatedAt:        editTime,
+		SourceResourceID: resourceID,
+		Metadata:         baseMeta,
+	}, nil
+}
+
+// fetchDocxWithBlocks retrieves a docx node via the blocks API, converts it to
+// Markdown, and returns a main item plus any parseable attachment sub-items.
+// Falls back to the export API if the blocks API returns an error.
+func (c *Connector) fetchDocxWithBlocks(ctx context.Context, client *Client, node wikiNode,
+	resourceID string, editTime time.Time, baseMeta map[string]string, multimodalEnabled bool) ([]*types.FetchedItem, error) {
+
+	blocks, err := client.ListDocumentBlocks(ctx, node.ObjToken)
+	if err != nil {
+		logger.Warnf(ctx, "[Feishu] blocks API failed for %s (%s), falling back to export: %v",
+			node.Title, node.ObjToken, err)
+		item, ferr := c.fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta)
+		if ferr != nil {
+			return nil, ferr
+		}
+		// Do NOT set ReplacesSubtree here. The export path cannot re-enumerate the
+		// doc's attachments, so it emits no sub-items. If the blocks API failed
+		// transiently (rate limit / 5xx), sweeping would delete the good attachment
+		// children from the prior blocks-path sync with nothing to replace them —
+		// silent data loss. Leaving stale children is the safe choice; they are
+		// reconciled on the next successful blocks-path sync.
+		return []*types.FetchedItem{item}, nil
+	}
+
+	md, atts, err := blocksToMarkdown(ctx, client, blocks)
+	if err != nil {
+		return nil, fmt.Errorf("convert blocks %s: %w", node.Title, err)
+	}
+
+	// A docx that renders to empty Markdown (a blank page, or only block types that
+	// produce no text) must NOT be emitted as a main item with empty Content plus a
+	// wiki URL: ingestItem would then take its URL branch and CreateKnowledgeFromURL
+	// against the login-gated Feishu page — a guaranteed failure that reports the
+	// node as Failed. Fall back to the export path, which always yields a valid (if
+	// minimal) .docx binary, preserving the invariant that a supported docx node
+	// ingests as content bytes. An empty render implies no File/Image blocks either
+	// (both write a placeholder into the Markdown), so no attachment/image sub-items
+	// are lost by skipping the downdrill here.
+	if len(strings.TrimSpace(string(md))) == 0 {
+		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
+			node.Title, node.ObjToken)
+		item, ferr := c.fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta)
+		if ferr != nil {
+			return nil, ferr
+		}
+		return []*types.FetchedItem{item}, nil
+	}
+
+	main := &types.FetchedItem{
+		ExternalID:       node.NodeToken,
+		Title:            node.Title,
+		Content:          md,
+		ContentType:      "text/markdown",
+		FileName:         sanitizeFileName(node.Title) + ".md",
+		URL:              c.region.wikiURL(node.NodeToken),
+		UpdatedAt:        editTime,
+		SourceResourceID: resourceID,
+		Metadata:         baseMeta,
+		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
+	}
+	items := []*types.FetchedItem{main}
+
+	// keep collects the external_id of every attachment still present in the doc
+	// this sync — parseable or not, downloaded or not. The subtree sweep deletes
+	// only children NOT in this set, so an attachment that is still present but
+	// could not be re-ingested this cycle (unclassifiable filename, transient
+	// download failure) keeps its previously-synced good copy instead of being
+	// deleted with nothing to replace it. Only attachments genuinely removed from
+	// the doc fall out of keep and get swept — one bad attachment no longer
+	// freezes reconciliation of its siblings.
+	keep := make([]string, 0, len(atts))
+	childMeta := func() map[string]string {
+		m := maps.Clone(baseMeta)
+		m["parent_node_token"] = node.NodeToken
+		m["attachment"] = "true"
+		return m
+	}
+	for _, a := range atts {
+		childID := types.SubtreeChildID(node.NodeToken, "file", a.FileToken)
+		keep = append(keep, childID) // present in the doc → never sweep as stale
+		ext := strings.ToLower(filepath.Ext(a.Name))
+		if ext == "" {
+			// No filename extension to classify by: we can neither decide whether
+			// the file is parseable nor build a valid typed filename downstream, so
+			// it cannot be ingested as a standalone item this cycle. Log instead of
+			// dropping silently; its prior copy (if any) is preserved via keep.
+			logger.Warnf(ctx, "[Feishu] doc %s: skipping attachment with no usable filename (token=%s name=%q)",
+				node.ObjToken, a.FileToken, a.Name)
+			continue
+		}
+		if !parseableAttachmentExts[ext] {
+			continue // decorative/non-parseable → not a standalone knowledge item
+		}
+		data, derr := client.DownloadMediaFile(ctx, a.FileToken)
+		if derr != nil {
+			// Degrade gracefully: a single failed attachment (revoked token,
+			// permission gap, transient error) must NOT discard the already-built
+			// document body and its other attachments. Surface it as a per-item
+			// sync error (visible in the UI and counted, not just a server log);
+			// keep already preserves its prior copy so the sweep won't delete it.
+			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
+				node.ObjToken, a.Name, a.FileToken, derr)
+			items = append(items, &types.FetchedItem{
+				ExternalID:       childID,
+				Title:            a.Name,
+				SourceResourceID: resourceID,
+				Metadata:         feishuErrorItemMeta(derr, childMeta()),
+			})
+			continue
+		}
+		if len(data) < minAttachmentBytes {
+			// Below the decorative-micro-file floor. Log rather than drop silently
+			// (the sibling skip paths above also surface a note); its prior copy, if
+			// any, is preserved via keep.
+			logger.Infof(ctx, "[Feishu] doc %s: skipping tiny attachment %q (token=%s, %d bytes < %d)",
+				node.ObjToken, a.Name, a.FileToken, len(data), minAttachmentBytes)
+			continue
+		}
+		items = append(items, &types.FetchedItem{
+			ExternalID:       childID,
+			Title:            a.Name,
+			Content:          data,
+			ContentType:      "application/octet-stream",
+			FileName:         sanitizeFileName(a.Name),
+			URL:              c.region.wikiURL(node.NodeToken),
+			UpdatedAt:        editTime,
+			SourceResourceID: resourceID,
+			Metadata:         childMeta(),
+		})
+	}
+
+	// Embedded images: the Markdown body only carries a token-free placeholder for
+	// each image, so image-borne text (screenshots/diagrams) would be unsearchable.
+	// Emit each image as a standalone sub-item whose bytes flow through WeKnora's
+	// VLM OCR+caption pipeline, recovering that text. The image's external_id is
+	// ALWAYS added to keep (so toggling VLM off later does not sweep previously
+	// OCR'd images), but the bytes are only downloaded and ingested when the KB has
+	// multimodal enabled — ingesting an image into a non-VLM KB is rejected, so
+	// doing so would turn every image into a failed sync item.
+	imgMeta := func() map[string]string {
+		m := maps.Clone(baseMeta)
+		m["parent_node_token"] = node.NodeToken
+		m["embedded_image"] = "true"
+		return m
+	}
+	for _, b := range blocks {
+		if b.BlockType != blockTypeImage || b.Image == nil || b.Image.Token == "" {
+			continue
+		}
+		childID := types.SubtreeChildID(node.NodeToken, "image", b.Image.Token)
+		keep = append(keep, childID) // present in the doc → never sweep as stale
+		if !multimodalEnabled {
+			continue // KB can't OCR images; the inline placeholder is all we keep
+		}
+		data, derr := client.DownloadMediaFile(ctx, b.Image.Token)
+		if derr != nil {
+			// A failed image download (revoked token, permission gap, transient
+			// error) is a genuine fetch failure, not the best-effort ingest
+			// rejection a non-VLM KB produces — surface it as a visible per-item
+			// sync error exactly like a failed attachment download, instead of
+			// dropping it to a server log only. keep already preserves any prior
+			// OCR'd copy so the sweep won't delete it.
+			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
+				node.ObjToken, b.Image.Token, derr)
+			items = append(items, &types.FetchedItem{
+				ExternalID:       childID,
+				Title:            fmt.Sprintf("%s（内嵌图片）", node.Title),
+				SourceResourceID: resourceID,
+				Metadata:         feishuErrorItemMeta(derr, imgMeta()),
+			})
+			continue
+		}
+		if len(data) < minAttachmentBytes {
+			continue // decorative micro-image (icon/spacer)
+		}
+		ext, contentType, ok := supportedImageExt(data)
+		if !ok {
+			logger.Warnf(ctx, "[Feishu] doc %s: skipping image (token=%s) of unsupported type %q",
+				node.ObjToken, b.Image.Token, contentType)
+			continue
+		}
+		items = append(items, &types.FetchedItem{
+			ExternalID:       childID,
+			Title:            fmt.Sprintf("%s（内嵌图片）", node.Title),
+			Content:          data,
+			ContentType:      contentType,
+			FileName:         "image-" + b.Image.Token + ext,
+			URL:              c.region.wikiURL(node.NodeToken),
+			UpdatedAt:        editTime,
+			SourceResourceID: resourceID,
+			Metadata:         imgMeta(),
+		})
+	}
+
+	// Reconcile the subtree against the attachments still present in the doc: the
+	// sweep (in datasource_service) deletes only prior children absent from keep.
+	main.SubtreeKeep = keep
+	return items, nil
+}
+
+// supportedImageExt sniffs image bytes and returns the filename extension and
+// content type WeKnora accepts for a standalone image knowledge item (png/jpg/
+// gif — the image set isValidFileType admits). ok is false for non-image or
+// unsupported formats (e.g. webp/bmp), which the caller skips rather than
+// mislabel — a wrong extension would fail parsing. The detected content type is
+// returned even when ok is false so the caller can log it without re-sniffing.
+func supportedImageExt(data []byte) (ext, contentType string, ok bool) {
+	switch ct := http.DetectContentType(data); ct {
+	case "image/png":
+		return ".png", ct, true
+	case "image/jpeg":
+		return ".jpg", ct, true
+	case "image/gif":
+		return ".gif", ct, true
+	default:
+		return "", ct, false
 	}
 }
 
@@ -810,6 +1066,14 @@ func parseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 		feishuConfig.BaseURL = region.OpenBaseURL
 	}
 
+	// Timezone is a display setting (bitable date rendering), not a credential, so
+	// it lives in Settings. Empty falls back to GMT+8 in resolveLocation.
+	if feishuConfig.Timezone == "" && config.Settings != nil {
+		if tz, ok := config.Settings["timezone"].(string); ok {
+			feishuConfig.Timezone = strings.TrimSpace(tz)
+		}
+	}
+
 	if err := datasource.ValidateConnectorBaseURL(feishuConfig.GetBaseURL()); err != nil {
 		return nil, err
 	}
@@ -845,6 +1109,10 @@ func parseFeishuTimestamp(ts string) time.Time {
 // truncates at a UTF-8 rune boundary. Raw byte truncation would split a
 // multi-byte codepoint (Chinese chars are 3 bytes) and produce invalid UTF-8
 // that downstream validation (utf8.ValidString) rejects.
+//
+// The extension is preserved across truncation: only the base name is trimmed,
+// so a long attachment name like "很长的名字….pdf" keeps its ".pdf" suffix that
+// downstream file-type classification depends on.
 func sanitizeFileName(name string) string {
 	if name == "" {
 		return "untitled"
@@ -855,15 +1123,30 @@ func sanitizeFileName(name string) string {
 	)
 	result := replacer.Replace(name)
 	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
+	if len(result) <= maxBytes {
+		return result
 	}
-	return result
+	ext := filepath.Ext(result)
+	if len(ext) >= maxBytes {
+		ext = "" // pathological: extension alone overflows the budget → drop it
+	}
+	base := truncateUTF8(result[:len(result)-len(ext)], maxBytes-len(ext))
+	return base + ext
+}
+
+// truncateUTF8 shortens s to at most maxBytes bytes without splitting a
+// multi-byte rune: after a hard byte cut it trims any trailing partial codepoint.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	s = s[:maxBytes]
+	for len(s) > 0 {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		s = s[:len(s)-1]
+	}
+	return s
 }
