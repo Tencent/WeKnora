@@ -202,6 +202,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     content_hash VARCHAR(64),
     flags INTEGER NOT NULL DEFAULT 1,
     seq_id INTEGER,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0,
+    positive_rate REAL NOT NULL DEFAULT 0,
+    recall_weight REAL NOT NULL DEFAULT 1,
+    needs_optimization BOOLEAN NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -215,6 +220,52 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
+
+CREATE TABLE IF NOT EXISTS message_chunk_refs (
+    tenant_id INTEGER NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, message_id, chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_chunk_refs_message_id ON message_chunk_refs(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_chunk_refs_kb_chunk ON message_chunk_refs(knowledge_base_id, chunk_id);
+
+CREATE TABLE IF NOT EXISTS user_message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    vote VARCHAR(10) NOT NULL,
+    dislike_reason VARCHAR(100) NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_message_feedbacks_unique ON user_message_feedbacks(tenant_id, user_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_user_message_feedbacks_session ON user_message_feedbacks(tenant_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_user_message_feedbacks_message ON user_message_feedbacks(message_id);
+
+CREATE TABLE IF NOT EXISTS chunk_recall_weight_logs (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    trigger_type VARCHAR(30) NOT NULL,
+    user_id VARCHAR(36),
+    message_id VARCHAR(36),
+    old_weight REAL NOT NULL,
+    new_weight REAL NOT NULL,
+    like_count INTEGER NOT NULL,
+    dislike_count INTEGER NOT NULL,
+    positive_rate REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_recall_weight_logs_chunk_id ON chunk_recall_weight_logs(chunk_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,

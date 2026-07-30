@@ -369,6 +369,10 @@
                 <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
                 </div>
+
+                <div v-if="mode === 'edit' && kbId && !isFAQ && canShareKB && currentSection === 'chunkStats'" class="section">
+                  <ChunkStats :kb-id="kbId" />
+                </div>
               </div>
 
               <!-- 保存按钮 -->
@@ -413,6 +417,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import ChunkStats from './stats/ChunkStats.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -549,6 +554,9 @@ const navItems = computed(() => {
   if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
+  if (props.mode === 'edit' && props.kbId && formData.value?.type !== 'faq' && canShareKB.value) {
+    items.push({ key: 'chunkStats', icon: 'chart-bar', label: t('knowledgeEditor.sidebar.chunkStats') })
+  }
   return items
 })
 
@@ -576,7 +584,7 @@ const navGroups = computed(() => {
     {
       key: 'integration',
       label: t('knowledgeEditor.navGroups.integration'),
-      items: pickItems(['share']),
+      items: pickItems(['share', 'chunkStats']),
     },
   ].filter((group) => group.items.length > 0)
 })

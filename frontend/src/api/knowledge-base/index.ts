@@ -491,3 +491,30 @@ export function batchReparseKnowledge(kbId: string, ids: string[], processConfig
     process_config: processConfig,
   });
 }
+
+export function getChunkFeedbackStats(knowledgeBaseId: string, params: {
+  page?: number;
+  page_size?: number;
+  max_positive_rate?: number;
+  needs_optimization?: boolean;
+} = {}) {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.page_size) query.set('page_size', String(params.page_size));
+  if (params.max_positive_rate !== undefined) query.set('max_positive_rate', String(params.max_positive_rate));
+  if (params.needs_optimization !== undefined) query.set('needs_optimization', String(params.needs_optimization));
+  const qs = query.toString();
+  return get(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunk-feedback-stats${qs ? `?${qs}` : ''}`);
+}
+
+export function getChunkRecallWeightLogs(knowledgeBaseId: string, chunkId: string, limit = 50) {
+  return get(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/recall-weight-logs?limit=${limit}`);
+}
+
+export function resetChunkFeedback(knowledgeBaseId: string, chunkId: string) {
+  return post(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/feedback-reset`, {});
+}
+
+export function updateChunkWeight(knowledgeBaseId: string, chunkId: string, weight: number) {
+  return put(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/weight`, { weight });
+}

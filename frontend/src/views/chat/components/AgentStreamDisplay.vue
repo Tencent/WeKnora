@@ -291,6 +291,11 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <MessageFeedbackButtons
+                  :enabled="!!session?.knowledge_references?.length"
+                  :session-id="sessionId || ''"
+                  :message-id="session?.id || ''"
+                />
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -442,6 +447,7 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import MessageFeedbackButtons from './MessageFeedbackButtons.vue';
 import { countGrepDocuments } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';

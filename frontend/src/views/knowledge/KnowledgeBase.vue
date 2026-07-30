@@ -2212,6 +2212,7 @@ async function createNewSession(value: string): Promise<void> {
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
+
         <div class="knowledge-main">
           <div class="tag-content">
             <div class="doc-card-area">

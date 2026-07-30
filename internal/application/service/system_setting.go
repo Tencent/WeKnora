@@ -179,6 +179,33 @@ var registry = map[string]settingSpec{
 			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
 			"修改后需重启服务进程方可生效。",
 	},
+	// chunk_feedback.positive_rate_high_threshold controls the threshold (%)
+	// above which a chunk'''s recall weight is boosted. Default 80 = 80%.
+	"chunk_feedback.positive_rate_high_threshold": {
+		Type:        "int",
+		EnvName:     "",
+		Default:     int64(80),
+		Category:    "feedback",
+		Description: "?????????? 0-100??????? >= ????????????????? 80?",
+	},
+	// chunk_feedback.positive_rate_low_threshold controls the threshold (%)
+	// below which a chunk'''s recall weight is reduced. Default 50 = 50%.
+	"chunk_feedback.positive_rate_low_threshold": {
+		Type:        "int",
+		EnvName:     "",
+		Default:     int64(50),
+		Category:    "feedback",
+		Description: "?????????? 0-100??????? < ????????????????? 50?",
+	},
+	// chunk_feedback.needs_optimization_threshold controls the rate (%) below
+	// which a chunk is auto-marked "needs optimization". Default 20 = 20%.
+	"chunk_feedback.needs_optimization_threshold": {
+		Type:        "int",
+		EnvName:     "",
+		Default:     int64(20),
+		Category:    "feedback",
+		Description: "????\"???\"?????? 0-100??????? < ?????????????? 20?",
+	},
 }
 
 // systemSettingService wires the repository, audit log, and (P2)

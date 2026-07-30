@@ -153,7 +153,12 @@ type Chunk struct {
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
-	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	ContentHash       string  `json:"content_hash"             gorm:"type:varchar(64);index"`
+	LikeCount         int64   `json:"like_count"               gorm:"default:0"`
+	DislikeCount      int64   `json:"dislike_count"            gorm:"default:0"`
+	PositiveRate      float64 `json:"positive_rate"          gorm:"default:0"`
+	RecallWeight      float64 `json:"recall_weight"          gorm:"default:1"`
+	NeedsOptimization bool    `json:"needs_optimization"   gorm:"default:false"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time

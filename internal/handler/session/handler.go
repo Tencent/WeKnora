@@ -28,7 +28,8 @@ type Handler struct {
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
 	modelService         interfaces.ModelService         // Service for model management (VLM access)
 	userService          interfaces.UserService          // Service for resolving per-user preferences (e.g. enable_memory default)
-	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
+	chunkFeedbackService interfaces.ChunkFeedbackService
+	attachmentProcessor  *AttachmentProcessor // Processor for file attachments
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -45,6 +46,7 @@ func NewHandler(
 	fileService interfaces.FileService,
 	modelService interfaces.ModelService,
 	userService interfaces.UserService,
+	chunkFeedbackService interfaces.ChunkFeedbackService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 ) *Handler {
@@ -61,6 +63,7 @@ func NewHandler(
 		fileService:          fileService,
 		modelService:         modelService,
 		userService:          userService,
+		chunkFeedbackService: chunkFeedbackService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

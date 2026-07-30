@@ -57,6 +57,7 @@ type RouterParams struct {
 	AuditLogHandler              *handler.AuditLogHandler
 	AuditLogService              interfaces.AuditLogService
 	ChunkHandler                 *handler.ChunkHandler
+	ChunkFeedbackHandler         *handler.ChunkFeedbackHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
 	ModelHandler                 *handler.ModelHandler
@@ -205,6 +206,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterChunkFeedbackRoutes(v1, params.ChunkFeedbackHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
@@ -407,6 +409,19 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	}
 }
 
+func RegisterChunkFeedbackRoutes(r *gin.RouterGroup, handler *handler.ChunkFeedbackHandler, g *rbacGuards) {
+	if handler == nil {
+		return
+	}
+	kb := r.Group("/knowledge-bases/:id")
+	{
+		kb.GET("/chunk-feedback-stats", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ListKnowledgeBaseChunkFeedbackStats)
+		kb.GET("/chunks/:chunk_id/recall-weight-logs", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ListChunkRecallWeightLogs)
+		kb.POST("/chunks/:chunk_id/feedback-reset", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ResetChunkFeedback)
+		kb.PUT("/chunks/:chunk_id/weight", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateChunkWeight)
+	}
+}
+
 // RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
 //
 // Tags are KB metadata: Viewer reads, Contributor writes. Per-KB
@@ -444,6 +459,8 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 		messages.POST("/search", g.Viewer(), handler.SearchMessages)
 		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		messages.PUT("/:session_id/:id/feedback", g.Viewer(), handler.SetMessageFeedback)
+		messages.DELETE("/:session_id/:id/feedback", g.Viewer(), handler.CancelMessageFeedback)
 		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
 }

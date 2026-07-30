@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,7 +20,8 @@ import (
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
-	MessageService interfaces.MessageService // Service that implements message business logic
+	MessageService  interfaces.MessageService // Service that implements message business logic
+	FeedbackService interfaces.ChunkFeedbackService
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -29,7 +31,15 @@ type MessageHandler struct {
 // Returns a pointer to a new MessageHandler
 func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler {
 	return &MessageHandler{
-		MessageService: messageService,
+		MessageService:  messageService,
+		FeedbackService: nil,
+	}
+}
+
+func NewMessageHandlerWithFeedback(messageService interfaces.MessageService, feedbackService interfaces.ChunkFeedbackService) *MessageHandler {
+	return &MessageHandler{
+		MessageService:  messageService,
+		FeedbackService: feedbackService,
 	}
 }
 
@@ -294,4 +304,119 @@ func parseMessageBeforeTime(raw string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, lastErr
+}
+
+type MessageFeedbackRequest struct {
+	Vote          string `json:"vote"`
+	DislikeReason string `json:"dislike_reason"`
+}
+
+func (h *MessageHandler) SetMessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	if h.FeedbackService == nil {
+		c.Error(errors.NewInternalServerError("feedback service not enabled"))
+		return
+	}
+
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+	if sessionID == "" || messageID == "" {
+		c.Error(errors.NewBadRequestError("missing session_id or message_id"))
+		return
+	}
+
+	var req MessageFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+		return
+	}
+	userID := c.GetString(types.UserIDContextKey.String())
+	if userID == "" {
+		c.Error(errors.NewUnauthorizedError("user ID not found"))
+		return
+	}
+
+	if _, err := h.MessageService.GetMessage(ctx, sessionID, messageID); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	vote := types.UserMessageFeedbackVote(strings.ToLower(strings.TrimSpace(req.Vote)))
+	if err := h.FeedbackService.SetMessageFeedback(ctx, sessionID, messageID, userID, tenantID, vote, req.DislikeReason); err != nil {
+		switch {
+		case stderrors.Is(err, appservice.ErrFeedbackInvalidVote),
+			stderrors.Is(err, appservice.ErrFeedbackNoChunkRefs),
+			stderrors.Is(err, appservice.ErrFeedbackReasonRequired),
+			stderrors.Is(err, appservice.ErrFeedbackReasonTooLong):
+			c.Error(errors.NewBadRequestError(err.Error()))
+		default:
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *MessageHandler) CancelMessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	if h.FeedbackService == nil {
+		c.Error(errors.NewInternalServerError("feedback service not enabled"))
+		return
+	}
+
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+	if sessionID == "" || messageID == "" {
+		c.Error(errors.NewBadRequestError("missing session_id or message_id"))
+		return
+	}
+
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+		return
+	}
+	userID := c.GetString(types.UserIDContextKey.String())
+	if userID == "" {
+		c.Error(errors.NewUnauthorizedError("user ID not found"))
+		return
+	}
+
+	if _, err := h.MessageService.GetMessage(ctx, sessionID, messageID); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	if err := h.FeedbackService.CancelMessageFeedback(ctx, sessionID, messageID, userID, tenantID); err != nil {
+		switch {
+		case stderrors.Is(err, appservice.ErrFeedbackNoChunkRefs):
+			c.Error(errors.NewBadRequestError(err.Error()))
+		default:
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

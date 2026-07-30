@@ -76,3 +76,19 @@ export async function stopSession(session_id: string, message_id: string) {
 export async function clearSessionMessages(session_id: string) {
   return del(`/api/v1/sessions/${session_id}/messages`);
 }
+
+export async function setMessageFeedback(data: {
+  session_id: string;
+  message_id: string;
+  vote: 'like' | 'dislike';
+  dislike_reason?: string;
+}) {
+  return put(`/api/v1/messages/${data.session_id}/${data.message_id}/feedback`, {
+    vote: data.vote,
+    dislike_reason: data.dislike_reason,
+  });
+}
+
+export async function cancelMessageFeedback(session_id: string, message_id: string) {
+  return del(`/api/v1/messages/${session_id}/${message_id}/feedback`);
+}
