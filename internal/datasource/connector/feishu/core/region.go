@@ -59,8 +59,8 @@ var (
 		Label:         "FeishuDrive",
 	}
 
-	// regionLarkDrive is the international cloud, Drive mode.
-	regionLarkDrive = Region{
+	// RegionLarkDrive is the international cloud, Drive mode.
+	RegionLarkDrive = Region{
 		ConnectorType: types.ConnectorTypeLarkDrive,
 		OpenBaseURL:   larkOpenBaseURL,
 		WebBaseURL:    larkWebBaseURL,

@@ -25,15 +25,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
-	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 )
 
-// core.CollectHandler records everything a real FetchStream emits so the test can
+// collectHandler records everything a real FetchStream emits so the test can
 // assert coverage and resume behaviour. cancelAfter>0 simulates a task timeout
 // by cancelling the run after that many successful content emits.
-type core.CollectHandler struct {
+type collectHandler struct {
 	ingested    []string
 	failed      []string
 	checkpoints []*types.SyncCursor
@@ -42,7 +42,7 @@ type core.CollectHandler struct {
 	cancel      context.CancelFunc
 }
 
-func (h *core.CollectHandler) Emit(ctx context.Context, item types.FetchedItem) error {
+func (h *collectHandler) Emit(ctx context.Context, item types.FetchedItem) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (h *core.CollectHandler) Emit(ctx context.Context, item types.FetchedItem) 
 	return nil
 }
 
-func (h *core.CollectHandler) Checkpoint(_ context.Context, cursor *types.SyncCursor) error {
+func (h *collectHandler) Checkpoint(_ context.Context, cursor *types.SyncCursor) error {
 	// Snapshot the cursor JSON (mirrors the service serialising synchronously).
 	b, _ := json.Marshal(cursor.ConnectorCursor)
 	var m map[string]interface{}
@@ -137,7 +137,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	c := NewConnector(core.RegionFeishu)
 
 	// ---- Pass 1: full sync against the real space.
-	h1 := &core.CollectHandler{}
+	h1 := &collectHandler{}
 	cur1, err := c.FetchStream(context.Background(), cfg, nil, h1)
 	if err != nil {
 		t.Fatalf("pass 1 (full) FetchStream error: %v", err)
@@ -167,7 +167,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	// ---- Pass 2: incremental with pass-1 cursor. Against the REAL API this is
 	// the load-bearing check a fake can't make: real obj_edit_time must be
 	// stable for unchanged docs, so NOTHING is re-ingested.
-	h2 := &core.CollectHandler{}
+	h2 := &collectHandler{}
 	cur2, err := c.FetchStream(context.Background(), cfg, cur1, h2)
 	if err != nil {
 		t.Fatalf("pass 2 (incremental) FetchStream error: %v", err)
@@ -191,7 +191,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	defer func() { core.FeishuStreamCheckpointInterval = prevN }()
 
 	ctx3, cancel3 := context.WithCancel(context.Background())
-	h3 := &core.CollectHandler{cancelAfter: 1, cancel: cancel3} // abort after 1 success
+	h3 := &collectHandler{cancelAfter: 1, cancel: cancel3} // abort after 1 success
 	_, err = c.FetchStream(ctx3, cfg, nil, h3)
 	cancel3()
 	if err == nil {
@@ -204,7 +204,7 @@ func TestRealAPI_FetchStreamResumeConverges(t *testing.T) {
 	t.Logf("pass 3: ingested=%d before abort, persisted cursor nodes=%d", len(h3.ingested), countNodes(nodeTimes(t, persisted)))
 
 	// Resume from the persisted Checkpoint; must converge to full coverage.
-	h4 := &core.CollectHandler{}
+	h4 := &collectHandler{}
 	_, err = c.FetchStream(context.Background(), cfg, persisted, h4)
 	if err != nil {
 		t.Fatalf("pass 4 (resume) FetchStream error: %v", err)

@@ -21,7 +21,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost,open.feishu.cn,open.larksuite.com")
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }
