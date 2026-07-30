@@ -32,6 +32,8 @@ class TestMarkdownTableUtil(unittest.TestCase):
         )
         if not docx.is_file():
             docx = Path(__file__).resolve().parents[2].parent / "testdata/rag_test/docx/en_tables.docx"
+        if not docx.is_file():
+            self.skipTest("en_tables.docx fixture not available")
         raw = MarkItDown().convert(io.BytesIO(docx.read_bytes()), file_extension=".docx").text_content
         normalized = MarkdownTableUtil().format_table(raw)
 

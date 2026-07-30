@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/token"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -220,6 +221,7 @@ func (c *Consolidator) summarizeWithRetry(
 
 	for attempt := 1; attempt <= maxConsolidationAttempts; attempt++ {
 		summarizeCtx, cancel := context.WithTimeout(ctx, consolidationTimeout)
+		summarizeCtx = types.WithLLMCallMetadata(summarizeCtx, "agent_memory_consolidation", "")
 
 		resp, err := c.chatModel.Chat(summarizeCtx, []chat.Message{
 			{Role: "system", Content: consolidationSystemPrompt},

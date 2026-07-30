@@ -103,7 +103,7 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 }
 
 type DataAnalysisInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
+	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
 	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
 }
 
@@ -122,7 +122,21 @@ type DataAnalysisTool struct {
 	// env var at request time can produce a different (or empty) value if the
 	// variable was not exported to the sub-process or was set programmatically
 	// after startup, causing GetFile to look in the wrong directory (#1040).
-	localBaseDir         string
+	localBaseDir    string
+	storageResolver interfaces.StorageBackendResolver
+	searchTargets   types.SearchTargets
+	scopeEnforced   bool
+}
+
+// WithSearchTargets enables the Agent-only authorization boundary. Other
+// internal data-analysis callers retain their existing service-owned scope.
+// The flag is set independently of the slice length: an Agent turn that ended
+// up with no search target must reject every document, not fall back to
+// unrestricted access.
+func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) *DataAnalysisTool {
+	t.searchTargets = searchTargets
+	t.scopeEnforced = true
+	return t
 }
 
 func NewDataAnalysisTool(
@@ -132,8 +146,9 @@ func NewDataAnalysisTool(
 	fileService interfaces.FileService,
 	db *sql.DB,
 	sessionID string,
+	storageResolvers ...interfaces.StorageBackendResolver,
 ) *DataAnalysisTool {
-	return &DataAnalysisTool{
+	tool := &DataAnalysisTool{
 		BaseTool:             dataAnalysisTool,
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
@@ -145,8 +160,12 @@ func NewDataAnalysisTool(
 		// call to resolveFileServiceForKnowledge uses the same base path.  The
 		// env var is guaranteed to be set (or empty == "/data/files" fallback)
 		// when the application starts and the DI container is assembled.
-		localBaseDir:         strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
+		localBaseDir: strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
 	}
+	if len(storageResolvers) > 0 {
+		tool.storageResolver = storageResolvers[0]
+	}
+	return tool
 }
 
 // recordCreatedTable records a table name for cleanup, ensuring uniqueness
@@ -194,6 +213,11 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			Success: false,
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
+	}
+	if t.scopeEnforced {
+		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 	}
 
 	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
@@ -653,7 +677,10 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
 	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil {
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
 		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)
 	}
@@ -782,8 +809,12 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	}
 
 	provider := ""
+	backendID, _, _ := types.ParseStorageBackendPath(knowledge.FilePath)
 	if kb != nil {
 		provider = kb.GetStorageProvider()
+		if backendID == "" && kb.StorageBackendID != nil {
+			backendID = strings.TrimSpace(*kb.StorageBackendID)
+		}
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant == nil {
@@ -808,6 +839,18 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	}
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if t.storageResolver != nil && tenant != nil && (backendID != "" || provider != "") {
+		resolvedSvc, resolvedProvider, err := t.storageResolver.ResolveFileService(
+			ctx, tenant, backendID, provider, t.localBaseDir,
+		)
+		if err == nil {
+			logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved storage backend: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s",
+				t.sessionID, knowledge.ID, kbID, backendID, resolvedProvider)
+			return resolvedSvc
+		}
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] resolve storage backend failed, trying legacy config: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s err=%v",
+			t.sessionID, knowledge.ID, kbID, backendID, provider, err)
 	}
 
 	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {

@@ -155,6 +155,15 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		if count > 0 {
 			return fmt.Sprintf("Semantic search returned %d result(s) (details omitted from history)", count)
 		}
+	case "attachment_parsing":
+		parsed := intField(data, "parsed_count")
+		skipped := intField(data, "skipped_count")
+		if skipped > 0 {
+			return fmt.Sprintf("Parsed %d attachment(s), %d skipped (still processing)", parsed, skipped)
+		}
+		if parsed > 0 {
+			return fmt.Sprintf("Parsed %d attachment(s)", parsed)
+		}
 	}
 	if displayType := stringField(data, "display_type"); displayType != "" {
 		return fmt.Sprintf("Tool completed (%s; payload omitted from history)", displayType)

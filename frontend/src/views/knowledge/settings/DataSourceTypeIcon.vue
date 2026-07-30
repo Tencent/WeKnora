@@ -17,6 +17,8 @@ function fallbackText(type: string) {
   switch (type) {
     case 'feishu':
       return 'F'
+    case 'lark':
+      return 'L'
     case 'notion':
       return 'N'
     case 'yuque':

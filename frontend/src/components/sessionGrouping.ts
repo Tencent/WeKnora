@@ -8,6 +8,12 @@ export const DEFAULT_SESSION_GROUP_MODE: SessionGroupMode = 'none'
 /** Mirrors backend types.EmbedSessionMarkerPrefix */
 export const EMBED_SESSION_MARKER_PREFIX = 'embed_channel:'
 
+/** Mirrors backend types.SessionOwnerAPITenantKeyPrefix (sessions.user_id owner). */
+export const API_SESSION_OWNER_PREFIX = 'api_tenant_key:'
+
+/** Mirrors backend types.SessionOwnerAPIExternalUserPrefix. */
+export const API_EXTERNAL_USER_SESSION_OWNER_PREFIX = 'api_external_user:'
+
 export interface SessionForGrouping {
   id: string
   title?: string
@@ -16,6 +22,7 @@ export interface SessionForGrouping {
   updated_at?: string
   im_platform?: string
   description?: string
+  user_id?: string
   originalIndex?: number
 }
 
@@ -29,6 +36,7 @@ export type SessionOrigin =
   | { kind: 'web' }
   | { kind: 'im'; platform: string }
   | { kind: 'embed'; channelId: string }
+  | { kind: 'api' }
 
 export interface GroupModeOption {
   value: SessionGroupMode
@@ -37,6 +45,7 @@ export interface GroupModeOption {
 
 export interface SourceGroupLabels {
   web: string
+  api: string
   embedFallback: string
   embedChannel: (channelId: string) => string
   imPlatform: (platform: string) => string
@@ -86,6 +95,13 @@ export function resolveSessionOrigin(session: SessionForGrouping): SessionOrigin
     const channelId = desc.slice(EMBED_SESSION_MARKER_PREFIX.length).trim()
     if (channelId) return { kind: 'embed', channelId }
   }
+  const ownerId = session.user_id || ''
+  if (
+    ownerId.startsWith(API_SESSION_OWNER_PREFIX) ||
+    ownerId.startsWith(API_EXTERNAL_USER_SESSION_OWNER_PREFIX)
+  ) {
+    return { kind: 'api' }
+  }
   return { kind: 'web' }
 }
 
@@ -97,6 +113,8 @@ export function originGroupKey(origin: SessionOrigin): string {
       return `im:${origin.platform}`
     case 'embed':
       return `embed:${origin.channelId}`
+    case 'api':
+      return 'api'
   }
 }
 
@@ -108,6 +126,8 @@ function labelForOrigin(
   switch (origin.kind) {
     case 'web':
       return labels.web
+    case 'api':
+      return labels.api
     case 'im':
       return labels.imPlatform(origin.platform)
     case 'embed': {

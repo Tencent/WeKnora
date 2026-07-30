@@ -23,7 +23,7 @@ TENANT_ID="1"
 echo "配置信息："
 echo "  API地址: ${API_BASE_URL}"
 echo "  知识库ID: ${KB_ID}"
-echo "  租户ID: ${TENANT_ID}"
+echo "  空间ID: ${TENANT_ID}"
 echo ""
 
 # 测试 1：获取当前配置

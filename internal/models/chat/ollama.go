@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	ollamaapi "github.com/ollama/ollama/api"
 )
 
@@ -63,7 +63,13 @@ func resolveImageForOllama(imageURL string) ollamaapi.ImageData {
 		return data
 	}
 	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
-		client := &http.Client{Timeout: 30 * time.Second}
+		if err := secutils.ValidateURLForSSRF(imageURL); err != nil {
+			return nil
+		}
+		client := secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+			Timeout:      30 * time.Second,
+			MaxRedirects: 5,
+		})
 		resp, err := client.Get(imageURL)
 		if err != nil {
 			return nil
@@ -159,6 +165,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		CompletionTokens: completionTokens,
 		TotalTokens:      promptTokens + completionTokens,
 	}
+	usage.MarkPromptCacheUnsupported()
 	logUsage(ctx, c.modelName, &usage)
 
 	return &types.ChatResponse{
@@ -254,6 +261,7 @@ func (c *OllamaChat) ChatStream(
 						CompletionTokens: resp.EvalCount,
 						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
 					}
+					usage.MarkPromptCacheUnsupported()
 				}
 				logUsage(ctx, c.modelName, usage)
 				streamChan <- types.StreamResponse{

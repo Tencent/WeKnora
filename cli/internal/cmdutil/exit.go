@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Tencent/WeKnora/cli/internal/output"
 )
@@ -93,7 +94,7 @@ func ExitCode(err error) int {
 
 // PrintError writes err to w (typically stderr) in dual mode:
 //   - text:         code: msg\nhint: ...\nretry: ...
-//   - json/ndjson:  {ok:false, error:{...}, _notice?:...}
+//   - json/ndjson:  {ok:false, error:{...}}
 //
 // Mode is read from globalFormatMode (set by root PersistentPreRunE).
 func PrintError(w io.Writer, err error) {
@@ -126,12 +127,12 @@ func printErrorProse(w io.Writer, err error) {
 		if hint != "" {
 			fmt.Fprintf(w, "hint: %s\n", hint)
 		}
-		retry := typed.RetryCommand
-		if retry == "" {
-			retry = defaultRetryCommand(typed.Code)
+		retry := typed.RetryArgv
+		if len(retry) == 0 {
+			retry = defaultRetryArgv(typed.Code)
 		}
-		if retry != "" {
-			fmt.Fprintf(w, "retry: %s\n", retry)
+		if len(retry) > 0 {
+			fmt.Fprintf(w, "retry: %s\n", strings.Join(retry, " "))
 		}
 	}
 }
@@ -198,30 +199,58 @@ func defaultHint(code ErrorCode) string {
 	return ""
 }
 
-// defaultRetryCommand returns canonical retry argv for known codes.
-// Empty string for codes without a stable canonical retry.
+// defaultRetryArgv returns canonical retry argv for known codes.
+// nil for codes without a stable canonical retry.
 // Symmetric counterpart to defaultHint.
-func defaultRetryCommand(code ErrorCode) string {
+func defaultRetryArgv(code ErrorCode) []string {
 	switch code {
 	case CodeAuthUnauthenticated, CodeAuthBadCredential, CodeAuthTokenExpired:
-		return "weknora auth login"
+		return []string{"weknora", "auth", "login"}
 	case CodeKBIDRequired:
-		return "weknora link"
+		return []string{"weknora", "link"}
 	case CodeNetworkError, CodeServerTimeout:
-		return "weknora doctor"
+		return []string{"weknora", "doctor"}
 	case CodeProjectLinkCorrupt:
-		return "weknora link" // re-bind the project to a KB
+		return []string{"weknora", "link"} // re-bind the project to a KB
 	case CodeLocalConfigCorrupt:
 		// Recovery is two steps (delete config + re-login); the prose hint
-		// already spells it out, so the retry argv stays empty.
-		return ""
+		// already spells it out, so the retry argv stays nil.
+		return nil
 	}
-	return ""
+	return nil
 }
 
-// DefaultHint and DefaultRetryCommand are exported wrappers so that
-// cross-package callers (MCP handlers, batch envelope helpers) can
-// resolve hint/retry without duplicating the typed-code → string table.
-// Avoids drift between cmdutil and copies elsewhere.
-func DefaultHint(code ErrorCode) string         { return defaultHint(code) }
-func DefaultRetryCommand(code ErrorCode) string { return defaultRetryCommand(code) }
+// boolPtr returns a pointer to b. Used by retryableForCode so the *bool can
+// distinguish true / false / unknown(nil) on the wire.
+func boolPtr(b bool) *bool { return &b }
+
+// retryableForCode classifies whether re-running the SAME command may succeed.
+// Pointer-to-true for transient failures, pointer-to-false for deterministic
+// ones, nil (omitted) when genuinely unknown — notably CodeInternalError and
+// any unlisted code (do NOT default to false).
+func retryableForCode(code ErrorCode) *bool {
+	switch code {
+	// Transient — retrying the same command may succeed.
+	case CodeServerRateLimited, CodeServerTimeout, CodeNetworkError,
+		CodeOperationTimeout, CodeSSEStreamAborted:
+		return boolPtr(true)
+	// CodeServerError (generic 500) is deliberately NOT here: a 500 may be a
+	// transient server hiccup OR a deterministic server-side bug / mislabeled
+	// bad request, so blindly retrying risks a loop. Left unlisted → nil
+	// (unknown), so the agent decides rather than reading an optimistic true.
+	// Deterministic — same command will fail the same way.
+	case CodeAuthUnauthenticated, CodeAuthTokenExpired, CodeAuthBadCredential,
+		CodeAuthForbidden, CodeAuthCrossTenantBlocked, CodeAuthTenantMismatch,
+		CodeInputInvalidArgument, CodeInputMissingFlag,
+		CodeInputConfirmationRequired, CodeInputUnknownSubcommand,
+		CodeResourceNotFound, CodeResourceAlreadyExists, CodeResourceLocked,
+		CodeOperationFailed, CodeOperationCancelled, CodeUserAborted,
+		CodeUploadFileNotFound, CodeKBIDRequired, CodeKBNotFound,
+		CodeProjectLinkCorrupt, CodeLocalConfigCorrupt, CodeLocalKeychainDenied,
+		CodeLocalFileIO, CodeLocalProfileNotFound, CodeSessionCreateFailed,
+		CodeServerIncompatibleVersion:
+		return boolPtr(false)
+	}
+	// CodeInternalError and any unlisted code: genuinely unknown → omit.
+	return nil
+}

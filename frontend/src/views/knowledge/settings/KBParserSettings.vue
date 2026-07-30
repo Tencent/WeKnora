@@ -14,7 +14,7 @@
       <p>{{ $t('kbSettings.parser.noEngineAvailable') }}</p>
     </div>
 
-    <div v-else class="settings-group">
+    <div v-else class="settings-group" :class="{ 'settings-group--embedded': embedded }">
       <div
         v-for="group in fileTypeGroups"
         :key="group.key"
@@ -22,7 +22,7 @@
       >
         <div class="setting-info">
           <label class="group-label">
-            <t-icon :name="group.icon" class="group-icon" />
+            <t-icon v-if="!embedded" :name="group.icon" class="group-icon" />
             {{ group.label }}
           </label>
           <div class="ext-tags">
@@ -30,52 +30,34 @@
           </div>
         </div>
         <div class="setting-control">
-          <t-select
-            :value="getEngineForGroup(group.extensions) || undefined"
-            @change="(val: string) => handleEngineChange(group.extensions, val)"
-            :style="embedded ? { width: '100%' } : { width: '280px' }"
-            :status="hasAvailableEngine(group.extensions) ? 'default' : 'warning'"
-            :placeholder="$t('kbSettings.parser.noEngine')"
-          >
-            <t-option
-              v-for="opt in getEngineOptions(group.extensions)"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.selectLabel"
-              :disabled="opt.disabled"
+          <div class="parser-control-stack">
+            <t-select
+              :value="getEngineForGroup(group.extensions) || undefined"
+              @change="(val: string) => handleEngineChange(group.extensions, val)"
+              :style="embedded ? undefined : { width: '280px' }"
+              :class="{ 'parser-engine-select--embedded': embedded }"
+              :status="hasAvailableEngine(group.extensions) ? 'default' : 'warning'"
+              :placeholder="$t('kbSettings.parser.noEngine')"
+              :popup-props="{ overlayInnerStyle: { maxHeight: '240px' } }"
             >
-              <t-tooltip
-                :content="$t('kbSettings.supportedFormats') + ': ' + opt.fileTypes.map(ft => '.' + ft).join('  ')"
-                placement="left"
-                :show-arrow="false"
-              >
-                <div class="engine-option">
-                  <div class="engine-option-top">
-                    <span class="engine-option-name">{{ getEngineDisplayName(opt.value) }}</span>
-                    <t-tag
-                      v-if="opt.isDefault"
-                      theme="primary"
-                      variant="light"
-                      size="small"
-                    >{{ $t('kbSettings.parser.default') }}</t-tag>
-                    <t-tag
-                      v-if="opt.disabled"
-                      theme="danger"
-                      variant="light"
-                      size="small"
-                    >{{ $t('kbSettings.parser.unavailable') }}</t-tag>
-                  </div>
-                  <div class="engine-option-desc">{{ getEngineDisplayDesc(opt.value, opt.desc) }}</div>
-                  <div v-if="opt.disabled && opt.reason" class="engine-option-reason">
-                    {{ opt.reason }}
-                    <a class="go-settings" @click.stop.prevent="goToParserSettings">{{ $t('kbSettings.parser.goSettings') }}</a>
-                  </div>
-                </div>
-              </t-tooltip>
-            </t-option>
-          </t-select>
-          <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
-            <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
+              <t-option
+                v-for="opt in getEngineOptions(group.extensions)"
+                :key="opt.value"
+                :value="opt.value"
+                :label="opt.selectLabel"
+              />
+            </t-select>
+            <t-checkbox
+              v-if="group.extensions.includes('xlsx') && getEngineForGroup(group.extensions) === 'builtin'"
+              class="xlsx-header-option"
+              :checked="getXLSXFirstRowAsHeader(group.extensions)"
+              @change="(checked: boolean) => handleXLSXFirstRowAsHeaderChange(group.extensions, checked)"
+            >
+              {{ $t('kbSettings.parser.xlsxFirstRowAsHeader') }}
+            </t-checkbox>
+            <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
+              <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
+            </div>
           </div>
         </div>
       </div>
@@ -100,25 +82,21 @@ function getEngineDisplayName(engineName: string): string {
   return translated !== key ? translated : engineName
 }
 
-function getEngineDisplayDesc(engineName: string, fallback: string): string {
-  const key = `kbSettings.parser.engines.${engineName}.desc`
-  const translated = t(key)
-  return translated !== key ? translated : fallback
-}
-
 export interface ParserEngineRule {
   file_types: string[]
   engine: string
+  xlsx_first_row_as_header?: boolean
 }
 
 interface EngineOption {
   value: string
   selectLabel: string
-  desc: string
-  fileTypes: string[]
-  disabled: boolean
   isDefault: boolean
-  reason?: string
+}
+
+function buildOptionLabel(name: string, isDefault: boolean): string {
+  const label = getEngineDisplayName(name)
+  return isDefault ? `${label} (${t('kbSettings.parser.default')})` : label
 }
 
 interface Props {
@@ -192,6 +170,14 @@ const fileTypeGroups = computed(() => {
     })
   }
 
+  // Keep the UI driven by the backend registry. New parser plugins can expose
+  // file types without requiring another frontend release; known families get
+  // friendly labels above and everything else gets a compact dynamic row.
+  const grouped = new Set(groups.flatMap(group => group.extensions))
+  for (const ext of [...ft].filter(ext => !grouped.has(ext) && ext !== 'url').sort()) {
+    groups.push({ key: `dynamic-${ext}`, label: ext.toUpperCase(), icon: 'file-code', extensions: [ext] })
+  }
+
   const rel = props.relevantExtensions
   if (!rel?.length) return groups
   const relSet = new Set(rel)
@@ -214,19 +200,17 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
     }
   }
   const defaultName = raw.find(e => e.available)?.name ?? ''
-  return raw.map(e => ({
-    value: e.name,
-    selectLabel: `${getEngineDisplayName(e.name)}  —  ${getEngineDisplayDesc(e.name, e.desc)}`,
-    desc: e.desc,
-    fileTypes: e.fileTypes,
-    disabled: !e.available,
-    isDefault: defaultName !== '' && e.name === defaultName,
-    reason: e.reason,
-  }))
+  return raw
+    .filter(e => e.available)
+    .map(e => ({
+      value: e.name,
+      selectLabel: buildOptionLabel(e.name, defaultName !== '' && e.name === defaultName),
+      isDefault: defaultName !== '' && e.name === defaultName,
+    }))
 }
 
 function hasAvailableEngine(extensions: string[]): boolean {
-  return getEngineOptions(extensions).some(opt => !opt.disabled)
+  return getEngineOptions(extensions).length > 0
 }
 
 function getDefaultEngine(extensions: string[]): string {
@@ -244,14 +228,41 @@ function getEngineForGroup(extensions: string[]): string {
 }
 
 function handleEngineChange(extensions: string[], engine: string) {
+  const currentRule = getRuleForGroup(extensions)
   const otherRules = localEngineRules.value.filter(
     r => !r.file_types.some(ft => extensions.includes(ft))
   )
   if (engine) {
-    otherRules.push({ file_types: [...extensions], engine })
+    otherRules.push({
+      file_types: [...extensions],
+      engine,
+      ...(currentRule?.xlsx_first_row_as_header !== undefined
+        ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
+        : {}),
+    })
   }
   localEngineRules.value = otherRules
   emit('update:parserEngineRules', buildCompleteRules())
+}
+
+function getRuleForGroup(extensions: string[]): ParserEngineRule | undefined {
+  return localEngineRules.value.find(
+    rule => rule.file_types.some(fileType => extensions.includes(fileType))
+  )
+}
+
+function getXLSXFirstRowAsHeader(extensions: string[]): boolean {
+  return getRuleForGroup(extensions)?.xlsx_first_row_as_header === true
+}
+
+function handleXLSXFirstRowAsHeaderChange(extensions: string[], checked: boolean) {
+  const rules = buildCompleteRules()
+  const rule = rules.find(item => item.file_types.some(fileType => extensions.includes(fileType)))
+  if (!rule) return
+
+  rule.xlsx_first_row_as_header = checked
+  localEngineRules.value = rules
+  emit('update:parserEngineRules', rules)
 }
 
 function buildCompleteRules(): ParserEngineRule[] {
@@ -259,7 +270,14 @@ function buildCompleteRules(): ParserEngineRule[] {
   for (const group of fileTypeGroups.value) {
     const engine = getEngineForGroup(group.extensions)
     if (engine) {
-      rules.push({ file_types: [...group.extensions], engine })
+      const currentRule = getRuleForGroup(group.extensions)
+      rules.push({
+        file_types: [...group.extensions],
+        engine,
+        ...(currentRule?.xlsx_first_row_as_header !== undefined
+          ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
+          : {}),
+      })
     }
   }
   return rules
@@ -417,6 +435,29 @@ watch(() => props.parserEngineRules, (v) => {
   align-items: flex-end;
 }
 
+.parser-control-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 280px;
+}
+
+.xlsx-header-option {
+  align-self: stretch;
+
+  :deep(.t-checkbox) {
+    align-items: flex-start;
+  }
+
+  :deep(.t-checkbox__label) {
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: left;
+    white-space: normal;
+  }
+}
+
 .no-engine-warning {
   display: flex;
   align-items: center;
@@ -439,77 +480,49 @@ watch(() => props.parserEngineRules, (v) => {
 }
 
 // ---- 下拉选项样式 ----
-.engine-option {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 3px 0;
-}
-
-.engine-option-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.engine-option-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family-mono);
-}
-
-.engine-option-desc {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  line-height: 1.4;
-}
-
-.engine-option-reason {
-  font-size: 12px;
-  color: var(--td-error-color);
-  line-height: 1.4;
-
-  .go-settings {
-    color: var(--td-brand-color);
-    cursor: pointer;
-    margin-left: 4px;
-    font-size: 12px;
-    text-decoration: none;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-}
-
 .kb-parser-settings--embedded {
+  .settings-group {
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer, #f8f9fb);
+    overflow: hidden;
+  }
+
   .setting-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    padding: 12px 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 14px;
+    background: var(--td-bg-color-container, #fff);
+    border-bottom: 1px solid var(--td-component-stroke);
+
+    &:last-child {
+      border-bottom: none;
+    }
   }
 
   .setting-info {
-    flex: none;
-    max-width: none;
+    flex: 0 0 168px;
+    max-width: 168px;
     padding-right: 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 10px;
+    display: block;
   }
 
   .setting-control {
-    flex: none;
+    flex: 1;
+    min-width: 0;
     max-width: none;
     align-items: stretch;
   }
 
+  .parser-control-stack {
+    width: 100%;
+  }
+
   .group-label {
-    font-size: 14px;
-    margin-bottom: 0;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 4px;
   }
 
   .ext-tags {
@@ -521,17 +534,9 @@ watch(() => props.parserEngineRules, (v) => {
     font-size: 11px;
     padding: 2px 6px;
   }
-}
-</style>
 
-<style lang="less">
-.t-select__dropdown .t-select-option {
-  height: auto;
-  align-items: flex-start;
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.t-select__dropdown .t-select-option__content {
-  white-space: normal;
+  .parser-engine-select--embedded {
+    width: 100%;
+  }
 }
 </style>

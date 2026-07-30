@@ -27,6 +27,7 @@ type NvidiaReranker struct {
 func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
+
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
 }
@@ -57,17 +58,16 @@ func NewNvidiaReranker(config *RerankerConfig) (*NvidiaReranker, error) {
 	if url := config.BaseURL; url != "" {
 		baseURL = url
 	}
+	if err := validateRerankBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 
 	return &NvidiaReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-			},
-		},
+		client:    newRerankHTTPClient(0),
 	}, nil
 }
 

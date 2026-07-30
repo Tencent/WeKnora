@@ -6,7 +6,7 @@ import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
 import { useOrganizationStore } from '@/stores/organization'
 
-/** 租户级资源缓存 TTL */
+/** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
 
 type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders'
@@ -174,7 +174,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
   }
 
-  /** 并行预取对话输入栏及列表页常用的租户级资源 */
+  /** 并行预取对话输入栏及列表页常用的空间级资源 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
     await Promise.all([
@@ -186,25 +186,29 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     ])
   }
 
-  async function ensureAgentKnowledgeBases(agentId: string, force = false): Promise<any[]> {
-    const cached = agentKbCache.get(agentId)
+  async function ensureAgentKnowledgeBases(agentId: string, sourceTenantId?: string, force = false): Promise<any[]> {
+    const cacheKey = `${agentId}:${sourceTenantId || 'current'}`
+    const cached = agentKbCache.get(cacheKey)
     if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
       return cached.data
     }
-    const existing = agentKbInflight.get(agentId)
+    const existing = agentKbInflight.get(cacheKey)
     if (existing) return existing
 
     const p = (async () => {
       try {
-        const res: any = await listKnowledgeBases({ agent_id: agentId })
+        const res: any = await listKnowledgeBases({
+          agent_id: agentId,
+          agent_source_tenant_id: sourceTenantId,
+        })
         const list = res?.data && Array.isArray(res.data) ? res.data : []
-        agentKbCache.set(agentId, { at: Date.now(), data: list })
+        agentKbCache.set(cacheKey, { at: Date.now(), data: list })
         return list
       } finally {
-        agentKbInflight.delete(agentId)
+        agentKbInflight.delete(cacheKey)
       }
     })()
-    agentKbInflight.set(agentId, p)
+    agentKbInflight.set(cacheKey, p)
     return p
   }
 

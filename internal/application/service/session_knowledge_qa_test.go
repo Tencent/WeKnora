@@ -52,6 +52,34 @@ type stubModelService struct {
 	modelsByID map[string]*types.Model
 }
 
+func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) {
+	bus := event.NewEventBus()
+	var emitted []event.Event
+	bus.On(event.EventAgentReferences, func(_ context.Context, evt event.Event) error {
+		emitted = append(emitted, evt)
+		return nil
+	})
+	disabled := false
+	result := &types.SearchResult{ID: "chunk-1", KnowledgeTitle: "Doc"}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{CitationEnabled: &disabled},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{result},
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+	}
+
+	emitKnowledgeReferencesEvent(context.Background(), cm)
+	require.Len(t, emitted, 1)
+	require.Equal(t, event.EventAgentReferences, emitted[0].Type)
+	require.Equal(t, []*types.SearchResult{result}, emitted[0].Data.(event.AgentReferencesData).References)
+
+	enabled := true
+	cm.CitationEnabled = &enabled
+	emitKnowledgeReferencesEvent(context.Background(), cm)
+	require.Len(t, emitted, 2)
+}
+
 func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
 	return nil
 }
@@ -139,11 +167,16 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 
 	svc.handleModelFallback(context.Background(), cm)
 
-	require.Len(t, chatModel.lastMessages, 3)
-	assert.Equal(t, "user", chatModel.lastMessages[0].Role)
-	assert.Equal(t, "先介绍一下 WeKnora", chatModel.lastMessages[0].Content)
-	assert.Equal(t, "assistant", chatModel.lastMessages[1].Role)
-	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[1].Content)
-	assert.Equal(t, "user", chatModel.lastMessages[2].Role)
-	assert.Contains(t, chatModel.lastMessages[2].Content, "现在还能继续讲吗？")
+	// Corrected fallback shape: a system message carries the fallback
+	// instruction, history is replayed in the middle, and the turn ends on the
+	// user's question. Previously the system message was dropped entirely.
+	require.Len(t, chatModel.lastMessages, 4)
+	assert.Equal(t, "system", chatModel.lastMessages[0].Role)
+	assert.Contains(t, chatModel.lastMessages[0].Content, "Answer the latest user question")
+	assert.Equal(t, "user", chatModel.lastMessages[1].Role)
+	assert.Equal(t, "先介绍一下 WeKnora", chatModel.lastMessages[1].Content)
+	assert.Equal(t, "assistant", chatModel.lastMessages[2].Role)
+	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[2].Content)
+	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
+	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }

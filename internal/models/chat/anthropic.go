@@ -50,8 +50,10 @@ type anthropicResponse struct {
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int  `json:"input_tokens"`
+		OutputTokens             int  `json:"output_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -63,10 +65,10 @@ type anthropicStreamEvent struct {
 	Type    string `json:"type"`
 	Message *struct {
 		Usage struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			InputTokens              int  `json:"input_tokens"`
+			OutputTokens             int  `json:"output_tokens"`
+			CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	} `json:"message,omitempty"`
 	Delta *struct {
@@ -75,10 +77,10 @@ type anthropicStreamEvent struct {
 		StopReason string `json:"stop_reason"`
 	} `json:"delta,omitempty"`
 	Usage *struct {
-		InputTokens              int `json:"input_tokens"`
-		OutputTokens             int `json:"output_tokens"`
-		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		InputTokens              int  `json:"input_tokens"`
+		OutputTokens             int  `json:"output_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 	} `json:"usage,omitempty"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -316,14 +318,20 @@ func (c *AnthropicChat) parseResponse(resp *anthropicResponse) *types.ChatRespon
 	}
 	inputTokens := resp.Usage.InputTokens
 	outputTokens := resp.Usage.OutputTokens
+	cacheRead := valueOrZero(resp.Usage.CacheReadInputTokens)
+	cacheWrite := valueOrZero(resp.Usage.CacheCreationInputTokens)
+	promptTokens := inputTokens + cacheRead + cacheWrite
+	usage := types.TokenUsage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      promptTokens + outputTokens,
+	}
+	usage.SetPromptCacheUsage(cacheRead, cacheWrite, max(0, promptTokens-cacheRead),
+		resp.Usage.CacheReadInputTokens != nil || resp.Usage.CacheCreationInputTokens != nil)
 	return &types.ChatResponse{
 		Content:      strings.Join(parts, ""),
 		FinishReason: resp.StopReason,
-		Usage: types.TokenUsage{
-			PromptTokens:     inputTokens,
-			CompletionTokens: outputTokens,
-			TotalTokens:      inputTokens + outputTokens,
-		},
+		Usage:        usage,
 	}
 }
 
@@ -333,6 +341,9 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 	var finishReason string
 	var inputTokens int
 	var outputTokens int
+	var cacheReadTokens int
+	var cacheWriteTokens int
+	var cacheReported bool
 
 	for {
 		event, err := sseReader.ReadEvent()
@@ -359,6 +370,11 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 		if streamEvent.Message != nil {
 			inputTokens = max(inputTokens, streamEvent.Message.Usage.InputTokens)
 			outputTokens = max(outputTokens, streamEvent.Message.Usage.OutputTokens)
+			cacheReadTokens, cacheWriteTokens, cacheReported = mergeAnthropicCacheCounters(
+				cacheReadTokens, cacheWriteTokens, cacheReported,
+				streamEvent.Message.Usage.CacheReadInputTokens,
+				streamEvent.Message.Usage.CacheCreationInputTokens,
+			)
 		}
 		if streamEvent.Delta != nil {
 			if streamEvent.Delta.Type == "text_delta" && streamEvent.Delta.Text != "" {
@@ -371,17 +387,26 @@ func parseAnthropicSSE(reader io.Reader) (*types.ChatResponse, error) {
 		if streamEvent.Usage != nil {
 			inputTokens = max(inputTokens, streamEvent.Usage.InputTokens)
 			outputTokens = max(outputTokens, streamEvent.Usage.OutputTokens)
+			cacheReadTokens, cacheWriteTokens, cacheReported = mergeAnthropicCacheCounters(
+				cacheReadTokens, cacheWriteTokens, cacheReported,
+				streamEvent.Usage.CacheReadInputTokens,
+				streamEvent.Usage.CacheCreationInputTokens,
+			)
 		}
 	}
+	promptTokens := inputTokens + cacheReadTokens + cacheWriteTokens
+	usage := types.TokenUsage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      promptTokens + outputTokens,
+	}
+	usage.SetPromptCacheUsage(cacheReadTokens, cacheWriteTokens,
+		max(0, promptTokens-cacheReadTokens), cacheReported)
 
 	return &types.ChatResponse{
 		Content:      strings.Join(contentParts, ""),
 		FinishReason: finishReason,
-		Usage: types.TokenUsage{
-			PromptTokens:     inputTokens,
-			CompletionTokens: outputTokens,
-			TotalTokens:      inputTokens + outputTokens,
-		},
+		Usage:        usage,
 	}, nil
 }
 
@@ -447,7 +472,10 @@ func processAnthropicStream(ctx context.Context, model string, resp *http.Respon
 			return
 		}
 		if streamEvent.Message != nil {
-			usage = mergeAnthropicUsage(usage, streamEvent.Message.Usage.InputTokens, streamEvent.Message.Usage.OutputTokens)
+			usage = mergeAnthropicUsage(usage, streamEvent.Message.Usage.InputTokens,
+				streamEvent.Message.Usage.OutputTokens,
+				streamEvent.Message.Usage.CacheReadInputTokens,
+				streamEvent.Message.Usage.CacheCreationInputTokens)
 		}
 		if streamEvent.Delta != nil {
 			if streamEvent.Delta.StopReason != "" {
@@ -462,17 +490,48 @@ func processAnthropicStream(ctx context.Context, model string, resp *http.Respon
 			}
 		}
 		if streamEvent.Usage != nil {
-			usage = mergeAnthropicUsage(usage, streamEvent.Usage.InputTokens, streamEvent.Usage.OutputTokens)
+			usage = mergeAnthropicUsage(usage, streamEvent.Usage.InputTokens,
+				streamEvent.Usage.OutputTokens,
+				streamEvent.Usage.CacheReadInputTokens,
+				streamEvent.Usage.CacheCreationInputTokens)
 		}
 	}
 }
 
-func mergeAnthropicUsage(current *types.TokenUsage, inputTokens, outputTokens int) *types.TokenUsage {
+func mergeAnthropicUsage(
+	current *types.TokenUsage,
+	inputTokens, outputTokens int,
+	cacheRead, cacheWrite *int,
+) *types.TokenUsage {
 	if current == nil {
 		current = &types.TokenUsage{}
 	}
-	current.PromptTokens = max(current.PromptTokens, inputTokens)
+	read, write, reported := mergeAnthropicCacheCounters(
+		current.CacheReadTokens, current.CacheWriteTokens, current.CacheReported,
+		cacheRead, cacheWrite,
+	)
+	uncachedInput := max(0, current.PromptTokens-current.CacheReadTokens-current.CacheWriteTokens)
+	uncachedInput = max(uncachedInput, inputTokens)
+	current.PromptTokens = uncachedInput + read + write
 	current.CompletionTokens = max(current.CompletionTokens, outputTokens)
 	current.TotalTokens = current.PromptTokens + current.CompletionTokens
+	current.SetPromptCacheUsage(read, write, max(0, current.PromptTokens-read), reported)
 	return current
+}
+
+func mergeAnthropicCacheCounters(
+	currentRead, currentWrite int,
+	currentReported bool,
+	cacheRead, cacheWrite *int,
+) (read, write int, reported bool) {
+	read = currentRead
+	write = currentWrite
+	reported = currentReported || cacheRead != nil || cacheWrite != nil
+	if cacheRead != nil {
+		read = max(read, *cacheRead)
+	}
+	if cacheWrite != nil {
+		write = max(write, *cacheWrite)
+	}
+	return read, write, reported
 }

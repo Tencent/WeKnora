@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // Client calls Mattermost REST API v4.
@@ -25,14 +28,28 @@ func NewClient(siteURL, botToken string) (*Client, error) {
 	if siteURL == "" {
 		return nil, fmt.Errorf("site_url is required")
 	}
+	parsed, err := url.Parse(siteURL)
+	if err != nil || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid site_url: must be a valid http(s) URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("invalid site_url: must use http or https")
+	}
+	if err := secutils.ValidateURLForSSRF(siteURL); err != nil {
+		return nil, fmt.Errorf(
+			"invalid site_url: %w (for private Mattermost deployments, add the hostname to SSRF_WHITELIST)",
+			err,
+		)
+	}
 	if strings.TrimSpace(botToken) == "" {
 		return nil, fmt.Errorf("bot_token is required")
 	}
 	return &Client{
 		baseURL: siteURL + "/api/v4",
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		httpClient: secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+			Timeout:      60 * time.Second,
+			MaxRedirects: 5,
+		}),
 		token: strings.TrimSpace(botToken),
 	}, nil
 }

@@ -19,15 +19,20 @@ package types
 // happen to be named similarly.
 type TracingContext struct {
 	// LangfuseTraceID is the id of the root trace that originated this task.
-	// When set, workers attach their observations to the same trace instead
-	// of creating a standalone one, which is what makes the Langfuse UI
-	// show the asynq work as a child of the originating HTTP request.
+	// Kept for backward compatibility with legacy payloads; the OTLP path now
+	// propagates correlation via LangfuseTraceparent (W3C) below.
 	LangfuseTraceID string `json:"lf_trace_id,omitempty"`
-	// LangfuseParentObservationID, when set, points to the span that
-	// enclosed the enqueue call. The worker's own span/generation will list
-	// it as parentObservationId so Langfuse renders the tree as:
-	// http-trace → http-span → asynq-span → generation.
+	// LangfuseParentObservationID is retained for backward compatibility only;
+	// the OTLP path no longer uses it (parent linking flows through the W3C
+	// traceparent's parent span id).
 	LangfuseParentObservationID string `json:"lf_parent_obs_id,omitempty"`
+	// LangfuseTraceparent carries the W3C Trace Context (`traceparent` header
+	// value: `00-<trace_id>-<span_id>-<flags>`) from the enqueuing request.
+	// The worker re-extracts it so its spans are children of the same trace —
+	// stitching the HTTP request and the async job into one LiteFuse tree. This
+	// is also what propagates a sop3 run's W3C trace_id into any asynq jobs
+	// WeKnora enqueues while serving sop3's agent-chat call.
+	LangfuseTraceparent string `json:"lf_traceparent,omitempty"`
 	// LangfuseUserID preserves the userId / tenant label across the async
 	// boundary so that orphan async traces (when no upstream trace id is
 	// available) still show up in the Langfuse "Users" view under the

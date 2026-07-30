@@ -181,10 +181,6 @@ watch(headerTitle, (title) => {
   :deep(.embed-send-btn:not(.disabled)) {
     background: var(--embed-primary, var(--td-brand-color));
   }
-
-  :deep(.loading-typing span) {
-    background: var(--embed-primary, var(--td-brand-color));
-  }
 }
 
 .embed-header {

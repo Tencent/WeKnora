@@ -8,7 +8,7 @@
       </div>
       <template v-if="!uiStore.sidebarCollapsed">
         <div class="user-info">
-          <!-- 多租户 / superuser：首行租户名，次行 username · 角色。单租户：昵称 + 邮箱。 -->
+          <!-- 多空间 / superuser：首行空间名，次行 username · 角色。单空间：昵称 + 邮箱。 -->
           <template v-if="showTenantIdentityLine">
             <div class="user-tenant-name" :title="activeTenantName">{{ activeTenantName }}</div>
             <div class="user-tenant-meta">
@@ -31,8 +31,10 @@
     <!-- 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
-        <!-- 弹出菜单：账号（头像+昵称）／当前租户（名称+权限）；底部侧栏样式不改。 -->
-        <div v-if="userName" class="dropdown-user-header">
+        <!-- 弹出菜单：账号（头像+昵称）／当前空间（名称+权限）；底部侧栏样式不改。 -->
+        <div v-if="userName" class="dropdown-user-header is-clickable" role="button" tabindex="0"
+          @click="handleQuickNav('userprofile')" @keydown.enter.prevent="handleQuickNav('userprofile')"
+          @keydown.space.prevent="handleQuickNav('userprofile')">
           <div class="dropdown-user-avatar">
             <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
             <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
@@ -47,6 +49,7 @@
                 </button>
               </t-tooltip>
             </div>
+            <span v-if="userEmail" class="dropdown-user-email">{{ userEmail }}</span>
           </div>
         </div>
 
@@ -70,38 +73,24 @@
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
         <div class="menu-divider"></div>
-        <!-- QuickNav 入口与 Settings 的最低角色对齐：members/models/websearch/mcp/api
-             分别对应 viewer/viewer/admin/admin/owner（详情见 Settings.vue 的
-             SECTION_MIN_ROLE）。低角色用户看到这些入口点进去也只能看到
-             role-denied 兜底页，索性藏起来。 -->
-        <div v-if="canSeeQuickNav('members')" class="menu-item" @click="handleQuickNav('members')">
+        <!-- 账号与空间是头像菜单的核心上下文；基础设施类配置统一收进「全部设置」。 -->
+        <div class="menu-item" @click="handleQuickNav('general')">
+          <t-icon name="user" class="menu-icon" />
+          <span>{{ $t('general.personalSettings') }}</span>
+        </div>
+        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
+          <t-icon name="user-circle" class="menu-icon" />
+          <span>{{ $t('settings.workspaceSettings') }}</span>
+        </div>
+        <!-- “管理”类快捷入口只对真正具备写权限的人展示。只读名册和模型列表
+             仍可从「全部设置」进入，避免 viewer 看到名不副实的管理入口。 -->
+        <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
           <t-icon name="usergroup" class="menu-icon" />
           <span>{{ $t('tenantMember.title') }}</span>
         </div>
-        <div v-if="canSeeQuickNav('models')" class="menu-item" @click="handleQuickNav('models')">
+        <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('websearch')" class="menu-item" @click="handleQuickNav('websearch')">
-          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-            class="menu-icon svg-icon">
-            <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-            <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-          </svg>
-          <span>{{ $t('settings.webSearchConfig') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('mcp')" class="menu-item" @click="handleQuickNav('mcp')">
-          <t-icon name="tools" class="menu-icon" />
-          <span>{{ $t('settings.mcpService') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('api')" class="menu-item" @click="handleQuickNav('api')">
-          <t-icon name="secured" class="menu-icon" />
-          <span>{{ $t('settings.apiInfo') }}</span>
         </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
@@ -116,10 +105,19 @@
         -->
         <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handleSystemAdmin">
           <t-icon name="server" class="menu-icon" />
-          <span>{{ $t('settings.system') }}</span>
+          <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
-        <!-- 切换租户入口在下拉「当前租户」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
+        <div class="menu-item" @click="openDocs">
+          <t-icon name="help-circle" class="menu-icon" />
+          <span class="menu-text-with-icon">
+            <span>{{ $t('general.helpAndDocs') }}</span>
+            <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
+            </svg>
+          </span>
+        </div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
@@ -185,11 +183,8 @@
             {{ $t('tenant.switcher.empty') }}
           </div>
         </div>
-        <!-- 自助创建新工作区入口：放在租户列表底部，所有能 hover 出这个
-             子菜单的用户都能看到（包括单租户用户）。后端 router 已对
-             POST /api/v1/tenants 去掉跨租户超管守卫，handler 内部会把
-             当前用户 EnsureOwner 成新租户的 Owner。 -->
-        <div class="tenant-submenu-create" @click="openCreateTenantDialog">
+        <!-- 自助创建入口与 /auth/me 返回的后端能力保持一致。 -->
+        <div v-if="authStore.canCreateTenant" class="tenant-submenu-create" @click="openCreateTenantDialog">
           <t-icon name="add" class="tenant-submenu-create-icon" />
           <span class="tenant-submenu-create-label">{{ $t('tenant.create.action') }}</span>
         </div>
@@ -219,6 +214,7 @@ import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
+import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
 
 const { t } = useI18n()
 
@@ -228,9 +224,9 @@ const authStore = useAuthStore()
 const { formatRole, roleIcon } = useRoleLabel()
 const { homeTenantId, isHomeTenantActive, isHomeTenant } = useHomeTenant()
 
-// 顶部用户卡片展示的租户名 / 当前角色：跟着 tenant 切换器实时变。
+// 顶部用户卡片展示的空间名 / 当前角色：跟着 tenant 切换器实时变。
 // activeTenantName 优先用切换器选中的名字（含 fallback 到 home tenant 名字），
-// 单租户用户也能正常显示自己的 home tenant 名。
+// 单空间用户也能正常显示自己的 home tenant 名。
 const activeTenantName = computed(() => {
   return (
     authStore.selectedTenantName ||
@@ -241,8 +237,8 @@ const activeTenantName = computed(() => {
 const currentRoleLabel = computed(() => formatRole(authStore.currentTenantRole))
 const currentRoleIcon = computed(() => roleIcon(authStore.currentTenantRole))
 
-// 单租户用户（memberships <= 1 且非 superuser）= 永远 home + owner，第三
-// 行就是 user-email 信息的重复，没必要占视觉空间；只对多租户 / superuser
+// 单空间用户（memberships <= 1 且非 superuser）= 永远 home + owner，第三
+// 行就是 user-email 信息的重复，没必要占视觉空间；只对多空间 / superuser
 // 渲染。Lite 模式下没有 RBAC 概念，统一隐藏。
 const showTenantIdentityLine = computed(() => {
   if (authStore.isLiteMode) return false
@@ -250,19 +246,16 @@ const showTenantIdentityLine = computed(() => {
   return (authStore.memberships ?? []).length > 1
 })
 
-// 与 Settings.vue 的 SECTION_MIN_ROLE 同步；这里只挂 quickNav 直接跳转的
-// 那 4 项。改这张表前请同步 Settings.vue 的对照注释。
-const QUICKNAV_MIN_ROLE: Record<string, 'viewer' | 'contributor' | 'admin' | 'owner'> = {
-  members: 'viewer',
-  models: 'viewer',
-  websearch: 'admin',
-  mcp: 'admin',
-  api: 'owner',
-}
-const canSeeQuickNav = (key: string): boolean => {
-  if (authStore.canAccessAllTenants) return true
-  return authStore.hasRole(QUICKNAV_MIN_ROLE[key] ?? 'viewer')
-}
+// 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
+// viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。
+const canManageMembers = computed(() =>
+  authStore.canAccessAllTenants || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
+)
+const canManageModels = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models),
+)
 
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
@@ -296,14 +289,7 @@ const toggleMenu = () => {
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
-  router.push('/platform/settings')
-
-  // 延迟一下，确保设置页面已经渲染
-  setTimeout(() => {
-    // 触发设置页面切换到对应section
-    const event = new CustomEvent('settings-nav', { detail: { section } })
-    window.dispatchEvent(event)
-  }, 100)
+  router.push({ path: '/platform/settings', query: { section } })
 }
 
 // 打开设置
@@ -313,11 +299,9 @@ const handleSettings = () => {
   router.push('/platform/settings')
 }
 
-// Open the platform administration area inside the standard Settings
-// modal. The admin roster lives at the top of the global-settings
-// pane (as a tag-input row) so we route straight there; this is the
-// only system-admin section now. Gated by SYSTEM_ADMIN_SECTIONS in
-// Settings.vue.
+// Open the platform administration group inside the standard Settings
+// modal. Global settings is the group's landing page; task queues, platform
+// API keys and the audit log remain available beside it in the settings nav.
 const handleSystemAdmin = () => {
   menuVisible.value = false
   uiStore.openSettings('system-global')
@@ -332,14 +316,18 @@ const closeAll = () => {
 }
 
 // ---------- Create new tenant ----------
-// 普通用户在租户子菜单底部点 "+ 创建新工作区" → 弹 CreateTenantDialog →
-// 后端写一行 owner 的 tenant_members → 直接切到新租户。复用 switchToTenant
+// 普通用户在空间子菜单底部点 "+ 创建新工作区" → 弹 CreateTenantDialog →
+// 后端写一行 owner 的 tenant_members → 直接切到新空间。复用 switchToTenant
 // 同款的 setSelectedTenant + navigateAfterTenantSwitch 链路，避免 token
-// 依然指向旧租户带来的 SSE / store 不一致。
+// 依然指向旧空间带来的 SSE / store 不一致。
 const createTenantDialogVisible = ref(false)
 
 const openCreateTenantDialog = () => {
   closeAll()
+  if (!authStore.canCreateTenant) {
+    MessagePlugin.info(t('tenant.create.disabled'))
+    return
+  }
   createTenantDialogVisible.value = true
 }
 
@@ -401,9 +389,9 @@ const switchToTenant = (m: Membership) => {
     closeAll()
     return
   }
-  // 始终把激活租户写进 selectedTenantId，让 request.ts 永远附 X-Tenant-ID。
-  // 历史实现里「切回 home 就清 override」会让请求落回 JWT 编码的租户，
-  // 而 JWT 在 last_active != home 的会话里恰好是 peer 租户（见
+  // 始终把激活空间写进 selectedTenantId，让 request.ts 永远附 X-Tenant-ID。
+  // 历史实现里「切回 home 就清 override」会让请求落回 JWT 编码的空间，
+  // 而 JWT 在 last_active != home 的会话里恰好是 peer 空间（见
   // userService.resolveLoginTenantID），结果切回 home 反而原地不动。
   // 服务端持久化偏好仍然按 home/peer 区分：home 时清空 last_active，
   // 让下次干净重登能正确回到 home。
@@ -505,6 +493,11 @@ const reopenGuide = () => {
   openNewUserGuide()
 }
 
+const openDocs = () => {
+  menuVisible.value = false
+  window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
+}
+
 // 打开 GitHub
 const openGithub = () => {
   menuVisible.value = false
@@ -551,20 +544,26 @@ const loadUserInfo = async () => {
       // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
       // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
       authStore.setUser(userInfoFromApi(user))
-      // 如果返回了租户信息，也更新租户信息
+      // 如果返回了空间信息，也更新空间信息；tenantless 用户（/auth/me
+      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的空间快照。
       if (response.data.tenant) {
         authStore.setTenant({
           id: String(response.data.tenant.id),
           name: response.data.tenant.name,
-          api_key: response.data.tenant.api_key || '',
           owner_id: user.id,
           created_at: response.data.tenant.created_at,
           updated_at: response.data.tenant.updated_at
         })
+      } else {
+        authStore.setTenant(null)
       }
       const membershipsSync = response.data.memberships
       if (Array.isArray(membershipsSync)) {
         authStore.setMemberships(membershipsSync)
+      }
+      const canCreateTenant = response.data.capabilities?.can_create_tenant
+      if (typeof canCreateTenant === 'boolean') {
+        authStore.setCanCreateTenant(canCreateTenant)
       }
     }
   } catch (error) {
@@ -762,6 +761,17 @@ onUnmounted(() => {
   padding: 9px 12px;
   min-width: 0;
 
+  &.is-clickable {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--td-bg-color-container-hover);
+      outline: none;
+    }
+  }
+
   .dropdown-user-avatar {
     width: 24px;
     height: 24px;
@@ -811,6 +821,16 @@ onUnmounted(() => {
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dropdown-user-email {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1041,7 +1061,7 @@ onUnmounted(() => {
   margin: 3px 0;
 }
 
-// 紧跟账号/租户区块后的分隔线：略收紧与上方的留白
+// 紧跟账号/空间区块后的分隔线：略收紧与上方的留白
 .dropdown-user-header+.menu-divider,
 .dropdown-tenant-panel+.menu-divider {
   margin-top: 1px;
@@ -1196,7 +1216,7 @@ onUnmounted(() => {
 
   // Home 标识改为叠在 avatar 右下角的小 dot，不在 meta 行额外占位，让
   // 各行徽标列宽对齐；用户切到非 home tenant 时这个小 icon 仍能一眼指
-  // 出「我的主租户在哪一行」。
+  // 出「我的主空间在哪一行」。
   .tenant-submenu-item-avatar {
     position: relative;
   }

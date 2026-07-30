@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,6 +14,30 @@ import (
 
 // MarkdownImageRegex matches Markdown image links: ![alt](url)
 var MarkdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+
+// HTMLImageSrcRegex matches an HTML <img> tag with a quoted src attribute.
+// Documents that rely on surrounding markup for layout embed their screenshots
+// this way, so image-derived text has to be matched back to these tags as well
+// as to Markdown image links.
+//
+// Submatches: 1 = attributes before src, 2 = the src value, 3 = attributes
+// after. Callers index the value through HTMLImageSrcURLGroup rather than
+// assuming a position.
+//
+// src must be preceded by whitespace so that data-src and other hyphenated
+// attribute names are not mistaken for it — matching those would capture a
+// lazy-loading placeholder and leave the real src unvisited. An unquoted src
+// and a srcset-only tag are deliberately out of scope; both are rare in
+// authored documents and matching them reliably needs an HTML parser.
+//
+// Both this package and the document parser share this one definition. Two
+// copies would be free to drift, and an image the parser stores but the
+// enricher cannot match back is exactly the kind of gap this exists to close.
+var HTMLImageSrcRegex = regexp.MustCompile(`(?i)<img\b([^>]*?)\ssrc\s*=\s*['"]([^'"]+)['"]([^>]*)>`)
+
+// HTMLImageSrcURLGroup is the submatch index of the src value in
+// HTMLImageSrcRegex.
+const HTMLImageSrcURLGroup = 2
 
 // CollectImageInfoByChunkIDs collects merged image_info JSON for each given
 // chunk ID by querying child chunks (image_ocr / image_caption). It supports
@@ -260,10 +285,15 @@ func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
 	return content
 }
 
-// EnrichContentWithImageInfoForChat is like EnrichContentWithImageInfo but only
-// wraps Markdown images that have a matching image_info entry. This avoids
-// turning every parent thumbnail into an <image> block when only a few pages
-// were retrieved, and skips appending orphan image_info extras.
+// EnrichContentWithImageInfoForChat enriches matching Markdown images with
+// caption / OCR text while keeping the image itself as Markdown. Chat context is
+// deliberately answer-ready: if a model copies a relevant image from its
+// context, the copied content should still render instead of leaking the
+// internal <image> XML protocol into the answer.
+//
+// Only images with a matching image_info entry are enriched. This avoids adding
+// every parent thumbnail when only a few pages were retrieved, and skips orphan
+// image_info extras.
 func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) string {
 	var imageInfos []types.ImageInfo
 	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
@@ -283,27 +313,105 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 		}
 	}
 
-	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
+	// Screenshots embedded as HTML carry their image_info the same way as
+	// Markdown links: without covering both, a document that keeps its images in
+	// <img> tags reaches the model as bare markup with the caption and OCR text
+	// stripped out, even though the analysis ran and the entry is right here.
+	//
+	// Both syntaxes are located against the ORIGINAL content and spliced in one
+	// right-to-left pass. Running one regex over the other's output would let a
+	// metadata block that itself quotes an image reference be rescanned, cutting
+	// the OCR sentence in half and injecting the same block twice.
+	type injection struct {
+		at   int
+		text string
+	}
+	var injections []injection
+
+	// trim is applied to HTML only. An attribute value may be padded, while a
+	// Markdown target is looked up exactly as written so that the keys this
+	// function matches on stay the ones it has always matched on.
+	appendFor := func(locs [][]int, urlGroup int, trim bool) {
+		for _, loc := range locs {
+			start, end := loc[2*urlGroup], loc[2*urlGroup+1]
+			if start < 0 {
+				continue
+			}
+			key := content[start:end]
+			if trim {
+				key = strings.TrimSpace(key)
+			}
+			imgInfo, found := imageInfoMap[key]
+			if !found || imgInfo == nil {
+				continue
+			}
+			metadata := buildImageInfoMarkdownMetadata(imgInfo)
+			if metadata == "" {
+				continue
+			}
+			injections = append(injections, injection{at: loc[1], text: "\n\n" + metadata})
 		}
-		imgURL := match[2]
-		imgInfo, found := imageInfoMap[imgURL]
-		if !found || imgInfo == nil {
-			continue
-		}
-		inner := BuildImageInfoXML(imgInfo)
-		if inner == "" {
-			continue
-		}
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
-		b.WriteString(inner)
-		b.WriteString("</image>")
-		content = strings.Replace(content, match[0], b.String(), 1)
+	}
+	appendFor(MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1), 2, false)
+	appendFor(HTMLImageSrcRegex.FindAllStringSubmatchIndex(content, -1), HTMLImageSrcURLGroup, true)
+
+	sort.Slice(injections, func(i, j int) bool { return injections[i].at > injections[j].at })
+	for _, inj := range injections {
+		content = content[:inj.at] + inj.text + content[inj.at:]
 	}
 	return content
+}
+
+// buildImageInfoMarkdownMetadata keeps image-derived text explicit for the LLM
+// without introducing a second, user-visible markup protocol. Blockquotes keep
+// multiline OCR attached to its image and remain harmless if copied verbatim.
+func buildImageInfoMarkdownMetadata(img *types.ImageInfo) string {
+	if img == nil {
+		return ""
+	}
+
+	var lines []string
+	if caption := strings.TrimSpace(img.Caption); caption != "" {
+		lines = append(lines, "**Image caption:** "+caption)
+	}
+	if ocr := strings.TrimSpace(img.OCRText); ocr != "" {
+		lines = append(lines, "**Image text (OCR):** "+ocr)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return "> " + strings.ReplaceAll(strings.Join(lines, "\n\n"), "\n", "\n> ")
+}
+
+// BuildImageInfoMarkdownWithURL formats one image as answer-ready Markdown for
+// LLM-facing chat/tool context. The URL is intentionally preserved verbatim;
+// resource and provider URLs are opaque handles resolved by the frontend.
+func BuildImageInfoMarkdownWithURL(url string, img *types.ImageInfo) string {
+	if img == nil {
+		return ""
+	}
+	url = strings.TrimSpace(url)
+	metadata := buildImageInfoMarkdownMetadata(img)
+	if url == "" {
+		return metadata
+	}
+
+	alt := strings.Join(strings.Fields(img.Caption), " ")
+	if alt == "" {
+		alt = "image"
+	}
+	alt = strings.NewReplacer(
+		`\`, `\\`,
+		`[`, `\[`,
+		`]`, `\]`,
+	).Replace(alt)
+
+	image := fmt.Sprintf("![%s](%s)", alt, url)
+	if metadata == "" {
+		return image
+	}
+	return image + "\n\n" + metadata
 }
 
 // BuildImageInfoXML returns XML-tagged caption / ocr for one image.

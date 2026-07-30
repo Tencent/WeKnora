@@ -20,7 +20,7 @@ var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
 	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
 Pack multiple concepts into ONE regex using ` + "`|`" + ` alternation — do not call this tool repeatedly for synonyms.
-Returns matching chunks with hit counts and a <match_snippet> around the first match (each tagged with its knowledge_id and chunk_id).
+Returns matching chunks with a short cN chunk source ID, a parent dN document ID, and a <match> snippet around the first match.
 Examples:
 - Alternation (RECOMMENDED): "stardust|skyvault|psionic" (matches any of the words)
 - Multiple terms in order: "psionic.*engine" (matches both words in order)
@@ -30,8 +30,8 @@ IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ in
 Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
 
 ## Deep read after grep:
-- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id** from the grep result (NOT the parent knowledge_id).
-- **Document hit**: call list_knowledge_chunks with **knowledge_id**, or get_document_info with **knowledge_ids**.`,
+- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id=cN** from the grep result (NOT the parent dN document ID).
+- **Document hit**: call list_knowledge_chunks with **knowledge_id=dN**, or get_document_info with **knowledge_ids=[dN]**.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -263,20 +263,18 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
+		// A target that carries a resolved document whitelist is already the
+		// intersection of its mention and any tag scope, so it must be grepped
+		// by knowledge ID. Falling back to the tag branch would widen the
+		// search to every document carrying the tag.
+		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
 		switch {
-		case len(target.KnowledgeIDs) > 0:
-			for _, kid := range target.KnowledgeIDs {
-				if kid != "" && !seenKnowledge[kid] {
-					seenKnowledge[kid] = true
-					knowledgeIDs = append(knowledgeIDs, kid)
-				}
-			}
-		case len(target.TagIDs) > 0:
+		case len(targetTagIDs) > 0:
 			tenantID := target.TenantID
 			if tenantID == 0 {
 				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
 			}
-			tagIDs := dedupNonEmptyStrings(target.TagIDs)
+			tagIDs := targetTagIDs
 			if len(tagIDs) == 0 || tenantID == 0 {
 				continue
 			}
@@ -291,6 +289,13 @@ func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, t
 				TenantID:        tenantID,
 				TagIDs:          tagIDs,
 			})
+		case len(targetKnowledgeIDs) > 0:
+			for _, kid := range targetKnowledgeIDs {
+				if !seenKnowledge[kid] {
+					seenKnowledge[kid] = true
+					knowledgeIDs = append(knowledgeIDs, kid)
+				}
+			}
 		default:
 			if !seenKB[target.KnowledgeBaseID] {
 				seenKB[target.KnowledgeBaseID] = true

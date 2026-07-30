@@ -75,6 +75,8 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
 
+	mdContent = normalizeHTMLTables(mdContent)
+
 	imageRefs := c.downloadImages(mdContent, imagesURL)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
 

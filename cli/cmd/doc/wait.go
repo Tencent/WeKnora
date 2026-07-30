@@ -94,6 +94,7 @@ For fail-fast semantics, use shell composition:
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 10*time.Minute, "Max wait time before exiting 124")
 	cmd.Flags().DurationVar(&opts.Interval, "interval", 2*time.Second, "Initial poll interval; exponential backoff capped at 15s + jitter")
 	cmdutil.AddFormatFlag(cmd)
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "block until one or more documents reach a terminal parse state (completed or failed), or --timeout elapses",
 		RequiredFlags: []string{"<doc-id>... (one or more positionals)"},
@@ -233,6 +234,14 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 					return
 				case "failed":
 					addFailed(FailedDoc{ID: id, Message: doc.ErrorMessage})
+					return
+				case "draft":
+					// draft = created but NOT queued for parsing (inline
+					// `doc create` leaves docs here; file `doc upload`
+					// auto-enqueues). It never progresses on its own, so
+					// waiting would hang to the --timeout (124). Fail fast with
+					// the exact unblock command instead of silently polling.
+					addFailed(FailedDoc{ID: id, Message: "parse_status=draft: not queued for parsing — run `weknora doc reparse " + id + "` to index it"})
 					return
 				}
 

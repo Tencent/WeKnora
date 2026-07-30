@@ -2,7 +2,6 @@ package dingtalk
 
 import (
 	"context"
-	"strings"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	dtsdk "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
@@ -59,33 +58,7 @@ func (c *LongConnClient) Close() {
 }
 
 func (c *LongConnClient) onChatBotMessage(ctx context.Context, data *chatbot.BotCallbackDataModel) ([]byte, error) {
-	chatType := im.ChatTypeDirect
-	chatID := ""
-	if data.ConversationType == dingtalkConvTypeGroup {
-		chatType = im.ChatTypeGroup
-		chatID = data.ConversationId
-	}
-
-	userID := data.SenderStaffId
-	if userID == "" {
-		userID = data.SenderId
-	}
-
-	content := strings.TrimSpace(data.Text.Content)
-
-	incoming := &im.IncomingMessage{
-		Platform:    im.PlatformDingtalk,
-		UserID:      userID,
-		UserName:    data.SenderNick,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		MessageID:   data.MsgId,
-		MessageType: im.MessageTypeText,
-		Content:     content,
-		Extra: map[string]string{
-			"session_webhook": data.SessionWebhook,
-		},
-	}
+	incoming := streamToIncoming(data, c.clientID)
 
 	if err := c.handler(ctx, incoming); err != nil {
 		logger.Errorf(ctx, "[DingTalk] Handle message error: %v", err)

@@ -1,13 +1,13 @@
 ---
 title: IM集成开发
-tags: [集成扩展, IM, 企微, 飞书, Slack, Telegram, 钉钉, Mattermost]
+tags: [集成扩展, IM, 企微, 飞书, Lark, Slack, Telegram, 钉钉, Mattermost]
 aliases: [IM集成, IM开发, 企业微信, 即时通讯]
 source: IM集成开发文档.md
 ---
 
 # IM 集成开发
 
-WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Slack、Telegram、钉钉、Mattermost）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
+WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Lark、Slack、Telegram、钉钉、Mattermost）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
 
 IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道。
 
@@ -19,6 +19,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道。
 |------|:-:|:-:|:-:|
 | 企业微信 | ✅ | ✅ | ✅ |
 | 飞书 | ✅ | ✅ | ✅ (CardKit) |
+| Lark（飞书国际版） | ✅ | ✅ | ✅ (CardKit) |
 | Slack | ✅ (Socket Mode) | ✅ (Events API) | ✅ |
 | Telegram | ✅ (长轮询) | ✅ | ✅ |
 | 钉钉 | ✅ (Stream) | ✅ | ✅ (AI 卡片) |
@@ -46,6 +47,20 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道。
 - **Webhook 模式** — 需要公网回调地址
 
 > 飞书同时也是数据源导入的支持平台，参见 [数据源导入开发](数据源导入开发.md)
+
+### Lark 接入
+
+Lark 是飞书的国际版，IM 接口一致，与飞书共用同一套适配器。接入步骤基本相同，但开放平台
+与**权限清单**不同：
+
+- 飞书：<https://open.feishu.cn/>
+- Lark：<https://open.larksuite.com/>
+
+> **权限不可套用飞书的清单**：飞书清单混入了数据源连接器（Wiki 同步）用的权限，其中部分在
+> Lark 并不存在，整份导入会失败。Lark 只需 IM 相关的 6 项，见
+> [IM集成开发文档 — Lark 权限配置](../../IM集成开发文档.md#lark-权限配置)。
+
+> 两朵云的应用互不通用，凭证只在创建它的那朵云上有效。
 
 ### Slack 接入
 
