@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -157,8 +158,9 @@ func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string)
 // guardOpts collects optional knobs for runGuard. Keeps the call site
 // readable when most tests only care about a couple of dimensions.
 type guardOpts struct {
-	agentID    string                  // ?agent_id query param
-	agentShare *stubAgentShareForGuard // nil means "no agent-share service"
+	agentID             string // ?agent_id query param
+	agentSourceTenantID string // ?agent_source_tenant_id query param
+	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
 }
 
 // runGuard fires a single request through the guard and returns the
@@ -181,8 +183,15 @@ func runGuard(
 	c.Params = gin.Params{{Key: "id", Value: kbID}}
 
 	url := "/"
+	query := make([]string, 0, 2)
 	if opts.agentID != "" {
-		url = "/?agent_id=" + opts.agentID
+		query = append(query, "agent_id="+opts.agentID)
+	}
+	if opts.agentSourceTenantID != "" {
+		query = append(query, "agent_source_tenant_id="+opts.agentSourceTenantID)
+	}
+	if len(query) > 0 {
+		url = "/?" + strings.Join(query, "&")
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
@@ -529,4 +538,19 @@ func TestRequireKBAccess_NotFound_FiresEvenWhenRBACDisabled(t *testing.T) {
 	guard(c)
 	require.True(t, c.IsAborted(), "404 still fires with enforcement off")
 	_ = rec
+}
+
+func TestRequireKBAccess_InvalidAgentSourceTenantID(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1",
+		types.OrgRoleViewer,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 200},
+		nil,
+		guardOpts{
+			agentID:             "agent-1",
+			agentSourceTenantID: "not-a-number",
+			agentShare:          &stubAgentShareForGuard{},
+		},
+	)
+	require.True(t, c.IsAborted())
+	require.NotEmpty(t, c.Errors)
 }

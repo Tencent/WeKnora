@@ -442,6 +442,9 @@ const isImageUploadEnabledByAgent = computed(() => {
 
 // Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
 const showWebSearchButton = computed(() => {
+  if (hasAgentConfig.value && settingsStore.selectedAgentSourceTenantId && !isWebSearchReadinessKnown.value) {
+    return false;
+  }
   if (!hasAgentConfig.value) {
     return isTenantWebSearchReady(webSearchProviders.value);
   }
