@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import "github.com/Tencent/WeKnora/internal/types"
 
@@ -6,15 +6,15 @@ import "github.com/Tencent/WeKnora/internal/types"
 // two isolated clouds; the wiki/docx/drive APIs this connector uses are
 // identical, only the host differs.
 const (
-	feishuOpenBaseURL = "https://open.feishu.cn"
-	larkOpenBaseURL   = "https://open.larksuite.com"
+	FeishuOpenBaseURL = "https://open.feishu.cn"
+	LarkOpenBaseURL   = "https://open.larksuite.com"
 )
 
 // Web origins used to build human-facing links to wiki spaces and nodes. These
 // are the end-user app hosts, not the API hosts.
 const (
-	feishuWebBaseURL = "https://feishu.cn"
-	larkWebBaseURL   = "https://larksuite.com"
+	FeishuWebBaseURL = "https://feishu.cn"
+	LarkWebBaseURL   = "https://larksuite.com"
 )
 
 // Region selects which cloud the connector syncs from. Apps, tenants, tokens
@@ -36,16 +36,16 @@ var (
 	// RegionFeishu is the Chinese mainland cloud (飞书).
 	RegionFeishu = Region{
 		ConnectorType: types.ConnectorTypeFeishu,
-		OpenBaseURL:   feishuOpenBaseURL,
-		WebBaseURL:    feishuWebBaseURL,
+		OpenBaseURL:   FeishuOpenBaseURL,
+		WebBaseURL:    FeishuWebBaseURL,
 		Label:         "Feishu",
 	}
 
 	// RegionLark is the international cloud (Lark).
 	RegionLark = Region{
 		ConnectorType: types.ConnectorTypeLark,
-		OpenBaseURL:   larkOpenBaseURL,
-		WebBaseURL:    larkWebBaseURL,
+		OpenBaseURL:   LarkOpenBaseURL,
+		WebBaseURL:    LarkWebBaseURL,
 		Label:         "Lark",
 	}
 
@@ -54,28 +54,28 @@ var (
 	// type differs so the registry dispatches to the Drive connector.
 	RegionFeishuDrive = Region{
 		ConnectorType: types.ConnectorTypeFeishuDrive,
-		OpenBaseURL:   feishuOpenBaseURL,
-		WebBaseURL:    feishuWebBaseURL,
+		OpenBaseURL:   FeishuOpenBaseURL,
+		WebBaseURL:    FeishuWebBaseURL,
 		Label:         "FeishuDrive",
 	}
 
 	// RegionLarkDrive is the international cloud, Drive mode.
 	RegionLarkDrive = Region{
 		ConnectorType: types.ConnectorTypeLarkDrive,
-		OpenBaseURL:   larkOpenBaseURL,
-		WebBaseURL:    larkWebBaseURL,
+		OpenBaseURL:   LarkOpenBaseURL,
+		WebBaseURL:    LarkWebBaseURL,
 		Label:         "LarkDrive",
 	}
 )
 
-// wikiURL builds the user-facing link to a wiki space or node on this cloud.
+// WikiURL builds the user-facing link to a wiki space or node on this cloud.
 // The token is either a space_id or a node_token; both live under /wiki/.
-func (r Region) wikiURL(token string) string {
+func (r Region) WikiURL(token string) string {
 	return r.WebBaseURL + "/wiki/" + token
 }
 
-// driveFolderURL builds the user-facing link to a Drive folder on this cloud.
+// DriveFolderURL builds the user-facing link to a Drive folder on this cloud.
 // A folder_token lives under /drive/folder/.
-func (r Region) driveFolderURL(folderToken string) string {
+func (r Region) DriveFolderURL(folderToken string) string {
 	return r.WebBaseURL + "/drive/folder/" + folderToken
 }

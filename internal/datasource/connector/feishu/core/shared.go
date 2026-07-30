@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -18,47 +18,47 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-const feishuWikiNodeResourceSeparator = ":"
+const FeishuWikiNodeResourceSeparator = ":"
 
 // shared.go holds the helpers used by BOTH the wiki Connector (connector.go)
 // and the Drive DriveConnector (drive_connector.go): error classification,
-// config parsing, stream-checkpoint tuning, the fetch tally, filename/time
-// utilities, attachment rules, and the docx blocks fetch path. Anything that
+// config parsing, stream-checkpoint tuning, the Fetch tally, filename/time
+// utilities, attachment rules, and the docx blocks Fetch path. Anything that
 // is specific to one connector stays in that connector's own file.
 
-// feishuStreamCheckpointInterval is how many processed nodes pass between
-// cursor checkpoints during a streaming fetch. Small enough that a timed-out
+// FeishuStreamCheckpointInterval is how many processed nodes pass between
+// cursor checkpoints during a streaming Fetch. Small enough that a timed-out
 // sync loses little work on resume, large enough that checkpoint persistence
 // (a DB write) does not dominate. Overridable in tests. See FetchStream.
-var feishuStreamCheckpointInterval = 50
+var FeishuStreamCheckpointInterval = 50
 
-// feishuStreamCheckpointMaxInterval bounds checkpointing by wall-clock time as
+// FeishuStreamCheckpointMaxInterval bounds checkpointing by wall-clock time as
 // well as node count. Without it, a sync of fewer than
-// feishuStreamCheckpointInterval very slow (rate-limited) exports could reach
+// FeishuStreamCheckpointInterval very slow (rate-limited) exports could reach
 // the 2h task timeout having never checkpointed, and resume from scratch every
 // retry — the #2136 "never fully syncs" case. Overridable in tests.
-var feishuStreamCheckpointMaxInterval = 30 * time.Second
+var FeishuStreamCheckpointMaxInterval = 30 * time.Second
 
-// fetchTally accumulates the outcome of fetching a wiki node subtree so the
-// connector can emit a single actionable summary. Without it, unsupported nodes
+// FetchTally accumulates the outcome of fetching a wiki node subtree so the
+// connector can emit a single actionable Summary. Without it, unsupported nodes
 // (mindnote/slides/etc.) vanish with no item, no error and no log, leaving users
 // unable to explain why "13 documents synced only 3" (Tencent/WeKnora#2136).
-type fetchTally struct {
+type FetchTally struct {
 	discovered    int
 	fetched       int
 	failed        int
 	skippedByType map[string]int
 }
 
-func newFetchTally(discovered int) *fetchTally {
-	return &fetchTally{discovered: discovered, skippedByType: map[string]int{}}
+func NewFetchTally(discovered int) *FetchTally {
+	return &FetchTally{discovered: discovered, skippedByType: map[string]int{}}
 }
 
-func (t *fetchTally) fetch()              { t.fetched++ }
-func (t *fetchTally) fail()               { t.failed++ }
-func (t *fetchTally) skip(objType string) { t.skippedByType[objType]++ }
+func (t *FetchTally) Fetch()              { t.fetched++ }
+func (t *FetchTally) Fail()               { t.failed++ }
+func (t *FetchTally) Skip(objType string) { t.skippedByType[objType]++ }
 
-func (t *fetchTally) skipped() int {
+func (t *FetchTally) Skipped() int {
 	n := 0
 	for _, c := range t.skippedByType {
 		n += c
@@ -66,30 +66,30 @@ func (t *fetchTally) skipped() int {
 	return n
 }
 
-func (t *fetchTally) summary() string {
+func (t *FetchTally) Summary() string {
 	return fmt.Sprintf("discovered=%d fetched=%d failed=%d skipped_unsupported=%d by_type=%v",
-		t.discovered, t.fetched, t.failed, t.skipped(), t.skippedByType)
+		t.discovered, t.fetched, t.failed, t.Skipped(), t.skippedByType)
 }
 
-var reFeishuErrorCode = regexp.MustCompile(`code["\s]*[:=]\s*(\d+)`)
+var ReFeishuErrorCode = regexp.MustCompile(`code["\s]*[:=]\s*(\d+)`)
 
-// feishuErrorCode extracts the numeric Feishu error code from a raw error string
+// FeishuErrorCode extracts the numeric Feishu error code from a raw error string
 // (e.g. `body={"code":1663,...}` or `code=1663`), best-effort.
-func feishuErrorCode(raw string) string {
-	if m := reFeishuErrorCode.FindStringSubmatch(raw); len(m) == 2 {
+func FeishuErrorCode(raw string) string {
+	if m := ReFeishuErrorCode.FindStringSubmatch(raw); len(m) == 2 {
 		return m[1]
 	}
 	return ""
 }
 
-// feishuFailure classifies a raw connector/API error into a stable i18n code
+// FeishuFailure classifies a raw connector/API error into a stable i18n code
 // (mapped to a localized string on the frontend), an optional numeric Feishu
 // error code for interpolation, and an English fallback message for clients
 // without the i18n key. The raw status/JSON body/log_id is never returned here —
 // it stays in the server logs. Dumping it in the UI is the anti-pattern
 // Airbyte/Fivetran/Onyx warn against. Transient errors are retried next sync
 // (the cursor is retained); auth/permission errors point at the fix instead.
-func feishuFailure(err error) (code, codeValue, fallback string) {
+func FeishuFailure(err error) (code, codeValue, fallback string) {
 	if err == nil {
 		return "sync_failed", "", "Sync failed; will retry on the next sync"
 	}
@@ -113,7 +113,7 @@ func feishuFailure(err error) (code, codeValue, fallback string) {
 	case strings.Contains(s, "api error"),
 		strings.Contains(s, "export task failed"),
 		strings.Contains(s, "download failed"):
-		if v := feishuErrorCode(err.Error()); v != "" {
+		if v := FeishuErrorCode(err.Error()); v != "" {
 			return "feishu_api_error", v, fmt.Sprintf("Feishu API error (code=%s); will retry on the next sync", v)
 		}
 		return "feishu_api_error_generic", "", "Feishu API error; will retry on the next sync"
@@ -122,11 +122,11 @@ func feishuFailure(err error) (code, codeValue, fallback string) {
 	}
 }
 
-// feishuErrorItemMeta builds the metadata for a failed item: the raw error (for
+// FeishuErrorItemMeta builds the metadata for a failed item: the raw error (for
 // server logs) plus the classified i18n code / param / fallback (for a
 // localisable SyncItemError in the UI), merged with any caller-supplied extras.
-func feishuErrorItemMeta(err error, extra map[string]string) map[string]string {
-	code, codeValue, fallback := feishuFailure(err)
+func FeishuErrorItemMeta(err error, extra map[string]string) map[string]string {
+	code, codeValue, fallback := FeishuFailure(err)
 	m := map[string]string{
 		"error":             err.Error(),
 		"error_reason_code": code,
@@ -139,23 +139,23 @@ func feishuErrorItemMeta(err error, extra map[string]string) map[string]string {
 	return m
 }
 
-// parseableAttachmentExts are attachment extensions worth ingesting as their
-// own knowledge entries; other files (icons, tiny decor) are skipped.
-var parseableAttachmentExts = map[string]bool{
+// ParseableAttachmentExts are attachment extensions worth ingesting as their
+// own knowledge entries; other files (icons, tiny decor) are Skipped.
+var ParseableAttachmentExts = map[string]bool{
 	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
 	".ppt": true, ".pptx": true, ".txt": true, ".md": true, ".csv": true,
 }
 
-// minAttachmentBytes filters out decorative micro-files.
-const minAttachmentBytes = 2 * 1024
+// MinAttachmentBytes filters out decorative micro-files.
+const MinAttachmentBytes = 2 * 1024
 
-// supportedImageExt sniffs image bytes and returns the filename extension and
+// SupportedImageExt sniffs image bytes and returns the filename extension and
 // content type WeKnora accepts for a standalone image knowledge item (png/jpg/
 // gif — the image set isValidFileType admits). ok is false for non-image or
 // unsupported formats (e.g. webp/bmp), which the caller skips rather than
-// mislabel — a wrong extension would fail parsing. The detected content type is
+// mislabel — a wrong extension would Fail parsing. The detected content type is
 // returned even when ok is false so the caller can log it without re-sniffing.
-func supportedImageExt(data []byte) (ext, contentType string, ok bool) {
+func SupportedImageExt(data []byte) (ext, contentType string, ok bool) {
 	switch ct := http.DetectContentType(data); ct {
 	case "image/png":
 		return ".png", ct, true
@@ -168,13 +168,13 @@ func supportedImageExt(data []byte) (ext, contentType string, ok bool) {
 	}
 }
 
-// parseFeishuConfig extracts and validates Feishu/Lark-specific configuration.
+// ParseFeishuConfig extracts and validates Feishu/Lark-specific configuration.
 //
 // base_url stays an explicit override so existing data sources that pointed a
 // "feishu" connector at open.larksuite.com keep working; when it is unset the
 // region's own host is filled in, making the resolved Config.BaseURL concrete
 // for everything downstream.
-func parseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, error) {
+func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -198,10 +198,10 @@ func parseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 	}
 
 	// Timezone is a display setting (bitable date rendering), not a credential, so
-	// it lives in Settings. Empty falls back to GMT+8 in resolveLocation.
+	// it lives in Settings. Empty falls back to GMT+8 in ResolveLocation.
 	if feishuConfig.Timezone == "" && config.Settings != nil {
-		if tz, ok := config.Settings["timezone"].(string); ok {
-			feishuConfig.Timezone = strings.TrimSpace(tz)
+		if Tz, ok := config.Settings["timezone"].(string); ok {
+			feishuConfig.Timezone = strings.TrimSpace(Tz)
 		}
 	}
 
@@ -212,9 +212,9 @@ func parseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 	return &feishuConfig, nil
 }
 
-// isSupportedDocType checks if a Feishu document type can be synced.
-// mindnote and slides have no content read API and are skipped.
-func isSupportedDocType(objType string) bool {
+// IsSupportedDocType checks if a Feishu document type can be synced.
+// mindnote and slides have no content read API and are Skipped.
+func IsSupportedDocType(objType string) bool {
 	switch objType {
 	case "docx", "doc", "sheet", "bitable", "file":
 		return true
@@ -224,8 +224,8 @@ func isSupportedDocType(objType string) bool {
 	}
 }
 
-// parseFeishuTimestamp parses a Feishu unix timestamp string (seconds) into time.Time.
-func parseFeishuTimestamp(ts string) time.Time {
+// ParseFeishuTimestamp parses a Feishu unix timestamp string (seconds) into time.Time.
+func ParseFeishuTimestamp(ts string) time.Time {
 	if ts == "" {
 		return time.Time{}
 	}
@@ -236,7 +236,7 @@ func parseFeishuTimestamp(ts string) time.Time {
 	return time.Unix(sec, 0)
 }
 
-// sanitizeFileName removes characters that are invalid in filenames and
+// SanitizeFileName removes characters that are invalid in filenames and
 // truncates at a UTF-8 rune boundary. Raw byte truncation would split a
 // multi-byte codepoint (Chinese chars are 3 bytes) and produce invalid UTF-8
 // that downstream validation (utf8.ValidString) rejects.
@@ -244,7 +244,7 @@ func parseFeishuTimestamp(ts string) time.Time {
 // The extension is preserved across truncation: only the base name is trimmed,
 // so a long attachment name like "很长的名字….pdf" keeps its ".pdf" suffix that
 // downstream file-type classification depends on.
-func sanitizeFileName(name string) string {
+func SanitizeFileName(name string) string {
 	if name == "" {
 		return "untitled"
 	}
@@ -262,13 +262,13 @@ func sanitizeFileName(name string) string {
 		// pathological: extension alone overflows the budget → drop it
 		ext = ""
 	}
-	base := truncateUTF8(result[:len(result)-len(ext)], maxBytes-len(ext))
+	base := TruncateUTF8(result[:len(result)-len(ext)], maxBytes-len(ext))
 	return base + ext
 }
 
-// truncateUTF8 shortens s to at most maxBytes bytes without splitting a
+// TruncateUTF8 shortens s to at most maxBytes bytes without splitting a
 // multi-byte rune: after a hard byte cut it trims any trailing partial codepoint.
-func truncateUTF8(s string, maxBytes int) string {
+func TruncateUTF8(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
@@ -283,31 +283,31 @@ func truncateUTF8(s string, maxBytes int) string {
 	return s
 }
 
-// docxFetchInput is the unified description of one docx document from either
-// source (wiki node or Drive file) that fetchDocxWithBlocks needs.
-type docxFetchInput struct {
+// DocxFetchInput is the unified description of one docx document from either
+// source (wiki node or Drive file) that FetchDocxWithBlocks needs.
+type DocxFetchInput struct {
 	// WeKnora external_id: wiki=node.NodeToken, drive=file.Token
-	docToken string
+	DocToken string
 	// Feishu docx document token
-	objToken          string
-	title             string
-	url               string
-	resourceID        string
-	editTime          time.Time
-	baseMeta          map[string]string
-	multimodalEnabled bool
+	ObjToken          string
+	Title             string
+	URL               string
+	ResourceID        string
+	EditTime          time.Time
+	BaseMeta          map[string]string
+	MultimodalEnabled bool
 }
 
-// fetchDocxWithBlocks retrieves a docx document via the blocks API, converts it
+// FetchDocxWithBlocks retrieves a docx document via the blocks API, converts it
 // to Markdown, and returns a main item plus any parseable attachment/image
 // sub-items. Falls back to the export API if the blocks API errors or renders
 // empty. Shared by the wiki Connector and the Drive DriveConnector.
-func fetchDocxWithBlocks(ctx context.Context, client *Client, in docxFetchInput) ([]*types.FetchedItem, error) {
-	blocks, err := client.ListDocumentBlocks(ctx, in.objToken)
+func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
+	blocks, err := client.ListDocumentBlocks(ctx, in.ObjToken)
 	if err != nil {
 		logger.Warnf(ctx, "[Feishu] blocks API failed for %s (%s), falling back to export: %v",
-			in.title, in.objToken, err)
-		item, ferr := exportDocxFallback(ctx, client, in)
+			in.Title, in.ObjToken, err)
+		item, ferr := ExportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -317,15 +317,15 @@ func fetchDocxWithBlocks(ctx context.Context, client *Client, in docxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	md, atts, err := blocksToMarkdown(ctx, client, blocks)
+	md, atts, err := BlocksToMarkdown(ctx, client, blocks)
 	if err != nil {
-		return nil, fmt.Errorf("convert blocks %s: %w", in.title, err)
+		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
 
 	if len(strings.TrimSpace(string(md))) == 0 {
 		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
-			in.title, in.objToken)
-		item, ferr := exportDocxFallback(ctx, client, in)
+			in.Title, in.ObjToken)
+		item, ferr := ExportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -333,53 +333,53 @@ func fetchDocxWithBlocks(ctx context.Context, client *Client, in docxFetchInput)
 	}
 
 	main := &types.FetchedItem{
-		ExternalID:       in.docToken,
-		Title:            in.title,
+		ExternalID:       in.DocToken,
+		Title:            in.Title,
 		Content:          md,
 		ContentType:      "text/markdown",
-		FileName:         sanitizeFileName(in.title) + ".md",
-		URL:              in.url,
-		UpdatedAt:        in.editTime,
-		SourceResourceID: in.resourceID,
-		Metadata:         in.baseMeta,
+		FileName:         SanitizeFileName(in.Title) + ".md",
+		URL:              in.URL,
+		UpdatedAt:        in.EditTime,
+		SourceResourceID: in.ResourceID,
+		Metadata:         in.BaseMeta,
 		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
 	}
 	items := []*types.FetchedItem{main}
 
 	keep := make([]string, 0, len(atts))
 	childMeta := func() map[string]string {
-		m := maps.Clone(in.baseMeta)
-		m["parent_node_token"] = in.docToken
+		m := maps.Clone(in.BaseMeta)
+		m["parent_node_token"] = in.DocToken
 		m["attachment"] = "true"
 		return m
 	}
 	for _, a := range atts {
-		childID := types.SubtreeChildID(in.docToken, "file", a.FileToken)
+		childID := types.SubtreeChildID(in.DocToken, "file", a.FileToken)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
 		ext := strings.ToLower(filepath.Ext(a.Name))
 		if ext == "" {
 			logger.Warnf(ctx, "[Feishu] doc %s: skipping attachment with no usable filename (token=%s name=%q)",
-				in.objToken, a.FileToken, a.Name)
+				in.ObjToken, a.FileToken, a.Name)
 			continue
 		}
-		if !parseableAttachmentExts[ext] {
+		if !ParseableAttachmentExts[ext] {
 			continue
 		}
 		data, derr := client.DownloadMediaFile(ctx, a.FileToken)
 		if derr != nil {
 			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
-				in.objToken, a.Name, a.FileToken, derr)
+				in.ObjToken, a.Name, a.FileToken, derr)
 			items = append(items, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            a.Name,
-				SourceResourceID: in.resourceID,
-				Metadata:         feishuErrorItemMeta(derr, childMeta()),
+				SourceResourceID: in.ResourceID,
+				Metadata:         FeishuErrorItemMeta(derr, childMeta()),
 			})
 			continue
 		}
-		if len(data) < minAttachmentBytes {
+		if len(data) < MinAttachmentBytes {
 			logger.Infof(ctx, "[Feishu] doc %s: skipping tiny attachment %q (token=%s, %d bytes < %d)",
-				in.objToken, a.Name, a.FileToken, len(data), minAttachmentBytes)
+				in.ObjToken, a.Name, a.FileToken, len(data), MinAttachmentBytes)
 			continue
 		}
 		items = append(items, &types.FetchedItem{
@@ -387,59 +387,59 @@ func fetchDocxWithBlocks(ctx context.Context, client *Client, in docxFetchInput)
 			Title:            a.Name,
 			Content:          data,
 			ContentType:      "application/octet-stream",
-			FileName:         sanitizeFileName(a.Name),
-			URL:              in.url,
-			UpdatedAt:        in.editTime,
-			SourceResourceID: in.resourceID,
+			FileName:         SanitizeFileName(a.Name),
+			URL:              in.URL,
+			UpdatedAt:        in.EditTime,
+			SourceResourceID: in.ResourceID,
 			Metadata:         childMeta(),
 		})
 	}
 
 	imgMeta := func() map[string]string {
-		m := maps.Clone(in.baseMeta)
-		m["parent_node_token"] = in.docToken
+		m := maps.Clone(in.BaseMeta)
+		m["parent_node_token"] = in.DocToken
 		m["embedded_image"] = "true"
 		return m
 	}
 	for _, b := range blocks {
-		if b.BlockType != blockTypeImage || b.Image == nil || b.Image.Token == "" {
+		if b.BlockType != BlockTypeImage || b.Image == nil || b.Image.Token == "" {
 			continue
 		}
-		childID := types.SubtreeChildID(in.docToken, "image", b.Image.Token)
+		childID := types.SubtreeChildID(in.DocToken, "image", b.Image.Token)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
-		if !in.multimodalEnabled {
+		if !in.MultimodalEnabled {
 			continue // KB can't OCR images; the inline placeholder is all we keep
 		}
 		data, derr := client.DownloadMediaFile(ctx, b.Image.Token)
 		if derr != nil {
 			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
-				in.objToken, b.Image.Token, derr)
+				in.ObjToken, b.Image.Token, derr)
 			items = append(items, &types.FetchedItem{
 				ExternalID:       childID,
-				Title:            fmt.Sprintf("%s（内嵌图片）", in.title),
-				SourceResourceID: in.resourceID,
-				Metadata:         feishuErrorItemMeta(derr, imgMeta()),
+				Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),
+				SourceResourceID: in.ResourceID,
+				Metadata:         FeishuErrorItemMeta(derr, imgMeta()),
 			})
 			continue
 		}
-		if len(data) < minAttachmentBytes {
+		if len(data) < MinAttachmentBytes {
 			continue // decorative micro-image (icon/spacer)
 		}
-		ext, contentType, ok := supportedImageExt(data)
+		ext, contentType, ok := SupportedImageExt(data)
 		if !ok {
 			logger.Warnf(ctx, "[Feishu] doc %s: skipping image (token=%s) of unsupported type %q",
-				in.objToken, b.Image.Token, contentType)
+				in.ObjToken, b.Image.Token, contentType)
 			continue
 		}
 		items = append(items, &types.FetchedItem{
 			ExternalID:       childID,
-			Title:            fmt.Sprintf("%s（内嵌图片）", in.title),
+			Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),
 			Content:          data,
 			ContentType:      contentType,
 			FileName:         "image-" + b.Image.Token + ext,
-			URL:              in.url,
-			UpdatedAt:        in.editTime,
-			SourceResourceID: in.resourceID,
+			URL:              in.URL,
+			UpdatedAt:        in.EditTime,
+			SourceResourceID: in.ResourceID,
 			Metadata:         imgMeta(),
 		})
 	}
@@ -448,31 +448,31 @@ func fetchDocxWithBlocks(ctx context.Context, client *Client, in docxFetchInput)
 	return items, nil
 }
 
-// exportDocxFallback exports a docx document via the async export API and
+// ExportDocxFallback exports a docx document via the async export API and
 // returns a single FetchedItem containing the exported .docx binary. Used by
-// fetchDocxWithBlocks when the blocks API is unavailable or renders empty.
-func exportDocxFallback(ctx context.Context, client *Client, in docxFetchInput) (*types.FetchedItem, error) {
-	data, fileName, err := client.ExportAndDownload(ctx, in.objToken, "docx")
+// FetchDocxWithBlocks when the blocks API is unavailable or renders empty.
+func ExportDocxFallback(ctx context.Context, client *Client, in DocxFetchInput) (*types.FetchedItem, error) {
+	data, fileName, err := client.ExportAndDownload(ctx, in.ObjToken, "docx")
 	if err != nil {
-		return nil, fmt.Errorf("export %s (docx): %w", in.title, err)
+		return nil, fmt.Errorf("export %s (docx): %w", in.Title, err)
 	}
 
-	ext := exportFileExtToSuffix[objTypeToExportFileExtension["docx"]]
+	ext := ExportFileExtToSuffix[ObjTypeToExportFileExtension["docx"]]
 	if fileName == "" {
-		fileName = sanitizeFileName(in.title) + ext
+		fileName = SanitizeFileName(in.Title) + ext
 	} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
-		fileName = sanitizeFileName(fileName) + ext
+		fileName = SanitizeFileName(fileName) + ext
 	}
 
 	return &types.FetchedItem{
-		ExternalID:       in.docToken,
-		Title:            in.title,
+		ExternalID:       in.DocToken,
+		Title:            in.Title,
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
-		URL:              in.url,
-		UpdatedAt:        in.editTime,
-		SourceResourceID: in.resourceID,
-		Metadata:         in.baseMeta,
+		URL:              in.URL,
+		UpdatedAt:        in.EditTime,
+		SourceResourceID: in.ResourceID,
+		Metadata:         in.BaseMeta,
 	}, nil
 }

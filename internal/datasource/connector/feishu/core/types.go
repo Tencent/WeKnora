@@ -8,7 +8,7 @@
 //   - Export tasks:     https://open.feishu.cn/document/server-docs/docs/drive-v1/export_task/export-user-guide
 //   - File download:    https://open.feishu.cn/document/server-docs/docs/drive-v1/file/download
 //   - Auth:             https://open.feishu.cn/document/server-docs/authentication-management/access-token/tenant_access_token_internal
-package feishu
+package core
 
 import (
 	"strings"
@@ -36,21 +36,21 @@ type Config struct {
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// defaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
+// DefaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
 // no timezone is configured. A fixed zone avoids any dependency on system tzdata,
 // which minimal container images may omit.
-const defaultTimezoneOffsetSeconds = 8 * 3600
+const DefaultTimezoneOffsetSeconds = 8 * 3600
 
-// resolveLocation returns the *time.Location used to render bitable date cells.
+// ResolveLocation returns the *time.Location used to render bitable date cells.
 // An empty name yields a fixed GMT+8 zone (no tzdata dependency); a named zone is
-// loaded from the system tz database, falling back to GMT+8 if it is unavailable.
-func resolveLocation(name string) *time.Location {
+// loaded from the system Tz database, falling back to GMT+8 if it is unavailable.
+func ResolveLocation(name string) *time.Location {
 	if name != "" {
 		if loc, err := time.LoadLocation(name); err == nil {
 			return loc
 		}
 	}
-	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
+	return time.FixedZone("GMT+8", DefaultTimezoneOffsetSeconds)
 }
 
 // DefaultBaseURL is the default Feishu Open Platform API base URL.
@@ -79,25 +79,25 @@ const (
 	ExportTypePDF = "pdf"
 )
 
-// objTypeToExportFileExtension maps Feishu obj_type to the best export file_extension.
-var objTypeToExportFileExtension = map[string]string{
+// ObjTypeToExportFileExtension maps Feishu obj_type to the best export file_extension.
+var ObjTypeToExportFileExtension = map[string]string{
 	"docx":    ExportTypeDocx,
 	"doc":     ExportTypeDocx,
 	"sheet":   ExportTypeXlsx,
 	"bitable": ExportTypeXlsx,
 }
 
-// objTypeToExportType maps Feishu obj_type to the export API "type" parameter.
+// ObjTypeToExportType maps Feishu obj_type to the export API "type" parameter.
 // See: https://open.feishu.cn/document/server-docs/docs/drive-v1/export_task/create
-var objTypeToExportType = map[string]string{
+var ObjTypeToExportType = map[string]string{
 	"docx":    "docx",
 	"doc":     "doc",
 	"sheet":   "sheet",
 	"bitable": "bitable",
 }
 
-// exportFileExtToSuffix maps export file_extension to the file suffix for FileName.
-var exportFileExtToSuffix = map[string]string{
+// ExportFileExtToSuffix maps export file_extension to the file suffix for FileName.
+var ExportFileExtToSuffix = map[string]string{
 	ExportTypeDocx: ".docx",
 	ExportTypeXlsx: ".xlsx",
 	ExportTypePDF:  ".pdf",
@@ -105,55 +105,55 @@ var exportFileExtToSuffix = map[string]string{
 
 // --- Feishu API response structures ---
 
-// apiResponse is the common Feishu API response wrapper.
-type apiResponse struct {
+// ApiResponse is the common Feishu API response wrapper.
+type ApiResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 }
 
-// tokenResponse is the response for tenant_access_token API.
-type tokenResponse struct {
-	apiResponse
+// TokenResponse is the response for tenant_access_token API.
+type TokenResponse struct {
+	ApiResponse
 	TenantAccessToken string `json:"tenant_access_token"`
 	Expire            int    `json:"expire"` // seconds
 }
 
-// wikiSpaceListData is the data payload of wikiSpaceListResponse.
-type wikiSpaceListData struct {
-	Items     []wikiSpace `json:"items"`
+// WikiSpaceListData is the data payload of WikiSpaceListResponse.
+type WikiSpaceListData struct {
+	Items     []WikiSpace `json:"items"`
 	HasMore   bool        `json:"has_more"`
 	PageToken string      `json:"page_token"`
 }
 
-// wikiSpaceListResponse is the response for GET /open-apis/wiki/v2/spaces.
-type wikiSpaceListResponse struct {
-	apiResponse
-	Data wikiSpaceListData `json:"data"`
+// WikiSpaceListResponse is the response for GET /open-apis/wiki/v2/spaces.
+type WikiSpaceListResponse struct {
+	ApiResponse
+	Data WikiSpaceListData `json:"data"`
 }
 
-// wikiSpace represents a Feishu Wiki space.
-type wikiSpace struct {
+// WikiSpace represents a Feishu Wiki space.
+type WikiSpace struct {
 	SpaceID     string `json:"space_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Visibility  string `json:"visibility"` // "public" or "private"
 }
 
-// wikiNodeListData is the data payload of wikiNodeListResponse.
-type wikiNodeListData struct {
-	Items     []wikiNode `json:"items"`
+// WikiNodeListData is the data payload of WikiNodeListResponse.
+type WikiNodeListData struct {
+	Items     []WikiNode `json:"items"`
 	HasMore   bool       `json:"has_more"`
 	PageToken string     `json:"page_token"`
 }
 
-// wikiNodeListResponse is the response for GET /open-apis/wiki/v2/spaces/:space_id/nodes.
-type wikiNodeListResponse struct {
-	apiResponse
-	Data wikiNodeListData `json:"data"`
+// WikiNodeListResponse is the response for GET /open-apis/wiki/v2/spaces/:space_id/nodes.
+type WikiNodeListResponse struct {
+	ApiResponse
+	Data WikiNodeListData `json:"data"`
 }
 
-// wikiNode represents a node (document or folder) in a Feishu Wiki space.
-type wikiNode struct {
+// WikiNode represents a node (document or folder) in a Feishu Wiki space.
+type WikiNode struct {
 	SpaceID        string `json:"space_id"`
 	NodeToken      string `json:"node_token"`
 	ObjToken       string `json:"obj_token"` // document token
@@ -172,44 +172,44 @@ type wikiNode struct {
 	NodeEditTime   string `json:"node_edit_time"`   // node edit time (unix timestamp string) — only tracks node attribute changes
 }
 
-// wikiNodeInfoData is the data payload of wikiNodeInfoResponse.
-type wikiNodeInfoData struct {
-	Node wikiNode `json:"node"`
+// WikiNodeInfoData is the data payload of WikiNodeInfoResponse.
+type WikiNodeInfoData struct {
+	Node WikiNode `json:"node"`
 }
 
-// wikiNodeInfoResponse is the response for GET /open-apis/wiki/v2/spaces/get_node.
-type wikiNodeInfoResponse struct {
-	apiResponse
-	Data wikiNodeInfoData `json:"data"`
+// WikiNodeInfoResponse is the response for GET /open-apis/wiki/v2/spaces/get_node.
+type WikiNodeInfoResponse struct {
+	ApiResponse
+	Data WikiNodeInfoData `json:"data"`
 }
 
 // --- Export task API responses ---
 
-// docRawContentData is the data payload of docRawContentResponse.
-type docRawContentData struct {
+// DocRawContentData is the data payload of DocRawContentResponse.
+type DocRawContentData struct {
 	Content string `json:"content"`
 }
 
-// docRawContentResponse is the response for GET /open-apis/docx/v1/documents/:document_id/raw_content.
+// DocRawContentResponse is the response for GET /open-apis/docx/v1/documents/:document_id/raw_content.
 // Deprecated: prefer export API for full-fidelity document export.
-type docRawContentResponse struct {
-	apiResponse
-	Data docRawContentData `json:"data"`
+type DocRawContentResponse struct {
+	ApiResponse
+	Data DocRawContentData `json:"data"`
 }
 
-// exportTaskCreateData is the data payload of exportTaskCreateResponse.
-type exportTaskCreateData struct {
+// ExportTaskCreateData is the data payload of ExportTaskCreateResponse.
+type ExportTaskCreateData struct {
 	Ticket string `json:"ticket"`
 }
 
-// exportTaskCreateResponse is the response for POST /drive/v1/export_tasks.
-type exportTaskCreateResponse struct {
-	apiResponse
-	Data exportTaskCreateData `json:"data"`
+// ExportTaskCreateResponse is the response for POST /drive/v1/export_tasks.
+type ExportTaskCreateResponse struct {
+	ApiResponse
+	Data ExportTaskCreateData `json:"data"`
 }
 
-// exportTaskResult is the per-task result inside exportTaskStatusData.
-type exportTaskResult struct {
+// ExportTaskResult is the per-task result inside ExportTaskStatusData.
+type ExportTaskResult struct {
 	FileToken string `json:"file_token"`
 	FileSize  int64  `json:"file_size"`
 	// JobStatus: 0=success, 1=initializing, 2=processing
@@ -218,39 +218,39 @@ type exportTaskResult struct {
 	FileName    string `json:"file_name"`
 }
 
-// exportTaskStatusData is the data payload of exportTaskStatusResponse.
-type exportTaskStatusData struct {
-	Result exportTaskResult `json:"result"`
+// ExportTaskStatusData is the data payload of ExportTaskStatusResponse.
+type ExportTaskStatusData struct {
+	Result ExportTaskResult `json:"result"`
 }
 
-// exportTaskStatusResponse is the response for GET /drive/v1/export_tasks/{ticket}.
-type exportTaskStatusResponse struct {
-	apiResponse
-	Data exportTaskStatusData `json:"data"`
+// ExportTaskStatusResponse is the response for GET /drive/v1/export_tasks/{ticket}.
+type ExportTaskStatusResponse struct {
+	ApiResponse
+	Data ExportTaskStatusData `json:"data"`
 }
 
 // --- File download response ---
 
-// driveFileMeta is one entry of driveFileMetaData.Metas.
-type driveFileMeta struct {
+// DriveFileMeta is one entry of DriveFileMetaData.Metas.
+type DriveFileMeta struct {
 	DocToken string `json:"doc_token"`
 	DocType  string `json:"doc_type"`
 	Title    string `json:"title"`
 }
 
-// driveFileMetaData is the data payload of driveFileMetaResponse.
-type driveFileMetaData struct {
-	Metas []driveFileMeta `json:"metas"`
+// DriveFileMetaData is the data payload of DriveFileMetaResponse.
+type DriveFileMetaData struct {
+	Metas []DriveFileMeta `json:"metas"`
 }
 
-// driveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
-type driveFileMetaResponse struct {
-	apiResponse
-	Data driveFileMetaData `json:"data"`
+// DriveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
+type DriveFileMetaResponse struct {
+	ApiResponse
+	Data DriveFileMetaData `json:"data"`
 }
 
-// feishuCursor stores incremental sync state for Feishu.
-type feishuCursor struct {
+// FeishuCursor stores incremental sync state for Feishu.
+type FeishuCursor struct {
 	// LastSyncTime is the timestamp of the last successful sync.
 	LastSyncTime time.Time `json:"last_sync_time"`
 
@@ -263,11 +263,11 @@ type feishuCursor struct {
 // Added by feat/datasource-feishu-drive. These are independent of the wiki
 // types above and do not affect the wiki connector.
 
-// driveFile represents a file/folder in Feishu Drive (云空间). Returned by
+// DriveFile represents a file/folder in Feishu Drive (云空间). Returned by
 // GET /open-apis/drive/v1/files?folder_token=xxx. The list API returns
 // modified_time directly (verified), so no batch_query/metas call is needed for
 // incremental detection - see ADR-0002.
-type driveFile struct {
+type DriveFile struct {
 	Token        string `json:"token"`
 	Name         string `json:"name"`
 	Type         string `json:"type"` // doc/docx/sheet/bitable/file/folder/shortcut/mindnote/slides/board
@@ -279,30 +279,30 @@ type driveFile struct {
 	// ShortcutInfo is populated only for type=="shortcut". target_type can only
 	// be doc/sheet/mindnote/bitable/file/docx (Feishu does not allow shortcuts to
 	// folders, verified) - see ADR-0002 / glossary shortcut entry.
-	ShortcutInfo *driveShortcutInfo `json:"shortcut_info,omitempty"`
+	ShortcutInfo *DriveShortcutInfo `json:"shortcut_info,omitempty"`
 }
 
-// driveShortcutInfo is the target metadata of a Drive shortcut.
-type driveShortcutInfo struct {
+// DriveShortcutInfo is the target metadata of a Drive shortcut.
+type DriveShortcutInfo struct {
 	TargetToken string `json:"target_token"`
 	TargetType  string `json:"target_type"`
 }
 
-// driveFileListData is the data payload of driveFileListResponse.
-type driveFileListData struct {
-	Files         []driveFile `json:"files"`
+// DriveFileListData is the data payload of DriveFileListResponse.
+type DriveFileListData struct {
+	Files         []DriveFile `json:"files"`
 	HasMore       bool        `json:"has_more"`
 	NextPageToken string      `json:"next_page_token"`
 }
 
-// driveFileListResponse is the response for GET /open-apis/drive/v1/files.
-type driveFileListResponse struct {
-	apiResponse
-	Data driveFileListData `json:"data"`
+// DriveFileListResponse is the response for GET /open-apis/drive/v1/files.
+type DriveFileListResponse struct {
+	ApiResponse
+	Data DriveFileListData `json:"data"`
 }
 
-// driveFolderMetaData is the data payload of driveFolderMetaResponse.
-type driveFolderMetaData struct {
+// DriveFolderMetaData is the data payload of DriveFolderMetaResponse.
+type DriveFolderMetaData struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Token     string `json:"token"`
@@ -312,29 +312,29 @@ type driveFolderMetaData struct {
 	OwnUid    string `json:"ownUid"`
 }
 
-// driveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
+// DriveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
 // Used to resolve a root folder's human-readable name (the list API only returns
 // the folder's children, not the folder itself).
-type driveFolderMetaResponse struct {
-	apiResponse
-	Data driveFolderMetaData `json:"data"`
+type DriveFolderMetaResponse struct {
+	ApiResponse
+	Data DriveFolderMetaData `json:"data"`
 }
 
-// driveFileListFailure records a single sub-folder listing that failed during a
-// recursive walk. Mirrors wikiNodeListFailure.
-type driveFileListFailure struct {
+// DriveFileListFailure records a single sub-folder listing that failed during a
+// recursive walk. Mirrors WikiNodeListFailure.
+type DriveFileListFailure struct {
 	FolderToken string
 	Err         error
 }
 
-// partialDriveFileListError aggregates per-folder listing failures so the walk
+// PartialDriveFileListError aggregates per-folder listing failures so the walk
 // can continue and the caller can still surface the partial result. Mirrors
-// partialWikiNodeListError.
-type partialDriveFileListError struct {
-	Failures []driveFileListFailure
+// PartialWikiNodeListError.
+type PartialDriveFileListError struct {
+	Failures []DriveFileListFailure
 }
 
-func (e *partialDriveFileListError) Error() string {
+func (e *PartialDriveFileListError) Error() string {
 	if e == nil || len(e.Failures) == 0 {
 		return "partial drive file listing failed"
 	}
@@ -345,11 +345,11 @@ func (e *partialDriveFileListError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
-// feishuDriveCursor stores incremental sync state for Feishu Drive (云盘).
-// Structurally symmetric with feishuCursor: outer key = resourceID
+// FeishuDriveCursor stores incremental sync state for Feishu Drive (云盘).
+// Structurally symmetric with FeishuCursor: outer key = resourceID
 // ("folderToken" or "folderToken:fileToken"), inner key = file_token,
 // value = modified_time. See ADR-0001.
-type feishuDriveCursor struct {
+type FeishuDriveCursor struct {
 	// LastSyncTime is the timestamp of the last successful sync.
 	LastSyncTime time.Time `json:"last_sync_time"`
 

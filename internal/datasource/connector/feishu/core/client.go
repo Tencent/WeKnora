@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"bytes"
@@ -34,16 +34,16 @@ type Client struct {
 	tokenExpAt time.Time
 }
 
-type wikiNodeListFailure struct {
-	Node wikiNode
+type WikiNodeListFailure struct {
+	Node WikiNode
 	Err  error
 }
 
-type partialWikiNodeListError struct {
-	Failures []wikiNodeListFailure
+type PartialWikiNodeListError struct {
+	Failures []WikiNodeListFailure
 }
 
-func (e *partialWikiNodeListError) Error() string {
+func (e *PartialWikiNodeListError) Error() string {
 	if e == nil || len(e.Failures) == 0 {
 		return "partial wiki node listing failed"
 	}
@@ -54,13 +54,13 @@ func (e *partialWikiNodeListError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
-// tz returns the client's date-rendering location, defaulting to GMT+8 when a
+// Tz returns the client's date-rendering location, defaulting to GMT+8 when a
 // Client was constructed without one (e.g. in tests that build Client directly).
-func (c *Client) tz() *time.Location {
+func (c *Client) Tz() *time.Location {
 	if c.location != nil {
 		return c.location
 	}
-	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
+	return time.FixedZone("GMT+8", DefaultTimezoneOffsetSeconds)
 }
 
 // NewClient creates a new Feishu API client.
@@ -69,14 +69,14 @@ func NewClient(config *Config) *Client {
 		baseURL:    config.GetBaseURL(),
 		appID:      config.AppID,
 		appSecret:  config.AppSecret,
-		location:   resolveLocation(config.Timezone),
+		location:   ResolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 	}
 }
 
-// getTenantAccessToken retrieves (or returns cached) tenant access token.
+// GetTenantAccessToken retrieves (or returns cached) tenant access token.
 // Feishu tokens expire in 2 hours; we cache with a 5-minute safety margin.
-func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
+func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	c.tokenMu.Lock()
 	defer c.tokenMu.Unlock()
 
@@ -102,7 +102,7 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	var result tokenResponse
+	var result TokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
@@ -131,35 +131,35 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
-// Retry policy shared by doRequest (JSON API calls) and downloadRawBytes (file
+// Retry policy shared by DoRequest (JSON API calls) and DownloadRawBytes (file
 // downloads): 429 honours Retry-After, 5xx retries once, transport errors back off.
 const (
-	feishuMaxRetries    = 3
-	feishuMax5xxRetries = 1
-	feishuRetry5xxDelay = 2 * time.Second
+	FeishuMaxRetries    = 3
+	FeishuMax5xxRetries = 1
+	FeishuRetry5xxDelay = 2 * time.Second
 )
 
-// maxFeishuDownloadBytes bounds a single file download to protect the sync
+// MaxFeishuDownloadBytes bounds a single file download to protect the sync
 // worker from adversarial or pathological oversized responses.
-const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
+const MaxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
 
-var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+var FeishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
-// doRequest executes an authenticated API request and decodes the JSON response,
+// DoRequest executes an authenticated API request and decodes the JSON response,
 // retrying transient failures (transport errors, HTTP 429, 5xx). Feishu's drive
 // export/wiki APIs are aggressively rate limited, and a thousand-document sync
 // issues tens of thousands of calls; without backoff a single 429 burst used to
-// fail whole swathes of documents silently. 429 responses honour Retry-After;
-// 5xx is retried once; other non-2xx statuses fail fast (no point retrying 4xx).
-func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+// Fail whole swathes of documents silently. 429 responses honour Retry-After;
+// 5xx is retried once; other non-2xx statuses Fail fast (no point retrying 4xx).
+func (c *Client) DoRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	const (
-		maxRetries    = feishuMaxRetries
-		max5xxRetries = feishuMax5xxRetries
-		retry5xxDelay = feishuRetry5xxDelay
+		maxRetries    = FeishuMaxRetries
+		max5xxRetries = FeishuMax5xxRetries
+		retry5xxDelay = FeishuRetry5xxDelay
 	)
-	backoff := feishuRetryBackoff
+	backoff := FeishuRetryBackoff
 
-	token, err := c.getTenantAccessToken(ctx)
+	token, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		if err != nil {
 			lastErr = fmt.Errorf("execute request: %w", err)
 			if attempt < maxRetries {
-				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+				if sErr := SleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
 				continue
@@ -210,7 +210,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
 			if attempt < maxRetries {
-				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+				if sErr := SleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
 				continue
@@ -219,13 +219,13 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		}
 
 		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
-			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+			method, path, resp.StatusCode, len(respBody), Truncate(string(respBody), 1000))
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])
-			lastErr = fmt.Errorf("feishu rate limited: status=429 body=%s", truncate(string(respBody), 500))
+			wait := ParseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])
+			lastErr = fmt.Errorf("feishu rate limited: status=429 body=%s", Truncate(string(respBody), 500))
 			if attempt < maxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
+				if sErr := SleepCtx(ctx, wait); sErr != nil {
 					return sErr
 				}
 				continue
@@ -234,9 +234,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			lastErr = fmt.Errorf("feishu server error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 500))
+			lastErr = fmt.Errorf("feishu server error: status=%d body=%s", resp.StatusCode, Truncate(string(respBody), 500))
 			if attempt < max5xxRetries {
-				if sErr := sleepCtx(ctx, retry5xxDelay); sErr != nil {
+				if sErr := SleepCtx(ctx, retry5xxDelay); sErr != nil {
 					return sErr
 				}
 				continue
@@ -259,10 +259,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	return lastErr
 }
 
-// parseRetryAfter interprets a Retry-After header value (seconds) into a wait
+// ParseRetryAfter interprets a Retry-After header value (seconds) into a wait
 // duration, coercing 0/negative to a short delay and falling back when absent
 // or unparseable.
-func parseRetryAfter(header string, fallback time.Duration) time.Duration {
+func ParseRetryAfter(header string, fallback time.Duration) time.Duration {
 	if header == "" {
 		return fallback
 	}
@@ -276,9 +276,9 @@ func parseRetryAfter(header string, fallback time.Duration) time.Duration {
 	return time.Duration(secs * float64(time.Second))
 }
 
-// sleepCtx waits for d or until ctx is cancelled, returning ctx.Err() if the
+// SleepCtx waits for d or until ctx is cancelled, returning ctx.Err() if the
 // context ends first so retries abort promptly on task cancellation/timeout.
-func sleepCtx(ctx context.Context, d time.Duration) error {
+func SleepCtx(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()
 	}
@@ -292,8 +292,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// truncate truncates a string to maxLen and appends "..." if truncated.
-func truncate(s string, maxLen int) string {
+// Truncate truncates a string to maxLen and appends "..." if truncated.
+func Truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
@@ -301,8 +301,8 @@ func truncate(s string, maxLen int) string {
 }
 
 // ListWikiSpaces returns all wiki spaces accessible to the app.
-func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
-	var allSpaces []wikiSpace
+func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
+	var allSpaces []WikiSpace
 	pageToken := ""
 
 	for {
@@ -311,8 +311,8 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
 			path += "&page_token=" + pageToken
 		}
 
-		var resp wikiSpaceListResponse
-		if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		var resp WikiSpaceListResponse
+		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 			return nil, fmt.Errorf("list wiki spaces: %w", err)
 		}
 		if resp.Code != 0 {
@@ -339,8 +339,8 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
 
 // ListWikiNodes returns all nodes (documents) under a wiki space.
 // If parentNodeToken is empty, returns top-level nodes.
-func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]wikiNode, error) {
-	var allNodes []wikiNode
+func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
+	var allNodes []WikiNode
 	pageToken := ""
 
 	for {
@@ -352,8 +352,8 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			path += "&page_token=" + pageToken
 		}
 
-		var resp wikiNodeListResponse
-		if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		var resp WikiNodeListResponse
+		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 			return nil, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
@@ -380,15 +380,15 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 }
 
 // GetWikiNode returns metadata for a single wiki node.
-func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (wikiNode, error) {
+func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (WikiNode, error) {
 	path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(nodeToken))
 
-	var resp wikiNodeInfoResponse
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return wikiNode{}, fmt.Errorf("get wiki node: %w", err)
+	var resp WikiNodeInfoResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
-		return wikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
+		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	node := resp.Data.Node
@@ -400,18 +400,18 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 
 // ListAllWikiNodesRecursive recursively lists all nodes under a wiki space.
 // It walks the tree depth-first to discover all nested documents.
-func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]wikiNode, error) {
+func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]WikiNode, error) {
 	// Start with top-level nodes
 	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
 	if err != nil {
 		return nil, err
 	}
 
-	var allNodes []wikiNode
-	var failures []wikiNodeListFailure
-	var walk func(nodes []wikiNode)
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
 
-	walk = func(nodes []wikiNode) {
+	walk = func(nodes []WikiNode) {
 		for _, node := range nodes {
 			allNodes = append(allNodes, node)
 
@@ -420,7 +420,7 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
 				if err != nil {
 					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-					failures = append(failures, wikiNodeListFailure{
+					failures = append(failures, WikiNodeListFailure{
 						Node: node,
 						Err:  wrappedErr,
 					})
@@ -435,14 +435,14 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 
 	walk(topNodes)
 	if len(failures) > 0 {
-		return allNodes, &partialWikiNodeListError{Failures: failures}
+		return allNodes, &PartialWikiNodeListError{Failures: failures}
 	}
 
 	return allNodes, nil
 }
 
 // ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
-func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]wikiNode, error) {
+func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]WikiNode, error) {
 	if nodeToken == "" {
 		return c.ListAllWikiNodesRecursive(ctx, spaceID)
 	}
@@ -452,14 +452,14 @@ func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string,
 		return nil, err
 	}
 
-	nodes, err := c.listWikiNodeDescendants(ctx, spaceID, root)
+	nodes, err := c.ListWikiNodeDescendants(ctx, spaceID, root)
 	if err != nil {
-		return append([]wikiNode{root}, nodes...), err
+		return append([]WikiNode{root}, nodes...), err
 	}
-	return append([]wikiNode{root}, nodes...), nil
+	return append([]WikiNode{root}, nodes...), nil
 }
 
-func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, root wikiNode) ([]wikiNode, error) {
+func (c *Client) ListWikiNodeDescendants(ctx context.Context, spaceID string, root WikiNode) ([]WikiNode, error) {
 	if !root.HasChild {
 		return nil, nil
 	}
@@ -469,19 +469,19 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
 		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
 			spaceID, root.NodeToken, err)
-		return nil, &partialWikiNodeListError{
-			Failures: []wikiNodeListFailure{{
+		return nil, &PartialWikiNodeListError{
+			Failures: []WikiNodeListFailure{{
 				Node: root,
 				Err:  wrappedErr,
 			}},
 		}
 	}
 
-	var allNodes []wikiNode
-	var failures []wikiNodeListFailure
-	var walk func(nodes []wikiNode)
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
 
-	walk = func(nodes []wikiNode) {
+	walk = func(nodes []WikiNode) {
 		for _, node := range nodes {
 			allNodes = append(allNodes, node)
 			if !node.HasChild {
@@ -491,7 +491,7 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
 			if err != nil {
 				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-				failures = append(failures, wikiNodeListFailure{
+				failures = append(failures, WikiNodeListFailure{
 					Node: node,
 					Err:  wrappedErr,
 				})
@@ -505,7 +505,7 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 
 	walk(children)
 	if len(failures) > 0 {
-		return allNodes, &partialWikiNodeListError{Failures: failures}
+		return allNodes, &PartialWikiNodeListError{Failures: failures}
 	}
 	return allNodes, nil
 }
@@ -516,8 +516,8 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 func (c *Client) GetDocumentRawContent(ctx context.Context, documentID string) (string, error) {
 	path := fmt.Sprintf("/open-apis/docx/v1/documents/%s/raw_content", documentID)
 
-	var resp docRawContentResponse
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	var resp DocRawContentResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return "", fmt.Errorf("get document raw content: %w", err)
 	}
 	if resp.Code != 0 {
@@ -529,7 +529,7 @@ func (c *Client) GetDocumentRawContent(ctx context.Context, documentID string) (
 
 // Ping verifies the credentials by attempting to get a tenant access token.
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.getTenantAccessToken(ctx)
+	_, err := c.GetTenantAccessToken(ctx)
 	return err
 }
 
@@ -553,8 +553,8 @@ func (c *Client) CreateExportTask(ctx context.Context, token, objType, fileExten
 		"type":           objType,
 	}
 
-	var resp exportTaskCreateResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/open-apis/drive/v1/export_tasks", body, &resp); err != nil {
+	var resp ExportTaskCreateResponse
+	if err := c.DoRequest(ctx, http.MethodPost, "/open-apis/drive/v1/export_tasks", body, &resp); err != nil {
 		return "", fmt.Errorf("create export task: %w", err)
 	}
 	if resp.Code != 0 {
@@ -570,8 +570,8 @@ func (c *Client) CreateExportTask(ctx context.Context, token, objType, fileExten
 func (c *Client) GetExportTaskStatus(ctx context.Context, ticket string, token string) (string, string, error) {
 	path := fmt.Sprintf("/open-apis/drive/v1/export_tasks/%s?token=%s", ticket, token)
 
-	var resp exportTaskStatusResponse
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	var resp ExportTaskStatusResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return "", "", fmt.Errorf("get export task status: %w", err)
 	}
 	if resp.Code != 0 {
@@ -594,7 +594,7 @@ func (c *Client) GetExportTaskStatus(ctx context.Context, ticket string, token s
 // The file must be downloaded within 10 minutes of export completion.
 func (c *Client) DownloadExportFile(ctx context.Context, fileToken string) ([]byte, error) {
 	path := fmt.Sprintf("/open-apis/drive/v1/export_tasks/file/%s/download", fileToken)
-	return c.downloadRawBytes(ctx, path)
+	return c.DownloadRawBytes(ctx, path)
 }
 
 // ExportAndDownload is a high-level helper that creates an export task, polls until
@@ -603,12 +603,12 @@ func (c *Client) DownloadExportFile(ctx context.Context, fileToken string) ([]by
 // Timeout: 60 seconds. Poll interval: 2 seconds.
 func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string) ([]byte, string, error) {
 	// Determine export format
-	fileExt, ok := objTypeToExportFileExtension[objType]
+	fileExt, ok := ObjTypeToExportFileExtension[objType]
 	if !ok {
 		return nil, "", fmt.Errorf("unsupported obj_type for export: %s", objType)
 	}
 
-	exportType, ok := objTypeToExportType[objType]
+	exportType, ok := ObjTypeToExportType[objType]
 	if !ok {
 		return nil, "", fmt.Errorf("unsupported obj_type for export: %s", objType)
 	}
@@ -650,7 +650,7 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 
 	// Build a sensible file name
 	if fileName == "" {
-		fileName = "export" + exportFileExtToSuffix[fileExt]
+		fileName = "export" + ExportFileExtToSuffix[fileExt]
 	}
 
 	return data, fileName, nil
@@ -664,7 +664,7 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 // Used for wiki nodes with obj_type="file" (user-uploaded PDF, Word, images, etc.).
 func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byte, error) {
 	path := fmt.Sprintf("/open-apis/drive/v1/files/%s/download", fileToken)
-	return c.downloadRawBytes(ctx, path)
+	return c.DownloadRawBytes(ctx, path)
 }
 
 // DownloadMediaFile downloads embedded media (attachments/images referenced by
@@ -673,12 +673,12 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 // endpoint rather than /files/.
 func (c *Client) DownloadMediaFile(ctx context.Context, fileToken string) ([]byte, error) {
 	path := fmt.Sprintf("/open-apis/drive/v1/medias/%s/download", url.PathEscape(fileToken))
-	return c.downloadRawBytes(ctx, path)
+	return c.DownloadRawBytes(ctx, path)
 }
 
-// downloadRawBytes performs an authenticated GET and returns the raw response body.
-func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
-	token, err := c.getTenantAccessToken(ctx)
+// DownloadRawBytes performs an authenticated GET and returns the raw response body.
+func (c *Client) DownloadRawBytes(ctx context.Context, path string) ([]byte, error) {
+	token, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +686,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	url := c.baseURL + path
 	var lastErr error
 
-	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
+	for attempt := 0; attempt <= FeishuMaxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("create download request: %w", err)
@@ -696,14 +696,14 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if attempt == 0 {
 			logger.Infof(ctx, "[Feishu] download GET %s", path)
 		} else {
-			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, feishuMaxRetries)
+			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, FeishuMaxRetries)
 		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("download request: %w", err)
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+			if attempt < FeishuMaxRetries {
+				if sErr := SleepCtx(ctx, FeishuRetryBackoff[attempt]); sErr != nil {
 					return nil, sErr
 				}
 				continue
@@ -714,10 +714,10 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode == http.StatusTooManyRequests {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
-			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
+			wait := ParseRetryAfter(resp.Header.Get("Retry-After"), FeishuRetryBackoff[min(attempt, len(FeishuRetryBackoff)-1)])
+			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", Truncate(string(body), 500))
+			if attempt < FeishuMaxRetries {
+				if sErr := SleepCtx(ctx, wait); sErr != nil {
 					return nil, sErr
 				}
 				continue
@@ -728,9 +728,9 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
-			if attempt < feishuMax5xxRetries {
-				if sErr := sleepCtx(ctx, feishuRetry5xxDelay); sErr != nil {
+			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, Truncate(string(body), 500))
+			if attempt < FeishuMax5xxRetries {
+				if sErr := SleepCtx(ctx, FeishuRetry5xxDelay); sErr != nil {
 					return nil, sErr
 				}
 				continue
@@ -741,20 +741,20 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, Truncate(string(body), 500))
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
 		}
 
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
-		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, MaxFeishuDownloadBytes+1))
+		if readErr == nil && int64(len(data)) > MaxFeishuDownloadBytes {
 			resp.Body.Close()
-			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", maxFeishuDownloadBytes, path)
+			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", MaxFeishuDownloadBytes, path)
 		}
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read download body: %w", readErr)
-			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+			if attempt < FeishuMaxRetries {
+				if sErr := SleepCtx(ctx, FeishuRetryBackoff[attempt]); sErr != nil {
 					return nil, sErr
 				}
 				continue
@@ -782,7 +782,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 // folderToken == "" is rejected: the root folder is not paginated and does
 // not return shortcuts (Feishu API limitation), which would silently drop
 // content and risk an unbounded single response. See ADR-0004.
-func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken string) ([]driveFile, string, error) {
+func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken string) ([]DriveFile, string, error) {
 	if folderToken == "" {
 		return nil, "", fmt.Errorf("root folder not supported; specify a concrete folder_token (root folder is not paginated and does not return shortcuts)")
 	}
@@ -794,8 +794,8 @@ func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken stri
 		path += "&page_token=" + url.QueryEscape(pageToken)
 	}
 
-	var resp driveFileListResponse
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	var resp DriveFileListResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, "", fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
@@ -812,13 +812,13 @@ func (c *Client) ListDriveFiles(ctx context.Context, folderToken, pageToken stri
 // only returns the folder's children, not the folder itself.
 //
 // GET /open-apis/drive/explorer/v2/folder/:folderToken/meta
-func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (driveFolderMetaResponse, error) {
-	var resp driveFolderMetaResponse
+func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (DriveFolderMetaResponse, error) {
+	var resp DriveFolderMetaResponse
 	if folderToken == "" {
 		return resp, fmt.Errorf("root folder not supported; specify a concrete folder_token")
 	}
 	path := "/open-apis/drive/explorer/v2/folder/" + url.QueryEscape(folderToken) + "/meta"
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return resp, fmt.Errorf("get drive folder meta: %w", err)
 	}
 	if resp.Code != 0 {
@@ -827,9 +827,9 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 	return resp, nil
 }
 
-// listDriveFilesAllPages lists every direct child of a folder across all pages.
-func (c *Client) listDriveFilesAllPages(ctx context.Context, folderToken string) ([]driveFile, error) {
-	var all []driveFile
+// ListDriveFilesAllPages lists every direct child of a folder across all pages.
+func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string) ([]DriveFile, error) {
+	var all []DriveFile
 	pageToken := ""
 	for {
 		files, next, err := c.ListDriveFiles(ctx, folderToken, pageToken)
@@ -856,12 +856,12 @@ func (c *Client) listDriveFilesAllPages(ctx context.Context, folderToken string)
 //   - other -> collect.
 //
 // Partial failures (a sub-folder listing returns an error) are collected into a
-// *partialDriveFileListError and the walk continues, mirroring the wiki
-// connector's partialWikiNodeListError semantics.
-func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken string) ([]driveFile, error) {
+// *PartialDriveFileListError and the walk continues, mirroring the wiki
+// connector's PartialWikiNodeListError semantics.
+func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken string) ([]DriveFile, error) {
 	visited := make(map[string]bool)
-	var all []driveFile
-	var failures []driveFileListFailure
+	var all []DriveFile
+	var failures []DriveFileListFailure
 
 	var walk func(folderToken string)
 	walk = func(folderToken string) {
@@ -870,10 +870,10 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 		}
 		visited[folderToken] = true
 
-		files, err := c.listDriveFilesAllPages(ctx, folderToken)
+		files, err := c.ListDriveFilesAllPages(ctx, folderToken)
 		if err != nil {
 			wrappedErr := fmt.Errorf("list children of %s: %w", folderToken, err)
-			failures = append(failures, driveFileListFailure{
+			failures = append(failures, DriveFileListFailure{
 				FolderToken: folderToken,
 				Err:         wrappedErr,
 			})
@@ -890,7 +890,7 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 				// Expand to target. target_type is never "folder" (verified), so
 				// no recursion here - the target is a regular file.
 				if f.ShortcutInfo != nil && f.ShortcutInfo.TargetToken != "" {
-					expanded := driveFile{
+					expanded := DriveFile{
 						Token:        f.ShortcutInfo.TargetToken,
 						Name:         f.Name,
 						Type:         f.ShortcutInfo.TargetType,
@@ -910,7 +910,7 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 
 	walk(folderToken)
 	if len(failures) > 0 {
-		return all, &partialDriveFileListError{Failures: failures}
+		return all, &PartialDriveFileListError{Failures: failures}
 	}
 	return all, nil
 }

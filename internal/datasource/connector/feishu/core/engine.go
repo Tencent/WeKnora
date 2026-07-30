@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -12,22 +12,22 @@ import (
 
 // engine.go holds the single generic streaming sync engine shared by the wiki
 // Connector and the Drive DriveConnector. The per-connector differences (node
-// type, listing API, edit-time field, cursor wire format, fetch dispatch,
+// type, listing API, edit-time field, cursor wire format, Fetch dispatch,
 // log tag) are isolated behind the NodeOps adapter interface. FetchAll /
 // FetchIncremental are thin wrappers over the same engine that collect Emits
 // instead of streaming them.
 //
 // Behaviour note (deliberate, see ADR-0005 / design §2.4):
 //   - Resume/incremental fast-path: a node recorded at its current edit time
-//     is skipped, keeping the cursor entry.
-//   - A fetch failure does NOT advance the cursor: the prior edit time is
+//     is Skipped, keeping the cursor entry.
+//   - A Fetch failure does NOT advance the cursor: the prior edit time is
 //     retained so the node is retried next run instead of being permanently
-//     skipped on a transient export failure (Tencent/WeKnora#2136). This now
+//     Skipped on a transient export failure (Tencent/WeKnora#2136). This now
 //     also holds for the FetchIncremental path (previously it advanced the
 //     cursor before fetching, a latent #2136 bug).
-//   - Logs use the "stream progress/summary" wording uniformly; the
+//   - Logs use the "stream progress/Summary" wording uniformly; the
 //     FetchIncremental path additionally gains per-100 progress + tally
-//     summary logs it did not emit before (log-only change).
+//     Summary logs it did not emit before (log-only change).
 
 // NodeOps adapts one connector's node type to the shared sync engine. Every
 // method is a pure accessor or a thin wrapper - no engine logic lives here.
@@ -63,23 +63,23 @@ type NodeOps[N any] interface {
 	DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string
 	// EncodeCursor wraps the engine's internal times map into the connector's
 	// wire-format SyncCursor. JSON-marshals for snapshot isolation, mirroring
-	// the original feishuCursor.toSyncCursor / feishuDriveCursor.toSyncCursor.
+	// the original FeishuCursor.toSyncCursor / FeishuDriveCursor.toSyncCursor.
 	EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor
 }
 
-// collectHandler is the StreamHandler used by FetchAll / FetchIncremental to
+// CollectHandler is the StreamHandler used by FetchAll / FetchIncremental to
 // gather every Emitted item into a slice instead of streaming. Checkpoint is a
 // no-op: those paths return a single cursor at the end.
-type collectHandler struct {
+type CollectHandler struct {
 	items []types.FetchedItem
 }
 
-func (h *collectHandler) Emit(_ context.Context, item types.FetchedItem) error {
+func (h *CollectHandler) Emit(_ context.Context, item types.FetchedItem) error {
 	h.items = append(h.items, item)
 	return nil
 }
 
-func (h *collectHandler) Checkpoint(_ context.Context, _ *types.SyncCursor) error { return nil }
+func (h *CollectHandler) Checkpoint(_ context.Context, _ *types.SyncCursor) error { return nil }
 
 // runSync is the single implementation behind FetchStream / FetchAll /
 // FetchIncremental. With cursor == nil it fetches everything (full sync);
@@ -127,7 +127,7 @@ func runSync[N any](
 		}
 
 		currentNodes := make(map[string]bool)
-		tally := newFetchTally(len(nodes))
+		tally := NewFetchTally(len(nodes))
 		for i, node := range nodes {
 			tok := ops.Token(node)
 			currentNodes[tok] = true
@@ -143,7 +143,7 @@ func runSync[N any](
 
 			// Resume/incremental fast-path: a node recorded at its current edit
 			// time is unchanged (or already synced this run) - keep the record
-			// and skip re-fetching.
+			// and Skip re-fetching.
 			if hadPrev && prevEdit == editTimeStr {
 				newTimes[resourceID][tok] = editTimeStr
 				continue
@@ -151,11 +151,11 @@ func runSync[N any](
 
 			items, ferr := ops.Fetch(ctx, client, node, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
-				tally.fail()
+				tally.Fail()
 				// Do NOT advance the cursor: the content was never fetched.
 				// Retain the prior edit time (if any) so prev != current next
 				// run and the node is retried, instead of being permanently
-				// skipped on a transient export failure (Tencent/WeKnora#2136).
+				// Skipped on a transient export failure (Tencent/WeKnora#2136).
 				if hadPrev {
 					newTimes[resourceID][tok] = prevEdit
 				}
@@ -163,16 +163,16 @@ func runSync[N any](
 					ExternalID:       tok,
 					Title:            ops.Title(node),
 					SourceResourceID: resourceID,
-					Metadata:         feishuErrorItemMeta(ferr, nil),
+					Metadata:         FeishuErrorItemMeta(ferr, nil),
 				}); eerr != nil {
 					return nil, eerr
 				}
 			} else {
-				// Fetched, or an unsupported type (nothing to fetch): record
+				// Fetched, or an unsupported type (nothing to Fetch): record
 				// the current edit time so the node is not re-processed next run.
 				newTimes[resourceID][tok] = editTimeStr
 				if len(items) > 0 {
-					tally.fetch()
+					tally.Fetch()
 					for _, it := range items {
 						if eerr := h.Emit(ctx, *it); eerr != nil {
 							return nil, eerr
@@ -180,12 +180,12 @@ func runSync[N any](
 					}
 				} else {
 					// Unsupported type (mindnote/slides/…): no item.
-					tally.skip(ops.ObjType(node))
+					tally.Skip(ops.ObjType(node))
 				}
 			}
 
 			processed++
-			if processed%feishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= feishuStreamCheckpointMaxInterval {
+			if processed%FeishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= FeishuStreamCheckpointMaxInterval {
 				if cerr := h.Checkpoint(ctx, ops.EncodeCursor(newTimes, lastSync)); cerr != nil {
 					logger.Warnf(ctx, "%s stream checkpoint failed: %v", ops.LogTag(), cerr)
 				}
@@ -193,7 +193,7 @@ func runSync[N any](
 			}
 			if n := i + 1; n%100 == 0 {
 				logger.Infof(ctx, "%s stream progress resource=%s %d/%d (%s)",
-					ops.LogTag(), resourceID, n, len(nodes), tally.summary())
+					ops.LogTag(), resourceID, n, len(nodes), tally.Summary())
 			}
 		}
 
@@ -215,7 +215,7 @@ func runSync[N any](
 				}
 			}
 		}
-		logger.Infof(ctx, "%s stream summary resource=%s %s", ops.LogTag(), resourceID, tally.summary())
+		logger.Infof(ctx, "%s stream Summary resource=%s %s", ops.LogTag(), resourceID, tally.Summary())
 	}
 
 	return ops.EncodeCursor(newTimes, lastSync), nil
@@ -240,7 +240,7 @@ func FetchAllEngine[N any](
 	ctx context.Context, client *Client, config *types.DataSourceConfig,
 	resourceIDs []string, ops NodeOps[N],
 ) ([]types.FetchedItem, error) {
-	ch := &collectHandler{}
+	ch := &CollectHandler{}
 	if _, err := runSync(ctx, client, config, resourceIDs, nil, ch, ops); err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ func FetchIncrementalEngine[N any](
 	ctx context.Context, client *Client, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, ops NodeOps[N],
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
-	ch := &collectHandler{}
+	ch := &CollectHandler{}
 	next, err := runSync(ctx, client, config, config.ResourceIDs, cursor, ch, ops)
 	if err != nil {
 		return nil, nil, err

@@ -1,4 +1,4 @@
-package feishu
+package wiki
 
 import (
 	"context"
@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Connector implements the datasource.Connector interface for Feishu and, with
 // the same code, for Lark: the two clouds expose an identical wiki/docx/drive
-// API surface. A Region picks the cloud — see region.go.
+// API surface. A core.Region picks the cloud — see region.go.
 type Connector struct {
-	region Region
+	region core.Region
 }
 
 // NewConnector creates a connector for the given region (RegionFeishu or RegionLark).
-func NewConnector(region Region) *Connector {
+func NewConnector(region core.Region) *Connector {
 	return &Connector{region: region}
 }
 
@@ -36,12 +37,12 @@ func (c *Connector) Type() string {
 
 // Validate verifies that the Feishu configuration is valid by testing connectivity.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return err
 	}
 
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("feishu connection failed: %w", err)
 	}
@@ -61,12 +62,12 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 func (c *Connector) ListResources(
 	ctx context.Context, config *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
 
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 
 	if parentID == "" {
 		spaces, err := client.ListWikiSpaces(ctx)
@@ -81,7 +82,7 @@ func (c *Connector) ListResources(
 				Name:        space.Name,
 				Type:        "wiki_space",
 				Description: space.Description,
-				URL:         c.region.wikiURL(space.SpaceID),
+				URL:         c.region.WikiURL(space.SpaceID),
 				HasChildren: true,
 				Metadata: map[string]interface{}{
 					"visibility": space.Visibility,
@@ -114,11 +115,11 @@ func (c *Connector) ListResources(
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 
 	seen := make(map[string]bool)
 	ancestors := make([]string, 0)
@@ -165,12 +166,12 @@ func (c *Connector) ResolveResourceAncestors(
 // Defensive fallback path - the service prefers FetchStream when the connector
 // implements StreamingConnector.
 func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
-	return FetchAllEngine(ctx, client, config, resourceIDs, wikiOps{region: c.region})
+	client := core.NewClient(feishuConfig)
+	return core.FetchAllEngine(ctx, client, config, resourceIDs, wikiOps{region: c.region})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
@@ -179,16 +180,16 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 // failure-doesn't-advance-cursor semantics apply here too (previously this path
 // advanced the cursor before fetching, a latent #2136 bug).
 func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	ops := wikiOps{region: c.region}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
-	return FetchIncrementalEngine(ctx, client, config, cursor, ops)
+	return core.FetchIncrementalEngine(ctx, client, config, cursor, ops)
 }
 
 // FetchStream performs a resumable, memory-bounded sync. It unifies the full
@@ -203,32 +204,32 @@ func (c *Connector) FetchStream(
 	ctx context.Context, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler,
 ) (*types.SyncCursor, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	ops := wikiOps{region: c.region}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
-	return FetchStreamEngine(ctx, client, config, cursor, h, ops)
+	return core.FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
 // wikiOps adapts the wiki Connector to the generic sync engine. It carries the
 // region (for URL rendering) and encodes/decodes the wiki cursor wire format
-// (feishuCursor / space_node_times) so the engine can stay format-agnostic.
+// (core.FeishuCursor / space_node_times) so the engine can stay format-agnostic.
 type wikiOps struct {
-	region Region
+	region core.Region
 }
 
-func (o wikiOps) List(ctx context.Context, client *Client, resourceID string) ([]wikiNode, error, error) {
+func (o wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
 	nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
 	if err == nil {
 		return nodes, nil, nil
 	}
-	var partial *partialWikiNodeListError
+	var partial *core.PartialWikiNodeListError
 	if errors.As(err, &partial) {
 		// Partial listing: nodes are still usable; the failed sub-trees are
 		// surfaced via ListFailureItems, and the sync continues.
@@ -237,28 +238,28 @@ func (o wikiOps) List(ctx context.Context, client *Client, resourceID string) ([
 	return nodes, nil, err
 }
 
-func (o wikiOps) Token(n wikiNode) string   { return n.NodeToken }
-func (o wikiOps) Title(n wikiNode) string   { return n.Title }
-func (o wikiOps) ObjType(n wikiNode) string { return n.ObjType }
+func (o wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
+func (o wikiOps) Title(n core.WikiNode) string   { return n.Title }
+func (o wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
 // EditTime is the change-detection timestamp: ObjEditTime (document content)
 // with a NodeEditTime fallback for nodes that lack obj_edit_time. This drives
 // the cursor comparison, NOT FetchedItem.UpdatedAt (which uses NodeEditTime).
-func (o wikiOps) EditTime(n wikiNode) string {
+func (o wikiOps) EditTime(n core.WikiNode) string {
 	if n.ObjEditTime != "" {
 		return n.ObjEditTime
 	}
 	return n.NodeEditTime
 }
 
-func (o wikiOps) Fetch(ctx context.Context, client *Client, n wikiNode, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+func (o wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
 	return fetchNodeContent(ctx, client, n, spaceID, resourceID, multimodal, o.region)
 }
 
 func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
 	spaceID, _ := parseWikiResourceID(resourceID)
-	var pe *partialWikiNodeListError
+	var pe *core.PartialWikiNodeListError
 	if errors.As(partial, &pe) {
 		return appendWikiNodeListFailureItems(nil, spaceID, resourceID, pe.Failures)
 	}
@@ -272,21 +273,21 @@ func (o wikiOps) EmptyResourceIDsError() string {
 func (o wikiOps) LogTag() string { return "[Feishu]" }
 
 func (o wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
-	var prev feishuCursor
+	var prev core.FeishuCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
 	return prev.SpaceNodeTimes
 }
 
 func (o wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
-	fc := feishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
+	fc := core.FeishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
 	_ = json.Unmarshal(b, &m)
 	return &types.SyncCursor{LastSyncTime: lastSync, ConnectorCursor: m}
 }
 
-func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []wikiNodeListFailure) []types.FetchedItem {
+func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []core.WikiNodeListFailure) []types.FetchedItem {
 	for _, failure := range failures {
 		node := failure.Node
 		title := node.Title
@@ -297,7 +298,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 			ExternalID:       node.NodeToken,
 			Title:            title,
 			SourceResourceID: resourceID,
-			Metadata: feishuErrorItemMeta(failure.Err, map[string]string{
+			Metadata: core.FeishuErrorItemMeta(failure.Err, map[string]string{
 				"channel":       types.ChannelFeishu,
 				"node_token":    node.NodeToken,
 				"space_id":      spaceID,
@@ -315,14 +316,14 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - docx       → blocks API (Markdown) with export fallback; may return attachments
 //   - doc/sheet/bitable → export API → binary file
 //   - file       → drive download → original file (PDF/Word/image/etc.)
-//   - mindnote   → skip (no API)
-//   - slides     → skip (no API)
-func fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string, multimodalEnabled bool, region Region) ([]*types.FetchedItem, error) {
-	if !isSupportedDocType(node.ObjType) {
+//   - mindnote   → Skip (no API)
+//   - slides     → Skip (no API)
+func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, multimodalEnabled bool, region core.Region) ([]*types.FetchedItem, error) {
+	if !core.IsSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
 
-	editTime := parseFeishuTimestamp(node.NodeEditTime)
+	editTime := core.ParseFeishuTimestamp(node.NodeEditTime)
 	baseMeta := map[string]string{
 		"obj_token":  node.ObjToken,
 		"obj_type":   node.ObjType,
@@ -335,15 +336,15 @@ func fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceI
 
 	switch node.ObjType {
 	case "docx":
-		return fetchDocxWithBlocks(ctx, client, docxFetchInput{
-			docToken:          node.NodeToken,
-			objToken:          node.ObjToken,
-			title:             node.Title,
-			url:               region.wikiURL(node.NodeToken),
-			resourceID:        resourceID,
-			editTime:          editTime,
-			baseMeta:          baseMeta,
-			multimodalEnabled: multimodalEnabled,
+		return core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+			DocToken:          node.NodeToken,
+			ObjToken:          node.ObjToken,
+			Title:             node.Title,
+			URL:               region.WikiURL(node.NodeToken),
+			ResourceID:        resourceID,
+			EditTime:          editTime,
+			BaseMeta:          baseMeta,
+			MultimodalEnabled: multimodalEnabled,
 		})
 	case "doc", "sheet", "bitable":
 		item, err := fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta, region)
@@ -364,7 +365,7 @@ func fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceI
 
 // fetchViaExport exports a doc/sheet/bitable node via the async export API and
 // returns a single FetchedItem containing the exported binary.
-func fetchViaExport(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region Region) (*types.FetchedItem, error) {
+func fetchViaExport(ctx context.Context, client *core.Client, node core.WikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region core.Region) (*types.FetchedItem, error) {
 	// Export as a file via the async export API
 	data, fileName, err := client.ExportAndDownload(ctx, node.ObjToken, node.ObjType)
 	if err != nil {
@@ -372,12 +373,12 @@ func fetchViaExport(ctx context.Context, client *Client, node wikiNode, resource
 	}
 
 	// Ensure a reasonable file name with correct extension
-	ext := exportFileExtToSuffix[objTypeToExportFileExtension[node.ObjType]]
+	ext := core.ExportFileExtToSuffix[core.ObjTypeToExportFileExtension[node.ObjType]]
 	if fileName == "" {
-		fileName = sanitizeFileName(node.Title) + ext
+		fileName = core.SanitizeFileName(node.Title) + ext
 	} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
 		// Feishu often returns the doc title without extension - append it
-		fileName = sanitizeFileName(fileName) + ext
+		fileName = core.SanitizeFileName(fileName) + ext
 	}
 
 	return &types.FetchedItem{
@@ -386,7 +387,7 @@ func fetchViaExport(ctx context.Context, client *Client, node wikiNode, resource
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
-		URL:              region.wikiURL(node.NodeToken),
+		URL:              region.WikiURL(node.NodeToken),
 		UpdatedAt:        editTime,
 		SourceResourceID: resourceID,
 		Metadata:         baseMeta,
@@ -395,7 +396,7 @@ func fetchViaExport(ctx context.Context, client *Client, node wikiNode, resource
 
 // fetchDriveFile downloads an original uploaded file from Drive and returns a
 // single FetchedItem containing the raw bytes.
-func fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region Region) (*types.FetchedItem, error) {
+func fetchDriveFile(ctx context.Context, client *core.Client, node core.WikiNode, resourceID string, editTime time.Time, baseMeta map[string]string, region core.Region) (*types.FetchedItem, error) {
 	// Download the original uploaded file from Drive
 	data, err := client.DownloadDriveFile(ctx, node.ObjToken)
 	if err != nil {
@@ -414,7 +415,7 @@ func fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resource
 		Content:          data,
 		ContentType:      "application/octet-stream",
 		FileName:         fileName,
-		URL:              region.wikiURL(node.NodeToken),
+		URL:              region.WikiURL(node.NodeToken),
 		UpdatedAt:        editTime,
 		SourceResourceID: resourceID,
 		Metadata:         baseMeta,
@@ -424,15 +425,15 @@ func fetchDriveFile(ctx context.Context, client *Client, node wikiNode, resource
 // --- Helper functions ---
 
 func makeWikiNodeResourceID(spaceID, nodeToken string) string {
-	return spaceID + feishuWikiNodeResourceSeparator + nodeToken
+	return spaceID + core.FeishuWikiNodeResourceSeparator + nodeToken
 }
 
 func parseWikiResourceID(resourceID string) (spaceID string, nodeToken string) {
-	spaceID, nodeToken, _ = strings.Cut(resourceID, feishuWikiNodeResourceSeparator)
+	spaceID, nodeToken, _ = strings.Cut(resourceID, core.FeishuWikiNodeResourceSeparator)
 	return spaceID, nodeToken
 }
 
-func (c *Connector) wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
+func (c *Connector) wikiNodeToResource(spaceID string, node core.WikiNode) types.Resource {
 	parentID := spaceID
 	if node.ParentNodeID != "" {
 		parentID = makeWikiNodeResourceID(spaceID, node.ParentNodeID)
@@ -443,16 +444,16 @@ func (c *Connector) wikiNodeToResource(spaceID string, node wikiNode) types.Reso
 		name = node.NodeToken
 	}
 
-	modifiedAt := parseFeishuTimestamp(node.ObjEditTime)
+	modifiedAt := core.ParseFeishuTimestamp(node.ObjEditTime)
 	if modifiedAt.IsZero() {
-		modifiedAt = parseFeishuTimestamp(node.NodeEditTime)
+		modifiedAt = core.ParseFeishuTimestamp(node.NodeEditTime)
 	}
 
 	return types.Resource{
 		ExternalID:  makeWikiNodeResourceID(spaceID, node.NodeToken),
 		Name:        name,
 		Type:        "wiki_node",
-		URL:         c.region.wikiURL(node.NodeToken),
+		URL:         c.region.WikiURL(node.NodeToken),
 		ParentID:    parentID,
 		HasChildren: node.HasChild,
 		ModifiedAt:  modifiedAt,

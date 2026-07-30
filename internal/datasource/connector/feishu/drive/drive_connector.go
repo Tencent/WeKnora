@@ -1,4 +1,4 @@
-package feishu
+package drive
 
 import (
 	"context"
@@ -9,22 +9,23 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // DriveConnector implements the datasource.Connector (and StreamingConnector)
-// interface for Feishu/Lark Drive (云盘) mode. It shares Client/Config/Region
+// interface for Feishu/Lark Drive (云盘) mode. It shares core.Client/core.Config/core.Region
 // and the export/download logic with the wiki Connector; only resource
-// enumeration and fetch dispatch differ. See 飞书云盘数据源设计.md and
+// enumeration and Fetch dispatch differ. See 飞书云盘数据源设计.md and
 // ADR-0001..0004.
 type DriveConnector struct {
-	region Region
+	region core.Region
 }
 
 // NewDriveConnector creates a Drive connector for the given region
 // (RegionFeishuDrive or RegionLarkDrive).
-func NewDriveConnector(region Region) *DriveConnector {
+func NewDriveConnector(region core.Region) *DriveConnector {
 	return &DriveConnector{region: region}
 }
 
@@ -41,12 +42,12 @@ func (c *DriveConnector) Type() string {
 // connectivity. It does not validate folder_token here - that is done in
 // ListResources when the user loads the tree root. Mirrors the wiki Connector.
 func (c *DriveConnector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return err
 	}
 
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("%s connection failed: %w", c.region.Label, err)
 	}
@@ -67,18 +68,18 @@ func (c *DriveConnector) Validate(ctx context.Context, config *types.DataSourceC
 //   - parentID == "folderToken:subFolderToken" -> ListDriveFiles(subFolderToken)
 //     returns that sub-folder's direct children.
 //
-// Each driveFile becomes a Resource: folder HasChildren=true, others false.
+// Each core.DriveFile becomes a Resource: folder HasChildren=true, others false.
 // resourceID encoding: root = folderToken; child = folderToken + ":" + fileToken
-// (reuses feishuWikiNodeResourceSeparator). See ADR-0001 §3.4.
+// (reuses core.FeishuWikiNodeResourceSeparator). See ADR-0001 §3.4.
 func (c *DriveConnector) ListResources(
 	ctx context.Context, config *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
 
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 
 	if parentID == "" {
 		// Root load: read the user-supplied folder_token from config.ResourceIDs.
@@ -89,7 +90,7 @@ func (c *DriveConnector) ListResources(
 		// Validate access by listing the root's direct children (also lazy-loads
 		// the first level for the picker). Reuse the list call rather than a
 		// separate ping.
-		files, err := client.listDriveFilesAllPages(ctx, rootFolderToken)
+		files, err := client.ListDriveFilesAllPages(ctx, rootFolderToken)
 		if err != nil {
 			return nil, fmt.Errorf("list feishu drive folder %s: %w", rootFolderToken, err)
 		}
@@ -112,7 +113,7 @@ func (c *DriveConnector) ListResources(
 		// parentID is a bare root folder token -> list its children.
 		folderToken = rootFolderToken
 	}
-	files, err := client.listDriveFilesAllPages(ctx, folderToken)
+	files, err := client.ListDriveFilesAllPages(ctx, folderToken)
 	if err != nil {
 		return nil, fmt.Errorf("list feishu drive files under %s: %w", parentID, err)
 	}
@@ -135,11 +136,11 @@ func (c *DriveConnector) ListResources(
 func (c *DriveConnector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 
 	seen := make(map[string]bool)
 	ancestors := make([]string, 0)
@@ -182,7 +183,7 @@ func (c *DriveConnector) ResolveResourceAncestors(
 			cur := queue[0]
 			queue = queue[1:]
 
-			files, err := client.listDriveFilesAllPages(ctx, cur)
+			files, err := client.ListDriveFilesAllPages(ctx, cur)
 			if err != nil {
 				logger.Warnf(ctx, "[FeishuDrive] resolve ancestors: list %s: %v", cur, err)
 				break // best-effort: stop this root's traversal
@@ -230,12 +231,12 @@ func buildDriveAncestorChain(rootFolderToken, cur string, parentChain map[string
 func (c *DriveConnector) FetchAll(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]types.FetchedItem, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
-	return FetchAllEngine(ctx, client, config, resourceIDs, driveOps{region: c.region})
+	client := core.NewClient(feishuConfig)
+	return core.FetchAllEngine(ctx, client, config, resourceIDs, driveOps{region: c.region})
 }
 
 // FetchIncremental performs an incremental sync by comparing file modified_time
@@ -245,16 +246,16 @@ func (c *DriveConnector) FetchAll(
 func (c *DriveConnector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	ops := driveOps{region: c.region}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
-	return FetchIncrementalEngine(ctx, client, config, cursor, ops)
+	return core.FetchIncrementalEngine(ctx, client, config, cursor, ops)
 }
 
 // FetchStream performs a resumable, memory-bounded sync. It unifies the full
@@ -269,48 +270,48 @@ func (c *DriveConnector) FetchStream(
 	ctx context.Context, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler,
 ) (*types.SyncCursor, error) {
-	feishuConfig, err := parseFeishuConfig(config, c.region)
+	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(feishuConfig)
+	client := core.NewClient(feishuConfig)
 	ops := driveOps{region: c.region}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
-	return FetchStreamEngine(ctx, client, config, cursor, h, ops)
+	return core.FetchStreamEngine(ctx, client, config, cursor, h, ops)
 }
 
 // driveOps adapts the Drive DriveConnector to the generic sync engine. It
 // carries the region (for channel + URL) and encodes/decodes the Drive cursor
-// wire format (feishuDriveCursor / file_times) so the engine stays format-agnostic.
+// wire format (core.FeishuDriveCursor / file_times) so the engine stays format-agnostic.
 type driveOps struct {
-	region Region
+	region core.Region
 }
 
-func (o driveOps) List(ctx context.Context, client *Client, resourceID string) ([]driveFile, error, error) {
+func (o driveOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.DriveFile, error, error) {
 	files, err := listDriveFilesForResource(ctx, client, resourceID)
 	if err == nil {
 		return files, nil, nil
 	}
-	var partial *partialDriveFileListError
+	var partial *core.PartialDriveFileListError
 	if errors.As(err, &partial) {
 		return files, err, nil
 	}
 	return files, nil, err
 }
 
-func (o driveOps) Token(n driveFile) string    { return n.Token }
-func (o driveOps) Title(n driveFile) string    { return n.Name }
-func (o driveOps) ObjType(n driveFile) string  { return n.Type }
-func (o driveOps) EditTime(n driveFile) string { return n.ModifiedTime }
+func (o driveOps) Token(n core.DriveFile) string    { return n.Token }
+func (o driveOps) Title(n core.DriveFile) string    { return n.Name }
+func (o driveOps) ObjType(n core.DriveFile) string  { return n.Type }
+func (o driveOps) EditTime(n core.DriveFile) string { return n.ModifiedTime }
 
-func (o driveOps) Fetch(ctx context.Context, client *Client, n driveFile, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+func (o driveOps) Fetch(ctx context.Context, client *core.Client, n core.DriveFile, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
 	return fetchDriveFileContent(ctx, client, n, resourceID, multimodal, o.region)
 }
 
 func (o driveOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
-	var pe *partialDriveFileListError
+	var pe *core.PartialDriveFileListError
 	if errors.As(partial, &pe) {
 		return appendDriveFileListFailureItems(nil, resourceID, o.channel(), pe.Failures)
 	}
@@ -331,14 +332,14 @@ func (o driveOps) EmptyResourceIDsError() string {
 func (o driveOps) LogTag() string { return "[FeishuDrive]" }
 
 func (o driveOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
-	var prev feishuDriveCursor
+	var prev core.FeishuDriveCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
 	return prev.FileTimes
 }
 
 func (o driveOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
-	fc := feishuDriveCursor{LastSyncTime: lastSync, FileTimes: times}
+	fc := core.FeishuDriveCursor{LastSyncTime: lastSync, FileTimes: times}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
 	_ = json.Unmarshal(b, &m)
@@ -353,15 +354,15 @@ func (o driveOps) EncodeCursor(times map[string]map[string]string, lastSync time
 //   - docx                   -> blocks API (Markdown) with export fallback; may return attachments/images
 //   - doc/sheet/bitable      -> ExportAndDownload -> docx/xlsx
 //   - file                   -> DownloadDriveFile -> original file
-//   - mindnote/slides/board  -> skip (no API), returns (nil, nil)
+//   - mindnote/slides/board  -> Skip (no API), returns (nil, nil)
 func fetchDriveFileContent(
-	ctx context.Context, client *Client, file driveFile, resourceID string, multimodalEnabled bool, region Region,
+	ctx context.Context, client *core.Client, file core.DriveFile, resourceID string, multimodalEnabled bool, region core.Region,
 ) ([]*types.FetchedItem, error) {
-	if !isSupportedDocType(file.Type) {
+	if !core.IsSupportedDocType(file.Type) {
 		return nil, nil
 	}
 
-	editTime := parseFeishuTimestamp(file.ModifiedTime)
+	editTime := core.ParseFeishuTimestamp(file.ModifiedTime)
 	// Channel marks the knowledge "source" label. Drive uses its own channel
 	// (feishu_drive / lark_drive) so Drive docs show "飞书云盘" / "Lark 云盘"
 	// distinct from the wiki connector's "飞书".
@@ -379,15 +380,15 @@ func fetchDriveFileContent(
 
 	switch file.Type {
 	case "docx":
-		return fetchDocxWithBlocks(ctx, client, docxFetchInput{
-			docToken:          file.Token,
-			objToken:          file.Token,
-			title:             file.Name,
-			url:               file.URL,
-			resourceID:        resourceID,
-			editTime:          editTime,
-			baseMeta:          baseMeta,
-			multimodalEnabled: multimodalEnabled,
+		return core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+			DocToken:          file.Token,
+			ObjToken:          file.Token,
+			Title:             file.Name,
+			URL:               file.URL,
+			ResourceID:        resourceID,
+			EditTime:          editTime,
+			BaseMeta:          baseMeta,
+			MultimodalEnabled: multimodalEnabled,
 		})
 
 	case "doc", "sheet", "bitable":
@@ -396,11 +397,11 @@ func fetchDriveFileContent(
 			return nil, fmt.Errorf("export %s (%s): %w", file.Name, file.Type, err)
 		}
 
-		ext := exportFileExtToSuffix[objTypeToExportFileExtension[file.Type]]
+		ext := core.ExportFileExtToSuffix[core.ObjTypeToExportFileExtension[file.Type]]
 		if fileName == "" {
-			fileName = sanitizeFileName(file.Name) + ext
+			fileName = core.SanitizeFileName(file.Name) + ext
 		} else if !strings.HasSuffix(strings.ToLower(fileName), ext) {
-			fileName = sanitizeFileName(fileName) + ext
+			fileName = core.SanitizeFileName(fileName) + ext
 		}
 
 		return []*types.FetchedItem{{
@@ -445,19 +446,19 @@ func fetchDriveFileContent(
 
 // --- Helpers ---
 
-// makeDriveResourceID encodes a Drive resourceID: "folderToken" (root) or
-// "folderToken:fileToken" (child). Reuses feishuWikiNodeResourceSeparator.
+// makeDriveResourceID encodes a Drive ResourceID: "folderToken" (root) or
+// "folderToken:fileToken" (child). Reuses core.FeishuWikiNodeResourceSeparator.
 func makeDriveResourceID(rootFolderToken, fileToken string) string {
 	if fileToken == "" {
 		return rootFolderToken
 	}
-	return rootFolderToken + feishuWikiNodeResourceSeparator + fileToken
+	return rootFolderToken + core.FeishuWikiNodeResourceSeparator + fileToken
 }
 
 // parseDriveResourceID splits a Drive resourceID into (rootFolderToken, fileToken).
 // Mirrors parseWikiResourceID.
 func parseDriveResourceID(resourceID string) (rootFolderToken, fileToken string) {
-	rootFolderToken, fileToken, _ = strings.Cut(resourceID, feishuWikiNodeResourceSeparator)
+	rootFolderToken, fileToken, _ = strings.Cut(resourceID, core.FeishuWikiNodeResourceSeparator)
 	return rootFolderToken, fileToken
 }
 
@@ -476,8 +477,8 @@ func parseDriveResourceID(resourceID string) (rootFolderToken, fileToken string)
 // that sub-folder's subtree directly - ListDriveFilesRecursiveFrom accepts a
 // folder token, so no filtering is needed there.
 func listDriveFilesForResource(
-	ctx context.Context, client *Client, resourceID string,
-) ([]driveFile, error) {
+	ctx context.Context, client *core.Client, resourceID string,
+) ([]core.DriveFile, error) {
 	rootFolderToken, fileToken := parseDriveResourceID(resourceID)
 	if fileToken == "" {
 		return client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
@@ -491,7 +492,7 @@ func listDriveFilesForResource(
 	}
 	all, walkErr := client.ListDriveFilesRecursiveFrom(ctx, rootFolderToken)
 	if walkErr != nil {
-		var partialErr *partialDriveFileListError
+		var partialErr *core.PartialDriveFileListError
 		if !errors.As(walkErr, &partialErr) {
 			return nil, walkErr
 		}
@@ -512,8 +513,8 @@ func isDriveNotFolderError(err error) bool {
 }
 
 // filterDriveFileByToken returns only the entries whose Token matches token.
-func filterDriveFileByToken(files []driveFile, token string) []driveFile {
-	var out []driveFile
+func filterDriveFileByToken(files []core.DriveFile, token string) []core.DriveFile {
+	var out []core.DriveFile
 	for _, f := range files {
 		if f.Token == token {
 			out = append(out, f)
@@ -549,7 +550,7 @@ func (c *DriveConnector) driveFolderToResource(rootFolderToken, parentToken, fol
 		ExternalID:  rootFolderToken,
 		Name:        name,
 		Type:        "drive_folder",
-		URL:         c.region.driveFolderURL(folderToken),
+		URL:         c.region.DriveFolderURL(folderToken),
 		HasChildren: true,
 		Metadata: map[string]interface{}{
 			"folder_token": folderToken,
@@ -557,19 +558,19 @@ func (c *DriveConnector) driveFolderToResource(rootFolderToken, parentToken, fol
 	}
 }
 
-// driveFileToResource converts a driveFile (list result) into a picker Resource.
+// driveFileToResource converts a core.DriveFile (list result) into a picker Resource.
 // The ParentID must match the parent folder's ExternalID: the root folder's
 // ExternalID is the bare rootFolderToken (see driveFolderToResource), while any
 // sub-folder's ExternalID is "rootFolderToken:folderToken". Direct children of
 // the root have file.ParentToken == rootFolderToken, so their ParentID is the
 // bare rootFolderToken; deeper descendants use the encoded form.
-func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveFile) types.Resource {
+func (c *DriveConnector) driveFileToResource(rootFolderToken string, file core.DriveFile) types.Resource {
 	name := file.Name
 	if name == "" {
 		name = file.Token
 	}
 
-	modifiedAt := parseFeishuTimestamp(file.ModifiedTime)
+	modifiedAt := core.ParseFeishuTimestamp(file.ModifiedTime)
 
 	parentID := makeDriveResourceID(rootFolderToken, file.ParentToken)
 	if file.ParentToken == rootFolderToken || file.ParentToken == "" {
@@ -597,13 +598,13 @@ func (c *DriveConnector) driveFileToResource(rootFolderToken string, file driveF
 // appendDriveFileListFailureItems converts Drive listing failures into error
 // FetchedItems so the sync log surfaces which sub-folders could not be listed.
 // Mirrors appendWikiNodeListFailureItems.
-func appendDriveFileListFailureItems(items []types.FetchedItem, resourceID, channel string, failures []driveFileListFailure) []types.FetchedItem {
+func appendDriveFileListFailureItems(items []types.FetchedItem, resourceID, channel string, failures []core.DriveFileListFailure) []types.FetchedItem {
 	for _, failure := range failures {
 		items = append(items, types.FetchedItem{
 			ExternalID:       failure.FolderToken,
 			Title:            failure.FolderToken,
 			SourceResourceID: resourceID,
-			Metadata: feishuErrorItemMeta(failure.Err, map[string]string{
+			Metadata: core.FeishuErrorItemMeta(failure.Err, map[string]string{
 				"channel":       channel,
 				"folder_token":  failure.FolderToken,
 				"failure_stage": "list_children",
