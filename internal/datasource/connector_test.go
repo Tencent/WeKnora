@@ -15,3 +15,17 @@ func TestFeishuMetadataDoesNotAdvertiseWebhook(t *testing.T) {
 		}
 	}
 }
+
+func TestDingTalkMetadataAdvertisesImplementedCapabilities(t *testing.T) {
+	meta := ConnectorMetadataRegistry[types.ConnectorTypeDingTalk]
+	if meta.AuthType != "oauth2" {
+		t.Fatalf("DingTalk AuthType = %q", meta.AuthType)
+	}
+	want := map[string]bool{"incremental": true, "deletion_sync": true}
+	for _, capability := range meta.Capabilities {
+		delete(want, capability)
+	}
+	if len(want) != 0 {
+		t.Fatalf("DingTalk metadata is missing capabilities: %v", want)
+	}
+}

@@ -124,7 +124,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | ナレッジベースタイプ | FAQ / ドキュメント / Wiki、フォルダーインポート・URL インポート・複数タグ管理・オンライン入力 |
 | アップロード単位の解析設定 | アップロード確認ダイアログまたは `process_config` API でパーサー・チャンキング・マルチモーダル（VLM / ASR）・グラフ抽出・質問生成をバッチ単位で上書き；reparse 時も設定変更可能 |
 | 一括 reparse | 複数ドキュメントの解析を一度に再キュー、バッチ単位の `process_config` 対応 |
-| データソースインポート | Feishu / Notion / Yuque / RSS フィードの自動同期（他のデータソースも開発中）、増分・全量同期対応 |
+| データソースインポート | Feishu / DingTalk / Notion / Yuque / RSS フィードの自動同期（他のデータソースも開発中）、増分・全量同期対応 |
 | 文書フォーマット | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 画像 / CSV / Excel / PPT / JSON |
 | 検索戦略 | BM25 疎検索 / Dense 密検索 / GraphRAG グラフ強化 / 親子チャンキング / pgvector HNSW 加速（1024 次元）/ 多次元インデックス |
 | 一括選択 | KB リストでマーキー（ドラッグ）複数選択によるバッチ操作 |

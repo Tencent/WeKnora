@@ -216,10 +216,10 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,
 		Name:         "DingTalk (钉钉)",
-		Description:  "Sync documents and content from DingTalk",
+		Description:  "Sync online documents from DingTalk knowledge bases",
 		Priority:     7,
-		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,
