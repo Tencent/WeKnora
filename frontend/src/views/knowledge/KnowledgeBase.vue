@@ -442,6 +442,41 @@ const batchTagPreSelectedIds = computed(() => {
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
+// Computed: all failed document IDs in the current card list
+const failedDocIds = computed(() => {
+  return cardList.value
+    .filter((card) => card.parse_status === 'failed')
+    .map((card) => card.id);
+});
+
+// Select all failed documents for rebuilding
+const selectAllFailed = () => {
+  for (const id of failedDocIds.value) {
+    selectedIds.value.add(id);
+  }
+  batchMode.value = true;
+};
+
+// Rebuild all failed documents directly (without selecting them first)
+const rebuildAllFailed = async () => {
+  if (failedDocIds.value.length === 0) return;
+  if (batchReparsing.value) return;
+  batchReparsing.value = true;
+  try {
+    const res: any = await batchReparseKnowledge(kbId.value, failedDocIds.value);
+    if (res?.success) {
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: failedDocIds.value.length }));
+      applyOptimisticBatchReparse(failedDocIds.value);
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
+  } finally {
+    batchReparsing.value = false;
+  }
+};
+
 const applyOptimisticBatchReparse = (ids: string[]) => {
   const idSet = new Set(ids);
   for (const card of cardList.value) {
@@ -2289,6 +2324,15 @@ async function createNewSession(value: string): Promise<void> {
                     </template>
                   </t-date-range-picker>
                 </div>
+                <t-popconfirm v-if="canEdit && failedDocIds.length > 0" theme="warning"
+                  :content="t('knowledgeBase.confirmRebuildAllFailed', { count: failedDocIds.length })"
+                  :confirm-btn="{ content: t('knowledgeBase.confirmRebuildAllFailedBtn'), theme: 'warning' }"
+                  :cancel-btn="{ content: t('common.cancel') }" placement="bottom" @confirm="rebuildAllFailed">
+                  <t-button theme="danger" variant="outline" size="small" :loading="batchReparsing" @click.stop>
+                    <template #icon><t-icon name="refresh" size="14px" /></template>
+                    {{ t('knowledgeBase.rebuildAllFailed', { count: failedDocIds.length }) }}
+                  </t-button>
+                </t-popconfirm>
                 </div>
                 <div class="doc-filter-bar__trailing">
                   <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
