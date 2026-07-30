@@ -417,4 +417,16 @@ const handleKBEditorSuccess = (kbId: string) => {
 
     }
 }
+
+/* ============= Responsive creatChat ============= */
+@media (max-width: 767px) {
+  .creat-chat-container {
+    padding: 8px !important;
+  }
+
+  .creat-chat-container .agent-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+}
 </style>

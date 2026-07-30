@@ -757,4 +757,22 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     }
   }
 }
+
+/* ============= Responsive Document List ============= */
+@media (max-width: 767px) {
+  .doc-list-header {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .doc-list-header .search-section {
+    flex: 1 1 100% !important;
+  }
+
+  .doc-table :deep(th),
+  .doc-table :deep(td) {
+    padding: 6px 4px !important;
+    font-size: 12px !important;
+  }
+}
 </style>

@@ -4438,4 +4438,42 @@ async function createNewSession(value: string): Promise<void> {
 .del-card {
   vertical-align: middle;
 }
+
+/* ============= Responsive Knowledge Base Detail ============= */
+@media (max-width: 1023px) {
+  .kb-content {
+    padding: 0 8px !important;
+  }
+
+  .section-header h2 {
+    font-size: 18px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .kb-content {
+    padding: 0 4px !important;
+  }
+
+  .kb-detail-header {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .kb-detail-header .kb-info-section {
+    flex: 1 1 100% !important;
+  }
+
+  .section-header {
+    padding: 8px 0 !important;
+  }
+
+  .section-header h2 {
+    font-size: 16px !important;
+  }
+
+  .section-description {
+    font-size: 12px !important;
+  }
+}
 </style>

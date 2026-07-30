@@ -547,4 +547,37 @@ onBeforeUnmount(() => {
     line-height: 1.4;
   }
 }
+
+/* ============= Responsive List Space Sidebar ============= */
+@media (max-width: 1023px) {
+  .list-space-sidebar {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    padding: 4px 8px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--td-component-stroke);
+    min-height: auto !important;
+    gap: 4px !important;
+  }
+
+  .list-space-sidebar .icon-strip {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 4px !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+
+  .list-space-sidebar .icon-item-labeled {
+    padding: 6px 10px !important;
+    min-height: auto !important;
+    white-space: nowrap;
+  }
+
+  .list-space-sidebar .icon-item-labeled .icon-label {
+    opacity: 1 !important;
+  }
+}
 </style>

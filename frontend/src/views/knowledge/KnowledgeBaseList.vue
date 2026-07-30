@@ -3041,4 +3041,55 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
 }
+
+/* ============= Responsive Knowledge Base List ============= */
+@media (max-width: 1023px) {
+  .kb-list-container {
+    flex-direction: column !important;
+  }
+
+  .kb-list-content {
+    flex: 1;
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .header {
+    padding: 8px 0 !important;
+  }
+
+  .kb-card-wrap {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .kb-list-content {
+    padding: 0 4px !important;
+  }
+
+  .header-title h2 {
+    font-size: 18px !important;
+  }
+
+  .header-subtitle {
+    font-size: 12px !important;
+  }
+
+  .kb-card-wrap {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .kb-card {
+    padding: 12px !important;
+  }
+
+  .warning-banner {
+    margin: 8px 0 !important;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+}
 </style>

@@ -800,4 +800,29 @@ onUnmounted(() => {
     line-height: 1.6;
   }
 }
+
+/* ============= Responsive Settings ============= */
+@media (max-width: 1023px) {
+  .settings-modal {
+    width: 90vw !important;
+    max-width: 90vw !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .settings-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    left: 0 !important;
+  }
+
+  .settings-content .section-header h2 {
+    font-size: 16px !important;
+  }
+}
 </style>

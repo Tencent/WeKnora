@@ -1895,5 +1895,26 @@ watch(
     font-weight: 500;
   }
 }
+
+/* ============= Responsive KB Editor Modal ============= */
+@media (max-width: 1023px) {
+  .settings-modal {
+    width: 90vw !important;
+    max-width: 90vw !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .settings-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+  }
+}
 </style>
 

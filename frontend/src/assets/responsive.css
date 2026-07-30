@@ -1,0 +1,154 @@
+/* ============= Responsive Breakpoints ============= */
+/* PC/Desktop: >= 1024px | Tablet: 768~1023px | Mobile: <768px (430×932) */
+
+/* Safe area */
+@supports (padding-top: env(safe-area-inset-top)) {
+  body {
+    --safe-area-top: env(safe-area-inset-top);
+    --safe-area-bottom: env(safe-area-inset-bottom);
+    --safe-area-left: env(safe-area-inset-left);
+    --safe-area-right: env(safe-area-inset-right);
+  }
+}
+
+/* ===== Mobile (< 768px, e.g. 430×932) ===== */
+@media (max-width: 767px) {
+  body, html, #app { font-size: 13px; overflow-x: hidden; }
+
+  /* Sidebar: hidden when collapsed */
+  .aside_box { display: none !important; }
+
+  /* Sidebar: drawer when expanded */
+  .aside_box.aside_box--mobile {
+    display: flex !important;
+    position: fixed !important;
+    left: 0 !important; top: 0 !important; bottom: 0 !important;
+    z-index: 1001 !important;
+    width: 280px !important; min-width: 280px !important;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
+  }
+
+  .sidebar-overlay {
+    display: block !important;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4); z-index: 1000;
+  }
+
+  .mobile-hamburger {
+    display: flex !important;
+    position: fixed; top: 12px; left: 12px; z-index: 100;
+    width: 40px; height: 40px; border-radius: 10px;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-component-stroke);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    cursor: pointer; align-items: center; justify-content: center;
+    color: var(--td-text-color-primary);
+  }
+  .mobile-hamburger:hover { background: var(--td-bg-color-container-hover); }
+
+  /* Main layout */
+  .main { min-width: 0 !important; width: 100%; }
+  .platform-route-outlet { width: 100%; min-width: 0; overflow: hidden; }
+  .chat { width: 100%; min-width: 0; }
+
+  /* Chat view */
+  .chat_scroll_box { padding: 0 4px !important; width: 100% !important; }
+  .input-container { max-width: 100% !important; width: 100% !important; padding: 0 4px 12px !important; min-height: auto !important; }
+  .msg_list { max-width: 100% !important; width: 100% !important; padding: 0 !important; gap: 12px !important; }
+  .msg-skeleton-list { max-width: 100% !important; }
+
+  /* KB List */
+  .kb-list-container { flex-direction: column !important; width: 100% !important; }
+  .kb-list-content { width: 100% !important; min-width: 0 !important; padding: 0 4px !important; }
+  .kb-card-wrap { grid-template-columns: 1fr !important; gap: 8px !important; }
+  .kb-card { padding: 12px !important; }
+  .header-title h2 { font-size: 18px !important; }
+  .header-subtitle { font-size: 12px !important; }
+  .warning-banner { margin: 8px 0 !important; padding: 8px 12px !important; font-size: 12px !important; }
+
+  /* KB Detail */
+  .kb-content { padding: 0 4px !important; width: 100% !important; min-width: 0 !important; }
+  .kb-detail-header { flex-wrap: wrap !important; gap: 8px !important; }
+  .kb-detail-header .kb-info-section { flex: 1 1 100% !important; }
+  .section-header { padding: 8px 0 !important; }
+  .section-header h2 { font-size: 16px !important; }
+  .section-description { font-size: 12px !important; }
+
+  /* ListSpaceSidebar (secondary) */
+  .list-space-sidebar {
+    display: flex !important; flex-direction: row !important;
+    width: 100% !important; max-width: 100% !important;
+    overflow-x: auto !important; padding: 4px 8px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--td-component-stroke);
+    min-height: auto !important; gap: 4px !important;
+  }
+  .list-space-sidebar .icon-strip {
+    display: flex !important; flex-direction: row !important;
+    gap: 4px !important; width: 100% !important; padding: 0 !important;
+  }
+  .list-space-sidebar .icon-item-labeled { padding: 6px 10px !important; min-height: auto !important; white-space: nowrap; }
+  .list-space-sidebar .icon-item-labeled .icon-label { opacity: 1 !important; }
+
+  /* Settings modal */
+  .settings-modal {
+    width: 100vw !important; max-width: 100vw !important;
+    height: 100vh !important; max-height: 100vh !important;
+    border-radius: 0 !important; top: 0 !important; left: 0 !important;
+    transform: none !important;
+  }
+  .settings-content .section-header h2 { font-size: 16px !important; }
+
+  /* Document List */
+  .doc-list-header { flex-wrap: wrap !important; gap: 8px !important; }
+  .doc-list-header .search-section { flex: 1 1 100% !important; }
+
+  /* KB Editor Modal */
+  .kb-editor-modal, .settings-modal {
+    width: 100vw !important; max-width: 100vw !important;
+    height: 100vh !important; max-height: 100vh !important;
+    border-radius: 0 !important; top: 0 !important; left: 0 !important;
+    transform: none !important;
+  }
+
+  /* Send message */
+  .send-message { padding: 8px !important; }
+  .send-message .input-area { min-height: 40px !important; }
+  .send-message .toolbar { gap: 4px !important; }
+  .send-message .toolbar .tool-btn { width: 28px !important; height: 28px !important; }
+
+  /* creatChat */
+  .creat-chat-container { padding: 8px !important; }
+  .creat-chat-container .agent-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+
+  /* TDesign overrides */
+  .t-dialog {
+    width: 100vw !important; max-width: 100vw !important;
+    margin: 0 !important; border-radius: 0 !important;
+    height: 100vh !important; max-height: 100vh !important;
+  }
+  .t-dialog__body { max-height: calc(100vh - 120px); overflow-y: auto; }
+  .t-drawer { width: 100vw !important; max-width: 100vw !important; }
+  .t-select__wrap, .t-cascader__wrap { max-width: 100% !important; }
+  .t-table__content { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .t-card { border-radius: 6px !important; }
+  .t-form__item { margin-bottom: 12px !important; }
+
+  /* Touch */
+  * { -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  /* Login page */
+  .login-layout .showcase-section { display: none !important; }
+  .login-layout .form-section { width: 100% !important; padding: 24px 16px !important; }
+  .login-layout .form-card { padding: 24px 16px !important; }
+  .login-layout .header-logo { top: 12px !important; left: 12px !important; }
+  .login-layout .header-logo .logo-image { width: 70px !important; }
+}
+
+/* ===== Tablet (768px ~ 1023px) ===== */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .main { min-width: 0 !important; }
+  .platform-route-outlet { margin-left: 0 !important; }
+  .t-dialog { width: 80vw !important; max-width: 80vw !important; }
+}

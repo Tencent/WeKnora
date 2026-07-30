@@ -1124,4 +1124,47 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-leave-to {
     opacity: 0;
 }
+
+/* ============= Responsive Chat View ============= */
+@media (max-width: 1023px) {
+  .chat_scroll_box {
+    padding: 0 12px !important;
+  }
+
+  .input-container {
+    padding: 0 12px !important;
+    max-width: 100% !important;
+  }
+
+  .msg_list {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+
+  .msg-item-wrapper {
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .chat_scroll_box {
+    padding: 0 8px !important;
+  }
+
+  .input-container {
+    padding: 0 8px 12px !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+  }
+
+  .msg_list {
+    max-width: 100% !important;
+    gap: 12px !important;
+  }
+
+  .msg-skeleton-list {
+    max-width: 100% !important;
+  }
+}
+
 </style>

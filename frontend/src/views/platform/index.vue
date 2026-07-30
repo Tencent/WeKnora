@@ -295,4 +295,22 @@ img {
     -o-user-drag: none;
     user-drag: none;
 }
+
+/* Responsive Platform Layout */
+@media (max-width: 1023px) {
+  .main {
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .main {
+    min-width: 0 !important;
+    flex-direction: column;
+  }
+
+  .platform-route-outlet {
+    overflow: visible;
+  }
+}
 </style>

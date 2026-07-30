@@ -2650,4 +2650,41 @@ defineExpose({
     transform: translateX(100%);
   }
 }
-</style>
+
+/* ===== Mobile & Tablet responsive ===== */
+@media (max-width: 1023px) {
+  .agent-list-container {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+  .agent-list-content {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 12px 0 0 12px !important;
+  }
+  .agent-list-main {
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+  .agent-card-wrap {
+    gap: 8px !important;
+  }
+}
+@media (max-width: 767px) {
+  .agent-list-content {
+    padding: 8px 0 0 4px !important;
+  }
+  .header-title h2 {
+    font-size: 18px !important;
+  }
+  .header-subtitle {
+    font-size: 12px !important;
+  }
+  .agent-card-wrap {
+    gap: 8px !important;
+  }
+  .agent-card {
+    padding: 12px !important;
+  }
+}</style>

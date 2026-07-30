@@ -1,5 +1,15 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <!-- Mobile overlay -->
+    <div v-if="isSmallScreen && !uiStore.sidebarCollapsed" class="sidebar-overlay" @click="uiStore.collapseSidebar"></div>
+    <!-- Mobile hamburger button -->
+    <div v-if="isSmallScreen" class="mobile-hamburger" @click="uiStore.expandSidebar">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </div>
+    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--mobile': isSmallScreen && !uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
@@ -79,7 +89,7 @@
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
-                    <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
+                    <div @click="handleNavClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
@@ -1144,6 +1154,39 @@ const mouseenteMenu = (path: string) => {
 const mouseleaveMenu = (path: string) => {
 }
 
+// Responsive: track viewport width
+const isMobile = ref(window.innerWidth < 768)
+const isTablet = ref(window.innerWidth >= 768 && window.innerWidth < 1024)
+const isSmallScreen = ref(window.innerWidth < 1024)
+
+const handleResize = () => {
+  const w = window.innerWidth
+  isMobile.value = w < 768
+  isTablet.value = w >= 768 && w < 1024
+  isSmallScreen.value = w < 1024
+  // Auto-collapse sidebar on small screens
+  if (isSmallScreen.value && !uiStore.sidebarCollapsed) {
+    uiStore.collapseSidebar()
+  }
+}
+
+// Close sidebar on mobile when clicking a menu item
+const handleNavClick = (path: string) => {
+  if (isSmallScreen.value) {
+    uiStore.collapseSidebar()
+  }
+  handleMenuClick(path)
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  handleResize()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
+
 const onDragHandleMouseDown = (e: MouseEvent) => {
     e.preventDefault()
     const startX = e.clientX
@@ -2048,4 +2091,35 @@ html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon img.icon {
         border-color: var(--td-error-color);
     }
 }
-</style>
+
+/* ============= Responsive Sidebar Styles ============= */
+.mobile-hamburger {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-primary);
+  transition: background 0.2s ease;
+}
+
+.mobile-hamburger:hover {
+  background: var(--td-bg-color-container-hover);
+}
+
+/* Responsive: mobile uses global responsive.css; keep minimal overrides here */
+@media (max-width: 1023px) {
+  .mobile-hamburger { display: flex; }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .aside_box.aside_box--collapsed { position: static !important; transform: none !important; box-shadow: none !important; }
+}</style>
