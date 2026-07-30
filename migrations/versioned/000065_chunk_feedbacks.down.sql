@@ -12,4 +12,3 @@ ALTER TABLE chunks DROP COLUMN IF EXISTS recall_weight;
 ALTER TABLE chunks DROP COLUMN IF EXISTS positive_rate;
 ALTER TABLE chunks DROP COLUMN IF EXISTS dislike_count;
 ALTER TABLE chunks DROP COLUMN IF EXISTS like_count;
-

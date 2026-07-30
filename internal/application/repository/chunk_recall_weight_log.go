@@ -35,4 +35,3 @@ func (r *chunkRecallWeightLogRepository) ListByChunkID(ctx context.Context, tena
 		Find(&list).Error
 	return list, err
 }
-

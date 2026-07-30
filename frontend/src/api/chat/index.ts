@@ -96,4 +96,3 @@ export async function setMessageFeedback(data: {
 export async function cancelMessageFeedback(session_id: string, message_id: string) {
   return del(`/api/v1/messages/${session_id}/${message_id}/feedback`);
 }
-

@@ -54,4 +54,3 @@ CREATE TABLE IF NOT EXISTS chunk_recall_weight_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunk_recall_weight_logs_chunk_id ON chunk_recall_weight_logs(chunk_id, created_at DESC);
-

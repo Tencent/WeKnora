@@ -24,14 +24,13 @@ var (
 )
 
 type chunkFeedbackService struct {
-	db                     *gorm.DB
-	systemSettingService   interfaces.SystemSettingService
+	db                   *gorm.DB
+	systemSettingService interfaces.SystemSettingService
 }
 
 func NewChunkFeedbackService(db *gorm.DB, systemSettingService interfaces.SystemSettingService) interfaces.ChunkFeedbackService {
 	return &chunkFeedbackService{db: db, systemSettingService: systemSettingService}
 }
-
 
 func (s *chunkFeedbackService) getThresholdRate(ctx context.Context, key string, defaultVal float64) float64 {
 	if s.systemSettingService == nil {

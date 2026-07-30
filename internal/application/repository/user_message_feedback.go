@@ -46,4 +46,3 @@ func (r *userMessageFeedbackRepository) DeleteByUserMessage(ctx context.Context,
 		Where("tenant_id = ? AND user_id = ? AND message_id = ?", tenantID, userID, messageID).
 		Delete(&types.UserMessageFeedback{}).Error
 }
-

@@ -37,4 +37,3 @@ func (r *messageChunkRefRepository) ListChunkIDsByMessage(ctx context.Context, t
 		Pluck("chunk_id", &ids).Error
 	return ids, err
 }
-

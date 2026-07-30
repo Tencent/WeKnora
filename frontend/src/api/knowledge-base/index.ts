@@ -603,4 +603,3 @@ export function resetChunkFeedback(knowledgeBaseId: string, chunkId: string) {
 export function updateChunkWeight(knowledgeBaseId: string, chunkId: string, weight: number) {
   return put(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/weight`, { weight });
 }
-
