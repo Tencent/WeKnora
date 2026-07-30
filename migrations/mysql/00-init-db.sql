@@ -1,27 +1,27 @@
-DROP TABLE IF EXISTS tenants;
-DROP TABLE IF EXISTS models;
-DROP TABLE IF EXISTS knowledge_bases;
-DROP TABLE IF EXISTS knowledges;
-DROP TABLE IF EXISTS sessions;
-DROP TABLE IF EXISTS messages;
-DROP TABLE IF EXISTS chunks;
-
-CREATE TABLE tenants (
+-- WeKnora MySQL 完整初始化脚本 (MySQL 8.0+)
+-- ============================================================================
+-- 覆盖全部 PostgreSQL migrations 000000–000079，适配 MySQL 语法
+-- JSONB→JSON, SERIAL→BIGINT AUTO_INCREMENT, BOOLEAN→TINYINT(1)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS tenants (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    retriever_engines JSON NOT NULL,
+    api_key VARCHAR(64) NOT NULL,
+    retriever_engines JSON NOT NULL DEFAULT ('[]'),
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,
     storage_quota BIGINT NOT NULL DEFAULT 10737418240,
     storage_used BIGINT NOT NULL DEFAULT 0,
-    agent_config JSON DEFAULT NULL COMMENT 'Tenant-level agent configuration in JSON format',
+    agent_config JSON DEFAULT NULL,
+    context_config JSON DEFAULT NULL,
+    conversation_config JSON DEFAULT NULL,
+    web_search_config JSON DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=10000;
-
-CREATE TABLE models (
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci AUTO_INCREMENT=10000;
+CREATE TABLE IF NOT EXISTS models (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -30,16 +30,39 @@ CREATE TABLE models (
     source VARCHAR(50) NOT NULL,
     description TEXT,
     parameters JSON NOT NULL,
-    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_default TINYINT(1) NOT NULL DEFAULT 0,
     status VARCHAR(50) NOT NULL DEFAULT 'active',
+    is_builtin TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;  
-
-CREATE INDEX idx_models_tenant_source_type ON models(tenant_id, source, type);
-
-CREATE TABLE knowledge_bases (
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(36) PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    avatar VARCHAR(500),
+    tenant_id INT,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    can_access_all_tenants TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY uk_users_username (username),
+    UNIQUE KEY uk_users_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    token TEXT NOT NULL,
+    token_type VARCHAR(50) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    is_revoked TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS knowledge_bases (
     id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -48,18 +71,21 @@ CREATE TABLE knowledge_bases (
     image_processing_config JSON NOT NULL,
     embedding_model_id VARCHAR(64) NOT NULL,
     summary_model_id VARCHAR(64) NOT NULL,
-    rerank_model_id VARCHAR(64) NOT NULL,
     cos_config JSON NOT NULL,
     vlm_config JSON NOT NULL,
     extract_config JSON NULL,
+    is_temporary TINYINT(1) NOT NULL DEFAULT 0,
+    type VARCHAR(32) NOT NULL DEFAULT 'document',
+    faq_config JSON NULL,
+    question_generation_config JSON NULL,
+    storage_provider_config JSON NULL,
+    vector_store_id VARCHAR(36),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_knowledge_bases_tenant_name ON knowledge_bases(tenant_id, name);
-
-CREATE TABLE knowledges (
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_kb_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
@@ -77,112 +103,70 @@ CREATE TABLE knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata JSON,
+    tag_id VARCHAR(36),
+    summary_status VARCHAR(32) DEFAULT 'none',
     custom_metadata JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL DEFAULT NULL,
+    error_message TEXT,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    processed_at TIMESTAMP,
-    error_message TEXT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
-
-CREATE TABLE sessions (
+    INDEX idx_k_tenant_base (tenant_id, knowledge_base_id),
+    INDEX idx_k_parse_status (parse_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS sessions (
     id VARCHAR(36) PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
+    tenant_id INT NOT NULL,
     title VARCHAR(255),
     description TEXT,
     knowledge_base_id VARCHAR(36),
     max_rounds INT NOT NULL DEFAULT 5,
-    enable_rewrite BOOLEAN NOT NULL DEFAULT TRUE,
+    enable_rewrite TINYINT(1) NOT NULL DEFAULT 1,
     fallback_strategy VARCHAR(255) NOT NULL DEFAULT 'fixed',
-    fallback_response VARCHAR(255) NOT NULL DEFAULT '很抱歉，我暂时无法回答这个问题。',
+    fallback_response TEXT NOT NULL,
     keyword_threshold FLOAT NOT NULL DEFAULT 0.5,
     vector_threshold FLOAT NOT NULL DEFAULT 0.5,
     rerank_model_id VARCHAR(64),
-    embedding_top_k INTEGER NOT NULL DEFAULT 10,
-    rerank_top_k INTEGER NOT NULL DEFAULT 10,
+    embedding_top_k INT NOT NULL DEFAULT 10,
+    rerank_top_k INT NOT NULL DEFAULT 10,
     rerank_threshold FLOAT NOT NULL DEFAULT 0.65,
     summary_model_id VARCHAR(64),
     summary_parameters JSON NOT NULL,
-    agent_config JSON DEFAULT NULL COMMENT 'Session-level agent configuration in JSON format',
-    context_config JSON DEFAULT NULL COMMENT 'LLM context management configuration (separate from message storage)',
+    agent_config JSON DEFAULT NULL,
+    context_config JSON DEFAULT NULL,
+    user_id VARCHAR(36),
+    is_pinned TINYINT(1) NOT NULL DEFAULT 0,
+    pinned_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_sessions_tenant_id ON sessions(tenant_id);
-
-CREATE TABLE messages (
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_s_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(36) PRIMARY KEY,
     request_id VARCHAR(36) NOT NULL,
     session_id VARCHAR(36) NOT NULL,
     role VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
     knowledge_references JSON NOT NULL,
-    agent_steps JSON DEFAULT NULL COMMENT 'Agent execution steps (reasoning process and tool calls)',
-    is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+    agent_steps JSON DEFAULT NULL,
+    is_completed TINYINT(1) NOT NULL DEFAULT 0,
     agent_id VARCHAR(36) NOT NULL DEFAULT '',
-    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    agent_tenant_id INT NOT NULL DEFAULT 0,
     model_id VARCHAR(64) NOT NULL DEFAULT '',
     execution_context JSON NOT NULL,
+    rendered_content TEXT,
+    channel_type VARCHAR(32),
+    images JSON,
+    knowledge_id VARCHAR(36),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_messages_session_role ON messages(session_id, role); 
-CREATE INDEX idx_messages_agent_id ON messages(agent_id);
-
-CREATE TABLE message_suggestion_sets (
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_m_session (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
-    session_id VARCHAR(36) NOT NULL,
-    assistant_message_id VARCHAR(36) NOT NULL,
-    agent_id VARCHAR(36) NOT NULL DEFAULT '',
-    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
-    placement VARCHAR(32) NOT NULL,
-    config_hash VARCHAR(64) NOT NULL,
-    locale VARCHAR(16) NOT NULL DEFAULT '',
-    status VARCHAR(16) NOT NULL,
-    allow_regenerate BOOLEAN NOT NULL DEFAULT FALSE,
-    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
-    questions JSON NOT NULL,
-    model_id VARCHAR(64) NOT NULL DEFAULT '',
-    prompt_tokens INTEGER NOT NULL DEFAULT 0,
-    completion_tokens INTEGER NOT NULL DEFAULT 0,
-    latency_ms BIGINT NOT NULL DEFAULT 0,
-    error_code VARCHAR(64) NOT NULL DEFAULT '',
-    lease_until TIMESTAMP NULL DEFAULT NULL,
-    generated_at TIMESTAMP NULL DEFAULT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY idx_message_suggestion_sets_cache_key
-        (tenant_id, assistant_message_id, placement, config_hash, locale),
-    KEY idx_message_suggestion_sets_session (tenant_id, session_id, created_at),
-    KEY idx_message_suggestion_sets_status (status, lease_until)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE message_suggestion_events (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
-    session_id VARCHAR(36) NOT NULL,
-    suggestion_set_id VARCHAR(36) NOT NULL,
-    question_id VARCHAR(64) NOT NULL DEFAULT '',
-    event_type VARCHAR(32) NOT NULL,
-    actor_id VARCHAR(512) NOT NULL DEFAULT '',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    KEY idx_message_suggestion_events_set (suggestion_set_id, created_at),
-    KEY idx_message_suggestion_events_session (tenant_id, session_id, created_at),
-    KEY idx_message_suggestion_events_type (event_type, created_at),
-    CONSTRAINT fk_message_suggestion_events_set
-        FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE chunks (
-    id VARCHAR(36) PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
+    tenant_id INT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     content TEXT NOT NULL,
@@ -191,10 +175,10 @@ CREATE TABLE chunks (
     index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
     last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
     context_header TEXT NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    start_at INTEGER NOT NULL,
-    end_at INTEGER NOT NULL,
+    chunk_index INT NOT NULL,
+    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    start_at INT NOT NULL,
+    end_at INT NOT NULL,
     pre_chunk_id VARCHAR(36),
     next_chunk_id VARCHAR(36),
     chunk_type VARCHAR(20) NOT NULL DEFAULT 'text',
@@ -202,16 +186,19 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    metadata JSON,
+    tag_id VARCHAR(36),
+    status INT NOT NULL DEFAULT 0,
+    content_hash VARCHAR(64),
+    flags INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
-CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
-CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
-
-CREATE TABLE chunk_revisions (
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_c_tenant_knowledge (tenant_id, knowledge_id),
+    INDEX idx_c_parent (parent_chunk_id),
+    INDEX idx_c_type (chunk_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS chunk_revisions (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
@@ -219,11 +206,259 @@ CREATE TABLE chunk_revisions (
     chunk_id VARCHAR(36) NOT NULL,
     revision INT NOT NULL,
     content TEXT NOT NULL,
-    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
     editor_id VARCHAR(64) NOT NULL DEFAULT '',
     edit_source VARCHAR(16) NOT NULL DEFAULT 'user',
     edited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY idx_chunk_revisions_chunk_revision (chunk_id, revision),
-    KEY idx_chunk_revisions_tenant_chunk (tenant_id, chunk_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    UNIQUE KEY uk_cr_chunk_rev (chunk_id, revision)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS knowledge_tags (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    color VARCHAR(32),
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY uk_kt_kb_name (tenant_id, knowledge_base_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS mcp_services (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    enabled TINYINT(1) DEFAULT 1,
+    transport_type VARCHAR(50) NOT NULL,
+    url VARCHAR(512),
+    headers JSON,
+    auth_config JSON,
+    advanced_config JSON,
+    stdio_config JSON,
+    env_vars JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_mcp_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS message_suggestion_sets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    assistant_message_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INT NOT NULL DEFAULT 0,
+    placement VARCHAR(32) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL,
+    allow_regenerate TINYINT(1) NOT NULL DEFAULT 0,
+    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
+    questions JSON NOT NULL,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_tokens INT NOT NULL DEFAULT 0,
+    completion_tokens INT NOT NULL DEFAULT 0,
+    latency_ms BIGINT NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMP NULL DEFAULT NULL,
+    generated_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_mss_cache (tenant_id, assistant_message_id, placement, config_hash, locale),
+    INDEX idx_mss_session (tenant_id, session_id, created_at),
+    INDEX idx_mss_status (status, lease_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS message_suggestion_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    suggestion_set_id VARCHAR(36) NOT NULL,
+    question_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_type VARCHAR(32) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_mse_set (suggestion_set_id, created_at),
+    INDEX idx_mse_session (tenant_id, session_id, created_at),
+    INDEX idx_mse_type (event_type, created_at),
+    CONSTRAINT fk_mse_set FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS vector_stores (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    engine_type VARCHAR(50) NOT NULL,
+    connection_config JSON,
+    index_config JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- MySQL 向量存储表 (BLOB 存储 embedding，Go 端余弦相似度)
+CREATE TABLE IF NOT EXISTS mysql_embeddings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    source_id VARCHAR(64) NOT NULL,
+    source_type INT NOT NULL,
+    chunk_id VARCHAR(64),
+    knowledge_id VARCHAR(64),
+    knowledge_base_id VARCHAR(64),
+    tag_id VARCHAR(36),
+    content TEXT,
+    dimension INT NOT NULL,
+    embedding LONGBLOB,
+    is_enabled TINYINT(1) DEFAULT 1,
+    UNIQUE KEY uk_mysql_emb_source (source_id, source_type),
+    INDEX idx_mysql_emb_chunk (chunk_id),
+    INDEX idx_mysql_emb_knowledge (knowledge_id),
+    INDEX idx_mysql_emb_kb (knowledge_base_id),
+    INDEX idx_mysql_emb_enabled (is_enabled),
+    FULLTEXT INDEX ft_mysql_emb_content (content) WITH PARSER ngram
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS web_search_providers (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    provider_type VARCHAR(50) NOT NULL,
+    api_key VARCHAR(512),
+    config JSON,
+    is_enabled TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_wsp_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS data_sources (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    source_type VARCHAR(50) NOT NULL,
+    config JSON,
+    sync_schedule VARCHAR(100),
+    is_enabled TINYINT(1) DEFAULT 1,
+    last_sync_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_ds_tenant_kb (tenant_id, knowledge_base_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS tenant_members (
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id INT NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'member',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS tenant_invitations (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    role VARCHAR(50) NOT NULL DEFAULT 'member',
+    invited_by VARCHAR(36),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    expires_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_ti_tenant (tenant_id),
+    INDEX idx_ti_token (token)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS organizations (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    owner_id VARCHAR(36),
+    tenant_id INT,
+    invite_code VARCHAR(36) UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS user_kb_pins (
+    user_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, knowledge_base_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS user_resource_favorites (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    resource_type VARCHAR(50) NOT NULL,
+    resource_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_urf_user_res (user_id, resource_type, resource_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    user_id VARCHAR(36),
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(50),
+    resource_id VARCHAR(36),
+    detail JSON,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_al_tenant_time (tenant_id, created_at),
+    INDEX idx_al_user (user_id),
+    INDEX idx_al_action (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS embed_channels (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    name VARCHAR(255),
+    channel_key VARCHAR(64) NOT NULL UNIQUE,
+    rate_limit INT DEFAULT 100,
+    style_config JSON,
+    is_enabled TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_ec_tenant (tenant_id),
+    INDEX idx_ec_key (channel_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS temporary_documents (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    file_name VARCHAR(255),
+    file_type VARCHAR(50),
+    file_size BIGINT,
+    content TEXT,
+    parse_status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    INDEX idx_td_session (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS custom_agents (
+    id VARCHAR(36) NOT NULL,
+    tenant_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    agent_type VARCHAR(50) NOT NULL DEFAULT 'custom',
+    config JSON,
+    is_default TINYINT(1) DEFAULT 0,
+    is_active TINYINT(1) DEFAULT 1,
+    creator_id VARCHAR(36),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id, tenant_id),
+    INDEX idx_ca_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36),
+    name VARCHAR(255) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_kf_kb (tenant_id, knowledge_base_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
