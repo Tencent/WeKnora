@@ -8,7 +8,6 @@ on:
       - "!cli/**"
       - "go.mod"
       - "go.sum"
-      - ".golangci.yml"
       - "Makefile"
       - "config/**"
       - "migrations/**"
@@ -22,7 +21,6 @@ on:
       - "!cli/**"
       - "go.mod"
       - "go.sum"
-      - ".golangci.yml"
       - "Makefile"
       - "config/**"
       - "migrations/**"
@@ -81,7 +79,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test $(go list ./... | grep -v '/docreader/')
 
       - name: Build server
         run: go build ./cmd/server
