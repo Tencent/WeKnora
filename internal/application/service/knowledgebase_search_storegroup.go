@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -11,6 +12,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+// storeResolveBudget caps the time a single search spends resolving the
+// engines for its store groups. Resolution is sequential and can rebuild a
+// missing engine, so the worst case is one build timeout per distinct store;
+// this bounds the total rather than the individual attempt.
+const storeResolveBudget = 12 * time.Second
 
 // storeGroup is one fan-out unit of HybridSearch: a set of KB IDs that share
 // the same (VectorStore, owning tenant) pair.
@@ -97,6 +104,15 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 		buckets[key] = append(buckets[key], kb)
 	}
 
+	// Resolving a group can rebuild a missing store engine, which dials a
+	// backend. Those rebuilds happen one after another here, and this server
+	// sets no read or write timeout, so a search across several cold stores
+	// would otherwise have nothing bounding it. The rebuild itself is detached
+	// from this context, so an exhausted budget still leaves the engines
+	// warming and the next search finds them ready.
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, storeResolveBudget)
+	defer cancelResolve()
+
 	groups := make([]*storeGroup, 0, len(buckets))
 	for key, groupKBs := range buckets {
 		var storeIDPtr *string
@@ -105,7 +121,7 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 			storeIDPtr = &sid
 		}
 		engine, err := retriever.CreateRetrieveEngineForKB(
-			ctx, s.retrieveEngine, s.ownership, key.tenantID, storeIDPtr)
+			resolveCtx, s.retrieveEngine, s.ownership, key.tenantID, storeIDPtr)
 		if err != nil {
 			return nil, classifyFactoryError(ctx, err, key.tenantID, key.storeID)
 		}
@@ -146,7 +162,17 @@ func classifyFactoryError(
 	case errors.Is(err, retriever.ErrVectorStoreForbidden):
 		return apperrors.NewVectorStoreBindingInvalidError(
 			"vector store bound to the knowledge base is not available")
+	case errors.Is(err, retriever.ErrVectorStoreUnavailable):
+		return apperrors.NewVectorStoreUnavailableError(
+			"vector store is currently unavailable")
 	case errors.Is(err, retriever.ErrVectorStoreNotFound):
+		return apperrors.NewVectorStoreUnavailableError(
+			"vector store is currently unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		// Resolving the store ran out of time, which can happen while its
+		// engine is being rebuilt. The binding is fine and a retry may work,
+		// so report it as unavailable rather than letting it fall through as
+		// an internal error.
 		return apperrors.NewVectorStoreUnavailableError(
 			"vector store is currently unavailable")
 	case errors.Is(err, retriever.ErrTenantInfoMissing):

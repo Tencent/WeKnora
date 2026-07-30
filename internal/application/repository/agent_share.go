@@ -209,3 +209,33 @@ func (r *agentShareRepository) GetShareByAgentIDForTenant(ctx context.Context, t
 	}
 	return &share, nil
 }
+
+// GetShareByAgentIDAndSourceForTenant validates an exact source selector
+// against organization membership. This avoids loading every shared agent and
+// makes same-ID builtins from multiple workspaces deterministic.
+func (r *agentShareRepository) GetShareByAgentIDAndSourceForTenant(
+	ctx context.Context,
+	tenantID uint64,
+	agentID string,
+	sourceTenantID uint64,
+) (*types.AgentShare, error) {
+	var share types.AgentShare
+	tx := r.db.WithContext(ctx).
+		Joins("JOIN organization_tenant_members otm ON otm.organization_id = agent_shares.organization_id").
+		Joins("JOIN organizations ON organizations.id = agent_shares.organization_id AND organizations.deleted_at IS NULL").
+		Joins("JOIN custom_agents ON custom_agents.id = agent_shares.agent_id AND custom_agents.tenant_id = agent_shares.source_tenant_id AND custom_agents.deleted_at IS NULL").
+		Where("agent_shares.agent_id = ?", agentID).
+		Where("agent_shares.source_tenant_id = ?", sourceTenantID).
+		Where("otm.tenant_id = ?", tenantID).
+		Where("agent_shares.deleted_at IS NULL").
+		Order("agent_shares.id").
+		Limit(1).
+		Find(&share)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return nil, ErrAgentShareNotFound
+	}
+	return &share, nil
+}

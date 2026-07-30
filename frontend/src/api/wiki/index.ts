@@ -30,6 +30,10 @@ export interface WikiPage {
   out_links: string[];
   page_metadata: Record<string, any>;
   version: number;
+  // Author kind of the current version: 'pipeline' | 'agent' | 'user' |
+  // 'revert'. Empty/missing on legacy rows (treat as 'pipeline').
+  last_edit_source?: string;
+  last_editor_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -177,12 +181,76 @@ export function getWikiPage(kbId: string, slug: string) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`);
 }
 
-export function updateWikiPage(kbId: string, slug: string, data: Partial<WikiPage>) {
+// WikiPageUpdatePayload is a partial update: absent fields keep their stored
+// value. `version` is the optimistic-lock guard — send the version the page
+// had when the user started editing; the backend answers 409 (with
+// `current_version` in the body) when someone else edited in between.
+export interface WikiPageUpdatePayload {
+  title?: string;
+  content?: string;
+  summary?: string;
+  page_type?: string;
+  status?: string;
+  aliases?: string[];
+  version?: number;
+}
+
+export function updateWikiPage(kbId: string, slug: string, data: WikiPageUpdatePayload) {
   return put(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`, data);
 }
 
 export function deleteWikiPage(kbId: string, slug: string) {
   return del(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`);
+}
+
+// WikiPageRevision is one immutable snapshot of a superseded page version.
+// `content` is only populated when fetching a single revision.
+export interface WikiPageRevision {
+  id: string;
+  tenant_id: number;
+  knowledge_base_id: string;
+  page_id: string;
+  slug: string;
+  version: number;
+  title: string;
+  page_type: string;
+  status: string;
+  content?: string;
+  summary: string;
+  aliases: string[];
+  edit_source: string;
+  editor_id: string;
+  edited_at: string;
+  created_at: string;
+}
+
+export interface WikiRevisionListResponse {
+  revisions: WikiPageRevision[];
+  total: number;
+  current_version: number;
+}
+
+// listWikiRevisions returns the page's historical snapshots newest-first
+// (content omitted) plus the current version number. The current version has
+// no revision row — it is the page itself.
+export function listWikiRevisions(kbId: string, slug: string, params?: { limit?: number; offset?: number }) {
+  const query = new URLSearchParams();
+  if (params?.limit !== undefined) query.set('limit', String(params.limit));
+  if (params?.offset !== undefined) query.set('offset', String(params.offset));
+  const qs = query.toString();
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/revisions/${encodeSlugPath(slug)}${qs ? '?' + qs : ''}`);
+}
+
+// getWikiRevision returns one snapshot with full content.
+export function getWikiRevision(kbId: string, slug: string, version: number) {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/revisions/${encodeSlugPath(slug)}?version=${version}`);
+}
+
+// revertWikiPage rolls the page back to a stored revision. Applied as a
+// regular edit: the pre-revert state is snapshotted and version advances,
+// so a revert is itself revertable.
+export function revertWikiPage(kbId: string, slug: string, version: number) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/revert`, { slug, version });
 }
 
 export interface WikiIndexEntryDTO {
@@ -228,47 +296,6 @@ export function getWikiIndex(
   const qs = query.toString();
   const suffix = qs ? `?${qs}` : '';
   return get(`/api/v1/knowledgebase/${kbId}/wiki/index${suffix}`);
-}
-
-export interface WikiLogPageRef {
-  slug: string;
-  title?: string;
-}
-
-export interface WikiLogEntry {
-  id: number;
-  tenant_id: number;
-  knowledge_base_id: string;
-  action: string;
-  knowledge_id: string;
-  doc_title: string;
-  summary: string;
-  // Each ref carries both slug (for navigation) and title (captured at
-  // ingest time for display). Legacy rows written before the title
-  // column was added surface as refs with an empty title; render falls
-  // back to the slug in that case.
-  pages_affected: WikiLogPageRef[];
-  created_at: string;
-}
-
-export interface WikiLogListResponse {
-  entries: WikiLogEntry[];
-  next_cursor?: string;
-}
-
-// getWikiLog fetches a page of wiki operation events (newest first). Pass the
-// `next_cursor` from the previous response back as `cursor` to load more;
-// an empty / missing `next_cursor` signals end-of-feed. `limit` is clamped
-// server-side to [1, 200] and defaults to 50.
-export function getWikiLog(kbId: string, params?: { cursor?: string; limit?: number }) {
-  const query = new URLSearchParams();
-  if (params) {
-    if (params.cursor) query.set('cursor', params.cursor);
-    if (params.limit !== undefined) query.set('limit', String(params.limit));
-  }
-  const qs = query.toString();
-  const suffix = qs ? `?${qs}` : '';
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/log${suffix}`);
 }
 
 export interface WikiGraphQueryParams {

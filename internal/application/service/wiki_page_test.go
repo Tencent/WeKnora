@@ -17,7 +17,7 @@ import (
 func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
@@ -68,6 +68,38 @@ func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
 	if got := stripWikiInlineChunkCitations(input); got != input {
 		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
 	}
+}
+
+func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	page, err := svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: "kb-alias", Slug: "concept/alias",
+		Title: "Alias", Summary: "summary", Content: "content",
+		PageType: types.WikiPageTypeConcept, Aliases: types.StringArray{"old"},
+	})
+	require.NoError(t, err)
+
+	page.Aliases = types.StringArray{"new", "alternate"}
+	updated, err := svc.UpdatePage(ctx, page)
+	require.NoError(t, err)
+	require.Equal(t, types.StringArray{"new", "alternate"}, updated.Aliases)
+	require.Equal(t, 2, updated.Version)
+
+	updated.Aliases = types.StringArray{}
+	cleared, err := svc.UpdatePage(ctx, updated)
+	require.NoError(t, err)
+	require.Empty(t, cleared.Aliases)
+	require.Equal(t, 3, cleared.Version)
+
+	stored, err := svc.GetPageBySlug(ctx, "kb-alias", "concept/alias")
+	require.NoError(t, err)
+	require.Empty(t, stored.Aliases)
 }
 
 func TestParseOutLinks(t *testing.T) {
@@ -144,7 +176,7 @@ func TestParseOutLinks(t *testing.T) {
 func TestRepairContentLinks(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}))
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)

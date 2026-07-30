@@ -77,7 +77,7 @@ func TestShouldPreferPDFTextLayer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldPreferPDFTextLayer(tt.fileType, tt.parserEngine, tt.enableMultimodel, tt.overrides); got != tt.want {
+			if got := shouldPreferPDFTextLayer(tt.fileType, tt.parserEngine, tt.enableMultimodal, tt.overrides); got != tt.want {
 				t.Fatalf("shouldPreferPDFTextLayer() = %v, want %v", got, tt.want)
 			}
 		})

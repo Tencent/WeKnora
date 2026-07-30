@@ -180,6 +180,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, userSpecifiedKBs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
@@ -193,6 +196,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 		var filteredTargets types.SearchTargets
 		for _, target := range t.searchTargets {
+			if target == nil {
+				continue
+			}
 			if userKBSet[target.KnowledgeBaseID] {
 				filteredTargets = append(filteredTargets, target)
 			}
@@ -460,6 +466,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	}
 	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		if searchableKBs[st.KnowledgeBaseID] {
 			filteredTargets = append(filteredTargets, st)
 			continue
@@ -482,6 +491,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 
 	groups := make(map[string][]*types.SearchTarget)
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		key := modelKeyMap[st.KnowledgeBaseID]
 		groups[key] = append(groups[key], st)
 	}
@@ -1091,6 +1103,39 @@ func (t *KnowledgeSearchTool) buildContentSignature(content string) string {
 	return searchutil.BuildContentSignature(content)
 }
 
+// writeKnowledgeMetadataHeader emits document-scoped metadata once per
+// knowledge item. Chunk entries keep only chunk-specific content so repeated
+// results from the same document do not waste model context.
+func writeKnowledgeMetadataHeader(ob *strings.Builder, results []*searchResultWithMeta) {
+	seen := make(map[string]struct{}, len(results))
+	hasMetadata := false
+	var documents strings.Builder
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil || result.KnowledgeID == "" || result.KnowledgeCustomMetadata == "" {
+			continue
+		}
+		if _, ok := seen[result.KnowledgeID]; ok {
+			continue
+		}
+		seen[result.KnowledgeID] = struct{}{}
+		hasMetadata = true
+		documents.WriteString(fmt.Sprintf(
+			"<document knowledge_id=\"%s\" knowledge_base_id=\"%s\" title=\"%s\">\n",
+			xmlEscape(result.KnowledgeID),
+			xmlEscape(result.KnowledgeBaseID),
+			xmlEscape(result.KnowledgeTitle),
+		))
+		documents.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", xmlEscape(result.KnowledgeCustomMetadata)))
+		documents.WriteString("</document>\n")
+	}
+	if !hasMetadata {
+		return
+	}
+	ob.WriteString("<documents>\n")
+	ob.WriteString(documents.String())
+	ob.WriteString("</documents>\n")
+}
+
 // formatOutput formats the search results for display
 func (t *KnowledgeSearchTool) formatOutput(
 	ctx context.Context,
@@ -1124,7 +1169,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
-		kbCounts[r.KnowledgeID]++
+		kbCounts[r.KnowledgeBaseID]++
 	}
 
 	// Format individual results as XML. Tag names are kept in sync with
@@ -1136,8 +1181,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 	for _, q := range queries {
 		ob.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
 	}
+	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
+	enabled := true
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 
@@ -1177,6 +1224,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 					effectiveTenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
 					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
+					&enabled,
 				)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
@@ -1290,6 +1338,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,
+			"knowledge_metadata":  result.KnowledgeCustomMetadata,
 			"match_type":          result.MatchType,
 			"source_query":        result.SourceQuery,
 			"query_type":          result.QueryType,

@@ -40,10 +40,20 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	}
 	defer file.Close()
 
-	agent, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"))
+	sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.PostForm(types.AgentSourceTenantIDParam))
+	if parseErr != nil {
+		c.Error(apperrors.NewBadRequestError(parseErr.Error()))
+		return
+	}
+	agent, resourceTenantID, _ := h.resolveAgent(ctx, c, c.PostForm("agent_id"), sourceTenantID)
+	if sourceTenantID != 0 && agent == nil {
+		c.Error(apperrors.NewNotFoundError("Shared agent not found"))
+		return
+	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), ".")
 	options := types.TemporaryDocumentCreateOptions{ParserEngine: strings.TrimSpace(c.PostForm("parser_engine"))}
 	if agent != nil {
+		options.ResourceTenantID = resourceTenantID
 		if len(agent.Config.SupportedFileTypes) > 0 && !containsFileType(agent.Config.SupportedFileTypes, ext) {
 			c.Error(apperrors.NewBadRequestError("file type is not supported by this agent"))
 			return

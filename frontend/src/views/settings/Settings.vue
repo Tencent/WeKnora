@@ -218,6 +218,10 @@ import {
   INTEGRATION_TABS,
   type IntegrationTab,
 } from '@/config/integrations'
+import {
+  SETTINGS_SECTION_MIN_ROLE,
+  SYSTEM_ADMIN_SETTINGS_SECTIONS,
+} from '@/config/settingsAccess'
 
 const route = useRoute()
 const router = useRouter()
@@ -243,7 +247,8 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// 设置二级导航的最低可见角色：和 internal/router/router.go 的守卫矩阵对齐。
+// 设置二级导航的最低可见角色来自 settingsAccess.ts，和
+// internal/router/router.go 的守卫矩阵对齐。
 // 以「页面里至少有 1 个有意义的写操作所要求的最低角色」为基准，把基础设
 // 施配置（models 写、ollama 下载、websearch 写、parser/storage/vector/mcp
 // CRUD、chat-history 配置）统一收到 admin；只读类（general / system info /
@@ -257,25 +262,7 @@ type NavGroup = {
 // - models 列表 viewer 可读，页面内的「+ 添加模型 / 编辑 / 删除」按钮在
 //   ModelSettings.vue 里另用 hasRole('admin') 自己 gate，所以入口保留
 //   viewer 是合理的（contributor 也能浏览模型列表）。
-type RoleKey = 'viewer' | 'contributor' | 'admin' | 'owner'
-const SECTION_MIN_ROLE: Record<string, RoleKey> = {
-  general: 'viewer',
-  ollama: 'admin',
-  weknoracloud: 'admin',
-  models: 'viewer',
-  websearch: 'admin',
-  chathistory: 'admin',
-  vectorstore: 'admin',
-  parser: 'admin',
-  storage: 'admin',
-  mcp: 'admin',
-  system: 'viewer',
-  userprofile: 'viewer',
-  tenant: 'viewer',
-  members: 'viewer',
-}
-
-const SYSTEM_ADMIN_SECTIONS = new Set(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log'])
+const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
 const INTEGRATION_SECTION_PREFIX = 'integration-'
 
 const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
@@ -315,7 +302,7 @@ const canSeeSection = (key: string): boolean => {
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
     return authStore.isSystemAdmin
   }
-  const min = SECTION_MIN_ROLE[key] ?? 'viewer'
+  const min = SETTINGS_SECTION_MIN_ROLE[key] ?? 'viewer'
   // canAccessAllTenants（superuser）和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
   if (authStore.canAccessAllTenants) return true
@@ -323,9 +310,9 @@ const canSeeSection = (key: string): boolean => {
 }
 
 const navItems = computed(() => {
-  // 一律走 SECTION_MIN_ROLE 表，避免 ad-hoc isAdmin/isOwner 散落在多处。
+  // 一律走 SETTINGS_SECTION_MIN_ROLE 表，避免 ad-hoc isAdmin/isOwner 散落在多处。
   // 服务端在每条路由上仍以 g.Viewer/Admin/Owner 为准，这里只决定 UI 是
-  // 否露入口；改动入口规则请同步更新 SECTION_MIN_ROLE 注释里的对照路由。
+  // 否露入口；改动入口规则请同步更新 settingsAccess.ts 和对应后端路由。
   const integrationItems: NavItem[] = INTEGRATION_PREVIEW_ITEMS.map((item) => ({
     key: integrationSectionKey(item.key),
     icon: item.icon.type === 'icon' ? item.icon.name : 'integration',
@@ -477,6 +464,10 @@ const visible = computed(() => {
 
 // 关闭弹窗
 const handleClose = () => {
+  // Blur before unmount so TDesign textarea autosize won't run on a detached node.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
@@ -561,6 +552,12 @@ const handleSettingsNav = (e: CustomEvent) => {
 onMounted(() => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
+})
+
+watch(currentSection, () => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
 })
 
 onUnmounted(() => {

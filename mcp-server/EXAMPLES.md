@@ -397,7 +397,7 @@ python main.py --verbose
 }
 ```
 
-项目仓库: https://github.com/NannaOlympicBroadcast/WeKnoraMCP
+项目仓库: https://github.com/Tencent/WeKnora/tree/main/mcp-server
 
 ### 与其他 MCP 客户端集成
 参考各客户端的文档，配置服务器启动命令和环境变量。

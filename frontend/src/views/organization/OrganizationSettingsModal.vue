@@ -1502,7 +1502,8 @@ const handleSave = async () => {
       // 创建模式
       const result = await orgStore.create(
         formData.value.name.trim(),
-        formData.value.description.trim()
+        formData.value.description.trim(),
+        formData.value.avatar || undefined
       )
       if (result) {
         MessagePlugin.success(t('organization.createSuccess'))
