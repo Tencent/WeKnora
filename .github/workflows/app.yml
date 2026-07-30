@@ -39,6 +39,7 @@ permissions:
 
 env:
   GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
   # Keep tests independent of a developer machine's custom log template.
   LOG_FORMAT: ""
   BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -56,7 +57,11 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: go.sum
+          cache: true
+          # v6 defaults to go.mod for the cache key (more stable than go.sum).
+
+      - name: Download modules
+        run: go mod download
 
       - name: Check formatting
         shell: bash
@@ -75,11 +80,12 @@ jobs:
             exit 1
           fi
 
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test $(go list ./... | grep -v '/docreader/')
+      - name: Vet and test
+        shell: bash
+        run: |
+          mapfile -t pkgs < <(go list ./... | grep -v '/docreader/')
+          go vet "${pkgs[@]}"
+          go test "${pkgs[@]}"
 
       - name: Build server
         run: go build ./cmd/server
