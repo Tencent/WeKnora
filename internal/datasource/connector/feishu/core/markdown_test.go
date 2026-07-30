@@ -1,4 +1,4 @@
-package feishu
+package core
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// txt builds a text-bearing blockText from plain content.
-func txt(s string) *blockText {
-	return &blockText{Elements: []textElement{{TextRun: &textRun{Content: s}}}}
+// txt builds a text-bearing BlockText from plain content.
+func txt(s string) *BlockText {
+	return &BlockText{Elements: []TextElement{{TextRun: &TextRun{Content: s}}}}
 }
 
 type fakeReader struct {
@@ -30,14 +30,14 @@ func (f fakeReader) ReadBitableRecords(_ context.Context, _ string) ([][]string,
 }
 
 func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
-		{BlockID: "img", BlockType: blockTypeImage, Image: &blockTokenRef{Token: "img_t"}},
-		{BlockID: "f", BlockType: blockTypeFile, File: &blockFileRef{Token: "file_t", Name: "报表.pdf"}},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
+		{BlockID: "img", BlockType: BlockTypeImage, Image: &BlockTokenRef{Token: "img_t"}},
+		{BlockID: "f", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
-	md, atts, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, atts, err := BlocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -59,12 +59,12 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 }
 
 func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -74,14 +74,14 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 }
 
 func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "s", BlockType: blockTypeSheet, Sheet: &blockTokenRef{Token: "sht_a_0"}},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
-		t.Fatalf("should not fail on permission error, got %v", err)
+		t.Fatalf("should not Fail on permission error, got %v", err)
 	}
 	if !strings.Contains(string(md), "无法读取内嵌电子表格") {
 		t.Errorf("want degraded placeholder, got:\n%s", md)
@@ -90,11 +90,11 @@ func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 
 func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 	mk := func(fr fakeReader) string {
-		blocks := []docxBlock{
-			{BlockID: "root", BlockType: blockTypePage},
-			{BlockID: "bt", BlockType: blockTypeBitable, Bitable: &blockTokenRef{Token: "bascabc_tblxyz"}},
+		blocks := []DocxBlock{
+			{BlockID: "root", BlockType: BlockTypePage},
+			{BlockID: "bt", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "bascabc_tblxyz"}},
 		}
-		md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+		md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -115,15 +115,15 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 func TestBlocksToMarkdown_NativeTableFromCellChildren(t *testing.T) {
 	// Real Feishu shape: a table_cell (block_type 32) is a container whose text
 	// lives in child text blocks, not on the cell. The renderer must read cell
-	// text from those children AND must not also emit them as loose paragraphs.
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
+	// text from those children AND must not also Emit them as loose paragraphs.
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
 		tableBlk("t", 2, "c1", "c2", "c3", "c4"),
 		cellBlk("c1"), cellBlk("c2"), cellBlk("c3"), cellBlk("c4"),
 		cellTextBlk("c1", "姓名"), cellTextBlk("c2", "分数"),
 		cellTextBlk("c3", "张三"), cellTextBlk("c4", "95"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -141,13 +141,13 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 	// A file block nested inside a table cell must still be collected as an
 	// attachment — the table "consumed" set marks a cell's text structure but
 	// must NOT swallow attachment/media blocks, or embedded files silently vanish.
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
 		tableBlk("t", 1, "c1"),
-		{BlockID: "c1", BlockType: blockTypeTableCell, Children: []string{"f1"}},
-		{BlockID: "f1", BlockType: blockTypeFile, File: &blockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
+		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"f1"}},
+		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
-	_, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	_, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMarkdownTable_RaggedRowClampedToHeader(t *testing.T) {
 		{"名称", "数量"},
 		{"苹果", "3", "多余1", "多余2"},
 	}
-	out := markdownTable(rows)
+	out := MarkdownTable(rows)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 lines (header, separator, 1 row), got %d:\n%s", len(lines), out)
@@ -184,13 +184,13 @@ func TestMarkdownTable_RaggedRowClampedToHeader(t *testing.T) {
 func TestMarkdownTable_ZeroColumnRendersNothing(t *testing.T) {
 	// An embedded sheet/bitable with a header row but no columns (e.g. a bitable
 	// whose fields were all deleted) yields rows == [][]string{{}}. len(rows)==1
-	// passes a naive empty guard, but cols==0 would emit a malformed GFM table
+	// passes a naive empty guard, but cols==0 would Emit a malformed GFM table
 	// ("|  |" header + a bare "|" separator). It must render nothing instead.
 	for _, rows := range [][][]string{
 		{{}},         // one empty header row, no data
 		{{}, {}, {}}, // empty header + empty data rows
 	} {
-		out := markdownTable(rows)
+		out := MarkdownTable(rows)
 		if out != "" {
 			t.Errorf("zero-column table must render nothing, got %q for rows=%+v", out, rows)
 		}
@@ -202,14 +202,14 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 	// cannot be rendered as a Markdown table. Its cells must NOT be consumed, so
 	// their text still reaches the output as loose paragraphs rather than
 	// vanishing entirely.
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
 		// tableBlk sets Property (renderable); here we want an UNrenderable one.
-		{BlockID: "t", BlockType: blockTypeTable, Table: &blockTable{Cells: []string{"c1"}}},
-		{BlockID: "c1", BlockType: blockTypeTableCell, Children: []string{"c1_txt"}},
+		{BlockID: "t", BlockType: BlockTypeTable, Table: &BlockTable{Cells: []string{"c1"}}},
+		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -219,15 +219,15 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 }
 
 func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage, Children: []string{"h", "p", "b"}},
-		{BlockID: "h", BlockType: blockTypeHeading1, Heading1: txt("标题")},
-		{BlockID: "p", BlockType: blockTypeText, Text: txt("一段正文")},
-		{BlockID: "b", BlockType: blockTypeBullet, Bullet: txt("要点")},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"h", "p", "b"}},
+		{BlockID: "h", BlockType: BlockTypeHeading1, Heading1: txt("标题")},
+		{BlockID: "p", BlockType: BlockTypeText, Text: txt("一段正文")},
+		{BlockID: "b", BlockType: BlockTypeBullet, Bullet: txt("要点")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
-		t.Fatalf("blocksToMarkdown: %v", err)
+		t.Fatalf("BlocksToMarkdown: %v", err)
 	}
 	if len(atts) != 0 {
 		t.Errorf("want 0 attachments, got %d", len(atts))
@@ -240,18 +240,18 @@ func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
 
 func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 	// A page with no renderable children (or only empty-text/container blocks)
-	// must render to empty Markdown. fetchDocxWithBlocks relies on this: an empty
+	// must render to empty Markdown. FetchDocxWithBlocks relies on this: an empty
 	// render triggers the export fallback instead of emitting a content-less main
 	// item that would wrongly ingest the login-gated wiki URL. Any File/Image
 	// block writes a placeholder, so a truly empty render also implies no
 	// attachment/image downdrill is lost by that fallback.
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage, Children: []string{"p"}},
-		{BlockID: "p", BlockType: blockTypeText, Text: txt("")},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"p"}},
+		{BlockID: "p", BlockType: BlockTypeText, Text: txt("")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
-		t.Fatalf("blocksToMarkdown: %v", err)
+		t.Fatalf("BlocksToMarkdown: %v", err)
 	}
 	if strings.TrimSpace(string(md)) != "" {
 		t.Errorf("blank doc should render empty Markdown, got:\n%q", md)
@@ -262,12 +262,12 @@ func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 }
 
 func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "t", BlockType: blockTypeTodo, Todo: txt("买牛奶")},
-		{BlockID: "c", BlockType: blockTypeCallout, Callout: txt("注意事项")},
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "t", BlockType: BlockTypeTodo, Todo: txt("买牛奶")},
+		{BlockID: "c", BlockType: BlockTypeCallout, Callout: txt("注意事项")},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -280,16 +280,16 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 }
 
 func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
-	// A callout with no direct text (container form) must emit nothing itself.
-	blocks := []docxBlock{
-		{BlockID: "root", BlockType: blockTypePage},
-		{BlockID: "c", BlockType: blockTypeCallout},
+	// A callout with no direct text (container form) must Emit nothing itself.
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "c", BlockType: BlockTypeCallout},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if strings.TrimSpace(string(md)) != "" {
-		t.Errorf("empty callout should emit nothing, got:\n%q", md)
+		t.Errorf("empty callout should Emit nothing, got:\n%q", md)
 	}
 }

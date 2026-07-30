@@ -1,4 +1,4 @@
-package feishu
+package wiki
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -30,14 +31,14 @@ func TestMain(m *testing.M) {
 // ──────────────────────────────────────────────────────────────────────
 
 // fakeFeishu builds an httptest.Server that emulates the relevant Feishu APIs.
-// It returns the server and a Config pointing at it.
-func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
+// It returns the server and a core.Config pointing at it.
+func fakeFeishu(nodes []core.WikiNode) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
 
 	// --- auth ---
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
@@ -45,10 +46,10 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 
 	// --- wiki spaces ---
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: wikiSpaceListData{
-				Items: []wikiSpace{
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.WikiSpaceListData{
+				Items: []core.WikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
 			},
@@ -57,9 +58,9 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 
 	// --- wiki nodes (top-level only for simplicity) ---
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: wikiNodeListData{
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.WikiNodeListData{
 				Items: nodes,
 			},
 		})
@@ -68,17 +69,17 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	// --- export task: create ---
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			writeJSON(w, exportTaskCreateResponse{
-				apiResponse: apiResponse{Code: 0},
-				Data:        exportTaskCreateData{Ticket: "ticket-123"},
+			writeJSON(w, core.ExportTaskCreateResponse{
+				ApiResponse: core.ApiResponse{Code: 0},
+				Data:        core.ExportTaskCreateData{Ticket: "ticket-123"},
 			})
 			return
 		}
 		// GET /open-apis/drive/v1/export_tasks/ticket-123
-		writeJSON(w, exportTaskStatusResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: exportTaskStatusData{
-				Result: exportTaskResult{
+		writeJSON(w, core.ExportTaskStatusResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.ExportTaskStatusData{
+				Result: core.ExportTaskResult{
 					FileToken: "ft-abc",
 					FileSize:  100,
 					JobStatus: 0, // success
@@ -90,10 +91,10 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 
 	// --- export task: status polling (pattern match with ticket) ---
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-123", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, exportTaskStatusResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: exportTaskStatusData{
-				Result: exportTaskResult{
+		writeJSON(w, core.ExportTaskStatusResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.ExportTaskStatusData{
+				Result: core.ExportTaskResult{
 					FileToken: "ft-abc",
 					FileSize:  100,
 					JobStatus: 0,
@@ -120,7 +121,7 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	ts := httptest.NewServer(mux)
-	cfg := &Config{
+	cfg := &core.Config{
 		AppID:     "test-app-id",
 		AppSecret: "test-app-secret",
 		BaseURL:   ts.URL,
@@ -128,13 +129,13 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	return ts, cfg
 }
 
-func fakeFeishuWithChildFailure(topNodes []wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+func fakeFeishuWithChildFailure(topNodes []core.WikiNode, failingParentToken string) (*httptest.Server, *core.Config) {
 	return fakeFeishuHierarchy(topNodes, nil, failingParentToken)
 }
 
-func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+func fakeFeishuHierarchy(topNodes []core.WikiNode, childNodes map[string][]core.WikiNode, failingParentToken string) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
-	nodeByToken := make(map[string]wikiNode)
+	nodeByToken := make(map[string]core.WikiNode)
 	for _, node := range topNodes {
 		node.SpaceID = "space1"
 		nodeByToken[node.NodeToken] = node
@@ -150,18 +151,18 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 	}
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
 	})
 
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: wikiSpaceListData{
-				Items: []wikiSpace{
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.WikiSpaceListData{
+				Items: []core.WikiSpace{
 					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
 				},
 			},
@@ -187,9 +188,9 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 				}
 			}
 		}
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: wikiNodeListData{
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.WikiNodeListData{
 				Items: nodes,
 			},
 		})
@@ -199,14 +200,14 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		nodeToken := r.URL.Query().Get("token")
 		node, ok := nodeByToken[nodeToken]
 		if !ok {
-			writeJSON(w, wikiNodeInfoResponse{
-				apiResponse: apiResponse{Code: 1663, Msg: "node not found"},
+			writeJSON(w, core.WikiNodeInfoResponse{
+				ApiResponse: core.ApiResponse{Code: 1663, Msg: "node not found"},
 			})
 			return
 		}
-		writeJSON(w, wikiNodeInfoResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeInfoData{Node: node},
+		writeJSON(w, core.WikiNodeInfoResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeInfoData{Node: node},
 		})
 	})
 
@@ -220,7 +221,7 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 	})
 
 	ts := httptest.NewServer(mux)
-	cfg := &Config{
+	cfg := &core.Config{
 		AppID:     "test-app-id",
 		AppSecret: "test-app-secret",
 		BaseURL:   ts.URL,
@@ -233,7 +234,7 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func makeConfig(cfg *Config, resourceIDs []string) *types.DataSourceConfig {
+func makeConfig(cfg *core.Config, resourceIDs []string) *types.DataSourceConfig {
 	creds := map[string]interface{}{
 		"app_id":     cfg.AppID,
 		"app_secret": cfg.AppSecret,
@@ -268,9 +269,9 @@ func TestIsSupportedDocType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.objType, func(t *testing.T) {
-			got := isSupportedDocType(tt.objType)
+			got := core.IsSupportedDocType(tt.objType)
 			if got != tt.expected {
-				t.Errorf("isSupportedDocType(%q) = %v, want %v", tt.objType, got, tt.expected)
+				t.Errorf("core.IsSupportedDocType(%q) = %v, want %v", tt.objType, got, tt.expected)
 			}
 		})
 	}
@@ -290,9 +291,9 @@ func TestSanitizeFileName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := sanitizeFileName(tt.input)
+			got := core.SanitizeFileName(tt.input)
 			if got != tt.expected {
-				t.Errorf("sanitizeFileName(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("core.SanitizeFileName(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}
@@ -302,9 +303,9 @@ func TestSanitizeFileName_TruncatesAtRuneBoundary(t *testing.T) {
 	// Each 测 is 3 bytes; raw byte truncation at 200 would split a rune and
 	// produce invalid UTF-8 that downstream filename validation rejects.
 	long := strings.Repeat("测试", 100)
-	got := sanitizeFileName(long)
+	got := core.SanitizeFileName(long)
 	if !utf8.ValidString(got) {
-		t.Fatalf("sanitizeFileName produced invalid UTF-8: %q", got)
+		t.Fatalf("core.SanitizeFileName produced invalid UTF-8: %q", got)
 	}
 	if len(got) > 200 {
 		t.Errorf("len = %d, want ≤ 200", len(got))
@@ -319,7 +320,7 @@ func TestSanitizeFileName_PreservesExtensionOnTruncation(t *testing.T) {
 	// Truncation must keep the ".pdf" suffix — downstream file-type validation
 	// classifies by extension, so a chopped extension would reject the file.
 	long := strings.Repeat("报告", 150) + ".pdf" // 150*6 bytes + ".pdf"
-	got := sanitizeFileName(long)
+	got := core.SanitizeFileName(long)
 	if !utf8.ValidString(got) {
 		t.Fatalf("produced invalid UTF-8: %q", got)
 	}
@@ -332,7 +333,7 @@ func TestSanitizeFileName_PreservesExtensionOnTruncation(t *testing.T) {
 }
 
 func TestParseFeishuTimestamp(t *testing.T) {
-	ts := parseFeishuTimestamp("1711468800") // 2024-03-27 00:00:00 UTC
+	ts := core.ParseFeishuTimestamp("1711468800") // 2024-03-27 00:00:00 UTC
 	if ts.IsZero() {
 		t.Fatal("expected non-zero time")
 	}
@@ -340,23 +341,23 @@ func TestParseFeishuTimestamp(t *testing.T) {
 		t.Errorf("unexpected unix = %d", ts.Unix())
 	}
 
-	if !parseFeishuTimestamp("").IsZero() {
+	if !core.ParseFeishuTimestamp("").IsZero() {
 		t.Error("expected zero time for empty string")
 	}
-	if !parseFeishuTimestamp("invalid").IsZero() {
+	if !core.ParseFeishuTimestamp("invalid").IsZero() {
 		t.Error("expected zero time for invalid string")
 	}
 }
 
 func TestParseFeishuConfig(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
-		cfg, err := parseFeishuConfig(&types.DataSourceConfig{
+		cfg, err := core.ParseFeishuConfig(&types.DataSourceConfig{
 			Credentials: map[string]interface{}{
 				"app_id":     "id1",
 				"app_secret": "sec1",
 				"base_url":   "https://open.feishu.cn",
 			},
-		}, RegionFeishu)
+		}, core.RegionFeishu)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -366,19 +367,19 @@ func TestParseFeishuConfig(t *testing.T) {
 	})
 
 	t.Run("nil config", func(t *testing.T) {
-		_, err := parseFeishuConfig(nil, RegionFeishu)
+		_, err := core.ParseFeishuConfig(nil, core.RegionFeishu)
 		if err == nil {
 			t.Fatal("expected error for nil config")
 		}
 	})
 
 	t.Run("missing credentials", func(t *testing.T) {
-		_, err := parseFeishuConfig(&types.DataSourceConfig{
+		_, err := core.ParseFeishuConfig(&types.DataSourceConfig{
 			Credentials: map[string]interface{}{
 				"app_id": "id1",
 				// missing app_secret
 			},
-		}, RegionFeishu)
+		}, core.RegionFeishu)
 		if err == nil {
 			t.Fatal("expected error for missing app_secret")
 		}
@@ -390,7 +391,7 @@ func TestParseFeishuConfig(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestConnectorType(t *testing.T) {
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	if c.Type() != types.ConnectorTypeFeishu {
 		t.Errorf("Type() = %q, want %q", c.Type(), types.ConnectorTypeFeishu)
 	}
@@ -400,7 +401,7 @@ func TestConnectorValidate(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	err := c.Validate(context.Background(), makeConfig(cfg, nil))
 	if err != nil {
 		t.Fatalf("Validate() error: %v", err)
@@ -408,7 +409,7 @@ func TestConnectorValidate(t *testing.T) {
 }
 
 func TestConnectorValidate_BadCredentials(t *testing.T) {
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	err := c.Validate(context.Background(), &types.DataSourceConfig{
 		Credentials: map[string]interface{}{
 			"app_id":     "bad",
@@ -425,7 +426,7 @@ func TestConnectorListResources(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	resources, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources() error: %v", err)
@@ -452,11 +453,11 @@ func TestConnectorListResources(t *testing.T) {
 // the wiki tree lazily — only the requested level — instead of recursing the whole
 // tree up front (Tencent/WeKnora#1672).
 func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
-	topNodes := []wikiNode{
+	topNodes := []core.WikiNode{
 		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true, ObjEditTime: "100"},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "docx", Title: "Peer", ObjEditTime: "200"},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]core.WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", ObjEditTime: "300"},
 		},
@@ -464,7 +465,7 @@ func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
 	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 
 	// Root listing: only the space, no descendants.
 	spaces, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
@@ -513,10 +514,10 @@ func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
 // deeply nested selection is resolved (so an edit-mode picker can reveal it)
 // without listing the whole tree.
 func TestConnectorResolveResourceAncestors(t *testing.T) {
-	topNodes := []wikiNode{
+	topNodes := []core.WikiNode{
 		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]core.WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", HasChild: true},
 		},
@@ -527,7 +528,7 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 
 	// A deeply nested node resolves to its space plus every intermediate parent.
 	ancestors, err := c.ResolveResourceAncestors(
@@ -577,7 +578,7 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestFetchAll_DocxNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    "nt1",
 		ObjToken:     "obj-docx-1",
 		ObjType:      "docx",
@@ -587,7 +588,7 @@ func TestFetchAll_DocxNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -619,7 +620,7 @@ func TestFetchAll_DocxNode(t *testing.T) {
 }
 
 func TestFetchAll_SheetNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    "nt-sheet",
 		ObjToken:     "obj-sheet-1",
 		ObjType:      "sheet",
@@ -629,7 +630,7 @@ func TestFetchAll_SheetNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -644,7 +645,7 @@ func TestFetchAll_SheetNode(t *testing.T) {
 }
 
 func TestFetchAll_BitableNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    "nt-bitable",
 		ObjToken:     "obj-bitable-1",
 		ObjType:      "bitable",
@@ -654,7 +655,7 @@ func TestFetchAll_BitableNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -668,7 +669,7 @@ func TestFetchAll_BitableNode(t *testing.T) {
 }
 
 func TestFetchAll_FileNode(t *testing.T) {
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    "nt-file",
 		ObjToken:     "obj-file-1",
 		ObjType:      "file",
@@ -678,7 +679,7 @@ func TestFetchAll_FileNode(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -701,27 +702,27 @@ func TestFetchAll_FileNode(t *testing.T) {
 }
 
 func TestFetchAll_SkipsMindnoteAndSlides(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt-mn", ObjToken: "obj-mn", ObjType: "mindnote", Title: "Brain Map"},
 		{NodeToken: "nt-sl", ObjToken: "obj-sl", ObjType: "slides", Title: "Presentation"},
 	}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
 
-	// Both should be skipped (nil returned by fetchNodeContent)
+	// Both should be core.Skipped (nil returned by fetchNodeContent)
 	if len(items) != 0 {
-		t.Errorf("expected 0 items (mindnote+slides skipped), got %d", len(items))
+		t.Errorf("expected 0 items (mindnote+slides core.Skipped), got %d", len(items))
 	}
 }
 
 func TestFetchAll_MixedTypes(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "sheet", Title: "Sheet", NodeEditTime: "1711468800"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "file", Title: "report.pdf", NodeEditTime: "1711468800"},
@@ -732,13 +733,13 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
 
-	// docx + sheet + file + bitable = 4 items; mindnote + slides = skipped
+	// docx + sheet + file + bitable = 4 items; mindnote + slides = core.Skipped
 	if len(items) != 4 {
 		t.Errorf("expected 4 items, got %d", len(items))
 		for i, it := range items {
@@ -748,7 +749,7 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 }
 
 func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800"},
 		{NodeToken: "nt4", ObjToken: "obj4", ObjType: "mindnote", Title: "Mind", NodeEditTime: "1711468800"},
 		{NodeToken: "nt5", ObjToken: "obj5", ObjType: "slides", Title: "Slides", NodeEditTime: "1711468800"},
@@ -760,7 +761,7 @@ func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
 	logger.SetOutput(&buf)
 	defer logger.SetOutput(os.Stderr)
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	if _, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"}); err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
@@ -781,14 +782,14 @@ func TestFetchAll_LogsSummaryWithSkipBreakdown(t *testing.T) {
 }
 
 func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll must not abort when one child listing fails: %v", err)
@@ -831,11 +832,11 @@ func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
 }
 
 func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
-	topNodes := []wikiNode{
+	topNodes := []core.WikiNode{
 		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "file", Title: "Root.pdf", NodeEditTime: "100", HasChild: true},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
-	childNodes := map[string][]wikiNode{
+	childNodes := map[string][]core.WikiNode{
 		"nt-root": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "300"},
 		},
@@ -844,7 +845,7 @@ func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
 	defer ts.Close()
 
 	resourceID := "space1:nt-root"
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{resourceID}), []string{resourceID})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -876,14 +877,14 @@ func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────
 
 func TestFetchIncremental_FirstSync(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "file", Title: "file.pdf", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	// First sync with no cursor → all items should be fetched
@@ -904,13 +905,13 @@ func TestFetchIncremental_FirstSync(t *testing.T) {
 }
 
 func TestFetchIncremental_NoChanges(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 	}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	// First sync
@@ -932,13 +933,13 @@ func TestFetchIncremental_NoChanges(t *testing.T) {
 
 func TestFetchIncremental_DetectsDeleted(t *testing.T) {
 	// First sync: 2 nodes
-	allNodes := []wikiNode{
+	allNodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "docx", Title: "Doc2", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishu(allNodes)
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	dsConfig := makeConfig(cfg, []string{"space1"})
 
 	_, cursor1, err := c.FetchIncremental(context.Background(), dsConfig, nil)
@@ -948,7 +949,7 @@ func TestFetchIncremental_DetectsDeleted(t *testing.T) {
 	ts.Close()
 
 	// Second sync: only 1 node remains (nt2 was deleted)
-	ts2, cfg2 := fakeFeishu([]wikiNode{
+	ts2, cfg2 := fakeFeishu([]core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", NodeEditTime: "100"},
 	})
 	defer ts2.Close()
@@ -978,7 +979,7 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	dsConfig := makeConfig(cfg, nil) // no resource IDs
 	dsConfig.ResourceIDs = nil
 
@@ -992,14 +993,14 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 }
 
 func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
 		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
 	}
 	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, cursor, err := conn.FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
 	if err != nil {
 		t.Fatalf("FetchIncremental must not abort when one child listing fails: %v", err)
@@ -1027,17 +1028,17 @@ func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *test
 }
 
 func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(t *testing.T) {
-	firstNodes := []wikiNode{
+	firstNodes := []core.WikiNode{
 		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
 	}
-	firstChildren := map[string][]wikiNode{
+	firstChildren := map[string][]core.WikiNode{
 		"nt-parent": {
 			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "150"},
 		},
 	}
 	ts, cfg := fakeFeishuHierarchy(firstNodes, firstChildren, "")
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	firstItems, cursor, err := conn.FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
 	if err != nil {
 		t.Fatalf("first sync error: %v", err)
@@ -1047,7 +1048,7 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	}
 	ts.Close()
 
-	secondNodes := []wikiNode{
+	secondNodes := []core.WikiNode{
 		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
 	}
 	ts2, cfg2 := fakeFeishuHierarchy(secondNodes, nil, "nt-parent")
@@ -1064,7 +1065,7 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 	}
 
 	cursorBytes, _ := json.Marshal(nextCursor.ConnectorCursor)
-	var restored feishuCursor
+	var restored core.FeishuCursor
 	if err := json.Unmarshal(cursorBytes, &restored); err != nil {
 		t.Fatalf("restore cursor: %v", err)
 	}
@@ -1074,16 +1075,16 @@ func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Client tests
+// core.Client tests
 // ──────────────────────────────────────────────────────────────────────
 
 func TestClientPing(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 	if err := client.Ping(context.Background()); err != nil {
-		t.Fatalf("Ping() error: %v", err)
+		t.Fatalf("core.Ping() error: %v", err)
 	}
 }
 
@@ -1092,8 +1093,8 @@ func TestClientTokenCaching(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
 		callCount++
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: fmt.Sprintf("token-%d", callCount),
 			Expire:            7200,
 		})
@@ -1101,12 +1102,12 @@ func TestClientTokenCaching(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	client := NewClient(&Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
+	client := core.NewClient(&core.Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
 
 	// First call: fetches token
-	t1, _ := client.getTenantAccessToken(context.Background())
+	t1, _ := client.GetTenantAccessToken(context.Background())
 	// Second call: should use cache
-	t2, _ := client.getTenantAccessToken(context.Background())
+	t2, _ := client.GetTenantAccessToken(context.Background())
 
 	if t1 != t2 {
 		t.Errorf("expected cached token, got different tokens: %q vs %q", t1, t2)
@@ -1120,10 +1121,10 @@ func TestClientExportAndDownload(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 	data, fileName, err := client.ExportAndDownload(context.Background(), "obj-token-1", "docx")
 	if err != nil {
-		t.Fatalf("ExportAndDownload() error: %v", err)
+		t.Fatalf("core.ExportAndDownload() error: %v", err)
 	}
 
 	if string(data) != "fake-docx-content" {
@@ -1138,7 +1139,7 @@ func TestClientExportAndDownload_UnsupportedType(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 	_, _, err := client.ExportAndDownload(context.Background(), "obj-token-1", "mindnote")
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
@@ -1152,10 +1153,10 @@ func TestClientDownloadDriveFile(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 	data, err := client.DownloadDriveFile(context.Background(), "file-token-abc")
 	if err != nil {
-		t.Fatalf("DownloadDriveFile() error: %v", err)
+		t.Fatalf("core.DownloadDriveFile() error: %v", err)
 	}
 
 	if string(data) != "fake-pdf-binary" {
@@ -1167,10 +1168,10 @@ func TestClientListWikiSpaces(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
 
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 	spaces, err := client.ListWikiSpaces(context.Background())
 	if err != nil {
-		t.Fatalf("ListWikiSpaces() error: %v", err)
+		t.Fatalf("core.ListWikiSpaces() error: %v", err)
 	}
 	if len(spaces) != 1 {
 		t.Fatalf("expected 1 space, got %d", len(spaces))
@@ -1188,32 +1189,32 @@ func TestObjTypeToExportMappings(t *testing.T) {
 	// Verify all exportable types have valid mappings
 	exportable := []string{"docx", "doc", "sheet", "bitable"}
 	for _, ot := range exportable {
-		if _, ok := objTypeToExportFileExtension[ot]; !ok {
-			t.Errorf("objTypeToExportFileExtension missing %q", ot)
+		if _, ok := core.ObjTypeToExportFileExtension[ot]; !ok {
+			t.Errorf("core.ObjTypeToExportFileExtension missing %q", ot)
 		}
-		if _, ok := objTypeToExportType[ot]; !ok {
-			t.Errorf("objTypeToExportType missing %q", ot)
+		if _, ok := core.ObjTypeToExportType[ot]; !ok {
+			t.Errorf("core.ObjTypeToExportType missing %q", ot)
 		}
 	}
 
 	// Verify non-exportable types do NOT have mappings
 	nonExportable := []string{"file", "mindnote", "slides"}
 	for _, ot := range nonExportable {
-		if _, ok := objTypeToExportFileExtension[ot]; ok {
-			t.Errorf("objTypeToExportFileExtension should NOT contain %q", ot)
+		if _, ok := core.ObjTypeToExportFileExtension[ot]; ok {
+			t.Errorf("core.ObjTypeToExportFileExtension should NOT contain %q", ot)
 		}
 	}
 }
 
 func TestExportFileExtToSuffix(t *testing.T) {
-	if exportFileExtToSuffix[ExportTypeDocx] != ".docx" {
-		t.Errorf("docx suffix = %q", exportFileExtToSuffix[ExportTypeDocx])
+	if core.ExportFileExtToSuffix[core.ExportTypeDocx] != ".docx" {
+		t.Errorf("docx suffix = %q", core.ExportFileExtToSuffix[core.ExportTypeDocx])
 	}
-	if exportFileExtToSuffix[ExportTypeXlsx] != ".xlsx" {
-		t.Errorf("xlsx suffix = %q", exportFileExtToSuffix[ExportTypeXlsx])
+	if core.ExportFileExtToSuffix[core.ExportTypeXlsx] != ".xlsx" {
+		t.Errorf("xlsx suffix = %q", core.ExportFileExtToSuffix[core.ExportTypeXlsx])
 	}
-	if exportFileExtToSuffix[ExportTypePDF] != ".pdf" {
-		t.Errorf("pdf suffix = %q", exportFileExtToSuffix[ExportTypePDF])
+	if core.ExportFileExtToSuffix[core.ExportTypePDF] != ".pdf" {
+		t.Errorf("pdf suffix = %q", core.ExportFileExtToSuffix[core.ExportTypePDF])
 	}
 }
 
@@ -1229,41 +1230,41 @@ func TestExportFileExtToSuffix(t *testing.T) {
 //
 // The export endpoint is intentionally absent; any call to it returns 404 so the
 // test verifies the blocks-API path, not the export-fallback path.
-func fakeFeishuWithBlocks(nodes []wikiNode, docToken, attToken, attName string, attContent []byte) (*httptest.Server, *Config) {
+func fakeFeishuWithBlocks(nodes []core.WikiNode, docToken, attToken, attName string, attContent []byte) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeListData{Items: nodes},
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
 		})
 	})
 
 	// blocks API for the given docx document
 	blocksPath := "/open-apis/docx/v1/documents/" + docToken + "/blocks"
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, docxBlocksResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: docxBlocksData{
-				Items: []docxBlock{
-					{BlockID: "b1", BlockType: blockTypePage},
-					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &textRun{Content: "Hello blocks"}}},
+		writeJSON(w, core.DocxBlocksResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.DocxBlocksData{
+				Items: []core.DocxBlock{
+					{BlockID: "b1", BlockType: core.BlockTypePage},
+					{BlockID: "b2", BlockType: core.BlockTypeText, Text: &core.BlockText{
+						Elements: []core.TextElement{{TextRun: &core.TextRun{Content: "Hello blocks"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
+					{BlockID: "b3", BlockType: core.BlockTypeFile, File: &core.BlockFileRef{Token: attToken, Name: attName}},
 				},
 			},
 		})
@@ -1280,7 +1281,7 @@ func fakeFeishuWithBlocks(nodes []wikiNode, docToken, attToken, attName string, 
 	})
 
 	ts := httptest.NewServer(mux)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
 }
 
 // TestFetchDocxWithBlocks_MultiItem verifies that a docx node returns a main
@@ -1292,10 +1293,10 @@ func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
 		attToken  = "ft-att-1"
 		attName   = "report.pdf"
 	)
-	// Attachment content must exceed minAttachmentBytes (2 KiB) to not be filtered.
-	attContent := bytes.Repeat([]byte("x"), minAttachmentBytes+1)
+	// Attachment content must exceed core.MinAttachmentBytes (2 KiB) to not be filtered.
+	attContent := bytes.Repeat([]byte("x"), core.MinAttachmentBytes+1)
 
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    nodeToken,
 		ObjToken:     objToken,
 		ObjType:      "docx",
@@ -1305,7 +1306,7 @@ func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
 	ts, cfg := fakeFeishuWithBlocks(nodes, objToken, attToken, attName, attContent)
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -1346,41 +1347,41 @@ func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
 // drive download endpoint returns the given HTTP status code instead of 200. Use
 // downloadStatus = http.StatusInternalServerError to exercise the
 // attachment-download-failure path.
-func fakeFeishuWithBlocksAndDownloadStatus(nodes []wikiNode, docToken, attToken, attName string, downloadStatus int) (*httptest.Server, *Config) {
+func fakeFeishuWithBlocksAndDownloadStatus(nodes []core.WikiNode, docToken, attToken, attName string, downloadStatus int) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeListData{Items: nodes},
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
 		})
 	})
 
 	// blocks API — one text block + one parseable .pdf file block
 	blocksPath := "/open-apis/docx/v1/documents/" + docToken + "/blocks"
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, docxBlocksResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: docxBlocksData{
-				Items: []docxBlock{
-					{BlockID: "b1", BlockType: blockTypePage},
-					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &textRun{Content: "Hello"}}},
+		writeJSON(w, core.DocxBlocksResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.DocxBlocksData{
+				Items: []core.DocxBlock{
+					{BlockID: "b1", BlockType: core.BlockTypePage},
+					{BlockID: "b2", BlockType: core.BlockTypeText, Text: &core.BlockText{
+						Elements: []core.TextElement{{TextRun: &core.TextRun{Content: "Hello"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
+					{BlockID: "b3", BlockType: core.BlockTypeFile, File: &core.BlockFileRef{Token: attToken, Name: attName}},
 				},
 			},
 		})
@@ -1397,7 +1398,7 @@ func fakeFeishuWithBlocksAndDownloadStatus(nodes []wikiNode, docToken, attToken,
 	})
 
 	ts := httptest.NewServer(mux)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
 }
 
 // TestFetchDocxWithBlocks_AttachmentDownloadFailure verifies that when the blocks
@@ -1413,7 +1414,7 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 		attToken  = "ft-att-bad"
 		attName   = "slides.pdf"
 	)
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    nodeToken,
 		ObjToken:     objToken,
 		ObjType:      "docx",
@@ -1423,9 +1424,9 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 	ts, cfg := fakeFeishuWithBlocksAndDownloadStatus(nodes, objToken, attToken, attName, http.StatusInternalServerError)
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
-	client := NewClient(cfg)
+	client := core.NewClient(cfg)
 
 	baseMeta := map[string]string{
 		"obj_token":  objToken,
@@ -1434,15 +1435,15 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 		"space_id":   "space1",
 		"channel":    types.ChannelFeishu,
 	}
-	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
-		docToken:          nodeToken,
-		objToken:          objToken,
-		title:             "Doc With Bad Attachment",
-		url:               conn.region.wikiURL(nodeToken),
-		resourceID:        "space1:nt-docx-fail",
-		editTime:          parseFeishuTimestamp("1711468800"),
-		baseMeta:          baseMeta,
-		multimodalEnabled: true,
+	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+		DocToken:          nodeToken,
+		ObjToken:          objToken,
+		Title:             "Doc With Bad Attachment",
+		URL:               conn.region.WikiURL(nodeToken),
+		ResourceID:        "space1:nt-docx-fail",
+		EditTime:          core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:          baseMeta,
+		MultimodalEnabled: true,
 	})
 	if err != nil {
 		t.Fatalf("a failed attachment must not fail the whole node, got error: %v", err)
@@ -1498,24 +1499,24 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 		imgToken  = "media-img-1"
 	)
 	// A valid PNG signature + padding so http.DetectContentType returns image/png
-	// and the bytes exceed minAttachmentBytes.
-	pngBytes := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("x"), minAttachmentBytes)...)
+	// and the bytes exceed core.MinAttachmentBytes.
+	pngBytes := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("x"), core.MinAttachmentBytes)...)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 	blocksPath := "/open-apis/docx/v1/documents/" + objToken + "/blocks"
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, docxBlocksResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: docxBlocksData{
-				Items: []docxBlock{
-					{BlockID: "b1", BlockType: blockTypePage},
-					{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-						Elements: []textElement{{TextRun: &textRun{Content: "Hello"}}},
+		writeJSON(w, core.DocxBlocksResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.DocxBlocksData{
+				Items: []core.DocxBlock{
+					{BlockID: "b1", BlockType: core.BlockTypePage},
+					{BlockID: "b2", BlockType: core.BlockTypeText, Text: &core.BlockText{
+						Elements: []core.TextElement{{TextRun: &core.TextRun{Content: "Hello"}}},
 					}},
-					{BlockID: "b3", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
+					{BlockID: "b3", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
 				},
 			},
 		})
@@ -1530,27 +1531,27 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	cfg := &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(RegionFeishu)
+	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
-	client := NewClient(cfg)
-	node := wikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Image", NodeEditTime: "1711468800"}
+	client := core.NewClient(cfg)
+	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Image", NodeEditTime: "1711468800"}
 	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
 	imgChildID := nodeToken + "#image#" + imgToken
 
 	// multimodal ON → image emitted as a sub-item and kept.
-	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
-		docToken:          node.NodeToken,
-		objToken:          node.ObjToken,
-		title:             node.Title,
-		url:               conn.region.wikiURL(node.NodeToken),
-		resourceID:        "space1:" + nodeToken,
-		editTime:          parseFeishuTimestamp("1711468800"),
-		baseMeta:          baseMeta,
-		multimodalEnabled: true,
+	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+		DocToken:          node.NodeToken,
+		ObjToken:          node.ObjToken,
+		Title:             node.Title,
+		URL:               conn.region.WikiURL(node.NodeToken),
+		ResourceID:        "space1:" + nodeToken,
+		EditTime:          core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:          baseMeta,
+		MultimodalEnabled: true,
 	})
 	if err != nil {
-		t.Fatalf("fetchDocxWithBlocks (multimodal on): %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks (multimodal on): %v", err)
 	}
 	var main, img *types.FetchedItem
 	for _, it := range items {
@@ -1584,23 +1585,23 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	}
 
 	// multimodal OFF → no image sub-item, but the id is still kept (not swept).
-	itemsOff, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
-		docToken:          node.NodeToken,
-		objToken:          node.ObjToken,
-		title:             node.Title,
-		url:               conn.region.wikiURL(node.NodeToken),
-		resourceID:        "space1:" + nodeToken,
-		editTime:          parseFeishuTimestamp("1711468800"),
-		baseMeta:          baseMeta,
-		multimodalEnabled: false,
+	itemsOff, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+		DocToken:          node.NodeToken,
+		ObjToken:          node.ObjToken,
+		Title:             node.Title,
+		URL:               conn.region.WikiURL(node.NodeToken),
+		ResourceID:        "space1:" + nodeToken,
+		EditTime:          core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:          baseMeta,
+		MultimodalEnabled: false,
 	})
 	if err != nil {
-		t.Fatalf("fetchDocxWithBlocks (multimodal off): %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks (multimodal off): %v", err)
 	}
 	var mainOff *types.FetchedItem
 	for _, it := range itemsOff {
 		if it.ExternalID == imgChildID {
-			t.Errorf("multimodal off must NOT emit an image sub-item, got %+v", it)
+			t.Errorf("multimodal off must NOT Emit an image sub-item, got %+v", it)
 		}
 		if it.ExternalID == nodeToken {
 			mainOff = it
@@ -1616,7 +1617,7 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 }
 
 // TestFetchDocxWithBlocks_ImageDownloadFailure verifies that a failed image
-// download (a genuine fetch failure — revoked token, permission gap, transient
+// download (a genuine core.Fetch failure — revoked token, permission gap, transient
 // error) surfaces a visible error sub-item exactly like a failed attachment
 // download, rather than being silently dropped to a server log. The image is
 // still kept in SubtreeKeep so any prior OCR'd copy is preserved.
@@ -1628,16 +1629,16 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 	blocksPath := "/open-apis/docx/v1/documents/" + objToken + "/blocks"
 	mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, docxBlocksResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: docxBlocksData{
-				Items: []docxBlock{
-					{BlockID: "b1", BlockType: blockTypePage},
-					{BlockID: "b2", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
+		writeJSON(w, core.DocxBlocksResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.DocxBlocksData{
+				Items: []core.DocxBlock{
+					{BlockID: "b1", BlockType: core.BlockTypePage},
+					{BlockID: "b2", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
 				},
 			},
 		})
@@ -1649,24 +1650,24 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	cfg := &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(RegionFeishu)
+	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
-	client := NewClient(cfg)
-	node := wikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Bad Image", NodeEditTime: "1711468800"}
+	client := core.NewClient(cfg)
+	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Bad Image", NodeEditTime: "1711468800"}
 	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
 	imgChildID := nodeToken + "#image#" + imgToken
 
 	// multimodal ON → the download is attempted and fails → a visible error item.
-	items, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
-		docToken:          node.NodeToken,
-		objToken:          node.ObjToken,
-		title:             node.Title,
-		url:               conn.region.wikiURL(node.NodeToken),
-		resourceID:        "space1:" + nodeToken,
-		editTime:          parseFeishuTimestamp("1711468800"),
-		baseMeta:          baseMeta,
-		multimodalEnabled: true,
+	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+		DocToken:          node.NodeToken,
+		ObjToken:          node.ObjToken,
+		Title:             node.Title,
+		URL:               conn.region.WikiURL(node.NodeToken),
+		ResourceID:        "space1:" + nodeToken,
+		EditTime:          core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:          baseMeta,
+		MultimodalEnabled: true,
 	})
 	if err != nil {
 		t.Fatalf("a failed image download must not fail the whole node, got error: %v", err)
@@ -1684,7 +1685,7 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 		t.Fatal("main doc item missing")
 	}
 	if errItem == nil {
-		t.Fatalf("failed image download must emit a visible error sub-item, got %+v", items)
+		t.Fatalf("failed image download must Emit a visible error sub-item, got %+v", items)
 	}
 	if len(errItem.Content) != 0 {
 		t.Errorf("image error item must carry no content, got %d bytes", len(errItem.Content))
@@ -1702,22 +1703,22 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 
 	// multimodal OFF → the download is never attempted, so no error item, but the
 	// id is still kept (not swept).
-	itemsOff, err := fetchDocxWithBlocks(ctx, client, docxFetchInput{
-		docToken:          node.NodeToken,
-		objToken:          node.ObjToken,
-		title:             node.Title,
-		url:               conn.region.wikiURL(node.NodeToken),
-		resourceID:        "space1:" + nodeToken,
-		editTime:          parseFeishuTimestamp("1711468800"),
-		baseMeta:          baseMeta,
-		multimodalEnabled: false,
+	itemsOff, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
+		DocToken:          node.NodeToken,
+		ObjToken:          node.ObjToken,
+		Title:             node.Title,
+		URL:               conn.region.WikiURL(node.NodeToken),
+		ResourceID:        "space1:" + nodeToken,
+		EditTime:          core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:          baseMeta,
+		MultimodalEnabled: false,
 	})
 	if err != nil {
-		t.Fatalf("fetchDocxWithBlocks (multimodal off): %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks (multimodal off): %v", err)
 	}
 	for _, it := range itemsOff {
 		if it.ExternalID == imgChildID {
-			t.Errorf("multimodal off must NOT attempt the image download or emit an item, got %+v", it)
+			t.Errorf("multimodal off must NOT attempt the image download or Emit an item, got %+v", it)
 		}
 	}
 }
@@ -1732,10 +1733,10 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 		attToken  = "ft-icon"
 		attName   = "icon.png"
 	)
-	// Content size well above minAttachmentBytes — the filter must be extension, not size.
-	attContent := bytes.Repeat([]byte("x"), minAttachmentBytes+100)
+	// Content size well above core.MinAttachmentBytes — the filter must be extension, not size.
+	attContent := bytes.Repeat([]byte("x"), core.MinAttachmentBytes+100)
 
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    nodeToken,
 		ObjToken:     objToken,
 		ObjType:      "docx",
@@ -1745,7 +1746,7 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 	ts, cfg := fakeFeishuWithBlocks(nodes, objToken, attToken, attName, attContent)
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -1762,7 +1763,7 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 }
 
 // TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted verifies that a
-// whitelisted-extension file block whose download is smaller than minAttachmentBytes
+// whitelisted-extension file block whose download is smaller than core.MinAttachmentBytes
 // is NOT promoted to a sub-item, but its inline reference IS present in the main doc.
 func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) {
 	const (
@@ -1771,10 +1772,10 @@ func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) 
 		attToken  = "ft-tiny-pdf"
 		attName   = "tiny.pdf"
 	)
-	// Content is well below minAttachmentBytes (100 bytes vs 2048 threshold).
+	// Content is well below core.MinAttachmentBytes (100 bytes vs 2048 threshold).
 	attContent := bytes.Repeat([]byte("x"), 100)
 
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:    nodeToken,
 		ObjToken:     objToken,
 		ObjType:      "docx",
@@ -1784,7 +1785,7 @@ func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) 
 	ts, cfg := fakeFeishuWithBlocks(nodes, objToken, attToken, attName, attContent)
 	defer ts.Close()
 
-	conn := NewConnector(RegionFeishu)
+	conn := NewConnector(core.RegionFeishu)
 	items, err := conn.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
 	if err != nil {
 		t.Fatalf("FetchAll() error: %v", err)
@@ -1805,7 +1806,7 @@ func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) 
 // ──────────────────────────────────────────────────────────────────────
 
 func TestFeishuCursorRoundTrip(t *testing.T) {
-	original := feishuCursor{
+	original := core.FeishuCursor{
 		LastSyncTime: time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC),
 		SpaceNodeTimes: map[string]map[string]string{
 			"space1": {
@@ -1828,7 +1829,7 @@ func TestFeishuCursorRoundTrip(t *testing.T) {
 
 	// Deserialize back
 	data2, _ := json.Marshal(cursorMap)
-	var restored feishuCursor
+	var restored core.FeishuCursor
 	if err := json.Unmarshal(data2, &restored); err != nil {
 		t.Fatalf("restore error: %v", err)
 	}
@@ -1861,7 +1862,7 @@ func TestSupportedImageExt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ext, ct, ok := supportedImageExt(tc.data)
+			ext, ct, ok := core.SupportedImageExt(tc.data)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}

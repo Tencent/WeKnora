@@ -1,4 +1,4 @@
-package feishu
+package wiki
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -36,23 +37,23 @@ func (s *statefulFeishu) shouldFail(token string) bool {
 	return s.failTokens[token]
 }
 
-func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFeishu) {
+func newStatefulFeishu(nodes []core.WikiNode) (*httptest.Server, *core.Config, *statefulFeishu) {
 	s := &statefulFeishu{failTokens: map[string]bool{}}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeListData{Items: nodes},
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
 		})
 	})
 	// Export create: ticket == obj_token so the poll below can key on it.
@@ -61,9 +62,9 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 			Token string `json:"token"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		writeJSON(w, exportTaskCreateResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        exportTaskCreateData{Ticket: body.Token},
+		writeJSON(w, core.ExportTaskCreateResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.ExportTaskCreateData{Ticket: body.Token},
 		})
 	})
 	// Export status poll: /open-apis/drive/v1/export_tasks/<ticket>?token=<objToken>
@@ -78,7 +79,7 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 		if s.shouldFail(token) {
 			status = 3 // failed job
 		}
-		resp := exportTaskStatusResponse{apiResponse: apiResponse{Code: 0}}
+		resp := core.ExportTaskStatusResponse{ApiResponse: core.ApiResponse{Code: 0}}
 		resp.Data.Result.FileToken = "file-" + token
 		resp.Data.Result.FileName = "exported.docx"
 		resp.Data.Result.JobStatus = status
@@ -87,7 +88,7 @@ func newStatefulFeishu(nodes []wikiNode) (*httptest.Server, *Config, *statefulFe
 	})
 
 	ts := httptest.NewServer(mux)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}, s
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}, s
 }
 
 // convergenceHandler models the service side across a resumable sync:
@@ -99,7 +100,7 @@ type convergenceHandler struct {
 	ingested        []string // ExternalIDs of successfully ingested content items
 	failed          []string // ExternalIDs surfaced as failures (Metadata["error"])
 	exportedTokens  map[string]int
-	checkpoints     []feishuCursor
+	checkpoints     []core.FeishuCursor
 	calls           int
 	cancelAfterCall int // >0: cancel ctx and abort on the Nth Emit call
 	cancel          context.CancelFunc
@@ -125,7 +126,7 @@ func (h *convergenceHandler) Emit(ctx context.Context, item types.FetchedItem) e
 }
 
 func (h *convergenceHandler) Checkpoint(ctx context.Context, cursor *types.SyncCursor) error {
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(cursor.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	h.checkpoints = append(h.checkpoints, fc)
@@ -149,17 +150,17 @@ func lastCheckpointCursor(h *convergenceHandler, t *testing.T) *types.SyncCursor
 // TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure is the
 // end-to-end proof for Tencent/WeKnora#2136: a large-ish wiki that (a) hits a
 // transient per-node export failure and (b) is killed by the 2h task timeout
-// mid-traversal must, on the asynq retry, resume from the last checkpoint,
-// re-fetch only what is outstanding, retry the transiently-failed node, and end
-// with EVERY document synced exactly once — no permanent skip, no full restart,
+// mid-traversal must, on the asynq retry, resume from the last Checkpoint,
+// re-core.Fetch only what is outstanding, retry the transiently-failed node, and end
+// with EVERY document synced exactly once — no permanent core.Skip, no full restart,
 // no redundant re-export of already-done nodes.
 func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T) {
 	// Checkpoint on every processed node so the persisted cursor is precise.
-	prevN := feishuStreamCheckpointInterval
-	feishuStreamCheckpointInterval = 1
-	defer func() { feishuStreamCheckpointInterval = prevN }()
+	prevN := core.FeishuStreamCheckpointInterval
+	core.FeishuStreamCheckpointInterval = 1
+	defer func() { core.FeishuStreamCheckpointInterval = prevN }()
 
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc1", ObjEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "docx", Title: "Doc2", ObjEditTime: "200"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
@@ -169,7 +170,7 @@ func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T
 	ts, cfg, srv := newStatefulFeishu(nodes)
 	defer ts.Close()
 	cfgDS := makeConfig(cfg, []string{"space1"})
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 
 	// ---- Pass 1: obj2 export fails transiently; task "times out" on the 3rd
 	// Emit call (nt1 success, nt2 failure-item, then cancel as nt3 is emitted).
@@ -187,14 +188,14 @@ func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T
 		t.Fatalf("pass 1 ingested = %q, want just nt1", got)
 	}
 
-	// The persisted cursor (last checkpoint) must contain nt1 but NOT the
-	// aborted nt3, nor the transiently-failed nt2 — otherwise resume would skip
+	// The persisted cursor (last Checkpoint) must contain nt1 but NOT the
+	// aborted nt3, nor the transiently-failed nt2 — otherwise resume would core.Skip
 	// them forever.
 	persisted := lastCheckpointCursor(h1, t)
 	if persisted == nil {
-		t.Fatalf("pass 1 wrote no checkpoint — resume would restart from scratch")
+		t.Fatalf("pass 1 wrote no Checkpoint — resume would restart from scratch")
 	}
-	var pc feishuCursor
+	var pc core.FeishuCursor
 	pb, _ := json.Marshal(persisted.ConnectorCursor)
 	_ = json.Unmarshal(pb, &pc)
 	p := pc.SpaceNodeTimes["space1"]
@@ -202,10 +203,10 @@ func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T
 		t.Errorf("persisted cursor missing nt1 (done work lost on resume)")
 	}
 	if _, ok := p["nt2"]; ok {
-		t.Errorf("persisted cursor recorded transiently-failed nt2 — it would be skipped forever")
+		t.Errorf("persisted cursor recorded transiently-failed nt2 — it would be core.Skipped forever")
 	}
 	if _, ok := p["nt3"]; ok {
-		t.Errorf("persisted cursor recorded aborted nt3 — it would be skipped forever")
+		t.Errorf("persisted cursor recorded aborted nt3 — it would be core.Skipped forever")
 	}
 
 	// ---- Pass 2: asynq retry. obj2 has recovered; run to completion resuming
@@ -217,7 +218,7 @@ func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T
 		t.Fatalf("pass 2 error: %v", err2)
 	}
 
-	// nt1 was already done → must be skipped (not re-exported, not re-ingested).
+	// nt1 was already done → must be core.Skipped (not re-exported, not re-ingested).
 	for _, id := range h2.ingested {
 		if id == "nt1" {
 			t.Errorf("pass 2 re-ingested nt1 — redundant re-export of completed work")
@@ -255,12 +256,12 @@ func TestFetchStream_ResumeConvergesAfterTimeoutAndTransientFailure(t *testing.T
 
 	// Final cursor is a complete snapshot of every node (next incremental sync
 	// starts clean).
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	nb, _ := json.Marshal(next2.ConnectorCursor)
 	_ = json.Unmarshal(nb, &fc)
 	for _, n := range nodes {
 		if _, ok := fc.SpaceNodeTimes["space1"][n.NodeToken]; !ok {
-			t.Errorf("final cursor missing %s — incremental sync would re-fetch it", n.NodeToken)
+			t.Errorf("final cursor missing %s — incremental sync would re-core.Fetch it", n.NodeToken)
 		}
 	}
 }

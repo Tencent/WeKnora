@@ -1,4 +1,4 @@
-package feishu
+package wiki
 
 import (
 	"bytes"
@@ -10,50 +10,51 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // fakeFeishuFailingExport serves the auth/spaces/nodes endpoints normally but
 // fails every document export (code != 0), so fetchNodeContent returns an error
 // for each supported node — modelling a rate-limited / broken export.
-func fakeFeishuFailingExport(nodes []wikiNode) (*httptest.Server, *Config) {
+func fakeFeishuFailingExport(nodes []core.WikiNode) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeListData{Items: nodes},
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
 		})
 	})
 	// Export creation fails for every document.
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, apiResponse{Code: 1, Msg: "export unavailable"})
+		writeJSON(w, core.ApiResponse{Code: 1, Msg: "export unavailable"})
 	})
 	ts := httptest.NewServer(mux)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
 }
 
-// A node whose fetch fails must NOT have its new edit time recorded in the
+// A node whose core.Fetch fails must NOT have its new edit time recorded in the
 // returned cursor: recording it would make the next sync's unchanged fast-path
-// skip it forever, silently dropping a document on a transient export failure
+// core.Skip it forever, silently dropping a document on a transient export failure
 // (Tencent/WeKnora#2136). With a prior edit time known, the prior value is
 // retained so prev != current next run and the node is retried.
 func TestFetchStream_FailedFetchRetainsPriorCursor(t *testing.T) {
-	nodes := []wikiNode{{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"}}
+	nodes := []core.WikiNode{{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"}}
 	ts, cfg := fakeFeishuFailingExport(nodes)
 	defer ts.Close()
 
 	cursor := makeStreamCursor(t, map[string]map[string]string{"space1": {"nt1": "50"}}) // prior, older
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	next, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), cursor, h)
 	if err != nil {
@@ -65,33 +66,33 @@ func TestFetchStream_FailedFetchRetainsPriorCursor(t *testing.T) {
 		t.Fatalf("expected 1 emitted failure item with error metadata, got %+v", h.emitted)
 	}
 
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(next.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	got := fc.SpaceNodeTimes["space1"]["nt1"]
 	if got == "100" {
-		t.Fatalf("failed node advanced to current edit time %q — it will be skipped forever", got)
+		t.Fatalf("failed node advanced to current edit time %q — it will be core.Skipped forever", got)
 	}
 	if got != "50" {
 		t.Errorf("failed node cursor = %q, want prior value \"50\" (retry next run)", got)
 	}
 }
 
-// With no prior cursor entry, a failed fetch must leave the node out of the
+// With no prior cursor entry, a failed core.Fetch must leave the node out of the
 // returned cursor entirely, so the next run treats it as new and retries it.
 func TestFetchStream_FailedFetchNoPriorOmitsFromCursor(t *testing.T) {
-	nodes := []wikiNode{{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"}}
+	nodes := []core.WikiNode{{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"}}
 	ts, cfg := fakeFeishuFailingExport(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	next, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
 	if err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
 
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(next.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	if v, ok := fc.SpaceNodeTimes["space1"]["nt1"]; ok {
@@ -99,14 +100,14 @@ func TestFetchStream_FailedFetchNoPriorOmitsFromCursor(t *testing.T) {
 	}
 }
 
-// recordingHandler captures the items and checkpoints a streaming fetch emits.
+// recordingHandler captures the items and checkpoints a streaming core.Fetch emits.
 // Checkpoints are snapshotted (JSON-encoded) at call time — mirroring the
 // service, which serializes the cursor synchronously inside Checkpoint — so the
 // test observes the cursor state as it was when Checkpoint was called, not the
 // connector's later-mutated map.
 type recordingHandler struct {
 	emitted     []types.FetchedItem
-	checkpoints []feishuCursor
+	checkpoints []core.FeishuCursor
 	emitErr     func(item types.FetchedItem) error
 }
 
@@ -121,7 +122,7 @@ func (h *recordingHandler) Emit(ctx context.Context, item types.FetchedItem) err
 }
 
 func (h *recordingHandler) Checkpoint(ctx context.Context, cursor *types.SyncCursor) error {
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(cursor.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	h.checkpoints = append(h.checkpoints, fc)
@@ -130,7 +131,7 @@ func (h *recordingHandler) Checkpoint(ctx context.Context, cursor *types.SyncCur
 
 func makeStreamCursor(t *testing.T, spaceNodeTimes map[string]map[string]string) *types.SyncCursor {
 	t.Helper()
-	prev := feishuCursor{SpaceNodeTimes: spaceNodeTimes}
+	prev := core.FeishuCursor{SpaceNodeTimes: spaceNodeTimes}
 	b, _ := json.Marshal(prev)
 	var m map[string]interface{}
 	if err := json.Unmarshal(b, &m); err != nil {
@@ -143,7 +144,7 @@ func makeStreamCursor(t *testing.T, spaceNodeTimes map[string]map[string]string)
 // types, and the returned cursor records the edit time of every discovered node
 // (so the next incremental run can detect changes).
 func TestFetchStream_EmitsSupportedSkipsUnsupported(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"},
 		{NodeToken: "nt2", ObjToken: "obj2", ObjType: "mindnote", Title: "Brain", ObjEditTime: "200"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
@@ -151,7 +152,7 @@ func TestFetchStream_EmitsSupportedSkipsUnsupported(t *testing.T) {
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	next, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
 	if err != nil {
@@ -165,7 +166,7 @@ func TestFetchStream_EmitsSupportedSkipsUnsupported(t *testing.T) {
 		t.Errorf("emitted ids = %q,%q; want nt1,nt3", h.emitted[0].ExternalID, h.emitted[1].ExternalID)
 	}
 
-	var fc feishuCursor
+	var fc core.FeishuCursor
 	b, _ := json.Marshal(next.ConnectorCursor)
 	_ = json.Unmarshal(b, &fc)
 	times := fc.SpaceNodeTimes["space1"]
@@ -178,10 +179,10 @@ func TestFetchStream_EmitsSupportedSkipsUnsupported(t *testing.T) {
 
 // When a cursor already records a node at its current edit time, that node is
 // unchanged and must not be re-emitted; only new/changed nodes stream through.
-// This is the resume/incremental-skip behavior that lets a timed-out sync
+// This is the resume/incremental-core.Skip behavior that lets a timed-out sync
 // converge across retries instead of re-exporting everything.
 func TestFetchStream_SkipsUnchangedNodesFromCursor(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
 	}
@@ -192,7 +193,7 @@ func TestFetchStream_SkipsUnchangedNodesFromCursor(t *testing.T) {
 		"space1": {"nt1": "100"}, // nt1 unchanged; nt3 unknown → new
 	})
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	if _, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), cursor, h); err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
@@ -207,33 +208,33 @@ func TestFetchStream_SkipsUnchangedNodesFromCursor(t *testing.T) {
 }
 
 // Checkpoints must persist progress at page boundaries so a crash mid-sync
-// resumes from the last checkpoint. With the interval set to 1, each emitted
-// item triggers a checkpoint, and the first checkpoint must already contain the
+// resumes from the last Checkpoint. With the interval set to 1, each emitted
+// item triggers a Checkpoint, and the first Checkpoint must already contain the
 // first node's edit time.
 func TestFetchStream_CheckpointsProgress(t *testing.T) {
-	prev := feishuStreamCheckpointInterval
-	feishuStreamCheckpointInterval = 1
-	defer func() { feishuStreamCheckpointInterval = prev }()
+	prev := core.FeishuStreamCheckpointInterval
+	core.FeishuStreamCheckpointInterval = 1
+	defer func() { core.FeishuStreamCheckpointInterval = prev }()
 
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
 	}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	if _, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h); err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
 
 	if len(h.checkpoints) == 0 {
-		t.Fatalf("expected at least one checkpoint")
+		t.Fatalf("expected at least one Checkpoint")
 	}
 	first := h.checkpoints[0]
 	if _, ok := first.SpaceNodeTimes["space1"]["nt1"]; !ok {
-		t.Errorf("first checkpoint missing nt1 progress: %+v", first.SpaceNodeTimes)
+		t.Errorf("first Checkpoint missing nt1 progress: %+v", first.SpaceNodeTimes)
 	}
 }
 
@@ -242,25 +243,25 @@ func TestFetchStream_CheckpointsProgress(t *testing.T) {
 // exports reaches the 2h task timeout having never checkpointed, and resumes
 // from scratch forever — exactly the #2136 "never fully syncs" case. With the
 // node interval effectively disabled and the time interval at 0, every
-// processed node must still produce a checkpoint.
+// processed node must still produce a Checkpoint.
 func TestFetchStream_CheckpointsOnElapsedTime(t *testing.T) {
-	prevN := feishuStreamCheckpointInterval
-	prevT := feishuStreamCheckpointMaxInterval
-	feishuStreamCheckpointInterval = 1 << 30 // never fires by count
-	feishuStreamCheckpointMaxInterval = 0    // fires by elapsed time every node
+	prevN := core.FeishuStreamCheckpointInterval
+	prevT := core.FeishuStreamCheckpointMaxInterval
+	core.FeishuStreamCheckpointInterval = 1 << 30 // never fires by count
+	core.FeishuStreamCheckpointMaxInterval = 0    // fires by elapsed time every node
 	defer func() {
-		feishuStreamCheckpointInterval = prevN
-		feishuStreamCheckpointMaxInterval = prevT
+		core.FeishuStreamCheckpointInterval = prevN
+		core.FeishuStreamCheckpointMaxInterval = prevT
 	}()
 
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
 	}
 	ts, cfg := fakeFeishu(nodes)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	if _, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h); err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
@@ -274,7 +275,7 @@ func TestFetchStream_CheckpointsOnElapsedTime(t *testing.T) {
 // error and stop fetching further nodes (the sync is failing; do not burn API
 // budget on the rest of the tree).
 func TestFetchStream_EmitErrorAborts(t *testing.T) {
-	nodes := []wikiNode{
+	nodes := []core.WikiNode{
 		{NodeToken: "nt1", ObjToken: "obj1", ObjType: "docx", Title: "Doc", ObjEditTime: "100"},
 		{NodeToken: "nt3", ObjToken: "obj3", ObjType: "docx", Title: "Doc3", ObjEditTime: "300"},
 	}
@@ -282,14 +283,14 @@ func TestFetchStream_EmitErrorAborts(t *testing.T) {
 	defer ts.Close()
 
 	boom := errors.New("ingest failed")
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{emitErr: func(item types.FetchedItem) error { return boom }}
 	_, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
 	if !errors.Is(err, boom) {
 		t.Fatalf("FetchStream() error = %v, want %v", err, boom)
 	}
 	if len(h.emitted) != 0 {
-		t.Errorf("emitted %d items, want 0 (aborted on first emit)", len(h.emitted))
+		t.Errorf("emitted %d items, want 0 (aborted on first Emit)", len(h.emitted))
 	}
 }
 
@@ -299,10 +300,10 @@ func TestFetchStream_EmitErrorAborts(t *testing.T) {
 
 // TestFetchStream_DocxMultiItem is a stream-level integration test proving that a
 // docx node fans out to a main Markdown item + an attachment item through the real
-// FetchStream → fetchNodeContent → fetchDocxWithBlocks path. The fake server
+// FetchStream → fetchNodeContent → core.FetchDocxWithBlocks path. The fake server
 // serves the blocks API (one text block + one file block) and the drive download;
 // no export endpoint is registered, so any accidental fall-through to the export
-// path would 404 and surface as a fetch error.
+// path would 404 and surface as a core.Fetch error.
 func TestFetchStream_DocxMultiItem(t *testing.T) {
 	const (
 		nodeToken = "nt-blocks"
@@ -310,10 +311,10 @@ func TestFetchStream_DocxMultiItem(t *testing.T) {
 		attToken  = "ft-stream-att"
 		attName   = "slides.pdf"
 	)
-	// Attachment content must exceed minAttachmentBytes (2 KiB).
-	attContent := bytes.Repeat([]byte("a"), minAttachmentBytes+1)
+	// Attachment content must exceed core.MinAttachmentBytes (2 KiB).
+	attContent := bytes.Repeat([]byte("a"), core.MinAttachmentBytes+1)
 
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:   nodeToken,
 		ObjToken:    objToken,
 		ObjType:     "docx",
@@ -323,7 +324,7 @@ func TestFetchStream_DocxMultiItem(t *testing.T) {
 	ts, cfg := fakeFeishuWithBlocks(nodes, objToken, attToken, attName, attContent)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
 	if err != nil {
@@ -357,27 +358,27 @@ func TestFetchStream_DocxMultiItem(t *testing.T) {
 
 // fakeFeishuWithBlocksFallback returns a server where the blocks API returns HTTP 500
 // (simulating a permission/scope error) and the export task path returns success.
-// This wires the fallback path: fetchDocxWithBlocks → blocks error → fetchViaExport.
-func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.Server, *Config) {
+// This wires the fallback path: core.FetchDocxWithBlocks → blocks error → fetchViaExport.
+func fakeFeishuWithBlocksFallback(nodes []core.WikiNode, docToken string) (*httptest.Server, *core.Config) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, tokenResponse{
-			apiResponse:       apiResponse{Code: 0},
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiSpaceListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiSpaceListData{Items: []wikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
+		writeJSON(w, core.WikiSpaceListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
 		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, wikiNodeListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        wikiNodeListData{Items: nodes},
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
 		})
 	})
 
@@ -391,9 +392,9 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 	// Export task creation → returns ticket.
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			writeJSON(w, exportTaskCreateResponse{
-				apiResponse: apiResponse{Code: 0},
-				Data:        exportTaskCreateData{Ticket: "ticket-fb"},
+			writeJSON(w, core.ExportTaskCreateResponse{
+				ApiResponse: core.ApiResponse{Code: 0},
+				Data:        core.ExportTaskCreateData{Ticket: "ticket-fb"},
 			})
 			return
 		}
@@ -401,10 +402,10 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 	})
 	// Export task status polling.
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-fb", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, exportTaskStatusResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: exportTaskStatusData{
-				Result: exportTaskResult{
+		writeJSON(w, core.ExportTaskStatusResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.ExportTaskStatusData{
+				Result: core.ExportTaskResult{
 					FileToken: "ft-export-fallback",
 					FileSize:  512,
 					JobStatus: 0, // done
@@ -430,7 +431,7 @@ func fakeFeishuWithBlocksFallback(nodes []wikiNode, docToken string) (*httptest.
 	})
 
 	ts := httptest.NewServer(mux)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
 }
 
 // TestFetchStream_DocxBlocksFallback proves that when the blocks API returns HTTP 500
@@ -443,7 +444,7 @@ func TestFetchStream_DocxBlocksFallback(t *testing.T) {
 		nodeToken = "nt-fallback"
 		objToken  = "obj-fallback"
 	)
-	nodes := []wikiNode{{
+	nodes := []core.WikiNode{{
 		NodeToken:   nodeToken,
 		ObjToken:    objToken,
 		ObjType:     "docx",
@@ -453,14 +454,14 @@ func TestFetchStream_DocxBlocksFallback(t *testing.T) {
 	ts, cfg := fakeFeishuWithBlocksFallback(nodes, objToken)
 	defer ts.Close()
 
-	c := NewConnector(RegionFeishu)
+	c := NewConnector(core.RegionFeishu)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeConfig(cfg, []string{"space1"}), nil, h)
 	if err != nil {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
 
-	// The fallback path must emit exactly one item (exported binary, not multi-item).
+	// The fallback path must Emit exactly one item (exported binary, not multi-item).
 	if len(h.emitted) != 1 {
 		t.Fatalf("expected 1 emitted item (export fallback), got %d: %+v", len(h.emitted), h.emitted)
 	}

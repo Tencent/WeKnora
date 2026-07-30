@@ -1,4 +1,4 @@
-package feishu
+package drive
 
 import (
 	"bytes"
@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // makeDriveConfig builds a DataSourceConfig for the Drive connector, mirroring
 // makeConfig but with the drive connector type and a multimodal toggle.
-func makeDriveConfig(cfg *Config, resourceIDs []string, multimodal bool) *types.DataSourceConfig {
+func makeDriveConfig(cfg *core.Config, resourceIDs []string, multimodal bool) *types.DataSourceConfig {
 	c := makeConfig(cfg, resourceIDs)
 	c.Type = types.ConnectorTypeFeishuDrive
 	c.MultimodalEnabled = multimodal
@@ -27,21 +28,21 @@ func makeDriveConfig(cfg *Config, resourceIDs []string, multimodal bool) *types.
 //   - "empty": serve only a page block → empty Markdown → export fallback
 //
 // The export trio is always registered so both fallback modes can complete.
-func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
-	blocks []docxBlock, blocksMode string, mediaContent []byte,
-) (*httptest.Server, *Config) {
+func fakeFeishuDriveDocx(t *testing.T, files []core.DriveFile, docToken string,
+	blocks []core.DocxBlock, blocksMode string, mediaContent []byte,
+) (*httptest.Server, *core.Config) {
 	t.Helper()
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, tokenResponse{apiResponse: apiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
 	})
 
 	// Drive file listing (single page).
 	mux.HandleFunc("/open-apis/drive/v1/files", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, driveFileListResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        driveFileListData{Files: files},
+		writeJSON(w, core.DriveFileListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.DriveFileListData{Files: files},
 		})
 	})
 
@@ -55,16 +56,16 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 		})
 	case "empty":
 		mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, docxBlocksResponse{
-				apiResponse: apiResponse{Code: 0},
-				Data:        docxBlocksData{Items: []docxBlock{{BlockID: "b1", BlockType: blockTypePage}}},
+			writeJSON(w, core.DocxBlocksResponse{
+				ApiResponse: core.ApiResponse{Code: 0},
+				Data:        core.DocxBlocksData{Items: []core.DocxBlock{{BlockID: "b1", BlockType: core.BlockTypePage}}},
 			})
 		})
 	default: // "ok"
 		mux.HandleFunc(blocksPath, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, docxBlocksResponse{
-				apiResponse: apiResponse{Code: 0},
-				Data:        docxBlocksData{Items: blocks},
+			writeJSON(w, core.DocxBlocksResponse{
+				ApiResponse: core.ApiResponse{Code: 0},
+				Data:        core.DocxBlocksData{Items: blocks},
 			})
 		})
 	}
@@ -81,16 +82,16 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 
 	// Export trio for the fallback path.
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, exportTaskCreateResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data:        exportTaskCreateData{Ticket: "ticket-drv"},
+		writeJSON(w, core.ExportTaskCreateResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.ExportTaskCreateData{Ticket: "ticket-drv"},
 		})
 	})
 	mux.HandleFunc("/open-apis/drive/v1/export_tasks/ticket-drv", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, exportTaskStatusResponse{
-			apiResponse: apiResponse{Code: 0},
-			Data: exportTaskStatusData{
-				Result: exportTaskResult{FileToken: "ft-export-drv", FileSize: 512, JobStatus: 0, FileName: "drive-fallback.docx"},
+		writeJSON(w, core.ExportTaskStatusResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data: core.ExportTaskStatusData{
+				Result: core.ExportTaskResult{FileToken: "ft-export-drv", FileSize: 512, JobStatus: 0, FileName: "drive-fallback.docx"},
 			},
 		})
 	})
@@ -101,23 +102,23 @@ func fakeFeishuDriveDocx(t *testing.T, files []driveFile, docToken string,
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return ts, &Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
 }
 
-func driveDocxBlocks(attToken, attName string) []docxBlock {
-	return []docxBlock{
-		{BlockID: "b1", BlockType: blockTypePage},
-		{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-			Elements: []textElement{{TextRun: &textRun{Content: "Hello drive"}}},
+func driveDocxBlocks(attToken, attName string) []core.DocxBlock {
+	return []core.DocxBlock{
+		{BlockID: "b1", BlockType: core.BlockTypePage},
+		{BlockID: "b2", BlockType: core.BlockTypeText, Text: &core.BlockText{
+			Elements: []core.TextElement{{TextRun: &core.TextRun{Content: "Hello drive"}}},
 		}},
-		{BlockID: "b3", BlockType: blockTypeFile, File: &blockFileRef{Token: attToken, Name: attName}},
+		{BlockID: "b3", BlockType: core.BlockTypeFile, File: &core.BlockFileRef{Token: attToken, Name: attName}},
 	}
 }
 
 const driveDocxFileToken = "fdoc1"
 
-func driveDocxFile() driveFile {
-	return driveFile{
+func driveDocxFile() core.DriveFile {
+	return core.DriveFile{
 		Token:        driveDocxFileToken,
 		Type:         "docx",
 		Name:         "Drive Doc",
@@ -134,12 +135,12 @@ func TestDriveFetchStream_DocxBlocksMultiItem(t *testing.T) {
 		attToken = "ft-drv-att"
 		attName  = "report.pdf"
 	)
-	attContent := bytes.Repeat([]byte("x"), minAttachmentBytes+1)
+	attContent := bytes.Repeat([]byte("x"), core.MinAttachmentBytes+1)
 
-	_, cfg := fakeFeishuDriveDocx(t, []driveFile{driveDocxFile()}, driveDocxFileToken,
+	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken,
 		driveDocxBlocks(attToken, attName), "ok", attContent)
 
-	c := NewDriveConnector(RegionFeishuDrive)
+	c := NewDriveConnector(core.RegionFeishuDrive)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeDriveConfig(cfg, []string{"folder1"}, false), nil, h)
 	if err != nil {
@@ -183,9 +184,9 @@ func TestDriveFetchStream_DocxBlocksMultiItem(t *testing.T) {
 // Blocks API failure falls back to export: exactly one octet-stream item, no
 // ReplacesSubtree (must not sweep good prior children on a transient failure).
 func TestDriveFetchStream_DocxBlocksFailFallsBackToExport(t *testing.T) {
-	_, cfg := fakeFeishuDriveDocx(t, []driveFile{driveDocxFile()}, driveDocxFileToken, nil, "fail", nil)
+	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, nil, "fail", nil)
 
-	c := NewDriveConnector(RegionFeishuDrive)
+	c := NewDriveConnector(core.RegionFeishuDrive)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeDriveConfig(cfg, []string{"folder1"}, false), nil, h)
 	if err != nil {
@@ -211,11 +212,11 @@ func TestDriveFetchStream_DocxBlocksFailFallsBackToExport(t *testing.T) {
 }
 
 // Blocks rendering to empty Markdown also falls back to export (a blank page
-// would otherwise ingest as a login-gated URL fetch and fail).
+// would otherwise ingest as a login-gated URL core.Fetch and fail).
 func TestDriveFetchStream_DocxBlocksEmptyFallsBackToExport(t *testing.T) {
-	_, cfg := fakeFeishuDriveDocx(t, []driveFile{driveDocxFile()}, driveDocxFileToken, nil, "empty", nil)
+	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, nil, "empty", nil)
 
-	c := NewDriveConnector(RegionFeishuDrive)
+	c := NewDriveConnector(core.RegionFeishuDrive)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeDriveConfig(cfg, []string{"folder1"}, false), nil, h)
 	if err != nil {
@@ -239,16 +240,16 @@ func TestDriveFetchStream_DocxBlocksEmptyFallsBackToExport(t *testing.T) {
 // sweep it, and toggling VLM off later does not delete previously OCR'd images.
 func TestDriveFetchStream_DocxImageMultimodalOff(t *testing.T) {
 	const imgToken = "img-drv-1"
-	blocks := []docxBlock{
-		{BlockID: "b1", BlockType: blockTypePage},
-		{BlockID: "b2", BlockType: blockTypeText, Text: &blockText{
-			Elements: []textElement{{TextRun: &textRun{Content: "has image"}}},
+	blocks := []core.DocxBlock{
+		{BlockID: "b1", BlockType: core.BlockTypePage},
+		{BlockID: "b2", BlockType: core.BlockTypeText, Text: &core.BlockText{
+			Elements: []core.TextElement{{TextRun: &core.TextRun{Content: "has image"}}},
 		}},
-		{BlockID: "b3", BlockType: blockTypeImage, Image: &blockTokenRef{Token: imgToken}},
+		{BlockID: "b3", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
 	}
-	_, cfg := fakeFeishuDriveDocx(t, []driveFile{driveDocxFile()}, driveDocxFileToken, blocks, "ok", nil)
+	_, cfg := fakeFeishuDriveDocx(t, []core.DriveFile{driveDocxFile()}, driveDocxFileToken, blocks, "ok", nil)
 
-	c := NewDriveConnector(RegionFeishuDrive)
+	c := NewDriveConnector(core.RegionFeishuDrive)
 	h := &recordingHandler{}
 	_, err := c.FetchStream(context.Background(), makeDriveConfig(cfg, []string{"folder1"}, false), nil, h)
 	if err != nil {
@@ -256,7 +257,7 @@ func TestDriveFetchStream_DocxImageMultimodalOff(t *testing.T) {
 	}
 
 	if len(h.emitted) != 1 {
-		t.Fatalf("expected 1 emitted item (main only, image skipped), got %d: %+v", len(h.emitted), h.emitted)
+		t.Fatalf("expected 1 emitted item (main only, image core.Skipped), got %d: %+v", len(h.emitted), h.emitted)
 	}
 	main := h.emitted[0]
 	wantKeep := driveDocxFileToken + "#image#" + imgToken

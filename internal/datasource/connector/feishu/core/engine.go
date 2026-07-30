@@ -25,9 +25,9 @@ import (
 //     Skipped on a transient export failure (Tencent/WeKnora#2136). This now
 //     also holds for the FetchIncremental path (previously it advanced the
 //     cursor before fetching, a latent #2136 bug).
-//   - Logs use the "stream progress/Summary" wording uniformly; the
+//   - Logs use the "stream progress/summary" wording uniformly; the
 //     FetchIncremental path additionally gains per-100 progress + tally
-//     Summary logs it did not emit before (log-only change).
+//     summary logs it did not emit before (log-only change).
 
 // NodeOps adapts one connector's node type to the shared sync engine. Every
 // method is a pure accessor or a thin wrapper - no engine logic lives here.
@@ -215,7 +215,7 @@ func runSync[N any](
 				}
 			}
 		}
-		logger.Infof(ctx, "%s stream Summary resource=%s %s", ops.LogTag(), resourceID, tally.Summary())
+		logger.Infof(ctx, "%s stream summary resource=%s %s", ops.LogTag(), resourceID, tally.Summary())
 	}
 
 	return ops.EncodeCursor(newTimes, lastSync), nil
