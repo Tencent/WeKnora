@@ -24,7 +24,7 @@ def read_requirements():
             ]
     except FileNotFoundError:
         return [
-            "mcp>=1.28,<2",
+            "mcp>=2,<3",
             "requests>=2.31.0",
             "starlette>=0.27.0",
             "uvicorn>=0.24.0",
@@ -33,7 +33,7 @@ def read_requirements():
 
 setup(
     name="weknora-mcp",
-    version="1.0.1",
+    version="1.1.0",
     author="WeKnora Team",
     author_email="support@weknora.com",
     description="WeKnora MCP Server - Model Context Protocol server for WeKnora API",
