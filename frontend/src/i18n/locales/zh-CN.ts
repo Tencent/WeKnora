@@ -6538,6 +6538,7 @@ export default {
       ingest_failed: "入库失败，详情见服务日志",
     },
     connector: {
+      dingtalk: "钉钉",
       feishu: "飞书",
       lark: "Lark（飞书国际版）",
       notion: "Notion",
@@ -6545,6 +6546,7 @@ export default {
       rss: "RSS / Atom 订阅",
     },
     connectorDesc: {
+      dingtalk: "同步钉钉文档中的内容",
       feishu: "同步飞书知识库中的文档、表格、文件",
       lark: "同步 Lark 知识库中的文档、表格、文件（飞书国际版）",
       notion: "同步 Notion 中的页面和数据库",
@@ -6552,6 +6554,7 @@ export default {
       rss: "同步 RSS / Atom 订阅源中的文章",
     },
     field: {
+      appKey: "App Key",
       appId: "App ID",
       appSecret: "App Secret",
       integrationToken: "Integration Token",

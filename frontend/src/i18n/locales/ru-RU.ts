@@ -6301,6 +6301,7 @@ export default {
       ingest_failed: 'Ошибка импорта; смотрите логи сервера',
     },
     connector: {
+      dingtalk: 'DingTalk (ДинТок)',
       feishu: 'Feishu (Фэйшу)',
       lark: 'Lark',
       notion: 'Notion',
@@ -6308,6 +6309,7 @@ export default {
       rss: 'RSS / Atom лента',
     },
     connectorDesc: {
+      dingtalk: 'Синхронизация документов из рабочих пространств DingTalk',
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       lark: 'Синхронизация документов, таблиц и файлов из Lark Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
@@ -6315,6 +6317,7 @@ export default {
       rss: 'Синхронизация статей из лент RSS / Atom',
     },
     field: {
+      appKey: 'App Key',
       appId: 'App ID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',

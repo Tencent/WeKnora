@@ -6480,6 +6480,7 @@ export default {
       ingest_failed: "가져오기 실패, 서버 로그를 확인하세요",
     },
     connector: {
+      dingtalk: "딩톡 (DingTalk)",
       feishu: "페이슈 (Feishu)",
       lark: "Lark (Feishu 글로벌)",
       notion: "Notion",
@@ -6487,6 +6488,7 @@ export default {
       rss: "RSS / Atom 피드",
     },
     connectorDesc: {
+      dingtalk: "딩톡 워크스페이스에서 문서 동기화",
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
       lark: "Lark 위키에서 문서, 스프레드시트, 파일 동기화",
       notion: "Notion에서 페이지 및 데이터베이스 동기화",
@@ -6494,6 +6496,7 @@ export default {
       rss: "RSS / Atom 피드에서 글 동기화",
     },
     field: {
+      appKey: "App Key",
       appId: "App ID",
       appSecret: "App Secret",
       integrationToken: "Integration Token",
