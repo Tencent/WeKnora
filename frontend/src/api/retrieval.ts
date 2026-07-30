@@ -3,6 +3,9 @@ import { get, put } from '@/utils/request'
 // RetrievalConfig represents the global retrieval/search configuration for a tenant.
 // Shared by knowledge search and message search.
 export interface RetrievalConfig {
+  feedback_retrieval_weight_enabled: boolean
+  feedback_enabled?: boolean
+  feedback_retrieval_weight_globally_enabled?: boolean
   embedding_top_k: number
   vector_threshold: number
   keyword_threshold: number

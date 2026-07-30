@@ -1,4 +1,44 @@
 export default {
+  feedback: {
+    answerLabel: 'Отзыв об ответе', like: 'Полезно', dislike: 'Не полезно',
+    reasonLabel: 'Что можно улучшить?',
+    saveFailed: 'Не удалось сохранить отзыв. Повторите попытку.',
+    chunkDetails: 'Отзывы о фрагменте', effectiveWeight: 'Текущий эффективный вес поиска',
+    storedWeight: 'Сохранённый снимок для аудита', sessionCount: 'Связанных сессий: {count}',
+    needsOptimization: 'Требует оптимизации', reset: 'Сбросить отзывы',
+    resetSuccess: 'Отзывы о фрагменте сброшены',
+    resetFailed: 'Не удалось сбросить отзывы о фрагменте',
+    loadFailed: 'Не удалось загрузить отзывы о фрагменте',
+    optimizationThreshold: 'Порог низкого качества',
+    optimizationThresholdDescription: 'Фрагменты с меньшей долей положительных отзывов помечаются для оптимизации.',
+    reasons: {
+      inaccurate: 'Неточно', irrelevant: 'Не по теме', incomplete: 'Неполно',
+      outdated: 'Устарело', other: 'Другое',
+    },
+    sources: {
+      like: 'Положительный отзыв', dislike: 'Отрицательный отзыв', cancel: 'Отзыв отменён',
+      admin_reset: 'Сброс администратором', content_delete: 'Сообщение удалено', legacy: 'Старое событие',
+    },
+    governance: {
+      title: 'Управление отзывами о фрагментах',
+      description: 'Просмотр сигналов качества, текущих весов политики и истории сбросов.',
+      searchPlaceholder: 'Поиск по фрагменту или заголовку документа',
+      untitled: 'Документ без названия',
+      likes: 'Положительные', dislikes: 'Отрицательные', healthy: 'Норма',
+      needsOptimization: 'Требует оптимизации', viewDetail: 'Подробнее',
+      detailTitle: 'Отзывы о фрагменте', chunkContent: 'Содержимое фрагмента',
+      dislikeReasons: 'Причины отрицательных отзывов', noReasons: 'Причин пока нет',
+      history: 'История весов и сбросов', reset: 'Сбросить отзывы',
+      resetConfirm: 'Сбросить текущие агрегаты отзывов для этого фрагмента?',
+      loadFailed: 'Не удалось загрузить данные управления отзывами',
+      status: { all: 'Все', rated: 'Оценённые', high: 'Высокие', normal: 'Обычные', low: 'Низкие', unrated: 'Без оценок' },
+      optimization: { all: 'Все состояния', yes: 'Требует оптимизации', no: 'Норма' },
+      columns: {
+        document: 'Документ', content: 'Фрагмент', ratings: 'Оценки', weights: 'Веса',
+        status: 'Статус', time: 'Время', trigger: 'Причина', change: 'Изменение сохранённого веса',
+      },
+    },
+  },
   platformApiKeys: {
     title: 'Платформенные API-ключи',
     description: 'Учетные данные для автоматизации между рабочими пространствами. Для API пространства используйте X-Tenant-ID.',
@@ -3677,7 +3717,8 @@ export default {
       asr: 'Аудио',
       datasource: 'Источники данных',
       share: 'Sharing',
-      activity: 'История активности'
+      activity: 'История активности',
+      feedback: 'Управление отзывами'
     },
     navGroups: {
       basic: 'Основное',

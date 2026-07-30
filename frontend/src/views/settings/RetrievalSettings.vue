@@ -6,6 +6,20 @@
     </div>
 
     <div class="settings-group">
+      <div class="setting-item">
+        <div class="setting-label-row">
+          <span>{{ t('retrievalSettings.feedbackWeightLabel') }}</span>
+          <t-switch
+            v-model="localConfig.feedback_retrieval_weight_enabled"
+            :disabled="!canEdit || !feedbackRetrievalGloballyEnabled"
+            @change="handleParamChange"
+          />
+        </div>
+        <p class="setting-desc" :class="{ 'warning-text': !feedbackRetrievalGloballyEnabled }">
+          {{ feedbackStatusText }}
+        </p>
+      </div>
+
       <!-- Rerank Model -->
       <div class="setting-item">
         <div class="setting-label">
@@ -109,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, computed, onMounted, nextTick } from 'vue'
+import { reactive, ref, computed, onMounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
@@ -128,6 +142,7 @@ const authStore = useAuthStore()
 const canEdit = computed(() => authStore.hasRole('admin'))
 
 const defaultConfig: RetrievalConfig = {
+  feedback_retrieval_weight_enabled: false,
   embedding_top_k: 50,
   vector_threshold: 0.15,
   keyword_threshold: 0.3,
@@ -139,6 +154,14 @@ const defaultConfig: RetrievalConfig = {
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
 let initialConfig: RetrievalConfig = { ...defaultConfig }
 let isInitializing = true
+const feedbackEnabled = ref(true)
+const feedbackRetrievalGloballyEnabled = ref(false)
+const feedbackStatusText = computed(() => {
+  if (!feedbackEnabled.value) return t('retrievalSettings.feedbackDisabled')
+  if (!feedbackRetrievalGloballyEnabled.value) return t('retrievalSettings.feedbackCollectionOnly')
+  if (!localConfig.feedback_retrieval_weight_enabled) return t('retrievalSettings.feedbackWorkspaceOptInRequired')
+  return t('retrievalSettings.feedbackWeightActive')
+})
 
 const loadConfig = async () => {
   try {
@@ -146,6 +169,7 @@ const loadConfig = async () => {
     if (response.data) {
       const cfg = response.data
       Object.assign(localConfig, {
+        feedback_retrieval_weight_enabled: cfg.feedback_retrieval_weight_enabled === true,
         embedding_top_k: cfg.embedding_top_k || defaultConfig.embedding_top_k,
         vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
         keyword_threshold: cfg.keyword_threshold || defaultConfig.keyword_threshold,
@@ -153,6 +177,8 @@ const loadConfig = async () => {
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
       })
+      feedbackEnabled.value = cfg.feedback_enabled !== false
+      feedbackRetrievalGloballyEnabled.value = cfg.feedback_retrieval_weight_globally_enabled === true
       initialConfig = { ...localConfig }
     }
   } catch (error: any) {

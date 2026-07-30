@@ -1,4 +1,47 @@
 export default {
+  feedback: {
+    effectiveWeight: '当前策略下有效召回权重',
+    storedWeight: '持久化审计快照',
+    answerLabel: '回答反馈',
+    like: '有帮助',
+    dislike: '没有帮助',
+    reasonLabel: '哪些方面需要改进？',
+    saveFailed: '反馈保存失败，请重试。',
+    chunkDetails: '分块反馈',
+    sessionCount: '关联会话 {count} 个',
+    needsOptimization: '只看待优化',
+    reset: '重置反馈',
+    resetSuccess: '分块反馈已重置',
+    resetFailed: '分块反馈重置失败',
+    loadFailed: '分块反馈加载失败',
+    optimizationThreshold: '低质量反馈阈值',
+    optimizationThresholdDescription: '正向率低于该值的分块会标记为待优化。',
+    reasons: {
+      inaccurate: '内容不准确', irrelevant: '与问题无关', incomplete: '回答不完整',
+      outdated: '信息已过时', other: '其他',
+    },
+    sources: {
+      like: '用户点赞', dislike: '用户点踩', cancel: '取消反馈',
+      admin_reset: '管理员重置', content_delete: '消息删除', legacy: '历史记录',
+    },
+    governance: {
+      title: '分块反馈治理',
+      description: '查看反馈质量信号、当前策略权重与重置历史。',
+      searchPlaceholder: '搜索分块内容或文档标题',
+      untitled: '未命名文档',
+      likes: '点赞', dislikes: '点踩', healthy: '状态正常', needsOptimization: '需要优化',
+      viewDetail: '详情', detailTitle: '分块反馈详情', chunkContent: '分块内容',
+      dislikeReasons: '点踩原因', noReasons: '暂无点踩原因', history: '权重与重置历史',
+      reset: '重置反馈', resetConfirm: '确认重置此分块的当前反馈聚合吗？',
+      loadFailed: '反馈治理数据加载失败',
+      status: { all: '全部', rated: '有评分', high: '高', normal: '普通', low: '低', unrated: '无评分' },
+      optimization: { all: '全部质量状态', yes: '需要优化', no: '状态正常' },
+      columns: {
+        document: '文档', content: '分块', ratings: '反馈数', weights: '权重',
+        status: '状态', time: '时间', trigger: '触发来源', change: '持久权重变化',
+      },
+    },
+  },
   platformApiKeys: {
     title: '平台 API Key',
     description: '为跨空间自动化创建平台级凭据；调用空间接口时通过 X-Tenant-ID 指定目标空间。',
@@ -3677,7 +3720,8 @@ export default {
       asr: '音频处理',
       datasource: '数据源',
       share: '共享管理',
-      activity: '活动记录'
+      activity: '活动记录',
+      feedback: '反馈治理'
     },
     navGroups: {
       basic: '基础',

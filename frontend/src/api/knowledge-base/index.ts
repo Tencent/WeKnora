@@ -372,6 +372,36 @@ export function getChunkByIdOnly(chunkId: string) {
   return get(`/api/v1/chunks/by-id/${chunkId}`);
 }
 
+export type ChunkFeedbackTriggerSource =
+  | 'like'
+  | 'dislike'
+  | 'cancel'
+  | 'admin_reset'
+  | 'content_delete'
+  | 'legacy';
+
+export interface ChunkFeedbackAudit {
+  id: number;
+  action: 'feedback_weight_changed' | 'feedback_reset';
+  trigger_source: ChunkFeedbackTriggerSource;
+  old_weight: number;
+  new_weight: number;
+  created_at: string;
+}
+
+export interface ChunkFeedbackDetails {
+  reason_counts: Record<string, number>;
+  audits: ChunkFeedbackAudit[];
+}
+
+export function getChunkFeedbackDetails(chunkId: string) {
+  return get<{ success: boolean; data: ChunkFeedbackDetails }>(`/api/v1/chunks/by-id/${chunkId}/feedback`);
+}
+
+export function resetChunkFeedback(knowledgeBaseId: string, chunkId: string) {
+  return post(`/api/v1/knowledge-bases/${knowledgeBaseId}/chunks/${chunkId}/feedback/reset`, {});
+}
+
 // Delete a single generated question from a chunk by question ID
 export function deleteGeneratedQuestion(chunkId: string, questionId: string) {
   return del(`/api/v1/chunks/by-id/${chunkId}/questions`, { question_id: questionId });

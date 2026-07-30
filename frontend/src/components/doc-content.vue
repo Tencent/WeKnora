@@ -12,6 +12,7 @@ import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
   regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+  getChunkFeedbackDetails, resetChunkFeedback,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
@@ -725,8 +726,68 @@ const mergedContent = computed(() => {
 });
 
 // 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
+const onlyNeedsOptimization = ref(false);
+const feedbackDetailChunkID = ref('');
+const feedbackDetailLoading = ref(false);
+const feedbackResettingChunkID = ref('');
+const feedbackDetails = ref(null);
+let feedbackDetailSequence = 0;
+const feedbackReasons = ['inaccurate', 'irrelevant', 'incomplete', 'outdated', 'other'];
+
+const chunkPositiveRate = (chunk: any) => {
+  if (chunk.positive_rate === null || chunk.positive_rate === undefined) return '—';
+  return `${Math.round(Number(chunk.positive_rate) * 100)}%`;
+};
+
+const setChunkFeedbackVisible = async (chunk: any, visible: boolean) => {
+  const sequence = ++feedbackDetailSequence;
+  feedbackDetailChunkID.value = visible ? chunk.id : '';
+  feedbackDetails.value = null;
+  if (!visible) {
+    feedbackDetailLoading.value = false;
+    return;
+  }
+  feedbackDetailLoading.value = true;
+  try {
+    const response = await getChunkFeedbackDetails(chunk.id);
+    if (sequence === feedbackDetailSequence) feedbackDetails.value = response?.data || {};
+  } catch {
+    if (sequence === feedbackDetailSequence) MessagePlugin.error(t('feedback.loadFailed'));
+  } finally {
+    if (sequence === feedbackDetailSequence) feedbackDetailLoading.value = false;
+  }
+};
+
+const resetChunkFeedbackSummary = async (chunk: any) => {
+  const knowledgeBaseID = props.kbId || chunk.knowledge_base_id;
+  if (!knowledgeBaseID) return;
+  feedbackResettingChunkID.value = chunk.id;
+  try {
+    await resetChunkFeedback(knowledgeBaseID, chunk.id);
+    Object.assign(chunk, {
+      like_count: 0,
+      dislike_count: 0,
+      positive_rate: null,
+      stored_recall_weight: 1,
+      effective_recall_weight: 1,
+      needs_optimization: false,
+    });
+    feedbackDetailSequence += 1;
+    feedbackDetailChunkID.value = '';
+    feedbackDetails.value = null;
+    MessagePlugin.success(t('feedback.resetSuccess'));
+  } catch {
+    MessagePlugin.error(t('feedback.resetFailed'));
+  } finally {
+    feedbackResettingChunkID.value = '';
+  }
+};
+
 const processedChunks = computed(() => {
-  return (props.details?.md || []).map((item: any, index: number) => {
+  const chunks = onlyNeedsOptimization.value
+    ? (props.details?.md || []).filter((item: any) => item.needs_optimization)
+    : (props.details?.md || []);
+  return chunks.map((item: any, index: number) => {
     return {
       original: item,
       processedContent: processMarkdown(item.content),
@@ -1840,6 +1901,15 @@ const handleDetailsScroll = () => {
                 class="view-mode-btn">
                 {{ $t('knowledgeBase.viewChunks') }}
               </t-button>
+              <t-button
+                v-if="viewMode === 'chunks'"
+                size="small"
+                :variant="onlyNeedsOptimization ? 'base' : 'outline'"
+                :theme="onlyNeedsOptimization ? 'danger' : 'default'"
+                @click="onlyNeedsOptimization = !onlyNeedsOptimization"
+              >
+                {{ $t('feedback.needsOptimization') }}
+              </t-button>
             </div>
           </div>
 
@@ -1872,6 +1942,64 @@ const handleDetailsScroll = () => {
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                   <div class="chunk-header-right">
+                    <t-popup
+                      :visible="feedbackDetailChunkID === chunk.original.id"
+                      trigger="click"
+                      placement="bottom-right"
+                      destroy-on-close
+                      @visible-change="setChunkFeedbackVisible(chunk.original, $event)"
+                    >
+                      <button
+                        type="button"
+                        class="chunk-feedback-summary"
+                        :class="{ 'needs-optimization': chunk.original.needs_optimization }"
+                        :aria-label="t('feedback.chunkDetails')"
+                      >
+                        <span>👍 {{ chunk.original.like_count || 0 }}</span>
+                        <span>👎 {{ chunk.original.dislike_count || 0 }}</span>
+                        <span>{{ chunkPositiveRate(chunk.original) }}</span>
+                        <span>×{{ Number(chunk.original.effective_recall_weight || 1).toFixed(1) }}</span>
+                      </button>
+                      <template #content>
+                        <div class="chunk-feedback-detail" @click.stop>
+                          <strong>{{ t('feedback.chunkDetails') }}</strong>
+                          <div class="chunk-feedback-detail__metric">
+                            {{ t('feedback.effectiveWeight') }}:
+                            ×{{ Number(chunk.original.effective_recall_weight || 1).toFixed(1) }}
+                          </div>
+                          <div class="chunk-feedback-detail__metric">
+                            {{ t('feedback.storedWeight') }}:
+                            ×{{ Number(chunk.original.stored_recall_weight || 1).toFixed(1) }}
+                          </div>
+                          <div class="chunk-feedback-detail__metric">
+                            {{ t('feedback.sessionCount', { count: chunk.original.session_count || 0 }) }}
+                          </div>
+                          <t-loading v-if="feedbackDetailLoading" size="small" />
+                          <template v-else>
+                            <div v-for="reason in feedbackReasons" :key="reason" class="chunk-feedback-detail__row">
+                              <span>{{ t(`feedback.reasons.${reason}`) }}</span>
+                              <span>{{ feedbackDetails?.reason_counts?.[reason] || 0 }}</span>
+                            </div>
+                            <div v-if="feedbackDetails?.audits?.length" class="chunk-feedback-detail__audits">
+                              <div v-for="audit in feedbackDetails.audits.slice(0, 5)" :key="audit.id">
+                                {{ audit.action }} · {{ t(`feedback.sources.${audit.trigger_source || 'legacy'}`) }}
+                                · {{ audit.old_weight }} → {{ audit.new_weight }}
+                              </div>
+                            </div>
+                          </template>
+                          <t-button
+                            v-if="canEditContent"
+                            size="small"
+                            theme="danger"
+                            variant="outline"
+                            :loading="feedbackResettingChunkID === chunk.original.id"
+                            @click="resetChunkFeedbackSummary(chunk.original)"
+                          >
+                            {{ t('feedback.reset') }}
+                          </t-button>
+                        </div>
+                      </template>
+                    </t-popup>
                     <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
                       :content="$t('knowledgeBase.retryIndex')" placement="top">
                       <t-button class="icon-action-btn" size="small" theme="danger" variant="text" shape="square"
@@ -3281,5 +3409,41 @@ body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
 
 .t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+.chunk-feedback-summary {
+  border: 0;
+  border-radius: 12px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  gap: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.chunk-feedback-summary.needs-optimization {
+  color: var(--td-error-color);
+  background: var(--td-error-color-1);
+}
+
+.chunk-feedback-detail {
+  width: min(280px, calc(100vw - 32px));
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chunk-feedback-detail__row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.chunk-feedback-detail__metric,
+.chunk-feedback-detail__audits {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
 }
 </style>

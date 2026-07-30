@@ -87,7 +87,8 @@
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                             :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
-                            @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
+                            @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)"
+                            @feedback-change="session.my_feedback = $event">
                         </botmsg>
                         <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"

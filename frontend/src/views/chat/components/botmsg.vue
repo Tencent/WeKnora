@@ -46,6 +46,12 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <AnswerFeedbackControls
+                    v-if="feedbackEligible && sessionId && session.id"
+                    :session-id="sessionId"
+                    :message="session"
+                    @update:feedback="emit('feedback-change', $event)"
+                />
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -79,6 +85,7 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import AnswerFeedbackControls from './AnswerFeedbackControls.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
@@ -119,7 +126,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'feedback-change'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -164,6 +171,7 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const feedbackEligible = computed(() => props.session?.feedback_eligible === true);
 
 const preview = (url) => {
     nextTick(() => {

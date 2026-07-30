@@ -1,4 +1,42 @@
 export default {
+  feedback: {
+    answerLabel: '답변 피드백', like: '도움이 됨', dislike: '도움이 되지 않음',
+    reasonLabel: '어떤 점을 개선할 수 있나요?',
+    saveFailed: '피드백을 저장하지 못했습니다. 다시 시도해 주세요.',
+    chunkDetails: '청크 피드백', effectiveWeight: '현재 유효 검색 가중치',
+    storedWeight: '저장된 감사 스냅샷', sessionCount: '관련 세션 {count}개',
+    needsOptimization: '최적화 필요', reset: '피드백 초기화',
+    resetSuccess: '청크 피드백이 초기화되었습니다',
+    resetFailed: '청크 피드백을 초기화하지 못했습니다',
+    loadFailed: '청크 피드백을 불러오지 못했습니다',
+    optimizationThreshold: '낮은 품질 피드백 임계값',
+    optimizationThresholdDescription: '긍정 비율이 이 값보다 낮은 청크는 최적화 필요로 표시됩니다.',
+    reasons: {
+      inaccurate: '부정확함', irrelevant: '관련 없음', incomplete: '불완전함',
+      outdated: '오래된 정보', other: '기타',
+    },
+    sources: {
+      like: '좋아요', dislike: '싫어요', cancel: '피드백 취소',
+      admin_reset: '관리자 초기화', content_delete: '메시지 삭제', legacy: '이전 이벤트',
+    },
+    governance: {
+      title: '청크 피드백 관리',
+      description: '피드백 품질 신호, 현재 정책 가중치 및 초기화 기록을 검토합니다.',
+      searchPlaceholder: '청크 내용 또는 문서 제목 검색', untitled: '제목 없는 문서',
+      likes: '좋아요', dislikes: '싫어요', healthy: '정상', needsOptimization: '최적화 필요',
+      viewDetail: '세부 정보', detailTitle: '청크 피드백 세부 정보', chunkContent: '청크 내용',
+      dislikeReasons: '부정적 피드백 사유', noReasons: '부정적 피드백 사유 없음',
+      history: '가중치 및 초기화 기록', reset: '피드백 초기화',
+      resetConfirm: '이 청크의 현재 피드백 집계를 초기화할까요?',
+      loadFailed: '피드백 관리 데이터를 불러오지 못했습니다',
+      status: { all: '전체', rated: '평가됨', high: '높음', normal: '보통', low: '낮음', unrated: '미평가' },
+      optimization: { all: '모든 품질 상태', yes: '최적화 필요', no: '정상' },
+      columns: {
+        document: '문서', content: '청크', ratings: '평가', weights: '가중치',
+        status: '상태', time: '시간', trigger: '트리거', change: '저장 가중치 변경',
+      },
+    },
+  },
   platformApiKeys: {
     title: '플랫폼 API 키',
     description: '워크스페이스 간 자동화를 위한 플랫폼 자격 증명입니다. 워크스페이스 API에는 X-Tenant-ID를 사용하세요.',
@@ -3677,7 +3715,8 @@ export default {
       asr: '오디오',
       datasource: '데이터 소스',
       share: '공유관리',
-      activity: '활동 기록'
+      activity: '활동 기록',
+      feedback: '피드백 관리'
     },
     navGroups: {
       basic: '기본',
