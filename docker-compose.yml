@@ -86,7 +86,9 @@ services:
       # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
       # 启动时自动执行数据库迁移；设为 false 禁用，默认启用
       - AUTO_MIGRATE=${AUTO_MIGRATE:-true}
-      # 本地存储后端生成下载链接用的外部可达 URL（IM 渠道 local 后端必填）
+      # IM 渠道图片/文件外链的外部可达 URL。IM 显示知识库图片需二选一：
+      # 存储后端公网可达（如 MINIO_ENDPOINT 设为公网），或设本变量走 <APP_EXTERNAL_URL>/r/<token>（需 nginx 代理 /r/）。
+      # 默认 MinIO 内网部署 / local 后端需设本变量。
       # - APP_EXTERNAL_URL=${APP_EXTERNAL_URL:-}
       # 前端外部 origin，用于邀请链接等绝对 URL（留空走 host-relative）
       - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-}

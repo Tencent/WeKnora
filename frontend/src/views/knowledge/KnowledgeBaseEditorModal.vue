@@ -419,7 +419,7 @@
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
-                <div v-if="mode === 'edit' && kbId && currentSection === 'feedback'" class="section">
+                <div v-if="mode === 'edit' && kbId && authStore.hasRole('admin') && currentSection === 'feedback'" class="section">
                   <ChunkFeedbackSettings :kb-id="kbId" />
                 </div>
 

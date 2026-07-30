@@ -7,22 +7,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 )
+
+var ErrChunkRevisionConflict = repository.ErrChunkRevisionConflict
 
 // chunkService implements the ChunkService interface
 // It provides operations for managing document chunks in the knowledge base
 // Chunks are segments of documents that have been processed and prepared for indexing
 type chunkService struct {
 	chunkRepository interfaces.ChunkRepository // Repository for chunk data persistence
+	knowledgeRepo   interfaces.KnowledgeRepository
 	kbRepository    interfaces.KnowledgeBaseRepository
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
+	task            interfaces.TaskEnqueuer
+	spanTracker     SpanTracker
 }
 
 // NewChunkService creates a new chunk service
@@ -34,19 +45,27 @@ type chunkService struct {
 //   - interfaces.ChunkService: Initialized chunk service implementation
 func NewChunkService(
 	chunkRepository interfaces.ChunkRepository,
+	knowledgeRepo interfaces.KnowledgeRepository,
 	kbRepository interfaces.KnowledgeBaseRepository,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
+	task interfaces.TaskEnqueuer,
+	spanTracker SpanTracker,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
+		knowledgeRepo:   knowledgeRepo,
 		kbRepository:    kbRepository,
 		modelService:    modelService,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
+		task:            task,
+		spanTracker:     spanTracker,
 	}
 }
+
+const maxEditableChunkLength = 200000
 
 // GetRepository gets the chunk repository
 // Parameters:
@@ -191,6 +210,7 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 		"",
 		"",
 		"",
+		nil,
 	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -372,6 +392,380 @@ func (s *chunkService) ListChunkByParentID(
 	return chunks, nil
 }
 
+// UpdateDocumentChunk applies an optimistic, versioned edit. Generated
+// retrieval questions remain indexed across content edits; the UI marks them as
+// stale when their revision no longer matches the current body. The current row
+// remains saved when reindexing fails and exposes index_status=failed so the
+// UI never presents a false success state.
+func (s *chunkService) UpdateDocumentChunk(
+	ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int,
+) (*types.Chunk, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunk, err := s.chunkRepository.GetChunkByID(ctx, tenantID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	if chunk.ChunkType != types.ChunkTypeText {
+		return nil, fmt.Errorf("only text chunks can be edited")
+	}
+	if expectedRevision != nil && *expectedRevision != chunk.ContentRevision {
+		return nil, ErrChunkRevisionConflict
+	}
+
+	newContent := chunk.Content
+	if content != nil {
+		newContent = strings.TrimSpace(*content)
+		if newContent == "" {
+			return nil, fmt.Errorf("chunk content cannot be empty")
+		}
+		if len(newContent) > maxEditableChunkLength {
+			return nil, fmt.Errorf("chunk content exceeds %d bytes", maxEditableChunkLength)
+		}
+	}
+	newEnabled := chunk.IsEnabled
+	if isEnabled != nil {
+		newEnabled = *isEnabled
+	}
+	if newContent == chunk.Content && newEnabled == chunk.IsEnabled {
+		if chunk.IndexStatus == "failed" {
+			if chunk.ParentChunkID != "" && chunk.ContentRevision > 0 {
+				if err := s.rebuildParentContent(ctx, chunk); err != nil {
+					logger.Warnf(ctx, "Failed to rebuild parent chunk while retrying edit: %v", err)
+					return chunk, nil
+				}
+			}
+			chunk.IndexStatus = "processing"
+			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			if err := s.syncChunkIndex(ctx, chunk); err != nil {
+				chunk.IndexStatus = "failed"
+				_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+				return chunk, nil
+			}
+			chunk.IndexStatus = "ready"
+			if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+				return nil, err
+			}
+		}
+		return chunk, nil
+	}
+	if content != nil {
+		sourceContent := chunk.SourceContent
+		if sourceContent == "" {
+			sourceContent = chunk.Content
+		}
+		if err := validateEditedChunkImages(sourceContent, newContent); err != nil {
+			return nil, err
+		}
+	}
+
+	actorID, _ := types.UserIDFromContext(ctx)
+	now := time.Now()
+	oldRevision := chunk.ContentRevision
+	revision := &types.ChunkRevision{
+		ID: uuid.NewString(), TenantID: chunk.TenantID,
+		KnowledgeBaseID: chunk.KnowledgeBaseID, KnowledgeID: chunk.KnowledgeID,
+		ChunkID: chunk.ID, Revision: oldRevision, Content: chunk.Content,
+		IsEnabled: chunk.IsEnabled, EditorID: chunk.LastEditorID,
+		EditSource: "user", EditedAt: chunk.UpdatedAt, CreatedAt: now,
+	}
+	if chunk.SourceContent == "" {
+		chunk.SourceContent = chunk.Content
+	}
+	bodyChanged := newContent != chunk.Content
+	chunk.Content = newContent
+	chunk.IsEnabled = newEnabled
+	chunk.ContentRevision++
+	chunk.LastEditorID = actorID
+	chunk.IndexStatus = "processing"
+	chunk.UpdatedAt = now
+	if err := s.chunkRepository.SaveChunkRevision(ctx, chunk, revision, oldRevision); err != nil {
+		return nil, err
+	}
+
+	if bodyChanged && chunk.ParentChunkID != "" {
+		if err := s.rebuildParentContent(ctx, chunk); err != nil {
+			logger.Warnf(ctx, "Failed to rebuild parent chunk after edit: %v", err)
+			chunk.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			return chunk, nil
+		}
+	}
+	if bodyChanged || newEnabled != revision.IsEnabled {
+		if err := s.syncEditedChunkImages(ctx, chunk); err != nil {
+			logger.Warnf(ctx, "Failed to synchronize image children after chunk edit: %v", err)
+			chunk.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			return chunk, nil
+		}
+	}
+	if bodyChanged || newEnabled != revision.IsEnabled {
+		knowledge, getErr := s.knowledgeRepo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+		if getErr == nil {
+			if err := enqueueSummaryRefresh(
+				ctx, s.knowledgeRepo, s.task, s.kbRepository, s.spanTracker, knowledge,
+			); err != nil {
+				logger.Warnf(ctx, "Chunk saved but summary refresh enqueue failed for %s: %v", knowledge.ID, err)
+			}
+		}
+	}
+	if err := s.syncChunkIndex(ctx, chunk); err != nil {
+		chunk.IndexStatus = "failed"
+		_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+		logger.Errorf(ctx, "Chunk %s saved but reindex failed: %v", chunk.ID, err)
+		return chunk, nil
+	}
+	chunk.IndexStatus = "ready"
+	if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+		return nil, err
+	}
+	return chunk, nil
+}
+
+func validateEditedChunkImages(sourceContent, editedContent string) error {
+	allowed := searchutil.ImageURLsInContent(sourceContent)
+	for url := range searchutil.ImageURLsInContent(editedContent) {
+		if !allowed[url] {
+			return fmt.Errorf("adding images to an existing chunk is not supported: %s", url)
+		}
+	}
+	return nil
+}
+
+func imageChildMatchesContent(child *types.Chunk, contentURLs map[string]bool) bool {
+	for url := range searchutil.ImageURLsFromInfo(child.ImageInfo) {
+		if contentURLs[url] {
+			return true
+		}
+	}
+	return false
+}
+
+// syncEditedChunkImages removes image OCR/caption children from retrieval
+// when their Markdown image was deleted. Rows are disabled rather than hard
+// deleted so reverting to a historical chunk revision can re-enable them.
+func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.Chunk) error {
+	children, err := s.chunkRepository.ListChunkByParentID(ctx, chunk.TenantID, chunk.ID)
+	if err != nil {
+		return err
+	}
+	contentURLs := searchutil.ImageURLsInContent(chunk.Content)
+	for _, child := range children {
+		if child.ChunkType != types.ChunkTypeImageOCR && child.ChunkType != types.ChunkTypeImageCaption {
+			continue
+		}
+		desiredEnabled := chunk.IsEnabled && imageChildMatchesContent(child, contentURLs)
+		if child.IsEnabled == desiredEnabled && child.IndexStatus == "ready" {
+			continue
+		}
+		child.IsEnabled = desiredEnabled
+		child.IndexStatus = "processing"
+		child.UpdatedAt = time.Now()
+		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+			return err
+		}
+		if err := s.syncChunkIndex(ctx, child); err != nil {
+			child.IndexStatus = "failed"
+			_ = s.chunkRepository.UpdateChunk(ctx, child)
+			return err
+		}
+		child.IndexStatus = "ready"
+		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *chunkService) ListChunkRevisions(ctx context.Context, chunkID string) ([]*types.ChunkRevision, error) {
+	return s.chunkRepository.ListChunkRevisions(ctx, types.MustTenantIDFromContext(ctx), chunkID)
+}
+
+func (s *chunkService) RevertDocumentChunk(
+	ctx context.Context, chunkID string, revision int, expectedRevision *int,
+) (*types.Chunk, error) {
+	item, err := s.chunkRepository.GetChunkRevision(ctx, types.MustTenantIDFromContext(ctx), chunkID, revision)
+	if err != nil {
+		return nil, err
+	}
+	content := item.Content
+	enabled := item.IsEnabled
+	return s.UpdateDocumentChunk(ctx, chunkID, &content, &enabled, expectedRevision)
+}
+
+// rebuildParentContent overlays manually edited child ranges on the immutable
+// parent source. Applying replacements in reverse offset order preserves the
+// parser coordinate system even when edited text changes length.
+func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.Chunk) error {
+	parent, err := s.chunkRepository.GetChunkByID(ctx, edited.TenantID, edited.ParentChunkID)
+	if err != nil {
+		return err
+	}
+	children, err := s.chunkRepository.ListChunkByParentID(ctx, edited.TenantID, parent.ID)
+	if err != nil {
+		return err
+	}
+	base := parent.SourceContent
+	if base == "" {
+		base = parent.Content
+		parent.SourceContent = base
+	}
+	baseRunes := []rune(base)
+	type replacement struct {
+		start, end int
+		content    string
+		updatedAt  time.Time
+	}
+	replacements := make([]replacement, 0)
+	for _, child := range children {
+		if child.ContentRevision == 0 {
+			continue
+		}
+		start, end := child.StartAt-parent.StartAt, child.EndAt-parent.StartAt
+		if start >= 0 && end >= start && end <= len(baseRunes) {
+			replacements = append(replacements, replacement{start, end, child.Content, child.UpdatedAt})
+		}
+	}
+	// Overlapping arbitrary replacements cannot both occupy the same source
+	// interval. Keep the latest edit in place, then append every conflicting
+	// current body that is not already represented. Retrieval must prefer a
+	// small amount of duplication over silently losing an accepted edit.
+	sort.Slice(replacements, func(i, j int) bool { return replacements[i].updatedAt.After(replacements[j].updatedAt) })
+	selected := make([]replacement, 0, len(replacements))
+	conflicts := make([]replacement, 0)
+	for _, candidate := range replacements {
+		overlaps := false
+		for _, existing := range selected {
+			if candidate.start < existing.end && candidate.end > existing.start {
+				overlaps = true
+				break
+			}
+		}
+		if !overlaps {
+			selected = append(selected, candidate)
+		} else {
+			conflicts = append(conflicts, candidate)
+		}
+	}
+	replacements = selected
+	sort.Slice(replacements, func(i, j int) bool { return replacements[i].start > replacements[j].start })
+	for _, repl := range replacements {
+		baseRunes = append(append(append([]rune{}, baseRunes[:repl.start]...), []rune(repl.content)...), baseRunes[repl.end:]...)
+	}
+	parent.Content = string(baseRunes)
+	for _, conflict := range conflicts {
+		parent.Content = searchutil.JoinChunkContent(parent.Content, conflict.content, "\n\n")
+	}
+	parent.UpdatedAt = time.Now()
+	return s.chunkRepository.UpdateChunk(ctx, parent)
+}
+
+func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) error {
+	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
+	if err != nil {
+		return err
+	}
+	if !kb.NeedsEmbeddingModel() {
+		return nil
+	}
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		return err
+	}
+	engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, chunk.TenantID, kb.VectorStoreID)
+	if err != nil {
+		return err
+	}
+	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
+		return err
+	}
+	if !chunk.IsEnabled {
+		return nil
+	}
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
+	if err != nil {
+		return err
+	}
+	items := []*types.IndexInfo{{
+		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
+		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
+		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
+		KnowledgeType: kb.Type, IsEnabled: true,
+	}}
+	meta, err := chunk.DocumentMetadata()
+	if err != nil {
+		return err
+	}
+	if meta != nil {
+		for _, question := range meta.GeneratedQuestions {
+			if strings.TrimSpace(question.Question) == "" {
+				continue
+			}
+			items = append(items, &types.IndexInfo{
+				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
+				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
+				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
+				KnowledgeType: kb.Type, IsEnabled: true,
+			})
+		}
+	}
+	return engine.BatchIndex(ctx, embedder, items)
+}
+
+func (s *chunkService) UpsertGeneratedQuestion(
+	ctx context.Context, chunkID string, questionID string, question string,
+) (*types.GeneratedQuestion, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return nil, fmt.Errorf("question cannot be empty")
+	}
+	chunk, err := s.chunkRepository.GetChunkByID(ctx, types.MustTenantIDFromContext(ctx), chunkID)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := chunk.DocumentMetadata()
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		meta = &types.DocumentChunkMetadata{}
+	}
+	currentRevision := chunk.ContentRevision
+	if questionID == "" {
+		questionID = uuid.NewString()
+		meta.GeneratedQuestions = append(meta.GeneratedQuestions, types.GeneratedQuestion{
+			ID: questionID, Question: question, ContentRevision: &currentRevision,
+		})
+	} else {
+		found := false
+		for i := range meta.GeneratedQuestions {
+			if meta.GeneratedQuestions[i].ID == questionID {
+				meta.GeneratedQuestions[i].Question = question
+				meta.GeneratedQuestions[i].ContentRevision = &currentRevision
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("question not found")
+		}
+	}
+	if err := chunk.SetDocumentMetadata(meta); err != nil {
+		return nil, err
+	}
+	if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+		return nil, err
+	}
+	if err := s.syncChunkIndex(ctx, chunk); err != nil {
+		return nil, err
+	}
+	for i := range meta.GeneratedQuestions {
+		if meta.GeneratedQuestions[i].ID == questionID {
+			return &meta.GeneratedQuestions[i], nil
+		}
+	}
+	return nil, fmt.Errorf("question not found")
+}
+
 // DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
 // This updates the chunk metadata and removes the corresponding vector index
 func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error {
@@ -426,7 +820,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 
 	// 5. Delete the vector index for this question
 	// The source_id format is: {chunk_id}-{question_id}
-	sourceID := fmt.Sprintf("%s-%s", chunkID, questionID)
+	sourceID := types.GeneratedQuestionSourceID(chunkID, questionID)
 
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)

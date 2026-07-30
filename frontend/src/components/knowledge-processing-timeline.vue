@@ -6,6 +6,7 @@ import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledge
 import {
   groupPostprocessGraphSpans,
   knowledgeSpansPayloadHasTrace,
+  summarizePostprocessTasks,
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
@@ -1197,6 +1198,10 @@ const stagesStatDisplay = computed(() => {
   }
 })
 
+const postprocessTaskStats = computed(() =>
+  summarizePostprocessTasks(data.value?.trace),
+)
+
 const headMetaParts = computed(() => {
   if (!data.value) return []
   const parts: string[] = [t('knowledgeStages.title')]
@@ -1205,6 +1210,19 @@ const headMetaParts = computed(() => {
   }
   const st = stagesStatDisplay.value
   parts.push(`${st.label} ${st.value}`)
+  const postprocess = postprocessTaskStats.value
+  if (postprocess.total > 0) {
+    parts.push(t('knowledgeStages.head.postprocessTasks', {
+      running: postprocess.running,
+      failed: postprocess.failed,
+      completed: postprocess.completed,
+    }))
+  }
+  if (data.value.parse_status === 'completed' && postprocess.running > 0) {
+    parts.push(t('knowledgeStages.head.completedWithActiveTrace', {
+      n: postprocess.running,
+    }))
+  }
   if (attemptTabs.value.length === 0 && data.value.current_attempt) {
     parts.push(t('knowledgeStages.attempt', { n: data.value.current_attempt }))
   }

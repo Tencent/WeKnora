@@ -521,7 +521,7 @@ func setupChunkFeedbackFlowDB(t *testing.T) *gorm.DB {
 		INSERT INTO chunks (id, tenant_id, knowledge_base_id, knowledge_id, content, updated_at)
 		VALUES ('chunk-1', 1, 'kb-1', 'knowledge-1', 'chunk content', CURRENT_TIMESTAMP)
 	`).Error)
-	migrationSQL, err := os.ReadFile("../../../migrations/sqlite/000075_chunk_feedback.up.sql")
+	migrationSQL, err := os.ReadFile("../../../migrations/sqlite/000079_chunk_feedback.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migrationSQL)).Error)
 	return db

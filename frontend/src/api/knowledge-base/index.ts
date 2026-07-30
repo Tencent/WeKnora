@@ -333,6 +333,35 @@ export function getKnowledgeDetailsCon(id: string, page: number) {
   return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
 }
 
+export interface ChunkEditPayload {
+  content?: string;
+  is_enabled?: boolean;
+  expected_revision?: number;
+}
+
+export function updateDocumentChunk(knowledgeId: string, chunkId: string, data: ChunkEditPayload) {
+  return put(`/api/v1/chunks/${knowledgeId}/${chunkId}`, data);
+}
+
+export function listChunkRevisions(knowledgeId: string, chunkId: string) {
+  return get(`/api/v1/chunks/${knowledgeId}/${chunkId}/revisions`);
+}
+
+export function revertDocumentChunk(knowledgeId: string, chunkId: string, revision: number, expectedRevision: number) {
+  return post(`/api/v1/chunks/${knowledgeId}/${chunkId}/revert`, {
+    revision,
+    expected_revision: expectedRevision,
+  });
+}
+
+export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Record<string, unknown>) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
+}
+
+export function regenerateKnowledgeSummary(knowledgeId: string) {
+  return post(`/api/v1/knowledge/${knowledgeId}/regenerate-summary`, {});
+}
+
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
 export function getChunkByIdOnly(chunkId: string) {
   return get(`/api/v1/chunks/by-id/${chunkId}`);
@@ -341,6 +370,17 @@ export function getChunkByIdOnly(chunkId: string) {
 // Delete a single generated question from a chunk by question ID
 export function deleteGeneratedQuestion(chunkId: string, questionId: string) {
   return del(`/api/v1/chunks/by-id/${chunkId}/questions`, { question_id: questionId });
+}
+
+export function upsertGeneratedQuestion(chunkId: string, question: string, questionId?: string) {
+  return put(`/api/v1/chunks/by-id/${chunkId}/questions`, {
+    question_id: questionId || '',
+    question,
+  });
+}
+
+export function regenerateGeneratedQuestions(chunkId: string) {
+  return post(`/api/v1/chunks/by-id/${chunkId}/questions/regenerate`, {});
 }
 
 export function listKnowledgeTags(

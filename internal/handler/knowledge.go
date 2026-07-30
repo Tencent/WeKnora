@@ -1565,12 +1565,52 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	updated, getErr := h.kgService.GetKnowledgeByID(effCtx, id)
+	if getErr != nil {
+		logger.Warnf(ctx, "Knowledge updated but failed to reload status for %s: %v", id, getErr)
+	}
 
 	logger.Infof(ctx, "Knowledge updated successfully, knowledge ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Knowledge chunk updated successfully",
+		"message": "Knowledge updated successfully",
+		"data":    updated,
 	})
+}
+
+// RegenerateKnowledgeSummary refreshes a stale summary after chunk or metadata edits.
+func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.GetKnowledgeByID(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if knowledge.SummaryStatus == "" || knowledge.SummaryStatus == types.SummaryStatusNone {
+		knowledge, err = h.kgService.RegenerateKnowledgeSummary(effCtx, id)
+	} else {
+		err = h.kgService.RequestKnowledgeSummaryRefresh(effCtx, id)
+		if err == nil {
+			knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id)
+		}
+	}
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
 }
 
 // UpdateManualKnowledge godoc
