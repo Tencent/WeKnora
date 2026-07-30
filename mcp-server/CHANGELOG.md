@@ -7,8 +7,23 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-30
+
 ### 修复
-- 将 `mcp` 依赖上限锁定为 `<2`，避免 `pip install` / `uv sync` 自动安装 MCP Python SDK 2.x 导致 `@app.list_tools()` 启动失败（`AttributeError: 'Server' object has no attribute 'list_tools'`）
+- 修复 MCP Python SDK 2.x 下服务器启动崩溃（`AttributeError: 'Server' object has no attribute 'list_tools'`）。
+  SDK 2.0 移除了低层 `Server` 的装饰器 API（`@app.list_tools()` / `@app.call_tool()` / `app.get_capabilities()`），
+  而通过 `uvx` 拉起已发布包时会解析到最新 2.x，导致连接被关闭。
+
+### 变更
+- 将 MCP 服务器实现从低层 `Server` 迁移到高层 `MCPServer` API（mcp 2.x，原 FastMCP 改名）。
+  - 28 个工具重写为 `@mcp.tool()` 函数签名式：输入参数走类型标注（schema 由框架自动生成），
+    描述走 docstring，返回纯 Python 值由框架序列化。
+  - 传输层改用 `run_stdio_async()` / `sse_app()` / `streamable_http_app()`，鉴权仍由 `MCPAuthMiddleware` 包裹。
+  - `WeKnoraClient` 业务逻辑（REST/SSE 调用、resolve_*、wiki）保持不变。
+- 依赖上限调整为 `mcp>=2,<3`（发布包与开发环境一致，避免再次因无上限被解析到未来破坏性版本）。
+
+### 注意
+- 本版本要求运行环境 `mcp>=2`。若临时需要旧版 SDK，可在启动命令加 `--with "mcp<2"`，但建议升级到本版本。
 
 ## [1.0.1] - 2026-07-28
 

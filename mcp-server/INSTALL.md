@@ -137,9 +137,8 @@ WeKnoraMCP/
 
 ### 添加新功能
 1. 在 `WeKnoraClient` 类中添加新的 API 方法
-2. 在 `handle_list_tools()` 中注册新工具
-3. 在 `handle_call_tool()` 中实现工具逻辑
-4. 更新文档和测试
+2. 用 `@mcp.tool()` 装饰器注册一个新工具函数：参数用类型标注（schema 自动生成），描述写在 docstring 里，函数体调用上面新增的客户端方法
+3. 更新文档和测试
 
 ### 测试
 ```bash
