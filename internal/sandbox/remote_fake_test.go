@@ -293,8 +293,6 @@ func (c *fakeRemoteClient) addSandbox(
 	}
 }
 
-
-
 func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

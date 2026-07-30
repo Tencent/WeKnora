@@ -497,9 +497,9 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts"
+    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
-    :session-id="sessionId"
+    :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
     :artifacts="artifactList"
   />
@@ -896,6 +896,7 @@ const artifactList = computed(() => {
 });
 const hasArtifacts = computed(() => artifactList.value.length > 0);
 const artifactCount = computed(() => artifactList.value.length);
+const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
   String(props.session?.id || props.session?.request_id || ''),
 );
