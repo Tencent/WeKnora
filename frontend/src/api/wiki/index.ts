@@ -26,6 +26,7 @@ export interface WikiPage {
   depth?: number;
   sort_order?: number;
   source_refs: string[];
+  chunk_refs?: string[];
   in_links: string[];
   out_links: string[];
   page_metadata: Record<string, any>;
@@ -36,6 +37,42 @@ export interface WikiPage {
   last_editor_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface WikiPageProvenanceSource {
+  knowledge_id: string;
+  knowledge_revision_id: string;
+  knowledge_revision_no: number;
+  parse_attempt: number;
+  knowledge_title: string;
+  file_name?: string;
+  file_type?: string;
+  chunk_id?: string;
+  chunk_index?: number;
+  evidence_excerpt?: string;
+  evidence_hash?: string;
+  source_role: string;
+  confidence: number;
+  validation_status: string;
+  source_available: boolean;
+}
+
+export interface WikiPageProvenanceBlock {
+  id: string;
+  logical_block_id: string;
+  block_type: string;
+  sort_order: number;
+  content: string;
+  provenance_status: string;
+  sources: WikiPageProvenanceSource[];
+}
+
+export interface WikiPageProvenanceResponse {
+  page_id: string;
+  page_revision_id?: string;
+  revision_no: number;
+  provenance_status?: string;
+  blocks: WikiPageProvenanceBlock[];
 }
 
 export interface WikiPageListResponse {
@@ -197,6 +234,10 @@ export interface WikiPageUpdatePayload {
 
 export function updateWikiPage(kbId: string, slug: string, data: WikiPageUpdatePayload) {
   return put(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`, data);
+}
+
+export function getWikiPageSources(kbId: string, pageId: string) {
+  return get(`/api/v1/knowledgebase/${encodeURIComponent(kbId)}/wiki/sources/${encodeURIComponent(pageId)}`);
 }
 
 export function deleteWikiPage(kbId: string, slug: string) {

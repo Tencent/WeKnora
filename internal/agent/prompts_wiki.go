@@ -84,6 +84,44 @@ const WikiSummaryPrompt = `You are a wiki editor. Given the following document c
 
 Output the SUMMARY line first, then the Markdown content. Do not include any other preamble.`
 
+// WikiSummaryFactsPrompt generates a summary as independently attributable
+// blocks. The backend validates every cited chunk ID before rendering or
+// persisting the page; IDs not present in SourceChunks are rejected.
+const WikiSummaryFactsPrompt = `You are a grounded wiki compiler. Build a document summary from the supplied source chunks.
+
+<available_wiki_pages>
+{{.ExtractedSlugs}}
+</available_wiki_pages>
+
+<source_chunks>
+{{.SourceChunks}}
+</source_chunks>
+
+<instructions>
+1. Output one JSON object with schema_version, summary, and blocks. Output no Markdown fence and no preamble.
+2. summary must be one sentence (15-40 words) in {{.Language}} describing the document.
+3. Each block is the smallest independently removable unit. Prefer one concrete fact per fact block; do not combine unrelated claims.
+4. Allowed block types are: heading, paragraph, fact, list_item, table_row, quote, code.
+5. Every non-heading block MUST contain at least one citation with a chunk_id copied exactly from a <chunk id="..."> above. Never invent or alter an ID.
+6. citation role is supporting by default. Use contradicting only when that chunk explicitly conflicts with another cited claim.
+7. Do not state anything that is not supported by the cited chunks. A filename, title, or prior knowledge is not evidence.
+8. Wiki links may use only exact slugs from available_wiki_pages, in [[slug|display name]] form.
+9. Keep headings structural and uncited. Put factual wording in separately cited blocks.
+10. Write all content in {{.Language}}.
+</instructions>
+
+Output shape:
+{
+  "schema_version": 1,
+  "summary": "One-sentence index summary",
+  "blocks": [
+    {"type": "heading", "content": "# Page title", "citations": []},
+    {"type": "fact", "content": "One source-grounded fact.", "citations": [{"chunk_id": "exact-chunk-id", "role": "supporting"}]}
+  ]
+}
+
+Output ONLY valid JSON.`
+
 // WikiKnowledgeExtractPrompt extracts both entities and concepts in a single LLM call.
 // Returns a JSON object with "entities" and "concepts" arrays.
 // This replaces the former separate WikiEntityExtractPrompt and WikiConceptExtractPrompt.
@@ -401,6 +439,61 @@ The <new_information> block above is assembled from VERBATIM source chunks alrea
 </instructions>
 
 Output the SUMMARY line first, then the updated Markdown content. Do not include any other preamble.`
+
+// WikiPageFactMergePrompt recompiles an entity/concept page into validated
+// fact blocks. Existing structured blocks are included for continuity, while
+// source_chunks is the exclusive citation allow-list for the new output.
+const WikiPageFactMergePrompt = `You are a grounded wiki compiler. Rebuild one Wiki page as independently attributable fact blocks.
+
+<page_metadata>
+  <slug>{{.PageSlug}}</slug>
+  <title>{{.PageTitle}}</title>
+  <type>{{.PageType}}</type>{{if .PageAliases}}
+  <aliases>{{.PageAliases}}</aliases>{{end}}
+</page_metadata>
+
+<existing_fact_blocks>
+{{.ExistingFactBlocks}}
+</existing_fact_blocks>
+
+<existing_page_markdown>
+{{.ExistingContent}}
+</existing_page_markdown>
+
+<source_chunks>
+{{.SourceChunks}}
+</source_chunks>
+
+<valid_wiki_links>
+{{.AvailableSlugs}}
+</valid_wiki_links>
+
+<instructions>
+1. Output one JSON object with schema_version, summary, and blocks. Output no Markdown fence and no preamble.
+2. The page is only about {{.PageTitle}} ({{.PageType}}). Reject chunks about a different, merely related subject.
+3. Recompile the final page from the source_chunks. Existing content is context, not evidence; retain a claim only when a supplied chunk supports it.
+4. Each block must be the smallest independently removable unit. Prefer one concrete claim per fact block. Split a paragraph when its claims have different sources.
+5. Allowed block types are: heading, paragraph, fact, list_item, table_row, quote, code.
+6. Every non-heading block MUST contain at least one citation. Each chunk_id must be copied exactly from a <chunk id="..."> above. Never invent, shorten, or alter an ID.
+7. citation role is supporting by default. Use contradicting only for a chunk that explicitly conflicts with the claim; a non-heading block still needs at least one supporting citation.
+8. Do not infer, embellish, or add transitions that introduce new claims. Stay close to source wording.
+9. Use [[slug|name]] only when slug is present in valid_wiki_links. Never link the page to itself.
+10. Keep headings structural and uncited. Put all factual wording in separately cited blocks.
+11. If no supported factual content remains, return a heading block only and summary "(empty page)".
+12. Write all content in {{.Language}}.
+</instructions>
+
+Output shape:
+{
+  "schema_version": 1,
+  "summary": "One-sentence index summary",
+  "blocks": [
+    {"type": "heading", "content": "# {{.PageTitle}}", "citations": []},
+    {"type": "fact", "content": "One source-grounded fact.", "citations": [{"chunk_id": "exact-chunk-id", "role": "supporting"}]}
+  ]
+}
+
+Output ONLY valid JSON.`
 
 // WikiIndexIntroPrompt generates the introduction for a NEW index page (first time only).
 const WikiIndexIntroPrompt = `You are a wiki editor. Write a brief introduction for a wiki knowledge base index page.

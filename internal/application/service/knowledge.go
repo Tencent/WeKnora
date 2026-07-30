@@ -73,6 +73,7 @@ type knowledgeService struct {
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
 	wikiRepo            interfaces.WikiPageRepository
 	wikiService         interfaces.WikiPageService
+	wikiProvenance      interfaces.WikiProvenanceLifecycleService
 
 	// spanTracker records the per-attempt span tree for the parsing
 	// pipeline. Best-effort: a nil tracker (test harness) is safely
@@ -114,6 +115,7 @@ func NewKnowledgeService(
 	imageResolver *docparser.ImageResolver,
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
+	wikiProvenance interfaces.WikiProvenanceLifecycleService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 	audit interfaces.AuditLogService,
@@ -143,6 +145,7 @@ func NewKnowledgeService(
 		imageResolver:   imageResolver,
 		wikiRepo:        wikiRepo,
 		wikiService:     wikiService,
+		wikiProvenance:  wikiProvenance,
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 		audit:           audit,

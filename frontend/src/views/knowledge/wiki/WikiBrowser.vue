@@ -530,9 +530,48 @@
                   @click.prevent="navigateToSlug(link)">{{ slugDisplayName(link) }}</a>
               </div>
 
-              <!-- Content -->
-              <div v-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent"
-                @click="handleContentClick">
+              <!-- Current pipeline pages render as independently attributable
+                   fact blocks. Any missing/stale provenance falls back to the
+                   complete page and explains why. -->
+              <t-alert v-if="!editingPage && provenanceDisplayNotice" theme="warning" variant="light"
+                class="wiki-provenance-fallback" :message="provenanceDisplayNotice" />
+              <div v-if="!editingPage" ref="readerBodyRef" class="wiki-reader-body" @click="handleContentClick">
+                <template v-if="useBlockProvenance">
+                  <section v-for="block in pageProvenance!.blocks" :key="block.id" class="wiki-provenance-block"
+                    :data-logical-block-id="block.logical_block_id">
+                    <div class="wiki-provenance-block-content" v-html="renderProvenanceBlock(block)"></div>
+                    <button v-if="block.sources.length" type="button" class="wiki-block-source-toggle"
+                      :aria-expanded="isSourceBlockExpanded(block.id)" @click.stop="toggleSourceBlock(block.id)">
+                      <t-icon name="link" size="14px" />
+                      {{ $t('knowledgeEditor.wikiBrowser.blockSources', { count: block.sources.length }) }}
+                      <t-icon :name="isSourceBlockExpanded(block.id) ? 'chevron-up' : 'chevron-down'" size="14px" />
+                    </button>
+                    <div v-if="isSourceBlockExpanded(block.id)" class="wiki-block-sources">
+                      <article v-for="source in block.sources"
+                        :key="`${source.knowledge_revision_id}:${source.chunk_id || 'document'}`"
+                        class="wiki-block-source-card">
+                        <div class="wiki-block-source-header">
+                          <button type="button" class="wiki-block-source-document"
+                            :disabled="!source.source_available"
+                            @click.stop="source.source_available && emit('open-source-doc', source.knowledge_id)">
+                            <t-icon name="file" size="14px" />
+                            {{ source.knowledge_title || source.file_name || source.knowledge_id }}
+                          </button>
+                          <span v-if="source.chunk_index !== undefined" class="wiki-block-source-location">
+                            {{ $t('knowledgeEditor.wikiBrowser.sourceChunk', { index: source.chunk_index + 1 }) }}
+                          </span>
+                          <t-tag v-if="!source.source_available" theme="danger" variant="light" size="small">
+                            {{ $t('knowledgeEditor.wikiBrowser.sourceUnavailable') }}
+                          </t-tag>
+                        </div>
+                        <blockquote v-if="source.evidence_excerpt" class="wiki-block-source-excerpt">
+                          {{ source.evidence_excerpt }}
+                        </blockquote>
+                      </article>
+                    </div>
+                  </section>
+                </template>
+                <div v-else v-html="renderedContent"></div>
               </div>
 
               <!-- Inline markdown editor (canEdit only). Saves are guarded by
@@ -570,8 +609,9 @@
                 </div>
               </div>
 
-              <!-- Source refs -->
-              <div v-if="parsedSourceRefs.length" class="wiki-reader-sources">
+              <!-- Legacy whole-page source refs. Structured pages render
+                   sources directly below each fact block above. -->
+              <div v-if="!useBlockProvenance && parsedSourceRefs.length" class="wiki-reader-sources">
                 <span class="wiki-link-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
                 <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-source-ref"
                   @click.prevent="emit('open-source-doc', ref.id)">
@@ -786,6 +826,7 @@ import {
   updateWikiPage,
   deleteWikiPage,
   getWikiPage,
+  getWikiPageSources,
   getWikiIndex,
   getWikiGraph,
   getWikiStats,
@@ -793,6 +834,8 @@ import {
   listWikiIssues,
   updateWikiIssueStatus,
   type WikiPage,
+  type WikiPageProvenanceBlock,
+  type WikiPageProvenanceResponse,
   type WikiFolderNode,
   type WikiGraphData,
   type WikiStats,
@@ -825,6 +868,11 @@ const emit = defineEmits<{
 }>()
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+const pageProvenance = ref<WikiPageProvenanceResponse | null>(null)
+const expandedSourceBlocks = ref<Set<string>>(new Set())
+const provenanceLoading = ref(false)
+const provenanceLoadError = ref('')
+let provenanceRequestSerial = 0
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =
@@ -1947,6 +1995,97 @@ const renderedContent = computed(() => {
   return renderMarkdown(selectedPage.value.content)
 })
 
+const provenanceHasMissingBlockSources = computed(() => {
+  const provenance = pageProvenance.value
+  return !!provenance && provenance.blocks.some(block =>
+    block.block_type !== 'heading' &&
+    !block.sources.some(source => source.source_role === 'supporting'),
+  )
+})
+
+const useBlockProvenance = computed(() => {
+  const page = selectedPage.value
+  const provenance = pageProvenance.value
+  return !!page && !!provenance &&
+    provenance.page_id === page.id &&
+    provenance.revision_no === page.version &&
+    provenance.provenance_status !== 'legacy_inferred' &&
+    provenance.blocks.length > 0 &&
+    !provenanceHasMissingBlockSources.value
+})
+
+const provenanceFallbackReason = computed(() => {
+  const page = selectedPage.value
+  if (!page || provenanceLoading.value || useBlockProvenance.value) return ''
+  if (provenanceLoadError.value) {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackUnavailable', {
+      reason: provenanceLoadError.value,
+    })
+  }
+  const provenance = pageProvenance.value
+  if (!provenance) return t('knowledgeEditor.wikiBrowser.sourceFallbackNoData')
+  if (provenance.page_id !== page.id || provenance.revision_no !== page.version) {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackVersionMismatch')
+  }
+  if (provenance.provenance_status === 'legacy_inferred') {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackLegacy')
+  }
+  if (provenance.blocks.length > 0 && provenanceHasMissingBlockSources.value) {
+    return t('knowledgeEditor.wikiBrowser.sourceFallbackMissingSources')
+  }
+  return t('knowledgeEditor.wikiBrowser.sourceFallbackNoBlocks')
+})
+
+const provenanceDisplayNotice = computed(() => {
+  if (provenanceFallbackReason.value) return provenanceFallbackReason.value
+  if (useBlockProvenance.value && pageProvenance.value?.blocks.some(block =>
+    block.sources.some(source => !source.source_available),
+  )) {
+    return t('knowledgeEditor.wikiBrowser.sourceSomeUnavailable')
+  }
+  return ''
+})
+
+function renderProvenanceBlock(block: WikiPageProvenanceBlock): string {
+  let markdown = block.content.trim()
+  if (block.block_type === 'heading' && !markdown.startsWith('#')) {
+    markdown = `## ${markdown}`
+  } else if (block.block_type === 'list_item' && !/^[-*]\s/.test(markdown)) {
+    markdown = `- ${markdown}`
+  }
+  return renderMarkdown(markdown)
+}
+
+function isSourceBlockExpanded(blockID: string): boolean {
+  return expandedSourceBlocks.value.has(blockID)
+}
+
+function toggleSourceBlock(blockID: string) {
+  const next = new Set(expandedSourceBlocks.value)
+  if (next.has(blockID)) next.delete(blockID)
+  else next.add(blockID)
+  expandedSourceBlocks.value = next
+}
+
+async function loadPageProvenance(pageID: string) {
+  const requestSerial = ++provenanceRequestSerial
+  pageProvenance.value = null
+  expandedSourceBlocks.value = new Set()
+  provenanceLoading.value = true
+  provenanceLoadError.value = ''
+  try {
+    const res = await getWikiPageSources(props.knowledgeBaseId, pageID)
+    if (requestSerial !== provenanceRequestSerial || selectedPage.value?.id !== pageID) return
+    pageProvenance.value = ((res as any).data || res) as WikiPageProvenanceResponse
+  } catch (e: any) {
+    if (requestSerial !== provenanceRequestSerial) return
+    pageProvenance.value = null
+    provenanceLoadError.value = e?.message || t('knowledgeEditor.wikiBrowser.sourceFallbackUnknownError')
+  } finally {
+    if (requestSerial === provenanceRequestSerial) provenanceLoading.value = false
+  }
+}
+
 // Label shown next to the back arrow on page headers. Prefers the
 // nearest page-history entry when available so the user sees where
 // they'll land; falls back to the Index label when the current
@@ -1977,7 +2116,7 @@ const indexHasMore = computed(() => {
   return true
 })
 
-watch(renderedContent, async () => {
+watch([renderedContent, pageProvenance], async () => {
   await nextTick()
   if (readerBodyRef.value) {
     await hydrateProtectedFileImages(readerBodyRef.value, undefined, props.knowledgeBaseId)
@@ -3018,8 +3157,12 @@ async function refreshSelectedPage() {
   const slug = selectedPage.value.slug
   try {
     const res = await getWikiPage(props.knowledgeBaseId, slug)
-    selectedPage.value = (res as any).data || res as any
-    await loadPageIssues(slug)
+    const loadedPage = ((res as any).data || res) as WikiPage
+    selectedPage.value = loadedPage
+    await Promise.all([
+      loadPageIssues(slug),
+      loadPageProvenance(loadedPage.id),
+    ])
   } catch (e) {
     console.error(`Failed to refresh wiki page ${slug}:`, e)
   }
@@ -3435,8 +3578,12 @@ async function selectPage(page: WikiPage) {
     }
     activeSystemView.value = ''
     const res = await getWikiPage(props.knowledgeBaseId, page.slug)
-    selectedPage.value = (res as any).data || res as any
-    await loadPageIssues(page.slug)
+    const loadedPage = ((res as any).data || res) as WikiPage
+    selectedPage.value = loadedPage
+    await Promise.all([
+      loadPageIssues(page.slug),
+      loadPageProvenance(loadedPage.id),
+    ])
   } catch (e) {
     console.error('Failed to load wiki page:', e)
   }
@@ -3454,8 +3601,12 @@ async function navigateToSlug(slug: string) {
     }
     activeSystemView.value = ''
     const res = await getWikiPage(props.knowledgeBaseId, slug)
-    selectedPage.value = (res as any).data || res as any
-    await loadPageIssues(slug)
+    const loadedPage = ((res as any).data || res) as WikiPage
+    selectedPage.value = loadedPage
+    await Promise.all([
+      loadPageIssues(slug),
+      loadPageProvenance(loadedPage.id),
+    ])
   } catch (e) {
     console.error(`Failed to navigate to ${slug}:`, e)
   }
@@ -3466,6 +3617,7 @@ function goBack() {
   if (prev) {
     selectedPage.value = prev
     loadPageIssues(prev.slug)
+    loadPageProvenance(prev.id)
     return
   }
   // History stack is empty but we remember the page was opened from
@@ -5747,6 +5899,95 @@ onUnmounted(() => {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--td-component-stroke);
   margin-bottom: 24px;
+}
+
+.wiki-provenance-block {
+  margin-bottom: 14px;
+}
+
+.wiki-provenance-fallback {
+  margin-bottom: 16px;
+}
+
+.wiki-provenance-block-content {
+  min-width: 0;
+}
+
+.wiki-block-source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -6px;
+  padding: 3px 8px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-brand-color);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: var(--td-brand-color-light);
+    border-color: var(--td-brand-color);
+  }
+}
+
+.wiki-block-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wiki-block-source-card {
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-block-source-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wiki-block-source-document {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-brand-color);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:disabled {
+    color: var(--td-text-color-disabled);
+    cursor: not-allowed;
+  }
+}
+
+.wiki-block-source-location {
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+}
+
+.wiki-block-source-excerpt {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--td-brand-color-light-active);
+  border-radius: 0 4px 4px 0;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .wiki-backlink-label {

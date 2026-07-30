@@ -20,25 +20,66 @@ import (
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService  interfaces.WikiPageService
-	kbService    interfaces.KnowledgeBaseService
-	lintService  *service.WikiLintService
-	auditService interfaces.AuditLogService
+	wikiService     interfaces.WikiPageService
+	provenanceQuery interfaces.WikiProvenanceQueryService
+	kbService       interfaces.KnowledgeBaseService
+	lintService     *service.WikiLintService
+	auditService    interfaces.AuditLogService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
 func NewWikiPageHandler(
 	wikiService interfaces.WikiPageService,
+	provenanceQuery interfaces.WikiProvenanceQueryService,
 	kbService interfaces.KnowledgeBaseService,
 	lintService *service.WikiLintService,
 	auditService interfaces.AuditLogService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:  wikiService,
-		kbService:    kbService,
-		lintService:  lintService,
-		auditService: auditService,
+		wikiService:     wikiService,
+		provenanceQuery: provenanceQuery,
+		kbService:       kbService,
+		lintService:     lintService,
+		auditService:    auditService,
 	}
+}
+
+// GetPageSources godoc
+// @Summary      Get the current block-level sources for a Wiki page
+// @Description  Return the published fact blocks and their source document/chunk evidence
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id    path  string  true  "Knowledge base ID"
+// @Param        page_id  path  string  true  "Wiki page ID"
+// @Success      200  {object}  types.WikiPageProvenanceResponse
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/sources/{page_id} [get]
+func (h *WikiPageHandler) GetPageSources(c *gin.Context) {
+	kbID, tenantID, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pageID := strings.TrimSpace(c.Param("page_id"))
+	if pageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Page ID is required"})
+		return
+	}
+	if h.provenanceQuery == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Wiki provenance query service is not configured"})
+		return
+	}
+	result, err := h.provenanceQuery.GetPageProvenance(c.Request.Context(), tenantID, kbID, pageID)
+	if err != nil {
+		if stderrors.Is(err, types.ErrWikiPublishScopeNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page sources not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // validateWikiKB validates that the KB exists and is a wiki type

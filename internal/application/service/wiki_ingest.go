@@ -330,6 +330,8 @@ type wikiIngestService struct {
 	audit          interfaces.AuditLogService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
+	provenance     interfaces.WikiProvenancePublishService
+	provenanceLife interfaces.WikiProvenanceLifecycleService
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
@@ -370,6 +372,8 @@ func NewWikiIngestService(
 	audit interfaces.AuditLogService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	provenance interfaces.WikiProvenancePublishService,
+	provenanceLife interfaces.WikiProvenanceLifecycleService,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -384,6 +388,8 @@ func NewWikiIngestService(
 		audit:          audit,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
+		provenance:     provenance,
+		provenanceLife: provenanceLife,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
 	}
@@ -1305,15 +1311,10 @@ type SlugUpdate struct {
 	// support this update. Mirrors Item.SourceChunks for convenience — the
 	// Reduce phase reads from here to avoid an extra field hop.
 	SourceChunks []string
-	// DocSummary is the document-level summary body produced by
-	// WikiSummaryPrompt (everything after the SUMMARY: ... headline, falling
-	// back to the raw output if no headline could be parsed out). Carried
-	// here so the Reduce phase can frame cited chunks with a rich
-	// <source_context> block that tells the editor model what the document
-	// is about AND what kind of document it is (resume vs announcement vs
-	// product page). The one-line headline alone was too terse to keep the
-	// editor grounded on longer / multi-topic source documents.
-	DocSummary string
+	// FactOutput is the validated, structured LLM result. Summary pages carry
+	// it directly from Map; entity/concept pages receive their final merged
+	// output during Reduce.
+	FactOutput *wikiFactOutput
 }
 
 func previewText(s string, maxRunes int) string {
@@ -1937,16 +1938,22 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 // stamped a system page with a knowledge ref would otherwise show up
 // in the reparse "old set" and confuse the reduce stage.
 func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context, kbID, knowledgeID string) map[string]bool {
-	slugs, err := s.wikiService.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 || s.provenanceLife == nil {
+		logger.Warnf(ctx, "wiki ingest: provenance lifecycle unavailable for %s", knowledgeID)
+		return nil
+	}
+	impacts, err := s.provenanceLife.ListKnowledgePageImpacts(ctx, tenantID, kbID, knowledgeID)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: ListSlugsBySourceRef(%s) failed: %v", knowledgeID, err)
+		logger.Warnf(ctx, "wiki ingest: provenance impact lookup for %s failed: %v", knowledgeID, err)
 		return nil
 	}
-	if len(slugs) == 0 {
+	if len(impacts) == 0 {
 		return nil
 	}
-	out := make(map[string]bool, len(slugs))
-	for _, slug := range slugs {
+	out := make(map[string]bool, len(impacts))
+	for _, impact := range impacts {
+		slug := impact.Slug
 		// Defense-in-depth: skip wiki-intrinsic slugs that never have
 		// real source refs.
 		if slug == "index" {

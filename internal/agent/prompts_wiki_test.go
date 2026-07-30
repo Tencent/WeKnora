@@ -124,6 +124,28 @@ func TestWikiChunkCitationPrompt_PreservesPlaceholders(t *testing.T) {
 	}
 }
 
+func TestWikiFactPromptsRequireStructuredCitations(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"summary": WikiSummaryFactsPrompt,
+		"merge":   WikiPageFactMergePrompt,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, required := range []string{
+				`"schema_version"`, `"blocks"`, `"citations"`, `"chunk_id"`,
+				"Every non-heading block MUST contain at least one citation",
+				"Output ONLY valid JSON",
+			} {
+				if !strings.Contains(prompt, required) {
+					t.Errorf("prompt missing %q", required)
+				}
+			}
+			if !strings.Contains(prompt, "{{.SourceChunks}}") {
+				t.Error("prompt lost trusted source chunk placeholder")
+			}
+		})
+	}
+}
+
 func TestWikiPageModifyUserPrompt_HidesInternalChunkHandles(t *testing.T) {
 	combined := WikiPageModifySystemPrompt + "\n" + WikiPageModifyUserPrompt
 	for _, guidance := range []string{
