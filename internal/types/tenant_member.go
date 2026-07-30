@@ -104,6 +104,13 @@ type TenantMember struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	// StorageQuota is the maximum storage (bytes) this user may consume
+	// within this tenant. 0 means "no individual limit — tenant quota
+	// is the only ceiling".
+	StorageQuota int64 `json:"storage_quota" gorm:"default:0"`
+	// StorageUsed tracks how many bytes this user currently occupies
+	// within this tenant.
+	StorageUsed int64 `json:"storage_used" gorm:"default:0"`
 }
 
 // TableName binds TenantMember to the tenant_members table.
@@ -126,12 +133,14 @@ type Membership struct {
 // the model directly would leak DeletedAt/UpdatedAt and lock the DB
 // schema into the public API. Use this for `/tenants/:id/members` only.
 type TenantMemberResponse struct {
-	UserID    string             `json:"user_id"`
-	Email     string             `json:"email"`
-	Username  string             `json:"username"`
-	Avatar    string             `json:"avatar,omitempty"`
-	Role      TenantRole         `json:"role"`
-	Status    TenantMemberStatus `json:"status"`
-	InvitedBy *string            `json:"invited_by,omitempty"`
-	JoinedAt  time.Time          `json:"joined_at"`
+	UserID       string             `json:"user_id"`
+	Email        string             `json:"email"`
+	Username     string             `json:"username"`
+	Avatar       string             `json:"avatar,omitempty"`
+	Role         TenantRole         `json:"role"`
+	Status       TenantMemberStatus `json:"status"`
+	InvitedBy    *string            `json:"invited_by,omitempty"`
+	JoinedAt     time.Time          `json:"joined_at"`
+	StorageQuota int64              `json:"storage_quota"`
+	StorageUsed  int64              `json:"storage_used"`
 }

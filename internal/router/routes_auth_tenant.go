@@ -112,6 +112,7 @@ func RegisterTenantRoutes(
 				g.apiKeyRoute(tenantByID, http.MethodPost, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.AddMember)
 				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.UpdateMemberRole)
 				g.apiKeyRoute(tenantByID, http.MethodDelete, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.RemoveMember)
+				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id/quota", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.UpdateMemberQuota)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
 			}
 

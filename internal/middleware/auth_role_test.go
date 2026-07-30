@@ -139,6 +139,17 @@ func (f *fakeMemberService) RemoveMember(ctx context.Context, userID string, ten
 	return nil
 }
 
+// UpdateMemberStorageQuota is a no-op stub for the test fake. The
+// resolveTenantRole path under test never touches per-user storage
+// quota, so we don't need real in-memory accounting here; the service
+// layer quota logic has its own dedicated tests in the service
+// package.
+func (f *fakeMemberService) UpdateMemberStorageQuota(
+	ctx context.Context, userID string, tenantID uint64, quotaBytes int64,
+) error {
+	return nil
+}
+
 var _ interfaces.TenantMemberService = (*fakeMemberService)(nil)
 
 func cfgWithRBAC(enabled bool) *config.Config {

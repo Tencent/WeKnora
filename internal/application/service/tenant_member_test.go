@@ -248,6 +248,38 @@ func (r *fakeTenantMemberRepo) RemoveOwnerAtomically(
 	return nil
 }
 
+// AdjustUserStorageUsed mirrors the production repo's clamp-to-0
+// semantics: storage_used never goes negative. Delta may be negative
+// (delete) or positive (index/clone).
+func (r *fakeTenantMemberRepo) AdjustUserStorageUsed(
+	ctx context.Context, userID string, tenantID uint64, delta int64,
+) error {
+	for _, e := range r.rows {
+		if e.UserID == userID && e.TenantID == tenantID && !e.DeletedAt.Valid {
+			e.StorageUsed += delta
+			if e.StorageUsed < 0 {
+				e.StorageUsed = 0
+			}
+			return nil
+		}
+	}
+	return gormErrRecordNotFound
+}
+
+// UpdateStorageQuota updates the per-user storage quota. quotaBytes=0
+// means "no individual limit".
+func (r *fakeTenantMemberRepo) UpdateStorageQuota(
+	ctx context.Context, userID string, tenantID uint64, quotaBytes int64,
+) error {
+	for _, e := range r.rows {
+		if e.UserID == userID && e.TenantID == tenantID && !e.DeletedAt.Valid {
+			e.StorageQuota = quotaBytes
+			return nil
+		}
+	}
+	return gormErrRecordNotFound
+}
+
 // Compile-time guard so the test stays in sync with the interface.
 var _ interfaces.TenantMemberRepository = (*fakeTenantMemberRepo)(nil)
 
@@ -504,5 +536,68 @@ func TestTenantRole_HasPermission(t *testing.T) {
 		if got := c.caller.HasPermission(c.required); got != c.want {
 			t.Errorf("HasPermission(%s, %s) = %v, want %v", c.caller, c.required, got, c.want)
 		}
+	}
+}
+
+func TestTenantMemberService_UpdateMemberStorageQuota_SetsQuota(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	ctx := context.Background()
+	if _, err := svc.EnsureOwner(ctx, "u1", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := svc.UpdateMemberStorageQuota(ctx, "u1", 1, 1024); err != nil {
+		t.Fatalf("UpdateMemberStorageQuota: %v", err)
+	}
+	m, err := repo.Get(ctx, "u1", 1)
+	if err != nil || m == nil {
+		t.Fatalf("Get after update: m=%v err=%v", m, err)
+	}
+	if m.StorageQuota != 1024 {
+		t.Fatalf("StorageQuota = %d, want 1024", m.StorageQuota)
+	}
+}
+
+func TestTenantMemberService_UpdateMemberStorageQuota_ZeroMeansNoLimit(t *testing.T) {
+	svc, _ := newServiceWithRepo()
+	ctx := context.Background()
+	if _, err := svc.EnsureOwner(ctx, "u1", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := svc.UpdateMemberStorageQuota(ctx, "u1", 1, 0); err != nil {
+		t.Fatalf("quota=0 (no limit) should be allowed, got %v", err)
+	}
+}
+
+func TestTenantMemberService_UpdateMemberStorageQuota_RejectsNegative(t *testing.T) {
+	svc, _ := newServiceWithRepo()
+	ctx := context.Background()
+	if _, err := svc.EnsureOwner(ctx, "u1", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := svc.UpdateMemberStorageQuota(ctx, "u1", 1, -1); !errors.Is(err, ErrInvalidStorageQuota) {
+		t.Fatalf("want ErrInvalidStorageQuota for negative quota, got %v", err)
+	}
+}
+
+func TestTenantMemberService_UpdateMemberStorageQuota_RejectsBelowUsed(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	ctx := context.Background()
+	if _, err := svc.EnsureOwner(ctx, "u1", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Simulate the member already consuming 2048 bytes.
+	if err := repo.AdjustUserStorageUsed(ctx, "u1", 1, 2048); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+	// A positive quota below current usage must be rejected.
+	if err := svc.UpdateMemberStorageQuota(ctx, "u1", 1, 1024); !errors.Is(err, ErrInvalidStorageQuota) {
+		t.Fatalf("want ErrInvalidStorageQuota when quota < used, got %v", err)
+	}
+}
+
+func TestTenantMemberService_UpdateMemberStorageQuota_ReturnsNotFound(t *testing.T) {
+	svc, _ := newServiceWithRepo()
+	if err := svc.UpdateMemberStorageQuota(context.Background(), "ghost", 1, 1024); !errors.Is(err, ErrMembershipNotFound) {
+		t.Fatalf("want ErrMembershipNotFound, got %v", err)
 	}
 }
