@@ -22,13 +22,13 @@ const FeishuWikiNodeResourceSeparator = ":"
 
 // shared.go holds the helpers used by BOTH the wiki Connector (connector.go)
 // and the Drive DriveConnector (drive_connector.go): error classification,
-// config parsing, stream-checkpoint tuning, the Fetch tally, filename/time
-// utilities, attachment rules, and the docx blocks Fetch path. Anything that
+// config parsing, stream-Checkpoint tuning, the fetch tally, filename/time
+// utilities, attachment rules, and the docx blocks fetch path. Anything that
 // is specific to one connector stays in that connector's own file.
 
 // FeishuStreamCheckpointInterval is how many processed nodes pass between
-// cursor checkpoints during a streaming Fetch. Small enough that a timed-out
-// sync loses little work on resume, large enough that checkpoint persistence
+// cursor checkpoints during a streaming fetch. Small enough that a timed-out
+// sync loses little work on resume, large enough that Checkpoint persistence
 // (a DB write) does not dominate. Overridable in tests. See FetchStream.
 var FeishuStreamCheckpointInterval = 50
 
@@ -39,26 +39,26 @@ var FeishuStreamCheckpointInterval = 50
 // retry — the #2136 "never fully syncs" case. Overridable in tests.
 var FeishuStreamCheckpointMaxInterval = 30 * time.Second
 
-// FetchTally accumulates the outcome of fetching a wiki node subtree so the
-// connector can emit a single actionable Summary. Without it, unsupported nodes
+// fetchTally accumulates the outcome of fetching a wiki node subtree so the
+// connector can Emit a single actionable summary. Without it, unsupported nodes
 // (mindnote/slides/etc.) vanish with no item, no error and no log, leaving users
 // unable to explain why "13 documents synced only 3" (Tencent/WeKnora#2136).
-type FetchTally struct {
+type fetchTally struct {
 	discovered    int
 	fetched       int
 	failed        int
 	skippedByType map[string]int
 }
 
-func NewFetchTally(discovered int) *FetchTally {
-	return &FetchTally{discovered: discovered, skippedByType: map[string]int{}}
+func newFetchTally(discovered int) *fetchTally {
+	return &fetchTally{discovered: discovered, skippedByType: map[string]int{}}
 }
 
-func (t *FetchTally) Fetch()              { t.fetched++ }
-func (t *FetchTally) Fail()               { t.failed++ }
-func (t *FetchTally) Skip(objType string) { t.skippedByType[objType]++ }
+func (t *fetchTally) fetch()              { t.fetched++ }
+func (t *fetchTally) fail()               { t.failed++ }
+func (t *fetchTally) Skip(objType string) { t.skippedByType[objType]++ }
 
-func (t *FetchTally) Skipped() int {
+func (t *fetchTally) skipped() int {
 	n := 0
 	for _, c := range t.skippedByType {
 		n += c
@@ -66,30 +66,30 @@ func (t *FetchTally) Skipped() int {
 	return n
 }
 
-func (t *FetchTally) Summary() string {
+func (t *fetchTally) summary() string {
 	return fmt.Sprintf("discovered=%d fetched=%d failed=%d skipped_unsupported=%d by_type=%v",
-		t.discovered, t.fetched, t.failed, t.Skipped(), t.skippedByType)
+		t.discovered, t.fetched, t.failed, t.skipped(), t.skippedByType)
 }
 
-var ReFeishuErrorCode = regexp.MustCompile(`code["\s]*[:=]\s*(\d+)`)
+var reFeishuErrorCode = regexp.MustCompile(`code["\s]*[:=]\s*(\d+)`)
 
-// FeishuErrorCode extracts the numeric Feishu error code from a raw error string
+// feishuErrorCode extracts the numeric Feishu error code from a raw error string
 // (e.g. `body={"code":1663,...}` or `code=1663`), best-effort.
-func FeishuErrorCode(raw string) string {
-	if m := ReFeishuErrorCode.FindStringSubmatch(raw); len(m) == 2 {
+func feishuErrorCode(raw string) string {
+	if m := reFeishuErrorCode.FindStringSubmatch(raw); len(m) == 2 {
 		return m[1]
 	}
 	return ""
 }
 
-// FeishuFailure classifies a raw connector/API error into a stable i18n code
+// feishuFailure classifies a raw connector/API error into a stable i18n code
 // (mapped to a localized string on the frontend), an optional numeric Feishu
 // error code for interpolation, and an English fallback message for clients
 // without the i18n key. The raw status/JSON body/log_id is never returned here —
 // it stays in the server logs. Dumping it in the UI is the anti-pattern
 // Airbyte/Fivetran/Onyx warn against. Transient errors are retried next sync
 // (the cursor is retained); auth/permission errors point at the fix instead.
-func FeishuFailure(err error) (code, codeValue, fallback string) {
+func feishuFailure(err error) (code, codeValue, fallback string) {
 	if err == nil {
 		return "sync_failed", "", "Sync failed; will retry on the next sync"
 	}
@@ -113,7 +113,7 @@ func FeishuFailure(err error) (code, codeValue, fallback string) {
 	case strings.Contains(s, "api error"),
 		strings.Contains(s, "export task failed"),
 		strings.Contains(s, "download failed"):
-		if v := FeishuErrorCode(err.Error()); v != "" {
+		if v := feishuErrorCode(err.Error()); v != "" {
 			return "feishu_api_error", v, fmt.Sprintf("Feishu API error (code=%s); will retry on the next sync", v)
 		}
 		return "feishu_api_error_generic", "", "Feishu API error; will retry on the next sync"
@@ -126,7 +126,7 @@ func FeishuFailure(err error) (code, codeValue, fallback string) {
 // server logs) plus the classified i18n code / param / fallback (for a
 // localisable SyncItemError in the UI), merged with any caller-supplied extras.
 func FeishuErrorItemMeta(err error, extra map[string]string) map[string]string {
-	code, codeValue, fallback := FeishuFailure(err)
+	code, codeValue, fallback := feishuFailure(err)
 	m := map[string]string{
 		"error":             err.Error(),
 		"error_reason_code": code,
@@ -139,9 +139,9 @@ func FeishuErrorItemMeta(err error, extra map[string]string) map[string]string {
 	return m
 }
 
-// ParseableAttachmentExts are attachment extensions worth ingesting as their
-// own knowledge entries; other files (icons, tiny decor) are Skipped.
-var ParseableAttachmentExts = map[string]bool{
+// parseableAttachmentExts are attachment extensions worth ingesting as their
+// own knowledge entries; other files (icons, tiny decor) are skipped.
+var parseableAttachmentExts = map[string]bool{
 	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
 	".ppt": true, ".pptx": true, ".txt": true, ".md": true, ".csv": true,
 }
@@ -153,7 +153,7 @@ const MinAttachmentBytes = 2 * 1024
 // content type WeKnora accepts for a standalone image knowledge item (png/jpg/
 // gif — the image set isValidFileType admits). ok is false for non-image or
 // unsupported formats (e.g. webp/bmp), which the caller skips rather than
-// mislabel — a wrong extension would Fail parsing. The detected content type is
+// mislabel — a wrong extension would fail parsing. The detected content type is
 // returned even when ok is false so the caller can log it without re-sniffing.
 func SupportedImageExt(data []byte) (ext, contentType string, ok bool) {
 	switch ct := http.DetectContentType(data); ct {
@@ -198,10 +198,10 @@ func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 	}
 
 	// Timezone is a display setting (bitable date rendering), not a credential, so
-	// it lives in Settings. Empty falls back to GMT+8 in ResolveLocation.
+	// it lives in Settings. Empty falls back to GMT+8 in resolveLocation.
 	if feishuConfig.Timezone == "" && config.Settings != nil {
-		if Tz, ok := config.Settings["timezone"].(string); ok {
-			feishuConfig.Timezone = strings.TrimSpace(Tz)
+		if tz, ok := config.Settings["timezone"].(string); ok {
+			feishuConfig.Timezone = strings.TrimSpace(tz)
 		}
 	}
 
@@ -213,7 +213,7 @@ func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 }
 
 // IsSupportedDocType checks if a Feishu document type can be synced.
-// mindnote and slides have no content read API and are Skipped.
+// mindnote and slides have no content read API and are skipped.
 func IsSupportedDocType(objType string) bool {
 	switch objType {
 	case "docx", "doc", "sheet", "bitable", "file":
@@ -262,13 +262,13 @@ func SanitizeFileName(name string) string {
 		// pathological: extension alone overflows the budget → drop it
 		ext = ""
 	}
-	base := TruncateUTF8(result[:len(result)-len(ext)], maxBytes-len(ext))
+	base := truncateUTF8(result[:len(result)-len(ext)], maxBytes-len(ext))
 	return base + ext
 }
 
-// TruncateUTF8 shortens s to at most maxBytes bytes without splitting a
+// truncateUTF8 shortens s to at most maxBytes bytes without splitting a
 // multi-byte rune: after a hard byte cut it trims any trailing partial codepoint.
-func TruncateUTF8(s string, maxBytes int) string {
+func truncateUTF8(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
@@ -303,11 +303,11 @@ type DocxFetchInput struct {
 // sub-items. Falls back to the export API if the blocks API errors or renders
 // empty. Shared by the wiki Connector and the Drive DriveConnector.
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
-	blocks, err := client.ListDocumentBlocks(ctx, in.ObjToken)
+	blocks, err := client.listDocumentBlocks(ctx, in.ObjToken)
 	if err != nil {
 		logger.Warnf(ctx, "[Feishu] blocks API failed for %s (%s), falling back to export: %v",
 			in.Title, in.ObjToken, err)
-		item, ferr := ExportDocxFallback(ctx, client, in)
+		item, ferr := exportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -317,7 +317,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	md, atts, err := BlocksToMarkdown(ctx, client, blocks)
+	md, atts, err := blocksToMarkdown(ctx, client, blocks)
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
@@ -325,7 +325,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	if len(strings.TrimSpace(string(md))) == 0 {
 		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
 			in.Title, in.ObjToken)
-		item, ferr := ExportDocxFallback(ctx, client, in)
+		item, ferr := exportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -362,10 +362,10 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 				in.ObjToken, a.FileToken, a.Name)
 			continue
 		}
-		if !ParseableAttachmentExts[ext] {
+		if !parseableAttachmentExts[ext] {
 			continue
 		}
-		data, derr := client.DownloadMediaFile(ctx, a.FileToken)
+		data, derr := client.downloadMediaFile(ctx, a.FileToken)
 		if derr != nil {
 			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
 				in.ObjToken, a.Name, a.FileToken, derr)
@@ -410,7 +410,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		if !in.MultimodalEnabled {
 			continue // KB can't OCR images; the inline placeholder is all we keep
 		}
-		data, derr := client.DownloadMediaFile(ctx, b.Image.Token)
+		data, derr := client.downloadMediaFile(ctx, b.Image.Token)
 		if derr != nil {
 			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
 				in.ObjToken, b.Image.Token, derr)
@@ -448,10 +448,10 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	return items, nil
 }
 
-// ExportDocxFallback exports a docx document via the async export API and
+// exportDocxFallback exports a docx document via the async export API and
 // returns a single FetchedItem containing the exported .docx binary. Used by
 // FetchDocxWithBlocks when the blocks API is unavailable or renders empty.
-func ExportDocxFallback(ctx context.Context, client *Client, in DocxFetchInput) (*types.FetchedItem, error) {
+func exportDocxFallback(ctx context.Context, client *Client, in DocxFetchInput) (*types.FetchedItem, error) {
 	data, fileName, err := client.ExportAndDownload(ctx, in.ObjToken, "docx")
 	if err != nil {
 		return nil, fmt.Errorf("export %s (docx): %w", in.Title, err)

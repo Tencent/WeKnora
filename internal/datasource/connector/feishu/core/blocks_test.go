@@ -38,9 +38,9 @@ func TestListDocumentBlocks_Paginates(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	blocks, err := c.ListDocumentBlocks(context.Background(), "doc123")
+	blocks, err := c.listDocumentBlocks(context.Background(), "doc123")
 	if err != nil {
-		t.Fatalf("ListDocumentBlocks: %v", err)
+		t.Fatalf("listDocumentBlocks: %v", err)
 	}
 	if len(blocks) != 3 {
 		t.Fatalf("got %d blocks, want 3", len(blocks))
@@ -68,9 +68,9 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadSheetRange(context.Background(), "sht_abc_0")
+	rows, truncated, err := c.readSheetRange(context.Background(), "sht_abc_0")
 	if err != nil {
-		t.Fatalf("ReadSheetRange: %v", err)
+		t.Fatalf("readSheetRange: %v", err)
 	}
 	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0" {
 		t.Errorf("path = %q", gotPath)
@@ -99,7 +99,7 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadSheetRange(context.Background(), "sht_x_0")
+	rows, truncated, err := c.readSheetRange(context.Background(), "sht_x_0")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -114,57 +114,57 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 func TestBitableCellToString(t *testing.T) {
 	// text-segment array: [{type:text, text:"你好"}] → "你好"
 	textSeg := []any{map[string]any{"type": "text", "text": "你好"}}
-	if got := BitableCellToString(textSeg); got != "你好" {
+	if got := bitableCellToString(textSeg); got != "你好" {
 		t.Errorf("text segment: got %q, want %q", got, "你好")
 	}
 
 	// person array: [{id:u1, name:"张三"}] → "张三"
 	person := []any{map[string]any{"id": "u1", "name": "张三"}}
-	if got := BitableCellToString(person); got != "张三" {
+	if got := bitableCellToString(person); got != "张三" {
 		t.Errorf("person: got %q, want %q", got, "张三")
 	}
 
 	// plain number (float64) → "3"
-	if got := BitableCellToString(float64(3)); got != "3" {
+	if got := bitableCellToString(float64(3)); got != "3" {
 		t.Errorf("float64: got %q, want %q", got, "3")
 	}
 
 	// plain string → passthrough
-	if got := BitableCellToString("abc"); got != "abc" {
+	if got := bitableCellToString("abc"); got != "abc" {
 		t.Errorf("string: got %q, want %q", got, "abc")
 	}
 }
 
 func TestBitableFieldCell_DateColumn(t *testing.T) {
-	gmt8 := ResolveLocation("") // default GMT+8
-	dateOnly := BitableColumn{fieldType: BitableFieldTypeDateTime, dateFormatter: "yyyy/MM/dd"}
-	dateTime := BitableColumn{fieldType: BitableFieldTypeDateTime, dateFormatter: "yyyy-MM-dd HH:mm"}
-	number := BitableColumn{fieldType: 2}
+	gmt8 := resolveLocation("") // default GMT+8
+	dateOnly := bitableColumn{fieldType: bitableFieldTypeDateTime, dateFormatter: "yyyy/MM/dd"}
+	dateTime := bitableColumn{fieldType: bitableFieldTypeDateTime, dateFormatter: "yyyy-MM-dd HH:mm"}
+	number := bitableColumn{fieldType: 2}
 
 	// Feishu stores a date as a UTC instant at the table-timezone midnight. The
 	// official sample 1711900800000 is 2024-04-01 00:00:00 GMT+8 (== 2024-03-31
 	// 16:00:00 UTC); a date-only column must render the GMT+8 calendar date, NOT
 	// the UTC-shifted "2024-03-31 16:00:00" the old code produced.
-	if got := BitableFieldCell(float64(1711900800000), dateOnly, gmt8); got != "2024-04-01" {
+	if got := bitableFieldCell(float64(1711900800000), dateOnly, gmt8); got != "2024-04-01" {
 		t.Errorf("date-only cell: got %q, want %q", got, "2024-04-01")
 	}
 
 	// A datetime column keeps the time, rendered in the same timezone.
 	// 1719802800000 == 2024-07-01 03:00 UTC == 2024-07-01 11:00 GMT+8.
-	if got := BitableFieldCell(float64(1719802800000), dateTime, gmt8); got != "2024-07-01 11:00" {
+	if got := bitableFieldCell(float64(1719802800000), dateTime, gmt8); got != "2024-07-01 11:00" {
 		t.Errorf("datetime cell: got %q, want %q", got, "2024-07-01 11:00")
 	}
 
 	// A non-date numeric field is left as its plain value, not a date.
-	if got := BitableFieldCell(float64(42), number, gmt8); got != "42" {
+	if got := bitableFieldCell(float64(42), number, gmt8); got != "42" {
 		t.Errorf("number cell: got %q, want %q", got, "42")
 	}
 
 	// An empty date cell (nil, or epoch 0) renders blank, not "1970-01-01".
-	if got := BitableFieldCell(nil, dateOnly, gmt8); got != "" {
+	if got := bitableFieldCell(nil, dateOnly, gmt8); got != "" {
 		t.Errorf("empty date cell: got %q, want empty", got)
 	}
-	if got := BitableFieldCell(float64(0), dateOnly, gmt8); got != "" {
+	if got := bitableFieldCell(float64(0), dateOnly, gmt8); got != "" {
 		t.Errorf("epoch-0 date cell: got %q, want empty", got)
 	}
 }
@@ -173,13 +173,13 @@ func TestDateFormatterHasTime(t *testing.T) {
 	withTime := []string{"yyyy-MM-dd HH:mm", "HH:mm", "yyyy/MM/dd hh:mm", "MM-dd HH:mm"}
 	dateOnly := []string{"", "yyyy/MM/dd", "MM-dd", "MM/dd/yyyy", "dd/MM/yyyy"}
 	for _, f := range withTime {
-		if !DateFormatterHasTime(f) {
-			t.Errorf("DateFormatterHasTime(%q) = false, want true", f)
+		if !dateFormatterHasTime(f) {
+			t.Errorf("dateFormatterHasTime(%q) = false, want true", f)
 		}
 	}
 	for _, f := range dateOnly {
-		if DateFormatterHasTime(f) {
-			t.Errorf("DateFormatterHasTime(%q) = true, want false", f)
+		if dateFormatterHasTime(f) {
+			t.Errorf("dateFormatterHasTime(%q) = true, want false", f)
 		}
 	}
 }
@@ -188,9 +188,9 @@ func TestResolveLocation(t *testing.T) {
 	// Empty and unknown names both fall back to a fixed GMT+8, with no dependency
 	// on system tzdata (minimal container images may omit it).
 	for _, name := range []string{"", "Not/AZone"} {
-		ref := time.Date(2024, 4, 1, 0, 0, 0, 0, ResolveLocation(name))
-		if _, off := ref.Zone(); off != DefaultTimezoneOffsetSeconds {
-			t.Errorf("ResolveLocation(%q) offset = %d, want %d", name, off, DefaultTimezoneOffsetSeconds)
+		ref := time.Date(2024, 4, 1, 0, 0, 0, 0, resolveLocation(name))
+		if _, off := ref.Zone(); off != defaultTimezoneOffsetSeconds {
+			t.Errorf("resolveLocation(%q) offset = %d, want %d", name, off, defaultTimezoneOffsetSeconds)
 		}
 	}
 }
@@ -221,10 +221,10 @@ func TestReadBitableRecords_DateColumnUsesFormatterAndTimezone(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), location: ResolveLocation("")}
-	rows, _, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), location: resolveLocation("")}
+	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("rows = %+v, want header + 1 record", rows)
@@ -266,9 +266,9 @@ func TestReadBitableRecords_SplitsTokenAndBuildsTable(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if truncated {
 		t.Errorf("did not expect truncation")
@@ -320,9 +320,9 @@ func TestReadBitableRecords_PaginatesFieldsAtMax100(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if len(rows) < 1 {
 		t.Fatal("expected at least a header row")
@@ -348,7 +348,7 @@ func bitableRows(n int) []map[string]any {
 }
 
 // TestReadBitableRecords_PaginatesAndTruncatesRecords exercises the record-side
-// pagination advance and the >MaxTableRows truncation — the boundary logic that
+// pagination advance and the >maxTableRows truncation — the boundary logic that
 // no prior test reached (every other bitable test returns a single sub-cap page).
 func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 	var secondPageToken string
@@ -368,7 +368,7 @@ func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 				}})
 			} else {
 				secondPageToken = tok
-				// Page 2: 250 more → 550 total, capped to MaxTableRows.
+				// Page 2: 250 more → 550 total, capped to maxTableRows.
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 					"has_more": false, "items": bitableRows(250),
 				}})
@@ -378,23 +378,23 @@ func TestReadBitableRecords_PaginatesAndTruncatesRecords(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if secondPageToken != "r2" {
 		t.Errorf("second records page must be fetched with page_token=r2, got %q", secondPageToken)
 	}
-	if len(rows) != MaxTableRows+1 { // header + MaxTableRows capped data rows
-		t.Errorf("rows = %d, want %d (header + %d capped)", len(rows), MaxTableRows+1, MaxTableRows)
+	if len(rows) != maxTableRows+1 { // header + maxTableRows capped data rows
+		t.Errorf("rows = %d, want %d (header + %d capped)", len(rows), maxTableRows+1, maxTableRows)
 	}
 	if !truncated {
-		t.Error("a >MaxTableRows bitable must report truncated=true")
+		t.Error("a >maxTableRows bitable must report truncated=true")
 	}
 }
 
 // TestReadBitableRecords_Exactly500NotTruncated guards the off-by-one at the cap:
-// exactly MaxTableRows records in a single page must NOT be flagged truncated.
+// exactly maxTableRows records in a single page must NOT be flagged truncated.
 func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -406,22 +406,22 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 			}})
 		case strings.HasSuffix(r.URL.Path, "/records/search"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
-				"has_more": false, "items": bitableRows(MaxTableRows),
+				"has_more": false, "items": bitableRows(maxTableRows),
 			}})
 		}
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, truncated, err := c.ReadBitableRecords(context.Background(), "bascabc_tblxyz")
+	rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
 	if err != nil {
-		t.Fatalf("ReadBitableRecords: %v", err)
+		t.Fatalf("readBitableRecords: %v", err)
 	}
 	if truncated {
-		t.Error("exactly MaxTableRows records must not be flagged truncated")
+		t.Error("exactly maxTableRows records must not be flagged truncated")
 	}
-	if len(rows) != MaxTableRows+1 {
-		t.Errorf("rows = %d, want %d (header + %d)", len(rows), MaxTableRows+1, MaxTableRows)
+	if len(rows) != maxTableRows+1 {
+		t.Errorf("rows = %d, want %d (header + %d)", len(rows), maxTableRows+1, maxTableRows)
 	}
 }
 
@@ -452,7 +452,7 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.ReadBitableRecords(ctx, "bascabc_tblxyz")
+	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
 	if err != nil {
 		t.Fatalf("empty-page pagination must terminate cleanly, got err: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	if _, _, err := c.ReadBitableRecords(ctx, "bascabc_tblxyz"); err != nil {
+	if _, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz"); err != nil {
 		t.Fatalf("empty fields page must terminate cleanly, got err: %v", err)
 	}
 	if fieldCalls != 1 {
@@ -515,7 +515,7 @@ func TestListDocumentBlocks_EmptyPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	blocks, err := c.ListDocumentBlocks(ctx, "doc-1")
+	blocks, err := c.listDocumentBlocks(ctx, "doc-1")
 	if err != nil {
 		t.Fatalf("empty blocks page must terminate cleanly, got err: %v", err)
 	}

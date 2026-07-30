@@ -124,7 +124,7 @@ func TestDownloadRawBytes_RetriesOn429ThenSucceeds(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(cfg)
-	data, err := c.DownloadRawBytes(context.Background(), "/dl")
+	data, err := c.downloadRawBytes(context.Background(), "/dl")
 	if err != nil {
 		t.Fatalf("expected success after retry, got %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDownloadRawBytes_4xxNotRetried(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(cfg)
-	if _, err := c.DownloadRawBytes(context.Background(), "/dl"); err == nil {
+	if _, err := c.downloadRawBytes(context.Background(), "/dl"); err == nil {
 		t.Fatal("expected error on 403")
 	}
 	if attempts != 1 {
@@ -166,8 +166,8 @@ func TestParseRetryAfter(t *testing.T) {
 		{"abc", fallback}, // unparseable
 	}
 	for _, tt := range tests {
-		if got := ParseRetryAfter(tt.header, fallback); got != tt.want {
-			t.Errorf("ParseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
+		if got := parseRetryAfter(tt.header, fallback); got != tt.want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
 		}
 	}
 }

@@ -18,7 +18,7 @@ const (
 	BlockTypePage      = 1
 	BlockTypeText      = 2
 	BlockTypeHeading1  = 3
-	BlockTypeHeading9  = 11
+	blockTypeHeading9  = 11
 	BlockTypeBullet    = 12
 	BlockTypeOrdered   = 13
 	BlockTypeCode      = 14
@@ -34,9 +34,9 @@ const (
 	BlockTypeTableCell = 32
 )
 
-// MaxDocumentBlocks caps how many blocks a single document contributes, guarding
+// maxDocumentBlocks caps how many blocks a single document contributes, guarding
 // against pathological/adversarial documents. Far above any real Feishu doc.
-const MaxDocumentBlocks = 50000
+const maxDocumentBlocks = 50000
 
 // TextElement is one inline run inside a text-bearing block.
 // TextRun is the text_run payload of a TextElement.
@@ -121,9 +121,9 @@ type DocxBlocksResponse struct {
 	Data DocxBlocksData `json:"data"`
 }
 
-// ListDocumentBlocks returns every block of a docx document as a flat,
+// listDocumentBlocks returns every block of a docx document as a flat,
 // pre-order array. Paginates at 500 blocks/page. documentID is the obj_token.
-func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]DocxBlock, error) {
+func (c *Client) listDocumentBlocks(ctx context.Context, documentID string) ([]DocxBlock, error) {
 	var all []DocxBlock
 	pageToken := ""
 	for {
@@ -146,8 +146,8 @@ func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]D
 			// burning API quota. There is nothing more to collect, so stop.
 			break
 		}
-		if len(all) >= MaxDocumentBlocks {
-			logger.Warnf(ctx, "[Feishu] document %s exceeded %d blocks; truncating", documentID, MaxDocumentBlocks)
+		if len(all) >= maxDocumentBlocks {
+			logger.Warnf(ctx, "[Feishu] document %s exceeded %d blocks; truncating", documentID, maxDocumentBlocks)
 			break
 		}
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
@@ -158,32 +158,32 @@ func (c *Client) ListDocumentBlocks(ctx context.Context, documentID string) ([]D
 	return all, nil
 }
 
-// MaxTableRows caps how many rows of an embedded sheet/bitable are rendered,
+// maxTableRows caps how many rows of an embedded sheet/bitable are rendered,
 // protecting chunking from pathologically large tables. Beyond this the table
 // is truncated and the caller annotates the omission.
-const MaxTableRows = 500
+const maxTableRows = 500
 
-// SheetValueRange is the valueRange payload of SheetValuesData.
-type SheetValueRange struct {
+// sheetValueRange is the valueRange payload of sheetValuesData.
+type sheetValueRange struct {
 	Values [][]any `json:"values"`
 }
 
-// SheetValuesData is the data payload of SheetValuesResponse.
-type SheetValuesData struct {
-	ValueRange SheetValueRange `json:"valueRange"`
+// sheetValuesData is the data payload of sheetValuesResponse.
+type sheetValuesData struct {
+	ValueRange sheetValueRange `json:"valueRange"`
 }
 
-// SheetValuesResponse is the response for sheets-v2 values read.
-type SheetValuesResponse struct {
+// sheetValuesResponse is the response for sheets-v2 values read.
+type sheetValuesResponse struct {
 	ApiResponse
-	Data SheetValuesData `json:"data"`
+	Data sheetValuesData `json:"data"`
 }
 
-// ReadSheetRange reads the cell values of an embedded spreadsheet block.
+// readSheetRange reads the cell values of an embedded spreadsheet block.
 // embedToken is the block's sheet.token, formatted "spreadsheetToken_sheetId".
 // Cells are stringified (display value) for RAG text retrieval. Rows are capped
-// at MaxTableRows; truncated is true when the source had more rows than that.
-func (c *Client) ReadSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error) {
+// at maxTableRows; truncated is true when the source had more rows than that.
+func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
 		return nil, false, fmt.Errorf("invalid sheet embed token: %q", embedToken)
@@ -191,7 +191,7 @@ func (c *Client) ReadSheetRange(ctx context.Context, embedToken string) ([][]str
 	spreadsheetToken, sheetID := embedToken[:idx], embedToken[idx+1:]
 	path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=ToString",
 		url.PathEscape(spreadsheetToken), url.PathEscape(sheetID))
-	var resp SheetValuesResponse
+	var resp sheetValuesResponse
 	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, false, fmt.Errorf("read sheet range: %w", err)
 	}
@@ -199,34 +199,34 @@ func (c *Client) ReadSheetRange(ctx context.Context, embedToken string) ([][]str
 		return nil, false, fmt.Errorf("read sheet range error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	raw, truncated := capRows(resp.Data.ValueRange.Values)
-	return StringifyMatrix(raw), truncated, nil
+	return stringifyMatrix(raw), truncated, nil
 }
 
-// capRows limits rows to MaxTableRows, reporting whether truncation happened. It
+// capRows limits rows to maxTableRows, reporting whether truncation happened. It
 // is generic so the sheet ([][]any) and bitable ([][]string) read paths share one
 // truncation rule instead of each inlining their own.
 func capRows[T any](rows []T) ([]T, bool) {
-	if len(rows) > MaxTableRows {
-		return rows[:MaxTableRows], true
+	if len(rows) > maxTableRows {
+		return rows[:maxTableRows], true
 	}
 	return rows, false
 }
 
-// StringifyMatrix renders arbitrary cell values to strings; nil → "".
-func StringifyMatrix(in [][]any) [][]string {
+// stringifyMatrix renders arbitrary cell values to strings; nil → "".
+func stringifyMatrix(in [][]any) [][]string {
 	out := make([][]string, len(in))
 	for i, row := range in {
 		cells := make([]string, len(row))
 		for j, v := range row {
-			cells[j] = CellToString(v)
+			cells[j] = cellToString(v)
 		}
 		out[i] = cells
 	}
 	return out
 }
 
-// CellToString renders a single JSON cell value to a string; nil → "".
-func CellToString(v any) string {
+// cellToString renders a single JSON cell value to a string; nil → "".
+func cellToString(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
@@ -241,29 +241,29 @@ func CellToString(v any) string {
 	}
 }
 
-// BitableFieldTypeDateTime is the Feishu bitable field type for a date/datetime
+// bitableFieldTypeDateTime is the Feishu bitable field type for a date/datetime
 // column. Its cell value is a bare Unix-millisecond number, so without type-aware
 // formatting it would render as a 13-digit integer instead of a readable date.
 // https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-field/guide
-const BitableFieldTypeDateTime = 5
+const bitableFieldTypeDateTime = 5
 
-// BitableColumn describes one bitable field: its name, integer type, and (for a
+// bitableColumn describes one bitable field: its name, integer type, and (for a
 // date column) its date_formatter, which distinguishes a date-only column
 // ("yyyy/MM/dd") from a datetime one ("yyyy-MM-dd HH:mm").
-type BitableColumn struct {
+type bitableColumn struct {
 	name          string
 	fieldType     int
 	dateFormatter string
 }
 
-// BitableFieldCell renders one bitable cell. Date columns carry a Unix-millisecond
+// bitableFieldCell renders one bitable cell. Date columns carry a Unix-millisecond
 // UTC instant; the calendar date a user sees is that instant in the table's
 // timezone, so it is formatted in loc (rendering in UTC would shift the date, e.g.
 // a GMT+8 "2024-04-01" would show as "2024-03-31 16:00:00"). A date-only formatter
 // yields "2006-01-02"; a datetime formatter adds the "15:04" time. Every other
-// type falls through to BitableCellToString.
-func BitableFieldCell(v any, col BitableColumn, loc *time.Location) string {
-	if col.fieldType == BitableFieldTypeDateTime {
+// type falls through to bitableCellToString.
+func bitableFieldCell(v any, col bitableColumn, loc *time.Location) string {
+	if col.fieldType == bitableFieldTypeDateTime {
 		// Empty date cells arrive as nil (→ fall through to blank); ms==0 (epoch) is
 		// not a real Feishu date value either — render blank, not "1970-01-01" or "0".
 		if ms, ok := v.(float64); ok {
@@ -271,33 +271,33 @@ func BitableFieldCell(v any, col BitableColumn, loc *time.Location) string {
 				return ""
 			}
 			t := time.UnixMilli(int64(ms)).In(loc)
-			if DateFormatterHasTime(col.dateFormatter) {
+			if dateFormatterHasTime(col.dateFormatter) {
 				return t.Format("2006-01-02 15:04")
 			}
 			return t.Format("2006-01-02")
 		}
 	}
-	return BitableCellToString(v)
+	return bitableCellToString(v)
 }
 
-// DateFormatterHasTime reports whether a Feishu date_formatter includes a time
+// dateFormatterHasTime reports whether a Feishu date_formatter includes a time
 // component. Feishu formatters are Java-style: 'H'/'h' hour, lowercase 'm' minute,
 // uppercase 'M' month — so a time part is present iff the string carries an hour or
 // a lowercase-'m' minute token (e.g. "yyyy-MM-dd HH:mm"). An empty formatter
 // (Feishu's default "yyyy/MM/dd") is date-only.
-func DateFormatterHasTime(f string) bool {
+func dateFormatterHasTime(f string) bool {
 	return strings.ContainsAny(f, "Hh") || strings.Contains(f, "m")
 }
 
-// BitableCellToString renders a bitable field value — which may be text segments,
+// bitableCellToString renders a bitable field value — which may be text segments,
 // a person/link object, or an attachment/multi-select array — to a readable
-// string for RAG. Scalars delegate to CellToString.
-func BitableCellToString(v any) string {
+// string for RAG. Scalars delegate to cellToString.
+func bitableCellToString(v any) string {
 	switch t := v.(type) {
 	case []any:
 		parts := make([]string, 0, len(t))
 		for _, e := range t {
-			if s := BitableCellToString(e); s != "" {
+			if s := bitableCellToString(e); s != "" {
 				parts = append(parts, s)
 			}
 		}
@@ -310,78 +310,78 @@ func BitableCellToString(v any) string {
 		}
 		return ""
 	default:
-		return CellToString(v)
+		return cellToString(v)
 	}
 }
 
-// BitableFieldProperty carries a field's type-specific settings.
-type BitableFieldProperty struct {
+// bitableFieldProperty carries a field's type-specific settings.
+type bitableFieldProperty struct {
 	// DateFormatter distinguishes a date-only column from a datetime one.
 	DateFormatter string `json:"date_formatter"`
 }
 
-// BitableField is one entry of BitableFieldsData.Items.
-type BitableField struct {
+// bitableField is one entry of bitableFieldsData.Items.
+type bitableField struct {
 	FieldName string                `json:"field_name"`
 	Type      int                   `json:"type"`
-	Property  *BitableFieldProperty `json:"property"`
+	Property  *bitableFieldProperty `json:"property"`
 }
 
-// BitableFieldsData is the data payload of BitableFieldsResponse.
-type BitableFieldsData struct {
+// bitableFieldsData is the data payload of bitableFieldsResponse.
+type bitableFieldsData struct {
 	HasMore   bool           `json:"has_more"`
 	PageToken string         `json:"page_token"`
-	Items     []BitableField `json:"items"`
+	Items     []bitableField `json:"items"`
 }
 
-type BitableFieldsResponse struct {
+type bitableFieldsResponse struct {
 	ApiResponse
-	Data BitableFieldsData `json:"data"`
+	Data bitableFieldsData `json:"data"`
 }
 
-// MaxBitableFieldPageSize is the documented per-page cap for the bitable
+// maxBitableFieldPageSize is the documented per-page cap for the bitable
 // list-fields endpoint (100). Unlike list-records (max 500), passing a larger
 // page_size here is rejected, so fields must be fetched 100 at a time and paged.
-const MaxBitableFieldPageSize = 100
+const maxBitableFieldPageSize = 100
 
-// BitableRecord is one entry of BitableRecordsData.Items.
-type BitableRecord struct {
+// bitableRecord is one entry of bitableRecordsData.Items.
+type bitableRecord struct {
 	Fields map[string]any `json:"fields"`
 }
 
-// BitableRecordsData is the data payload of BitableRecordsResponse.
-type BitableRecordsData struct {
+// bitableRecordsData is the data payload of bitableRecordsResponse.
+type bitableRecordsData struct {
 	HasMore   bool            `json:"has_more"`
 	PageToken string          `json:"page_token"`
-	Items     []BitableRecord `json:"items"`
+	Items     []bitableRecord `json:"items"`
 }
 
-type BitableRecordsResponse struct {
+type bitableRecordsResponse struct {
 	ApiResponse
-	Data BitableRecordsData `json:"data"`
+	Data bitableRecordsData `json:"data"`
 }
 
-// ReadBitableRecords reads an embedded bitable block as a table: a header row of
+// readBitableRecords reads an embedded bitable block as a table: a header row of
 // field names followed by one row per record. embedToken is the block's
 // bitable.token, formatted "appToken_tableId". Record rows are capped at
-// MaxTableRows; truncated is true when the source had more records than that.
-func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error) {
+// maxTableRows; truncated is true when the source had more records than that.
+func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
 		return nil, false, fmt.Errorf("invalid bitable embed token: %q", embedToken)
 	}
 	appToken, tableID := embedToken[:idx], embedToken[idx+1:]
 
-	var cols []BitableColumn
+	var cols []bitableColumn
 	baseFPath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/fields?page_size=%d",
-		url.PathEscape(appToken), url.PathEscape(tableID), MaxBitableFieldPageSize)
+		url.PathEscape(appToken), url.PathEscape(tableID), maxBitableFieldPageSize)
 	fieldPageToken := ""
 	for {
 		fpath := baseFPath
 		if fieldPageToken != "" {
 			fpath += "&page_token=" + url.QueryEscape(fieldPageToken)
 		}
-		var fieldsResp BitableFieldsResponse
+		var fieldsResp bitableFieldsResponse
 		if err := c.DoRequest(ctx, http.MethodGet, fpath, nil, &fieldsResp); err != nil {
 			return nil, false, fmt.Errorf("read bitable fields: %w", err)
 		}
@@ -393,7 +393,7 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 			if f.Property != nil {
 				formatter = f.Property.DateFormatter
 			}
-			cols = append(cols, BitableColumn{name: f.FieldName, fieldType: f.Type, dateFormatter: formatter})
+			cols = append(cols, bitableColumn{name: f.FieldName, fieldType: f.Type, dateFormatter: formatter})
 		}
 		if len(fieldsResp.Data.Items) == 0 {
 			// Defensive: an empty page with has_more=true would loop forever (this
@@ -410,7 +410,7 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 	for i, col := range cols {
 		header[i] = col.name
 	}
-	loc := c.Tz()
+	loc := c.tz()
 
 	var dataRows [][]string
 	truncated := false
@@ -427,7 +427,7 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 		if pageToken != "" {
 			rpath += "&page_token=" + url.QueryEscape(pageToken)
 		}
-		var rec BitableRecordsResponse
+		var rec bitableRecordsResponse
 		if err := c.DoRequest(ctx, http.MethodPost, rpath, map[string]any{}, &rec); err != nil {
 			return nil, false, fmt.Errorf("search bitable records: %w", err)
 		}
@@ -437,18 +437,18 @@ func (c *Client) ReadBitableRecords(ctx context.Context, embedToken string) ([][
 		for _, item := range rec.Data.Items {
 			row := make([]string, len(cols))
 			for i, col := range cols {
-				row[i] = BitableFieldCell(item.Fields[col.name], col, loc)
+				row[i] = bitableFieldCell(item.Fields[col.name], col, loc)
 			}
 			dataRows = append(dataRows, row)
 		}
 		if len(rec.Data.Items) == 0 {
 			// Defensive: an empty page with has_more=true never advances dataRows,
-			// so the MaxTableRows cap below would never trip — stop instead of
+			// so the maxTableRows cap below would never trip — stop instead of
 			// looping until the task deadline.
 			break
 		}
-		if len(dataRows) >= MaxTableRows {
-			if len(dataRows) > MaxTableRows || rec.Data.HasMore {
+		if len(dataRows) >= maxTableRows {
+			if len(dataRows) > maxTableRows || rec.Data.HasMore {
 				truncated = true
 			}
 			break

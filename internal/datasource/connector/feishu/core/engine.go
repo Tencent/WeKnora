@@ -12,22 +12,22 @@ import (
 
 // engine.go holds the single generic streaming sync engine shared by the wiki
 // Connector and the Drive DriveConnector. The per-connector differences (node
-// type, listing API, edit-time field, cursor wire format, Fetch dispatch,
+// type, listing API, edit-time field, cursor wire format, fetch dispatch,
 // log tag) are isolated behind the NodeOps adapter interface. FetchAll /
 // FetchIncremental are thin wrappers over the same engine that collect Emits
 // instead of streaming them.
 //
 // Behaviour note (deliberate, see ADR-0005 / design §2.4):
 //   - Resume/incremental fast-path: a node recorded at its current edit time
-//     is Skipped, keeping the cursor entry.
-//   - A Fetch failure does NOT advance the cursor: the prior edit time is
+//     is skipped, keeping the cursor entry.
+//   - A fetch failure does NOT advance the cursor: the prior edit time is
 //     retained so the node is retried next run instead of being permanently
-//     Skipped on a transient export failure (Tencent/WeKnora#2136). This now
+//     skipped on a transient export failure (Tencent/WeKnora#2136). This now
 //     also holds for the FetchIncremental path (previously it advanced the
 //     cursor before fetching, a latent #2136 bug).
 //   - Logs use the "stream progress/summary" wording uniformly; the
 //     FetchIncremental path additionally gains per-100 progress + tally
-//     summary logs it did not emit before (log-only change).
+//     summary logs it did not Emit before (log-only change).
 
 // NodeOps adapts one connector's node type to the shared sync engine. Every
 // method is a pure accessor or a thin wrapper - no engine logic lives here.
@@ -44,7 +44,7 @@ type NodeOps[N any] interface {
 	// EditTime is the change-detection timestamp string stored in the cursor.
 	EditTime(n N) string
 
-	// Fetch retrieves one node's content; (nil, nil) means an unsupported
+	// fetch retrieves one node's content; (nil, nil) means an unsupported
 	// type that yields no item.
 	Fetch(ctx context.Context, client *Client, n N, resourceID string, multimodal bool) ([]*types.FetchedItem, error)
 
@@ -127,7 +127,7 @@ func runSync[N any](
 		}
 
 		currentNodes := make(map[string]bool)
-		tally := NewFetchTally(len(nodes))
+		tally := newFetchTally(len(nodes))
 		for i, node := range nodes {
 			tok := ops.Token(node)
 			currentNodes[tok] = true
@@ -151,11 +151,11 @@ func runSync[N any](
 
 			items, ferr := ops.Fetch(ctx, client, node, resourceID, config.MultimodalEnabled)
 			if ferr != nil {
-				tally.Fail()
+				tally.fail()
 				// Do NOT advance the cursor: the content was never fetched.
 				// Retain the prior edit time (if any) so prev != current next
 				// run and the node is retried, instead of being permanently
-				// Skipped on a transient export failure (Tencent/WeKnora#2136).
+				// skipped on a transient export failure (Tencent/WeKnora#2136).
 				if hadPrev {
 					newTimes[resourceID][tok] = prevEdit
 				}
@@ -168,11 +168,11 @@ func runSync[N any](
 					return nil, eerr
 				}
 			} else {
-				// Fetched, or an unsupported type (nothing to Fetch): record
+				// Fetched, or an unsupported type (nothing to fetch): record
 				// the current edit time so the node is not re-processed next run.
 				newTimes[resourceID][tok] = editTimeStr
 				if len(items) > 0 {
-					tally.Fetch()
+					tally.fetch()
 					for _, it := range items {
 						if eerr := h.Emit(ctx, *it); eerr != nil {
 							return nil, eerr
@@ -187,13 +187,13 @@ func runSync[N any](
 			processed++
 			if processed%FeishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= FeishuStreamCheckpointMaxInterval {
 				if cerr := h.Checkpoint(ctx, ops.EncodeCursor(newTimes, lastSync)); cerr != nil {
-					logger.Warnf(ctx, "%s stream checkpoint failed: %v", ops.LogTag(), cerr)
+					logger.Warnf(ctx, "%s stream Checkpoint failed: %v", ops.LogTag(), cerr)
 				}
 				lastCheckpoint = time.Now()
 			}
 			if n := i + 1; n%100 == 0 {
 				logger.Infof(ctx, "%s stream progress resource=%s %d/%d (%s)",
-					ops.LogTag(), resourceID, n, len(nodes), tally.Summary())
+					ops.LogTag(), resourceID, n, len(nodes), tally.summary())
 			}
 		}
 
@@ -215,7 +215,7 @@ func runSync[N any](
 				}
 			}
 		}
-		logger.Infof(ctx, "%s stream summary resource=%s %s", ops.LogTag(), resourceID, tally.Summary())
+		logger.Infof(ctx, "%s stream summary resource=%s %s", ops.LogTag(), resourceID, tally.summary())
 	}
 
 	return ops.EncodeCursor(newTimes, lastSync), nil

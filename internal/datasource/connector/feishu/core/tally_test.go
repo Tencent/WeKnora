@@ -6,20 +6,20 @@ import (
 )
 
 func TestFetchTally_CountsAndSummary(t *testing.T) {
-	tally := NewFetchTally(13)
-	tally.Fetch()
-	tally.Fetch()
-	tally.Fetch()
+	tally := newFetchTally(13)
+	tally.fetch()
+	tally.fetch()
+	tally.fetch()
 	tally.Skip("mindnote")
 	tally.Skip("mindnote")
 	tally.Skip("slides")
-	tally.Fail()
+	tally.fail()
 
-	if got := tally.Skipped(); got != 3 {
-		t.Errorf("Skipped() = %d, want 3", got)
+	if got := tally.skipped(); got != 3 {
+		t.Errorf("skipped() = %d, want 3", got)
 	}
 
-	Summary := tally.Summary()
+	summary := tally.summary()
 	for _, want := range []string{
 		"discovered=13",
 		"fetched=3",
@@ -28,18 +28,18 @@ func TestFetchTally_CountsAndSummary(t *testing.T) {
 		"mindnote:2",
 		"slides:1",
 	} {
-		if !strings.Contains(Summary, want) {
-			t.Errorf("Summary() = %q, missing %q", Summary, want)
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary() = %q, missing %q", summary, want)
 		}
 	}
 }
 
 func TestFetchTally_EmptyHasNoSkips(t *testing.T) {
-	tally := NewFetchTally(0)
-	if got := tally.Skipped(); got != 0 {
-		t.Errorf("Skipped() = %d, want 0", got)
+	tally := newFetchTally(0)
+	if got := tally.skipped(); got != 0 {
+		t.Errorf("skipped() = %d, want 0", got)
 	}
-	if !strings.Contains(tally.Summary(), "skipped_unsupported=0") {
-		t.Errorf("Summary() = %q, want skipped_unsupported=0", tally.Summary())
+	if !strings.Contains(tally.summary(), "skipped_unsupported=0") {
+		t.Errorf("summary() = %q, want skipped_unsupported=0", tally.summary())
 	}
 }

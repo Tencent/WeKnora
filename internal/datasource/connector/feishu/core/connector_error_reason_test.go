@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// FeishuFailure classifies a raw connector/API error into a stable i18n code
+// feishuFailure classifies a raw connector/API error into a stable i18n code
 // (+ optional numeric feishu code) and an English fallback message. The frontend
 // localises by code; the raw status/body/log_id stays in the server logs and
 // must never appear in the code, codeValue or fallback.
@@ -83,7 +83,7 @@ func TestFeishuFailure(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			code, codeValue, fallback := FeishuFailure(tc.err)
+			code, codeValue, fallback := feishuFailure(tc.err)
 			if code != tc.wantCode {
 				t.Errorf("code = %q, want %q", code, tc.wantCode)
 			}

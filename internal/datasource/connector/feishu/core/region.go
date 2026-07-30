@@ -6,15 +6,15 @@ import "github.com/Tencent/WeKnora/internal/types"
 // two isolated clouds; the wiki/docx/drive APIs this connector uses are
 // identical, only the host differs.
 const (
-	FeishuOpenBaseURL = "https://open.feishu.cn"
-	LarkOpenBaseURL   = "https://open.larksuite.com"
+	feishuOpenBaseURL = "https://open.feishu.cn"
+	larkOpenBaseURL   = "https://open.larksuite.com"
 )
 
 // Web origins used to build human-facing links to wiki spaces and nodes. These
 // are the end-user app hosts, not the API hosts.
 const (
-	FeishuWebBaseURL = "https://feishu.cn"
-	LarkWebBaseURL   = "https://larksuite.com"
+	feishuWebBaseURL = "https://feishu.cn"
+	larkWebBaseURL   = "https://larksuite.com"
 )
 
 // Region selects which cloud the connector syncs from. Apps, tenants, tokens
@@ -36,16 +36,16 @@ var (
 	// RegionFeishu is the Chinese mainland cloud (飞书).
 	RegionFeishu = Region{
 		ConnectorType: types.ConnectorTypeFeishu,
-		OpenBaseURL:   FeishuOpenBaseURL,
-		WebBaseURL:    FeishuWebBaseURL,
+		OpenBaseURL:   feishuOpenBaseURL,
+		WebBaseURL:    feishuWebBaseURL,
 		Label:         "Feishu",
 	}
 
 	// RegionLark is the international cloud (Lark).
 	RegionLark = Region{
 		ConnectorType: types.ConnectorTypeLark,
-		OpenBaseURL:   LarkOpenBaseURL,
-		WebBaseURL:    LarkWebBaseURL,
+		OpenBaseURL:   larkOpenBaseURL,
+		WebBaseURL:    larkWebBaseURL,
 		Label:         "Lark",
 	}
 
@@ -54,16 +54,16 @@ var (
 	// type differs so the registry dispatches to the Drive connector.
 	RegionFeishuDrive = Region{
 		ConnectorType: types.ConnectorTypeFeishuDrive,
-		OpenBaseURL:   FeishuOpenBaseURL,
-		WebBaseURL:    FeishuWebBaseURL,
+		OpenBaseURL:   feishuOpenBaseURL,
+		WebBaseURL:    feishuWebBaseURL,
 		Label:         "FeishuDrive",
 	}
 
-	// RegionLarkDrive is the international cloud, Drive mode.
-	RegionLarkDrive = Region{
+	// regionLarkDrive is the international cloud, Drive mode.
+	regionLarkDrive = Region{
 		ConnectorType: types.ConnectorTypeLarkDrive,
-		OpenBaseURL:   LarkOpenBaseURL,
-		WebBaseURL:    LarkWebBaseURL,
+		OpenBaseURL:   larkOpenBaseURL,
+		WebBaseURL:    larkWebBaseURL,
 		Label:         "LarkDrive",
 	}
 )

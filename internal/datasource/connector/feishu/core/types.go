@@ -36,35 +36,35 @@ type Config struct {
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// DefaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
+// defaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
 // no timezone is configured. A fixed zone avoids any dependency on system tzdata,
 // which minimal container images may omit.
-const DefaultTimezoneOffsetSeconds = 8 * 3600
+const defaultTimezoneOffsetSeconds = 8 * 3600
 
-// ResolveLocation returns the *time.Location used to render bitable date cells.
+// resolveLocation returns the *time.Location used to render bitable date cells.
 // An empty name yields a fixed GMT+8 zone (no tzdata dependency); a named zone is
-// loaded from the system Tz database, falling back to GMT+8 if it is unavailable.
-func ResolveLocation(name string) *time.Location {
+// loaded from the system tz database, falling back to GMT+8 if it is unavailable.
+func resolveLocation(name string) *time.Location {
 	if name != "" {
 		if loc, err := time.LoadLocation(name); err == nil {
 			return loc
 		}
 	}
-	return time.FixedZone("GMT+8", DefaultTimezoneOffsetSeconds)
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
 }
 
-// DefaultBaseURL is the default Feishu Open Platform API base URL.
-const DefaultBaseURL = "https://open.feishu.cn"
+// defaultBaseURL is the default Feishu Open Platform API base URL.
+const defaultBaseURL = "https://open.feishu.cn"
 
-// LarkBaseURL is the Lark (international) API base URL.
-const LarkBaseURL = "https://open.larksuite.com"
+// larkBaseURL is the Lark (international) API base URL.
+const larkBaseURL = "https://open.larksuite.com"
 
 // GetBaseURL returns the effective base URL, defaulting to Feishu if not set.
 func (c *Config) GetBaseURL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL
 	}
-	return DefaultBaseURL
+	return defaultBaseURL
 }
 
 // --- Export format constants ---
@@ -185,16 +185,16 @@ type WikiNodeInfoResponse struct {
 
 // --- Export task API responses ---
 
-// DocRawContentData is the data payload of DocRawContentResponse.
-type DocRawContentData struct {
+// docRawContentData is the data payload of docRawContentResponse.
+type docRawContentData struct {
 	Content string `json:"content"`
 }
 
-// DocRawContentResponse is the response for GET /open-apis/docx/v1/documents/:document_id/raw_content.
+// docRawContentResponse is the response for GET /open-apis/docx/v1/documents/:document_id/raw_content.
 // Deprecated: prefer export API for full-fidelity document export.
-type DocRawContentResponse struct {
+type docRawContentResponse struct {
 	ApiResponse
-	Data DocRawContentData `json:"data"`
+	Data docRawContentData `json:"data"`
 }
 
 // ExportTaskCreateData is the data payload of ExportTaskCreateResponse.
@@ -231,22 +231,22 @@ type ExportTaskStatusResponse struct {
 
 // --- File download response ---
 
-// DriveFileMeta is one entry of DriveFileMetaData.Metas.
-type DriveFileMeta struct {
+// driveFileMeta is one entry of driveFileMetaData.Metas.
+type driveFileMeta struct {
 	DocToken string `json:"doc_token"`
 	DocType  string `json:"doc_type"`
 	Title    string `json:"title"`
 }
 
-// DriveFileMetaData is the data payload of DriveFileMetaResponse.
-type DriveFileMetaData struct {
-	Metas []DriveFileMeta `json:"metas"`
+// driveFileMetaData is the data payload of driveFileMetaResponse.
+type driveFileMetaData struct {
+	Metas []driveFileMeta `json:"metas"`
 }
 
-// DriveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
-type DriveFileMetaResponse struct {
+// driveFileMetaResponse is the response for GET /drive/v1/metas for file type nodes.
+type driveFileMetaResponse struct {
 	ApiResponse
-	Data DriveFileMetaData `json:"data"`
+	Data driveFileMetaData `json:"data"`
 }
 
 // FeishuCursor stores incremental sync state for Feishu.
@@ -279,11 +279,11 @@ type DriveFile struct {
 	// ShortcutInfo is populated only for type=="shortcut". target_type can only
 	// be doc/sheet/mindnote/bitable/file/docx (Feishu does not allow shortcuts to
 	// folders, verified) - see ADR-0002 / glossary shortcut entry.
-	ShortcutInfo *DriveShortcutInfo `json:"shortcut_info,omitempty"`
+	ShortcutInfo *driveShortcutInfo `json:"shortcut_info,omitempty"`
 }
 
-// DriveShortcutInfo is the target metadata of a Drive shortcut.
-type DriveShortcutInfo struct {
+// driveShortcutInfo is the target metadata of a Drive shortcut.
+type driveShortcutInfo struct {
 	TargetToken string `json:"target_token"`
 	TargetType  string `json:"target_type"`
 }
@@ -301,8 +301,8 @@ type DriveFileListResponse struct {
 	Data DriveFileListData `json:"data"`
 }
 
-// DriveFolderMetaData is the data payload of DriveFolderMetaResponse.
-type DriveFolderMetaData struct {
+// driveFolderMetaData is the data payload of driveFolderMetaResponse.
+type driveFolderMetaData struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Token     string `json:"token"`
@@ -312,12 +312,12 @@ type DriveFolderMetaData struct {
 	OwnUid    string `json:"ownUid"`
 }
 
-// DriveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
+// driveFolderMetaResponse is the response for GET /open-apis/drive/explorer/v2/folder/:folderToken/meta.
 // Used to resolve a root folder's human-readable name (the list API only returns
 // the folder's children, not the folder itself).
-type DriveFolderMetaResponse struct {
+type driveFolderMetaResponse struct {
 	ApiResponse
-	Data DriveFolderMetaData `json:"data"`
+	Data driveFolderMetaData `json:"data"`
 }
 
 // DriveFileListFailure records a single sub-folder listing that failed during a

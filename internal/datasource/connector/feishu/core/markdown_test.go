@@ -21,11 +21,11 @@ type fakeReader struct {
 	bitableErr       error
 }
 
-func (f fakeReader) ReadSheetRange(_ context.Context, _ string) ([][]string, bool, error) {
+func (f fakeReader) readSheetRange(_ context.Context, _ string) ([][]string, bool, error) {
 	return f.sheet, f.sheetTruncated, f.sheetErr
 }
 
-func (f fakeReader) ReadBitableRecords(_ context.Context, _ string) ([][]string, bool, error) {
+func (f fakeReader) readBitableRecords(_ context.Context, _ string) ([][]string, bool, error) {
 	return f.bitable, f.bitableTruncated, f.bitableErr
 }
 
@@ -37,7 +37,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 		{BlockID: "f", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
-	md, atts, err := BlocksToMarkdown(context.Background(), fr, blocks)
+	md, atts, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
-	md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -79,9 +79,9 @@ func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
-	md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 	if err != nil {
-		t.Fatalf("should not Fail on permission error, got %v", err)
+		t.Fatalf("should not fail on permission error, got %v", err)
 	}
 	if !strings.Contains(string(md), "无法读取内嵌电子表格") {
 		t.Errorf("want degraded placeholder, got:\n%s", md)
@@ -94,7 +94,7 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 			{BlockID: "root", BlockType: BlockTypePage},
 			{BlockID: "bt", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "bascabc_tblxyz"}},
 		}
-		md, _, err := BlocksToMarkdown(context.Background(), fr, blocks)
+		md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestBlocksToMarkdown_NativeTableFromCellChildren(t *testing.T) {
 		cellTextBlk("c1", "姓名"), cellTextBlk("c2", "分数"),
 		cellTextBlk("c3", "张三"), cellTextBlk("c4", "95"),
 	}
-	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"f1"}},
 		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
-	_, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	_, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMarkdownTable_RaggedRowClampedToHeader(t *testing.T) {
 		{"名称", "数量"},
 		{"苹果", "3", "多余1", "多余2"},
 	}
-	out := MarkdownTable(rows)
+	out := markdownTable(rows)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 lines (header, separator, 1 row), got %d:\n%s", len(lines), out)
@@ -190,7 +190,7 @@ func TestMarkdownTable_ZeroColumnRendersNothing(t *testing.T) {
 		{{}},         // one empty header row, no data
 		{{}, {}, {}}, // empty header + empty data rows
 	} {
-		out := MarkdownTable(rows)
+		out := markdownTable(rows)
 		if out != "" {
 			t.Errorf("zero-column table must render nothing, got %q for rows=%+v", out, rows)
 		}
@@ -209,7 +209,7 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}
-	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -225,9 +225,9 @@ func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("一段正文")},
 		{BlockID: "b", BlockType: BlockTypeBullet, Bullet: txt("要点")},
 	}
-	md, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
-		t.Fatalf("BlocksToMarkdown: %v", err)
+		t.Fatalf("blocksToMarkdown: %v", err)
 	}
 	if len(atts) != 0 {
 		t.Errorf("want 0 attachments, got %d", len(atts))
@@ -249,9 +249,9 @@ func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"p"}},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("")},
 	}
-	md, atts, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
-		t.Fatalf("BlocksToMarkdown: %v", err)
+		t.Fatalf("blocksToMarkdown: %v", err)
 	}
 	if strings.TrimSpace(string(md)) != "" {
 		t.Errorf("blank doc should render empty Markdown, got:\n%q", md)
@@ -267,7 +267,7 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 		{BlockID: "t", BlockType: BlockTypeTodo, Todo: txt("买牛奶")},
 		{BlockID: "c", BlockType: BlockTypeCallout, Callout: txt("注意事项")},
 	}
-	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "c", BlockType: BlockTypeCallout},
 	}
-	md, _, err := BlocksToMarkdown(context.Background(), nil, blocks)
+	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
