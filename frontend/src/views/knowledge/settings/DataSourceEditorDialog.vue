@@ -415,6 +415,24 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open-dev.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/document/isvapp/knowledge-base-overview',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+      'qyapi_get_member',
+    ],
+    fields: [
+      { key: 'app_key', labelKey: 'datasource.field.appKey', placeholder: 'dingxxxxxxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: '', optional: true, hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
