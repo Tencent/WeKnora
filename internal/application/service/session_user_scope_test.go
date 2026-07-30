@@ -29,6 +29,17 @@ func testAPISessionScopeContext(tenantID uint64, externalUserID string) context.
 	})
 }
 
+func testAPITenantKeyScopeContext(tenantID uint64, keyID uint64) context.Context {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "system-1")
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	ctx = types.WithPrincipal(ctx, types.Principal{
+		Type: types.PrincipalAPITenant,
+		ID:   "1",
+	})
+	return types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: keyID})
+}
+
 func newTestSessionService(t *testing.T) (*sessionService, *gorm.DB) {
 	t.Helper()
 
@@ -317,6 +328,49 @@ func TestGetSessionDeniesViewerOnIMSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, imSession.ID, got.ID)
 	require.Equal(t, "feishu", got.IMPlatform)
+}
+
+func TestGetSessionAllowsAPITenantRuntimeToReadOwnAPIKeySession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+
+	apiSession := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPITenantKeyPrefix + "1:10",
+		Title:    "api key session",
+	}
+	require.NoError(t, db.Create(apiSession).Error)
+
+	got, err := svc.GetSession(testAPITenantKeyScopeContext(1, 10), apiSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, apiSession.ID, got.ID)
+}
+
+func TestGetSessionDeniesAPITenantRuntimeFromReadingIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	_, err := svc.GetSession(testAPITenantKeyScopeContext(1, 10), imSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+}
+
+func TestGetSessionDeniesAPIExternalUserRuntimeFromReadingIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	_, err := svc.GetSession(testAPISessionScopeContext(1, "1:alice"), imSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
 }
 
 func TestGetSessionAllowsIMRuntimeToReadIMSession(t *testing.T) {
