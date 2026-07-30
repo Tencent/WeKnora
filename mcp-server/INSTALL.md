@@ -122,13 +122,14 @@ python main.py --check-only
 
 ### 项目结构
 ```
-WeKnoraMCP/
+WeKnora/mcp-server/
 ├── __init__.py              # 包初始化文件
 ├── main.py                  # 主入口点
 ├── run_server.py           # 原始启动脚本
 ├── weknora_mcp_server.py   # MCP 服务器实现
 ├── requirements.txt        # 依赖列表
 ├── setup.py               # 安装脚本
+├── pyproject.toml         # 项目元数据（PyPI: tencent-weknora-mcp）
 ├── MANIFEST.in            # 包含文件清单
 ├── LICENSE                # 许可证
 ├── README.md              # 项目说明
@@ -204,4 +205,4 @@ sudo systemctl start weknora-mcp
 1. 查看日志输出
 2. 检查环境配置
 3. 参考故障排除部分
-4. 提交 Issue 到项目仓库: https://github.com/NannaOlympicBroadcast/WeKnoraMCP/issues
+4. 提交 Issue 到项目仓库: https://github.com/Tencent/WeKnora/issues

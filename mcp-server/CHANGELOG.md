@@ -7,10 +7,23 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-07-30
+
+### 变更
+- 官方 PyPI 包名改为 **`tencent-weknora-mcp`**（由 Tencent/WeKnora 仓库 CI 通过 Trusted Publishing 发布）。
+  原社区包 `weknora-mcp` 非官方维护，请迁移安装命令。
+- 项目 URL 指向 [Tencent/WeKnora](https://github.com/Tencent/WeKnora) 官方仓库（`mcp-server/` 目录）。
+
 ### 修复
 - HTTP 传输恢复 `stateless_http=True`，与迁移前 `StreamableHTTPSessionManager(stateless=True)` 行为一致。
 - SSE 传输恢复消息端点 `/sse/messages/`，与迁移前路由一致。
 - `WeKnoraClient` 使用线程本地 `requests.Session`，避免 MCP 2.x 在线程池中并发调用时出现 Session 竞态。
+- 文件上传（`create_knowledge_from_file`）尊重 `WEKNORA_VERIFY_SSL` 设置。
+
+### 注意
+- 工具执行失败时，MCPServer 2.x 返回 `CallToolResult(isError=True)`（`ToolError`），
+  不再像旧版低层 API 那样以成功响应的文本块返回 `"Error executing …"` 前缀。
+  仅解析 `content[0].text` 的客户端通常无感；依赖 `isError` 标志的集成方行为会更符合 MCP 规范。
 
 ## [1.1.0] - 2026-07-30
 
@@ -86,7 +99,7 @@
 
 ### 文件结构
 ```
-WeKnoraMCP/
+WeKnora/mcp-server/
 ├── __init__.py              # 包初始化文件
 ├── main.py                  # 主入口点 (推荐)
 ├── run.py                   # 便捷启动脚本

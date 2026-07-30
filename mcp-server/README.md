@@ -61,10 +61,13 @@ python main.py --version              # 显示版本信息
 ### 从 PyPI 安装
 
 ```bash
-pip install weknora-mcp
+pip install tencent-weknora-mcp
+# 或使用 uvx 直接运行（无需预安装）
+uvx --from tencent-weknora-mcp weknora-mcp-server
 ```
 
-> PyPI 包名为 **`weknora-mcp`**（请勿与第三方包 `weknora-mcp-server` 混淆）。
+> 官方 PyPI 包名为 **`tencent-weknora-mcp`**（Tencent/WeKnora 维护，Trusted Publishing 发布）。
+> 旧社区包 `weknora-mcp` 请不要再使用。
 > 安装后命令行入口仍为 `weknora-mcp-server` / `weknora-server`。
 
 ### 开发模式安装
