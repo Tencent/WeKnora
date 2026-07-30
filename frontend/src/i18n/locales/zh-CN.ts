@@ -620,7 +620,8 @@ export default {
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      space: '钉钉文档空间'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -632,6 +633,7 @@ export default {
     field: {
       appId: 'App ID',
       appSecret: 'App Secret',
+      appKey: 'AppKey',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
       baseUrl: 'Base URL（可选）',
@@ -646,6 +648,7 @@ export default {
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
       notion: '同步 Notion 中的页面和数据库',
       yuque: '同步语雀知识库中的文档',
+      dingtalk: '同步钉钉文档空间中的文档内容',
       rss: '同步 RSS / Atom 订阅源中的文章'
     },
     connector: {
@@ -653,6 +656,7 @@ export default {
       lark: 'Lark（飞书国际版）',
       notion: 'Notion',
       yuque: '语雀',
+      dingtalk: '钉钉文档',
       rss: 'RSS / Atom 订阅'
     },
     logDetail: {
