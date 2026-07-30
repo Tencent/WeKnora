@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 PostgreSQL (ParadeDB) Deployment and Service.
 ParadeDB provides vector search and BM25 full-text search capabilities.
 */}}
-{{- if .Values.postgresql.enabled }}
+{{- if and .Values.postgresql.enabled (eq (include "weknora.databaseDriver" .) "postgres") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -33,6 +33,60 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
+Resolve and validate the main database mode.
+*/}}
+{{- define "weknora.databaseDriver" -}}
+{{- required "database.driver is required (postgres or mysql)" .Values.database.driver | lower -}}
+{{- end }}
+
+{{/*
+Resolve the retrieval driver. An empty value follows the main database driver,
+which makes database.driver=mysql a single, self-consistent mode.
+*/}}
+{{- define "weknora.retrievalDriver" -}}
+{{- default (include "weknora.databaseDriver" .) .Values.app.env.RETRIEVE_DRIVER | lower -}}
+{{- end }}
+
+{{/*
+Resolve the selected main database endpoint.
+*/}}
+{{- define "weknora.databaseHost" -}}
+{{- if eq (include "weknora.databaseDriver" .) "mysql" -}}
+{{- required "database.mysql.host is required when database.driver=mysql" .Values.database.mysql.host -}}
+{{- else -}}
+{{- required "database.host is required when database.driver=postgres" .Values.database.host -}}
+{{- end -}}
+{{- end }}
+
+{{- define "weknora.databasePort" -}}
+{{- if eq (include "weknora.databaseDriver" .) "mysql" -}}
+{{- required "database.mysql.port is required when database.driver=mysql" .Values.database.mysql.port -}}
+{{- else -}}
+{{- required "database.port is required when database.driver=postgres" .Values.database.port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Reject the one SQL combination that runtime cannot support. A PostgreSQL main
+database may still use the MySQL retriever with independent MYSQL_* settings.
+*/}}
+{{- define "weknora.validateDatabase" -}}
+{{- $driver := include "weknora.databaseDriver" . -}}
+{{- if not (has $driver (list "postgres" "mysql")) -}}
+{{- fail (printf "unsupported database.driver %q (expected postgres or mysql)" $driver) -}}
+{{- end -}}
+{{- $retriever := include "weknora.retrievalDriver" . -}}
+{{- $retrievers := splitList "," $retriever -}}
+{{- if and (eq $driver "mysql") (has "postgres" $retrievers) -}}
+{{- fail (printf "database.driver=%s cannot be combined with RETRIEVE_DRIVER=%s; leave RETRIEVE_DRIVER empty to follow the database mode, or choose a non-SQL retriever" $driver $retriever) -}}
+{{- end -}}
+{{- if eq $driver "mysql" -}}
+{{- $host := include "weknora.databaseHost" . -}}
+{{- $port := include "weknora.databasePort" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 Ref: https://helm.sh/docs/chart_best_practices/labels/
 */}}

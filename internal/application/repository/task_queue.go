@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -24,8 +25,8 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 }
 
 // Enqueue inserts a single op. Callers must populate TenantID/TaskType/
-// Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
-// EnqueuedAt is filled with the DB-side default if left zero.
+// Scope/ScopeID/Op (Payload optional). ID and FailCount default to zero;
+// EnqueuedAt is filled with the current UTC time if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
 	if err := preparePendingOp(op); err != nil {
 		return err
@@ -49,11 +50,18 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
+	if op.EnqueuedAt.IsZero() {
+		// GORM includes zero time.Time fields in INSERT statements instead of
+		// letting the database default run. MySQL strict mode rejects year
+		// zero, so populate the application-wide UTC convention explicitly.
+		op.EnqueuedAt = time.Now().UTC()
+	}
 	return nil
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
+// durable work after a KB was soft-deleted. On databases with row locking
+// (PostgreSQL and MySQL), the share lock
 // serializes this check+insert transaction against the row update performed by
 // soft deletion: whichever operation acquires the row first determines the
 // order, and the deletion path's subsequent scope scrub removes any insert
@@ -73,8 +81,7 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 		query := tx.Model(&types.KnowledgeBase{}).
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		if supportsRowLevelLocking(tx) {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -121,7 +128,7 @@ func (r *taskPendingOpsRepository) SeedKnowledgeFinalizingWithPendingOp(
 		query := tx.Model(&types.KnowledgeBase{}).
 			Select("id").
 			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		if tx.Dialector.Name() == "postgres" {
+		if supportsRowLevelLocking(tx) {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -212,6 +219,10 @@ func (r *taskPendingOpsRepository) PeekBatch(
 //     DISJOINT key sets — a key whose anchor is already locked by another
 //     in-flight claim is skipped entirely rather than half-claimed. We then
 //     stamp every eligible row of the chosen keys and read them back.
+//   - MySQL: one conditional UPDATE stamps the selected key groups with a
+//     per-claim token. InnoDB re-checks claimed_at after lock acquisition, so
+//     concurrent transactions cannot both own the same rows; the token selects
+//     only the rows actually won by this transaction.
 //   - Other dialects (SQLite, used by unit tests / Lite mode): writes are
 //     serialized by the single-writer engine, so a plain grouped SELECT +
 //     UPDATE is already race-free.
@@ -234,16 +245,64 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if isMySQL(tx) {
+			// MySQL does not reliably carry FOR UPDATE SKIP LOCKED through
+			// the window-function derived table used to choose one anchor per
+			// dedup key. Under contention two transactions can therefore read
+			// the same anchors. Claim with one conditional UPDATE instead:
+			// InnoDB re-checks claimed_at after acquiring each update lock, and
+			// the unique token identifies exactly the rows this transaction won.
+			claimToken := uuid.NewString()
+			const claimSQL = `
+UPDATE task_pending_ops AS target
+JOIN (
+	SELECT dedup_key
+	FROM (
+		SELECT eligible.dedup_key, MIN(eligible.id) AS anchor_id
+		FROM task_pending_ops AS eligible
+		WHERE eligible.task_type = ? AND eligible.scope = ? AND eligible.scope_id = ?
+			AND (eligible.claimed_at IS NULL OR eligible.claimed_at < ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM task_pending_ops AS fresh
+				WHERE fresh.task_type = eligible.task_type
+					AND fresh.scope = eligible.scope
+					AND fresh.scope_id = eligible.scope_id
+					AND fresh.dedup_key = eligible.dedup_key
+					AND fresh.claimed_at IS NOT NULL
+					AND fresh.claimed_at >= ?
+			)
+		GROUP BY eligible.dedup_key
+		ORDER BY anchor_id
+		LIMIT ?
+	) AS candidates
+) AS selected ON selected.dedup_key = target.dedup_key
+SET target.claimed_at = ?, target.claim_token = ?
+WHERE target.task_type = ? AND target.scope = ? AND target.scope_id = ?
+	AND (target.claimed_at IS NULL OR target.claimed_at < ?)`
+			if err := tx.Exec(
+				claimSQL,
+				taskType, scope, scopeID, staleBefore, staleBefore, limit,
+				now, claimToken,
+				taskType, scope, scopeID, staleBefore,
+			).Error; err != nil {
+				return err
+			}
+			return tx.Raw(`
+SELECT id, tenant_id, task_type, scope, scope_id, op, dedup_key, payload,
+	fail_count, enqueued_at, claimed_at
+FROM task_pending_ops
+WHERE claim_token = ?
+ORDER BY id ASC`, claimToken).Scan(&claimed).Error
+		}
+
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if isPostgres(tx) || isMySQL(tx) {
+		if isPostgres(tx) {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
-			// the locked anchors back to their dedup_keys. MySQL 8+ supports
-			// the same row-locking primitive, which keeps primary DB mode
-			// concurrency-safe instead of falling back to a racy grouped SELECT.
+			// the locked anchors back to their dedup_keys.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
@@ -325,10 +384,16 @@ func (r *taskPendingOpsRepository) ReleaseByIDs(ctx context.Context, ids []int64
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&types.TaskPendingOp{}).
-		Where("id IN ?", ids).
-		Update("claimed_at", nil).Error
+		Where("id IN ?", ids)
+	if isMySQL(r.db) {
+		return query.Updates(map[string]interface{}{
+			"claimed_at":  nil,
+			"claim_token": nil,
+		}).Error
+	}
+	return query.Update("claimed_at", nil).Error
 }
 
 // DeleteByIDs removes the given rows in one statement. Empty input is a
@@ -463,6 +528,11 @@ func (r *taskDeadLetterRepository) Insert(ctx context.Context, dl *types.TaskDea
 	}
 	if len(dl.Payload) == 0 {
 		dl.Payload = []byte("{}")
+	}
+	if dl.FailedAt.IsZero() {
+		// See preparePendingOp: an explicit zero time bypasses the SQL default
+		// and is invalid under the required MySQL strict mode.
+		dl.FailedAt = time.Now().UTC()
 	}
 	return r.db.WithContext(ctx).Create(dl).Error
 }

@@ -974,8 +974,8 @@ func (s *wikiPageService) ListByTypeRecent(ctx context.Context, kbID string, pag
 	return s.repo.ListByTypeRecent(ctx, kbID, pageType, limit)
 }
 
-// FindSimilarPages performs a pg_trgm similarity search; used by the
-// dedup pre-filter to surface candidate merge targets.
+// FindSimilarPages performs a dialect-appropriate title similarity search;
+// used by the dedup pre-filter to surface candidate merge targets.
 func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error) {
 	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
 }

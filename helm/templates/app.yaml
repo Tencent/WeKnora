@@ -53,11 +53,11 @@ spec:
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: {{ .Values.database.driver | quote }}
+              value: {{ include "weknora.databaseDriver" . | quote }}
             - name: DB_HOST
-              value: {{ .Values.database.host | quote }}
+              value: {{ include "weknora.databaseHost" . | quote }}
             - name: DB_PORT
-              value: {{ .Values.database.port | quote }}
+              value: {{ include "weknora.databasePort" . | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -73,6 +73,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
+            {{- if eq (include "weknora.databaseDriver" .) "mysql" }}
+            - name: DB_MAX_OPEN_CONNS
+              value: {{ .Values.database.mysql.pool.maxOpenConns | quote }}
+            - name: DB_MAX_IDLE_CONNS
+              value: {{ .Values.database.mysql.pool.maxIdleConns | quote }}
+            - name: DB_CONN_MAX_LIFETIME
+              value: {{ .Values.database.mysql.pool.connMaxLifetime | quote }}
+            - name: DB_CONN_MAX_IDLE_TIME
+              value: {{ .Values.database.mysql.pool.connMaxIdleTime | quote }}
+            {{- end }}
             # Redis configuration
             - name: REDIS_ADDR
               value: "redis:6379"
@@ -106,7 +116,31 @@ spec:
                   key: SYSTEM_AES_KEY
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
-              value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+              value: {{ include "weknora.retrievalDriver" . | quote }}
+            {{- if and (eq (include "weknora.databaseDriver" .) "mysql") (has "mysql" (splitList "," (include "weknora.retrievalDriver" .))) }}
+            # The MySQL retriever uses MYSQL_* rather than DB_* variables.
+            # Reuse the selected main-database endpoint and credentials so the
+            # single MySQL mode cannot silently target localhost or another DB.
+            - name: MYSQL_HOST
+              value: {{ include "weknora.databaseHost" . | quote }}
+            - name: MYSQL_PORT
+              value: {{ include "weknora.databasePort" . | quote }}
+            - name: MYSQL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_NAME
+            {{- end }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
             - name: LOCAL_STORAGE_BASE_DIR
@@ -116,7 +150,7 @@ spec:
               value: "docreader:50051"
             # Processing
             - name: AUTO_RECOVER_DIRTY
-              value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
+              value: {{ ternary "false" .Values.app.env.AUTO_RECOVER_DIRTY (eq (include "weknora.databaseDriver" .) "mysql") | quote }}
             - name: CONCURRENCY_POOL_SIZE
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
             {{- if .Values.neo4j.enabled }}

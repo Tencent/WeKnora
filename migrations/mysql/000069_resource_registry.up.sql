@@ -1,6 +1,6 @@
 CREATE TABLE resources (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
-    handle VARCHAR(22) NOT NULL UNIQUE,
+    handle VARCHAR(22) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
     tenant_id BIGINT NOT NULL,
     storage_backend_id VARCHAR(36) NULL,
     provider VARCHAR(32) NOT NULL,

@@ -1,5 +1,5 @@
 ALTER TABLE chunks
-    ADD COLUMN source_content TEXT NULL,
+    ADD COLUMN source_content LONGTEXT NULL,
     ADD COLUMN content_revision INT NOT NULL DEFAULT 0,
     ADD COLUMN index_status VARCHAR(16) NOT NULL DEFAULT 'ready',
     ADD COLUMN last_editor_id VARCHAR(64) NOT NULL DEFAULT '',
@@ -9,7 +9,7 @@ UPDATE chunks SET source_content = content WHERE source_content IS NULL OR sourc
 UPDATE chunks SET context_header = '' WHERE context_header IS NULL;
 
 ALTER TABLE chunks
-    MODIFY COLUMN source_content TEXT NOT NULL DEFAULT (''),
+    MODIFY COLUMN source_content LONGTEXT NOT NULL DEFAULT (''),
     MODIFY COLUMN context_header TEXT NOT NULL DEFAULT ('');
 
 ALTER TABLE knowledges
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS chunk_revisions (
     knowledge_id VARCHAR(36) NOT NULL,
     chunk_id VARCHAR(36) NOT NULL,
     revision INT NOT NULL,
-    content TEXT NOT NULL DEFAULT (''),
+    content LONGTEXT NOT NULL DEFAULT (''),
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     editor_id VARCHAR(64) NOT NULL DEFAULT '',
     edit_source VARCHAR(16) NOT NULL DEFAULT 'user',

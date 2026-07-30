@@ -541,6 +541,31 @@ func ValidateIndexConfig(ic IndexConfig) error {
 	return nil
 }
 
+// ValidateIndexConfigForEngine applies the common validation plus limits
+// imposed by the selected backend.
+func ValidateIndexConfigForEngine(engineType RetrieverEngineType, ic IndexConfig) error {
+	if err := ValidateIndexConfig(ic); err != nil {
+		return err
+	}
+	if engineType != MySQLRetrieverEngineType {
+		return nil
+	}
+
+	// MySQL identifiers are limited to 64 characters. Dimension-specific
+	// tables append a positive Go int (up to 19 decimal digits on 64-bit
+	// builds), so the normalized prefix, including its trailing underscore,
+	// must leave that suffix available.
+	const maxMySQLTablePrefixLength = 64 - 19
+	effectivePrefix := ic.GetIndexNameOrDefault(MySQLRetrieverEngineType)
+	if len(effectivePrefix) > maxMySQLTablePrefixLength {
+		return errors.NewValidationError(fmt.Sprintf(
+			"effective MySQL table prefix must be at most %d characters including the trailing underscore",
+			maxMySQLTablePrefixLength,
+		))
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // StoreDisplay — API-safe projection embedded in other resource responses
 // ---------------------------------------------------------------------------

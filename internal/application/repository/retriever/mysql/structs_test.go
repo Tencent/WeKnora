@@ -1,15 +1,18 @@
 package mysql
 
 import (
+	"math"
 	"reflect"
-	"strings"
 	"testing"
 )
 
 func TestEmbeddingJSONRoundTrip(t *testing.T) {
 	in := []float32{0.125, -2.5, 3}
 
-	raw := embeddingToJSON(in)
+	raw, err := embeddingToJSON(in)
+	if err != nil {
+		t.Fatalf("embeddingToJSON() error = %v", err)
+	}
 	got, err := parseEmbeddingJSON([]byte(raw))
 	if err != nil {
 		t.Fatalf("parseEmbeddingJSON() error = %v", err)
@@ -19,10 +22,9 @@ func TestEmbeddingJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEmbeddingLiteral(t *testing.T) {
-	got := embeddingLiteral([]float32{1, 0.5, -2})
-	if got != "JSON_ARRAY(1,0.5,-2)" {
-		t.Fatalf("embeddingLiteral() = %q", got)
+func TestEmbeddingToJSONRejectsNonFiniteValues(t *testing.T) {
+	if _, err := embeddingToJSON([]float32{float32(math.NaN())}); err == nil {
+		t.Fatal("embeddingToJSON() accepted NaN")
 	}
 }
 
@@ -66,21 +68,29 @@ func TestEscapeLikePatternEscapesPrefixWildcards(t *testing.T) {
 	}
 }
 
-func TestCosineSimilarityExprUsesPortableJSONFunctions(t *testing.T) {
-	got := cosineSimilarityExpr("embedding", []float32{1, 2})
-	for _, want := range []string{
-		"JSON_EXTRACT(embedding, '$[0]')",
-		"JSON_EXTRACT(embedding, '$[1]')",
-		"SQRT",
-		"CASE WHEN",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("cosineSimilarityExpr() missing %q in %s", want, got)
-		}
+func TestCosineSimilarity(t *testing.T) {
+	query := []float32{1, 2, 3}
+	queryNorm, err := validateQueryEmbedding(query)
+	if err != nil {
+		t.Fatalf("validateQueryEmbedding() error = %v", err)
 	}
-	for _, forbidden := range []string{"COSINE_DISTANCE", "JSON_ARRAY_PACK", "DOT_PRODUCT"} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("cosineSimilarityExpr() should not depend on %s: %s", forbidden, got)
-		}
+	score, err := cosineSimilarity(query, []float32{1, 2, 3}, queryNorm)
+	if err != nil {
+		t.Fatalf("cosineSimilarity() error = %v", err)
+	}
+	if math.Abs(score-1) > 1e-12 {
+		t.Fatalf("cosineSimilarity() = %.16f, want 1", score)
+	}
+
+	score, err = cosineSimilarity(query, []float32{0, 0, 0}, queryNorm)
+	if err != nil {
+		t.Fatalf("zero cosineSimilarity() error = %v", err)
+	}
+	if score != 0 {
+		t.Fatalf("zero cosineSimilarity() = %v, want 0", score)
+	}
+
+	if _, err := cosineSimilarity(query, []float32{1, 2}, queryNorm); err == nil {
+		t.Fatal("cosineSimilarity() accepted a dimension mismatch")
 	}
 }

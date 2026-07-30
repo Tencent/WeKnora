@@ -1,0 +1,5 @@
+{{/*
+Fail before rendering resources when the selected database mode is ambiguous
+or incomplete.
+*/}}
+{{- include "weknora.validateDatabase" . -}}

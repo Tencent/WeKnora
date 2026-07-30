@@ -11,21 +11,19 @@ If none of these match your situation, jump to
 
 ## What "migration failed" means
 
-WeKnora auto-runs `golang-migrate` migrations on every startup. When a
-migration fails, the application **still finishes starting up** (so the UI
-remains reachable to help you diagnose the problem), but:
+WeKnora auto-runs `golang-migrate` migrations on every startup. MySQL migration
+failure is fail-closed: the backend does not finish starting, because MySQL DDL
+may already have committed and serving against a partially upgraded schema is
+unsafe. PostgreSQL and SQLite retain the existing best-effort startup behavior:
+the failure is logged and cached for system diagnostics while startup continues.
 
-- The failing migration is rolled back, leaving the database at the previous
-  version. Any tables / indexes introduced by that migration **are not
-  created**.
-- Downstream features depending on those tables (Wiki ingest, knowledge graph,
-  task queues, …) may silently produce nothing.
-- The system info page shows the partial DB version + a red "Migration failed"
-  tag and the captured error.
+PostgreSQL and SQLite may roll back transactional migration statements. Never
+assume that MySQL objects from a failing migration were rolled back.
 
-The cached error message you see in the UI is the same one logged at startup
-under `Database migration failed: ...`. Recent container logs are the
-authoritative source — copy them before doing anything destructive.
+The app container's startup error containing `database migration failed`
+(capitalization and outer error wrapping may vary) is the authoritative source.
+Copy the log and inspect the live schema before changing the recorded migration
+version.
 
 ---
 
@@ -74,9 +72,9 @@ preinstalled, then retry.
 ### 2. Dirty migration state
 
 If a migration crashed partway through (OOM, container kill, network blip)
-`golang-migrate` marks the schema as "dirty" at the failing version. By
-default, WeKnora's startup tries to auto-recover; if you disabled that with
-`AUTO_RECOVER_DIRTY=false` you'll see:
+`golang-migrate` marks the schema as "dirty" at the failing version. MySQL
+always stops startup and requires the partial migration to be inspected before
+its recorded version is changed:
 
 ```
 database is in dirty state at version N. ...
@@ -95,10 +93,10 @@ make migrate-force version=<N-1>
 make migrate-up
 ```
 
-After that, restart WeKnora.
-
-Or set `AUTO_RECOVER_DIRTY=true` (the default in recent versions) and just
-restart — startup will perform the same `force` + retry automatically.
+After that, restart WeKnora. PostgreSQL and SQLite preserve the historical
+`AUTO_RECOVER_DIRTY=true` default. MySQL ignores that setting and never performs
+automatic force/retry because its DDL may already have committed; inspect and
+repair the partial schema before using `migrate-force`.
 
 ### 3. Insufficient privileges on the database role
 
@@ -141,19 +139,20 @@ migration's `*.up.sql` and then re-run pending migrations.
    your browser scroll — it is the complete `golang-migrate` error. The
    container log shows the same content with stack context.
 2. **Identify the failing migration**: the version number in the error (or
-   `make migrate-version`) points to a file under `migrations/versioned/`.
-   Open `migrations/versioned/<version>_*.up.sql` and look for the statement
-   matching the error type (extension, index, function, foreign key, …).
-3. **Run the failing statement manually** against the DB using `psql`. The
-   error will be far more specific than the migration wrapper's.
+   `make migrate-version`) points to `migrations/versioned/` for PostgreSQL,
+   `migrations/mysql/` for MySQL, or `migrations/sqlite/` for SQLite. Open the
+   matching `*.up.sql` and find the failing statement.
+3. **Run the failing statement manually** with the database's native client
+   (`psql`, `mysql`, or `sqlite3`). The server error is usually more specific
+   than the migration wrapper's.
 4. **Fix the underlying cause** (install extension, fix privileges, free
-   disk, …), then either:
-   - Restart WeKnora and let auto-recovery retry; **or**
-   - Run `make migrate-up` from a checkout to apply migrations outside the
-     server process.
-5. **Verify**: the system info page should now show the DB version without
-   the "Migration failed" tag, and the previously broken feature (Wiki, KG,
-   …) should start producing output.
+   disk, repair partial MySQL DDL, …), then run `make migrate-up` from a
+   checkout or restart WeKnora to retry a clean, non-dirty version. Do not
+   enable automatic dirty recovery until the live schema is known to match the
+   version you force.
+5. **Verify**: the backend becomes healthy, the recorded DB version reaches the
+   expected head, and the previously blocked feature (Wiki, KG, task queue, …)
+   works.
 
 ---
 
@@ -168,14 +167,15 @@ Include:
 
 - WeKnora version + commit ID (from the system info page).
 - The full error from the system info page (or container logs).
-- PostgreSQL version (`SELECT version();`) and how it was deployed (vanilla,
-  ParadeDB, Aurora, Aliyun RDS, …).
+- Database driver and server version (`SELECT version();`) and how it was
+  deployed (MySQL, Percona Server, PostgreSQL, ParadeDB, Aurora, Aliyun RDS, …).
 - The output of:
   ```sql
+  -- PostgreSQL only
   SELECT extname, extversion FROM pg_extension;
   ```
 - Any non-default values of `RETRIEVE_DRIVER`, `AUTO_MIGRATE`, and
   `AUTO_RECOVER_DIRTY`.
 
-The "Report issue" link on the system info page pre-fills a body with the
-captured error for you — clicking it is the fastest path.
+If the backend can start after recovery, the "Report issue" link on the system
+info page can pre-fill diagnostic context.

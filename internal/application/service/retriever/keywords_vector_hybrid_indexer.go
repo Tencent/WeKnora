@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -77,6 +78,12 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 			return err
 		}
 		embeddingMap[indexInfo.SourceID] = embedding
+	} else if v.engineType == types.MySQLRetrieverEngineType {
+		dimension, err := keywordOnlyDimension(embedder)
+		if err != nil {
+			return err
+		}
+		params["dimension"] = dimension
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
@@ -117,12 +124,31 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	// For non-vector retrieval, use concurrent batch saving as well
+	dimension := 0
+	if v.engineType == types.MySQLRetrieverEngineType {
+		var err error
+		dimension, err = keywordOnlyDimension(embedder)
+		if err != nil {
+			return err
+		}
+	}
 	chunks := utils.ChunkSlice(indexInfoList, 10)
 	const maxConcurrency = 5
 	if len(chunks) <= maxConcurrency {
-		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
+		return v.concurrentBatchSaveNoEmbedding(ctx, chunks, dimension)
 	}
-	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, dimension, maxConcurrency)
+}
+
+func keywordOnlyDimension(embedder embedding.Embedder) (int, error) {
+	if embedder == nil {
+		return 0, fmt.Errorf("MySQL keyword indexing requires an embedding model dimension")
+	}
+	dimension := embedder.GetDimensions()
+	if dimension <= 0 {
+		return 0, fmt.Errorf("MySQL keyword indexing requires a positive embedding dimension, got %d", dimension)
+	}
+	return dimension, nil
 }
 
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
@@ -232,11 +258,15 @@ func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSave(
 func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSaveNoEmbedding(
 	ctx context.Context,
 	chunks [][]*types.IndexInfo,
+	dimension int,
 ) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for _, indexChunk := range chunks {
 		g.Go(func() error {
 			params := make(map[string]any)
+			if dimension > 0 {
+				params["dimension"] = dimension
+			}
 			return v.indexRepository.BatchSave(ctx, indexChunk, params)
 		})
 	}
@@ -247,6 +277,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSaveNoEmbeddi
 func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSaveNoEmbedding(
 	ctx context.Context,
 	chunks [][]*types.IndexInfo,
+	dimension int,
 	maxConcurrency int,
 ) error {
 	g, ctx := errgroup.WithContext(ctx)
@@ -262,6 +293,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSaveNo
 			}
 
 			params := make(map[string]any)
+			if dimension > 0 {
+				params["dimension"] = dimension
+			}
 			return v.indexRepository.BatchSave(ctx, indexChunk, params)
 		})
 	}

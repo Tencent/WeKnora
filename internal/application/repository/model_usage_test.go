@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	mysqlgorm "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -110,4 +112,42 @@ func TestCountByModelID_CustomAgent(t *testing.T) {
 	count, err = repo.CountByModelID(ctx, 1, modelID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+}
+
+func TestScopeCustomAgentsByModelID_MySQLIncludesFollowUpSuggestions(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	mock.ExpectClose()
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	db, err := gorm.Open(mysqlgorm.New(mysqlgorm.Config{
+		Conn:                      sqlDB,
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+	})
+	require.NoError(t, err)
+
+	const modelID = "model-only-in-follow-ups"
+	var count int64
+	tx := scopeCustomAgentsByModelID(
+		db.Model(&types.CustomAgent{}).Where("tenant_id = ?", uint64(1)),
+		modelID,
+	).Count(&count)
+	require.NoError(t, tx.Error)
+	assert.Contains(
+		t,
+		tx.Statement.SQL.String(),
+		"JSON_UNQUOTE(JSON_EXTRACT(config, '$.question_suggestions.follow_ups.model_id')) = ?",
+	)
+	assert.Equal(t, []interface{}{
+		uint64(1),
+		modelID,
+		modelID,
+		modelID,
+		modelID,
+		modelID,
+		modelID,
+	}, tx.Statement.Vars)
 }

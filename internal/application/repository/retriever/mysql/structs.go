@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -60,45 +61,21 @@ func escapeLikePattern(s string) string {
 	return s
 }
 
-func embeddingToJSON(embedding []float32) string {
+func embeddingToJSON(embedding []float32) (string, error) {
 	if len(embedding) == 0 {
-		return "[]"
+		return "[]", nil
 	}
-	parts := make([]string, len(embedding))
-	for i, v := range embedding {
-		parts[i] = fmt.Sprintf("%g", v)
+	raw, err := json.Marshal(embedding)
+	if err != nil {
+		return "", err
 	}
-	return "[" + strings.Join(parts, ",") + "]"
+	return string(raw), nil
 }
 
 func parseEmbeddingJSON(raw []byte) ([]float32, error) {
-	s := strings.Trim(string(raw), "[]")
-	if s == "" {
-		return nil, nil
-	}
-	parts := strings.Split(s, ",")
-	vec := make([]float32, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		var v float32
-		if _, err := fmt.Sscanf(p, "%f", &v); err != nil {
-			return nil, fmt.Errorf("parse float: %s: %w", p, err)
-		}
-		vec = append(vec, v)
+	var vec []float32
+	if err := json.Unmarshal(raw, &vec); err != nil {
+		return nil, fmt.Errorf("decode embedding JSON: %w", err)
 	}
 	return vec, nil
-}
-
-func embeddingLiteral(embedding []float32) string {
-	if len(embedding) == 0 {
-		return "JSON_ARRAY()"
-	}
-	parts := make([]string, len(embedding))
-	for i, v := range embedding {
-		parts[i] = fmt.Sprintf("%g", v)
-	}
-	return "JSON_ARRAY(" + strings.Join(parts, ",") + ")"
 }

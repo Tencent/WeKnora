@@ -3,6 +3,8 @@ package mysql
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -22,8 +24,8 @@ const createTableTpl = "CREATE TABLE IF NOT EXISTS %s (" + `
     source_type       INT,
     tag_id            VARCHAR(64),
     is_enabled        BOOLEAN DEFAULT TRUE,
-    content           TEXT,
-    embedding         JSON NOT NULL,
+    content           LONGTEXT,
+    embedding         JSON NULL,
     PRIMARY KEY (id),
     INDEX idx_chunk    (chunk_id),
     INDEX idx_kb       (knowledge_base_id),
@@ -37,6 +39,9 @@ const createTableTpl = "CREATE TABLE IF NOT EXISTS %s (" + `
 // ensureTable 保证目标维度对应的表已经存在。
 func (r *mysqlRepository) ensureTable(ctx context.Context, dimension int) error {
 	tableName := r.getTableName(dimension)
+	if len(tableName) > 64 {
+		return fmt.Errorf("MySQL table identifier %q exceeds the 64-character limit", tableName)
+	}
 	exists, err := r.tableExists(ctx, tableName)
 	if err != nil {
 		return fmt.Errorf("check table existence: %w", err)
@@ -48,6 +53,12 @@ func (r *mysqlRepository) ensureTable(ctx context.Context, dimension int) error 
 		}
 	}
 
+	if err := r.ensureContentCapacity(ctx, tableName); err != nil {
+		return fmt.Errorf("ensure content capacity: %w", err)
+	}
+	if err := r.ensureEmbeddingNullable(ctx, tableName); err != nil {
+		return fmt.Errorf("ensure nullable embedding: %w", err)
+	}
 	return nil
 }
 
@@ -69,6 +80,48 @@ func (r *mysqlRepository) createTable(ctx context.Context, tableName string) err
 	return err
 }
 
+func (r *mysqlRepository) ensureContentCapacity(ctx context.Context, tableName string) error {
+	const q = `SELECT DATA_TYPE FROM information_schema.columns
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = 'content'`
+	var dataType string
+	if err := r.db.QueryRowContext(ctx, q, r.database, tableName).Scan(&dataType); err != nil {
+		return err
+	}
+	switch strings.ToLower(dataType) {
+	case "longtext":
+		return nil
+	case "tinytext", "text", "mediumtext":
+		_, err := r.db.ExecContext(
+			ctx,
+			"ALTER TABLE "+quoteIdentifier(tableName)+" MODIFY COLUMN content LONGTEXT",
+		)
+		return err
+	default:
+		return fmt.Errorf("unsupported content column type %q", dataType)
+	}
+}
+
+func (r *mysqlRepository) ensureEmbeddingNullable(ctx context.Context, tableName string) error {
+	const q = `SELECT IS_NULLABLE FROM information_schema.columns
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = 'embedding'`
+	var nullable string
+	if err := r.db.QueryRowContext(ctx, q, r.database, tableName).Scan(&nullable); err != nil {
+		return err
+	}
+	switch strings.ToUpper(nullable) {
+	case "YES":
+		return nil
+	case "NO":
+		_, err := r.db.ExecContext(
+			ctx,
+			"ALTER TABLE "+quoteIdentifier(tableName)+" MODIFY COLUMN embedding JSON NULL",
+		)
+		return err
+	default:
+		return fmt.Errorf("unsupported embedding nullability %q", nullable)
+	}
+}
+
 // listEmbeddingTables 返回当前 database 下所有 <prefix>_% 命名的表。
 func (r *mysqlRepository) listEmbeddingTables(ctx context.Context) ([]string, error) {
 	const q = `SELECT TABLE_NAME FROM information_schema.tables
@@ -86,9 +139,31 @@ func (r *mysqlRepository) listEmbeddingTables(ctx context.Context) ([]string, er
 		if err := rows.Scan(&n); err != nil {
 			return nil, err
 		}
-		names = append(names, n)
+		if _, ok := embeddingTableDimension(r.tablePrefix, n); ok {
+			names = append(names, n)
+		}
 	}
-	return names, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(names, func(i, j int) bool {
+		left, _ := embeddingTableDimension(r.tablePrefix, names[i])
+		right, _ := embeddingTableDimension(r.tablePrefix, names[j])
+		return left < right
+	})
+	return names, nil
+}
+
+func embeddingTableDimension(prefix, tableName string) (int, bool) {
+	if !strings.HasPrefix(tableName, prefix) {
+		return 0, false
+	}
+	suffix := strings.TrimPrefix(tableName, prefix)
+	dimension, err := strconv.Atoi(suffix)
+	if err != nil || dimension <= 0 || strconv.Itoa(dimension) != suffix {
+		return 0, false
+	}
+	return dimension, true
 }
 
 // buildVectorFilterSQL 构建向量距离过滤条件。

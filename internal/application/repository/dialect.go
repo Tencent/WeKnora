@@ -26,6 +26,15 @@ func isSQLite(db *gorm.DB) bool {
 	return dialectName(db) == "sqlite"
 }
 
+func supportsRowLevelLocking(db *gorm.DB) bool {
+	switch dialectName(db) {
+	case "postgres", "mysql":
+		return true
+	default:
+		return false
+	}
+}
+
 func caseInsensitiveLikeCondition(db *gorm.DB, expr string) string {
 	if isPostgres(db) {
 		return expr + " ILIKE ?"
@@ -79,6 +88,20 @@ func jsonArrayLengthExpr(db *gorm.DB, column string) string {
 		return fmt.Sprintf("COALESCE(JSON_LENGTH(%s), 0)", column)
 	default:
 		return fmt.Sprintf("COALESCE(json_array_length(%s), 0)", column)
+	}
+}
+
+func jsonValueEqualsClause(db *gorm.DB, column string) string {
+	switch dialectName(db) {
+	case "postgres":
+		return column + "::jsonb = ?::jsonb"
+	case "mysql":
+		// Compare binary JSON values rather than their serialized text. MySQL
+		// inserts whitespace when JSON is cast to CHAR, while encoding/json does
+		// not, so text equality rejects otherwise identical arrays.
+		return column + " = JSON_EXTRACT(?, '$')"
+	default:
+		return column + " = ?"
 	}
 }
 

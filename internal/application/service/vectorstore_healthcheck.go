@@ -12,6 +12,7 @@ import (
 	"time"
 
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
+	appdb "github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -332,17 +333,16 @@ func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (st
 		database = "information_schema"
 	}
 
-	cfg := mysql.NewConfig()
-	cfg.User = config.Username
-	cfg.Passwd = config.Password
-	cfg.Net = "tcp"
-	cfg.Addr = config.Addr
-	cfg.DBName = database
-	cfg.Timeout = 5 * time.Second
-	cfg.ParseTime = true
-	cfg.Params = map[string]string{"charset": "utf8mb4"}
-
-	db, err := sql.Open("mysql", cfg.FormatDSN())
+	username := strings.TrimSpace(config.Username)
+	if username == "" {
+		username = "root"
+	}
+	db, err := sql.Open("mysql", appdb.BuildMySQLApplicationDSN(
+		username,
+		config.Password,
+		config.Addr,
+		database,
+	))
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
 	}
@@ -351,6 +351,12 @@ func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (st
 	if err := db.PingContext(testCtx); err != nil {
 		logger.Warnf(ctx, "MySQL connection test failed: %v", err)
 		return "", errors.NewBadRequestError("failed to connect to mysql: connection refused or authentication failed")
+	}
+	if err := appdb.ValidateMySQLSession(testCtx, db); err != nil {
+		logger.Warnf(ctx, "MySQL compatibility check failed: %v", err)
+		return "", errors.NewBadRequestError(
+			"failed to connect to mysql: MySQL/Percona Server 8.0.16+ with strict SQL mode is required",
+		)
 	}
 
 	var version string

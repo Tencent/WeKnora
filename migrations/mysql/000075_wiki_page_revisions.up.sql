@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS wiki_page_revisions (
     title VARCHAR(512) NOT NULL DEFAULT '',
     page_type VARCHAR(32) NOT NULL DEFAULT 'summary',
     status VARCHAR(32) NOT NULL DEFAULT 'published',
-    content TEXT NOT NULL DEFAULT (''),
+    content LONGTEXT NOT NULL DEFAULT (''),
     summary TEXT NOT NULL DEFAULT (''),
     aliases JSON DEFAULT (JSON_ARRAY()),
     edit_source VARCHAR(16) NOT NULL DEFAULT '',

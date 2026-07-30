@@ -125,7 +125,7 @@ CREATE TABLE sessions (
     max_rounds INT NOT NULL DEFAULT 5,
     enable_rewrite BOOLEAN NOT NULL DEFAULT TRUE,
     fallback_strategy VARCHAR(255) NOT NULL DEFAULT 'fixed',
-    fallback_response TEXT NOT NULL,
+    fallback_response TEXT NOT NULL DEFAULT ('很抱歉，我暂时无法回答这个问题。'),
     keyword_threshold DOUBLE NOT NULL DEFAULT 0.5,
     vector_threshold DOUBLE NOT NULL DEFAULT 0.5,
     rerank_model_id VARCHAR(64),
@@ -133,11 +133,11 @@ CREATE TABLE sessions (
     rerank_top_k INT NOT NULL DEFAULT 10,
     rerank_threshold DOUBLE NOT NULL DEFAULT 0.65,
     summary_model_id VARCHAR(64),
-    summary_parameters JSON NOT NULL,
+    summary_parameters JSON NOT NULL DEFAULT (JSON_OBJECT()),
     agent_config JSON NULL,
     context_config JSON NULL,
     agent_id VARCHAR(36),
-    user_id VARCHAR(512),
+    user_id VARCHAR(512) COLLATE utf8mb4_bin,
     is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
     pinned_at DATETIME(3) NULL,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
@@ -153,8 +153,8 @@ CREATE TABLE messages (
     request_id VARCHAR(36) NOT NULL,
     session_id VARCHAR(36) NOT NULL,
     role VARCHAR(50) NOT NULL,
-    content TEXT NOT NULL,
-    rendered_content TEXT,
+    content LONGTEXT NOT NULL,
+    rendered_content LONGTEXT,
     knowledge_references JSON NOT NULL DEFAULT (JSON_ARRAY()),
     agent_steps JSON NULL,
     mentioned_items JSON NULL DEFAULT (JSON_ARRAY()),
@@ -179,7 +179,7 @@ CREATE TABLE chunks (
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
     tag_id VARCHAR(36) NOT NULL DEFAULT '',
-    content TEXT NOT NULL,
+    content LONGTEXT NOT NULL,
     chunk_index INT NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     flags INT NOT NULL DEFAULT 1,
@@ -255,8 +255,11 @@ CREATE TABLE tenant_members (
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted_at DATETIME(3) NULL,
-    UNIQUE KEY idx_tenant_members_user_tenant_unique (user_id, tenant_id)
+    active_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE UNIQUE INDEX idx_tenant_members_user_tenant_unique
+    ON tenant_members(user_id, tenant_id, active_unique_key);
 CREATE INDEX idx_tenant_members_tenant_role ON tenant_members(tenant_id, role);
 CREATE INDEX idx_tenant_members_user ON tenant_members(user_id);
 
@@ -288,17 +291,30 @@ CREATE TABLE tenant_invitations (
     role VARCHAR(20) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     message VARCHAR(500),
-    token VARCHAR(64) NOT NULL DEFAULT '',
+    token VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
     accepted_count INT NOT NULL DEFAULT 0,
     expires_at DATETIME(3) NOT NULL,
     responded_at DATETIME(3) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    pending_invitee_unique_key TINYINT
+        AS (CASE
+            WHEN status = 'pending' AND deleted_at IS NULL AND invitee_user_id <> '' THEN 1
+            ELSE NULL
+        END) STORED,
+    active_token_unique_key TINYINT
+        AS (CASE
+            WHEN token <> '' AND deleted_at IS NULL THEN 1
+            ELSE NULL
+        END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_tenant_invitations_tenant ON tenant_invitations(tenant_id);
 CREATE INDEX idx_tenant_invitations_invitee ON tenant_invitations(invitee_user_id);
-CREATE INDEX idx_tenant_invitations_token ON tenant_invitations(token);
+CREATE UNIQUE INDEX idx_tenant_invitations_unique_pending
+    ON tenant_invitations(tenant_id, invitee_user_id, pending_invitee_unique_key);
+CREATE UNIQUE INDEX idx_tenant_invitations_token
+    ON tenant_invitations(token, active_token_unique_key);
 
 CREATE TABLE user_resource_favorites (
     user_id VARCHAR(36) NOT NULL,
@@ -370,7 +386,7 @@ CREATE TABLE mcp_tool_approvals (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
     service_id VARCHAR(36) NOT NULL,
-    tool_name VARCHAR(512) NOT NULL,
+    tool_name VARCHAR(512) COLLATE utf8mb4_bin NOT NULL,
     require_approval BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -395,8 +411,8 @@ CREATE TABLE mcp_oauth_tokens (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
     user_id VARCHAR(512) NOT NULL,
-    principal_type VARCHAR(32) NOT NULL,
-    principal_id VARCHAR(512) NOT NULL,
+    principal_type VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
+    principal_id VARCHAR(512) COLLATE utf8mb4_bin NOT NULL,
     service_id VARCHAR(36) NOT NULL,
     access_token TEXT,
     refresh_token TEXT,
@@ -444,8 +460,15 @@ CREATE TABLE organizations (
     member_limit INT NOT NULL DEFAULT 50,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_invite_code_unique_key TINYINT
+        AS (CASE
+            WHEN invite_code IS NOT NULL AND deleted_at IS NULL THEN 1
+            ELSE NULL
+        END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE UNIQUE INDEX idx_organizations_invite_code
+    ON organizations(invite_code, active_invite_code_unique_key);
 CREATE INDEX idx_organizations_owner_id ON organizations(owner_id);
 CREATE INDEX idx_organizations_owner_tenant ON organizations(owner_tenant_id);
 CREATE INDEX idx_organizations_deleted_at ON organizations(deleted_at);
@@ -473,8 +496,12 @@ CREATE TABLE kb_shares (
     permission VARCHAR(32) NOT NULL DEFAULT 'viewer',
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_kb_share_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE UNIQUE INDEX idx_kb_shares_kb_org
+    ON kb_shares(knowledge_base_id, organization_id, active_kb_share_unique_key);
 CREATE INDEX idx_kb_shares_kb_id ON kb_shares(knowledge_base_id);
 CREATE INDEX idx_kb_shares_org_id ON kb_shares(organization_id);
 CREATE INDEX idx_kb_shares_source_tenant ON kb_shares(source_tenant_id);
@@ -494,8 +521,12 @@ CREATE TABLE organization_join_requests (
     reviewed_at DATETIME(3),
     review_message TEXT,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    pending_request_unique_key TINYINT
+        AS (CASE WHEN status = 'pending' THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE UNIQUE INDEX uq_org_join_requests_pending_per_tenant
+    ON organization_join_requests(organization_id, tenant_id, request_type, pending_request_unique_key);
 CREATE INDEX idx_org_join_requests_org_id ON organization_join_requests(organization_id);
 CREATE INDEX idx_org_join_requests_user_id ON organization_join_requests(user_id);
 CREATE INDEX idx_org_join_requests_status ON organization_join_requests(status);
@@ -510,8 +541,12 @@ CREATE TABLE agent_shares (
     permission VARCHAR(32) NOT NULL DEFAULT 'viewer',
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_agent_share_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE UNIQUE INDEX idx_agent_shares_agent_org
+    ON agent_shares(agent_id, source_tenant_id, organization_id, active_agent_share_unique_key);
 CREATE INDEX idx_agent_shares_agent_id ON agent_shares(agent_id);
 CREATE INDEX idx_agent_shares_org_id ON agent_shares(organization_id);
 CREATE INDEX idx_agent_shares_source_tenant ON agent_shares(source_tenant_id);
@@ -529,21 +564,30 @@ CREATE INDEX idx_tenant_disabled_shared_agents_tenant_id ON tenant_disabled_shar
 CREATE TABLE im_channel_sessions (
     id VARCHAR(36) PRIMARY KEY,
     platform VARCHAR(20) NOT NULL,
-    user_id VARCHAR(128) NOT NULL,
-    chat_id VARCHAR(128) NOT NULL DEFAULT '',
+    user_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,
+    chat_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
     session_id VARCHAR(36) NOT NULL,
     tenant_id BIGINT NOT NULL,
     agent_id VARCHAR(36) DEFAULT '',
     im_channel_id VARCHAR(36) DEFAULT '',
-    thread_id VARCHAR(128) NOT NULL DEFAULT '',
+    thread_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     metadata JSON NULL DEFAULT (JSON_OBJECT()),
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_session_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED,
+    active_thread_session_unique_key TINYINT
+        AS (CASE
+            WHEN deleted_at IS NULL AND thread_id <> '' THEN 1
+            ELSE NULL
+        END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE INDEX idx_channel_lookup ON im_channel_sessions(platform, user_id, chat_id, tenant_id, deleted_at);
-CREATE INDEX idx_channel_thread_lookup ON im_channel_sessions(platform, chat_id, thread_id, tenant_id, deleted_at);
+CREATE UNIQUE INDEX idx_channel_lookup
+    ON im_channel_sessions(platform, user_id, chat_id, tenant_id, agent_id, active_session_unique_key);
+CREATE UNIQUE INDEX idx_channel_thread_lookup
+    ON im_channel_sessions(platform, chat_id, thread_id, tenant_id, agent_id, active_thread_session_unique_key);
 CREATE INDEX idx_im_channel_tenant ON im_channel_sessions(tenant_id);
 CREATE INDEX idx_im_channel_session ON im_channel_sessions(session_id);
 CREATE INDEX idx_im_channel_sessions_channel ON im_channel_sessions(im_channel_id);
@@ -559,15 +603,23 @@ CREATE TABLE im_channels (
     output_mode VARCHAR(20) NOT NULL DEFAULT 'stream',
     credentials JSON NOT NULL DEFAULT (JSON_OBJECT()),
     knowledge_base_id VARCHAR(36) DEFAULT '',
-    bot_identity VARCHAR(255) NOT NULL DEFAULT '',
+    bot_identity VARCHAR(255) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
     session_mode VARCHAR(20) NOT NULL DEFAULT 'user',
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_bot_identity_unique_key TINYINT
+        AS (CASE
+            WHEN deleted_at IS NULL AND bot_identity <> '' THEN 1
+            ELSE NULL
+        END) STORED,
+    CONSTRAINT chk_im_channels_session_mode
+        CHECK (session_mode IN ('user', 'thread'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_im_channels_tenant ON im_channels(tenant_id);
 CREATE INDEX idx_im_channels_agent ON im_channels(agent_id);
-CREATE INDEX idx_im_channels_bot_identity ON im_channels(bot_identity, deleted_at);
+CREATE UNIQUE INDEX idx_im_channels_bot_identity
+    ON im_channels(bot_identity, active_bot_identity_unique_key);
 
 CREATE TABLE embed_channels (
     id VARCHAR(36) PRIMARY KEY,
@@ -575,7 +627,7 @@ CREATE TABLE embed_channels (
     agent_id VARCHAR(36) NOT NULL DEFAULT 'builtin-quick-answer',
     name VARCHAR(255) NOT NULL DEFAULT '',
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    publish_token VARCHAR(64) NOT NULL DEFAULT '',
+    publish_token VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
     allowed_origins JSON NOT NULL DEFAULT (JSON_ARRAY()),
     welcome_message TEXT,
     rate_limit_per_minute INT NOT NULL DEFAULT 30,
@@ -593,11 +645,17 @@ CREATE TABLE embed_channels (
     webhook_secret VARCHAR(128) NOT NULL DEFAULT '',
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_publish_token_unique_key TINYINT
+        AS (CASE
+            WHEN deleted_at IS NULL AND publish_token <> '' THEN 1
+            ELSE NULL
+        END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_embed_channels_tenant ON embed_channels(tenant_id);
 CREATE INDEX idx_embed_channels_agent ON embed_channels(agent_id);
-CREATE INDEX idx_embed_channels_publish_token ON embed_channels(publish_token, deleted_at);
+CREATE UNIQUE INDEX idx_embed_channels_publish_token
+    ON embed_channels(publish_token, active_publish_token_unique_key);
 
 CREATE TABLE data_sources (
     id VARCHAR(36) PRIMARY KEY,
@@ -674,9 +732,12 @@ CREATE TABLE vector_stores (
     tenant_id BIGINT NOT NULL,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_vector_store_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE INDEX idx_vector_stores_name_tenant ON vector_stores(name, tenant_id, deleted_at);
+CREATE UNIQUE INDEX idx_vector_stores_name_tenant
+    ON vector_stores(name, tenant_id, active_vector_store_unique_key);
 CREATE INDEX idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX idx_vector_stores_deleted_at ON vector_stores(deleted_at);
@@ -689,7 +750,7 @@ CREATE TABLE wiki_pages (
     title VARCHAR(512) NOT NULL DEFAULT '',
     page_type VARCHAR(32) NOT NULL DEFAULT 'summary',
     status VARCHAR(32) NOT NULL DEFAULT 'published',
-    content TEXT,
+    content LONGTEXT,
     summary TEXT,
     parent_slug VARCHAR(255) NOT NULL DEFAULT '',
     folder_id VARCHAR(36) NOT NULL DEFAULT '',
@@ -706,9 +767,12 @@ CREATE TABLE wiki_pages (
     version INT NOT NULL DEFAULT 1,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_wiki_page_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE INDEX idx_wiki_pages_kb_slug ON wiki_pages(knowledge_base_id, slug, deleted_at);
+CREATE UNIQUE INDEX idx_wiki_pages_kb_slug
+    ON wiki_pages(knowledge_base_id, slug, active_wiki_page_unique_key);
 CREATE INDEX idx_wiki_pages_kb_id ON wiki_pages(knowledge_base_id);
 CREATE INDEX idx_wiki_pages_page_type ON wiki_pages(knowledge_base_id, page_type);
 CREATE INDEX idx_wiki_pages_parent_slug ON wiki_pages(knowledge_base_id, parent_slug);
@@ -728,9 +792,12 @@ CREATE TABLE wiki_folders (
     sort_order INT NOT NULL DEFAULT 0,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    deleted_at DATETIME(3) NULL
+    deleted_at DATETIME(3) NULL,
+    active_wiki_folder_unique_key TINYINT
+        AS (CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END) STORED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE INDEX idx_wiki_folders_parent_name ON wiki_folders(knowledge_base_id, parent_id, name, deleted_at);
+CREATE UNIQUE INDEX idx_wiki_folders_parent_name
+    ON wiki_folders(knowledge_base_id, parent_id, name, active_wiki_folder_unique_key);
 CREATE INDEX idx_wiki_folders_parent ON wiki_folders(knowledge_base_id, parent_id);
 CREATE INDEX idx_wiki_folders_deleted_at ON wiki_folders(deleted_at);
 
@@ -778,10 +845,12 @@ CREATE TABLE task_pending_ops (
     payload JSON NOT NULL DEFAULT (JSON_OBJECT()),
     fail_count INT NOT NULL DEFAULT 0,
     enqueued_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    claimed_at DATETIME(3) NULL
+    claimed_at DATETIME(3) NULL,
+    claim_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_task_pending_ops_scope ON task_pending_ops(task_type, scope, scope_id, id);
 CREATE INDEX idx_task_pending_ops_tenant ON task_pending_ops(tenant_id);
+CREATE INDEX idx_task_pending_ops_claim_token ON task_pending_ops(claim_token);
 
 CREATE TABLE task_dead_letters (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

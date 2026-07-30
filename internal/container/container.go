@@ -22,7 +22,6 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -626,28 +625,17 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		}
 		hostPort := net.JoinHostPort(os.Getenv("DB_HOST"), dbPort)
 
-		gormCfg := gomysql.NewConfig()
-		gormCfg.User = os.Getenv("DB_USER")
-		gormCfg.Passwd = os.Getenv("DB_PASSWORD")
-		gormCfg.Net = "tcp"
-		gormCfg.Addr = hostPort
-		gormCfg.DBName = os.Getenv("DB_NAME")
-		gormCfg.ParseTime = true
-		gormCfg.Loc = time.UTC
-		gormCfg.Params = map[string]string{"charset": "utf8mb4"}
-		dialector = gormmysql.Open(gormCfg.FormatDSN())
-
-		migrateQuery := url.Values{}
-		migrateQuery.Set("charset", "utf8mb4")
-		migrateQuery.Set("loc", "UTC")
-		migrateQuery.Set("multiStatements", "true")
-		migrateQuery.Set("parseTime", "true")
-		migrateDSN = fmt.Sprintf(
-			"mysql://%s@tcp(%s)/%s?%s",
-			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+		dialector = gormmysql.Open(database.BuildMySQLApplicationDSN(
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
 			hostPort,
-			url.PathEscape(os.Getenv("DB_NAME")),
-			migrateQuery.Encode(),
+			os.Getenv("DB_NAME"),
+		))
+		migrateDSN = database.BuildMySQLMigrationDSN(
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
+			hostPort,
+			os.Getenv("DB_NAME"),
 		)
 
 		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
@@ -693,26 +681,77 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	if name := db.Dialector.Name(); name != "postgres" && name != "mysql" && name != "sqlite" {
 		return nil, fmt.Errorf(
 			"unsupported gorm dialector %q; expected postgres, mysql, or sqlite "+
-				"(see vectorStoreService.isPostgres for impact)", name)
+				"(dialect-specific SQL paths require an exact driver name)", name)
 	}
 
-	if os.Getenv("DB_DRIVER") == "sqlite" {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
-		}
+	// Configure and validate the underlying pool before migrations or any
+	// post-migration queries use it.
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+	dbDriver := os.Getenv("DB_DRIVER")
+	if dbDriver == "sqlite" {
+		// SQLite only supports one concurrent writer even in WAL mode.
+		database.ApplyConnectionPoolConfig(sqlDB, database.ConnectionPoolConfig{
+			MaxOpenConns:    1,
+			MaxIdleConns:    1,
+			ConnMaxLifetime: 10 * time.Minute,
+			ConnMaxIdleTime: 5 * time.Minute,
+		})
 		if err := sqlDB.Ping(); err != nil {
-			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+			return nil, database.CloseOnStartupError(
+				sqlDB,
+				fmt.Errorf("failed to ping SQLite database: %w", err),
+			)
+		}
+	} else {
+		poolCfg, err := database.MainDBConnectionPoolConfigFromEnv(dbDriver)
+		if err != nil {
+			return nil, database.CloseOnStartupError(sqlDB, err)
+		}
+		database.ApplyConnectionPoolConfig(sqlDB, poolCfg)
+		logger.Infof(
+			context.Background(),
+			"DB pool: max_open=%d max_idle=%d max_lifetime=%s max_idle_time=%s",
+			poolCfg.MaxOpenConns,
+			poolCfg.MaxIdleConns,
+			poolCfg.ConnMaxLifetime,
+			poolCfg.ConnMaxIdleTime,
+		)
+	}
+
+	if dbDriver == "mysql" {
+		validateCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		validateErr := database.ValidateMySQLSession(validateCtx, sqlDB)
+		cancel()
+		if validateErr != nil {
+			return nil, database.CloseOnStartupError(
+				sqlDB,
+				fmt.Errorf("MySQL compatibility check failed: %w", validateErr),
+			)
 		}
 	}
 
 	// Run database migrations automatically (optional, can be disabled via env var)
 	// To disable auto-migration, set AUTO_MIGRATE=false
-	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
+	// Preserve the existing PostgreSQL/SQLite startup policy. MySQL is
+	// fail-closed and never force-recovers a dirty migration because its DDL
+	// may already have committed statement by statement.
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
 
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
+		autoRecover, failClosed := migrationStartupPolicy(
+			dbDriver,
+			os.Getenv("AUTO_RECOVER_DIRTY"),
+		)
+		if dbDriver == "mysql" &&
+			strings.EqualFold(strings.TrimSpace(os.Getenv("AUTO_RECOVER_DIRTY")), "true") {
+			logger.Warnf(
+				context.Background(),
+				"AUTO_RECOVER_DIRTY=true is unsafe for MySQL and will be ignored; manual repair is required for dirty migrations",
+			)
+		}
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
@@ -720,8 +759,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
-		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
+		if failClosed {
+			if err := database.RunStartupMigrations(sqlDB, migrateDSN, migrationOpts); err != nil {
+				return nil, err
+			}
+		} else if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
 				context.Background(),
@@ -743,40 +785,23 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
-	// Get underlying SQL DB object
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, err
-	}
-
-	// Configure connection pool parameters
-	if os.Getenv("DB_DRIVER") == "sqlite" {
-		// SQLite only supports one concurrent writer even in WAL mode.
-		// Limiting to a single open connection serialises all DB access and
-		// prevents "database is locked" errors from concurrent goroutines.
-		sqlDB.SetMaxOpenConns(1)
-	} else {
-		sqlDB.SetMaxIdleConns(10)
-	}
-	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
-
 	return db, nil
 }
 
-func buildMySQLRetrieverDSN(host string, port int, username, password, database string) string {
-	cfg := gomysql.NewConfig()
-	cfg.User = username
-	cfg.Passwd = password
-	cfg.Net = "tcp"
-	cfg.Addr = fmt.Sprintf("%s:%d", host, port)
-	cfg.DBName = database
-	cfg.ParseTime = true
-	cfg.Loc = time.Local
-	cfg.InterpolateParams = true
-	cfg.Params = map[string]string{
-		"charset": "utf8mb4",
+func migrationStartupPolicy(driver string, autoRecoverEnv string) (autoRecover, failClosed bool) {
+	if strings.EqualFold(strings.TrimSpace(driver), "mysql") {
+		return false, true
 	}
-	return cfg.FormatDSN()
+	return !strings.EqualFold(strings.TrimSpace(autoRecoverEnv), "false"), false
+}
+
+func buildMySQLRetrieverDSN(host string, port int, username, password, databaseName string) string {
+	return database.BuildMySQLApplicationDSN(
+		username,
+		password,
+		net.JoinHostPort(host, strconv.Itoa(port)),
+		databaseName,
+	)
 }
 
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
@@ -1379,9 +1404,11 @@ func initRetrieveEngineRegistry(
 		}
 		mysqlPort := 3306
 		if portStr := os.Getenv("MYSQL_PORT"); portStr != "" {
-			if port, err := strconv.Atoi(portStr); err == nil {
-				mysqlPort = port
+			port, err := strconv.Atoi(portStr)
+			if err != nil || port <= 0 || port > 65535 {
+				return nil, fmt.Errorf("invalid MYSQL_PORT %q", portStr)
 			}
+			mysqlPort = port
 		}
 		mysqlUsername := os.Getenv("MYSQL_USERNAME")
 		if mysqlUsername == "" {
@@ -1392,26 +1419,42 @@ func initRetrieveEngineRegistry(
 		if mysqlDatabase == "" {
 			mysqlDatabase = "weknora"
 		}
+		mysqlIndexConfig := &types.IndexConfig{CollectionPrefix: os.Getenv("MYSQL_TABLE_PREFIX")}
+		if err := types.ValidateIndexConfigForEngine(
+			types.MySQLRetrieverEngineType,
+			*mysqlIndexConfig,
+		); err != nil {
+			return nil, fmt.Errorf("invalid MySQL retriever index config: %w", err)
+		}
 
 		dsn := buildMySQLRetrieverDSN(mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase)
 		mysqlDB, err := sql.Open("mysql", dsn)
 		if err != nil {
-			log.Errorf("Create mysql client failed: %v", err)
+			return nil, fmt.Errorf("create MySQL retriever client: %w", err)
 		} else {
 			mysqlDB.SetMaxOpenConns(20)
 			mysqlDB.SetMaxIdleConns(5)
 			mysqlDB.SetConnMaxLifetime(time.Hour)
 
+			healthCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			healthErr := database.ValidateMySQLSession(healthCtx, mysqlDB)
+			cancel()
+			if healthErr != nil {
+				_ = mysqlDB.Close()
+				return nil, fmt.Errorf("MySQL retriever health check failed: %w", healthErr)
+			}
+
 			mysqlRepository := mysqlRepo.NewMysqlRetrieveEngineRepository(
 				mysqlDB, mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase,
-				&types.IndexConfig{CollectionPrefix: os.Getenv("MYSQL_TABLE_PREFIX")},
+				mysqlIndexConfig,
 			)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					mysqlRepository, types.MySQLRetrieverEngineType,
 				),
 			); err != nil {
-				log.Errorf("Register mysql retrieve engine failed: %v", err)
+				_ = mysqlDB.Close()
+				return nil, fmt.Errorf("register MySQL retrieve engine: %w", err)
 			} else {
 				log.Infof("Register mysql retrieve engine success: %s:%d db=%s", mysqlHost, mysqlPort, mysqlDatabase)
 			}
@@ -1458,6 +1501,8 @@ func initRetrieveEngineRegistry(
 
 // loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
+const dbStoreStartupLoadBudget = 10 * time.Second
+
 func loadDBStoresIntoRegistry(
 	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
 ) {
@@ -1476,8 +1521,37 @@ func loadDBStoresIntoRegistry(
 	}
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
+	registerDBStoreEnginesWithinBudget(
+		ctx,
+		dbStoreStartupLoadBudget,
+		stores,
+		storeRegistry,
+		func(buildCtx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+			return createEngineServiceFromStore(buildCtx, store, db, cfg, auditSink)
+		},
+	)
+}
+
+func registerDBStoreEnginesWithinBudget(
+	parent context.Context,
+	budget time.Duration,
+	stores []types.VectorStore,
+	storeRegistry interfaces.StoreRegistry,
+	factory interfaces.EngineFactory,
+) {
+	ctx, cancel := context.WithTimeout(parent, budget)
+	defer cancel()
+	log := logger.GetLogger(ctx)
+
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		if err := ctx.Err(); err != nil {
+			log.Warnf(
+				"Vector store startup load budget exhausted; remaining stores will rebuild on demand: %v",
+				err,
+			)
+			return
+		}
+		svc, err := factory(ctx, store)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue

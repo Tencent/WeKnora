@@ -87,10 +87,22 @@ func RunMigrations(dsn string) error {
 	return RunMigrationsWithOptions(dsn, MigrationOptions{AutoRecoverDirty: false})
 }
 
+// RunStartupMigrations runs migrations for application startup. A migration
+// failure makes the already-open main pool unsafe to publish through the
+// dependency container, so the pool is closed before the error is returned.
+func RunStartupMigrations(db *sql.DB, dsn string, opts MigrationOptions) error {
+	if err := RunMigrationsWithOptions(dsn, opts); err != nil {
+		return CloseOnStartupError(db, fmt.Errorf("database migration failed: %w", err))
+	}
+	return nil
+}
+
 // MigrationOptions configures migration behavior
 type MigrationOptions struct {
 	// AutoRecoverDirty when true, automatically attempts to recover from dirty state
-	// by forcing to the previous version and retrying the migration
+	// by forcing to the previous version and retrying the migration.
+	// MySQL never performs this recovery because its DDL can be committed
+	// statement-by-statement, leaving schema changes that Force cannot undo.
 	AutoRecoverDirty bool
 
 	// SQLiteDBPath is the raw filesystem path to the SQLite database file.
@@ -160,7 +172,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	// If database is in dirty state, try to recover or return error
 	if oldDirty {
 		logger.Warnf(ctx, "Database is in dirty state at version %d", oldVersion)
-		if opts.AutoRecoverDirty {
+		if isMySQLMigrationDSN(dsn) {
+			return captureMigrationFailure(m, mysqlDirtyStateError(oldVersion, nil))
+		}
+		if opts.AutoRecoverDirty && dirtyAutoRecoveryAllowed(dsn) {
 			logger.Infof(ctx, "AutoRecoverDirty is enabled, attempting recovery...")
 			if err := recoverFromDirtyState(ctx, m, oldVersion); err != nil {
 				return captureMigrationFailure(m, err)
@@ -198,7 +213,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		currentVersion, currentDirty, versionCheckErr := m.Version()
 		if versionCheckErr == nil && currentDirty {
 			logger.Warnf(ctx, "Migration caused dirty state at version %d", currentVersion)
-			if opts.AutoRecoverDirty {
+			if isMySQLMigrationDSN(dsn) {
+				return captureMigrationFailure(m, mysqlDirtyStateError(currentVersion, err))
+			}
+			if opts.AutoRecoverDirty && dirtyAutoRecoveryAllowed(dsn) {
 				logger.Infof(ctx, "Attempting to recover from dirty state...")
 				// Try to recover and retry
 				if recoverErr := recoverFromDirtyState(ctx, m, currentVersion); recoverErr != nil {
@@ -331,6 +349,27 @@ func migrationSourceForDSN(dsn string) string {
 	}
 }
 
+func isMySQLMigrationDSN(dsn string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(dsn)), "mysql://")
+}
+
+func dirtyAutoRecoveryAllowed(dsn string) bool {
+	return !isMySQLMigrationDSN(dsn)
+}
+
+func mysqlDirtyStateError(version uint, migrationErr error) error {
+	message := fmt.Sprintf(
+		"MySQL database is in dirty migration state at version %d; automatic force/retry is disabled "+
+			"because MySQL DDL may already be committed. Inspect and repair partial schema changes, "+
+			"then manually force the last verified migration version before restarting",
+		version,
+	)
+	if migrationErr != nil {
+		return fmt.Errorf("%s: %w", message, migrationErr)
+	}
+	return fmt.Errorf("%s", message)
+}
+
 func migrationDSNFromEnv() (string, error) {
 	switch os.Getenv("DB_DRIVER") {
 	case "mysql":
@@ -338,17 +377,11 @@ func migrationDSNFromEnv() (string, error) {
 		if dbPort == "" {
 			dbPort = "3306"
 		}
-		query := url.Values{}
-		query.Set("charset", "utf8mb4")
-		query.Set("loc", "UTC")
-		query.Set("multiStatements", "true")
-		query.Set("parseTime", "true")
-		return fmt.Sprintf(
-			"mysql://%s@tcp(%s)/%s?%s",
-			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+		return BuildMySQLMigrationDSN(
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
 			net.JoinHostPort(os.Getenv("DB_HOST"), dbPort),
-			url.PathEscape(os.Getenv("DB_NAME")),
-			query.Encode(),
+			os.Getenv("DB_NAME"),
 		), nil
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")

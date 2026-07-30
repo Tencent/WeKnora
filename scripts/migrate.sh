@@ -58,11 +58,25 @@ if ! command -v migrate &> /dev/null; then
 fi
 
 urlencode() {
-    if command -v python3 &> /dev/null; then
-        python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
-    else
-        printf "%s" "$1"
-    fi
+    local raw="$1"
+    local encoded=""
+    local char
+    local byte
+    local i
+    local LC_ALL=C
+    for ((i = 0; i < ${#raw}; i++)); do
+        char="${raw:i:1}"
+        case "$char" in
+            [a-zA-Z0-9.~_-])
+                encoded+="$char"
+                ;;
+            *)
+                printf -v byte '%%%02X' "'$char"
+                encoded+="$byte"
+                ;;
+        esac
+    done
+    printf "%s" "$encoded"
 }
 
 append_query_param() {
@@ -74,6 +88,43 @@ append_query_param() {
         printf "%s?%s" "$url" "$param"
     fi
 }
+
+set_query_param() {
+    local url="$1"
+    local key="$2"
+    local value="$3"
+    local base="$url"
+    local query=""
+    local result
+    local part
+    local separator="?"
+    local -a parts=()
+
+    if [[ "$url" == *"?"* ]]; then
+        base="${url%%\?*}"
+        query="${url#*\?}"
+    fi
+
+    result="$base"
+    if [ -n "$query" ]; then
+        IFS='&' read -r -a parts <<< "$query"
+        for part in "${parts[@]}"; do
+            if [ -z "$part" ] || [ "${part%%=*}" = "$key" ]; then
+                continue
+            fi
+            result+="${separator}${part}"
+            separator="&"
+        done
+    fi
+    result+="${separator}${key}=${value}"
+    printf "%s" "$result"
+}
+
+# Keep manual golang-migrate sessions aligned with the application startup
+# contract in internal/database/mysql_config.go. Values are URL-encoded SQL
+# literals because go-sql-driver applies them with SET on each connection.
+MYSQL_TIME_ZONE_VALUE="%27%2B00%3A00%27"
+MYSQL_SQL_MODE_VALUE="%27ONLY_FULL_GROUP_BY%2CSTRICT_TRANS_TABLES%2CNO_ZERO_IN_DATE%2CNO_ZERO_DATE%2CERROR_FOR_DIVISION_BY_ZERO%2CNO_ENGINE_SUBSTITUTION%27"
 
 # Construct the database URL.
 # If DB_URL is already set in .env, use it and normalize required local defaults.
@@ -87,18 +138,12 @@ if [ -n "$DB_URL" ]; then
             DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
         fi
     elif [ "$DB_DRIVER" = "mysql" ]; then
-        if [[ "$DB_URL" != *"charset="* ]]; then
-            DB_URL="$(append_query_param "$DB_URL" "charset=utf8mb4")"
-        fi
-        if [[ "$DB_URL" != *"multiStatements="* ]]; then
-            DB_URL="$(append_query_param "$DB_URL" "multiStatements=true")"
-        fi
-        if [[ "$DB_URL" != *"parseTime="* ]]; then
-            DB_URL="$(append_query_param "$DB_URL" "parseTime=true")"
-        fi
-        if [[ "$DB_URL" != *"loc="* ]]; then
-            DB_URL="$(append_query_param "$DB_URL" "loc=UTC")"
-        fi
+        DB_URL="$(set_query_param "$DB_URL" "charset" "utf8mb4")"
+        DB_URL="$(set_query_param "$DB_URL" "multiStatements" "true")"
+        DB_URL="$(set_query_param "$DB_URL" "parseTime" "true")"
+        DB_URL="$(set_query_param "$DB_URL" "loc" "UTC")"
+        DB_URL="$(set_query_param "$DB_URL" "time_zone" "$MYSQL_TIME_ZONE_VALUE")"
+        DB_URL="$(set_query_param "$DB_URL" "sql_mode" "$MYSQL_SQL_MODE_VALUE")"
     fi
 else
     ENCODED_USER=$(urlencode "$DB_USER")
@@ -109,7 +154,7 @@ else
             DB_URL="postgres://${ENCODED_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${ENCODED_DB_NAME}?sslmode=disable"
             ;;
         mysql)
-            DB_URL="mysql://${ENCODED_USER}:${ENCODED_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${ENCODED_DB_NAME}?charset=utf8mb4&multiStatements=true&parseTime=true&loc=UTC"
+            DB_URL="mysql://${ENCODED_USER}:${ENCODED_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${ENCODED_DB_NAME}?charset=utf8mb4&multiStatements=true&parseTime=true&loc=UTC&time_zone=${MYSQL_TIME_ZONE_VALUE}&sql_mode=${MYSQL_SQL_MODE_VALUE}"
             ;;
         sqlite)
             DB_PATH=${DB_PATH:-./data/weknora.db}
@@ -122,10 +167,8 @@ fi
 case "$1" in
     up)
         echo "Running migrations up..."
-        echo "DB_URL: ${DB_URL}"
         echo "DB_DRIVER: ${DB_DRIVER}"
         echo "DB_USER: ${DB_USER}"
-        echo "DB_PASSWORD: ${DB_PASSWORD}"
         echo "DB_HOST: ${DB_HOST}"
         echo "DB_PORT: ${DB_PORT}"
         echo "DB_NAME: ${DB_NAME}"

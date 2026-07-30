@@ -1,17 +1,43 @@
+# This overlay uses the Compose !override tag (Docker Compose 2.24.4+).
+# It is intentionally deterministic: values from a PostgreSQL-oriented .env
+# cannot switch the main database or retriever back to PostgreSQL.
+# As with the base Compose workflow documented in the README, create .env from
+# .env.example before rendering or starting the stack.
 services:
   app:
     environment:
-      - DB_DRIVER=${DB_DRIVER:-mysql}
-      - DB_HOST=${DB_HOST:-mysql}
-      - DB_PORT=${DB_PORT:-3306}
-      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-mysql}
-    depends_on:
+      - DB_DRIVER=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-weknora}
+      - DB_PASSWORD=${DB_PASSWORD:-weknora123!@#}
+      - DB_NAME=${DB_NAME:-WeKnora}
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-20}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-10}
+      - DB_CONN_MAX_LIFETIME=${DB_CONN_MAX_LIFETIME:-10m}
+      - DB_CONN_MAX_IDLE_TIME=${DB_CONN_MAX_IDLE_TIME:-5m}
+      - AUTO_RECOVER_DIRTY=false
+      - RETRIEVE_DRIVER=${MYSQL_RETRIEVE_DRIVER:-mysql}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USERNAME=${DB_USER:-weknora}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-weknora123!@#}
+      - MYSQL_DATABASE=${DB_NAME:-WeKnora}
+      - MYSQL_TABLE_PREFIX=${MYSQL_TABLE_PREFIX:-weknora_embeddings}
+    depends_on: !override
       redis:
         condition: service_started
       mysql:
         condition: service_healthy
       docreader:
         condition: service_healthy
+
+  # Keep PostgreSQL available only for the optional Langfuse profile, whose
+  # upstream stack still requires it. It is not started by the MySQL default.
+  postgres:
+    profiles:
+      - langfuse
+      - full
 
   mysql:
     image: mysql:8.4
@@ -20,6 +46,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --ngram-token-size=2
+      - --default-time-zone=+00:00
     environment:
       - MYSQL_DATABASE=${DB_NAME:-WeKnora}
       - MYSQL_USER=${DB_USER:-weknora}

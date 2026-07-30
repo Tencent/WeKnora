@@ -1156,6 +1156,24 @@ func TestValidateIndexConfig(t *testing.T) {
 	})
 }
 
+func TestValidateIndexConfigForEngineRejectsMySQLIdentifierOverflow(t *testing.T) {
+	assert.NoError(t, ValidateIndexConfigForEngine(
+		MySQLRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 44)},
+	))
+	err := ValidateIndexConfigForEngine(
+		MySQLRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 45)},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MySQL")
+
+	assert.NoError(t, ValidateIndexConfigForEngine(
+		QdrantRetrieverEngineType,
+		IndexConfig{CollectionPrefix: strings.Repeat("a", 64)},
+	))
+}
+
 // ---------------------------------------------------------------------------
 // IndexConfig — scalability fields round-trip
 // ---------------------------------------------------------------------------

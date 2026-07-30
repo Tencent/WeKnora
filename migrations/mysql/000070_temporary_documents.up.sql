@@ -8,7 +8,7 @@ CREATE TABLE temporary_documents (
     mime_type VARCHAR(255) NOT NULL DEFAULT '',
     file_size BIGINT NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'uploaded',
-    content TEXT NOT NULL DEFAULT (''),
+    content LONGTEXT NOT NULL DEFAULT (''),
     chunks JSON NOT NULL DEFAULT (JSON_ARRAY()),
     image_refs JSON NOT NULL DEFAULT (JSON_ARRAY()),
     metadata JSON NOT NULL DEFAULT (JSON_OBJECT()),

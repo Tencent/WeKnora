@@ -32,6 +32,7 @@ import (
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	appdb "github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
@@ -79,7 +80,7 @@ func createEngineServiceFromStore(
 	case types.OpenSearchRetrieverEngineType:
 		return createOpenSearchEngine(ctx, store, auditSink)
 	case types.MySQLRetrieverEngineType:
-		return createMySQLEngine(store)
+		return createMySQLEngine(ctx, store)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
 	}
@@ -312,7 +313,13 @@ func hostFromAddr(addr string) string {
 	return addr
 }
 
-func createMySQLEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+func createMySQLEngine(
+	ctx context.Context,
+	store types.VectorStore,
+) (interfaces.RetrieveEngineService, error) {
+	if err := types.ValidateIndexConfigForEngine(store.EngineType, store.IndexConfig); err != nil {
+		return nil, err
+	}
 	cc := store.ConnectionConfig
 	addr := strings.TrimSpace(cc.Addr)
 	if addr == "" {
@@ -327,24 +334,29 @@ func createMySQLEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 		username = "root"
 	}
 
-	mc := mysql.NewConfig()
-	mc.User = username
-	mc.Passwd = cc.Password
-	mc.Net = "tcp"
-	mc.Addr = addr
-	mc.DBName = database
-	mc.Params = map[string]string{"charset": "utf8mb4"}
-	mc.ParseTime = true
-	mc.Loc = time.UTC
-	mc.InterpolateParams = true
-
-	db, err := sql.Open("mysql", mc.FormatDSN())
+	db, err := sql.Open("mysql", appdb.BuildMySQLApplicationDSN(
+		username,
+		cc.Password,
+		addr,
+		database,
+	))
 	if err != nil {
 		return nil, fmt.Errorf("create mysql client: %w", err)
 	}
 	db.SetMaxOpenConns(20)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(time.Hour)
+
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(connectCtx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("connect to mysql retriever: %w", err)
+	}
+	if err := appdb.ValidateMySQLSession(connectCtx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("validate mysql retriever server: %w", err)
+	}
 
 	host, port := splitMySQLAddr(addr)
 	repo := mysqlRepo.NewMysqlRetrieveEngineRepository(

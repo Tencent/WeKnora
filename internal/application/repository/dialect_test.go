@@ -53,6 +53,19 @@ func TestDialectHelpersCaseInsensitiveLike(t *testing.T) {
 	}
 }
 
+func TestDialectHelpersRowLevelLocking(t *testing.T) {
+	for _, dialect := range []string{"postgres", "mysql"} {
+		if !supportsRowLevelLocking(dbWithDialect(dialect)) {
+			t.Fatalf("%s should support row-level locking", dialect)
+		}
+	}
+	for _, dialect := range []string{"sqlite", ""} {
+		if supportsRowLevelLocking(dbWithDialect(dialect)) {
+			t.Fatalf("%s should not emit row-level locking clauses", dialect)
+		}
+	}
+}
+
 func TestDialectHelpersJSONExpressions(t *testing.T) {
 	if got := jsonTextExpr(dbWithDialect("postgres"), "metadata", "model_id"); got != "metadata->>'model_id'" {
 		t.Fatalf("postgres json text = %q", got)
@@ -68,6 +81,15 @@ func TestDialectHelpersJSONExpressions(t *testing.T) {
 	}
 	if got := jsonPathTextCastExpr(dbWithDialect("sqlite"), "metadata", "answers"); got != "CAST(COALESCE(json_extract(metadata, '$.answers'), '[]') AS TEXT)" {
 		t.Fatalf("sqlite json path cast = %q", got)
+	}
+	if got := jsonValueEqualsClause(dbWithDialect("postgres"), "category_path"); got != "category_path::jsonb = ?::jsonb" {
+		t.Fatalf("postgres json equality = %q", got)
+	}
+	if got := jsonValueEqualsClause(dbWithDialect("mysql"), "category_path"); got != "category_path = JSON_EXTRACT(?, '$')" {
+		t.Fatalf("mysql json equality = %q", got)
+	}
+	if got := jsonValueEqualsClause(dbWithDialect("sqlite"), "category_path"); got != "category_path = ?" {
+		t.Fatalf("sqlite json equality = %q", got)
 	}
 }
 

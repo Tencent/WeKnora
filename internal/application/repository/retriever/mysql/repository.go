@@ -1,12 +1,12 @@
 package mysql
 
 import (
+	"container/heap"
 	"context"
 	"database/sql"
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -82,6 +82,7 @@ func (r *mysqlRepository) EstimateStorageSize(
 // calculateStorageSize 估算单行存储成本。
 func calculateStorageSize(emb *MysqlVectorEmbedding) int64 {
 	var size int64
+	size += int64(len(emb.ID))
 	size += int64(len(emb.Content))
 	size += int64(len(emb.SourceID))
 	size += int64(len(emb.ChunkID))
@@ -89,9 +90,13 @@ func calculateStorageSize(emb *MysqlVectorEmbedding) int64 {
 	size += int64(len(emb.KnowledgeBaseID))
 	size += int64(len(emb.TagID))
 	size += 8 // source_type int
-	// 向量: dim * 4 bytes
+	// MySQL stores JSON numbers as binary-JSON doubles plus array offsets,
+	// not as the float32 values held by Go. Large arrays use roughly
+	// 13 bytes per element plus a 9-byte container header. This deliberately
+	// uses the large-array representation so quota accounting does not
+	// understate high-dimensional embeddings.
 	if len(emb.Embedding) > 0 {
-		size += int64(len(emb.Embedding) * 4)
+		size += int64(len(emb.Embedding))*13 + 9
 	}
 	const metaBytes int64 = 24
 	return size + metaBytes
@@ -120,9 +125,6 @@ func (r *mysqlRepository) BatchSave(
 	groups := make(map[int][]*MysqlVectorEmbedding)
 	for _, info := range indexInfoList {
 		emb := toMysqlVectorEmbedding(info, params)
-		if len(emb.Embedding) == 0 {
-			continue
-		}
 		// 稳定主键
 		if emb.ID == "" {
 			emb.ID = emb.SourceID
@@ -131,6 +133,13 @@ func (r *mysqlRepository) BatchSave(
 			emb.ID = uuid.New().String()
 		}
 		dim := len(emb.Embedding)
+		if dim == 0 {
+			var err error
+			dim, err = keywordOnlyDimensionFromParams(params)
+			if err != nil {
+				return fmt.Errorf("save keyword-only row %q: %w", emb.ID, err)
+			}
+		}
 		groups[dim] = append(groups[dim], emb)
 	}
 
@@ -145,6 +154,17 @@ func (r *mysqlRepository) BatchSave(
 	return nil
 }
 
+func keywordOnlyDimensionFromParams(params map[string]any) (int, error) {
+	if params == nil {
+		return 0, fmt.Errorf("missing positive dimension parameter")
+	}
+	dimension, ok := params["dimension"].(int)
+	if !ok || dimension <= 0 {
+		return 0, fmt.Errorf("missing positive dimension parameter")
+	}
+	return dimension, nil
+}
+
 // insertRows 批量插入数据。
 func (r *mysqlRepository) insertRows(
 	ctx context.Context,
@@ -155,17 +175,24 @@ func (r *mysqlRepository) insertRows(
 		return nil
 	}
 
-	// 9 个占位符 + 1 个 embedding JSON 字面量
-	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, %s)"
+	const perRowPlaceholders = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 	parts := make([]string, len(rows))
-	args := make([]interface{}, 0, len(rows)*9)
+	args := make([]interface{}, 0, len(rows)*10)
 	for i, e := range rows {
-		parts[i] = fmt.Sprintf(perRowPlaceholders, embeddingLiteral(e.Embedding))
+		var embeddingValue interface{}
+		if len(e.Embedding) > 0 {
+			embeddingJSON, err := embeddingToJSON(e.Embedding)
+			if err != nil {
+				return fmt.Errorf("encode embedding for row %q: %w", e.ID, err)
+			}
+			embeddingValue = embeddingJSON
+		}
+		parts[i] = perRowPlaceholders
 		args = append(args,
 			e.ID, e.Content, e.SourceID, e.SourceType,
 			e.ChunkID, e.KnowledgeID, e.KnowledgeBaseID, e.TagID,
-			e.IsEnabled,
+			e.IsEnabled, embeddingValue,
 		)
 	}
 
@@ -365,10 +392,15 @@ func (r *mysqlRepository) VectorRetrieve(
 	if len(params.Embedding) == 0 {
 		return nil, fmt.Errorf("empty query embedding")
 	}
+	queryNorm, err := validateQueryEmbedding(params.Embedding)
+	if err != nil {
+		return nil, err
+	}
+	if math.IsNaN(params.Threshold) || math.IsInf(params.Threshold, 0) {
+		return nil, fmt.Errorf("invalid vector threshold: %v", params.Threshold)
+	}
 
-	dim := len(params.Embedding)
-	table := r.getTableName(dim)
-
+	table := r.getTableName(len(params.Embedding))
 	exists, err := r.tableExists(ctx, table)
 	if err != nil {
 		return nil, fmt.Errorf("check table %s: %w", table, err)
@@ -377,39 +409,299 @@ func (r *mysqlRepository) VectorRetrieve(
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
 	}
 
-	// 构建过滤条件
-	wb := buildVectorWhereClause(params)
-	whereClause, whereArgs := wb.build()
+	// Keep the candidate scan and metadata fetch on one consistent snapshot.
+	tx, err := r.db.BeginTx(ctx, vectorReadTransactionOptions())
+	if err != nil {
+		return nil, fmt.Errorf("begin vector retrieve transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
-	scoreExpr := cosineSimilarityExpr("embedding", params.Embedding)
-	stmt := fmt.Sprintf(
-		"SELECT %s, %s AS score "+
-			"FROM %s "+
-			"WHERE %s AND embedding IS NOT NULL "+
-			"HAVING score >= ? AND score IS NOT NULL "+
-			"ORDER BY score DESC "+
-			"LIMIT %d",
-		strings.Join(columnsForRetrieve, ", "),
-		scoreExpr,
-		quoteIdentifier(table),
-		whereClause,
+	stmt, args := buildVectorCandidateSQL(table, params)
+	rows, err := tx.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan vector candidates: %w", err)
+	}
+	hits, rankErr := rankVectorCandidates(
+		rows,
+		params.Embedding,
+		queryNorm,
+		params.Threshold,
 		normalizeTopK(params.TopK),
 	)
-
-	args := append(whereArgs, params.Threshold)
-
-	rows, err := r.db.QueryContext(ctx, stmt, args...)
-	if err != nil {
-		return nil, fmt.Errorf("vector retrieve: %w", err)
+	closeErr := rows.Close()
+	if rankErr != nil {
+		return nil, rankErr
 	}
-	defer rows.Close()
+	if closeErr != nil {
+		return nil, fmt.Errorf("close vector candidate rows: %w", closeErr)
+	}
 
-	results, err := scanRetrieveRows(rows, types.MatchTypeEmbedding)
+	results, err := fetchVectorMetadata(ctx, tx, table, params, hits)
 	if err != nil {
 		return nil, err
 	}
-
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit vector retrieve transaction: %w", err)
+	}
 	return buildRetrieveResult(results, types.VectorRetrieverType), nil
+}
+
+func vectorReadTransactionOptions() *sql.TxOptions {
+	return &sql.TxOptions{
+		Isolation: sql.LevelRepeatableRead,
+		ReadOnly:  true,
+	}
+}
+
+func buildVectorCandidateSQL(table string, params types.RetrieveParams) (string, []interface{}) {
+	whereClause, args := buildVectorWhereClause(params).build()
+	return fmt.Sprintf(
+		"SELECT id, embedding FROM %s WHERE %s AND embedding IS NOT NULL",
+		quoteIdentifier(table),
+		whereClause,
+	), args
+}
+
+type rankedVectorHit struct {
+	id    string
+	score float64
+}
+
+// rankedVectorHeap keeps the worst retained hit at index zero. For equal
+// scores, the lexicographically larger ID is worse, matching final ordering.
+type rankedVectorHeap []rankedVectorHit
+
+func (h rankedVectorHeap) Len() int { return len(h) }
+
+func (h rankedVectorHeap) Less(i, j int) bool {
+	if h[i].score == h[j].score {
+		return h[i].id > h[j].id
+	}
+	return h[i].score < h[j].score
+}
+
+func (h rankedVectorHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *rankedVectorHeap) Push(value interface{}) {
+	*h = append(*h, value.(rankedVectorHit))
+}
+
+func (h *rankedVectorHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	value := old[n-1]
+	*h = old[:n-1]
+	return value
+}
+
+func validateQueryEmbedding(query []float32) (float64, error) {
+	var normSq float64
+	for i, value := range query {
+		v := float64(value)
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Errorf("query embedding contains non-finite value at dimension %d", i)
+		}
+		normSq += v * v
+	}
+	if normSq == 0 {
+		return 0, fmt.Errorf("query embedding has zero norm")
+	}
+	return math.Sqrt(normSq), nil
+}
+
+func cosineSimilarity(query, stored []float32, queryNorm float64) (float64, error) {
+	if len(stored) != len(query) {
+		return 0, fmt.Errorf(
+			"stored embedding dimension %d does not match query dimension %d",
+			len(stored),
+			len(query),
+		)
+	}
+
+	var dot, storedNormSq float64
+	for i, storedValue := range stored {
+		value := float64(storedValue)
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return 0, fmt.Errorf("stored embedding contains non-finite value at dimension %d", i)
+		}
+		dot += float64(query[i]) * value
+		storedNormSq += value * value
+	}
+	if queryNorm == 0 || storedNormSq == 0 {
+		return 0, nil
+	}
+	return dot / (queryNorm * math.Sqrt(storedNormSq)), nil
+}
+
+func rankVectorCandidates(
+	rows *sql.Rows,
+	query []float32,
+	queryNorm float64,
+	threshold float64,
+	topK int,
+) ([]rankedVectorHit, error) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("vector topK must be positive, got %d", topK)
+	}
+	initialCapacity := topK
+	if initialCapacity > vectorMetadataBatchSize {
+		initialCapacity = vectorMetadataBatchSize
+	}
+	hits := make(rankedVectorHeap, 0, initialCapacity)
+	heap.Init(&hits)
+
+	for rows.Next() {
+		var (
+			id           string
+			embeddingRaw []byte
+		)
+		if err := rows.Scan(&id, &embeddingRaw); err != nil {
+			return nil, fmt.Errorf("scan vector candidate: %w", err)
+		}
+		stored, err := parseEmbeddingJSON(embeddingRaw)
+		if err != nil {
+			return nil, fmt.Errorf("parse embedding for row %q: %w", id, err)
+		}
+		score, err := cosineSimilarity(query, stored, queryNorm)
+		if err != nil {
+			return nil, fmt.Errorf("score row %q: %w", id, err)
+		}
+		if threshold > 0 && score < threshold {
+			continue
+		}
+
+		hit := rankedVectorHit{id: id, score: score}
+		if hits.Len() < topK {
+			heap.Push(&hits, hit)
+			continue
+		}
+		if betterVectorHit(hit, hits[0]) {
+			hits[0] = hit
+			heap.Fix(&hits, 0)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate vector candidates: %w", err)
+	}
+
+	sort.Slice(hits, func(i, j int) bool {
+		return betterVectorHit(hits[i], hits[j])
+	})
+	return hits, nil
+}
+
+func betterVectorHit(left, right rankedVectorHit) bool {
+	if left.score == right.score {
+		return left.id < right.id
+	}
+	return left.score > right.score
+}
+
+const vectorMetadataBatchSize = 1000
+
+func fetchVectorMetadata(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	params types.RetrieveParams,
+	hits []rankedVectorHit,
+) ([]*types.IndexWithScore, error) {
+	if len(hits) == 0 {
+		return nil, nil
+	}
+
+	metadata := make(map[string]*types.IndexWithScore, len(hits))
+	for start := 0; start < len(hits); start += vectorMetadataBatchSize {
+		end := start + vectorMetadataBatchSize
+		if end > len(hits) {
+			end = len(hits)
+		}
+		stmt, args := buildVectorMetadataSQL(table, params, hits[start:end])
+		rows, err := tx.QueryContext(ctx, stmt, args...)
+		if err != nil {
+			return nil, fmt.Errorf("fetch vector metadata: %w", err)
+		}
+		batch, scanErr := scanVectorMetadataRows(rows)
+		closeErr := rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close vector metadata rows: %w", closeErr)
+		}
+		for id, result := range batch {
+			metadata[id] = result
+		}
+	}
+
+	results := make([]*types.IndexWithScore, 0, len(hits))
+	for _, hit := range hits {
+		result, ok := metadata[hit.id]
+		if !ok {
+			return nil, fmt.Errorf("vector metadata for selected row %q is missing", hit.id)
+		}
+		result.Score = hit.score
+		result.MatchType = types.MatchTypeEmbedding
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func buildVectorMetadataSQL(
+	table string,
+	params types.RetrieveParams,
+	hits []rankedVectorHit,
+) (string, []interface{}) {
+	idPlaceholders := make([]string, len(hits))
+	args := make([]interface{}, 0, len(hits))
+	for i, hit := range hits {
+		idPlaceholders[i] = "?"
+		args = append(args, hit.id)
+	}
+	whereClause, whereArgs := buildVectorWhereClause(params).build()
+	args = append(args, whereArgs...)
+	return fmt.Sprintf(
+		"SELECT %s FROM %s WHERE id IN (%s) AND %s AND embedding IS NOT NULL",
+		strings.Join(columnsForRetrieve, ", "),
+		quoteIdentifier(table),
+		strings.Join(idPlaceholders, ","),
+		whereClause,
+	), args
+}
+
+func scanVectorMetadataRows(rows *sql.Rows) (map[string]*types.IndexWithScore, error) {
+	out := make(map[string]*types.IndexWithScore)
+	for rows.Next() {
+		var (
+			id, content, sourceID, chunkID      sql.NullString
+			knowledgeID, knowledgeBaseID, tagID sql.NullString
+			sourceType                          sql.NullInt64
+			isEnabled                           sql.NullBool
+		)
+		if err := rows.Scan(
+			&id, &content, &sourceID, &sourceType, &chunkID,
+			&knowledgeID, &knowledgeBaseID, &tagID, &isEnabled,
+		); err != nil {
+			return nil, fmt.Errorf("scan vector metadata: %w", err)
+		}
+		out[id.String] = &types.IndexWithScore{
+			ID:              id.String,
+			Content:         content.String,
+			SourceID:        sourceID.String,
+			SourceType:      types.SourceType(sourceType.Int64),
+			ChunkID:         chunkID.String,
+			KnowledgeID:     knowledgeID.String,
+			KnowledgeBaseID: knowledgeBaseID.String,
+			TagID:           tagID.String,
+			IsEnabled:       !isEnabled.Valid || isEnabled.Bool,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate vector metadata: %w", err)
+	}
+	return out, nil
 }
 
 // buildVectorWhereClause 构建向量检索的过滤条件。
@@ -434,43 +726,6 @@ func buildVectorWhereClause(params types.RetrieveParams) *whereBuilder {
 	wb.add("(is_enabled IS NULL OR is_enabled = TRUE)")
 
 	return wb
-}
-
-func cosineSimilarityExpr(column string, embedding []float32) string {
-	if len(embedding) == 0 {
-		return "0"
-	}
-
-	dotTerms := make([]string, 0, len(embedding))
-	storedNormTerms := make([]string, 0, len(embedding))
-	var queryNormSq float64
-	for i, v := range embedding {
-		value := strconv.FormatFloat(float64(v), 'g', -1, 32)
-		component := fmt.Sprintf(
-			"COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(%s, '$[%d]')) AS DECIMAL(30,15)), 0)",
-			column,
-			i,
-		)
-		dotTerms = append(dotTerms, fmt.Sprintf("(%s * %s)", component, value))
-		storedNormTerms = append(storedNormTerms, fmt.Sprintf("POW(%s, 2)", component))
-		queryNormSq += float64(v) * float64(v)
-	}
-
-	queryNorm := math.Sqrt(queryNormSq)
-	if queryNorm == 0 {
-		return "0"
-	}
-
-	dot := strings.Join(dotTerms, " + ")
-	storedNorm := strings.Join(storedNormTerms, " + ")
-	queryNormLiteral := strconv.FormatFloat(queryNorm, 'g', -1, 64)
-	return fmt.Sprintf(
-		"(CASE WHEN SQRT(%s) = 0 THEN 0 ELSE (%s) / (SQRT(%s) * %s) END)",
-		storedNorm,
-		dot,
-		storedNorm,
-		queryNormLiteral,
-	)
 }
 
 // whereBuilder 辅助构建 WHERE 子句。
@@ -524,6 +779,9 @@ func (r *mysqlRepository) KeywordsRetrieve(
 	if query == "" {
 		return buildRetrieveResult(nil, types.KeywordsRetrieverType), nil
 	}
+	if math.IsNaN(params.Threshold) || math.IsInf(params.Threshold, 0) {
+		return nil, fmt.Errorf("invalid keyword threshold: %v", params.Threshold)
+	}
 
 	tables, err := r.listEmbeddingTables(ctx)
 	if err != nil {
@@ -562,7 +820,8 @@ func buildKeywordRetrieveSQL(table string, params types.RetrieveParams) (string,
 		"SELECT %s, MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE) AS score "+
 			"FROM %s "+
 			"WHERE %s AND MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE) "+
-			"ORDER BY score DESC "+
+			"HAVING score >= ? "+
+			"ORDER BY score DESC, id COLLATE utf8mb4_bin ASC "+
 			"LIMIT %d",
 		strings.Join(columnsForRetrieve, ", "),
 		quoteIdentifier(table),
@@ -574,12 +833,16 @@ func buildKeywordRetrieveSQL(table string, params types.RetrieveParams) (string,
 	args = append(args, query)
 	args = append(args, whereArgs...)
 	args = append(args, query)
+	args = append(args, params.Threshold)
 	return stmt, args
 }
 
 func limitTopKByScore(rows []*types.IndexWithScore, topK int) []*types.IndexWithScore {
 	sort.SliceStable(rows, func(i, j int) bool {
-		return rows[i].Score > rows[j].Score
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
+		}
+		return rows[i].ID < rows[j].ID
 	})
 	limit := normalizeTopK(topK)
 	if len(rows) > limit {
@@ -724,9 +987,10 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 	var out []*types.IndexWithScore
 	for rows.Next() {
 		var (
-			id, content, sourceID, chunkID      string
-			knowledgeID, knowledgeBaseID, tagID string
-			sourceType                          int
+			id                                  string
+			content, sourceID, chunkID          sql.NullString
+			knowledgeID, knowledgeBaseID, tagID sql.NullString
+			sourceType                          sql.NullInt64
 			isEnabled                           sql.NullBool
 			score                               float64
 		)
@@ -737,13 +1001,13 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 		}
 		out = append(out, &types.IndexWithScore{
 			ID:              id,
-			Content:         content,
-			SourceID:        sourceID,
-			SourceType:      types.SourceType(sourceType),
-			ChunkID:         chunkID,
-			KnowledgeID:     knowledgeID,
-			KnowledgeBaseID: knowledgeBaseID,
-			TagID:           tagID,
+			Content:         content.String,
+			SourceID:        sourceID.String,
+			SourceType:      types.SourceType(sourceType.Int64),
+			ChunkID:         chunkID.String,
+			KnowledgeID:     knowledgeID.String,
+			KnowledgeBaseID: knowledgeBaseID.String,
+			TagID:           tagID.String,
 			Score:           score,
 			MatchType:       matchType,
 			IsEnabled:       !isEnabled.Valid || isEnabled.Bool,
@@ -757,30 +1021,35 @@ func scanCopyRows(rows *sql.Rows) ([]*MysqlVectorEmbedding, error) {
 	var out []*MysqlVectorEmbedding
 	for rows.Next() {
 		var (
-			id, content, sourceID, chunkID      string
-			knowledgeID, knowledgeBaseID, tagID string
-			sourceType                          int
-			isEnabled                           bool
+			id                                  string
+			content, sourceID, chunkID          sql.NullString
+			knowledgeID, knowledgeBaseID, tagID sql.NullString
+			sourceType                          sql.NullInt64
+			isEnabled                           sql.NullBool
 			embeddingRaw                        []byte
 		)
 		if err := rows.Scan(&id, &content, &sourceID, &sourceType,
 			&chunkID, &knowledgeID, &knowledgeBaseID, &tagID, &isEnabled, &embeddingRaw); err != nil {
 			return nil, fmt.Errorf("scan copy row: %w", err)
 		}
-		vec, err := parseEmbeddingJSON(embeddingRaw)
-		if err != nil {
-			return nil, fmt.Errorf("parse embedding: %w", err)
+		var vec []float32
+		if len(embeddingRaw) > 0 {
+			var err error
+			vec, err = parseEmbeddingJSON(embeddingRaw)
+			if err != nil {
+				return nil, fmt.Errorf("parse embedding: %w", err)
+			}
 		}
 		out = append(out, &MysqlVectorEmbedding{
 			ID:              id,
-			Content:         content,
-			SourceID:        sourceID,
-			SourceType:      sourceType,
-			ChunkID:         chunkID,
-			KnowledgeID:     knowledgeID,
-			KnowledgeBaseID: knowledgeBaseID,
-			TagID:           tagID,
-			IsEnabled:       isEnabled,
+			Content:         content.String,
+			SourceID:        sourceID.String,
+			SourceType:      int(sourceType.Int64),
+			ChunkID:         chunkID.String,
+			KnowledgeID:     knowledgeID.String,
+			KnowledgeBaseID: knowledgeBaseID.String,
+			TagID:           tagID.String,
+			IsEnabled:       !isEnabled.Valid || isEnabled.Bool,
 			Embedding:       vec,
 		})
 	}
