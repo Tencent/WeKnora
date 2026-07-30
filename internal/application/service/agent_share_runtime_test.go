@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -88,4 +89,25 @@ func TestFilterSharedAgentWriteTools(t *testing.T) {
 		tools.ToolWikiReadIssue,
 		tools.ToolWebSearch,
 	}, got)
+}
+
+func TestFilterSharedAgentWriteToolsCoversAllWikiMutations(t *testing.T) {
+	readOnlyWikiTools := map[string]bool{
+		tools.ToolWikiReadPage:      true,
+		tools.ToolWikiSearch:        true,
+		tools.ToolWikiReadSourceDoc: true,
+		tools.ToolWikiReadIssue:     true,
+	}
+
+	for _, definition := range tools.AvailableToolDefinitions() {
+		if !strings.HasPrefix(definition.Name, "wiki_") {
+			continue
+		}
+		filtered := filterSharedAgentWriteTools([]string{definition.Name})
+		if readOnlyWikiTools[definition.Name] {
+			require.Equal(t, []string{definition.Name}, filtered, "read-only wiki tool %q should remain available", definition.Name)
+			continue
+		}
+		require.Empty(t, filtered, "wiki mutation tool %q must be filtered for shared agents", definition.Name)
+	}
 }

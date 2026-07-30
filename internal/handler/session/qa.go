@@ -502,7 +502,7 @@ func (h *Handler) resolveAgent(
 			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
 				secutils.SanitizeForLog(agentID), err)
 		}
-	} else {
+	} else if customAgent != nil {
 		logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
 			customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
 	}

@@ -188,7 +188,10 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	if h.agentShareService != nil && requiredPermission == types.OrgRoleViewer {
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			sourceTenantID, _ := strconv.ParseUint(c.Query("agent_source_tenant_id"), 10, 64)
+			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+			if parseErr != nil {
+				return nil, ctx, errors.NewBadRequestError(parseErr.Error())
+			}
 			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID, sourceTenantID)
 			if err == nil && agent != nil {
 				if knowledge.TenantID != agent.TenantID {
@@ -1422,6 +1425,10 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if _, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam)); parseErr != nil {
+		c.Error(errors.NewBadRequestError(parseErr.Error()))
+		return
+	}
 
 	// agentAllowedKBIDs restricts results to the agent's configured KB scope.
 	// nil = no agent restriction; empty slice = agent has no KB access (none mode).
@@ -1994,7 +2001,11 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		requestedSourceTenantID, _ := strconv.ParseUint(c.Query("agent_source_tenant_id"), 10, 64)
+		requestedSourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+		if parseErr != nil {
+			c.Error(errors.NewBadRequestError(parseErr.Error()))
+			return
+		}
 		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, requestedSourceTenantID)
 		if err != nil {
 			if goerrors.Is(err, service.ErrAgentShareNotFound) || goerrors.Is(err, service.ErrAgentSharePermission) || goerrors.Is(err, service.ErrAgentNotFoundForShare) {
