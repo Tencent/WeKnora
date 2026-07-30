@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/vectorstoreid"
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
 )
@@ -181,7 +182,7 @@ func (q *qdrantRepository) Save(ctx context.Context,
 	}
 
 	collectionName := q.getCollectionName(dimension)
-	pointID := uuid.New().String()
+	pointID := vectorstoreid.StablePointID(embedding.SourceID)
 	point := &qdrant.PointStruct{
 		Id:      qdrant.NewID(pointID),
 		Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
@@ -195,6 +196,15 @@ func (q *qdrantRepository) Save(ctx context.Context,
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to save index: %v", err)
 		return fmt.Errorf("failed to save index for chunk ID %s: %w", embedding.ChunkID, err)
+	}
+	cleanup := qdrantLegacyCleanup{
+		sourceID: embedding.SourceID, stableID: point.Id,
+	}
+	if _, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collectionName,
+		Points:         qdrant.NewPointsSelectorFilter(cleanup.filter()),
+	}); err != nil {
+		return fmt.Errorf("failed to remove legacy random-id points: %w", err)
 	}
 
 	log.Infof("[Qdrant] Successfully saved index for chunk ID: %s, point ID: %s", embedding.ChunkID, pointID)
@@ -215,6 +225,7 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 
 	// Group points by dimension
 	pointsByDimension := make(map[int][]*qdrant.PointStruct)
+	legacyCleanupByDimension := make(map[int][]qdrantLegacyCleanup)
 
 	for _, embedding := range embeddingList {
 		embeddingDB := toQdrantVectorEmbedding(embedding, additionalParams)
@@ -224,12 +235,16 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 		}
 
 		dimension := len(embeddingDB.Embedding)
+		pointID := vectorstoreid.StablePointID(embedding.SourceID)
 		point := &qdrant.PointStruct{
-			Id:      qdrant.NewID(uuid.New().String()),
+			Id:      qdrant.NewID(pointID),
 			Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
 			Payload: createPayload(embeddingDB),
 		}
 		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
+		legacyCleanupByDimension[dimension] = append(legacyCleanupByDimension[dimension], qdrantLegacyCleanup{
+			sourceID: embedding.SourceID, stableID: point.Id,
+		})
 		log.Debugf("[Qdrant] Added chunk ID %s to batch request (dimension: %d)", embedding.ChunkID, dimension)
 	}
 
@@ -263,12 +278,37 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 				return fmt.Errorf("failed to upsert batch: %w", err)
 			}
 		}
+		// Older releases generated a fresh point ID for every write. Preserve
+		// the stable points just upserted and remove historical random-ID rows.
+		for _, cleanup := range legacyCleanupByDimension[dimension] {
+			_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+				CollectionName: collectionName,
+				Points:         qdrant.NewPointsSelectorFilter(cleanup.filter()),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to remove legacy random-id points: %w", err)
+			}
+		}
 		totalSaved += len(points)
 		log.Infof("[Qdrant] Saved %d points to collection %s", len(points), collectionName)
 	}
 
 	log.Infof("[Qdrant] Successfully batch saved %d indices", totalSaved)
 	return nil
+}
+
+type qdrantLegacyCleanup struct {
+	sourceID string
+	stableID *qdrant.PointId
+}
+
+func (c qdrantLegacyCleanup) filter() *qdrant.Filter {
+	return &qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeyword(fieldSourceID, c.sourceID),
+		},
+		MustNot: []*qdrant.Condition{qdrant.NewHasID(c.stableID)},
+	}
 }
 
 // DeleteByChunkIDList removes points from the collection based on chunk IDs
@@ -832,7 +872,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 			}
 
 			newPoint := &qdrant.PointStruct{
-				Id:      qdrant.NewID(uuid.New().String()),
+				Id:      qdrant.NewID(vectorstoreid.StablePointID(targetSourceID)),
 				Vectors: vectors,
 				Payload: newPayload,
 			}

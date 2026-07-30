@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/vectorstoreid"
 )
 
 const (
@@ -252,13 +253,17 @@ func (m *milvusRepository) Save(ctx context.Context,
 
 	collectionName := m.getCollectionName(dimension)
 
-	embeddingDB.ID = uuid.New().String()
+	embeddingDB.ID = vectorstoreid.StablePointID(embedding.SourceID)
 	opts := createUpsert(collectionName, []*MilvusVectorEmbedding{embeddingDB})
 
 	_, err := m.client.Upsert(ctx, opts)
 	if err != nil {
 		log.Errorf("[Milvus] Failed to save index: %v", err)
 		return err
+	}
+	if _, err := m.client.Delete(ctx,
+		client.NewDeleteOption(collectionName).WithExpr(milvusLegacyPointExpr(embeddingDB))); err != nil {
+		return fmt.Errorf("failed to remove legacy random-id points: %w", err)
 	}
 
 	log.Infof("[Milvus] Successfully saved index for chunk ID: %s", embedding.ChunkID)
@@ -310,7 +315,7 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 
 		for _, embedding := range embeddings {
 			embeddingDB := toMilvusVectorEmbedding(embedding, additionalParams)
-			embeddingDB.ID = uuid.New().String()
+			embeddingDB.ID = vectorstoreid.StablePointID(embedding.SourceID)
 			embeddingDBList = append(embeddingDBList, embeddingDB)
 		}
 		opts := createUpsert(collectionName, embeddingDBList)
@@ -319,12 +324,24 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 			log.Errorf("[Milvus] Failed to execute batch operation for dimension %d: %v", dimension, err)
 			return fmt.Errorf("failed to batch save (dimension %d): %w", dimension, err)
 		}
+		for _, embeddingDB := range embeddingDBList {
+			deleteOpt := client.NewDeleteOption(collectionName).WithExpr(milvusLegacyPointExpr(embeddingDB))
+			if _, err := m.client.Delete(ctx, deleteOpt); err != nil {
+				return fmt.Errorf("failed to remove legacy random-id points (dimension %d): %w", dimension, err)
+			}
+		}
 		totalSaved += n
 		log.Infof("[Milvus] Saved %d points to collection %s", n, collectionName)
 	}
 
 	log.Infof("[Milvus] Successfully batch saved %d indices", totalSaved)
 	return nil
+}
+
+func milvusLegacyPointExpr(embedding *MilvusVectorEmbedding) string {
+	return fmt.Sprintf("%s == %s and %s != %s",
+		fieldSourceID, formatValue(embedding.SourceID),
+		fieldID, formatValue(embedding.ID))
 }
 
 // DeleteByChunkIDList removes points from the collection based on chunk IDs
@@ -855,7 +872,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 			targetEmbedding := &MilvusVectorEmbedding{
-				ID:              uuid.New().String(),
+				ID:              vectorstoreid.StablePointID(targetSourceID),
 				Content:         sourceEmbedding.Content,
 				SourceID:        targetSourceID,
 				SourceType:      sourceEmbedding.SourceType,

@@ -260,6 +260,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
 ) {
+	previousStorageSize := knowledge.StorageSize
+
 	// Get options
 	var options ProcessChunksOptions
 	if len(opts) > 0 {
@@ -271,6 +273,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
+		return
+	}
+	if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attemptFromCtx(ctx)) {
+		logger.Infof(ctx, "Knowledge attempt superseded, skipping chunk processing: %s", knowledge.ID)
 		return
 	}
 
@@ -287,36 +293,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
-	}
-
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
+	// Resolve the target retrieve engine without deleting the currently usable
+	// vectors. Reconciliation removes only obsolete chunk IDs after commit.
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
-		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
-		}
+	if err != nil && embeddingModel != nil {
+		logger.Errorf(ctx, "Failed to initialize retrieve engine: %v", err)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		return
 	}
-
-	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
-	}
-
-	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
 
 	// ========== DocReader 解析结果日志 ==========
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
@@ -441,6 +430,52 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
+	existingChunks, err := s.chunkService.GetRepository().ListActiveIngestionChunksByKnowledgeID(
+		ctx, knowledge.TenantID, knowledge.ID,
+	)
+	if err != nil {
+		logger.Errorf(ctx, "List active ingestion chunks failed: %v", err)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+	desiredChunks := make([]*types.Chunk, 0, len(parentDBChunks)+len(textDBChunks))
+	desiredChunks = append(desiredChunks, parentDBChunks...)
+	desiredChunks = append(desiredChunks, textDBChunks...)
+	reconcilePlan, err := PlanIngestionChunkReconcile(existingChunks, desiredChunks)
+	if err != nil {
+		logger.Errorf(ctx, "Plan ingestion chunk reconciliation failed: %v", err)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+	if err := BindReconciledChunkIDs(reconcilePlan, parentDBChunks, textDBChunks, chunks); err != nil {
+		logger.Errorf(ctx, "Bind reconciled chunk IDs failed: %v", err)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+	reconcileMutation, err := BuildIngestionChunkMutation(existingChunks, reconcilePlan, attemptFromCtx(ctx))
+	if err != nil {
+		logger.Errorf(ctx, "Build ingestion chunk mutation failed: %v", err)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+	addedTextIDs := reconcileTextChunkIDs(reconcilePlan.Added)
+	removedTextChunks := make([]*types.Chunk, 0, len(reconcilePlan.Removed)+len(reconcilePlan.Legacy))
+	removedTextChunks = append(removedTextChunks, reconcilePlan.Removed...)
+	removedTextChunks = append(removedTextChunks, reconcilePlan.Legacy...)
+	removedTextIDs := reconcileTextChunkIDs(removedTextChunks)
+
 	// Check if knowledge is being deleted/cancelled before writing chunks.
 	// Nothing has been persisted yet, so both branches just bail.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
@@ -448,32 +483,21 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 
-	// Save chunks to database — ALWAYS, regardless of indexing strategy.
-	// Chunks are needed for wiki generation, graph extraction, and summary generation
-	// even when vector/keyword indexing is disabled.
+	// Keep the chunking stage open until the database reconciliation commits.
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
+		"matched":        len(reconcilePlan.Matched),
+		"added":          len(reconcilePlan.Added),
+		"removed":        len(reconcilePlan.Removed),
+		"legacy":         len(reconcilePlan.Legacy),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.failStage(ctx, knowledge.ID, types.StageChunking,
-			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
-		return
-	}
 	totalChunkChars := 0
 	for _, c := range insertChunks {
 		totalChunkChars += len(c.Content)
 	}
-	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
-		"chunks_written":   len(insertChunks),
-		"total_text_chars": totalChunkChars,
-	})
 
-	// Create index information and perform vector indexing — only when vector/keyword is enabled.
-	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
+	// Create index information and perform vector indexing before switching the
+	// active database row set. Stable-identity matches still execute Embedding.
 	var totalStorageSize int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
 		embedInput := types.JSONMap{
@@ -526,7 +550,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				return
 			}
 			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
+			storageWithoutPrevious := tenantInfo.StorageUsed - previousStorageSize
+			if storageWithoutPrevious < 0 {
+				storageWithoutPrevious = 0
+			}
+			if storageWithoutPrevious+totalStorageSize > tenantInfo.StorageQuota {
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
@@ -545,6 +573,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
+			return
+		}
+		if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attemptFromCtx(ctx)) {
+			logger.Infof(ctx, "Knowledge attempt superseded before indexing: %s", knowledge.ID)
 			return
 		}
 
@@ -571,16 +603,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
-			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
-			}
-
-			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
+			// BatchIndex may have partially written newly added IDs. Compensate
+			// only those IDs; matched IDs belong to still-active old rows.
+			if len(addedTextIDs) > 0 {
+				if cleanupErr := retrieveEngine.DeleteByChunkIDList(
+					ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type,
+				); cleanupErr != nil {
+					logger.Errorf(ctx, "Delete partially indexed added chunks failed: %v", cleanupErr)
+				}
 			}
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
@@ -640,6 +670,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 				}
+			} else if len(addedTextIDs) > 0 {
+				if err := retrieveEngine.DeleteByChunkIDList(ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup added index after cancellation: %v", err)
+				}
+			}
+			return
+		}
+		if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attemptFromCtx(ctx)) {
+			logger.Infof(ctx, "Knowledge attempt superseded after indexing: %s", knowledge.ID)
+			if len(addedTextIDs) > 0 {
+				if err := retrieveEngine.DeleteByChunkIDList(ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup added index after supersede: %v", err)
+				}
 			}
 			return
 		}
@@ -647,6 +690,64 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
 	}
+
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx, "Knowledge aborted (%s) before reconciliation commit: %s", status, knowledge.ID)
+		if embeddingModel != nil && retrieveEngine != nil && len(addedTextIDs) > 0 {
+			if err := retrieveEngine.DeleteByChunkIDList(ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup added index before aborted commit: %v", err)
+			}
+		}
+		return
+	}
+	if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attemptFromCtx(ctx)) {
+		logger.Infof(ctx, "Knowledge attempt superseded before reconciliation commit: %s", knowledge.ID)
+		if embeddingModel != nil && retrieveEngine != nil && len(addedTextIDs) > 0 {
+			if err := retrieveEngine.DeleteByChunkIDList(ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup added index before superseded commit: %v", err)
+			}
+		}
+		return
+	}
+
+	if err := s.chunkService.GetRepository().ApplyIngestionChunkReconcile(
+		ctx, knowledge.TenantID, knowledge.ID, reconcileMutation,
+	); err != nil {
+		logger.Errorf(ctx, "Apply ingestion chunk reconciliation failed: %v", err)
+		if embeddingModel != nil && retrieveEngine != nil && len(addedTextIDs) > 0 {
+			if cleanupErr := retrieveEngine.DeleteByChunkIDList(
+				ctx, addedTextIDs, embeddingModel.GetDimensions(), kb.Type,
+			); cleanupErr != nil {
+				logger.Errorf(ctx, "Cleanup added vectors after reconciliation failure failed: %v", cleanupErr)
+			}
+		}
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+		s.failStage(ctx, knowledge.ID, types.StageChunking,
+			werrors.ErrCodeChunkingFailed, "reconcile chunks failed", err)
+		return
+	}
+
+	if embeddingModel != nil && retrieveEngine != nil && len(removedTextIDs) > 0 {
+		if err := retrieveEngine.DeleteByChunkIDList(
+			ctx, removedTextIDs, embeddingModel.GetDimensions(), kb.Type,
+		); err != nil {
+			logger.Errorf(ctx, "Delete removed chunk vectors failed: %v", err)
+			s.enqueueIngestionIndexCleanup(ctx, tenantInfo, kb, removedTextIDs)
+		}
+	}
+
+	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+		logger.Warnf(ctx, "Failed to reset graph after chunk reconciliation: %v", err)
+	}
+	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+		"chunks_written":   len(reconcilePlan.Matched) + len(reconcilePlan.Added),
+		"chunks_removed":   len(reconcilePlan.Removed) + len(reconcilePlan.Legacy),
+		"total_text_chars": totalChunkChars,
+	})
 
 	// Check if this document has extracted images that will be processed asynchronously
 	isImage := IsImageType(knowledge.FileType)
@@ -701,12 +802,53 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
+	// Reparse keeps the previous artifacts available until replacement. Account
+	// only for the storage delta so rebuilding a document does not double-charge
+	// the tenant while the old vectors still exist.
+	storageDelta := totalStorageSize - previousStorageSize
+	tenantInfo.StorageUsed += storageDelta
+	if tenantInfo.StorageUsed < 0 {
+		tenantInfo.StorageUsed = 0
+	}
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageDelta); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
+}
+
+// enqueueIngestionIndexCleanup gives post-commit vector cleanup durable retry
+// semantics. The shared index:delete worker routes from the snapshotted store
+// binding, so a later KB reconfiguration cannot send cleanup to the wrong
+// backend.
+func (s *knowledgeService) enqueueIngestionIndexCleanup(
+	ctx context.Context,
+	tenant *types.Tenant,
+	kb *types.KnowledgeBase,
+	chunkIDs []string,
+) {
+	if s.task == nil || tenant == nil || kb == nil || len(chunkIDs) == 0 {
+		return
+	}
+	payload := types.IndexDeletePayload{
+		TenantID:         tenant.ID,
+		KnowledgeBaseID:  kb.ID,
+		EmbeddingModelID: kb.EmbeddingModelID,
+		KBType:           kb.Type,
+		ChunkIDs:         slices.Clone(chunkIDs),
+		EffectiveEngines: tenant.GetEffectiveEngines(),
+		VectorStoreID:    kb.VectorStoreID,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "Marshal ingestion index cleanup task failed: %v", err)
+		return
+	}
+	task := asynq.NewTask(types.TypeIndexDelete, payloadBytes,
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(10), asynq.Timeout(time.Hour))
+	if _, err := s.task.Enqueue(task); err != nil {
+		logger.Errorf(ctx, "Enqueue ingestion index cleanup task failed: %v", err)
+	}
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
@@ -2145,7 +2287,7 @@ func (s *knowledgeService) ReparseKnowledge(
 			return nil, err
 		}
 
-		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true, reparseAttempt); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
 			existing.ParseStatus = "failed"
 			existing.ErrorMessage = "Failed to enqueue processing task"
@@ -2154,14 +2296,10 @@ func (s *knowledgeService) ReparseKnowledge(
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
-	}
+	// Preserve the currently active chunks, vectors, graph, and extracted images
+	// until the replacement parse has succeeded. processChunks performs the
+	// ingestion reconciliation instead of clearing resources before enqueue.
+	logger.Infof(ctx, "Preserving existing resources while scheduling reparse: %s", knowledgeID)
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
@@ -2664,8 +2802,9 @@ func (s *knowledgeService) UpdateImageInfo(
 	return nil
 }
 
-// ProcessManualUpdate handles Asynq manual knowledge update tasks.
-// It performs cleanup of old indexes/chunks (when NeedCleanup is true) and re-indexes the content.
+// ProcessManualUpdate handles Asynq manual knowledge update tasks. Existing
+// resources stay available while replacement content is parsed and re-indexed;
+// NeedCleanup is retained only for backward-compatible task decoding.
 func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Task) error {
 	var payload types.ManualProcessPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -2718,6 +2857,20 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
+			attempt = n
+		} else if err != nil {
+			logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+		}
+	}
+	ctx = withAttempt(ctx, attempt)
+	if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attempt) {
+		logger.Infof(ctx, "ProcessManualUpdate: attempt %d superseded for %s", attempt, knowledge.ID)
+		return nil
+	}
+
 	// Re-check abort status right before marking processing — see the same
 	// note in ProcessDocument for the cancel race this guards.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
@@ -2732,30 +2885,11 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 
-	// Allocate a fresh span-tracking attempt for this manual (re)index.
-	// Without it attemptFromCtx stays 0, so processChunks drops all stage
-	// spans and KnowledgePostProcess falls back to LatestAttempt — piling
-	// this run's summary/wiki subspans onto the previous attempt's trace.
-	attempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-		attempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
-	}
-	ctx = withAttempt(ctx, attempt)
-
-	// Cleanup old resources (indexes, chunks, graph) for update operations
+	// Keep the previous resources available while manual content is parsed. The
+	// NeedCleanup flag is retained for payload compatibility; cleanup is deferred
+	// to ingestion reconciliation after the replacement result is ready.
 	if payload.NeedCleanup {
-		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_id": payload.KnowledgeID,
-			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
-		}
+		logger.Infof(ctx, "ProcessManualUpdate: deferring resource cleanup to reconciliation: %s", knowledge.ID)
 	}
 
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
@@ -2852,6 +2986,17 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
+			attempt = n
+		}
+	}
+	ctx = withAttempt(ctx, attempt)
+	if attemptSuperseded(ctx, s.tracker(), knowledge.ID, attempt) {
+		logger.Infof(ctx, "ProcessDocument: attempt %d superseded for %s", attempt, knowledge.ID)
+		return nil
+	}
 
 	// Re-check abort status right before flipping to "processing" — closes
 	// the race where the user cancels between the entry guard above and
@@ -2867,20 +3012,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
 		return nil
 	}
-
-	// Resolve the attempt for span tracking. The enqueue site sets
-	// payload.Attempt to a fresh number for the initial parse and to
-	// max+1 for each user-initiated reparse. Asynq retries within a
-	// single user action keep the same payload (so retries record
-	// onto the same attempt). For payloads predating this code we
-	// fall back to OpenAttempt.
-	attempt := payload.Attempt
-	if attempt <= 0 {
-		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-			attempt = n
-		}
-	}
-	ctx = withAttempt(ctx, attempt)
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {

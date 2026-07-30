@@ -1028,7 +1028,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return existing, nil
 	}
 
-	// Publish: persist pending status and enqueue async task for cleanup + re-indexing
+	// Publish: persist pending status and enqueue async reconciliation/re-indexing.
 	existing.ParseStatus = "pending"
 	existing.Description = ""
 	existing.ProcessedAt = nil
@@ -1054,10 +1054,21 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	return existing, nil
 }
 
-// enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
+// enqueueManualProcessing enqueues a manual:process Asynq task for async reconciliation and re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, requestedAttempt ...int,
 ) error {
+	attempt := 0
+	if len(requestedAttempt) > 0 {
+		attempt = requestedAttempt[0]
+	}
+	if attempt <= 0 {
+		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, ""); err == nil && root != nil {
+			attempt = n
+		} else if err != nil {
+			logger.Warnf(ctx, "enqueueManualProcessing: OpenAttempt failed for %s: %v", knowledge.ID, err)
+		}
+	}
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
 		RequestId:       requestID,
@@ -1066,6 +1077,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)

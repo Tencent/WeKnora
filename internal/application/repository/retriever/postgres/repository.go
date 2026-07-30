@@ -93,12 +93,24 @@ func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, add
 func (g *pgRepository) BatchSave(
 	ctx context.Context, indexInfoList []*types.IndexInfo, additionalParams map[string]any,
 ) error {
+	if len(indexInfoList) == 0 {
+		return nil
+	}
 	logger.GetLogger(ctx).Infof("[Postgres] Batch saving %d indices", len(indexInfoList))
 	indexInfoDBList := make([]*pgVector, len(indexInfoList))
 	for i := range indexInfoList {
 		indexInfoDBList[i] = toDBVectorEmbedding(indexInfoList[i], additionalParams)
 	}
-	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(indexInfoDBList).Error
+	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		sourceIDs := make([]string, 0, len(indexInfoDBList))
+		for _, row := range indexInfoDBList {
+			sourceIDs = append(sourceIDs, row.SourceID)
+		}
+		if err := tx.Where("source_id IN ?", sourceIDs).Delete(&pgVector{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(indexInfoDBList).Error
+	})
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Batch save failed: %v", err)
 		return err

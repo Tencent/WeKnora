@@ -3,8 +3,10 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -238,6 +240,258 @@ func TestCreateChunks_SQLite_StableIdentitySurvivesRebuildWithRandomRowIDs(t *te
 	require.Len(t, activeRows, 1)
 	require.Equal(t, second.ID, activeRows[0].ID)
 	require.False(t, activeRows[0].DeletedAt.Valid)
+}
+
+func TestListActiveIngestionChunksByKnowledgeID_SQLite_ScopesManagedActiveRows(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	text := makeReconcileRepositoryChunk("text", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-text")
+	parent := makeReconcileRepositoryChunk("parent", 1, "kb-1", "knowledge-1", types.ChunkTypeParentText, "stable-parent")
+	legacy := makeReconcileRepositoryChunk("legacy", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "")
+	derived := makeReconcileRepositoryChunk("summary", 1, "kb-1", "knowledge-1", types.ChunkTypeSummary, "")
+	otherTenant := makeReconcileRepositoryChunk("other-tenant", 2, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-other-tenant")
+	otherKnowledge := makeReconcileRepositoryChunk("other-knowledge", 1, "kb-1", "knowledge-2", types.ChunkTypeText, "stable-other-knowledge")
+	deleted := makeReconcileRepositoryChunk("deleted", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-deleted")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{
+		text, parent, legacy, derived, otherTenant, otherKnowledge, deleted,
+	}))
+	require.NoError(t, db.Delete(deleted).Error)
+
+	got, err := repo.ListActiveIngestionChunksByKnowledgeID(ctx, 1, "knowledge-1")
+	require.NoError(t, err)
+	require.Equal(t, []string{"legacy", "parent", "text"}, chunkIDs(got))
+
+	empty, err := repo.ListActiveIngestionChunksByKnowledgeID(ctx, 1, "missing")
+	require.NoError(t, err)
+	require.NotNil(t, empty)
+	require.Empty(t, empty)
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_AppliesAtomicManagedDiff(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	createdAt := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
+	matched := makeReconcileRepositoryChunk("matched", 1, "kb-old", "knowledge-1", types.ChunkTypeText, "stable-matched")
+	matched.CreatedAt = createdAt
+	matched.Flags = 17
+	matched.Metadata = types.JSON(`{"preserved":true}`)
+	matched.ImageInfo = `{"url":"preserved"}`
+	matched.Status = 7
+	matched.IsEnabled = false
+	removed := makeReconcileRepositoryChunk("removed", 1, "kb-old", "knowledge-1", types.ChunkTypeParentText, "stable-removed")
+	derived := makeReconcileRepositoryChunk("summary", 1, "kb-old", "knowledge-1", types.ChunkTypeSummary, "")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{matched, removed, derived}))
+
+	desiredMatched := makeReconcileRepositoryChunk("temporary-id", 1, "kb-new", "knowledge-1", types.ChunkTypeText, "stable-matched")
+	desiredMatched.Content = "updated content"
+	desiredMatched.ChunkIndex = 9
+	desiredMatched.StartAt = 100
+	desiredMatched.EndAt = 200
+	desiredMatched.ParentChunkID = "new-parent"
+	desiredMatched.PreChunkID = "new-pre"
+	desiredMatched.NextChunkID = "new-next"
+	desiredMatched.Flags = 0
+	desiredMatched.Metadata = nil
+	desiredMatched.ImageInfo = ""
+	desiredMatched.Status = 0
+	desiredMatched.IsEnabled = true
+	desiredMatched.UpdatedAt = time.Now().Add(time.Minute).Truncate(time.Millisecond)
+	added := makeReconcileRepositoryChunk("added", 1, "kb-new", "knowledge-1", types.ChunkTypeParentText, "stable-added")
+
+	err := repo.ApplyIngestionChunkReconcile(ctx, 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		ExpectedActive: []interfaces.IngestionChunkSnapshot{
+			ingestionSnapshot(matched),
+			ingestionSnapshot(removed),
+		},
+		Matched: []interfaces.IngestionChunkUpdate{{ExistingID: matched.ID, Desired: desiredMatched}},
+		Added:   []*types.Chunk{added},
+		RemovedIDs: []string{
+			removed.ID,
+		},
+	})
+	require.NoError(t, err)
+
+	var savedMatched types.Chunk
+	require.NoError(t, db.First(&savedMatched, "id = ?", matched.ID).Error)
+	require.Equal(t, matched.ID, savedMatched.ID)
+	require.Equal(t, matched.SeqID, savedMatched.SeqID)
+	require.WithinDuration(t, createdAt, savedMatched.CreatedAt, time.Millisecond)
+	require.Equal(t, types.ChunkFlags(17), savedMatched.Flags)
+	require.Equal(t, types.JSON(`{"preserved":true}`), savedMatched.Metadata)
+	require.Equal(t, `{"url":"preserved"}`, savedMatched.ImageInfo)
+	require.Equal(t, 7, savedMatched.Status)
+	require.False(t, savedMatched.IsEnabled)
+	require.Equal(t, "kb-new", savedMatched.KnowledgeBaseID)
+	require.Equal(t, "updated content", savedMatched.Content)
+	require.Equal(t, 9, savedMatched.ChunkIndex)
+	require.Equal(t, 100, savedMatched.StartAt)
+	require.Equal(t, 200, savedMatched.EndAt)
+	require.Equal(t, "new-parent", savedMatched.ParentChunkID)
+	require.Equal(t, "new-pre", savedMatched.PreChunkID)
+	require.Equal(t, "new-next", savedMatched.NextChunkID)
+
+	var savedAdded types.Chunk
+	require.NoError(t, db.First(&savedAdded, "id = ?", added.ID).Error)
+	require.NotZero(t, savedAdded.SeqID)
+
+	var removedCount int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", removed.ID).Count(&removedCount).Error)
+	require.Zero(t, removedCount)
+	var deletedRemoved types.Chunk
+	require.NoError(t, db.Unscoped().First(&deletedRemoved, "id = ?", removed.ID).Error)
+	require.True(t, deletedRemoved.DeletedAt.Valid)
+
+	var savedDerived types.Chunk
+	require.NoError(t, db.First(&savedDerived, "id = ?", derived.ID).Error)
+	require.Equal(t, types.ChunkTypeSummary, savedDerived.ChunkType)
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_RejectsStaleSnapshotWithoutWrites(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	existing := makeReconcileRepositoryChunk("existing", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-existing")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{existing}))
+	added := makeReconcileRepositoryChunk("added", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-added")
+
+	err := repo.ApplyIngestionChunkReconcile(ctx, 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		ExpectedActive: nil,
+		Added:          []*types.Chunk{added},
+	})
+	require.ErrorContains(t, err, "snapshot changed")
+
+	var addedCount int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", added.ID).Count(&addedCount).Error)
+	require.Zero(t, addedCount)
+	var existingCount int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", existing.ID).Count(&existingCount).Error)
+	require.Equal(t, int64(1), existingCount)
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_RollsBackEarlierUpdatesOnInsertFailure(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	existing := makeReconcileRepositoryChunk("existing", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-existing")
+	existing.Content = "before"
+	conflicting := makeReconcileRepositoryChunk("conflict", 1, "kb-1", "knowledge-2", types.ChunkTypeText, "stable-conflict")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{existing, conflicting}))
+	desired := makeReconcileRepositoryChunk("temporary", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-existing")
+	desired.Content = "after"
+	addedWithConflictingID := makeReconcileRepositoryChunk(conflicting.ID, 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-added")
+
+	err := repo.ApplyIngestionChunkReconcile(ctx, 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		ExpectedActive: []interfaces.IngestionChunkSnapshot{ingestionSnapshot(existing)},
+		Matched:        []interfaces.IngestionChunkUpdate{{ExistingID: existing.ID, Desired: desired}},
+		Added:          []*types.Chunk{addedWithConflictingID},
+	})
+	require.Error(t, err)
+
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", existing.ID).Error)
+	require.Equal(t, "before", saved.Content)
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_RejectsOutOfScopeMutation(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	desired := makeReconcileRepositoryChunk("id", 2, "kb-1", "knowledge-1", types.ChunkTypeText, "stable")
+
+	err := repo.ApplyIngestionChunkReconcile(context.Background(), 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		Added: []*types.Chunk{desired},
+	})
+	require.ErrorContains(t, err, "outside tenant")
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_RejectsAddedActiveIdentityDuplicate(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	existing := makeReconcileRepositoryChunk("existing", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-duplicate")
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{existing}))
+	added := makeReconcileRepositoryChunk("added", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-duplicate")
+
+	err := repo.ApplyIngestionChunkReconcile(ctx, 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		ExpectedActive: []interfaces.IngestionChunkSnapshot{ingestionSnapshot(existing)},
+		Added:          []*types.Chunk{added},
+	})
+	require.ErrorContains(t, err, "duplicates active stable identity")
+
+	var count int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("knowledge_id = ?", "knowledge-1").Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestApplyIngestionChunkReconcile_SQLite_RejectsSupersededAttempt(t *testing.T) {
+	db := setupChunkTestDB(t)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE knowledge_processing_spans (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			knowledge_id TEXT NOT NULL,
+			attempt INTEGER NOT NULL
+		)
+	`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledge_processing_spans (knowledge_id, attempt) VALUES (?, ?)",
+		"knowledge-1", 2,
+	).Error)
+	repo := NewChunkRepository(db)
+	added := makeReconcileRepositoryChunk("added", 1, "kb-1", "knowledge-1", types.ChunkTypeText, "stable-added")
+
+	err := repo.ApplyIngestionChunkReconcile(context.Background(), 1, "knowledge-1", interfaces.IngestionChunkReconcileMutation{
+		ExpectedAttempt: 1,
+		Added:           []*types.Chunk{added},
+	})
+	require.ErrorContains(t, err, "superseded by attempt 2")
+
+	var count int64
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", added.ID).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func makeReconcileRepositoryChunk(
+	id string,
+	tenantID uint64,
+	kbID string,
+	knowledgeID string,
+	chunkType types.ChunkType,
+	stableIdentity string,
+) *types.Chunk {
+	return &types.Chunk{
+		ID:              id,
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     knowledgeID,
+		Content:         id + " content",
+		ChunkType:       chunkType,
+		StableIdentity:  stableIdentity,
+		IdentityVersion: "chunk-identity-v1",
+		IsEnabled:       true,
+	}
+}
+
+func ingestionSnapshot(chunk *types.Chunk) interfaces.IngestionChunkSnapshot {
+	return interfaces.IngestionChunkSnapshot{
+		ID:              chunk.ID,
+		StableIdentity:  chunk.StableIdentity,
+		IdentityVersion: chunk.IdentityVersion,
+		ChunkType:       chunk.ChunkType,
+	}
+}
+
+func chunkIDs(chunks []*types.Chunk) []string {
+	ids := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		ids[i] = chunk.ID
+	}
+	return ids
 }
 
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {

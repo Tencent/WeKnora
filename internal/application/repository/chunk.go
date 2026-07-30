@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
@@ -149,6 +150,363 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 		return nil, err
 	}
 	return chunks, nil
+}
+
+// ListActiveIngestionChunksByKnowledgeID returns the complete active database
+// rows managed by document-ingestion reconciliation. GORM's default scope is
+// intentionally retained so soft-deleted history is never returned.
+func (r *chunkRepository) ListActiveIngestionChunksByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+) ([]*types.Chunk, error) {
+	chunks := make([]*types.Chunk, 0)
+	err := r.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?",
+			tenantID,
+			knowledgeID,
+			ingestionReconcileChunkTypes(),
+		).
+		Order("chunk_index ASC, id ASC").
+		Find(&chunks).Error
+	if err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ApplyIngestionChunkReconcile atomically applies a previously planned diff
+// for active text/parent_text rows. The active identity snapshot is validated
+// again under a write lock before any mutation is made.
+func (r *chunkRepository) ApplyIngestionChunkReconcile(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	mutation interfaces.IngestionChunkReconcileMutation,
+) error {
+	if err := validateIngestionChunkMutation(tenantID, knowledgeID, mutation); err != nil {
+		return err
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if mutation.ExpectedAttempt > 0 {
+			var latestAttempt int
+			if err := tx.Model(&types.KnowledgeProcessingSpan{}).
+				Where("knowledge_id = ?", knowledgeID).
+				Select("COALESCE(MAX(attempt), 0)").
+				Scan(&latestAttempt).Error; err != nil {
+				return fmt.Errorf("check latest ingestion attempt: %w", err)
+			}
+			if latestAttempt != mutation.ExpectedAttempt {
+				return fmt.Errorf(
+					"ingestion attempt %d superseded by attempt %d for knowledge %q",
+					mutation.ExpectedAttempt,
+					latestAttempt,
+					knowledgeID,
+				)
+			}
+		}
+
+		active := make([]*types.Chunk, 0)
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(
+				"tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?",
+				tenantID,
+				knowledgeID,
+				ingestionReconcileChunkTypes(),
+			).
+			Order("id ASC").
+			Find(&active).Error; err != nil {
+			return fmt.Errorf("lock active ingestion chunks: %w", err)
+		}
+
+		if err := validateActiveIngestionChunkSnapshot(active, mutation.ExpectedActive); err != nil {
+			return err
+		}
+
+		activeByID := make(map[string]*types.Chunk, len(active))
+		for _, chunk := range active {
+			activeByID[chunk.ID] = chunk
+		}
+		if err := validateFinalIngestionIdentities(active, mutation.RemovedIDs, mutation.Added); err != nil {
+			return err
+		}
+
+		for _, update := range mutation.Matched {
+			existing := activeByID[update.ExistingID]
+			if existing == nil {
+				return fmt.Errorf("matched ingestion chunk %q is not active", update.ExistingID)
+			}
+			if !sameIngestionChunkIdentity(existing, update.Desired) {
+				return fmt.Errorf(
+					"matched ingestion chunk %q identity no longer matches desired identity %q",
+					update.ExistingID,
+					update.Desired.StableIdentity,
+				)
+			}
+
+			updatedAt := update.Desired.UpdatedAt
+			if updatedAt.IsZero() {
+				updatedAt = time.Now()
+			}
+			result := tx.Model(&types.Chunk{}).
+				Where(
+					"tenant_id = ? AND knowledge_id = ? AND id = ? AND chunk_type IN ?",
+					tenantID,
+					knowledgeID,
+					update.ExistingID,
+					ingestionReconcileChunkTypes(),
+				).
+				Updates(map[string]interface{}{
+					"knowledge_base_id": update.Desired.KnowledgeBaseID,
+					"content":           common.CleanInvalidUTF8(update.Desired.Content),
+					"chunk_index":       update.Desired.ChunkIndex,
+					"start_at":          update.Desired.StartAt,
+					"end_at":            update.Desired.EndAt,
+					"parent_chunk_id":   update.Desired.ParentChunkID,
+					"pre_chunk_id":      update.Desired.PreChunkID,
+					"next_chunk_id":     update.Desired.NextChunkID,
+					"chunk_type":        update.Desired.ChunkType,
+					"stable_identity":   update.Desired.StableIdentity,
+					"identity_version":  update.Desired.IdentityVersion,
+					"updated_at":        updatedAt,
+				})
+			if result.Error != nil {
+				return fmt.Errorf("update matched ingestion chunk %q: %w", update.ExistingID, result.Error)
+			}
+			// Some MySQL configurations report zero affected rows when every
+			// assigned value is unchanged. The row was already locked and
+			// validated above, so only an impossible multi-row update is an error.
+			if result.RowsAffected > 1 {
+				return fmt.Errorf("update matched ingestion chunk %q affected %d rows", update.ExistingID, result.RowsAffected)
+			}
+		}
+
+		if len(mutation.Added) > 0 {
+			added := cloneChunksForInsert(mutation.Added)
+			if tx.Dialector.Name() == "sqlite" {
+				if err := types.AssignChunkSeqIDs(tx, added); err != nil {
+					return fmt.Errorf("assign added ingestion chunk seq_ids: %w", err)
+				}
+			}
+			if err := tx.Select("*").CreateInBatches(added, 100).Error; err != nil {
+				return fmt.Errorf("insert added ingestion chunks: %w", err)
+			}
+		}
+
+		if len(mutation.RemovedIDs) > 0 {
+			result := tx.Where(
+				"tenant_id = ? AND knowledge_id = ? AND id IN ? AND chunk_type IN ?",
+				tenantID,
+				knowledgeID,
+				mutation.RemovedIDs,
+				ingestionReconcileChunkTypes(),
+			).Delete(&types.Chunk{})
+			if result.Error != nil {
+				return fmt.Errorf("soft-delete removed ingestion chunks: %w", result.Error)
+			}
+			if result.RowsAffected != int64(len(mutation.RemovedIDs)) {
+				return fmt.Errorf(
+					"soft-delete removed ingestion chunks affected %d rows, expected %d",
+					result.RowsAffected,
+					len(mutation.RemovedIDs),
+				)
+			}
+		}
+
+		return nil
+	})
+}
+
+func ingestionReconcileChunkTypes() []types.ChunkType {
+	return []types.ChunkType{types.ChunkTypeText, types.ChunkTypeParentText}
+}
+
+func isIngestionRepositoryChunkType(chunkType types.ChunkType) bool {
+	return chunkType == types.ChunkTypeText || chunkType == types.ChunkTypeParentText
+}
+
+func validateIngestionChunkMutation(
+	tenantID uint64,
+	knowledgeID string,
+	mutation interfaces.IngestionChunkReconcileMutation,
+) error {
+	expectedIDs := make(map[string]struct{}, len(mutation.ExpectedActive))
+	for i, snapshot := range mutation.ExpectedActive {
+		if snapshot.ID == "" {
+			return fmt.Errorf("expected active ingestion chunk at index %d has empty ID", i)
+		}
+		if !isIngestionRepositoryChunkType(snapshot.ChunkType) {
+			return fmt.Errorf("expected active ingestion chunk %q has unmanaged type %q", snapshot.ID, snapshot.ChunkType)
+		}
+		if _, duplicate := expectedIDs[snapshot.ID]; duplicate {
+			return fmt.Errorf("duplicate expected active ingestion chunk ID %q", snapshot.ID)
+		}
+		expectedIDs[snapshot.ID] = struct{}{}
+	}
+
+	matchedIDs := make(map[string]struct{}, len(mutation.Matched))
+	for i, update := range mutation.Matched {
+		if update.ExistingID == "" {
+			return fmt.Errorf("matched ingestion update at index %d has empty existing ID", i)
+		}
+		if update.Desired == nil {
+			return fmt.Errorf("matched ingestion update %q has nil desired chunk", update.ExistingID)
+		}
+		if err := validateIngestionMutationChunk(tenantID, knowledgeID, update.Desired, "matched desired"); err != nil {
+			return err
+		}
+		if _, duplicate := matchedIDs[update.ExistingID]; duplicate {
+			return fmt.Errorf("duplicate matched ingestion chunk ID %q", update.ExistingID)
+		}
+		matchedIDs[update.ExistingID] = struct{}{}
+	}
+
+	addedIDs := make(map[string]struct{}, len(mutation.Added))
+	for _, chunk := range mutation.Added {
+		if err := validateIngestionMutationChunk(tenantID, knowledgeID, chunk, "added"); err != nil {
+			return err
+		}
+		if chunk.ID == "" {
+			return errors.New("added ingestion chunk has empty ID")
+		}
+		if _, duplicate := addedIDs[chunk.ID]; duplicate {
+			return fmt.Errorf("duplicate added ingestion chunk ID %q", chunk.ID)
+		}
+		addedIDs[chunk.ID] = struct{}{}
+	}
+
+	removedIDs := make(map[string]struct{}, len(mutation.RemovedIDs))
+	for _, id := range mutation.RemovedIDs {
+		if id == "" {
+			return errors.New("removed ingestion chunk has empty ID")
+		}
+		if _, duplicate := removedIDs[id]; duplicate {
+			return fmt.Errorf("duplicate removed ingestion chunk ID %q", id)
+		}
+		if _, matched := matchedIDs[id]; matched {
+			return fmt.Errorf("ingestion chunk %q is both matched and removed", id)
+		}
+		removedIDs[id] = struct{}{}
+	}
+	return nil
+}
+
+func validateIngestionMutationChunk(
+	tenantID uint64,
+	knowledgeID string,
+	chunk *types.Chunk,
+	kind string,
+) error {
+	if chunk == nil {
+		return fmt.Errorf("%s ingestion chunk is nil", kind)
+	}
+	if chunk.TenantID != tenantID || chunk.KnowledgeID != knowledgeID {
+		return fmt.Errorf(
+			"%s ingestion chunk %q is outside tenant %d knowledge %q",
+			kind,
+			chunk.ID,
+			tenantID,
+			knowledgeID,
+		)
+	}
+	if !isIngestionRepositoryChunkType(chunk.ChunkType) {
+		return fmt.Errorf("%s ingestion chunk %q has unmanaged type %q", kind, chunk.ID, chunk.ChunkType)
+	}
+	if chunk.StableIdentity == "" || chunk.IdentityVersion == "" {
+		return fmt.Errorf("%s ingestion chunk %q has incomplete stable identity", kind, chunk.ID)
+	}
+	return nil
+}
+
+func validateActiveIngestionChunkSnapshot(
+	active []*types.Chunk,
+	expected []interfaces.IngestionChunkSnapshot,
+) error {
+	if len(active) != len(expected) {
+		return fmt.Errorf("active ingestion chunk snapshot changed: found %d rows, expected %d", len(active), len(expected))
+	}
+
+	expectedByID := make(map[string]interfaces.IngestionChunkSnapshot, len(expected))
+	for _, snapshot := range expected {
+		expectedByID[snapshot.ID] = snapshot
+	}
+	identityOwners := make(map[string]string, len(active))
+	for _, chunk := range active {
+		if chunk.StableIdentity != "" {
+			identityKey := fmt.Sprintf("%d\x00%s\x00%s", chunk.TenantID, chunk.KnowledgeID, chunk.StableIdentity)
+			if owner, duplicate := identityOwners[identityKey]; duplicate {
+				return fmt.Errorf(
+					"duplicate active ingestion stable identity %q on chunk IDs %q and %q",
+					chunk.StableIdentity,
+					owner,
+					chunk.ID,
+				)
+			}
+			identityOwners[identityKey] = chunk.ID
+		}
+
+		snapshot, ok := expectedByID[chunk.ID]
+		if !ok || snapshot.StableIdentity != chunk.StableIdentity ||
+			snapshot.IdentityVersion != chunk.IdentityVersion || snapshot.ChunkType != chunk.ChunkType {
+			return fmt.Errorf("active ingestion chunk snapshot changed at row %q", chunk.ID)
+		}
+	}
+	return nil
+}
+
+func sameIngestionChunkIdentity(existing, desired *types.Chunk) bool {
+	return existing.TenantID == desired.TenantID &&
+		existing.KnowledgeID == desired.KnowledgeID &&
+		existing.ChunkType == desired.ChunkType &&
+		existing.StableIdentity != "" &&
+		existing.StableIdentity == desired.StableIdentity &&
+		existing.IdentityVersion != "" &&
+		existing.IdentityVersion == desired.IdentityVersion
+}
+
+func validateFinalIngestionIdentities(
+	active []*types.Chunk,
+	removedIDs []string,
+	added []*types.Chunk,
+) error {
+	removed := make(map[string]struct{}, len(removedIDs))
+	for _, id := range removedIDs {
+		removed[id] = struct{}{}
+	}
+	owners := make(map[string]string, len(active)+len(added))
+	for _, chunk := range active {
+		if chunk.StableIdentity == "" {
+			continue
+		}
+		if _, willRemove := removed[chunk.ID]; willRemove {
+			continue
+		}
+		owners[chunk.StableIdentity] = chunk.ID
+	}
+	for _, chunk := range added {
+		if owner, duplicate := owners[chunk.StableIdentity]; duplicate {
+			return fmt.Errorf(
+				"added ingestion chunk %q duplicates active stable identity %q owned by chunk %q",
+				chunk.ID,
+				chunk.StableIdentity,
+				owner,
+			)
+		}
+		owners[chunk.StableIdentity] = chunk.ID
+	}
+	return nil
+}
+
+func cloneChunksForInsert(chunks []*types.Chunk) []*types.Chunk {
+	cloned := make([]*types.Chunk, len(chunks))
+	for i, chunk := range chunks {
+		copy := *chunk
+		copy.Content = common.CleanInvalidUTF8(copy.Content)
+		cloned[i] = &copy
+	}
+	return cloned
 }
 
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination

@@ -29,19 +29,19 @@ const (
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
+	QueueDefault = "default"
 	// QueueChatAttachment carries session-scoped chat attachment parsing. It
 	// lives in the core pool but with a higher weight than QueueDefault so
 	// interactive chat uploads are not starved by knowledge-base batch imports.
 	QueueChatAttachment = "chat_attachment"
 	QueuePostProcess    = "postprocess"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -452,6 +452,7 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	Attempt         int    `json:"attempt,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.

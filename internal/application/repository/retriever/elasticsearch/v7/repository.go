@@ -256,14 +256,14 @@ func (e *elasticsearchRepository) Save(ctx context.Context,
 		return err
 	}
 
-	docID := uuid.New().String()
+	docID := embedding.SourceID
 	log.Debugf("[ElasticsearchV7] Creating document with ID: %s for chunk ID: %s", docID, embedding.ChunkID)
 
-	resp, err := e.client.Create(
+	resp, err := e.client.Index(
 		e.index,
-		docID,
 		bytes.NewReader(docBytes),
-		e.client.Create.WithContext(ctx),
+		e.client.Index.WithDocumentID(docID),
+		e.client.Index.WithContext(ctx),
 	)
 	if err != nil {
 		log.Errorf("[ElasticsearchV7] Failed to create document: %v", err)
@@ -344,8 +344,9 @@ func (e *elasticsearchRepository) prepareBulkRequestBody(ctx context.Context,
 		// Convert to Elasticsearch document format
 		embeddingDB := elasticsearchRetriever.ToDBVectorEmbedding(embedding, additionalParams)
 
-		// Generate document ID and metadata line
-		docID := uuid.New().String()
+		// SourceID is the stable row identity. The bulk index operation replaces
+		// an earlier document atomically when ingestion reuses a chunk ID.
+		docID := embedding.SourceID
 		meta := []byte(fmt.Sprintf(`{ "index" : { "_id" : "%s" } }%s`, docID, "\n"))
 
 		// Marshal document to JSON

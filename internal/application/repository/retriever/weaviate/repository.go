@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/vectorstoreid"
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
@@ -266,7 +267,7 @@ func (w *weaviateRepository) BatchSave(ctx context.Context,
 
 			obj := &models.Object{
 				Class:      collectionName,
-				ID:         strfmt.UUID(embeddingDB.ChunkID),
+				ID:         strfmt.UUID(vectorstoreid.CompatibleUUIDPointID(embedding.SourceID)),
 				Properties: dataSchema,
 				Vector:     embeddingDB.Embedding,
 			}
@@ -781,7 +782,7 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			isEnabled := true
 			newObj := &models.Object{
 				Class: collectionName,
-				ID:    strfmt.UUID(uuid.New().String()),
+				ID:    strfmt.UUID(vectorstoreid.CompatibleUUIDPointID(targetSourceID)),
 				Properties: map[string]interface{}{
 					fieldContent:         data[fieldContent],
 					fieldSourceID:        targetSourceID,

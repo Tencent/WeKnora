@@ -171,16 +171,47 @@ func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types
 			rows[i].Dimension = len(emb)
 		}
 	}
-	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(rows).Error; err != nil {
-		return err
-	}
-	for i, row := range rows {
-		r.syncFTS5Insert(ctx, row)
-		if len(embs[i]) > 0 && row.ID > 0 {
-			r.insertVec(ctx, row.ID, row.Dimension, embs[i])
+	for _, row := range rows {
+		if row.Dimension > 0 {
+			r.ensureVecTable(row.Dimension)
 		}
 	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		sourceIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			sourceIDs = append(sourceIDs, row.SourceID)
+		}
+		var replaced []sqliteEmbedding
+		if err := tx.Where("source_id IN ?", sourceIDs).Find(&replaced).Error; err != nil {
+			return err
+		}
+		if err := r.deleteRowsAndVecsWithDB(tx, replaced); err != nil {
+			return err
+		}
+		if len(replaced) > 0 {
+			ids := make([]uint, 0, len(replaced))
+			for _, row := range replaced {
+				ids = append(ids, row.ID)
+			}
+			if err := tx.Where("id IN ?", ids).Delete(&sqliteEmbedding{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Create(rows).Error; err != nil {
+			return err
+		}
+		for i, row := range rows {
+			if err := r.syncFTS5InsertWithDB(tx, row); err != nil {
+				return err
+			}
+			if len(embs[i]) > 0 && row.ID > 0 {
+				if err := r.insertVecWithDB(tx, row.ID, row.Dimension, embs[i]); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func (r *sqliteRepository) EstimateStorageSize(_ context.Context, indexInfoList []*types.IndexInfo, _ map[string]any) int64 {
@@ -496,15 +527,23 @@ func extractEmbedding(params map[string]any, sourceID string) []float32 {
 
 func (r *sqliteRepository) insertVec(_ context.Context, rowID uint, dim int, emb []float32) {
 	r.ensureVecTable(dim)
+	_ = r.insertVecWithDB(r.db, rowID, dim, emb)
+}
+
+func (r *sqliteRepository) insertVecWithDB(db *gorm.DB, rowID uint, dim int, emb []float32) error {
 	blob, err := sqlite_vec.SerializeFloat32(emb)
 	if err != nil {
-		return
+		return err
 	}
 	sql := fmt.Sprintf("INSERT INTO %s(rowid, embedding) VALUES (?, ?)", vecTableName(dim))
-	r.db.Exec(sql, rowID, blob)
+	return db.Exec(sql, rowID, blob).Error
 }
 
 func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmbedding) {
+	_ = r.deleteRowsAndVecsWithDB(r.db, rows)
+}
+
+func (r *sqliteRepository) deleteRowsAndVecsWithDB(db *gorm.DB, rows []sqliteEmbedding) error {
 	dimIDs := make(map[int][]uint)
 	for _, row := range rows {
 		if row.Dimension > 0 {
@@ -517,12 +556,17 @@ func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmb
 		}
 		tbl := vecTableName(dim)
 		for _, id := range ids {
-			r.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id)
+			if err := db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id).Error; err != nil {
+				return err
+			}
 		}
 	}
 	for _, row := range rows {
-		r.db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID)
+		if err := db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int) {
@@ -537,12 +581,16 @@ func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int
 }
 
 func (r *sqliteRepository) syncFTS5Insert(_ context.Context, row *sqliteEmbedding) {
+	_ = r.syncFTS5InsertWithDB(r.db, row)
+}
+
+func (r *sqliteRepository) syncFTS5InsertWithDB(db *gorm.DB, row *sqliteEmbedding) error {
 	if row.ID == 0 {
-		return
+		return nil
 	}
 	tokenizedContent := tokenizeCJKBigram(row.Content)
 	sql := `INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)`
-	r.db.Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID)
+	return db.Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID).Error
 }
 
 type whereClause struct {

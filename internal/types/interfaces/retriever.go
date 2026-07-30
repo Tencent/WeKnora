@@ -24,7 +24,11 @@ type RetrieveEngineRepository interface {
 	// Save saves the index info
 	Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error
 
-	// BatchSave saves the index info list
+	// BatchSave saves the index info list. Repeating a successful call for the
+	// same SourceID is an idempotent replace: the backend exposes
+	// one current logical record containing the last successful content,
+	// metadata and vector. This persistence contract is not an artifact cache;
+	// callers still perform every requested Embedding operation.
 	BatchSave(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) error
 
 	// EstimateStorageSize estimates the storage size

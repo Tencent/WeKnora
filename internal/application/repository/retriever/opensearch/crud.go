@@ -153,7 +153,7 @@ func buildBulkBody(alias string, infos []*types.IndexInfo, emb [][]float32, para
 		action := map[string]any{
 			"index": map[string]any{
 				"_index": alias,
-				"_id":    info.ChunkID,
+				"_id":    info.SourceID,
 			},
 		}
 		actionJSON, err := json.Marshal(action)

@@ -12,6 +12,35 @@ type ChunkImageInfo struct {
 	ImageInfo   string `gorm:"column:image_info"`
 }
 
+// IngestionChunkSnapshot identifies one active text/parent_text row observed
+// while planning reconciliation. ApplyIngestionChunkReconcile compares the
+// complete active snapshot again inside its transaction so a stale plan cannot
+// silently overwrite a concurrently changed row set.
+type IngestionChunkSnapshot struct {
+	ID              string
+	StableIdentity  string
+	IdentityVersion string
+	ChunkType       types.ChunkType
+}
+
+// IngestionChunkUpdate applies parser-owned fields from Desired to the active
+// row identified by ExistingID. Repository-managed and user/derived fields,
+// including SeqID, CreatedAt, Flags, Metadata, and ImageInfo, are preserved.
+type IngestionChunkUpdate struct {
+	ExistingID string
+	Desired    *types.Chunk
+}
+
+// IngestionChunkReconcileMutation is the atomic database mutation produced
+// from a previously planned text/parent_text reconciliation.
+type IngestionChunkReconcileMutation struct {
+	ExpectedActive  []IngestionChunkSnapshot
+	ExpectedAttempt int
+	Matched         []IngestionChunkUpdate
+	Added           []*types.Chunk
+	RemovedIDs      []string
+}
+
 // ChunkRepository defines the interface for chunk repository operations
 type ChunkRepository interface {
 	// CreateChunks creates chunks
@@ -30,6 +59,23 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListActiveIngestionChunksByKnowledgeID lists active text and parent_text
+	// rows only. It never uses Unscoped and includes legacy rows whose stable
+	// identity is empty.
+	ListActiveIngestionChunksByKnowledgeID(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+	) ([]*types.Chunk, error)
+	// ApplyIngestionChunkReconcile atomically updates matched ingestion rows,
+	// inserts added rows, and soft-deletes removed rows after validating that
+	// the active snapshot has not changed since planning.
+	ApplyIngestionChunkReconcile(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		mutation IngestionChunkReconcileMutation,
+	) error
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagID is non-empty, results are filtered by tag_id.
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
