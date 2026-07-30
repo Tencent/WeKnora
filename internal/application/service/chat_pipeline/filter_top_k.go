@@ -53,6 +53,10 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	})
 
 	filterTopK := func(searchResult []*types.SearchResult, topK int) []*types.SearchResult {
+		// Preserve the upstream relevance contract before feedback is considered.
+		// The feedback policy uses this deterministic order as its stable
+		// tie-breaker and returns it unchanged for every disabled/fail-open path.
+		sortSearchResultsDeterministically(searchResult)
 		searchResult = p.applyFeedbackWeights(ctx, chatManage, searchResult, topK)
 		if topK > 0 && len(searchResult) > topK {
 			pipelineInfo(ctx, "FilterTopK", "filter", map[string]interface{}{
