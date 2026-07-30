@@ -262,6 +262,41 @@ func (r *chunkFeedbackRepository) GetByMessageAndUser(ctx context.Context, tenan
 	return &feedback, nil
 }
 
+func (r *chunkFeedbackRepository) GetByMessageIDsAndUser(
+	ctx context.Context,
+	tenantID uint64,
+	messageIDs []string,
+	userID string,
+) ([]*types.ChunkFeedback, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+	var feedbacks []*types.ChunkFeedback
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND user_id = ? AND message_id IN ?", tenantID, userID, messageIDs).
+		Find(&feedbacks).Error
+	return feedbacks, err
+}
+
+func (r *chunkFeedbackRepository) LockByMessageAndUser(
+	ctx context.Context,
+	tenantID uint64,
+	messageID, userID string,
+) (*types.ChunkFeedback, error) {
+	var feedback types.ChunkFeedback
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("tenant_id = ? AND message_id = ? AND user_id = ?", tenantID, messageID, userID).
+		First(&feedback).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &feedback, nil
+}
+
 func (r *chunkFeedbackRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Delete(&types.ChunkFeedback{}, "tenant_id = ? AND id = ?", tenantID, id).Error
 }
@@ -277,7 +312,12 @@ func (r *chunkFeedbackRepository) GetDislikeReasonsByChunkIDs(ctx context.Contex
 		Table("chunk_feedbacks cf").
 		Select("qrcr.chunk_id as chunk_id, cf.dislike_reason as reason").
 		Joins("JOIN qa_reply_chunk_refs qrcr ON cf.tenant_id = qrcr.tenant_id AND cf.message_id = qrcr.message_id").
-		Where("qrcr.chunk_tenant_id = ? AND qrcr.chunk_id IN ? AND cf.is_positive = ? AND cf.dislike_reason IS NOT NULL AND cf.dislike_reason != ''", tenantID, chunkIDs, false).
+		Joins(`LEFT JOIN qa_reply_chunk_ref_tombstones tombstone
+			ON tombstone.tenant_id = qrcr.tenant_id
+			AND tombstone.message_id = qrcr.message_id
+			AND tombstone.chunk_tenant_id = qrcr.chunk_tenant_id
+			AND tombstone.chunk_id = qrcr.chunk_id`).
+		Where("qrcr.chunk_tenant_id = ? AND qrcr.chunk_id IN ? AND tombstone.id IS NULL AND cf.is_positive = ? AND cf.dislike_reason IS NOT NULL AND cf.dislike_reason != ''", tenantID, chunkIDs, false).
 		Find(&results).Error
 	if err != nil {
 		return nil, err

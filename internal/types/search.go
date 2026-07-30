@@ -208,8 +208,8 @@ type SearchResult struct {
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 
-	// RecallWeight is the feedback weight for this chunk (1.0 = default, >1.0 boosted, <1.0 penalized)
-	// Loaded from chunks table by ChunkWeightLoader plugin
+	// RecallWeight is the persisted feedback weight for this chunk
+	// (1.0 = default, >1.0 boosted, <1.0 penalized).
 	RecallWeight float64 `json:"recall_weight,omitempty"`
 }
 
@@ -279,6 +279,10 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// ApplyRecallWeight ranks the over-retrieved candidate pool by persisted
+	// feedback weight before MatchCount truncation. Chat retrieval enables this;
+	// administrative and diagnostic searches retain their historical ordering.
+	ApplyRecallWeight bool `json:"apply_recall_weight,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

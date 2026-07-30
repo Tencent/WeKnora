@@ -85,12 +85,13 @@ CREATE TABLE IF NOT EXISTS chunk_feedbacks (
     message_id VARCHAR(36) NOT NULL,
     session_id VARCHAR(36) NOT NULL,
     tenant_id INTEGER NOT NULL,
-    user_id VARCHAR(512),
+    user_id VARCHAR(512) NOT NULL,
     is_positive BOOLEAN NOT NULL DEFAULT true,
     dislike_reason VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_message_user UNIQUE(tenant_id, message_id, user_id)
+    CONSTRAINT uq_message_user UNIQUE(tenant_id, message_id, user_id),
+    CONSTRAINT fk_chunk_feedbacks_message FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_message_id ON chunk_feedbacks(message_id);
@@ -116,7 +117,8 @@ CREATE TABLE IF NOT EXISTS chunk_weight_logs (
     trigger_type VARCHAR(50) NOT NULL,
     trigger_detail VARCHAR(500),
     operator VARCHAR(36),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chunk_weight_logs_chunk FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_chunk_id ON chunk_weight_logs(chunk_id);

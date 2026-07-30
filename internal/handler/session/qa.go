@@ -1340,12 +1340,71 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 	msg.AgentSteps[0].ReasoningContent += content
 }
 
+const (
+	completeMessagePersistMaxAttempts = 3
+	completeMessagePersistTimeout     = 5 * time.Second
+)
+
+var completeMessagePersistBackoff = [...]time.Duration{
+	0,
+	25 * time.Millisecond,
+	75 * time.Millisecond,
+}
+
+// persistCompletedAssistantMessage retries the atomic completion/reference
+// update with a short bounded lifetime. UpdateMessage is idempotent, and the
+// detached context lets the final write survive a client disconnect after the
+// response stream has already completed.
+func (h *Handler) persistCompletedAssistantMessage(ctx context.Context, assistantMessage *types.Message) error {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), completeMessagePersistTimeout)
+	defer cancel()
+
+	var lastErr error
+	for attempt := 0; attempt < completeMessagePersistMaxAttempts; attempt++ {
+		if delay := completeMessagePersistBackoff[attempt]; delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-persistCtx.Done():
+				timer.Stop()
+				return fmt.Errorf("persist completed assistant message %s: %w", assistantMessage.ID, persistCtx.Err())
+			}
+		}
+
+		if err := h.messageService.UpdateMessage(persistCtx, assistantMessage); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			if attempt+1 < completeMessagePersistMaxAttempts {
+				logger.Warnf(
+					persistCtx,
+					"complete assistant message %s failed on attempt %d/%d: %v",
+					assistantMessage.ID,
+					attempt+1,
+					completeMessagePersistMaxAttempts,
+					err,
+				)
+			}
+		}
+	}
+
+	return fmt.Errorf(
+		"persist completed assistant message %s after %d attempts: %w",
+		assistantMessage.ID,
+		completeMessagePersistMaxAttempts,
+		lastErr,
+	)
+}
+
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
 func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
-	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	if err := h.persistCompletedAssistantMessage(ctx, assistantMessage); err != nil {
+		logger.Errorf(ctx, "complete assistant message %s failed: %v", assistantMessage.ID, err)
+		return
+	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

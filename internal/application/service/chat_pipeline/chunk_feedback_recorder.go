@@ -55,7 +55,7 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	refs := feedbackReferenceRefs(chatManage, results)
+	refs := feedbackReferenceRefs(ctx, chatManage, results)
 	if len(refs) == 0 {
 		pipelineInfo(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
@@ -82,9 +82,13 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	return next()
 }
 
-func feedbackReferenceRefs(chatManage *types.ChatManage, results []*types.SearchResult) []*types.QAReplyChunkRef {
+func feedbackReferenceRefs(ctx context.Context, chatManage *types.ChatManage, results []*types.SearchResult) []*types.QAReplyChunkRef {
 	if chatManage == nil {
 		return nil
+	}
+	feedbackTenantID := chatManage.TenantID
+	if sessionTenantID, ok := types.SessionTenantIDFromContext(ctx); ok {
+		feedbackTenantID = sessionTenantID
 	}
 	seen := make(map[string]struct{})
 	refs := make([]*types.QAReplyChunkRef, 0, len(results))
@@ -103,7 +107,7 @@ func feedbackReferenceRefs(chatManage *types.ChatManage, results []*types.Search
 		refs = append(refs, &types.QAReplyChunkRef{
 			MessageID:     chatManage.MessageID,
 			ChunkID:       chunkID,
-			TenantID:      chatManage.TenantID,
+			TenantID:      feedbackTenantID,
 			ChunkTenantID: chunkTenantID,
 		})
 	}

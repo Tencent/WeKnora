@@ -17,6 +17,7 @@ import (
 var (
 	ErrInvalidFeedbackRequest     = errors.New("feedback request is required")
 	ErrFeedbackTargetNotAssistant = errors.New("feedback target must be an assistant message")
+	ErrFeedbackTargetNotCompleted = errors.New("feedback target must be a completed assistant message")
 	ErrDislikeReasonRequired      = errors.New("dislike reason is required for negative feedback")
 	ErrDislikeReasonTooLong       = errors.New("dislike reason is too long")
 )
@@ -27,6 +28,10 @@ type feedbackChunkLocker interface {
 
 type feedbackMessageLocker interface {
 	LockMessageForFeedback(ctx context.Context, tenantID uint64, userID, messageID string) (*types.Message, error)
+}
+
+type feedbackRecordLocker interface {
+	LockByMessageAndUser(ctx context.Context, tenantID uint64, messageID, userID string) (*types.ChunkFeedback, error)
 }
 
 type feedbackChunkRef struct {
@@ -76,6 +81,30 @@ func NewChunkFeedbackServiceWithUnitOfWork(
 	return svc
 }
 
+func NewConfiguredChunkFeedbackServiceWithUnitOfWork(
+	qaRefRepo interfaces.QAReplyChunkRefRepository,
+	feedbackRepo interfaces.ChunkFeedbackRepository,
+	messageRepo interfaces.MessageRepository,
+	chunkRepo interfaces.ChunkRepository,
+	weightLogRepo interfaces.ChunkWeightLogRepository,
+	uow interfaces.ChunkFeedbackUnitOfWork,
+	config *types.ChunkFeedbackConfig,
+) *ChunkFeedbackService {
+	svc := NewChunkFeedbackServiceWithUnitOfWork(
+		qaRefRepo,
+		feedbackRepo,
+		messageRepo,
+		chunkRepo,
+		weightLogRepo,
+		uow,
+	)
+	if config != nil {
+		configCopy := *config
+		svc.config = &configCopy
+	}
+	return svc
+}
+
 func (s *ChunkFeedbackService) withFeedbackTransaction(ctx context.Context, fn func(context.Context, *ChunkFeedbackService) error) error {
 	if s.uow == nil {
 		return fn(ctx, s)
@@ -111,6 +140,9 @@ func (s *ChunkFeedbackService) submitFeedback(ctx context.Context, tenantID uint
 	}
 	if message.Role != "assistant" {
 		return ErrFeedbackTargetNotAssistant
+	}
+	if !message.IsCompleted {
+		return ErrFeedbackTargetNotCompleted
 	}
 
 	chunkRefs, backfilledChunkRefs, err := s.resolveFeedbackChunkRefs(ctx, tenantID, req.MessageID, message)
@@ -163,7 +195,15 @@ func (s *ChunkFeedbackService) CancelFeedback(ctx context.Context, tenantID uint
 }
 
 func (s *ChunkFeedbackService) cancelFeedback(ctx context.Context, tenantID uint64, userID, messageID string) error {
-	feedback, err := s.feedbackRepo.GetByMessageAndUser(ctx, tenantID, messageID, userID)
+	var (
+		feedback *types.ChunkFeedback
+		err      error
+	)
+	if locker, ok := s.feedbackRepo.(feedbackRecordLocker); ok {
+		feedback, err = locker.LockByMessageAndUser(ctx, tenantID, messageID, userID)
+	} else {
+		feedback, err = s.feedbackRepo.GetByMessageAndUser(ctx, tenantID, messageID, userID)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get feedback: %w", err)
 	}
@@ -191,21 +231,55 @@ func (s *ChunkFeedbackService) cancelFeedback(ctx context.Context, tenantID uint
 		return err
 	}
 
-	for _, ref := range chunkRefs {
-		if err := s.cancelSingleChunkFeedbackStats(ctx, ref.ChunkTenantID, ref.ChunkID, feedback.IsPositive); err != nil {
-			return fmt.Errorf("failed to cancel chunk %s feedback stats: %w", ref.ChunkID, err)
-		}
+	if err := s.cancelChunksFeedbackStats(ctx, tenantID, messageID, chunkRefs, feedback.IsPositive); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (s *ChunkFeedbackService) updateChunksFeedbackStats(ctx context.Context, tenantID uint64, chunkRefs []feedbackChunkRef, feedback *types.ChunkFeedback, dislikeReason string) error {
-	for _, ref := range chunkRefs {
-		if ref.ChunkTenantID == 0 {
-			ref.ChunkTenantID = tenantID
+	lockedChunks, err := s.lockFeedbackChunks(ctx, tenantID, chunkRefs)
+	if err != nil {
+		return err
+	}
+	activeRefs, err := s.excludeResetChunkRefs(ctx, tenantID, feedback.MessageID, feedbackRefsFromLockedChunks(lockedChunks))
+	if err != nil {
+		return err
+	}
+	active := feedbackChunkRefSet(activeRefs)
+	for _, locked := range lockedChunks {
+		if _, ok := active[feedbackChunkRefKey(locked.ref)]; !ok {
+			continue
 		}
-		if err := s.updateSingleChunkFeedbackStats(ctx, ref.ChunkTenantID, ref.ChunkID, feedback, dislikeReason); err != nil {
-			return fmt.Errorf("failed to update chunk %s feedback stats: %w", ref.ChunkID, err)
+		if err := s.updateLockedChunkFeedbackStats(ctx, locked.chunk, feedback, dislikeReason); err != nil {
+			return fmt.Errorf("failed to update chunk %s feedback stats: %w", locked.ref.ChunkID, err)
+		}
+	}
+	return nil
+}
+
+func (s *ChunkFeedbackService) cancelChunksFeedbackStats(
+	ctx context.Context,
+	tenantID uint64,
+	messageID string,
+	chunkRefs []feedbackChunkRef,
+	wasPositive bool,
+) error {
+	lockedChunks, err := s.lockFeedbackChunks(ctx, tenantID, chunkRefs)
+	if err != nil {
+		return err
+	}
+	activeRefs, err := s.excludeResetChunkRefs(ctx, tenantID, messageID, feedbackRefsFromLockedChunks(lockedChunks))
+	if err != nil {
+		return err
+	}
+	active := feedbackChunkRefSet(activeRefs)
+	for _, locked := range lockedChunks {
+		if _, ok := active[feedbackChunkRefKey(locked.ref)]; !ok {
+			continue
+		}
+		if err := s.cancelLockedChunkFeedbackStats(ctx, locked.chunk, wasPositive); err != nil {
+			return fmt.Errorf("failed to cancel chunk %s feedback stats: %w", locked.ref.ChunkID, err)
 		}
 	}
 	return nil
@@ -264,7 +338,15 @@ func (s *ChunkFeedbackService) updateSingleChunkFeedbackStats(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("failed to get chunk: %w", err)
 	}
+	return s.updateLockedChunkFeedbackStats(ctx, chunk, feedback, dislikeReason)
+}
 
+func (s *ChunkFeedbackService) updateLockedChunkFeedbackStats(
+	ctx context.Context,
+	chunk *types.Chunk,
+	feedback *types.ChunkFeedback,
+	dislikeReason string,
+) error {
 	oldWeight := chunk.RecallWeight
 
 	state := chunkfeedback.ApplyVote(
@@ -297,12 +379,12 @@ func (s *ChunkFeedbackService) updateSingleChunkFeedbackStats(ctx context.Contex
 		}
 	}
 
-	if err := s.chunkRepo.UpdateChunkFeedbackStats(ctx, tenantID, chunkID, chunk.LikeCount, chunk.DislikeCount,
+	if err := s.chunkRepo.UpdateChunkFeedbackStats(ctx, chunk.TenantID, chunk.ID, chunk.LikeCount, chunk.DislikeCount,
 		chunk.PositiveRate, chunk.RecallWeight, chunk.QualityStatus); err != nil {
 		return fmt.Errorf("failed to update chunk stats: %w", err)
 	}
 
-	if err := s.chunkRepo.UpdateChunkLastFeedbackAt(ctx, tenantID, chunkID); err != nil {
+	if err := s.chunkRepo.UpdateChunkLastFeedbackAt(ctx, chunk.TenantID, chunk.ID); err != nil {
 		return fmt.Errorf("failed to update chunk last feedback time: %w", err)
 	}
 
@@ -311,7 +393,7 @@ func (s *ChunkFeedbackService) updateSingleChunkFeedbackStats(ctx context.Contex
 		if !feedback.IsPositive {
 			triggerType = types.FeedbackTriggerUserDislike
 		}
-		if err := s.recordWeightChange(ctx, chunkID, tenantID, "adjust_weight", oldWeight, chunk.RecallWeight, triggerType, weightTriggerDetail(feedback.MessageID, chunk), ""); err != nil {
+		if err := s.recordWeightChange(ctx, chunk.ID, chunk.TenantID, "adjust_weight", oldWeight, chunk.RecallWeight, triggerType, weightTriggerDetail(feedback.MessageID, chunk), ""); err != nil {
 			return fmt.Errorf("failed to record chunk weight change: %w", err)
 		}
 	}
@@ -324,21 +406,24 @@ func (s *ChunkFeedbackService) cancelSingleChunkFeedbackStats(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("failed to get chunk: %w", err)
 	}
+	return s.cancelLockedChunkFeedbackStats(ctx, chunk, wasPositive)
+}
 
+func (s *ChunkFeedbackService) cancelLockedChunkFeedbackStats(ctx context.Context, chunk *types.Chunk, wasPositive bool) error {
 	oldWeight := chunk.RecallWeight
 	state := chunkfeedback.CancelVote(chunkFeedbackState(chunk), wasPositive, chunkFeedbackConfig(s.config))
 	applyChunkFeedbackState(chunk, state)
 
-	if err := s.chunkRepo.UpdateChunkFeedbackStats(ctx, tenantID, chunkID, chunk.LikeCount, chunk.DislikeCount,
+	if err := s.chunkRepo.UpdateChunkFeedbackStats(ctx, chunk.TenantID, chunk.ID, chunk.LikeCount, chunk.DislikeCount,
 		chunk.PositiveRate, chunk.RecallWeight, chunk.QualityStatus); err != nil {
 		return fmt.Errorf("failed to update chunk stats: %w", err)
 	}
-	if err := s.chunkRepo.UpdateChunkLastFeedbackAt(ctx, tenantID, chunkID); err != nil {
+	if err := s.chunkRepo.UpdateChunkLastFeedbackAt(ctx, chunk.TenantID, chunk.ID); err != nil {
 		return fmt.Errorf("failed to update chunk last feedback time: %w", err)
 	}
 
 	if oldWeight != chunk.RecallWeight {
-		if err := s.recordWeightChange(ctx, chunkID, tenantID, "adjust_weight", oldWeight, chunk.RecallWeight, types.FeedbackTriggerUserCancel, "", ""); err != nil {
+		if err := s.recordWeightChange(ctx, chunk.ID, chunk.TenantID, "adjust_weight", oldWeight, chunk.RecallWeight, types.FeedbackTriggerUserCancel, "", ""); err != nil {
 			return fmt.Errorf("failed to record chunk weight change: %w", err)
 		}
 	}
@@ -346,10 +431,69 @@ func (s *ChunkFeedbackService) cancelSingleChunkFeedbackStats(ctx context.Contex
 }
 
 func (s *ChunkFeedbackService) getChunkForFeedbackUpdate(ctx context.Context, tenantID uint64, chunkID string) (*types.Chunk, error) {
+	var (
+		chunk *types.Chunk
+		err   error
+	)
 	if locker, ok := s.chunkRepo.(feedbackChunkLocker); ok {
-		return locker.LockChunkForFeedback(ctx, tenantID, chunkID)
+		chunk, err = locker.LockChunkForFeedback(ctx, tenantID, chunkID)
+	} else {
+		chunk, err = s.chunkRepo.GetChunkByID(ctx, tenantID, chunkID)
 	}
-	return s.chunkRepo.GetChunkByID(ctx, tenantID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	if chunk != nil {
+		if chunk.ID == "" {
+			chunk.ID = chunkID
+		}
+		if chunk.TenantID == 0 {
+			chunk.TenantID = tenantID
+		}
+	}
+	return chunk, nil
+}
+
+type lockedFeedbackChunk struct {
+	ref   feedbackChunkRef
+	chunk *types.Chunk
+}
+
+func (s *ChunkFeedbackService) lockFeedbackChunks(
+	ctx context.Context,
+	defaultTenantID uint64,
+	refs []feedbackChunkRef,
+) ([]lockedFeedbackChunk, error) {
+	normalizeAndSortFeedbackChunkRefs(defaultTenantID, refs)
+	locked := make([]lockedFeedbackChunk, 0, len(refs))
+	for _, ref := range refs {
+		chunk, err := s.getChunkForFeedbackUpdate(ctx, ref.ChunkTenantID, ref.ChunkID)
+		if err != nil {
+			if errors.Is(err, ErrChunkNotFound) {
+				logger.Warnf(ctx, "Skipping deleted chunk %s while updating feedback stats", ref.ChunkID)
+				continue
+			}
+			return nil, fmt.Errorf("failed to lock chunk %s feedback stats: %w", ref.ChunkID, err)
+		}
+		locked = append(locked, lockedFeedbackChunk{ref: ref, chunk: chunk})
+	}
+	return locked, nil
+}
+
+func feedbackRefsFromLockedChunks(chunks []lockedFeedbackChunk) []feedbackChunkRef {
+	refs := make([]feedbackChunkRef, 0, len(chunks))
+	for _, chunk := range chunks {
+		refs = append(refs, chunk.ref)
+	}
+	return refs
+}
+
+func feedbackChunkRefSet(refs []feedbackChunkRef) map[string]struct{} {
+	result := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		result[feedbackChunkRefKey(ref)] = struct{}{}
+	}
+	return result
 }
 
 func chunkFeedbackState(chunk *types.Chunk) chunkfeedback.State {
@@ -377,6 +521,7 @@ func chunkFeedbackConfig(config *types.ChunkFeedbackConfig) chunkfeedback.Config
 		WeightBoostFactor:    config.WeightBoostFactor,
 		WeightPenaltyFactor:  config.WeightPenaltyFactor,
 		AutoMarkThreshold:    config.AutoMarkThreshold,
+		AutoMarkMinFeedbacks: config.AutoMarkMinFeedbacks,
 		MinWeight:            config.MinWeight,
 		MaxWeight:            config.MaxWeight,
 	}
@@ -462,10 +607,11 @@ func (s *ChunkFeedbackService) GetFeedbackOverview(ctx context.Context, tenantID
 }
 
 func truncateContent(content string, maxLen int) string {
-	if len(content) <= maxLen {
+	runes := []rune(content)
+	if len(runes) <= maxLen {
 		return content
 	}
-	return content[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
 
 // ResetChunkFeedback 重置片段反馈数据
@@ -486,9 +632,6 @@ func (s *ChunkFeedbackService) resetChunkFeedback(ctx context.Context, tenantID 
 	}
 	if err := s.qaRefRepo.CreateResetTombstones(ctx, refs, operator); err != nil {
 		return fmt.Errorf("failed to create chunk feedback reset tombstones: %w", err)
-	}
-	if err := s.qaRefRepo.DeleteByChunkID(ctx, tenantID, chunkID); err != nil {
-		return fmt.Errorf("failed to delete chunk feedback refs: %w", err)
 	}
 	if err := s.chunkRepo.ResetChunkFeedback(ctx, tenantID, chunkID); err != nil {
 		return fmt.Errorf("failed to reset chunk feedback: %w", err)
@@ -518,6 +661,50 @@ func (s *ChunkFeedbackService) SaveQAReplyChunkRefs(ctx context.Context, tenantI
 	return s.saveQAReplyChunkRefs(ctx, tenantID, messageID, newFeedbackChunkRefs(tenantID, chunkIDs))
 }
 
+// SaveQAReplySearchResultRefs persists every trackable chunk represented by the
+// reply references, including chunks absorbed into a merged result. Chunk
+// ownership is resolved from the source rows so shared knowledge bases retain
+// the session tenant on the feedback record without losing the owner tenant
+// needed to update chunk statistics.
+func (s *ChunkFeedbackService) SaveQAReplySearchResultRefs(
+	ctx context.Context,
+	tenantID uint64,
+	messageID string,
+	results []*types.SearchResult,
+) error {
+	chunkIDs := types.CollectSearchResultChunkIDs(results)
+	chunkRefs, err := s.existingFeedbackChunkRefsForIDs(ctx, chunkIDs)
+	if err != nil {
+		return err
+	}
+	return s.saveQAReplyChunkRefs(ctx, tenantID, messageID, chunkRefs)
+}
+
+// PersistCompletedReply is the common completion boundary for assistant
+// messages. Keeping the message update and reply-chunk associations in the same
+// unit of work prevents Agent and IM replies from depending on lazy backfill at
+// the time of the first feedback request.
+func (s *ChunkFeedbackService) PersistCompletedReply(
+	ctx context.Context,
+	tenantID uint64,
+	message *types.Message,
+) error {
+	return s.withFeedbackTransaction(ctx, func(ctx context.Context, txSvc *ChunkFeedbackService) error {
+		if err := txSvc.messageRepo.UpdateMessage(ctx, message); err != nil {
+			return fmt.Errorf("failed to update completed assistant message: %w", err)
+		}
+		if err := txSvc.SaveQAReplySearchResultRefs(
+			ctx,
+			tenantID,
+			message.ID,
+			[]*types.SearchResult(message.KnowledgeReferences),
+		); err != nil {
+			return fmt.Errorf("failed to persist completed reply chunk refs: %w", err)
+		}
+		return nil
+	})
+}
+
 func (s *ChunkFeedbackService) saveQAReplyChunkRefs(ctx context.Context, tenantID uint64, messageID string, chunkRefs []feedbackChunkRef) error {
 	chunkRefs = mergeFeedbackChunkRefs(nil, chunkRefs)
 	refs := make([]*types.QAReplyChunkRef, len(chunkRefs))
@@ -532,18 +719,66 @@ func (s *ChunkFeedbackService) saveQAReplyChunkRefs(ctx context.Context, tenantI
 	return s.qaRefRepo.CreateBatch(ctx, refs)
 }
 
+// existingFeedbackChunkRefsForIDs is intentionally stricter than the legacy
+// feedback-time backfill resolver. At message completion there is no safe
+// tenant fallback for a missing shared chunk: unresolved IDs may have been
+// deleted, and assigning the session tenant would either violate the chunk FK
+// or attribute feedback to the wrong owner. Existing rows keep their source
+// tenant; missing rows are skipped and lookup failures abort the transaction.
+func (s *ChunkFeedbackService) existingFeedbackChunkRefsForIDs(
+	ctx context.Context,
+	chunkIDs []string,
+) ([]feedbackChunkRef, error) {
+	chunkIDs = mergeChunkIDs(nil, chunkIDs)
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+	if s.chunkRepo == nil {
+		return nil, errors.New("chunk repository is required to resolve completed reply refs")
+	}
+	chunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve completed reply chunk tenants: %w", err)
+	}
+	chunkByID := make(map[string]*types.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil || strings.TrimSpace(chunk.ID) == "" || chunk.TenantID == 0 {
+			continue
+		}
+		chunkByID[chunk.ID] = chunk
+	}
+	refs := make([]feedbackChunkRef, 0, len(chunkByID))
+	for _, chunkID := range chunkIDs {
+		chunk := chunkByID[chunkID]
+		if chunk == nil {
+			logger.Warnf(ctx, "Skipping missing chunk %s while persisting completed reply refs", chunkID)
+			continue
+		}
+		refs = append(refs, feedbackChunkRef{
+			ChunkID:       chunk.ID,
+			ChunkTenantID: chunk.TenantID,
+		})
+	}
+	return refs, nil
+}
+
 func (s *ChunkFeedbackService) resolveFeedbackChunkRefs(ctx context.Context, tenantID uint64, messageID string, message *types.Message) ([]feedbackChunkRef, []feedbackChunkRef, error) {
 	refs, err := s.qaRefRepo.GetByMessageID(ctx, tenantID, messageID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get chunk refs: %w", err)
 	}
-	chunkRefs := collectQAFeedbackRefs(tenantID, refs)
+	allChunkRefs := collectQAFeedbackRefs(tenantID, refs)
+	normalizeAndSortFeedbackChunkRefs(tenantID, allChunkRefs)
+	chunkRefs, err := s.excludeResetChunkRefs(ctx, tenantID, messageID, allChunkRefs)
+	if err != nil {
+		return nil, nil, err
+	}
 	if message == nil {
 		return chunkRefs, nil, nil
 	}
 
 	referenceChunkIDs := types.CollectSearchResultChunkIDs([]*types.SearchResult(message.KnowledgeReferences))
-	chunkIDs := feedbackRefIDs(chunkRefs)
+	chunkIDs := feedbackRefIDs(allChunkRefs)
 	backfilledChunkIDs := missingChunkIDs(chunkIDs, referenceChunkIDs)
 	backfilledChunkRefs := s.feedbackChunkRefsForIDs(ctx, tenantID, backfilledChunkIDs)
 	backfilledChunkRefs, err = s.excludeResetChunkRefs(ctx, tenantID, messageID, backfilledChunkRefs)
@@ -556,11 +791,12 @@ func (s *ChunkFeedbackService) resolveFeedbackChunkRefs(ctx context.Context, ten
 		}
 		chunkRefs = append(chunkRefs, backfilledChunkRefs...)
 	}
+	normalizeAndSortFeedbackChunkRefs(tenantID, chunkRefs)
 	return chunkRefs, backfilledChunkRefs, nil
 }
 
 func (s *ChunkFeedbackService) excludeResetChunkRefs(ctx context.Context, tenantID uint64, messageID string, refs []feedbackChunkRef) ([]feedbackChunkRef, error) {
-	if len(refs) == 0 {
+	if len(refs) == 0 || s.qaRefRepo == nil {
 		return refs, nil
 	}
 	tombstones, err := s.qaRefRepo.GetResetTombstonesByMessageID(ctx, tenantID, messageID)
@@ -700,6 +936,25 @@ func mergeFeedbackChunkRefs(base []feedbackChunkRef, extra []feedbackChunkRef) [
 
 func feedbackChunkRefKey(ref feedbackChunkRef) string {
 	return fmt.Sprintf("%d:%s", ref.ChunkTenantID, strings.TrimSpace(ref.ChunkID))
+}
+
+// normalizeAndSortFeedbackChunkRefs keeps row locks deterministic across
+// feedback transactions. Normalizing zero tenant IDs before sorting prevents
+// implicit and explicit references to the same tenant from producing different
+// physical lock orders.
+func normalizeAndSortFeedbackChunkRefs(defaultTenantID uint64, refs []feedbackChunkRef) {
+	for i := range refs {
+		refs[i].ChunkID = strings.TrimSpace(refs[i].ChunkID)
+		if refs[i].ChunkTenantID == 0 {
+			refs[i].ChunkTenantID = defaultTenantID
+		}
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].ChunkTenantID == refs[j].ChunkTenantID {
+			return refs[i].ChunkID < refs[j].ChunkID
+		}
+		return refs[i].ChunkTenantID < refs[j].ChunkTenantID
+	})
 }
 
 func feedbackRefIDs(refs []feedbackChunkRef) []string {

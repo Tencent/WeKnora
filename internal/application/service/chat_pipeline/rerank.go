@@ -145,6 +145,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"candidate_cnt": len(candidatesToRerank),
 			})
 			chatManage.SearchResult = append(directLoadResults, candidatesToRerank...)
+			applyRecallWeightsToResults(chatManage.SearchResult)
 			spanOutput = map[string]interface{}{
 				"stage":           "api_error_fallback",
 				"candidate_count": len(candidatesToRerank),
@@ -177,6 +178,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 					"candidate_cnt": len(candidatesToRerank),
 				})
 				chatManage.SearchResult = append(directLoadResults, candidatesToRerank...)
+				applyRecallWeightsToResults(chatManage.SearchResult)
 				spanOutput = map[string]interface{}{
 					"stage":              "api_error_fallback",
 					"candidate_count":    len(candidatesToRerank),
@@ -257,6 +259,9 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	}
 
 	if len(chatManage.RerankResult) == 0 {
+		// Merge falls back to SearchResult when the reranker filters every
+		// candidate. Preserve feedback priority in that fallback path too.
+		applyRecallWeightsToResults(chatManage.SearchResult)
 		pipelineWarn(ctx, "Rerank", "output", map[string]interface{}{
 			"filtered_cnt": 0,
 		})
@@ -481,15 +486,7 @@ func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float
 }
 
 func applyRecallWeightToRerankScore(sr *types.SearchResult) {
-	if sr == nil || sr.RecallWeight == 0 || sr.RecallWeight == 1.0 {
-		return
-	}
-	originalScore := sr.Score
-	sr.Score *= sr.RecallWeight
-	sr.Metadata = ensureMetadata(sr.Metadata)
-	sr.Metadata["recall_weight"] = fmt.Sprintf("%.2f", sr.RecallWeight)
-	sr.Metadata["recall_weight_original_score"] = fmt.Sprintf("%.4f", originalScore)
-	sr.Metadata["recall_weighted_score"] = fmt.Sprintf("%.4f", sr.Score)
+	applyRecallWeightToResult(sr)
 }
 
 // applyMMR applies the MMR algorithm to the search results with pre-computed token sets

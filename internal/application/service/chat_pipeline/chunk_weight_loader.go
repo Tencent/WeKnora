@@ -35,11 +35,17 @@ func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 		return next()
 	}
 
+	// HybridSearch now hydrates RecallWeight with the chunk row. Keep this
+	// loader for legacy/directly-constructed results, but avoid a duplicate DB
+	// query when every result already carries a persisted weight.
 	chunkIDs := make([]string, 0, len(chatManage.SearchResult))
 	for _, result := range chatManage.SearchResult {
-		if result.ID != "" {
+		if result != nil && result.ID != "" && result.RecallWeight == 0 {
 			chunkIDs = append(chunkIDs, result.ID)
 		}
+	}
+	if len(chunkIDs) == 0 {
+		return next()
 	}
 
 	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
@@ -55,6 +61,9 @@ func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 
 	loaded := 0
 	for _, result := range chatManage.SearchResult {
+		if result == nil || result.RecallWeight != 0 {
+			continue
+		}
 		if weight, ok := weightMap[result.ID]; ok {
 			result.RecallWeight = weight
 			loaded++
@@ -67,7 +76,7 @@ func (p *ChunkWeightLoader) OnEvent(ctx context.Context,
 		pipelineInfo(ctx, "ChunkWeightLoader", "loaded", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"loaded":     loaded,
-			"total":      len(chatManage.SearchResult),
+			"requested":  len(chunkIDs),
 		})
 	}
 

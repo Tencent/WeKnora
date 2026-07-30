@@ -146,9 +146,25 @@ func (r *ToolRegistry) ExecuteTool(
 	maxOutput := r.getMaxToolOutput()
 	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
 
-	// Truncate large tool outputs to prevent context window poisoning. The
-	// limit is counted in runes to match TruncateToolOutput; comparing bytes
-	// here would leave CJK output effectively uncapped.
+	// A knowledge result must never be truncated independently from its
+	// attribution set: doing so would count chunks that the model never saw.
+	// Fail closed and let the agent retry with a narrower query. Non-knowledge
+	// outputs retain the historical head/tail truncation behavior below.
+	if result != nil &&
+		len(result.KnowledgeReferences) > 0 &&
+		utf8.RuneCountInString(result.Output) > maxOutput {
+		result.Success = false
+		result.Error = fmt.Sprintf(
+			"knowledge retrieval output exceeded the %d-character limit; retry with a smaller limit or narrower query so chunk feedback attribution remains exact",
+			maxOutput,
+		)
+		result.Output = result.Error
+		result.KnowledgeReferences = nil
+	}
+
+	// Truncate large non-knowledge tool outputs to prevent context window
+	// poisoning. The limit is counted in runes to match TruncateToolOutput;
+	// comparing bytes here would leave CJK output effectively uncapped.
 	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
 	}

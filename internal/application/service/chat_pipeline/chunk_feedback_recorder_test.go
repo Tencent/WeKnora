@@ -56,6 +56,41 @@ func TestChunkFeedbackRecorderRecordsMessageChunkRefs(t *testing.T) {
 	}
 }
 
+func TestChunkFeedbackRecorderUsesSessionTenantForSharedAgentRefs(t *testing.T) {
+	repo := &recordingQARefRepo{}
+	recorder := &ChunkFeedbackRecorder{qaRefRepo: repo}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID: "session-1",
+			// Shared-agent retrieval runs under the source workspace.
+			TenantID: 99,
+			SearchTargets: types.SearchTargets{
+				{KnowledgeBaseID: "kb-source", TenantID: 99},
+			},
+		},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "chunk-source", KnowledgeBaseID: "kb-source", MatchType: types.MatchTypeEmbedding},
+			},
+		},
+		PipelineContext: types.PipelineContext{MessageID: "message-1"},
+	}
+	ctx := context.WithValue(context.Background(), types.SessionTenantIDContextKey, uint64(7))
+
+	err := recorder.OnEvent(ctx, types.INTO_CHAT_MESSAGE, cm, func() *PluginError { return nil })
+
+	if err != nil {
+		t.Fatalf("OnEvent() error = %v", err)
+	}
+	if len(repo.refs) != 1 {
+		t.Fatalf("saved refs = %#v, want one ref", repo.refs)
+	}
+	ref := repo.refs[0]
+	if ref.TenantID != 7 || ref.ChunkTenantID != 99 {
+		t.Fatalf("ref tenants = feedback:%d chunk:%d, want feedback:7 chunk:99", ref.TenantID, ref.ChunkTenantID)
+	}
+}
+
 type recordingQARefRepo struct {
 	refs []*types.QAReplyChunkRef
 }

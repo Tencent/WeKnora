@@ -44,16 +44,9 @@ func (p *RecallWeightApplier) OnEvent(ctx context.Context,
 func applyRecallWeightsToResults(results []*types.SearchResult) int {
 	applied := 0
 	for _, result := range results {
-		if result == nil || result.RecallWeight == 0 || result.RecallWeight == 1.0 {
-			continue
+		if applyRecallWeightToResult(result) {
+			applied++
 		}
-		originalScore := result.Score
-		result.Score *= result.RecallWeight
-		result.Metadata = ensureMetadata(result.Metadata)
-		result.Metadata["recall_weight"] = fmt.Sprintf("%.2f", result.RecallWeight)
-		result.Metadata["recall_weight_original_score"] = fmt.Sprintf("%.4f", originalScore)
-		result.Metadata["recall_weighted_score"] = fmt.Sprintf("%.4f", result.Score)
-		applied++
 	}
 	if applied > 0 {
 		sort.SliceStable(results, func(i, j int) bool {
@@ -61,4 +54,21 @@ func applyRecallWeightsToResults(results []*types.SearchResult) int {
 		})
 	}
 	return applied
+}
+
+func applyRecallWeightToResult(result *types.SearchResult) bool {
+	if result == nil || result.RecallWeight == 0 || result.RecallWeight == 1.0 {
+		return false
+	}
+	result.Metadata = ensureMetadata(result.Metadata)
+	if _, applied := result.Metadata["recall_weight_original_score"]; applied {
+		return false
+	}
+
+	originalScore := result.Score
+	result.Score *= result.RecallWeight
+	result.Metadata["recall_weight"] = fmt.Sprintf("%.2f", result.RecallWeight)
+	result.Metadata["recall_weight_original_score"] = fmt.Sprintf("%.4f", originalScore)
+	result.Metadata["recall_weighted_score"] = fmt.Sprintf("%.4f", result.Score)
+	return true
 }

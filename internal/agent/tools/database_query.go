@@ -49,17 +49,6 @@ var databaseQueryTool = BaseTool{
 
 
 
-### chunks
-- id (VARCHAR): Chunk ID
-- tenant_id (INTEGER): Owner tenant ID
-- knowledge_base_id (VARCHAR): Parent knowledge base ID
-- knowledge_id (VARCHAR): Parent document ID
-- content (TEXT): Chunk content
-- chunk_index (INTEGER): Index in document
-- is_enabled (BOOLEAN): Enable status
-- chunk_type (VARCHAR): Type (text/image/table)
-- created_at, updated_at, deleted_at (TIMESTAMP)
-
 ## Usage Examples
 
 Query knowledge base information:
@@ -86,6 +75,9 @@ Join knowledge bases and documents:
 - DO NOT include tenant_id in WHERE clause - it's automatically added
 - DO NOT include deleted_at filtering manually unless needed - default query already enforces deleted_at IS NULL
 - Only SELECT queries are allowed
+- The chunks table is intentionally unavailable here. Use knowledge_search,
+  list_knowledge_chunks, grep_chunks, wiki_read_source_doc, or data_schema so
+  every chunk exposed to an answer can be attributed for feedback.
 - Limit results with LIMIT clause for better performance
 - Use appropriate JOINs when querying across tables
 - All timestamps are in UTC with time zone`,
@@ -250,6 +242,11 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
+	if queryReferencesChunks(sqlQuery) {
+		return "", fmt.Errorf(
+			"querying the chunks table is not allowed; use a knowledge retrieval tool so chunk feedback attribution is preserved",
+		)
+	}
 	searchScopes := searchScopesFromTargets(t.searchTargets)
 	if len(searchScopes) == 0 {
 		return "", fmt.Errorf("no effective Agent knowledge scope is available")

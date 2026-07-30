@@ -156,11 +156,26 @@ func getSearchResultFromHistory(chatManage *types.ChatManage) []*types.SearchRes
 	// Search history in reverse chronological order
 	for i := len(chatManage.History) - 1; i >= 0; i-- {
 		if len(chatManage.History[i].KnowledgeReferences) > 0 {
-			// Mark all references as history matches
+			// Return defensive copies. History injection discounts scores and
+			// annotates metadata; mutating the persisted message references would
+			// leak those transient changes into later pipeline stages.
+			references := make([]*types.SearchResult, 0, len(chatManage.History[i].KnowledgeReferences))
 			for _, reference := range chatManage.History[i].KnowledgeReferences {
-				reference.MatchType = types.MatchTypeHistory
+				if reference == nil {
+					continue
+				}
+				cloned := *reference
+				cloned.SubChunkID = append([]string(nil), reference.SubChunkID...)
+				if reference.Metadata != nil {
+					cloned.Metadata = make(map[string]string, len(reference.Metadata))
+					for key, value := range reference.Metadata {
+						cloned.Metadata[key] = value
+					}
+				}
+				cloned.ChunkMetadata = append(types.JSON(nil), reference.ChunkMetadata...)
+				references = append(references, &cloned)
 			}
-			return chatManage.History[i].KnowledgeReferences
+			return references
 		}
 	}
 	return nil
@@ -420,6 +435,7 @@ func (p *PluginSearch) searchByTargets(
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
 						SkipContextEnrichment: true,
+						ApplyRecallWeight:     true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
@@ -494,6 +510,7 @@ func (p *PluginSearch) searchSingleTarget(
 		TagIDs:                t.TagIDs,
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
+		ApplyRecallWeight:     true,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {
 		params.KnowledgeIDs = t.KnowledgeIDs

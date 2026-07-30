@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -178,6 +180,7 @@ func TestCancelFeedbackBackfillsChunkRefsFromMessageReferences(t *testing.T) {
 			ID:           "message-1",
 			SessionID:    "session-1",
 			Role:         "assistant",
+			IsCompleted:  true,
 			DislikeCount: 1,
 			KnowledgeReferences: types.References{
 				&types.SearchResult{ID: "chunk-a", SubChunkID: []string{"chunk-b"}},
@@ -215,6 +218,47 @@ func TestCancelFeedbackBackfillsChunkRefsFromMessageReferences(t *testing.T) {
 	require.Equal(t, map[string]int{"chunk-a": 0, "chunk-b": 0}, chunkRepo.updatedDislikeCounts)
 }
 
+func TestCancelFeedbackUsesLockedCurrentDirection(t *testing.T) {
+	ctx := context.Background()
+	feedbackRepo := &lockingCancelFeedbackRepo{
+		stale:   &types.ChunkFeedback{ID: "feedback-1", IsPositive: true},
+		current: &types.ChunkFeedback{ID: "feedback-1", IsPositive: false},
+	}
+	messageRepo := &cancelFeedbackMessageRepo{
+		message: &types.Message{
+			ID:                  "message-1",
+			SessionID:           "session-1",
+			Role:                "assistant",
+			IsCompleted:         true,
+			DislikeCount:        1,
+			KnowledgeReferences: types.References{&types.SearchResult{ID: "chunk-1"}},
+		},
+	}
+	qaRefRepo := &cancelFeedbackQARefRepo{}
+	chunkRepo := &cancelFeedbackChunkRepo{
+		chunks: map[string]*types.Chunk{
+			"chunk-1": {
+				ID:            "chunk-1",
+				TenantID:      1,
+				DislikeCount:  1,
+				RecallWeight:  0.5,
+				QualityStatus: types.ChunkQualityStatusNormal,
+			},
+		},
+		updatedLikeCounts:    make(map[string]int),
+		updatedDislikeCounts: make(map[string]int),
+	}
+	svc := NewChunkFeedbackService(qaRefRepo, feedbackRepo, messageRepo, chunkRepo, &chunkFeedbackWeightLogRepo{})
+
+	err := svc.CancelFeedback(ctx, 1, "user-1", "message-1")
+
+	require.NoError(t, err)
+	require.True(t, feedbackRepo.lockCalled)
+	require.Equal(t, "feedback-1", feedbackRepo.deletedID)
+	require.Equal(t, 0, messageRepo.updatedDislikeCount)
+	require.Equal(t, map[string]int{"chunk-1": 0}, chunkRepo.updatedDislikeCounts)
+}
+
 func TestSubmitFeedbackBackfillsOnlyMissingChunkStatsForUnchangedFeedback(t *testing.T) {
 	ctx := context.Background()
 	feedbackRepo := &submitFeedbackFeedbackRepo{
@@ -231,10 +275,11 @@ func TestSubmitFeedbackBackfillsOnlyMissingChunkStatsForUnchangedFeedback(t *tes
 	}
 	messageRepo := &cancelFeedbackMessageRepo{
 		message: &types.Message{
-			ID:        "message-1",
-			SessionID: "session-1",
-			Role:      "assistant",
-			LikeCount: 1,
+			ID:          "message-1",
+			SessionID:   "session-1",
+			Role:        "assistant",
+			IsCompleted: true,
+			LikeCount:   1,
 			KnowledgeReferences: types.References{
 				&types.SearchResult{ID: "chunk-a", SubChunkID: []string{"chunk-b"}},
 			},
@@ -276,6 +321,70 @@ func TestSubmitFeedbackBackfillsOnlyMissingChunkStatsForUnchangedFeedback(t *tes
 	require.Equal(t, map[string]int{"chunk-b": 0}, chunkRepo.updatedDislikeCounts)
 }
 
+func TestUpdateChunksFeedbackStatsLocksChunksInDeterministicOrder(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string][]feedbackChunkRef{
+		"implicit default tenant": {
+			{ChunkID: "chunk-a", ChunkTenantID: 0},
+			{ChunkID: "chunk-b", ChunkTenantID: 3},
+		},
+		"explicit default tenant in reverse input": {
+			{ChunkID: "chunk-b", ChunkTenantID: 3},
+			{ChunkID: "chunk-a", ChunkTenantID: 5},
+		},
+	}
+	for name, refs := range cases {
+		t.Run(name, func(t *testing.T) {
+			chunkRepo := &cancelFeedbackChunkRepo{
+				chunks: map[string]*types.Chunk{
+					"chunk-a": {ID: "chunk-a", TenantID: 5, RecallWeight: 1, QualityStatus: types.ChunkQualityStatusNormal},
+					"chunk-b": {ID: "chunk-b", TenantID: 3, RecallWeight: 1, QualityStatus: types.ChunkQualityStatusNormal},
+				},
+				updatedLikeCounts:    make(map[string]int),
+				updatedDislikeCounts: make(map[string]int),
+			}
+			svc := NewChunkFeedbackService(nil, nil, nil, chunkRepo, &chunkFeedbackWeightLogRepo{})
+
+			err := svc.updateChunksFeedbackStats(ctx, 5, refs, &types.ChunkFeedback{
+				MessageID:  "message-1",
+				WasCreated: true,
+				IsChanged:  true,
+				IsPositive: true,
+			}, "")
+
+			require.NoError(t, err)
+			require.Equal(t, []string{"3:chunk-b", "5:chunk-a"}, chunkRepo.lockOrder)
+		})
+	}
+}
+
+func TestUpdateChunksFeedbackStatsSkipsDeletedChunk(t *testing.T) {
+	ctx := context.Background()
+	chunkRepo := &cancelFeedbackChunkRepo{
+		chunks: map[string]*types.Chunk{
+			"existing": {ID: "existing", TenantID: 1, RecallWeight: 1, QualityStatus: types.ChunkQualityStatusNormal},
+		},
+		updatedLikeCounts:    make(map[string]int),
+		updatedDislikeCounts: make(map[string]int),
+	}
+	svc := NewChunkFeedbackService(nil, nil, nil, chunkRepo, &chunkFeedbackWeightLogRepo{})
+
+	err := svc.updateChunksFeedbackStats(ctx, 1, []feedbackChunkRef{
+		{ChunkID: "deleted", ChunkTenantID: 1},
+		{ChunkID: "existing", ChunkTenantID: 1},
+	}, &types.ChunkFeedback{
+		MessageID:  "message-1",
+		WasCreated: true,
+		IsChanged:  true,
+		IsPositive: true,
+	}, "")
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"1:deleted", "1:existing"}, chunkRepo.lockOrder)
+	require.Equal(t, map[string]int{"existing": 1}, chunkRepo.updatedLikeCounts)
+	require.NotContains(t, chunkRepo.updatedLikeCounts, "deleted")
+}
+
 func TestSubmitFeedbackBackfillsSharedKnowledgeChunkTenant(t *testing.T) {
 	ctx := context.Background()
 	feedbackRepo := &submitFeedbackFeedbackRepo{
@@ -292,9 +401,10 @@ func TestSubmitFeedbackBackfillsSharedKnowledgeChunkTenant(t *testing.T) {
 	}
 	messageRepo := &cancelFeedbackMessageRepo{
 		message: &types.Message{
-			ID:        "message-1",
-			SessionID: "session-1",
-			Role:      "assistant",
+			ID:          "message-1",
+			SessionID:   "session-1",
+			Role:        "assistant",
+			IsCompleted: true,
 			KnowledgeReferences: types.References{
 				&types.SearchResult{ID: "chunk-shared", KnowledgeBaseID: "kb-shared"},
 			},
@@ -344,9 +454,10 @@ func TestSubmitFeedbackDoesNotBackfillResetChunkRef(t *testing.T) {
 	}
 	messageRepo := &cancelFeedbackMessageRepo{
 		message: &types.Message{
-			ID:        "message-1",
-			SessionID: "session-1",
-			Role:      "assistant",
+			ID:          "message-1",
+			SessionID:   "session-1",
+			Role:        "assistant",
+			IsCompleted: true,
 			KnowledgeReferences: types.References{
 				&types.SearchResult{ID: "chunk-reset", KnowledgeBaseID: "kb-shared"},
 			},
@@ -384,11 +495,95 @@ func TestSubmitFeedbackDoesNotBackfillResetChunkRef(t *testing.T) {
 	require.Empty(t, chunkRepo.updatedDislikeCounts)
 }
 
+func TestSubmitFeedbackRechecksResetTombstoneAfterChunkLock(t *testing.T) {
+	ctx := context.Background()
+	feedbackRepo := &submitFeedbackFeedbackRepo{
+		feedback: &types.ChunkFeedback{
+			ID:         "feedback-1",
+			MessageID:  "message-1",
+			SessionID:  "session-1",
+			TenantID:   1,
+			UserID:     "user-1",
+			IsPositive: true,
+			IsChanged:  true,
+			WasCreated: true,
+		},
+	}
+	messageRepo := &cancelFeedbackMessageRepo{
+		message: &types.Message{
+			ID:                  "message-1",
+			SessionID:           "session-1",
+			Role:                "assistant",
+			IsCompleted:         true,
+			KnowledgeReferences: types.References{&types.SearchResult{ID: "chunk-reset"}},
+		},
+	}
+	qaRefRepo := &resetRaceQARefRepo{}
+	chunkRepo := &cancelFeedbackChunkRepo{
+		chunks: map[string]*types.Chunk{
+			"chunk-reset": {
+				ID:            "chunk-reset",
+				TenantID:      1,
+				RecallWeight:  1,
+				QualityStatus: types.ChunkQualityStatusNormal,
+			},
+		},
+		updatedLikeCounts:    make(map[string]int),
+		updatedDislikeCounts: make(map[string]int),
+	}
+	svc := NewChunkFeedbackService(qaRefRepo, feedbackRepo, messageRepo, chunkRepo, &chunkFeedbackWeightLogRepo{})
+
+	err := svc.SubmitFeedback(ctx, 1, "user-1", &types.SubmitFeedbackRequest{
+		MessageID:  "message-1",
+		IsPositive: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, qaRefRepo.tombstoneReads)
+	require.Equal(t, []string{"1:chunk-reset"}, chunkRepo.lockOrder)
+	require.Empty(t, chunkRepo.updatedLikeCounts)
+	require.Empty(t, chunkRepo.updatedDislikeCounts)
+}
+
+func TestSubmitFeedbackRejectsIncompleteAssistantBeforePersisting(t *testing.T) {
+	ctx := context.Background()
+	feedbackRepo := &submitFeedbackFeedbackRepo{
+		feedback: &types.ChunkFeedback{
+			ID:         "feedback-1",
+			MessageID:  "message-1",
+			SessionID:  "session-1",
+			TenantID:   1,
+			UserID:     "user-1",
+			IsPositive: true,
+			IsChanged:  true,
+			WasCreated: true,
+		},
+	}
+	messageRepo := &cancelFeedbackMessageRepo{
+		message: &types.Message{
+			ID:          "message-1",
+			SessionID:   "session-1",
+			Role:        "assistant",
+			IsCompleted: false,
+		},
+	}
+	svc := NewChunkFeedbackService(nil, feedbackRepo, messageRepo, nil, nil)
+
+	err := svc.SubmitFeedback(ctx, 1, "user-1", &types.SubmitFeedbackRequest{
+		MessageID:  "message-1",
+		IsPositive: true,
+	})
+
+	require.ErrorIs(t, err, ErrFeedbackTargetNotCompleted)
+	require.Zero(t, feedbackRepo.upsertCalls)
+}
+
 func TestChunkFeedbackFullFlowLikeDislikeCancelReset(t *testing.T) {
 	ctx := context.Background()
 	db := setupChunkFeedbackFlowDB(t)
+	qaRefRepo := repository.NewQAReplyChunkRefRepository(db)
 	svc := NewChunkFeedbackServiceWithUnitOfWork(
-		repository.NewQAReplyChunkRefRepository(db),
+		qaRefRepo,
 		repository.NewChunkFeedbackRepository(db),
 		repository.NewMessageRepository(db),
 		repository.NewChunkRepository(db),
@@ -413,13 +608,46 @@ func TestChunkFeedbackFullFlowLikeDislikeCancelReset(t *testing.T) {
 	requireFeedbackFlowCounts(t, db, 0, 0, 0, 0, 1, 0, 0)
 
 	require.NoError(t, svc.ResetChunkFeedback(ctx, 1, "chunk-1", "admin-1"))
-	requireFeedbackFlowCounts(t, db, 0, 0, 0, 0, 0, 0, 1)
+	requireFeedbackFlowCounts(t, db, 0, 0, 0, 0, 1, 0, 1)
+	sessionCount, err := qaRefRepo.CountSessionsByChunkID(ctx, 1, "chunk-1")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), sessionCount)
 
 	require.NoError(t, svc.SubmitFeedback(ctx, 1, "user-1", &types.SubmitFeedbackRequest{
 		MessageID:  "message-1",
 		IsPositive: true,
 	}))
-	requireFeedbackFlowCounts(t, db, 0, 0, 1, 0, 0, 1, 1)
+	requireFeedbackFlowCounts(t, db, 0, 0, 1, 0, 1, 1, 1)
+}
+
+func TestResetChunkFeedbackKeepsAssociationButHidesHistoricalReasons(t *testing.T) {
+	ctx := context.Background()
+	db := setupChunkFeedbackFlowDB(t)
+	svc := NewChunkFeedbackServiceWithUnitOfWork(
+		repository.NewQAReplyChunkRefRepository(db),
+		repository.NewChunkFeedbackRepository(db),
+		repository.NewMessageRepository(db),
+		repository.NewChunkRepository(db),
+		repository.NewChunkWeightLogRepository(db),
+		repository.NewChunkFeedbackUnitOfWork(db),
+	)
+
+	require.NoError(t, svc.SubmitFeedback(ctx, 1, "user-1", &types.SubmitFeedbackRequest{
+		MessageID:     "message-1",
+		IsPositive:    false,
+		DislikeReason: "inaccurate",
+	}))
+	require.NoError(t, svc.ResetChunkFeedback(ctx, 1, "chunk-1", "admin-1"))
+
+	stats, err := svc.GetChunkStats(ctx, 1, "chunk-1")
+	require.NoError(t, err)
+	require.Zero(t, stats.LikeCount)
+	require.Zero(t, stats.DislikeCount)
+	require.Equal(t, 1.0, stats.RecallWeight)
+	require.Equal(t, 1, stats.RelatedSessionCount)
+	require.Empty(t, stats.DislikeReasons)
+	require.Empty(t, stats.DislikeReasonStats)
+	requireFeedbackFlowCounts(t, db, 0, 0, 0, 1, 1, 1, 1)
 }
 
 func TestNormalizeFeedbackRequestRequiresDislikeReason(t *testing.T) {
@@ -438,6 +666,18 @@ func TestNormalizeFeedbackRequestRequiresDislikeReason(t *testing.T) {
 	}
 }
 
+func TestConfiguredChunkFeedbackServiceCopiesRuntimePolicy(t *testing.T) {
+	config := types.DefaultChunkFeedbackConfig()
+	config.AutoMarkThreshold = 0.2
+
+	svc := NewConfiguredChunkFeedbackServiceWithUnitOfWork(nil, nil, nil, nil, nil, nil, config)
+	config.AutoMarkThreshold = 0.9
+
+	require.Equal(t, 0.2, svc.config.AutoMarkThreshold)
+	require.Equal(t, 0.8, svc.config.HighQualityThreshold)
+	require.Equal(t, 0.5, svc.config.LowQualityThreshold)
+}
+
 func TestAggregateDislikeReasonsCountsAndSorts(t *testing.T) {
 	got := aggregateDislikeReasons([]string{"unclear", "inaccurate", "unclear", "incomplete"})
 	want := []types.DislikeReasonStat{
@@ -449,7 +689,14 @@ func TestAggregateDislikeReasonsCountsAndSorts(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-func TestResetChunkFeedbackDeletesRefsAndPropagatesWeightLogError(t *testing.T) {
+func TestTruncateContentPreservesUTF8Boundaries(t *testing.T) {
+	got := truncateContent("这是一个包含多字节字符的知识片段", 5)
+
+	require.True(t, utf8.ValidString(got))
+	require.Equal(t, "这是一个包...", got)
+}
+
+func TestResetChunkFeedbackPreservesRefsAndPropagatesWeightLogError(t *testing.T) {
 	ctx := context.Background()
 	logErr := errors.New("weight log failed")
 	qaRefRepo := &resetFeedbackQARefRepo{}
@@ -467,15 +714,15 @@ func TestResetChunkFeedbackDeletesRefsAndPropagatesWeightLogError(t *testing.T) 
 	err := svc.ResetChunkFeedback(ctx, 1, "chunk-1", "admin-1")
 
 	require.ErrorIs(t, err, logErr)
-	require.Equal(t, "chunk-1", qaRefRepo.deletedChunkID)
-	require.Equal(t, uint64(1), qaRefRepo.deletedTenantID)
+	require.Empty(t, qaRefRepo.deletedChunkID)
+	require.Zero(t, qaRefRepo.deletedTenantID)
 	require.Equal(t, []string{"message-1"}, qaRefRepo.tombstonedMessageIDs)
 	require.True(t, chunkRepo.resetCalled)
 }
 
 func setupChunkFeedbackFlowDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:chunk-feedback-flow?mode=memory&cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
@@ -494,6 +741,7 @@ func setupChunkFeedbackFlowDB(t *testing.T) *gorm.DB {
 			id varchar(36) PRIMARY KEY,
 			session_id varchar(36),
 			role text,
+			is_completed boolean NOT NULL DEFAULT false,
 			knowledge_references text,
 			updated_at datetime,
 			deleted_at datetime
@@ -514,8 +762,8 @@ func setupChunkFeedbackFlowDB(t *testing.T) *gorm.DB {
 		INSERT INTO sessions (id, tenant_id, user_id) VALUES ('session-1', 1, 'user-1')
 	`).Error)
 	require.NoError(t, db.Exec(`
-		INSERT INTO messages (id, session_id, role, knowledge_references)
-		VALUES ('message-1', 'session-1', 'assistant', '[{"id":"chunk-1","knowledge_base_id":"kb-1"}]')
+		INSERT INTO messages (id, session_id, role, is_completed, knowledge_references)
+		VALUES ('message-1', 'session-1', 'assistant', true, '[{"id":"chunk-1","knowledge_base_id":"kb-1"}]')
 	`).Error)
 	require.NoError(t, db.Exec(`
 		INSERT INTO chunks (id, tenant_id, knowledge_base_id, knowledge_id, content, updated_at)
@@ -636,6 +884,29 @@ func (r *cancelFeedbackFeedbackRepo) Delete(ctx context.Context, tenantID uint64
 	return nil
 }
 
+type lockingCancelFeedbackRepo struct {
+	interfaces.ChunkFeedbackRepository
+
+	stale      *types.ChunkFeedback
+	current    *types.ChunkFeedback
+	lockCalled bool
+	deletedID  string
+}
+
+func (r *lockingCancelFeedbackRepo) GetByMessageAndUser(ctx context.Context, tenantID uint64, messageID, userID string) (*types.ChunkFeedback, error) {
+	return r.stale, nil
+}
+
+func (r *lockingCancelFeedbackRepo) LockByMessageAndUser(ctx context.Context, tenantID uint64, messageID, userID string) (*types.ChunkFeedback, error) {
+	r.lockCalled = true
+	return r.current, nil
+}
+
+func (r *lockingCancelFeedbackRepo) Delete(ctx context.Context, tenantID uint64, id string) error {
+	r.deletedID = id
+	return nil
+}
+
 type cancelFeedbackMessageRepo struct {
 	interfaces.MessageRepository
 
@@ -707,10 +978,20 @@ type cancelFeedbackChunkRepo struct {
 	updatedLikeCounts    map[string]int
 	updatedDislikeCounts map[string]int
 	updatedTenantIDs     map[string]uint64
+	lockOrder            []string
 }
 
 func (r *cancelFeedbackChunkRepo) GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error) {
 	return r.chunks[id], nil
+}
+
+func (r *cancelFeedbackChunkRepo) LockChunkForFeedback(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error) {
+	r.lockOrder = append(r.lockOrder, fmt.Sprintf("%d:%s", tenantID, id))
+	chunk, ok := r.chunks[id]
+	if !ok {
+		return nil, ErrChunkNotFound
+	}
+	return chunk, nil
 }
 
 func (r *cancelFeedbackChunkRepo) ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
@@ -790,10 +1071,12 @@ func (r *resetFeedbackChunkRepo) ResetChunkFeedback(ctx context.Context, tenantI
 type submitFeedbackFeedbackRepo struct {
 	interfaces.ChunkFeedbackRepository
 
-	feedback *types.ChunkFeedback
+	feedback    *types.ChunkFeedback
+	upsertCalls int
 }
 
 func (r *submitFeedbackFeedbackRepo) Upsert(ctx context.Context, messageID, sessionID, userID string, tenantID uint64, isPositive bool, dislikeReason string) (*types.ChunkFeedback, error) {
+	r.upsertCalls++
 	return r.feedback, nil
 }
 
@@ -805,4 +1088,32 @@ type submitFeedbackQARefRepo struct {
 
 func (r *submitFeedbackQARefRepo) GetByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRef, error) {
 	return r.refs, nil
+}
+
+type resetRaceQARefRepo struct {
+	cancelFeedbackQARefRepo
+
+	tombstoneReads int
+}
+
+func (r *resetRaceQARefRepo) GetByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRef, error) {
+	return []*types.QAReplyChunkRef{{
+		TenantID:      tenantID,
+		MessageID:     messageID,
+		ChunkID:       "chunk-reset",
+		ChunkTenantID: tenantID,
+	}}, nil
+}
+
+func (r *resetRaceQARefRepo) GetResetTombstonesByMessageID(ctx context.Context, tenantID uint64, messageID string) ([]*types.QAReplyChunkRefTombstone, error) {
+	r.tombstoneReads++
+	if r.tombstoneReads == 1 {
+		return nil, nil
+	}
+	return []*types.QAReplyChunkRefTombstone{{
+		TenantID:      tenantID,
+		MessageID:     messageID,
+		ChunkID:       "chunk-reset",
+		ChunkTenantID: tenantID,
+	}}, nil
 }

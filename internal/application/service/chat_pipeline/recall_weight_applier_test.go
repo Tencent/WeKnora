@@ -2,10 +2,13 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func TestRecallWeightApplierAppliesSearchResultsBeforeNextWhenNoRerankModel(t *testing.T) {
@@ -94,4 +97,72 @@ func TestApplyRecallWeightToRerankScore(t *testing.T) {
 	if got := result.Metadata["recall_weight_original_score"]; got != "0.6000" {
 		t.Fatalf("metadata original score = %q, want 0.6000", got)
 	}
+
+	applyRecallWeightToRerankScore(result)
+	if got := result.Score; math.Abs(got-0.90) > 0.0001 {
+		t.Fatalf("rerank weight applied more than once, score = %v", got)
+	}
+}
+
+func TestPluginRerankAppliesRecallWeightWhenModelFails(t *testing.T) {
+	plugin := &PluginRerank{
+		modelService: &recallWeightModelService{
+			reranker: failingRecallWeightReranker{},
+		},
+	}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			RerankModelID: "rerank-model",
+		},
+		PipelineState: types.PipelineState{
+			Intent:       types.IntentKBSearch,
+			RewriteQuery: "query",
+			SearchResult: []*types.SearchResult{
+				{ID: "neutral", Content: "neutral", Score: 0.80, RecallWeight: 1.0},
+				{ID: "boosted", Content: "boosted", Score: 0.60, RecallWeight: 1.5},
+			},
+		},
+	}
+
+	nextCalled := false
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, cm, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("OnEvent returned error: %v", err)
+	}
+	if !nextCalled {
+		t.Fatal("next plugin was not called")
+	}
+	if got := cm.SearchResult[0].ID; got != "boosted" {
+		t.Fatalf("first fallback result = %q, want boosted", got)
+	}
+	if got := cm.SearchResult[0].Score; math.Abs(got-0.90) > 0.0001 {
+		t.Fatalf("weighted fallback score = %v, want 0.90", got)
+	}
+}
+
+type recallWeightModelService struct {
+	interfaces.ModelService
+	reranker rerank.Reranker
+}
+
+func (s *recallWeightModelService) GetRerankModel(context.Context, string) (rerank.Reranker, error) {
+	return s.reranker, nil
+}
+
+type failingRecallWeightReranker struct{}
+
+func (failingRecallWeightReranker) Rerank(context.Context, string, []string) ([]rerank.RankResult, error) {
+	return nil, errors.New("rerank unavailable")
+}
+
+func (failingRecallWeightReranker) GetModelName() string {
+	return "failing"
+}
+
+func (failingRecallWeightReranker) GetModelID() string {
+	return "failing"
 }

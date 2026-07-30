@@ -419,7 +419,7 @@
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
-                <div v-if="mode === 'edit' && kbId && authStore.hasRole('admin') && currentSection === 'feedback'" class="section">
+                <div v-if="canManageFeedback && currentSection === 'feedback'" class="section">
                   <ChunkFeedbackSettings :kb-id="kbId" />
                 </div>
 
@@ -478,6 +478,7 @@ import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import ChunkFeedbackSettings from './settings/ChunkFeedbackSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
+import { canAccessChunkFeedbackSettings } from './knowledgeBaseFeedbackAccess'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -577,6 +578,15 @@ const canViewActivity = computed(() => {
   if (Number(kbTenantId.value || 0) !== Number(authStore.currentTenantId || 0)) return false
   return isKbOwner.value || authStore.hasRole('admin')
 })
+
+const canManageFeedback = computed(() =>
+  canAccessChunkFeedbackSettings(
+    props.mode,
+    props.kbId,
+    authStore.hasRole('admin'),
+    Number(kbTenantId.value || 0) === Number(authStore.effectiveTenantId || 0),
+  ),
+)
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
 
@@ -621,10 +631,10 @@ const navItems = computed(() => {
     )
     if (props.mode === 'edit' && props.kbId) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
-      if (authStore.hasRole('admin')) {
-        items.push({ key: 'feedback', icon: 'chart-pie', label: t('knowledgeEditor.feedback.title') })
-      }
     }
+  }
+  if (canManageFeedback.value) {
+    items.push({ key: 'feedback', icon: 'chart-pie', label: t('knowledgeEditor.feedback.title') })
   }
   if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })

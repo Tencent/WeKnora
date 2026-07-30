@@ -112,6 +112,38 @@ func TestCreateResetTombstonesPreventsDuplicateMarks(t *testing.T) {
 	require.Equal(t, "admin-1", tombstones[0].Operator)
 }
 
+func TestGetDislikeReasonsExcludesResetAssociations(t *testing.T) {
+	db := setupChunkFeedbackRepoTestDB(t)
+	ctx := context.Background()
+	repo := NewChunkFeedbackRepository(db)
+
+	require.NoError(t, db.Exec(`
+		INSERT INTO messages (id, session_id, role)
+		VALUES ('message-reset', 'session-1', 'assistant'),
+		       ('message-active', 'session-2', 'assistant')
+	`).Error)
+	require.NoError(t, db.Create(&[]types.QAReplyChunkRef{
+		{TenantID: 7, MessageID: "message-reset", ChunkID: "chunk-1", ChunkTenantID: 7},
+		{TenantID: 7, MessageID: "message-active", ChunkID: "chunk-1", ChunkTenantID: 7},
+	}).Error)
+	require.NoError(t, db.Create(&[]types.ChunkFeedback{
+		{TenantID: 7, MessageID: "message-reset", SessionID: "session-1", UserID: "user-1", IsPositive: false, DislikeReason: "reset reason"},
+		{TenantID: 7, MessageID: "message-active", SessionID: "session-2", UserID: "user-1", IsPositive: false, DislikeReason: "active reason"},
+	}).Error)
+	require.NoError(t, db.Create(&types.QAReplyChunkRefTombstone{
+		TenantID:      7,
+		MessageID:     "message-reset",
+		ChunkID:       "chunk-1",
+		ChunkTenantID: 7,
+		Operator:      "admin-1",
+	}).Error)
+
+	reasons, err := repo.GetDislikeReasonsByChunkIDs(ctx, 7, []string{"chunk-1"})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"active reason"}, reasons["chunk-1"])
+}
+
 func TestChunkFeedbackUpsertIsIdempotentAndTracksDirectionChanges(t *testing.T) {
 	db := setupChunkFeedbackRepoTestDB(t)
 	ctx := context.Background()
@@ -136,6 +168,47 @@ func TestChunkFeedbackUpsertIsIdempotentAndTracksDirectionChanges(t *testing.T) 
 	require.False(t, third.PreviousIsPositive)
 	require.False(t, third.IsChanged)
 	require.Equal(t, "unclear", third.DislikeReason)
+
+	firstNegative, err := repo.Upsert(ctx, "message-2", "session-2", "user-1", 7, false, "inaccurate")
+	require.NoError(t, err)
+	require.True(t, firstNegative.WasCreated)
+	require.False(t, firstNegative.IsPositive)
+	persistedNegative, err := repo.GetByMessageAndUser(ctx, 7, "message-2", "user-1")
+	require.NoError(t, err)
+	require.NotNil(t, persistedNegative)
+	require.False(t, persistedNegative.IsPositive,
+		"a first-time dislike must not be replaced by the database default for a zero-value bool")
+	require.Equal(t, "inaccurate", persistedNegative.DislikeReason)
+}
+
+func TestGetFeedbackByMessageIDsAndUserBatchesAndScopesResults(t *testing.T) {
+	db := setupChunkFeedbackRepoTestDB(t)
+	ctx := context.Background()
+	repo := &chunkFeedbackRepository{db: db}
+
+	require.NoError(t, db.Create(&[]types.ChunkFeedback{
+		{TenantID: 7, MessageID: "message-like", SessionID: "session-1", UserID: "user-1", IsPositive: true},
+		{TenantID: 7, MessageID: "message-dislike", SessionID: "session-1", UserID: "user-1", IsPositive: false, DislikeReason: "unclear"},
+		{TenantID: 7, MessageID: "message-other-user", SessionID: "session-1", UserID: "user-2", IsPositive: true},
+		{TenantID: 8, MessageID: "message-other-tenant", SessionID: "session-1", UserID: "user-1", IsPositive: true},
+	}).Error)
+
+	feedbacks, err := repo.GetByMessageIDsAndUser(
+		ctx,
+		7,
+		[]string{"message-like", "message-dislike", "message-other-user", "message-other-tenant"},
+		"user-1",
+	)
+
+	require.NoError(t, err)
+	require.Len(t, feedbacks, 2)
+	byMessageID := map[string]*types.ChunkFeedback{}
+	for _, feedback := range feedbacks {
+		byMessageID[feedback.MessageID] = feedback
+	}
+	require.True(t, byMessageID["message-like"].IsPositive)
+	require.False(t, byMessageID["message-dislike"].IsPositive)
+	require.Equal(t, "unclear", byMessageID["message-dislike"].DislikeReason)
 }
 
 func TestChunkFeedbackUnitOfWorkRollsBackOnError(t *testing.T) {

@@ -28,6 +28,10 @@ func NewChunkFeedbackHandler(
 }
 
 func handleFeedbackServiceError(c *gin.Context, err error) {
+	if stdErrors.Is(err, service.ErrFeedbackTargetNotCompleted) {
+		c.Error(errors.NewConflictError(err.Error()))
+		return
+	}
 	if stdErrors.Is(err, service.ErrFeedbackTargetNotAssistant) ||
 		stdErrors.Is(err, service.ErrInvalidFeedbackRequest) ||
 		stdErrors.Is(err, service.ErrDislikeReasonRequired) ||
@@ -35,8 +39,9 @@ func handleFeedbackServiceError(c *gin.Context, err error) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if stdErrors.Is(err, gorm.ErrRecordNotFound) {
-		c.Error(errors.NewNotFoundError("message not found"))
+	if stdErrors.Is(err, gorm.ErrRecordNotFound) ||
+		stdErrors.Is(err, service.ErrChunkNotFound) {
+		c.Error(errors.NewNotFoundError("feedback target not found"))
 		return
 	}
 	c.Error(errors.NewInternalServerError(err.Error()))
@@ -179,7 +184,7 @@ func (h *ChunkFeedbackHandler) GetChunkStats(c *gin.Context) {
 	stats, err := h.feedbackService.GetChunkStats(c.Request.Context(), tenantID, chunkID)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to get chunk stats: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		handleFeedbackServiceError(c, err)
 		return
 	}
 
@@ -288,12 +293,12 @@ func (h *ChunkFeedbackHandler) ResetChunkFeedback(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	operator := ""
 	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
-		operator = uid.(string)
+		operator, _ = uid.(string)
 	}
 
 	if err := h.feedbackService.ResetChunkFeedback(c.Request.Context(), tenantID, chunkID, operator); err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to reset chunk feedback: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		handleFeedbackServiceError(c, err)
 		return
 	}
 

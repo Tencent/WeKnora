@@ -88,7 +88,7 @@ export function cancelFeedback(messageId: string) {
 
 // 获取点踩原因选项
 export function getDislikeReasons() {
-  return get<string[]>('/api/v1/feedback/dislike-reasons')
+  return get<{ success: boolean; data: string[] }>('/api/v1/feedback/dislike-reasons')
 }
 
 // 获取片段统计

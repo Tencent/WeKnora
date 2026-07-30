@@ -260,6 +260,13 @@ type Message struct {
 	LikeCount int `json:"like_count" gorm:"default:0"`
 	// DislikeCount 点踩数量
 	DislikeCount int `json:"dislike_count" gorm:"default:0"`
+	// UserFeedback is the current caller's vote. It is hydrated in one batch
+	// when message history is returned and is never persisted on messages.
+	UserFeedback       *bool  `json:"user_feedback" gorm:"-"`
+	UserFeedbackReason string `json:"user_feedback_reason,omitempty" gorm:"-"`
+	// UserFeedbackLoaded distinguishes an authoritative "no vote" (nil) from
+	// a response path where batch hydration was unavailable.
+	UserFeedbackLoaded bool `json:"user_feedback_loaded,omitempty" gorm:"-"`
 
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`

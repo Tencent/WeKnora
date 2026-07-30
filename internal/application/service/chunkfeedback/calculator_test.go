@@ -104,6 +104,18 @@ func TestQualityStatusMarksPendingAfterEnoughLowQualityVotes(t *testing.T) {
 	}
 }
 
+func TestQualityStatusUsesConfiguredMinimumFeedbackCount(t *testing.T) {
+	config := testConfig()
+	config.AutoMarkMinFeedbacks = 1
+
+	got := ApplyVote(State{QualityStatus: StatusNormal},
+		VoteChange{WasCreated: true, IsChanged: true, IsPositive: false}, config)
+
+	if got.QualityStatus != StatusPending {
+		t.Fatalf("QualityStatus = %q, want %q", got.QualityStatus, StatusPending)
+	}
+}
+
 func TestRecallWeightClampsToConfiguredBounds(t *testing.T) {
 	config := testConfig()
 	config.WeightBoostFactor = 5
@@ -156,6 +168,7 @@ func testConfig() Config {
 		WeightBoostFactor:    1.5,
 		WeightPenaltyFactor:  0.5,
 		AutoMarkThreshold:    0.3,
+		AutoMarkMinFeedbacks: 5,
 		MinWeight:            0.1,
 		MaxWeight:            2,
 	}

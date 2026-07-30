@@ -48,6 +48,35 @@ func TestChunkWeightLoaderLoadsWeightsBeforeNext(t *testing.T) {
 	}
 }
 
+func TestChunkWeightLoaderSkipsRepositoryForHydratedWeights(t *testing.T) {
+	repo := &weightLoaderChunkRepo{}
+	loader := &ChunkWeightLoader{chunkRepo: repo}
+	cm := &types.ChatManage{
+		PipelineState: types.PipelineState{
+			SearchResult: []*types.SearchResult{
+				{ID: "chunk-a", Score: 0.4, RecallWeight: 1.5},
+				{ID: "chunk-b", Score: 0.9, RecallWeight: 1.0},
+			},
+		},
+	}
+
+	nextCalled := false
+	err := loader.OnEvent(context.Background(), types.CHUNK_RERANK, cm, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("OnEvent returned error: %v", err)
+	}
+	if !nextCalled {
+		t.Fatal("next plugin was not called")
+	}
+	if repo.requestedIDs != nil {
+		t.Fatalf("repository should not be queried, requested IDs = %#v", repo.requestedIDs)
+	}
+}
+
 type weightLoaderChunkRepo struct {
 	interfaces.ChunkRepository
 

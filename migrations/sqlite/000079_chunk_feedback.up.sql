@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS chunk_feedbacks (
     message_id VARCHAR(36) NOT NULL,
     session_id VARCHAR(36) NOT NULL,
     tenant_id INTEGER NOT NULL,
-    user_id VARCHAR(512),
+    user_id VARCHAR(512) NOT NULL,
     is_positive BOOLEAN NOT NULL DEFAULT 1,
     dislike_reason VARCHAR(255),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

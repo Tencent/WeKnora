@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	appErrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -46,6 +48,32 @@ func TestFeedbackScopeUserIDPrefersSessionOwnerPrincipal(t *testing.T) {
 	c.Set(types.UserIDContextKey.String(), "system-7")
 
 	require.Equal(t, "api_external_user:7:alice-external-user", feedbackScopeUserID(c))
+}
+
+func TestHandleFeedbackServiceErrorMapsWrappedChunkNotFoundTo404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	handleFeedbackServiceError(c, fmt.Errorf("lookup chunk: %w", service.ErrChunkNotFound))
+
+	require.Len(t, c.Errors, 1)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, c.Errors.Last().Err, &appErr)
+	require.Equal(t, http.StatusNotFound, appErr.HTTPCode)
+	require.Equal(t, appErrors.ErrNotFound, appErr.Code)
+}
+
+func TestHandleFeedbackServiceErrorMapsIncompleteMessageTo409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	handleFeedbackServiceError(c, fmt.Errorf("feedback race: %w", service.ErrFeedbackTargetNotCompleted))
+
+	require.Len(t, c.Errors, 1)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, c.Errors.Last().Err, &appErr)
+	require.Equal(t, http.StatusConflict, appErr.HTTPCode)
+	require.Equal(t, appErrors.ErrConflict, appErr.Code)
 }
 
 type handlerFeedbackChunkRepo struct {

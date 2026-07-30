@@ -29,6 +29,7 @@ type messageService struct {
 	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
+	feedbackSvc    *ChunkFeedbackService
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,6 +40,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	feedbackSvc *ChunkFeedbackService,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:    messageRepo,
@@ -48,6 +50,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		knowService:    knowService,
 		modelService:   modelService,
 		suggestionRepo: suggestionRepo,
+		feedbackSvc:    feedbackSvc,
 	}
 }
 
@@ -231,15 +234,23 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 	logger.Infof(ctx, "Updating message, ID: %s, session ID: %s", message.ID, message.SessionID)
 
 	tenantID := types.MustTenantIDFromContext(ctx)
-	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", tenantID)
-	_, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), message.SessionID)
+	sessionTenantID := tenantID
+	if ownerTenantID, ok := types.SessionTenantIDFromContext(ctx); ok {
+		sessionTenantID = ownerTenantID
+	}
+	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", sessionTenantID)
+	_, err := s.sessionRepo.Get(ctx, sessionTenantID, sessionUserIDForLookup(ctx), message.SessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return err
 	}
 
 	logger.Info(ctx, "Session exists, updating message")
-	err = s.messageRepo.UpdateMessage(ctx, message)
+	if message.Role == "assistant" && message.IsCompleted && s.feedbackSvc != nil {
+		err = s.feedbackSvc.PersistCompletedReply(ctx, sessionTenantID, message)
+	} else {
+		err = s.messageRepo.UpdateMessage(ctx, message)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": message.SessionID,

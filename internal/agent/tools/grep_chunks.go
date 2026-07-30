@@ -203,8 +203,9 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	output := t.formatOutput(ctx, finalResults, queries, compiled)
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
+		Success:             true,
+		Output:              output,
+		KnowledgeReferences: grepChunkKnowledgeReferences(finalResults),
 		Data: map[string]interface{}{
 			"query":              query,
 			"queries":            queries, // legacy alias for older frontends
@@ -220,6 +221,35 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"display_type":       "grep_results",
 		},
 	}, nil
+}
+
+func grepChunkKnowledgeReferences(results []chunkWithTitle) []*types.SearchResult {
+	references := make([]*types.SearchResult, 0, len(results))
+	for i := range results {
+		result := &results[i]
+		if result.ID == "" {
+			continue
+		}
+		references = append(references, &types.SearchResult{
+			ID:              result.ID,
+			Content:         result.Content,
+			KnowledgeID:     result.KnowledgeID,
+			ChunkIndex:      result.ChunkIndex,
+			KnowledgeTitle:  result.KnowledgeTitle,
+			StartAt:         result.StartAt,
+			EndAt:           result.EndAt,
+			Score:           result.MatchScore,
+			MatchType:       types.MatchTypeKeywords,
+			ChunkType:       string(result.ChunkType),
+			ParentChunkID:   result.ParentChunkID,
+			ImageInfo:       result.ImageInfo,
+			ChunkMetadata:   result.Metadata,
+			MatchedContent:  result.Content,
+			KnowledgeBaseID: result.KnowledgeBaseID,
+			RecallWeight:    result.RecallWeight,
+		})
+	}
+	return references
 }
 
 type chunkWithTitle struct {
@@ -385,6 +415,7 @@ func (t *GrepChunksTool) searchChunks(
 	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
 			"chunks.knowledge_base_id, chunks.chunk_type, chunks.metadata, chunks.created_at, "+
+			"chunks.recall_weight, "+
 			"knowledges.title as knowledge_title").
 		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
@@ -908,6 +939,13 @@ func (t *GrepChunksTool) scoreChunks(
 				// as one matched pattern so it isn't sorted below true zeros.
 				patternCount = 1
 			}
+		}
+		// searchChunks hydrates RecallWeight from the persisted chunk. Apply it
+		// to the freshly recomputed regex relevance once, before both MMR and
+		// the final sort, matching the other agent retrieval paths without
+		// compounding the weight when scoreChunks is called again.
+		if results[i].RecallWeight != 0 && results[i].RecallWeight != 1 {
+			score *= results[i].RecallWeight
 		}
 		scored[i].MatchScore = score
 		scored[i].MatchedPatterns = patternCount

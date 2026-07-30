@@ -17,6 +17,7 @@ import (
 type budgetProbeTool struct {
 	observedBudget int
 	output         string
+	references     []*types.SearchResult
 }
 
 func (b *budgetProbeTool) Name() string                { return "budget_probe" }
@@ -25,7 +26,11 @@ func (b *budgetProbeTool) Parameters() json.RawMessage { return json.RawMessage(
 
 func (b *budgetProbeTool) Execute(ctx context.Context, _ json.RawMessage) (*types.ToolResult, error) {
 	b.observedBudget = OutputBudget(ctx)
-	return &types.ToolResult{Success: true, Output: b.output}, nil
+	return &types.ToolResult{
+		Success:             true,
+		Output:              b.output,
+		KnowledgeReferences: b.references,
+	}, nil
 }
 
 func TestOutputBudgetDefaultsWhenUnset(t *testing.T) {
@@ -73,6 +78,29 @@ func TestExecuteToolLeavesOutputWithinBudgetUntouched(t *testing.T) {
 	result, err := registry.ExecuteTool(context.Background(), "budget_probe", json.RawMessage(`{}`))
 	require.NoError(t, err)
 	assert.Equal(t, output, result.Output)
+}
+
+func TestExecuteToolRejectsOversizedKnowledgeOutputWithoutOverAttribution(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.SetMaxToolOutputSize(300)
+	registry.RegisterTool(&budgetProbeTool{
+		output: strings.Repeat("knowledge evidence ", 100),
+		references: []*types.SearchResult{{
+			ID:              "chunk-never-shown",
+			KnowledgeBaseID: "kb-1",
+			MatchType:       types.MatchTypeEmbedding,
+		}},
+	})
+
+	result, err := registry.ExecuteTool(context.Background(), "budget_probe", json.RawMessage(`{}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.Success)
+	assert.Contains(t, result.Error, "feedback attribution remains exact")
+	assert.Contains(t, result.Output, "retry with a smaller limit")
+	assert.Empty(t, result.KnowledgeReferences)
+	assert.NotContains(t, result.Output, "knowledge evidence")
 }
 
 func TestSplitBudgetFairly(t *testing.T) {

@@ -258,8 +258,9 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
+		Success:             true,
+		Output:              output,
+		KnowledgeReferences: chunkKnowledgeReferences(chunks, knowledgeTitle),
 		Data: map[string]interface{}{
 			"display_type":    "knowledge_chunks_list",
 			"knowledge_id":    knowledgeID,
@@ -330,9 +331,10 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	}
 
 	return &types.ToolResult{
-		Success: true,
-		Output:  output,
-		Data:    data,
+		Success:             true,
+		Output:              output,
+		Data:                data,
+		KnowledgeReferences: chunkKnowledgeReferences(chunks, knowledgeTitle),
 	}, nil
 }
 

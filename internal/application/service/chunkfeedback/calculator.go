@@ -11,6 +11,7 @@ type Config struct {
 	WeightBoostFactor    float64
 	WeightPenaltyFactor  float64
 	AutoMarkThreshold    float64
+	AutoMarkMinFeedbacks int
 	MinWeight            float64
 	MaxWeight            float64
 }
@@ -80,7 +81,7 @@ func RecallWeight(positiveRate float64, total int, config Config) float64 {
 }
 
 func QualityStatus(current string, positiveRate float64, total int, config Config) string {
-	if positiveRate <= config.AutoMarkThreshold && total >= 5 {
+	if positiveRate <= config.AutoMarkThreshold && total >= config.AutoMarkMinFeedbacks {
 		return StatusPending
 	}
 	if current == StatusPending {

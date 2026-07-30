@@ -83,8 +83,8 @@ type ChunkFeedback struct {
 	MessageID     string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_tenant_message_user,priority:2;not null"`
 	SessionID     string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
 	TenantID      uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_tenant_message_user,priority:1;index;not null"`
-	UserID        string    `json:"user_id" gorm:"type:varchar(512);uniqueIndex:idx_tenant_message_user,priority:3;index"`
-	IsPositive    bool      `json:"is_positive" gorm:"not null;default:true"` // true=点赞, false=点踩
+	UserID        string    `json:"user_id" gorm:"type:varchar(512);not null;uniqueIndex:idx_tenant_message_user,priority:3;index"`
+	IsPositive    bool      `json:"is_positive" gorm:"not null"` // true=点赞, false=点踩
 	DislikeReason string    `json:"dislike_reason,omitempty" gorm:"type:varchar(255)"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -196,17 +196,18 @@ type ChunkFeedbackOverviewResponse struct {
 // ChunkFeedbackConfig 反馈配置
 type ChunkFeedbackConfig struct {
 	// 好评率阈值配置
-	HighQualityThreshold float64 `json:"high_quality_threshold"` // >= 此值提升权重，默认 0.8
-	LowQualityThreshold  float64 `json:"low_quality_threshold"`  // < 此值降低权重，默认 0.5
+	HighQualityThreshold float64 `yaml:"high_quality_threshold" json:"high_quality_threshold"` // >= 此值提升权重，默认 0.8
+	LowQualityThreshold  float64 `yaml:"low_quality_threshold"  json:"low_quality_threshold"`  // < 此值降低权重，默认 0.5
 
 	// 权重调整参数
-	WeightBoostFactor   float64 `json:"weight_boost_factor"`   // 高质量权重提升倍数，默认 1.5
-	WeightPenaltyFactor float64 `json:"weight_penalty_factor"` // 低质量权重降低倍数，默认 0.5
-	MinWeight           float64 `json:"min_weight"`            // 最小权重，默认 0.1
-	MaxWeight           float64 `json:"max_weight"`            // 最大权重，默认 2.0
+	WeightBoostFactor   float64 `yaml:"weight_boost_factor"   json:"weight_boost_factor"`   // 高质量权重提升倍数，默认 1.5
+	WeightPenaltyFactor float64 `yaml:"weight_penalty_factor" json:"weight_penalty_factor"` // 低质量权重降低倍数，默认 0.5
+	MinWeight           float64 `yaml:"min_weight"            json:"min_weight"`            // 最小权重，默认 0.1
+	MaxWeight           float64 `yaml:"max_weight"            json:"max_weight"`            // 最大权重，默认 2.0
 
 	// 自动标记阈值
-	AutoMarkThreshold float64 `json:"auto_mark_threshold"` // 自动标记待优化的好评率阈值，默认 0.3
+	AutoMarkThreshold    float64 `yaml:"auto_mark_threshold" json:"auto_mark_threshold"`         // 自动标记待优化的好评率阈值，默认 0.3
+	AutoMarkMinFeedbacks int     `yaml:"auto_mark_min_feedbacks" json:"auto_mark_min_feedbacks"` // 自动标记前所需的最少反馈数，默认 5
 }
 
 // DefaultChunkFeedbackConfig 返回默认配置
@@ -219,6 +220,7 @@ func DefaultChunkFeedbackConfig() *ChunkFeedbackConfig {
 		MinWeight:            0.1,
 		MaxWeight:            2.0,
 		AutoMarkThreshold:    0.3,
+		AutoMarkMinFeedbacks: 5,
 	}
 }
 

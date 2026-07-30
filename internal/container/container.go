@@ -376,7 +376,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
 	// Chunk feedback handler
-	must(container.Provide(service.NewChunkFeedbackServiceWithUnitOfWork))
+	must(container.Provide(func(cfg *config.Config) *types.ChunkFeedbackConfig {
+		return cfg.ChunkFeedback
+	}))
+	must(container.Provide(service.NewConfiguredChunkFeedbackServiceWithUnitOfWork))
 	must(container.Provide(handler.NewChunkFeedbackHandler))
 
 	// Data source handler
