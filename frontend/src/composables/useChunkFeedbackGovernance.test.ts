@@ -40,7 +40,7 @@ test('governance list/detail/history/reset form one scoped loop', async () => {
     },
     detail: async (targetKB: string, chunkId: string) => {
       calls.push(`detail:${targetKB}:${chunkId}`)
-      return { data: detail }
+      return { data: calls.some((call) => call === 'reset:kb-a:chunk-a') ? resetDetail : detail }
     },
     history: async (targetKB: string, chunkId: string) => {
       calls.push(`history:${targetKB}:${chunkId}`)
@@ -48,7 +48,6 @@ test('governance list/detail/history/reset form one scoped loop', async () => {
     },
     reset: async (targetKB: string, chunkId: string) => {
       calls.push(`reset:${targetKB}:${chunkId}`)
-      return { data: resetDetail }
     },
   } as any
 
@@ -73,6 +72,44 @@ test('governance list/detail/history/reset form one scoped loop', async () => {
   await nextTick()
   assert.equal(governance.selected.value, null)
   assert.deepEqual(governance.items.value, [])
+  scope.stop()
+})
+
+test('committed reset remains successful when refresh fails', async () => {
+  const kbId = ref('kb-a')
+  let resetCommitted = false
+  const detail = {
+    chunk_id: 'chunk-a',
+    like_count: 2,
+    dislike_count: 1,
+    positive_rate: 2 / 3,
+    stored_recall_weight: 1.2,
+    effective_recall_weight: 1.2,
+    needs_optimization: true,
+  }
+  const api = {
+    list: async () => page([detail]),
+    detail: async () => {
+      if (resetCommitted) throw new Error('refresh unavailable')
+      return { data: detail }
+    },
+    history: async () => page([]),
+    reset: async () => {
+      resetCommitted = true
+    },
+  } as any
+  const scope = effectScope()
+  const governance = scope.run(() => useChunkFeedbackGovernance({
+    kbId,
+    api,
+    autoLoad: false,
+  }))!
+
+  assert.equal(await governance.open('chunk-a'), true)
+  assert.equal(await governance.reset(), true, 'mutation success must not be reversed by refresh failure')
+  assert.equal(governance.selected.value?.like_count, 0)
+  assert.equal(governance.selected.value?.dislike_count, 0)
+  assert.ok(governance.error.value instanceof Error)
   scope.stop()
 })
 

@@ -1943,6 +1943,7 @@ const handleDetailsScroll = () => {
                   </div>
                   <div class="chunk-header-right">
                     <t-popup
+                      v-if="canEditContent"
                       :visible="feedbackDetailChunkID === chunk.original.id"
                       trigger="click"
                       placement="bottom-right"
@@ -2000,6 +2001,17 @@ const handleDetailsScroll = () => {
                         </div>
                       </template>
                     </t-popup>
+                    <span
+                      v-else
+                      class="chunk-feedback-summary chunk-feedback-summary--readonly"
+                      :class="{ 'needs-optimization': chunk.original.needs_optimization }"
+                      :aria-label="t('feedback.chunkDetails')"
+                    >
+                      <span>👍 {{ chunk.original.like_count || 0 }}</span>
+                      <span>👎 {{ chunk.original.dislike_count || 0 }}</span>
+                      <span>{{ chunkPositiveRate(chunk.original) }}</span>
+                      <span>×{{ Number(chunk.original.effective_recall_weight || 1).toFixed(1) }}</span>
+                    </span>
                     <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
                       :content="$t('knowledgeBase.retryIndex')" placement="top">
                       <t-button class="icon-action-btn" size="small" theme="danger" variant="text" shape="square"
@@ -3426,6 +3438,10 @@ body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
 .chunk-feedback-summary.needs-optimization {
   color: var(--td-error-color);
   background: var(--td-error-color-1);
+}
+
+.chunk-feedback-summary--readonly {
+  cursor: default;
 }
 
 .chunk-feedback-detail {

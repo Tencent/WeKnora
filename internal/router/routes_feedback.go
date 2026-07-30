@@ -11,15 +11,21 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.FeedbackHandler
 	if handler == nil {
 		return
 	}
-	// Policies are declared so the global API-key gate has a complete route
-	// map; mutating service methods still reject non-web-user principals.
-	sessions := g.apiKeyGroup(r.Group("/sessions"), apiKeyFullAccess())
+	// Feedback and governance are interactive-user surfaces. Keep every route
+	// undeclared in the API-key authorizer so machine principals are rejected
+	// by its default-deny policy before reaching role or service checks.
+	sessions := r.Group("/sessions")
 	sessions.PUT("/:session_id/messages/:message_id/feedback", g.Viewer(), handler.PutMessageFeedback)
 
-	chunkRead := g.apiKeyGroup(r.Group("/chunks"), apiKeyFullAccess())
-	chunkRead.GET("/by-id/:id/feedback", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkFeedbackDetails)
+	chunkRead := r.Group("/chunks")
+	chunkRead.GET(
+		"/by-id/:id/feedback",
+		g.OwnedChunkKBOrAdminFromChunkID(),
+		g.KBAccessReadFromChunkIDParam("id"),
+		handler.GetChunkFeedbackDetails,
+	)
 
-	kb := g.apiKeyGroup(r.Group("/knowledge-bases"), apiKeyFullAccess())
+	kb := r.Group("/knowledge-bases")
 	kb.POST("/:id/chunks/:chunk_id/feedback/reset",
 		g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ResetChunkFeedback)
 

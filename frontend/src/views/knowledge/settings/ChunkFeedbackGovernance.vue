@@ -186,8 +186,12 @@ const openRow = async (chunkId: string) => {
   if (!await open(chunkId)) MessagePlugin.error(t('feedback.governance.loadFailed'))
 }
 const confirmReset = async () => {
-  if (await reset()) MessagePlugin.success(t('feedback.resetSuccess'))
-  else MessagePlugin.error(t('feedback.resetFailed'))
+  if (await reset()) {
+    MessagePlugin.success(t('feedback.resetSuccess'))
+    if (error.value) MessagePlugin.error(t('feedback.governance.loadFailed'))
+  } else {
+    MessagePlugin.error(t('feedback.resetFailed'))
+  }
 }
 </script>
 

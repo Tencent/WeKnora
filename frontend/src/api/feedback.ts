@@ -84,7 +84,7 @@ export function listChunkFeedbackHistory(kbId: string, chunkId: string, page = 1
 }
 
 export function resetChunkFeedbackGovernance(kbId: string, chunkId: string) {
-  return post<APIResponse<ChunkFeedbackDetail>>(
+  return post<void>(
     `/api/v1/knowledge-bases/${encodeID(kbId)}/chunk-feedback/${encodeID(chunkId)}/reset`,
     {},
   )

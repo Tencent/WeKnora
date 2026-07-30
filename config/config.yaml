@@ -45,7 +45,7 @@ feedback:
   retrieval_weight_enabled: false
   high_rate_threshold: 0.8
   low_rate_threshold: 0.5
-  optimization_threshold: 0.2
+  optimization_threshold: 0.2  # optional; defaults to 0.2, explicit 0 is invalid
   minimum_sample_count: 5
   high_recall_weight: 1.2
   normal_recall_weight: 1.0

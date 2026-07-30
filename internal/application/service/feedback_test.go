@@ -193,6 +193,8 @@ func TestFeedbackGovernanceUsesCurrentEffectivePolicyAndRejectsAPIKeys(t *testin
 	apiCtx := feedbackServiceContext(types.Principal{Type: types.PrincipalAPITenant, ID: "api-key"})
 	_, err = svc.ListChunkFeedback(apiCtx, "kb-1", &types.ChunkFeedbackListQuery{})
 	assert.ErrorIs(t, err, ErrFeedbackForbidden)
+	_, err = svc.GetChunkFeedbackDetails(apiCtx, "chunk-1")
+	assert.ErrorIs(t, err, ErrFeedbackForbidden)
 	_, err = svc.GetChunkFeedbackGovernanceDetails(apiCtx, "kb-1", "chunk-1")
 	assert.ErrorIs(t, err, ErrFeedbackForbidden)
 	_, err = svc.ListChunkFeedbackHistory(apiCtx, "kb-1", "chunk-1", nil)

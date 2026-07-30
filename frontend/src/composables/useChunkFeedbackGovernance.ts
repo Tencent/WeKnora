@@ -14,7 +14,7 @@ type GovernanceAPI = {
   history: (kbId: string, chunkId: string, page?: number, pageSize?: number) => Promise<{
     data: { total: number; page: number; page_size: number; data: ChunkFeedbackAudit[] }
   }>
-  reset: (kbId: string, chunkId: string) => Promise<{ data: ChunkFeedbackDetail }>
+  reset: (kbId: string, chunkId: string) => Promise<void>
 }
 
 export function useChunkFeedbackGovernance(options: {
@@ -129,24 +129,40 @@ export function useChunkFeedbackGovernance(options: {
     resetting.value = true
     error.value = null
     try {
-      const response = await api.reset(targetKB, chunkId)
+      await api.reset(targetKB, chunkId)
       if (requestGeneration !== generation || targetKB !== kbId.value) return true
-      selected.value = response.data
-      const [listResponse, historyResponse] = await Promise.all([
-        api.list(targetKB, {
-          page: page.value,
-          page_size: pageSize.value,
-          feedback_status: filters.feedback_status,
-          sort_by: filters.sort_by,
-          sort_order: filters.sort_order,
-        }),
-        api.history(targetKB, chunkId, 1, 20),
-      ])
-      if (requestGeneration !== generation || targetKB !== kbId.value) return true
-      items.value = listResponse.data.data || []
-      total.value = listResponse.data.total || 0
-      history.value = historyResponse.data.data || []
-      historyTotal.value = historyResponse.data.total || 0
+      if (selected.value?.chunk_id === chunkId) {
+        selected.value = {
+          ...selected.value,
+          like_count: 0,
+          dislike_count: 0,
+          positive_rate: null,
+          stored_recall_weight: 1,
+          effective_recall_weight: 1,
+          needs_optimization: false,
+        }
+      }
+      try {
+        const [detailResponse, listResponse, historyResponse] = await Promise.all([
+          api.detail(targetKB, chunkId),
+          api.list(targetKB, {
+            page: page.value,
+            page_size: pageSize.value,
+            feedback_status: filters.feedback_status,
+            sort_by: filters.sort_by,
+            sort_order: filters.sort_order,
+          }),
+          api.history(targetKB, chunkId, 1, 20),
+        ])
+        if (requestGeneration !== generation || targetKB !== kbId.value) return true
+        selected.value = detailResponse.data
+        items.value = listResponse.data.data || []
+        total.value = listResponse.data.total || 0
+        history.value = historyResponse.data.data || []
+        historyTotal.value = historyResponse.data.total || 0
+      } catch (cause) {
+        if (requestGeneration === generation && targetKB === kbId.value) error.value = cause
+      }
       return true
     } catch (cause) {
       if (requestGeneration === generation && targetKB === kbId.value) error.value = cause

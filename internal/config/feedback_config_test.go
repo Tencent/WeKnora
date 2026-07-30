@@ -28,6 +28,7 @@ func TestFeedbackConfigValidate(t *testing.T) {
 		{"low below zero", func(c *FeedbackConfig) { c.LowRateThreshold = -0.1 }},
 		{"high above one", func(c *FeedbackConfig) { c.HighRateThreshold = 1.1 }},
 		{"threshold order", func(c *FeedbackConfig) { c.LowRateThreshold = 0.9; c.HighRateThreshold = 0.8 }},
+		{"optimization explicit zero", func(c *FeedbackConfig) { c.OptimizationThreshold = 0 }},
 		{"optimization below zero", func(c *FeedbackConfig) { c.OptimizationThreshold = -0.1 }},
 		{"minimum samples", func(c *FeedbackConfig) { c.MinimumSampleCount = 0 }},
 		{"zero weight", func(c *FeedbackConfig) { c.NormalRecallWeight = 0 }},
@@ -90,4 +91,31 @@ func TestFeedbackViperDefaultsAndEnvironmentOverrides(t *testing.T) {
 	require.NotNil(t, overridden.Feedback)
 	require.False(t, overridden.Feedback.Enabled)
 	require.True(t, overridden.Feedback.RetrievalWeightEnabled)
+}
+
+func TestFeedbackOptimizationThresholdOmittedAndExplicitZeroDiffer(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	setFeedbackConfigDefaults()
+
+	var omitted Config
+	require.NoError(t, viper.Unmarshal(&omitted))
+	applyFeedbackConfig(&omitted)
+	require.Equal(t, 0.2, omitted.Feedback.OptimizationThreshold)
+	require.Equal(t, 0.2, omitted.Feedback.EffectiveOptimizationThreshold())
+	require.NoError(t, omitted.Feedback.Validate())
+
+	viper.Set("feedback.optimization_threshold", 0)
+	var explicitZero Config
+	require.NoError(t, viper.Unmarshal(&explicitZero))
+	applyFeedbackConfig(&explicitZero)
+	require.Zero(t, explicitZero.Feedback.EffectiveOptimizationThreshold())
+	require.ErrorContains(t, explicitZero.Feedback.Validate(), "greater than 0")
+
+	for _, threshold := range []float64{0.01, 0.2, 1} {
+		cfg := DefaultFeedbackConfig()
+		cfg.OptimizationThreshold = threshold
+		require.NoError(t, cfg.Validate())
+		require.Equal(t, threshold, cfg.EffectiveOptimizationThreshold())
+	}
 }

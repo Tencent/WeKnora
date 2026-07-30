@@ -129,6 +129,9 @@ func (s *feedbackService) GetChunkFeedbackDetails(
 	if !s.collectionEnabled() {
 		return nil, ErrFeedbackDisabled
 	}
+	if err := requireFeedbackGovernancePrincipal(ctx); err != nil {
+		return nil, err
+	}
 	if chunkID == "" {
 		return nil, ErrInvalidFeedback
 	}

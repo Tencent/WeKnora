@@ -114,7 +114,8 @@ func (h *FeedbackHandler) ListChunkFeedbackHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
-// ResetChunkFeedbackGovernance resets and returns the resulting detail.
+// ResetChunkFeedbackGovernance reports the mutation result only. A subsequent
+// detail refresh is a separate read and cannot reverse a committed reset.
 func (h *FeedbackHandler) ResetChunkFeedbackGovernance(c *gin.Context) {
 	if err := h.service.ResetChunkFeedback(
 		c.Request.Context(),
@@ -124,16 +125,7 @@ func (h *FeedbackHandler) ResetChunkFeedbackGovernance(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
-	details, err := h.service.GetChunkFeedbackGovernanceDetails(
-		c.Request.Context(),
-		c.Param("id"),
-		c.Param("chunk_id"),
-	)
-	if err != nil {
-		h.writeError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": details})
+	c.Status(http.StatusNoContent)
 }
 
 func (h *FeedbackHandler) writeError(c *gin.Context, err error) {

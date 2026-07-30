@@ -81,10 +81,11 @@ func FeedbackCollectionEnabled(c *FeedbackConfig) bool {
 	return c == nil || c.Enabled
 }
 
-// EffectiveOptimizationThreshold returns the configured governance threshold
-// or the default when a partial runtime configuration omits it.
+// EffectiveOptimizationThreshold returns the configured governance threshold.
+// The loader injects the documented default before decoding. A non-nil zero
+// value is therefore an invalid explicit configuration, not an omitted value.
 func (c *FeedbackConfig) EffectiveOptimizationThreshold() float64 {
-	if c == nil || c.OptimizationThreshold <= 0 || c.OptimizationThreshold > 1 {
+	if c == nil {
 		return DefaultFeedbackConfig().OptimizationThreshold
 	}
 	return c.OptimizationThreshold
@@ -116,8 +117,8 @@ func (c *FeedbackConfig) Validate() error {
 		c.LowRateThreshold > c.HighRateThreshold {
 		return fmt.Errorf("feedback thresholds must satisfy 0 <= low_rate_threshold <= high_rate_threshold <= 1")
 	}
-	if c.OptimizationThreshold < 0 || c.OptimizationThreshold > 1 {
-		return fmt.Errorf("feedback.optimization_threshold must be between 0 and 1")
+	if c.OptimizationThreshold <= 0 || c.OptimizationThreshold > 1 {
+		return fmt.Errorf("feedback.optimization_threshold must be greater than 0 and at most 1")
 	}
 	if c.MinimumSampleCount < 1 {
 		return fmt.Errorf("feedback.minimum_sample_count must be at least 1")
