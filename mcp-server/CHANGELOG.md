@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### 修复
+- HTTP 传输恢复 `stateless_http=True`，与迁移前 `StreamableHTTPSessionManager(stateless=True)` 行为一致。
+- SSE 传输恢复消息端点 `/sse/messages/`，与迁移前路由一致。
+- `WeKnoraClient` 使用线程本地 `requests.Session`，避免 MCP 2.x 在线程池中并发调用时出现 Session 竞态。
+
 ## [1.1.0] - 2026-07-30
 
 ### 修复

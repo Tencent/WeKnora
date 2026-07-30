@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 from typing import Any, Dict
 
 import urllib3
@@ -35,6 +36,10 @@ try:
 except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
+
+# Network transport defaults kept for backward compatibility with pre-2.x deployments.
+SSE_MESSAGE_PATH = "/sse/messages/"
+STREAMABLE_HTTP_STATELESS = True
 
 
 def network_transport_auth_token() -> str:
@@ -110,16 +115,26 @@ class WeKnoraClient:
                 "This is insecure and should not be used in production."
             )
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        # Create a persistent session for connection pooling and performance
-        self.session = requests.Session()
-        self.session.verify = self.verify_ssl
-        # Set default headers for all requests
-        self.session.headers.update(
+        # MCP 2.x runs sync @mcp.tool() handlers on worker threads; use a
+        # thread-local Session because requests.Session is not thread-safe.
+        self._session_local = threading.local()
+
+    def _new_session(self) -> requests.Session:
+        session = requests.Session()
+        session.verify = self.verify_ssl
+        session.headers.update(
             {
-                "X-API-Key": api_key,  # API key for authentication
-                "Content-Type": "application/json",  # Default content type
+                "X-API-Key": self.api_key,
+                "Content-Type": "application/json",
             }
         )
+        return session
+
+    @property
+    def session(self) -> requests.Session:
+        if not getattr(self._session_local, "session", None):
+            self._session_local.session = self._new_session()
+        return self._session_local.session
 
     def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make a request to the WeKnora API
@@ -931,10 +946,14 @@ async def run_sse(host: str, port: int):
             f"SSE transport requires 'starlette' and 'uvicorn': pip install starlette uvicorn\n{e}"
         ) from e
 
-    starlette_app = MCPAuthMiddleware(mcp.sse_app(host=host), auth_token)
+    starlette_app = MCPAuthMiddleware(
+        mcp.sse_app(host=host, message_path=SSE_MESSAGE_PATH),
+        auth_token,
+    )
 
     logger.info("Starting SSE MCP server on %s:%d", host, port)
     logger.info("SSE endpoint:  http://%s:%d/sse", host, port)
+    logger.info("SSE messages: http://%s:%d%s", host, port, SSE_MESSAGE_PATH)
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     await server.serve()
@@ -951,7 +970,10 @@ async def run_http(host: str, port: int):
             f"HTTP transport requires 'starlette' and 'uvicorn': pip install starlette uvicorn\n{e}"
         ) from e
 
-    starlette_app = MCPAuthMiddleware(mcp.streamable_http_app(host=host), auth_token)
+    starlette_app = MCPAuthMiddleware(
+        mcp.streamable_http_app(host=host, stateless_http=STREAMABLE_HTTP_STATELESS),
+        auth_token,
+    )
 
     logger.info("Starting Streamable HTTP MCP server on %s:%d", host, port)
     logger.info("MCP endpoint:  http://%s:%d/mcp", host, port)
