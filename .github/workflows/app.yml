@@ -66,12 +66,19 @@ jobs:
       - name: Check formatting
         shell: bash
         run: |
-          base="$BASE_SHA"
-          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
-            base=$(git rev-parse HEAD^)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Compare base..head, not the PR merge commit, so files changed only
+            # on main after the branch point are not attributed to this PR.
+            diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            base="$BASE_SHA"
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              base=$(git rev-parse HEAD^)
+            fi
+            diff_range="$base..$GITHUB_SHA"
           fi
           unformatted=$(
-            git diff --name-only --diff-filter=ACMR -z "$base" "$GITHUB_SHA" -- '*.go' ':!cli/**' |
+            git diff --name-only --diff-filter=ACMR -z "$diff_range" -- '*.go' ':!cli/**' |
               xargs -0 -r gofmt -l
           )
           if [ -n "$unformatted" ]; then
