@@ -54,6 +54,7 @@ type RouterParams struct {
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
+	FeedbackHandler              *handler.FeedbackHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -247,6 +248,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		RegisterFeedbackRoutes(v1, params.FeedbackHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
@@ -267,6 +269,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
+		RegisterFeedbackAdminRoutes(v1, params.FeedbackHandler, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route
 		// template that does not actually exist (typo / path drift). A

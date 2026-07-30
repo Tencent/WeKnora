@@ -80,3 +80,11 @@ export async function stopSession(session_id: string, message_id: string) {
 export async function clearSessionMessages(session_id: string) {
   return del(`/api/v1/sessions/${session_id}/messages`);
 }
+
+export async function submitFeedback(session_id: string, message_id: string, data: { type: string; reason?: string }) {
+  return post(`/api/v1/messages/${session_id}/${message_id}/feedback`, data);
+}
+
+export async function getMessageFeedback(session_id: string, message_id: string) {
+  return get(`/api/v1/messages/${session_id}/${message_id}/feedback`);
+}
