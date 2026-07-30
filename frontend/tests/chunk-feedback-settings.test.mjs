@@ -67,10 +67,10 @@ test('legacy high and low quality statuses remain presentation-safe', () => {
 
 test('overview labels total_chunks as all chunks in every locale', () => {
   const expected = new Map([
-    ['zh-CN', /totalChunks:\s*"全部片段"/],
-    ['en-US', /totalChunks:\s*'Total chunks'/],
-    ['ko-KR', /totalChunks:\s*"전체 청크"/],
-    ['ru-RU', /totalChunks:\s*'Всего фрагментов'/],
+    ['zh-CN', /totalChunks:\s*['"]全部片段['"]/],
+    ['en-US', /totalChunks:\s*['"]Total chunks['"]/],
+    ['ko-KR', /totalChunks:\s*['"]전체 청크['"]/],
+    ['ru-RU', /totalChunks:\s*['"]Всего фрагментов['"]/],
   ])
 
   for (const [locale, pattern] of expected) {

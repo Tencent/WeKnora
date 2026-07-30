@@ -2,16 +2,10 @@ export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
-    integrations: 'Publish & Integrations',
     organizations: 'Shared Spaces',
-    chat: 'Chat',
     newChat: 'New Chat',
-    createChat: 'Create Chat',
-    tenant: 'Account Info',
     settings: 'System Settings',
     logout: 'Logout',
-    uploadKnowledge: 'Upload Knowledge',
-    deleteRecord: 'Delete Record',
     clearMessages: 'Clear Messages',
     clearMessagesSuccess: 'Messages cleared',
     clearMessagesFailed: 'Failed to clear messages, please try again later',
@@ -22,27 +16,15 @@ export default {
     newSession: 'New Chat',
     pin: 'Pin',
     unpin: 'Unpin',
-    pinned: 'Pinned',
     pinFailed: 'Failed to pin, please try again later',
     unpinFailed: 'Failed to unpin, please try again later',
-    confirmLogout: 'Are you sure you want to logout?',
-    systemInfo: 'System Information',
     search: 'Search',
     collapseSidebar: 'Collapse Sidebar',
     expandSidebar: 'Expand Sidebar',
     logoutSuccess: 'Logged out successfully',
     myChats: 'My chats',
     apiChats: 'API sessions',
-    embedChats: 'Web embed',
-    embedChannelNamed: 'Web embed · {name}',
-    groupBy: 'Group by',
-    groupNone: 'None',
-    groupDate: 'Date',
-    channelsSection: 'Channel chats',
-    chatsSection: 'Web chats',
-    otherSources: 'Other sources',
-    noSessions: 'No conversations yet',
-    loadMoreSessions: 'Load more',
+    noSessions: 'No conversations yet'
   },
   chatHeader: {
     moreActions: 'More conversation actions',
@@ -51,10 +33,7 @@ export default {
     copyMarkdown: 'Copy as Markdown',
     openNewWindow: 'Open in New Window',
     deleteSession: 'Delete Conversation',
-    renameTitle: 'Rename Conversation',
     renamePlaceholder: 'Enter a conversation title',
-    renameRequired: 'Conversation title is required',
-    pinSuccess: 'Conversation pinned',
     unpinSuccess: 'Conversation unpinned',
     sessionIdCopied: 'Session ID copied',
     linkCopied: 'Conversation link copied',
@@ -72,8 +51,8 @@ export default {
       user: 'User',
       assistant: 'Assistant',
       attachments: 'Attachments',
-      references: 'References',
-    },
+      references: 'References'
+    }
   },
   newUserGuide: {
     stepOf: '{current} / {total}',
@@ -85,33 +64,33 @@ export default {
     steps: {
       welcome: {
         title: 'Welcome to WeKnora',
-        desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.',
+        desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.'
       },
       knowledge: {
         title: 'Create your knowledge base',
-        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.',
+        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.'
       },
       chat: {
         title: 'Start an AI chat',
-        desc: 'Ask questions grounded in your knowledge base and get accurate answers with cited sources. Click here to start a new chat.',
+        desc: 'Ask questions grounded in your knowledge base and get accurate answers with cited sources. Click here to start a new chat.'
       },
       agents: {
         title: 'Build dedicated agents',
-        desc: 'Combine knowledge bases, prompts and tools into reusable agents that capture your expertise.',
+        desc: 'Combine knowledge bases, prompts and tools into reusable agents that capture your expertise.'
       },
       settings: {
         title: 'Account & settings',
-        desc: 'Open this to manage your account, members and system settings. You can reopen this tour from the help button next to your name at the top of this menu.',
+        desc: 'Open this to manage your account, members and system settings. You can reopen this tour from the help button next to your name at the top of this menu.'
       },
       models: {
         title: 'Configure your models',
-        desc: 'A key step: add chat, embedding and other models in Model Management so knowledge bases and chat can work. Click "Add model" to get started.',
+        desc: 'A key step: add chat, embedding and other models in Model Management so knowledge bases and chat can work. Click "Add model" to get started.'
       },
       done: {
         title: 'You are all set',
-        desc: 'You now know the essentials — start building your knowledge assistant! Revisit this tour anytime from the help button next to your name in this menu.',
-      },
-    },
+        desc: 'You now know the essentials — start building your knowledge assistant! Revisit this tour anytime from the help button next to your name in this menu.'
+      }
+    }
   },
   contextualGuide: {
     stepOf: '{current} / {total}',
@@ -124,201 +103,199 @@ export default {
       steps: {
         create: {
           title: 'Create your first knowledge base',
-          desc: 'Knowledge bases hold documents and FAQs. Click the highlighted "New knowledge base" button below and we will walk you through the form.',
-        },
-      },
+          desc: 'Knowledge bases hold documents and FAQs. Click the highlighted "New knowledge base" button below and we will walk you through the form.'
+        }
+      }
     },
     tenantModels: {
-      needModelsFirst: 'Add a chat model and an Embedding model before creating a knowledge base.',
       needChatModelFirst: 'Add a chat model (KnowledgeQA) before creating an agent.',
       steps: {
         intro: {
           title: 'Configure models first',
-          desc: 'A document knowledge base needs at least one chat model (summaries and Q&A) and one Embedding model (vector search). Add them in system settings.',
+          desc: 'A document knowledge base needs at least one chat model (summaries and Q&A) and one Embedding model (vector search). Add them in system settings.'
         },
         addModel: {
           title: 'Add models',
-          desc: 'Click "Add model" and configure KnowledgeQA (chat) and Embedding types. Lite users can pull local models via Ollama.',
+          desc: 'Click "Add model" and configure KnowledgeQA (chat) and Embedding types. Lite users can pull local models via Ollama.'
         },
         done: {
           title: 'Then continue',
-          desc: 'After saving models, close settings and click "New knowledge base". The wizard will walk you through type, indexing, and model binding.',
-        },
+          desc: 'After saving models, close settings and click "New knowledge base". The wizard will walk you through type, indexing, and model binding.'
+        }
       },
       stepsAgent: {
         intro: {
           title: 'Configure a chat model first',
-          desc: 'Creating an agent requires at least one KnowledgeQA model. Add it in system settings (Embedding is only required for knowledge bases).',
+          desc: 'Creating an agent requires at least one KnowledgeQA model. Add it in system settings (Embedding is only required for knowledge bases).'
         },
         addModel: {
           title: 'Add a chat model',
-          desc: 'Click "Add model" and configure a KnowledgeQA type.',
+          desc: 'Click "Add model" and configure a KnowledgeQA type.'
         },
         done: {
           title: 'Then create an agent',
-          desc: 'After saving, close settings and click "Create agent". The wizard covers mode, knowledge bases, and attachment upload options.',
-        },
-      },
+          desc: 'After saving, close settings and click "Create agent". The wizard covers mode, knowledge bases, and attachment upload options.'
+        }
+      }
     },
     kbCreate: {
       steps: {
         type: {
           title: 'Choose a type',
-          desc: 'Document bases are for PDFs, Word files, and similar uploads. FAQ bases are for question–answer pairs. The type cannot be changed later.',
+          desc: 'Document bases are for PDFs, Word files, and similar uploads. FAQ bases are for question–answer pairs. The type cannot be changed later.'
         },
         name: {
           title: 'Enter a name',
-          desc: 'Pick a clear name such as "Product manual" or "Support FAQ". Description is optional.',
+          desc: 'Pick a clear name such as "Product manual" or "Support FAQ". Description is optional.'
         },
         indexing: {
           title: 'Indexing capabilities',
-          desc: 'Vector and keyword search are on by default. You can also enable Wiki or knowledge-graph indexing. Keep at least one search mode enabled.',
+          desc: 'Vector and keyword search are on by default. You can also enable Wiki or knowledge-graph indexing. Keep at least one search mode enabled.'
         },
         navModels: {
           title: 'Model setup (required)',
-          desc: 'Every knowledge base needs a chat model; retrieval also requires an Embedding model. Open "Model configuration" on the left.',
+          desc: 'Every knowledge base needs a chat model; retrieval also requires an Embedding model. Open "Model configuration" on the left.'
         },
         llm: {
           title: 'Chat / summary model',
-          desc: 'Used for summaries and answers. If the list is empty, use the dropdown to open settings and add a model.',
+          desc: 'Used for summaries and answers. If the list is empty, use the dropdown to open settings and add a model.'
         },
         embedding: {
           title: 'Embedding model',
-          desc: 'Turns text into vectors for semantic search. Works with vector/keyword indexing above.',
+          desc: 'Turns text into vectors for semantic search. Works with vector/keyword indexing above.'
         },
         parser: {
           title: 'Parser engine (optional)',
-          desc: 'How PDFs and Office files are parsed. Defaults work for most cases; adjust if you need OCR or special layouts.',
+          desc: 'How PDFs and Office files are parsed. Defaults work for most cases; adjust if you need OCR or special layouts.'
         },
         chunking: {
           title: 'Chunking (optional)',
-          desc: 'How documents are split for retrieval. Default chunk sizes are tuned for RAG and rarely need changes.',
+          desc: 'How documents are split for retrieval. Default chunk sizes are tuned for RAG and rarely need changes.'
         },
         storage: {
           title: 'Storage (optional)',
-          desc: 'Where raw files are stored (local or object storage). The workspace default is usually fine.',
+          desc: 'Where raw files are stored (local or object storage). The workspace default is usually fine.'
         },
         navMultimodal: {
           title: 'Multimodal / images (optional)',
-          desc: 'Enable this if documents contain charts, scans, or image-heavy content that needs vision understanding.',
+          desc: 'Enable this if documents contain charts, scans, or image-heavy content that needs vision understanding.'
         },
         multimodalToggle: {
           title: 'Enable multimodal parsing',
-          desc: 'When on, image-bearing uploads are processed with a vision-language model for better retrieval.',
+          desc: 'When on, image-bearing uploads are processed with a vision-language model for better retrieval.'
         },
         multimodalVllm: {
           title: 'Choose a VLM model',
-          desc: 'Multimodal requires a VLM. Add one in system settings if the list is empty.',
+          desc: 'Multimodal requires a VLM. Add one in system settings if the list is empty.'
         },
         faq: {
           title: 'FAQ indexing',
-          desc: 'Choose how Q&A pairs are indexed. You can add FAQ entries after creation.',
+          desc: 'Choose how Q&A pairs are indexed. You can add FAQ entries after creation.'
         },
         submit: {
           title: 'Create the knowledge base',
-          desc: 'When type, name, and models look correct, click the highlighted Create button. You will then be guided to upload your first document.',
-        },
-      },
+          desc: 'When type, name, and models look correct, click the highlighted Create button. You will then be guided to upload your first document.'
+        }
+      }
     },
     agentList: {
       steps: {
         create: {
           title: 'Create your agent',
-          desc: 'Agents combine models, knowledge bases, tools, and prompts into reusable assistants. Click the highlighted "Create agent" button.',
-        },
-      },
+          desc: 'Agents combine models, knowledge bases, tools, and prompts into reusable assistants. Click the highlighted "Create agent" button.'
+        }
+      }
     },
     agentCreate: {
       steps: {
         mode: {
           title: 'Choose run mode',
-          desc: '"Quick answer" for straightforward Q&A; "Smart reasoning" uses tools and multi-step thinking for complex tasks.',
+          desc: '"Quick answer" for straightforward Q&A; "Smart reasoning" uses tools and multi-step thinking for complex tasks.'
         },
         agentType: {
           title: 'Choose an agent type',
-          desc: 'Presets fill in the system prompt, recommended tools, and knowledge scope (e.g. Wiki builder, data analysis). Switch by scenario—name and description update accordingly.',
+          desc: 'Presets fill in the system prompt, recommended tools, and knowledge scope (e.g. Wiki builder, data analysis). Switch by scenario—name and description update accordingly.'
         },
         name: {
           title: 'Name and description',
-          desc: 'Pick a recognizable name. Smart-reasoning mode may pre-fill a default you can edit.',
+          desc: 'Pick a recognizable name. Smart-reasoning mode may pre-fill a default you can edit.'
         },
         navModel: {
           title: 'Bind a chat model',
-          desc: 'Every agent needs a KnowledgeQA model as its reasoning engine.',
+          desc: 'Every agent needs a KnowledgeQA model as its reasoning engine.'
         },
         model: {
           title: 'Select model',
-          desc: 'Choose from configured chat models, or add one in system settings first.',
+          desc: 'Choose from configured chat models, or add one in system settings first.'
         },
         navKnowledge: {
           title: 'Link knowledge bases',
-          desc: 'Control which knowledge the agent can retrieve. Default is all knowledge bases.',
+          desc: 'Control which knowledge the agent can retrieve. Default is all knowledge bases.'
         },
         knowledge: {
           title: 'Knowledge scope',
-          desc: '"All" for general assistants; "Selected" for a domain; "None" relies on the model alone or web search.',
+          desc: '"All" for general assistants; "Selected" for a domain; "None" relies on the model alone or web search.'
         },
         navWebsearch: {
           title: 'Web search (optional)',
-          desc: 'Allow the agent to call external search for up-to-date information.',
+          desc: 'Allow the agent to call external search for up-to-date information.'
         },
         navMultimodal: {
           title: 'Attachment upload (optional)',
-          desc: 'Lets users send images, documents, and audio in chat; image understanding requires a VLM in system settings.',
+          desc: 'Lets users send images, documents, and audio in chat; image understanding requires a VLM in system settings.'
         },
         multimodal: {
           title: 'Enable attachment upload',
-          desc: 'Configure image and audio upload plus attachment parse rules; select a VLM below when image upload is enabled.',
+          desc: 'Configure image and audio upload plus attachment parse rules; select a VLM below when image upload is enabled.'
         },
         navTools: {
           title: 'Tools & MCP (optional)',
-          desc: 'In smart-reasoning mode, enable built-in tools and MCP services for search, code, and more.',
+          desc: 'In smart-reasoning mode, enable built-in tools and MCP services for search, code, and more.'
         },
         submit: {
           title: 'Save the agent',
-          desc: 'Click the highlighted confirm button to finish. You can then select this agent in chat.',
-        },
-      },
+          desc: 'Click the highlighted confirm button to finish. You can then select this agent in chat.'
+        }
+      }
     },
     kbDetail: {
       steps: {
         intro: {
           title: 'This knowledge base is empty',
-          desc: 'Add your first item so you can search and chat over it. You can also drag and drop supported file types.',
+          desc: 'Add your first item so you can search and chat over it. You can also drag and drop supported file types.'
         },
         upload: {
           title: 'Add documents',
-          desc: 'Use this menu to upload files or folders, import a URL, or create content online.',
+          desc: 'Use this menu to upload files or folders, import a URL, or create content online.'
         },
         done: {
           title: 'Ready after parsing',
-          desc: 'Once documents are indexed, mention this knowledge base in chat with @ to get answers with citations.',
-        },
-      },
+          desc: 'Once documents are indexed, mention this knowledge base in chat with {\'@\'} to get answers with citations.'
+        }
+      }
     },
     chat: {
       steps: {
         kb: {
           title: 'Choose knowledge scope',
-          desc: 'Click @ to pick one or more knowledge bases or files. Answers use only the selection; otherwise the current agent settings apply.',
+          desc: 'Click {\'@\'} to pick one or more knowledge bases or files. Answers use only the selection; otherwise the current agent settings apply.'
         },
         input: {
           title: 'Type your question',
-          desc: 'Describe what you want to know, or click a suggested question above to get started quickly.',
+          desc: 'Describe what you want to know, or click a suggested question above to get started quickly.'
         },
         send: {
           title: 'Send to start chatting',
-          desc: 'Sending creates a new session. The AI answers using your knowledge base and shows cited passages.',
+          desc: 'Sending creates a new session. The AI answers using your knowledge base and shows cited passages.'
         },
         done: {
           title: 'You are ready to explore',
-          desc: 'Try a question related to your uploaded documents and see grounded answers with references.',
-        },
-      },
-    },
+          desc: 'Try a question related to your uploaded documents and see grounded answers with references.'
+        }
+      }
+    }
   },
   batchManage: {
-    title: 'Manage Conversations',
     selectAll: 'Select All',
     cancel: 'Cancel',
     delete: 'Delete Conversations',
@@ -326,24 +303,14 @@ export default {
     deleteConfirmBody: 'Are you sure you want to delete the selected {count} conversation(s)? This action cannot be undone.',
     deleteAllConfirmBody: 'Are you sure you want to delete all conversations? This action cannot be undone.',
     deleteSuccess: 'Deleted successfully',
-    deleteFailed: 'Delete failed, please try again later',
-    noSelection: 'Please select at least one conversation',
-    loadFailed: 'Failed to load conversations',
+    deleteFailed: 'Delete failed, please try again later'
   },
   listSpaceSidebar: {
-    title: 'Filter',
     all: 'All',
     workspace: 'Workspace',
-    mine: 'Mine',
     spaces: 'Shared with me',
     favorites: 'Starred',
     recents: 'Recent'
-  },
-  listFilter: {
-    creator: 'Creator',
-    allCreators: 'All',
-    createdByMe: 'Created by me',
-    createdByOthers: 'Created by others'
   },
   resourceOrigin: {
     mine: 'Mine',
@@ -359,9 +326,7 @@ export default {
   },
   knowledgeBase: {
     title: 'Knowledge Base',
-    list: 'Knowledge Base List',
     fileContent: 'File Content',
-    detail: 'Knowledge Base Details',
     accessInfo: {
       myRole: 'My role',
       roleOwner: 'Owner',
@@ -371,7 +336,7 @@ export default {
       permissionViewer: 'View and search only',
       fromOrg: 'From space',
       sharedAt: 'Shared at',
-      lastUpdated: 'Last updated',
+      lastUpdated: 'Last updated'
     },
     infoCard: {
       tooltip: 'View knowledge base info',
@@ -393,25 +358,17 @@ export default {
       supportedFileTypes: 'Accepted formats',
       chunking: 'Chunking',
       parentShort: 'parent',
-      childShort: 'child',
+      childShort: 'child'
     },
-    create: 'Create Knowledge Base',
-    edit: 'Edit Knowledge Base',
-    delete: 'Delete Knowledge Base',
     name: 'Name',
     description: 'Description',
-    files: 'Files',
     settings: 'Settings',
-    publishToWeb: 'Publish to Web',
-    documentCategoryTitle: 'Document Tags',
     tagUpdateSuccess: 'Tag updated successfully',
     tagEditDialogHeading: 'Edit tags',
-    tagEditDialogTitle: 'Edit Tags — {name}',
     tagEditSearch: 'Search tags...',
     tagEditSelectedSection: 'Selected',
     tagEditAvailableSection: 'Available',
     tagEditNoSelected: 'None selected',
-    tagFilterAll: 'All documents',
     tagFilterTitle: 'Filter by tag',
     tagFilterPlaceholder: 'Tags',
     tagFilterMulti: '{count} tags',
@@ -422,21 +379,15 @@ export default {
     tagManageDocCount: '{count} documents',
     tagManageFaqCount: '{count} FAQ entries',
     tagSelectedCount: '{count} selected',
-    tagOverflowTip: 'Click to edit tags',
     tagNewPlaceholder: 'New tag name, press Enter to add',
-    category: 'Tag',
-    faqCategoryTitle: 'FAQ Tags',
     untagged: 'Untagged',
     tagClearAction: 'Clear selection',
-    tagSearchTooltip: 'Search tags',
     tagCreateAction: 'Create tag',
     tagSearchPlaceholder: 'Type to filter tags',
     tagNamePlaceholder: 'Enter tag name',
     tagNameRequired: 'Please provide a tag name',
     tagCreateSuccess: 'Tag created',
     tagEditSuccess: 'Tag updated',
-    tagDeleteTitle: 'Delete tag',
-    tagDeleteDesc: 'Delete tag "{name}"? All FAQ entries under this tag will also be deleted.',
     tagDeleteDescDoc: 'Delete tag "{name}"? All documents under this tag will also be deleted.',
     tagDeleteSuccess: 'Tag deleted',
     tagEditAction: 'Rename',
@@ -445,39 +396,19 @@ export default {
     tagLabel: 'Tag',
     tagPlaceholder: 'Select tags',
     noTags: 'No tags',
-    upload: 'Upload File',
     uploadSuccess: 'File uploaded successfully!',
     uploadFailed: 'File upload failed!',
-    docActionUnsupported: 'This knowledge base type does not support this action',
     fileExists: 'File already exists',
-    uploadingMultiple: 'Uploading {total} files...',
     uploadAllSuccess: 'Successfully uploaded {count} files!',
     uploadPartialSuccess: 'Upload completed: {success} succeeded, {fail} failed',
     uploadAllFailed: 'All files failed to upload',
     uploadingFolder: 'Uploading {total} files from folder...',
-    uploadingValidFiles: 'Uploading {valid}/{total} valid files...',
-    noValidFiles: 'No valid files',
-    noValidFilesInFolder: 'All {total} files in folder are unsupported',
-    noValidFilesSelected: 'All selected files are unsupported',
-    hiddenFilesFiltered: 'Filtered {count} hidden files',
-    imagesFilteredNoVLM: 'Filtered {count} image files (VLM not enabled)',
     videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
-    audiosFilteredNoASR: 'Filtered {count} audio files (ASR not enabled)',
-    invalidFilesFiltered: 'Filtered {count} unsupported files',
-    unsupportedFileType: 'Unsupported file type',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
-    failedFilesList: 'Failed files:', 
-    andMoreFiles: '...and {count} more files',
-    duplicateFilesSkipped: '{count} duplicate files skipped',
-    uploadFile: 'Upload File',
-    uploadFileDesc: 'Supports PDF, Word, TXT, images, audio, etc.',
     importURL: 'Import from URL',
     addDocument: 'Add Document',
-    importURLDesc: 'Import via URL link',
     importURLTitle: 'Import from URL',
-    manualCreate: 'Manual Create',
-    manualCreateDesc: 'Write document content directly',
     urlRequired: 'Please enter a URL',
     invalidURL: 'Please enter a valid URL',
     urlImportSuccess: 'URL imported successfully!',
@@ -506,7 +437,6 @@ export default {
     channelUrl: 'Web',
     channelUnknown: 'Unknown',
     urlSource: 'Source URL',
-    documentTitle: 'Document Title',
     webContent: 'Web Content',
     documentContent: 'Document Content',
     importTime: 'Import Time',
@@ -517,14 +447,9 @@ export default {
     characters: 'chars',
     segment: 'Segment',
     chunkCount: 'Total {count} segments',
-    viewOriginal: 'View Original File',
     viewChunks: 'View Chunks',
     viewMerged: 'Full Text',
-    originalFileNotSupported: 'This file type does not support original file view. Please download to view.',
-    loadOriginalFailed: 'Failed to load original file content',
-    questions: 'Questions',
     generatedQuestions: 'Retrieval questions',
-    childChunk: 'Child Chunk',
     viewParentContext: 'View Parent Context',
     parentContextLoadFailed: 'Failed to load parent context',
     confirmDeleteQuestion: 'Are you sure you want to delete this question? The corresponding vector index will also be removed.',
@@ -532,7 +457,6 @@ export default {
     customMetadata: 'Custom metadata',
     metadataCapabilityHint: 'Used for document summaries and as document-level context after retrieval; it is not indexed and does not affect retrieval ranking',
     noCustomMetadata: 'No custom metadata',
-    metadataObjectRequired: 'Metadata must be a JSON object',
     addMetadataField: 'Add metadata field',
     metadataKeyPlaceholder: 'Field name',
     metadataValuePlaceholder: 'Field value',
@@ -553,7 +477,6 @@ export default {
     chunkEditConflict: 'This chunk was modified by someone else. The list was refreshed; please try again.',
     retryIndex: 'Retry index',
     indexRetrySuccess: 'Index synchronized',
-    history: 'History',
     chunkHistory: 'Chunk edit history',
     currentVersion: 'Current version',
     noChunkHistory: 'No edit history',
@@ -563,7 +486,6 @@ export default {
     noContentChanges: 'No content changes; this revision only changed status',
     revertRevision: 'Revert revision',
     revertRevisionConfirm: 'Revert to v{revision}? A new revision will be created.',
-    enterRevision: 'Enter the revision to restore',
     chunkReverted: 'Chunk reverted',
     chunkContentRequired: 'Chunk content is required',
     disableChunk: 'Disable',
@@ -572,7 +494,6 @@ export default {
     disabledStatus: 'Disabled',
     editChunkContent: 'Edit chunk content',
     addGeneratedQuestion: 'Add retrieval question',
-    editGeneratedQuestion: 'Edit retrieval question',
     regenerateQuestions: 'Regenerate questions',
     questionsRegenerated: 'Retrieval questions refreshed',
     staleGeneratedQuestions: 'Generated from an earlier version; regenerate if needed',
@@ -584,41 +505,7 @@ export default {
     getInfoFailed: 'Failed to get knowledge base information, file upload is not possible',
     missingId: 'Knowledge base ID is missing',
     deleteFailed: 'Delete failed. Please try again later!',
-    quickActions: 'Quick Actions',
-    createKnowledgeBase: 'Create Knowledge Base',
-    knowledgeBaseName: 'Knowledge Base Name',
-    enterName: 'Enter knowledge base name',
-    embeddingModel: 'Embedding Model',
-    selectEmbeddingModel: 'Select embedding model',
-    summaryModel: 'Summary Model',
-    selectSummaryModel: 'Select summary model',
-    rerankModel: 'Rerank Model',
-    selectRerankModel: 'Select rerank model (optional)',
-    createSuccess: 'Knowledge base created successfully',
-    createFailed: 'Failed to create knowledge base',
-    updateSuccess: 'Knowledge base updated successfully',
-    updateFailed: 'Failed to update knowledge base',
-    deleteConfirm: 'Are you sure you want to delete this knowledge base?',
-    fileName: 'File Name',
-    fileSize: 'File Size',
     uploadTime: 'Upload Time',
-    status: 'Status',
-    actions: 'Actions',
-    processing: 'Processing',
-    completed: 'Completed',
-    failed: 'Failed',
-    noFiles: 'No files',
-    dragFilesHere: 'Drag files here or',
-    clickToUpload: 'click to upload',
-    supportedFormats: 'Supported formats',
-    maxFileSize: 'Max file size',
-    viewDetails: 'View Details',
-    downloadFile: 'Download File',
-    deleteFile: 'Delete File',
-    confirmDeleteFile: 'Are you sure you want to delete this file?',
-    totalFiles: 'Total files',
-    totalSize: 'Total size',
-    // Additional translations for KnowledgeBase.vue
     newSession: 'New Chat',
     editDocument: 'Edit Document',
     rebuildDocument: 'Rebuild Document',
@@ -636,28 +523,23 @@ export default {
     deleteDocument: 'Delete Document',
     moveDocument: 'Move to...',
     moveToKnowledgeBase: 'Move to Knowledge Base',
-    moveSelectTarget: 'Select target knowledge base',
     moveNoTargets: 'No compatible knowledge bases found (same type and embedding model required)',
-    moveMode: 'Move Mode',
     moveModeReuseVectors: 'Reuse Vectors (Fast)',
     moveModeReuseVectorsDesc: 'Directly move chunks and vector indices. Use when chunking config is the same.',
     moveModeReparse: 'Re-parse',
-    moveModeReparseDesc: "Re-parse documents using the target knowledge base's chunking config.",
+    moveModeReparseDesc: 'Re-parse documents using the target knowledge base\'s chunking config.',
     moveConfirm: 'Confirm Move',
     moveConfirmTitle: 'Confirm move settings',
     moveStarted: 'Move task submitted',
     moveFailed: 'Move failed',
     moveCompleted: 'Move completed',
     moveCompletedWithErrors: 'Move completed: {success} succeeded, {failed} failed',
-    moveProgress: 'Moving...',
     parsingFailed: 'Parsing failed',
     parsingInProgress: 'Parsing...',
     generatingSummary: 'Generating summary...',
     documentSummary: 'Summary',
     detailSectionMeta: 'Basic info',
-    deleteConfirmation: 'Delete Confirmation',
     confirmDeleteDocument: 'Confirm deletion of document "{fileName}", recovery will be impossible after deletion',
-    cancel: 'Cancel',
     confirmDelete: 'Confirm Delete',
     viewModeGrid: 'Grid view',
     viewModeList: 'List view',
@@ -665,7 +547,6 @@ export default {
     columnName: 'Name',
     columnTag: 'Tag',
     columnSize: 'Size',
-    columnType: 'Type',
     columnSource: 'Source',
     columnStatus: 'Status',
     columnUpdatedAt: 'Updated',
@@ -674,7 +555,6 @@ export default {
     selectedCount: '{count} selected',
     clearSelection: 'Deselect all',
     batchDelete: 'Delete selected',
-    batchDeleteConfirmation: 'Confirm Batch Delete',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
     batchDeleteSuccess: 'Deleted {count} documents',
     batchDeleteFailed: 'Batch delete failed',
@@ -694,39 +574,9 @@ export default {
     statusCompleted: 'Completed',
     statusProcessing: 'Processing',
     statusFinalizing: 'Optimizing',
-    statusPending: 'Pending',
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
     statusDraft: 'Draft',
-    selectKnowledgeBaseFirst: 'Please select a knowledge base first',
-    sessionCreationFailed: 'Failed to create chat session',
-    sessionCreationError: 'Chat session creation error',
-    settingsParsingFailed: 'Failed to parse settings',
-    fileUploadEventReceived: 'File upload event received, uploaded knowledge base ID: {uploadedKbId}, current knowledge base ID: {currentKbId}',
-    matchingKnowledgeBase: 'Matching knowledge base, starting file list update',
-    routeParamChange: 'Route parameter change, re-fetching knowledge base content',
-    fileUploadEventListening: 'Listening for file upload events',
-    apiCallKnowledgeFiles: 'Direct API call to get knowledge base file list',
-    responseInterceptorData: 'Since the response interceptor has already returned data, result is part of the response data',
-    hookProcessing: 'Processing according to useKnowledgeBase hook method',
-    errorHandling: 'Error handling',
-    priorityCurrentPageKbId: 'Priority to use knowledge base ID of current page',
-    fallbackLocalStorageKbId: 'If current page has no knowledge base ID, attempt to get knowledge base ID from settings in localStorage',
-    // Additional translations for KnowledgeBaseList.vue
-    createNewKnowledgeBase: 'Create Knowledge Base',
-    uninitializedWarning: 'Some knowledge bases are not initialized, you need to configure model information in settings first to add knowledge documents',
-    initializedStatus: 'Initialized',
-    notInitializedStatus: 'Not Initialized',
-    needSettingsFirst: 'You need to configure model information in settings first to add knowledge',
-    documents: 'Documents',
-    configureModelsFirst: 'Please configure model information in settings first',
-    confirmDeleteKnowledgeBase: 'Confirm deletion of this knowledge base?',
-    createKnowledgeBaseDialog: 'Create Knowledge Base',
-    enterNameKb: 'Enter name',
-    enterDescriptionKb: 'Enter description',
-    createKb: 'Create',
-    deleted: 'Deleted',
-    deleteFailedKb: 'Delete failed',
     noDescription: 'No description',
     emptyKnowledgeDragDrop: 'Knowledge is empty, drag and drop to upload',
     pdfDocFormat: 'pdf, doc format files, max 10M',
@@ -748,13 +598,11 @@ export default {
     parseStatusDraft: 'Draft',
     sourceFilter: 'Source',
     allSources: 'All Sources',
-    sourceWeb: 'Web',
     sourceApi: 'API',
     sourceBrowserExtension: 'Browser Extension',
     sourceUpload: 'Upload',
     sourceUrl: 'URL Import',
     sourceManual: 'Manual',
-    updatedTimeFilter: 'Updated',
     updatedTimeFrom: 'From',
     updatedTimeTo: 'To',
     noMatch: 'No matching knowledge base found',
@@ -767,42 +615,18 @@ export default {
     partialUploadSuccess: 'Partial upload success (success: {success}, failed: {fail})',
     allUploadFailed: 'All files failed to upload ({count} files)',
     deleteSuccess: 'Knowledge deleted successfully!',
-    chunkLoadFailed: 'Failed to load chunks',
+    chunkLoadFailed: 'Failed to load chunks'
   },
-
   uploadConfirm: {
     title: 'Confirm Upload',
-    fileList: 'Files to upload',
     parseConfig: 'Parse settings',
     configNav: 'Parse settings navigation',
-    tabOverview: 'Overview',
-    overviewTitle: 'Parse settings for this batch',
-    overviewDesc: 'Review the parsing settings below, then start the upload',
-    basicSettings: 'Common settings',
-    advancedSettings: 'Advanced capabilities',
     navParserDefault: 'Default',
     navParserCustomized: 'Customized',
     moreOptions: 'More processing options',
-    backToOverview: 'Back to overview',
-    summaryChunkOverlapShort: 'Overlap {overlap}',
     summaryParentChildShort: 'Parent-child',
-    summaryParserMode: 'Mode',
-    summaryParserBuiltin: 'Built-in engine (default)',
     summaryParserForceScanned: 'Scanned mode',
-    summaryChunkSize: 'Chunk size',
-    summaryChunkOverlap: 'Overlap',
-    summaryStrategy: 'Strategy',
-    summaryStrategyDefault: 'Default',
-    summaryParentChild: 'Parent-child',
-    summaryParentChildOn: 'On (parent {parent} / child {child})',
-    summaryParentChildOff: 'Off',
-    summaryStatus: 'Status',
-    summaryModel: 'Model',
-    summaryQuestionCount: 'Questions per chunk',
     summaryQuestionCountValue: '{count}',
-    summaryTableInstructionsSet: 'Table instructions set',
-    summaryTableInstructionsDefault: 'Default table instructions',
-    summaryGraphTags: 'Relation types',
     summaryGraphTagsValue: '{count}',
     navChunkingSummary: 'Chunk {size}',
     statusOn: 'On',
@@ -812,25 +636,15 @@ export default {
     summaryTagsCount: '{count} tags',
     confirm: 'Upload and parse',
     cancel: 'Cancel',
-    uploading: 'Uploading {current}/{total}',
-    tabParser: 'Parser',
     tabTags: 'Document tags',
     tagsDescription: 'Select one or more tags for every document in this import batch',
     tagsPlaceholder: 'Select tags (multiple allowed)',
     tagsEmpty: 'This knowledge base has no tags. You can create them in tag management after upload.',
     tagsLoadFailed: 'Failed to load tags. You can set them later from the document list.',
-    tabChunking: 'Chunking',
-    tabMultimodal: 'Multimodal',
-    tabAsr: 'Audio',
-    tabQuestion: 'Question generation',
-    tabEnhancement: 'Content enhancement',
-    tabGraph: 'Knowledge graph',
-    noFiles: 'Keep at least one file to upload',
     noItems: 'Add at least one file or URL',
     urlItemLabel: 'URL',
     urlAdded: 'URL added',
     urlDuplicate: 'This URL is already in the list',
-    addUrl: 'Add',
     statusNeedsSetup: 'Needs setup',
     multimodalSetupHint: 'Images detected. Enable multimodal and select a model.',
     asrSetupHint: 'Audio detected. Enable speech recognition and select a model.',
@@ -843,48 +657,25 @@ export default {
       description: 'Useful for web-print, scanned, or image-heavy PDFs. Every page will be rendered as an image and processed via OCR/VLM. May increase processing time and model costs.'
     },
     continueAdd: 'Add more',
-    addMoreFiles: 'Add more files',
-    addMoreFolder: 'Add more from folder',
     filesAdded: 'Added {count} file(s)',
     filesAllDuplicate: 'Selected files are already in the list',
-    titleUrl: 'Confirm URL import',
     titleManual: 'Confirm online publish',
-    overviewDescUrl: 'The URL will be fetched and parsed after you confirm the settings',
-    overviewDescManual: 'The document will be published and indexed after you confirm the settings',
-    confirmUrl: 'Import and parse',
     confirmManual: 'Publish and parse',
     titleReparse: 'Confirm reparse',
-    overviewDescReparse: 'After you confirm the settings, existing content will be cleared and the document re-parsed',
     confirmReparse: 'Confirm and reparse',
     reparseSource: 'Document to reparse',
     reparseHint: 'Reuses the last parse settings; adjust them here',
-    urlSource: 'Import source',
-    manualSource: 'Document to publish',
-    editUrl: 'Edit URL',
-    manualCharCount: '{count} characters',
+    manualCharCount: '{count} characters'
   },
-
   knowledgeStages: {
     title: 'Processing pipeline',
     root: 'Knowledge processing',
     processConfig: {
       title: 'Parse config for this run',
       kbDefault: 'Using knowledge base defaults',
-      chunking: 'Chunking',
-      chunkSize: 'size {n}',
-      parentChildOn: 'parent-child on',
-      parentChildOff: 'parent-child off',
-      parser: 'Parser engine',
-      multimodal: 'Multimodal',
-      asr: 'Audio (ASR)',
-      question: 'Question generation',
-      questionOn: 'on ({n} per chunk)',
-      graph: 'Knowledge graph',
-      on: 'on',
-      off: 'off',
+      graph: 'Knowledge graph'
     },
     attempt: 'Attempt {n}',
-    attemptLatest: 'Attempt {n} (latest)',
     retry: 'Retry parsing',
     refresh: 'Refresh now',
     copy: 'Copy',
@@ -894,11 +685,8 @@ export default {
     live: 'LIVE',
     liveTooltip: 'Parsing in progress — auto-refreshes every 2s',
     autoRefreshOn: 'Auto-refreshing',
-    autoRefreshOff: 'Auto-refresh stopped',
-    fetchFailed: 'Last {n} refreshes failed — data may be stale, click refresh to retry',
     fetchFailedShort: 'fetch failed',
     viewTrace: 'View trace',
-    traceBtn: 'Trace',
     expandBranch: 'Expand children',
     collapseBranch: 'Collapse children',
     rowSelectHint: 'Click to view details; use the arrow to expand or collapse children',
@@ -910,20 +698,16 @@ export default {
     totalDuration: 'Total: {d}',
     total: 'Total {d}',
     head: {
-      duration: 'Duration',
-      stages: 'Stages',
       stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
       postprocessTasks: 'Postprocess: {running} running / {failed} failed / {completed} completed',
       completedWithActiveTrace: 'Processing completed, but {n} trace task(s) remain active',
-      stage: 'Stage',
-      status: 'Status',
       attempt: 'Attempt',
-      updated: 'Updated',
+      updated: 'Updated'
     },
     tab: {
       overview: 'Overview',
-      raw: 'Raw JSON',
+      raw: 'Raw JSON'
     },
     detail: {
       started: 'Started',
@@ -951,14 +735,14 @@ export default {
       placeholderHint: 'This stage has no detailed span record; only the inferred state is shown.',
       showJson: 'Expand JSON',
       hideJson: 'Collapse JSON',
-      includingChildren: 'incl. children',
+      includingChildren: 'incl. children'
     },
     stage: {
       docreader: 'Document parsing',
       chunking: 'Chunking',
       embedding: 'Vectorization',
       multimodal: 'Multimodal recognition',
-      postprocess: 'Post-processing',
+      postprocess: 'Post-processing'
     },
     status: {
       pending: 'Pending',
@@ -967,38 +751,12 @@ export default {
       done: 'Done',
       failed: 'Failed',
       skipped: 'Skipped',
-      cancelled: 'Cancelled',
+      cancelled: 'Cancelled'
     },
     errorCode: {
-      DOCREADER_TIMEOUT: 'Document parser timed out',
-      DOCREADER_TIMEOUT_SUGGESTION: 'The file may be too large or the parser service is busy. Try again later or split the document.',
-      DOCREADER_UNAVAILABLE: 'Document parser unavailable',
-      DOCREADER_UNAVAILABLE_SUGGESTION: 'The parsing service is offline. Contact your administrator.',
-      DOCREADER_PARSE_FAILED: 'Document parsing failed',
-      DOCREADER_PARSE_FAILED_SUGGESTION: 'The file could not be parsed. Verify it is not corrupted.',
-      CHUNKING_FAILED: 'Chunking failed',
-      CHUNKING_FAILED_SUGGESTION: 'Try adjusting the chunking configuration of the knowledge base.',
-      EMBEDDING_RATE_LIMIT: 'Embedding service rate-limited',
-      EMBEDDING_RATE_LIMIT_SUGGESTION: 'The embedding provider is throttling requests. Retry shortly.',
-      EMBEDDING_PROVIDER_FAIL: 'Embedding provider error',
-      EMBEDDING_PROVIDER_FAIL_SUGGESTION: 'The embedding provider returned an error. Check provider configuration.',
-      VECTORSTORE_WRITE_FAILED: 'Vector store write failed',
-      VECTORSTORE_WRITE_FAILED_SUGGESTION: 'The vector store rejected the write. Check store availability.',
-      MULTIMODAL_VLM_FAILED: 'Image understanding failed',
-      MULTIMODAL_VLM_FAILED_SUGGESTION: 'A subset of images could not be processed. Document may still be usable.',
-      MULTIMODAL_ALL_FAILED: 'All images failed multimodal processing',
-      MULTIMODAL_ALL_FAILED_SUGGESTION: 'Verify the multimodal model configuration.',
-      TASK_TIMEOUT: 'Task exceeded maximum runtime',
-      TASK_TIMEOUT_SUGGESTION: 'The task ran longer than allowed. Retry or contact support.',
-      SERVER_RESTART: 'Task interrupted by server restart',
-      SERVER_RESTART_SUGGESTION: 'Redis-backed tasks retry from the queue; recoverable Wiki work also resumes in Lite mode. Retry if this task remains failed.',
-      UPSTREAM_FAILED: 'Stopped because an upstream stage failed',
-      UPSTREAM_FAILED_SUGGESTION: 'A previous stage failed and prevented this step from running.',
-      UNKNOWN: 'Unknown error',
-      UNKNOWN_SUGGESTION: 'Check the application logs for details.',
-    },
+      UNKNOWN_SUGGESTION: 'Check the application logs for details.'
+    }
   },
-
   agent: {
     taskLabel: 'Task:',
     think: 'Thinking',
@@ -1006,10 +764,8 @@ export default {
     addToKnowledgeBase: 'Add to Knowledge Base',
     updatePlan: 'Update Plan',
     webSearchFound: 'Found <strong>{count}</strong> web search result(s)',
-    argumentsLabel: 'Arguments',
     toolFallback: 'Tool',
     stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
-    stepsCompletedWithDuration: 'Completed <strong>{steps}</strong> step(s) in <strong>{duration}</strong>',
     reasoningRounds: '<strong>{rounds}</strong> reasoning round(s)',
     toolCalls: '<strong>{tools}</strong> tool call(s)',
     durationSuffix: '<strong>{duration}</strong>',
@@ -1017,7 +773,6 @@ export default {
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
-    createAgentShort: 'New',
     builtin: 'Built-in',
     disabled: 'Disabled',
     disable: 'Disable',
@@ -1029,51 +784,36 @@ export default {
     builtinAgents: 'Built-in Agents',
     customAgents: 'Custom Agents',
     capabilities: {
-      normal: 'Quick response, direct answers',
-      agent: 'Multi-step thinking, deep analysis for complex questions',
-      modelSpecified: 'Model specified',
       kbCount: '{count} knowledge base(s) specified',
       kbAll: 'Access to all knowledge bases',
-      kbDisabled: 'Knowledge base disabled',
-      rerankSpecified: 'ReRank model specified',
-      webSearchOn: 'Web search enabled',
-      webSearchOff: 'Web search disabled',
-      webSearchUnconfigured: 'Search engine not configured',
-      imageUploadOn: 'Image upload supported',
-      imageUploadOff: 'Image upload not supported',
-      hasPrompt: 'Custom prompt',
-      default: 'Default configuration',
       mcpEnabled: 'MCP services enabled',
-      multiTurn: 'Multi-turn conversation',
+      multiTurn: 'Multi-turn conversation'
     },
     type: {
       normal: 'Quick Answer',
-      agent: 'Smart Reasoning',
-      custom: 'Custom',
+      agent: 'Smart Reasoning'
     },
     mode: {
       normal: 'Quick Answer',
-      agent: 'Smart Reasoning',
+      agent: 'Smart Reasoning'
     },
     features: {
       webSearch: 'Web Search Enabled',
       knowledgeBase: 'Knowledge Base Linked',
       mcp: 'MCP Services Enabled',
-      multiTurn: 'Multi-turn Conversation',
+      multiTurn: 'Multi-turn Conversation'
     },
     tabs: {
-      all: 'All',
-      mine: 'My Agents',
-      sharedToMe: 'Shared to Me',
+      sharedToMe: 'Shared to Me'
     },
     sections: {
       builtin: 'Built-in',
       mine: 'Created by me',
-      tenantReadonly: 'Workspace · View only',
       tenantOthers: 'Workspace · Other members',
+      tenantReadonly: 'Workspace · View only',
       sharedByMe: 'Shared by me',
       sharedEditable: 'Shared with me · Can edit',
-      sharedReadonly: 'Shared with me · View only',
+      sharedReadonly: 'Shared with me · View only'
     },
     empty: {
       title: 'No Custom Agents',
@@ -1083,11 +823,11 @@ export default {
       favoritesTitle: 'No favorites yet',
       favoritesDescription: 'Star an agent from its card to add it here',
       recentsTitle: 'Nothing here yet',
-      recentsDescription: 'Agents you recently used will show up here',
+      recentsDescription: 'Agents you recently used will show up here'
     },
     detail: {
       title: 'Agent Details',
-      useInChat: 'Use in Chat',
+      useInChat: 'Use in Chat'
     },
     shareScope: {
       title: 'Share Scope',
@@ -1106,12 +846,12 @@ export default {
       disabled: 'Off',
       mcpAll: 'All services',
       mcpSelected: '{count} selected',
-      mcpNone: 'None',
+      mcpNone: 'None'
     },
     delete: {
       confirmTitle: 'Delete Agent',
       confirmMessage: 'Are you sure you want to delete agent "{name}"? This action cannot be undone.',
-      confirmButton: 'Confirm Delete',
+      confirmButton: 'Confirm Delete'
     },
     messages: {
       created: 'Agent created successfully',
@@ -1119,11 +859,10 @@ export default {
       deleted: 'Agent deleted',
       deleteFailed: 'Delete failed',
       saveFailed: 'Save failed',
-      builtinReadonly: 'Built-in agents cannot be edited',
       copied: 'Agent copied successfully',
       copyFailed: 'Copy failed',
       disabled: 'Agent disabled',
-      enabled: 'Agent enabled',
+      enabled: 'Agent enabled'
     },
     editor: {
       createTitle: 'Create Agent',
@@ -1134,54 +873,34 @@ export default {
       promptsConfigDesc: 'Configure system, context, intent, rewrite, and fallback prompts',
       modelConfig: 'Model Config',
       modelConfigDesc: 'Configure chat model, auxiliary models (ReRank), and generation parameters',
-      capabilities: 'Capabilities',
-      capabilitiesDesc: 'Configure agent capabilities and tools',
       toolsConfig: 'Tools',
       toolsConfigDesc: 'Configure tools available to the Agent',
       knowledgeConfig: 'Knowledge Base',
       knowledgeConfigDesc: 'Configure knowledge base scope and FAQ strategy for the agent',
       webSearchConfig: 'Web Search',
       webSearchConfigDesc: 'Configure web search capabilities for the agent',
-      configuration: 'Configuration',
       agentId: 'Agent ID',
       agentIdDesc: 'Use this ID to target the agent in API integrations',
       name: 'Name',
       namePlaceholder: 'Enter agent name',
       nameRequired: 'Agent name is required',
-      disabled: 'Disable',
-      disabledDesc: 'When disabled, this agent will not appear in the conversation agent dropdown',
       systemPromptRequired: 'System prompt is required',
       modelRequired: 'Please select a model',
-      rerankModelRequired: 'ReRank model is required when using knowledge bases',
-      contextsMissing: "Context template must contain {'{{'}contexts{'}}'} placeholder when knowledge base is enabled",
-      queryMissingInContext: "Context template must contain {'{{'}query{'}}'} placeholder",
-      knowledgeBasesMissing: "It is recommended to include {'{{'}knowledge_bases{'}}'} placeholder in system prompt so the model knows available knowledge bases",
-      queryMissingInRewrite: "Rewrite user prompt must contain {'{{'}query{'}}'} placeholder",
-      conversationMissing: "Rewrite user prompt must contain {'{{'}conversation{'}}'} placeholder",
-      queryMissingInFallback: "Fallback prompt must contain {'{{'}query{'}}'} placeholder",
-      avatar: 'Avatar',
-      avatarPlaceholder: 'Enter Emoji or select',
+      queryMissingInRewrite: 'Rewrite user prompt must contain {\'{{\'}query{\'}}\'} placeholder',
+      queryMissingInFallback: 'Fallback prompt must contain {\'{{\'}query{\'}}\'} placeholder',
       description: 'Description',
       descriptionPlaceholder: 'Enter agent description',
-      baseType: 'Base Type',
       normalDesc: 'Quick response, direct answers',
       agentDesc: 'Multi-step thinking, deep analysis for complex questions',
       model: 'Model',
       modelPlaceholder: 'Select Model',
       systemPrompt: 'System Prompt',
-      systemPromptPlaceholder: "Custom system prompt to define agent behavior and role (use {'{{'}web_search_status{'}}'} placeholder for dynamic web search behavior)",
-      defaultPromptHint: 'Leave empty to use the following default system prompt:',
-      defaultContextTemplateHint: 'Leave empty to use the following default context template:',
+      systemPromptPlaceholder: 'Custom system prompt to define agent behavior and role (use {\'{{\'}web_search_status{\'}}\'} placeholder for dynamic web search behavior)',
       contextTemplateRequired: 'Context template is required',
-      availablePlaceholders: 'Available Placeholders',
-      placeholderHint: "Type {'{{'} to trigger autocomplete",
       temperature: 'Temperature',
       thinking: 'Thinking Mode',
       citationEnabled: 'Show Source Citations',
       citationEnabledDesc: 'Show knowledge-base and web sources in final answers; retrieval and grounding still work when disabled',
-      welcomeMessage: 'Welcome Message',
-      welcomeMessagePlaceholder: 'Message displayed when this agent is selected',
-      suggestedPrompts: 'Suggested Prompts',
       mode: 'Running Mode',
       webSearch: 'Web Search',
       webSearchProvider: 'Search Engine',
@@ -1191,18 +910,14 @@ export default {
       webFetchTopN: 'Pages to Fetch',
       knowledgeBases: 'Knowledge Bases',
       allKnowledgeBases: 'All Knowledge Bases',
-      allKnowledgeBasesDesc: 'Agent can access all knowledge bases',
       selectedKnowledgeBases: 'Selected Knowledge Bases',
-      selectedKnowledgeBasesDesc: 'Only access selected knowledge bases',
       noKnowledgeBase: 'No Knowledge Base',
-      noKnowledgeBaseDesc: 'Pure model conversation, no knowledge retrieval',
       selectKnowledgeBases: 'Select Knowledge Bases',
       selectKnowledgeBasesDesc: 'Select knowledge bases to associate (including collaborative ones)',
       myKnowledgeBases: 'My Knowledge Bases',
       sharedKnowledgeBases: 'Collaborative Knowledge Bases',
       retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
-      retrieveKBOnlyWhenMentionedDesc: "Off: auto-retrieve configured KBs; On: retrieve only when user {'@'} mentions",
-      retrievalSectionTitle: 'Retrieval Strategy',
+      retrieveKBOnlyWhenMentionedDesc: 'Off: auto-retrieve configured KBs; On: retrieve only when user {\'@\'} mentions',
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
       rerankModelPlaceholder: 'Select ReRank Model',
@@ -1211,24 +926,15 @@ export default {
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',
       historyTurns: 'History Turns',
-      // Retrieval Strategy
       retrievalStrategy: 'Retrieval Strategy',
       embeddingTopK: 'Embedding Top K',
       keywordThreshold: 'Keyword Threshold',
       vectorThreshold: 'Vector Threshold',
       rerankTopK: 'Rerank Top K',
       rerankThreshold: 'Rerank Threshold',
-      // Conversation Settings
       conversationSettings: 'Conversation',
-      // Advanced Settings
-      advancedSettings: 'Advanced Settings',
       contextTemplate: 'Context Template',
       contextTemplatePlaceholder: 'Custom context template...',
-      availableContextPlaceholders: 'Available Placeholders',
-      placeholderQuery: 'User query',
-      placeholderContexts: 'Retrieved content list',
-      placeholderCurrentTime: 'Current time (format: 2006-01-02 15:04:05)',
-      placeholderCurrentWeek: 'Current weekday (e.g., Monday)',
       enableQueryExpansion: 'Query Expansion',
       enableRewrite: 'Query Rewrite',
       queryUnderstandModel: 'Query Understand Model',
@@ -1243,7 +949,6 @@ export default {
       fallbackResponsePlaceholder: 'Sorry, I cannot answer this question.',
       fallbackPrompt: 'Fallback Prompt',
       fallbackPromptPlaceholder: 'Leave empty to use default prompt',
-      // Skills Config
       skillsConfig: 'Skills',
       skillsConfigDesc: 'Configure preloaded Skills available to the Agent for specialized domain knowledge and workflows',
       skillsSelection: 'Skills Selection',
@@ -1255,19 +960,15 @@ export default {
       selectSkillsDesc: 'Choose which Skills to enable',
       noSkillsAvailable: 'No preloaded Skills available',
       skillsInfoTitle: 'What are Skills?',
-      skillsInfoContent: 'Skills are preloaded professional knowledge modules that provide domain-specific instructions, workflows, and tool support for the Agent. When enabled, the Agent will automatically load relevant knowledge when needed.',
+      skillsInfoContent: 'Skills are preloaded professional knowledge modules that provide domain-specific instructions, workflows, and tool support for the Agent. When enabled, the Agent will automatically load relevant knowledge when needed.'
     },
     selector: {
       title: 'Select Agent',
-      builtinSection: 'Built-in Agents',
-      customSection: 'My Agents',
-      addNew: 'Add New Agent',
       current: 'Current',
       goToSettings: 'Settings',
       sharedLabel: 'Shared',
       notReadyHint: 'Not ready. Configure: {items}',
       notReadyStatus: 'Setup needed',
-      notReadyMissing: 'Missing: {items}',
       configureAction: 'Configure',
       sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
       capabilitiesSection: 'Capabilities',
@@ -1277,43 +978,11 @@ export default {
       capabilityDisabled: 'Off',
       capabilitySupported: 'Supported',
       capabilityUnsupported: 'Unsupported',
-      capabilityUnconfigured: 'Not set',
-    },
-    // Built-in agent information
-    builtinInfo: {
-      quickAnswer: {
-        name: 'Quick Answer',
-        description: 'Knowledge base RAG Q&A for fast and accurate answers',
-      },
-      smartReasoning: {
-        name: 'Smart Reasoning',
-        description: 'ReAct reasoning framework with multi-step thinking and tool calling',
-      },
-      deepResearcher: {
-        name: 'Deep Researcher',
-        description: 'Focused on in-depth research and comprehensive analysis, capable of creating research plans, multi-dimensional information retrieval, deep thinking and providing thorough analysis reports',
-      },
-      dataAnalyst: {
-        name: 'Data Analyst',
-        description: 'Focused on database queries and data analysis, capable of understanding business needs, building SQL queries, analyzing data and providing insights',
-      },
-      knowledgeGraphExpert: {
-        name: 'Knowledge Graph Expert',
-        description: 'Focused on knowledge graph queries and relationship analysis, capable of exploring entity relationships, discovering hidden connections and building knowledge networks',
-      },
-      documentAssistant: {
-        name: 'Document Assistant',
-        description: 'Focused on document retrieval and content organization, capable of quickly locating documents, extracting key information and generating summaries',
-      },
-    },
+      capabilityUnconfigured: 'Not set'
+    }
   },
   settings: {
-    title: 'Settings',
-    modelConfig: 'Model Settings',
     modelManagement: 'Model Management',
-    agentConfig: 'Agent Settings',
-    conversationConfig: 'Conversation Settings',
-    conversationStrategy: 'Conversation Strategy',
     webSearchConfig: 'Web Search',
     autoCheckUpdate: 'Auto Download Updates',
     autoCheckUpdateDesc: 'When enabled, automatically check and download the latest version in the background.',
@@ -1325,18 +994,17 @@ export default {
     taskQueue: 'Task Queues',
     tenantInfo: 'Workspace Info',
     workspaceSettings: 'Workspace Settings',
-    apiInfo: 'API Info',
     navGroups: {
       account: 'Account',
       workspace: 'Workspace',
       modelsRuntime: 'Models',
       dataExtensions: 'Data & Extensions',
       systemAdministration: 'System Administration',
-      platform: 'Platform',
+      platform: 'Platform'
     },
     roleDenied: {
       title: 'Insufficient permissions',
-      desc: "Your role can't access this settings page. Ask an admin of this workspace to grant the required role.",
+      desc: 'Your role can\'t access this settings page. Ask an admin of this workspace to grant the required role.'
     },
     weknoraCloud: {
       title: 'WeKnora Cloud',
@@ -1378,61 +1046,23 @@ export default {
         addAllConfirm: 'Confirm',
         confirmAddOne: 'Add {type} model "{name}"?',
         confirmAddAll: 'Add all {count} missing cloud models at once?',
-        allReady: 'All four cloud models are ready',
+        allReady: 'All four cloud models are ready'
       },
       addModelsSuccess: 'Successfully added {count} model(s)',
       addModelsPartial: 'Added {success}, {failed} failed',
       addModelsFailed: 'Failed to add models',
-      addModelsAllExist: 'All four model types already exist',
       addModelsEmbeddingFailed: 'Embedding connection test failed; could not detect vector dimension',
       addModelsDisplayName: {
         chat: 'WeKnoraCloud Chat',
         embedding: 'WeKnoraCloud Embedding',
         rerank: 'WeKnoraCloud ReRank',
-        vllm: 'WeKnoraCloud Vision',
-      },
+        vllm: 'WeKnoraCloud Vision'
+      }
     },
     system: 'System Settings',
-    systemConfig: 'System Configuration',
-    knowledgeBaseSettings: 'Knowledge Base Settings',
-    configureKbModels: 'Configure models and document splitting parameters for this knowledge base',
-    manageSystemModels: 'Manage and update system models and service configurations',
-    basicInfo: 'Basic Information',
-    documentSplitting: 'Document Splitting',
-    apiEndpoint: 'API Endpoint',
-    enterApiEndpoint: 'Enter API endpoint, e.g.: http://localhost',
-    enterApiKey: 'Enter API key',
-    enterKnowledgeBaseId: 'Enter knowledge base ID',
-    saveConfig: 'Save Configuration',
-    reset: 'Reset',
-    configSaved: 'Configuration saved successfully',
-    enterApiEndpointRequired: 'Enter API endpoint',
-    enterApiKeyRequired: 'Enter API key',
-    enterKnowledgeBaseIdRequired: 'Enter knowledge base ID',
-    name: 'Name',
-    enterName: 'Enter name',
-    description: 'Description',
-    chunkSize: 'Chunk Size',
-    chunkOverlap: 'Chunk Overlap',
-    save: 'Save',
-    saving: 'Saving...',
-    saveSuccess: 'Saved successfully',
-    saveFailed: 'Failed to save',
-    model: 'Model',
-    llmModel: 'LLM Model',
-    embeddingModel: 'Embedding Model',
-    rerankModel: 'Rerank Model',
-    vlmModel: 'Multimodal Model',
-    modelName: 'Model Name',
-    modelUrl: 'Model URL',
-    apiKey: 'API Key',
-    cancel: 'Cancel',
-    saveFailedSettings: 'Failed to save settings',
-    enterNameRequired: 'Enter name',
     parser: {
       title: 'Parser Engine',
       description: 'Document parser engine status and configuration. Settings here take priority over server environment variables. Leave empty to use environment variable defaults.',
-      // Section / label keys for the redesigned drawer
       supportedFileTypes: 'Supported Formats',
       statusSection: 'Status',
       configSection: 'Configuration',
@@ -1454,7 +1084,6 @@ export default {
       chartRecognition: 'Chart Recognition',
       language: 'Language',
       testConnection: 'Test Connection',
-      saveConfig: 'Save Configuration',
       docs: 'Docs',
       loadFailed: 'Failed to load parser engine list',
       ensureDocreaderConnected: 'Please ensure the DocReader service is configured via environment variables and connected',
@@ -1474,7 +1103,7 @@ export default {
       vlmServerUrlHint: 'Required when Backend is vlm-http-client or hybrid-http-client',
       paddleocrVlEndpointPlaceholder: 'e.g. http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'Base URL of the full PaddleOCR-VL pipeline service; no /layout-parsing suffix needed',
-      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
+      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     storageBackend: {
       description: 'Manage the storage instances used for files and images; multiple instances of the same type can be configured.',
@@ -1517,12 +1146,11 @@ export default {
       deleteTitle: 'Delete storage instance',
       deleteConfirm: 'Are you sure you want to delete "{name}"?',
       deleted: 'Deleted',
-      deleteFailed: 'Failed to delete',
+      deleteFailed: 'Failed to delete'
     },
     storage: {
       title: 'Storage Engine',
       description: 'Configure document and image storage. Set engine parameters here; knowledge bases only select which engine to use.',
-      // Section / label keys for the redesigned drawer
       basicSection: 'Basic',
       modeSection: 'Deployment Mode',
       credentialsSection: 'Credentials',
@@ -1536,7 +1164,6 @@ export default {
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
       engineOss: 'Alibaba Cloud OSS',
-      engineS3: 'AWS S3',
       localTitle: 'Local Storage',
       localDesc: 'Store files on the server local filesystem, suitable for single-node deployment only.',
       available: 'Available',
@@ -1546,13 +1173,10 @@ export default {
       pathPrefixPlaceholder: 'e.g. weknora/images',
       prefixPlaceholder: 'e.g. weknora',
       bucketName: 'Bucket Name',
-      bucketSelectPlaceholder: 'Select or enter bucket name',
       bucketPlaceholder: 'Bucket name',
       minioDesc: 'S3-compatible self-hosted object storage, suitable for private networks and private cloud deployment.',
       minioDocker: 'Docker Deployment',
       minioRemote: 'Remote MinIO',
-      detected: 'Detected',
-      notDetected: 'Not Detected',
       minioDockerDetected: 'Docker-deployed MinIO environment variables detected. Connection info is provided by env vars, no manual input needed.',
       minioDockerNotDetected: 'MinIO environment variables (MINIO_ENDPOINT, etc.) not detected. Please verify your Docker Compose configuration.',
       minioRemoteHint: 'Connect to a remote MinIO service. Manual connection info required.',
@@ -1590,33 +1214,23 @@ export default {
       console: 'Console',
       docs: 'Docs',
       testConnection: 'Test Connection',
-      saveConfig: 'Save Configuration',
       loadFailed: 'Failed to load',
       saveSuccess: 'Saved successfully',
       saveFailed: 'Save failed',
       unknownError: 'Unknown error',
-      requestFailed: 'Request failed',
-      cos: 'Tencent Cloud COS',
-      tos: 'Volcengine TOS',
-      oss: 'Alibaba Cloud OSS',
-      ks3: 'Kingsoft Cloud KS3',
-      obs: 'Huawei Cloud OBS',
-    },
+      requestFailed: 'Request failed'
+    }
   },
   webSearchSettings: {
     title: 'Web Search Configuration',
     description: 'Configure web search so answers can include up-to-date information from the internet.',
-    // Section keys for the redesigned drawer
     basicSection: 'Basic',
     credentialsSection: 'Connection',
     optionsSection: 'Options',
-    // Provider entity management
     providersTitle: 'Search Engine Providers',
     addProvider: 'Add Provider',
     editProvider: 'Edit Provider',
-    noProviders: 'No search engine providers configured. Click "Add Provider" to get started.',
     deleteConfirm: 'Are you sure you want to delete this provider?',
-    default: 'Default',
     providerNameLabel: 'Name',
     providerNamePlaceholder: 'e.g., Production Bing Search',
     providerTypeLabel: 'Provider Type',
@@ -1626,33 +1240,9 @@ export default {
     setAsDefault: 'Set as default',
     testConnection: 'Test Connection',
     testing: 'Testing...',
-    free: 'Free',
     viewDocs: 'View docs for API key',
-    apiKeyUnchanged: 'Leave empty to keep current key',
-    noDescription: "No description provided",
-    noProvidersDesc: "Add a web search provider to enable your agents to retrieve real-time information from the internet.",
-    basicInfo: "Basic Information",
-    credentials: "Credentials",
-    setAsDefaultDesc: "This provider will be used by default when an agent doesn't specify one",
-    configFields: {
-      searchEngine: 'Search engine',
-      searchEngineDesc: 'Select the Zhipu search engine and per-request price tier.',
-      searchStd: 'Standard · ¥0.01/request',
-      searchPro: 'Pro · ¥0.03/request',
-      searchSogou: 'Sogou · ¥0.05/request',
-      searchQuark: 'Quark · ¥0.05/request',
-      contentSize: 'Content size',
-      contentSizeDesc: 'Medium returns concise summaries; high returns more context.',
-      contentMedium: 'Medium',
-      contentHigh: 'High',
-    },
-    // Search behavior
-    searchBehaviorTitle: 'Search Behavior',
-    defaultProviderLabel: 'Default Provider',
-    defaultProviderDescription: 'Select the default search provider for agents that do not specify their own.',
-    providerLabel: 'Search Provider',
-    providerDescription: 'Choose the search engine service used for web search',
-    providerPlaceholder: 'Select a search engine...',
+    noProvidersDesc: 'Add a web search provider to enable your agents to retrieve real-time information from the internet.',
+    setAsDefaultDesc: 'This provider will be used by default when an agent doesn\'t specify one',
     proxyUrlLabel: 'HTTP proxy',
     proxyUrlPlaceholder: 'e.g. http://proxy.example.com:3128 (optional; http/https only)',
     proxyUrlHelp: 'Use when outbound access to the search API requires a proxy; leave empty to rely on HTTP_PROXY/HTTPS_PROXY environment variables.',
@@ -1660,37 +1250,18 @@ export default {
     apiKeyOptionalLabel: 'API Key (optional)',
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
-    apiKeyDescription: 'Enter the API key for the selected search provider',
     apiKeyPlaceholder: 'Enter API key',
-    maxResultsLabel: 'Maximum Results',
-    maxResultsDescription: 'Maximum number of results returned per search (1-50)',
-    includeDateLabel: 'Include Publish Date',
-    includeDateDescription: 'Include publish date information in search results',
-    compressionLabel: 'Compression Method',
-    compressionDescription: 'Choose how to compress content from search results',
-    compressionNone: 'No Compression',
-    compressionSummary: 'LLM Summary',
-    blacklistLabel: 'URL Blacklist',
-    blacklistDescription: 'Exclude specific domains or URLs from search results. One per line. Supports wildcards (*) and regular expressions (/pattern/).',
-    blacklistPlaceholder: 'For example:\n*://*.example.com/*\n/example\\.(net|org)/',
-    errors: {
-      unknown: 'Unknown error'
-    },
     toasts: {
-      loadProvidersFailed: 'Failed to load search providers: {message}',
-      saveSuccess: 'Web search configuration saved',
-      saveFailed: 'Failed to save configuration: {message}',
       providerCreated: 'Search provider created',
       providerUpdated: 'Search provider updated',
       providerDeleted: 'Search provider deleted',
       testSuccess: 'Connection test succeeded',
-      testFailed: 'Connection test failed',
+      testFailed: 'Connection test failed'
     }
   },
   vectorStoreSettings: {
     title: 'Vector Database Engine',
     description: 'Register and manage vector database instances for knowledge base search.',
-    // Section key for the redesigned drawer
     basicSection: 'Basic',
     storesTitle: 'Vector Databases',
     addStore: 'Add Database',
@@ -1702,34 +1273,6 @@ export default {
     namePlaceholder: 'e.g., my-vector-store',
     connectionInfo: 'Connection Info',
     advancedIndexConfig: 'Advanced Settings',
-    fields: {
-      addr: 'URL',
-      host: 'Host',
-      port: 'Port',
-      username: 'Username',
-      password: 'Password',
-      api_key: 'API Key',
-      use_tls: 'Use TLS',
-      scheme: 'Scheme',
-      grpc_address: 'gRPC Address',
-      database: 'Database Name',
-      use_default_connection: 'Use Default Connection',
-      index_name: 'Index Name',
-      number_of_shards: 'Shards',
-      number_of_replicas: 'Replicas',
-      collection_prefix: 'Collection Prefix',
-      collection_name: 'Collection Name',
-      shard_number: 'Shard Number',
-      replication_factor: 'Replication Factor',
-      shards_num: 'Shards',
-      replica_number: 'In-memory Replicas',
-      desired_shard_count: 'Shard Count',
-      insecure_skip_verify: 'Skip TLS Verification',
-      hnsw_m: 'HNSW M (graph degree)',
-      hnsw_ef_construction: 'HNSW ef_construction',
-      hnsw_ef_search: 'HNSW ef_search',
-      knn_engine: 'k-NN Engine',
-    },
     envTag: 'DEFAULT',
     testConnection: 'Test Connection',
     testing: 'Testing...',
@@ -1739,7 +1282,7 @@ export default {
       nameRequired: 'Name is required',
       engineTypeRequired: 'Engine type is required',
       fieldRequired: '{field} is required',
-      indexNamePattern: 'Must start with a letter. Only letters, numbers, underscore, and hyphen allowed (max 128)',
+      indexNamePattern: 'Must start with a letter. Only letters, numbers, underscore, and hyphen allowed (max 128)'
     },
     toasts: {
       storeCreated: 'Vector database created',
@@ -1748,8 +1291,8 @@ export default {
       testSuccess: 'Connection test succeeded',
       testFailed: 'Connection test failed',
       duplicateName: 'A vector database with this name already exists',
-      errorGeneric: 'An error occurred. Please try again.',
-    },
+      errorGeneric: 'An error occurred. Please try again.'
+    }
   },
   chatHistorySettings: {
     title: 'Message Management',
@@ -1765,30 +1308,24 @@ export default {
     statsNotConfiguredDesc: 'Enable and select an embedding model to start auto-indexing conversation messages',
     toasts: {
       saveSuccess: 'Message management configuration saved',
-      saveFailed: 'Failed to save configuration: {message}',
-      loadFailed: 'Failed to load configuration: {message}',
-    },
+      saveFailed: 'Failed to save configuration: {message}'
+    }
   },
   retrievalSettings: {
     title: 'Search Settings',
     description: 'Configure global retrieval parameters for knowledge search and message search',
     embeddingTopKLabel: 'Vector Search Top K',
-    embeddingTopKDescription: 'Maximum number of results returned by vector search',
     vectorThresholdLabel: 'Vector Similarity Threshold',
-    vectorThresholdDescription: 'Minimum similarity score for vector search (0-1, higher is more precise)',
     keywordThresholdLabel: 'Keyword Match Threshold',
-    keywordThresholdDescription: 'Minimum match score for keyword search (0-1)',
     rerankTopKLabel: 'Rerank Top K',
-    rerankTopKDescription: 'Maximum number of results kept after reranking',
     rerankThresholdLabel: 'Rerank Threshold',
-    rerankThresholdDescription: 'Minimum score threshold for reranking (-10 to 10)',
     rerankModelLabel: 'Rerank Model',
     rerankModelDescription: 'Select the model for reranking search results',
     rerankModelRequired: 'Please select a Rerank model. Search requires this model to rerank results.',
     toasts: {
       saveSuccess: 'Retrieval configuration saved',
-      saveFailed: 'Failed to save configuration: {message}',
-    },
+      saveFailed: 'Failed to save configuration: {message}'
+    }
   },
   graphSettings: {
     title: 'Knowledge Graph Configuration',
@@ -1838,220 +1375,11 @@ export default {
     exampleLoaded: 'Example loaded',
     exampleCleared: 'Example cleared',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',
-    howToEnable: 'How to enable knowledge graph?',
-    saveSuccess: 'Graph configuration saved',
-    saveFailed: 'Failed to save configuration: {message}',
-    errors: {
-      unknown: 'Unknown error',
-    },
+    howToEnable: 'How to enable knowledge graph?'
   },
   initialization: {
-    title: 'Initialization',
-    welcome: 'Welcome to WeKnora',
-    description: 'Please configure the system before starting',
-    step1: 'Step 1: Configure LLM Model',
-    step2: 'Step 2: Configure Embedding Model',
-    step3: 'Step 3: Configure Additional Models',
-    complete: 'Complete Initialization',
     skip: 'Skip',
-    next: 'Next',
-    previous: 'Previous',
-    // Ollama service
-    ollamaServiceStatus: 'Ollama Service Status',
-    refreshStatus: 'Refresh Status',
-    ollamaServiceAddress: 'Ollama Service Address',
-    notConfigured: 'Not Configured',
-    notRunning: 'Not Running',
-    normal: 'Normal',
-    installedModels: 'Installed Models',
-    none: 'None temporarily',
-    // Knowledge base
-    knowledgeBaseInfo: 'Knowledge Base Information',
-    knowledgeBaseName: 'Knowledge Base Name',
-    knowledgeBaseNamePlaceholder: 'Enter knowledge base name',
-    knowledgeBaseDescription: 'Knowledge Base Description',
-    knowledgeBaseDescriptionPlaceholder: 'Enter knowledge base description',
-    // LLM model
-    llmModelConfig: 'LLM Large Language Model Configuration',
-    modelSource: 'Model Source',
-    local: 'Ollama (Local)',
-    remote: 'Remote API (Remote)',
-    modelName: 'Model Name',
-    modelNamePlaceholder: 'E.g.: qwen3:0.6b',
-    baseUrl: 'Base URL',
-    baseUrlPlaceholder: 'E.g.: https://api.openai.com/v1, remove /chat/completions from the end of URL',
-    apiKey: 'API Key (Optional)',
-    apiKeyPlaceholder: 'Enter API Key (Optional)',
-    downloadModel: 'Download Model',
-    installed: 'Installed',
-    notInstalled: 'Not Installed',
-    notChecked: 'Not Checked',
-    checkConnection: 'Check Connection',
-    connectionNormal: 'Connection Normal',
-    connectionFailed: 'Connection Failed',
-    checkingConnection: 'Checking Connection',
-    // Embedding model
-    embeddingModelConfig: 'Embedding Model Configuration',
-    embeddingWarning: 'Knowledge base already has files, cannot change embedding model configuration',
-    dimension: 'Dimension',
-    dimensionPlaceholder: 'Enter vector dimension',
-    detectDimension: 'Detect Dimension',
-    // Rerank model
-    rerankModelConfig: 'Rerank Model Configuration',
-    enableRerank: 'Enable Rerank Model',
-    // Multimodal settings
-    multimodalConfig: 'Multimodal Configuration',
-    enableMultimodal: 'Enable image information extraction',
-    visualLanguageModelConfig: 'Visual Language Model Configuration',
-    interfaceType: 'Interface Type',
-    openaiCompatible: 'OpenAI Compatible Interface',
-    // Storage settings
-    storageServiceConfig: 'Storage Service Configuration',
-    storageType: 'Storage Type',
-    bucketName: 'Bucket Name',
-    bucketNamePlaceholder: 'Enter Bucket name',
-    pathPrefix: 'Path Prefix',
-    pathPrefixPlaceholder: 'E.g.: images',
-    secretId: 'Secret ID',
-    secretIdPlaceholder: 'Enter COS Secret ID',
-    secretKey: 'Secret Key',
-    secretKeyPlaceholder: 'Enter COS Secret Key',
-    region: 'Region',
-    regionPlaceholder: 'E.g.: ap-beijing',
-    appId: 'App ID',
-    appIdPlaceholder: 'Enter App ID',
-    // Multimodal function testing
-    functionTest: 'Function Test',
-    testDescription: 'Upload an image to test the model\'s image description and text recognition functions',
-    selectImage: 'Select Image',
-    startTest: 'Start Test',
-    testResult: 'Test Result',
-    imageDescription: 'Image Description:',
-    textRecognition: 'Text Recognition:',
-    processingTime: 'Processing Time:',
-    testFailed: 'Test Failed',
-    multimodalProcessingFailed: 'Multimodal processing failed',
-    // Document splitting
-    documentSplittingConfig: 'Document Splitting Configuration',
-    splittingStrategy: 'Splitting Strategy',
-    balancedMode: 'Balanced Mode',
-    balancedModeDesc: 'Chunk size: 1000 / Overlap: 200',
-    precisionMode: 'Precision Mode',
-    precisionModeDesc: 'Chunk size: 512 / Overlap: 100',
-    contextMode: 'Context Mode',
-    contextModeDesc: 'Chunk size: 2048 / Overlap: 400',
-    custom: 'Custom',
-    customDesc: 'Configure parameters manually',
-    chunkSize: 'Chunk Size',
-    chunkOverlap: 'Chunk Overlap',
-    separatorSettings: 'Separator Settings',
-    selectOrCustomSeparators: 'Select or customize separators',
-    characters: 'characters',
-    separatorParagraph: 'Paragraph separator (\\n\\n)',
-    separatorNewline: 'Newline (\\n)',
-    separatorPeriod: 'Period (。)',
-    separatorExclamation: 'Exclamation mark (！)',
-    separatorQuestion: 'Question mark (？)',
-    separatorSemicolon: 'Semicolon (;)',
-    separatorChineseSemicolon: 'Chinese semicolon (；)',
-    separatorComma: 'Comma (,)',
-    separatorChineseComma: 'Chinese comma (，)',
-    // Entity and relation extraction
-    entityRelationExtraction: 'Entity and Relation Extraction',
-    enableEntityRelationExtraction: 'Enable entity and relation extraction',
-    relationTypeConfig: 'Relation Type Configuration',
-    relationType: 'Relation Type',
-    generateRandomTags: 'Generate Random Tags',
-    completeModelConfig: 'Please complete model configuration',
-    systemWillExtract: 'The system will extract corresponding entities and relations from the text according to the selected relation types',
-    extractionExample: 'Extraction Example',
-    sampleText: 'Sample Text',
-    sampleTextPlaceholder: 'Enter text for analysis, e.g.: "Red Mansion", also known as "Dream of the Red Chamber", is one of the four great classical novels of Chinese literature, written by Cao Xueqin during the Qing Dynasty...',
-    generateRandomText: 'Generate Random Text',
-    entityList: 'Entity List',
-    nodeName: 'Node Name',
-    nodeNamePlaceholder: 'Node name',
-    addAttribute: 'Add Attribute',
-    attributeValue: 'Attribute Value',
-    attributeValuePlaceholder: 'Attribute value',
-    addEntity: 'Add Entity',
-    completeEntityInfo: 'Please complete entity information',
-    relationConnection: 'Relation Connection',
-    selectEntity: 'Select Entity',
-    addRelation: 'Add Relation',
-    completeRelationInfo: 'Please complete relation information',
-    startExtraction: 'Start Extraction',
-    extracting: 'Extracting...',
-    defaultExample: 'Default Example',
-    clearExample: 'Clear Example',
-    // Buttons and messages
-    updateKnowledgeBaseSettings: 'Update Knowledge Base Settings',
-    updateConfigInfo: 'Update Configuration Information',
-    completeConfig: 'Complete Configuration',
-    waitForDownloads: 'Please wait for all Ollama models to finish downloading before updating configuration',
-    completeModelConfigInfo: 'Please complete model configuration information',
-    knowledgeBaseIdMissing: 'Knowledge base ID is missing',
-    knowledgeBaseSettingsUpdateSuccess: 'Knowledge base settings updated successfully',
-    configUpdateSuccess: 'Configuration updated successfully',
-    systemInitComplete: 'System initialization completed',
-    operationFailed: 'Operation failed',
-    updateKnowledgeBaseInfoFailed: 'Failed to update knowledge base basic information',
-    knowledgeBaseIdMissingCannotSave: 'Knowledge base ID is missing, cannot save configuration',
-    operationFailedCheckNetwork: 'Operation failed, please check network connection',
-    imageUploadSuccess: 'Image uploaded successfully, testing can begin',
-    multimodalConfigIncomplete: 'Multimodal configuration incomplete, please complete multimodal configuration before uploading images',
-    pleaseSelectImage: 'Please select an image',
-    multimodalTestSuccess: 'Multimodal test successful',
-    multimodalTestFailed: 'Multimodal test failed',
-    pleaseEnterSampleText: 'Please enter sample text',
-    pleaseEnterRelationType: 'Please enter relation type',
-    pleaseEnterLLMModelConfig: 'Please enter LLM large language model configuration',
-    noValidNodesExtracted: 'No valid nodes extracted',
-    noValidRelationsExtracted: 'No valid relations extracted',
-    extractionFailedCheckNetwork: 'Extraction failed, please check network or text format',
-    generateFailedRetry: 'Generation failed, please try again',
-    pleaseCheckForm: 'Please check form correctness',
-    detectionSuccessful: 'Detection successful, dimension automatically filled as',
-    detectionFailed: 'Detection failed',
-    detectionFailedCheckConfig: 'Detection failed, please check configuration',
-    modelDownloadSuccess: 'Model downloaded successfully',
-    modelDownloadFailed: 'Model download failed',
-    downloadStartFailed: 'Download start failed',
-    queryProgressFailed: 'Progress query failed',
-    checkOllamaStatusFailed: 'Ollama status check failed',
-    getKnowledgeBaseInfoFailed: 'Failed to get knowledge base information',
-    textRelationExtractionFailed: 'Text relation extraction failed',
-    // Validation
-    pleaseEnterKnowledgeBaseName: 'Please enter knowledge base name',
-    knowledgeBaseNameLength: 'Knowledge base name length must be 1-50 characters',
-    knowledgeBaseDescriptionLength: 'Knowledge base description cannot exceed 200 characters',
-    pleaseEnterLLMModelName: 'Please enter LLM model name',
-    pleaseEnterBaseURL: 'Please enter BaseURL',
-    pleaseEnterEmbeddingModelName: 'Please enter embedding model name',
-    pleaseEnterEmbeddingDimension: 'Please enter embedding dimension',
-    dimensionMustBeInteger: 'Dimension must be a valid integer, usually 768, 1024, 1536, 3584, etc.',
-    pleaseEnterTextContent: 'Please enter text content',
-    textContentMinLength: 'Text content must contain at least 10 characters',
-    pleaseEnterValidTag: 'Please enter a valid tag',
-    tagAlreadyExists: 'This tag already exists',
-    // Additional translations for InitializationContent.vue
-    checkFailed: 'Check failed',
-    startingDownload: 'Starting download...',
-    downloadStarted: 'Download started',
-    model: 'Model',
-    startModelDownloadFailed: 'Failed to start model download',
-    downloadCompleted: 'Download completed',
-    downloadFailed: 'Download failed',
-    knowledgeBaseSettingsModeMissingId: 'Knowledge base settings mode missing ID',
-    completeEmbeddingConfig: 'Please complete embedding configuration first',
-    detectionSuccess: 'Detection successful,',
-    dimensionAutoFilled: 'dimension automatically filled:',
-    checkFormCorrectness: 'Please check form correctness',
-    systemInitializationCompleted: 'System initialization completed',
-    generationFailedRetry: 'Generation failed, please try again',
-    chunkSizeDesc: 'Size of each text chunk. Larger chunks preserve more context but may reduce search accuracy.',
-    chunkOverlapDesc: 'Number of characters overlapping between adjacent chunks. Helps maintain context at chunk boundaries.',
-    selectRelationType: 'Select relation type'
+    next: 'Next'
   },
   inviteRegister: {
     bannerTitle: 'You have been invited to join "{tenant}"',
@@ -2061,9 +1389,9 @@ export default {
     invalidBody: 'Ask your inviter to send a new link, or sign in with an existing account.',
     backToLogin: 'Back to login',
     title: 'Complete registration',
-    subtitle: "You've been invited to join “{tenant}”",
+    subtitle: 'You\'ve been invited to join “{tenant}”',
     email: 'Email',
-    emailPlaceholder: 'your@example.com',
+    emailPlaceholder: 'your{\'@\'}example.com',
     emailHint: 'Use any email address you control.',
     emailInvalid: 'Please enter a valid email address',
     username: 'Display name',
@@ -2077,7 +1405,7 @@ export default {
     failed: 'Registration failed; please try again later',
     usernameRequired: 'Display name is required',
     passwordTooShort: 'Password must be at least 6 characters',
-    passwordMismatch: 'Passwords do not match',
+    passwordMismatch: 'Passwords do not match'
   },
   auth: {
     login: 'Login',
@@ -2087,26 +1415,18 @@ export default {
     redirectingToOIDC: 'Redirecting to identity provider...',
     orContinueWith: 'Or continue with',
     oidcLoginFailed: 'OIDC login failed',
-    oidcStateMismatch: 'OIDC state verification failed, please try again',
     username: 'Username',
     email: 'Email',
     password: 'Password',
     confirmPassword: 'Confirm Password',
-    rememberMe: 'Remember Me',
-    forgotPassword: 'Forgot Password?',
-    loginSuccess: 'Login successful!',
     loginSuccessTitle: 'Login successful',
     loginSuccessContent: 'Welcome back. You are now in {name}',
-    loginSuccessContentWithRole: 'Welcome back. You are now in {name} · as {role}',
-    loginFailed: 'Login failed',
     loggingIn: 'Logging in...',
     register: 'Register',
     registering: 'Registering...',
     createAccount: 'Create Account',
     haveAccount: 'Already have an account?',
-    noAccount: 'Don\'t have an account?',
     backToLogin: 'Back to Login',
-    registerNow: 'Register Now',
     loginHint: 'Sign in to continue, or create an account below if this is your first time.',
     firstTime: 'New to WeKnora?',
     registerSuccess: 'Registration successful. Please sign in',
@@ -2133,20 +1453,17 @@ export default {
     loginError: 'Login error, please check email or password',
     loginErrorRetry: 'Login error, please try again later',
     registerError: 'Registration error, please try again later',
-    forgotPasswordNotAvailable: 'Password recovery function is temporarily unavailable, please contact administrator',
     workspaceOnboarding: {
       title: 'Choose your workspace',
-      description: 'Your account does not belong to a workspace yet. Create one or accept an invitation from an administrator.',
       create: 'Create workspace',
       invitations: 'View invitations',
-      help: 'If no invitation is available, ask a system administrator to add you to an existing workspace.',
       loadingPolicy: 'Checking the available workspace options…',
       policyLoadFailed: 'Workspace permissions could not be loaded. Check your connection and try again.',
       retry: 'Reload',
       inviteOnlyTitle: 'Waiting for a workspace invitation',
       inviteOnlyDescription: 'Personal workspace creation is disabled. View and accept an invitation from a workspace administrator.',
       inviteOnlyNotice: 'This account can only join an existing workspace by invitation',
-      inviteOnlyHelp: 'No invitation yet? Send your registered email address to a workspace administrator and ask them to invite you.',
+      inviteOnlyHelp: 'No invitation yet? Send your registered email address to a workspace administrator and ask them to invite you.'
     }
   },
   authStore: {
@@ -2169,11 +1486,6 @@ export default {
     copied: 'Copied',
     default: 'Default',
     create: 'Create',
-    search: 'Search',
-    filter: 'Filter',
-    export: 'Export',
-    import: 'Import',
-    upload: 'Upload',
     download: 'Download',
     refresh: 'Refresh',
     loading: 'Loading...',
@@ -2182,28 +1494,22 @@ export default {
     error: 'Error',
     success: 'Success',
     failed: 'Failed',
-    warning: 'Warning',
     info: 'Information',
     selectAll: 'Select All',
     yes: 'Yes',
     no: 'No',
-    ok: 'OK',
     close: 'Close',
     back: 'Back',
     next: 'Next',
     finish: 'Finish',
     all: 'All',
-    reset: 'Reset',
     clear: 'Clear',
     website: 'Official Website',
-    chromeExtension: 'Chrome extension',
     clawhubSkill: 'Claw Skill',
-    newBadge: 'New',
     github: 'GitHub',
     githubStarTip: 'Open the repo on GitHub — star it if you find it useful',
     on: 'On',
     off: 'Off',
-    resetToDefault: 'Reset to default',
     confirmDelete: 'Confirm Delete',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed',
@@ -2217,7 +1523,7 @@ export default {
     copyFailed: 'Copy failed',
     retry: 'Retry',
     expand: 'Expand',
-    collapse: 'Collapse',
+    collapse: 'Collapse'
   },
   mentionDetail: {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
@@ -2225,20 +1531,10 @@ export default {
     kbCount: '{count} documents',
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
-    noCompatibleKbForAgent: "This agent's tools don't match any knowledge base's capabilities in scope, so nothing can be referenced.",
+    noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.'
   },
   file: {
-    upload: 'Upload File',
-    uploadSuccess: 'File uploaded successfully',
-    uploadFailed: 'File upload failed',
-    delete: 'Delete File',
-    deleteSuccess: 'File deleted successfully',
-    deleteFailed: 'File deletion failed',
-    download: 'Download File',
-    preview: 'Preview',
-    unsupportedFormat: 'Unsupported file format',
-    maxSizeExceeded: 'Maximum file size exceeded',
-    selectFile: 'Select File'
+    upload: 'Upload File'
   },
   manualEditor: {
     placeholders: {
@@ -2278,8 +1574,6 @@ export default {
       horizontalRule: 'Horizontal rule'
     },
     view: {
-      toggleToEdit: 'Switch to edit view',
-      toggleToPreview: 'Switch to preview view',
       editLabel: 'Back to edit',
       previewLabel: 'Preview content'
     },
@@ -2347,21 +1641,14 @@ export default {
     normalMode: 'Quick Answer',
     normalModeDesc: 'Knowledge base RAG Q&A',
     agentModeDesc: 'Multi-step thinking, deep analysis',
-    agentNotReadyTooltip: 'Agent is not ready. Please finish configuration first.',
     agentMissingAllowedTools: 'Allowed tools',
     agentMissingSummaryModel: 'Chat model',
     agentMissingRerankModel: 'Rerank model',
-    goToSettings: 'Go to settings →',
-    customAgentNotReadyTooltip: 'Agent is not ready. Please finish configuration first.',
-    customAgentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
     customAgentMissingSummaryModel: 'Chat model',
     customAgentMissingRerankModel: 'Rerank model',
     goToAgentEditor: 'Go to configure →',
     agentNotReadyDetail: 'Agent "{agentName}" is not ready. Please configure: {reasons}',
     sharedAgentNotReadyDetail: 'Shared agent "{agentName}" is not ready (missing: {reasons}). Ask the sharing organization admin to finish setup.',
-    builtinAgentNotReadyDetail: 'Built-in agent "{agentName}" is not ready. Please configure: {reasons}',
-    builtinAgentSettingName: 'Intelligent Reasoning',
-    builtinNormalSettingName: 'Quick Q&A',
     webSearch: {
       toggleOn: 'Enable Web Search',
       toggleOff: 'Disable Web Search',
@@ -2371,22 +1658,15 @@ export default {
     knowledgeBaseWithCount: 'Knowledge Base ({count})',
     notConfigured: 'Not configured',
     sharedAgentModelLabel: 'Model from shared agent',
-    model: 'Model',
-    remote: 'Remote',
     noModel: 'No available models',
     stopGeneration: 'Stop Generation',
     send: 'Send',
-    thinkingLabel: 'Thinking:',
     messages: {
       enterContent: 'Please enter content first!',
-      selectKnowledge: 'Please select a knowledge base first!',
       replying: 'Currently replying, please try again later!',
       agentSwitchedOn: 'Switched to Intelligent Reasoning',
       agentSwitchedOff: 'Switched to Quick Q&A',
       agentSelected: 'Selected agent "{name}"',
-      agentEnabled: 'Agent Mode enabled',
-      agentDisabled: 'Agent Mode disabled',
-      agentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
       webSearchNotConfigured: 'Web search engine is not configured. Please configure a provider and credentials in settings.',
       webSearchEnabled: 'Web search enabled',
       webSearchDisabled: 'Web search disabled',
@@ -2396,11 +1676,8 @@ export default {
       stopFailed: 'Failed to stop. Please try again.'
     },
     webSearchDisabledByAgent: 'Web search is disabled by the current agent',
-    webSearchForcedByAgent: 'Web search is enabled by the current agent and cannot be turned off',
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
-    cannotRemoveAgentKb: 'Cannot remove knowledge base configured by agent',
-    agentConfiguredKb: 'Configured by agent, cannot be removed',
     modelLockedByAgent: 'Model selection is locked by the current agent',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings'
@@ -2409,30 +1686,15 @@ export default {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
     newSessionTitle: 'New Session',
     messages: {
-      selectKnowledgeBase: 'Please select a knowledge base first',
       createFailed: 'Failed to create session',
       createError: 'Failed to create session, please try again later'
     }
   },
   knowledgeList: {
     create: 'Create Knowledge Base',
-    createShort: 'New',
-    createFAQ: 'Create FAQ Knowledge Base',
     subtitle: 'Manage and organize your knowledge bases, supporting document-based and FAQ-based knowledge bases',
-    myKnowledgeBases: 'My Knowledge Bases',
-    sharedKnowledgeBases: 'Shared Knowledge Bases',
     sharedToOrgs: 'Shared to {count} space(s)',
-    sharedLabel: 'Shared',
-    myLabel: 'Mine',
-    fromAgent: 'From agent {name}',
-    fromAgentShort: 'Agent: {name}',
-    tabs: {
-      all: 'All',
-      myKnowledgeBases: 'My Knowledge Bases',
-      sharedToMe: 'Shared with me',
-    },
     uninitializedBanner: 'Some knowledge bases are not initialized. Configure model information in settings before adding documents.',
-    emptyShared: 'No collaborative knowledge bases yet. Join a shared space to access knowledge bases from others.',
     empty: {
       title: 'No knowledge bases yet',
       description: 'Click "Create Knowledge Base" in the top-right corner to add your first one.',
@@ -2441,7 +1703,7 @@ export default {
       favoritesTitle: 'No favorites yet',
       favoritesDescription: 'Star a knowledge base from its card to add it here',
       recentsTitle: 'Nothing here yet',
-      recentsDescription: 'Knowledge bases you recently opened will show up here',
+      recentsDescription: 'Knowledge bases you recently opened will show up here'
     },
     delete: {
       confirmTitle: 'Delete Confirmation',
@@ -2450,39 +1712,32 @@ export default {
     },
     menu: {
       viewDetails: 'View Details',
-      duplicate: 'Duplicate',
+      duplicate: 'Duplicate'
     },
     pin: {
       pin: 'Pin to Top',
       unpin: 'Unpin',
       pinSuccess: 'Pinned',
       unpinSuccess: 'Unpinned',
-      failed: 'Operation failed',
+      failed: 'Operation failed'
     },
     sections: {
       pinned: 'Pinned',
       mine: 'Created by me',
-      tenantReadonly: 'Workspace · View only',
       tenantOthers: 'Workspace · Other members',
+      tenantReadonly: 'Workspace · View only',
       sharedByMe: 'Shared by me',
       sharedEditable: 'Shared with me · Can edit',
-      sharedReadonly: 'Shared with me · View only',
+      sharedReadonly: 'Shared with me · View only'
     },
     messages: {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base',
       duplicateSuccess: 'Knowledge base duplicate created (content not included)',
-      duplicateFailed: 'Failed to create knowledge base duplicate',
-      file: 'File',
-      knowledgeBase: 'Knowledge Base',
-      noResult: 'No results',
+      duplicateFailed: 'Failed to create knowledge base duplicate'
     },
     detail: {
       title: 'Shared Knowledge Base',
-      overview: 'Overview',
-      overviewDesc: 'View knowledge base information and source',
-      permission: 'Permission',
-      permissionDesc: 'View your permissions for this knowledge base',
       sourceType: 'Source',
       sourceTypeKbShare: 'KB shared directly to this space',
       sourceTypeAgent: 'Visible via shared agent',
@@ -2494,25 +1749,13 @@ export default {
       agentKbStrategyNone: 'No knowledge bases',
       sharedAt: 'Shared At',
       myPermission: 'My Permission',
-      canEdit: 'Can edit knowledge base content',
-      canView: 'Can view knowledge base content',
-      canSearch: 'Can search and use knowledge base',
-      goToKb: 'Go to Knowledge Base',
-      enabled: 'Enabled',
-      disabled: 'Disabled',
+      goToKb: 'Go to Knowledge Base'
     },
     features: {
       knowledgeGraph: 'Knowledge Graph',
       multimodal: 'Multimodal',
       questionGeneration: 'Question Generation',
-      wiki: 'Wiki',
-    },
-    processing: 'Processing import task',
-    processingDocuments: 'Processing {count} documents',
-    stats: {
-      documents: 'Document Count',
-      faqEntries: 'FAQ Entries',
-      chunks: 'Chunk Count'
+      wiki: 'Wiki'
     },
     uploadProgress: {
       uploadingTitle: 'Uploading folder documents to "{name}"',
@@ -2522,26 +1765,18 @@ export default {
       completedDetail: 'All {total} files uploaded. Refreshing list to show parsing status...',
       refreshing: 'Refreshing list to show parsing status...',
       errorTip: 'Some files failed to upload. Please check the notifications.',
-      unknownKb: 'Knowledge Base {id}',
+      unknownKb: 'Knowledge Base {id}'
     }
   },
   embedPublish: {
-    title: 'Web Page Embed',
-    description: 'Embed this agent on your website so visitors can chat via an in-page window or a floating launcher.',
     create: 'New embed channel',
     channelsTitle: 'Embed channels',
     disabled: 'Disabled',
     empty: 'No embed channels yet',
-    unnamed: 'Unnamed channel',
-    agent: 'Agent',
-    rateLimit: 'Rate limit',
-    rateLimitUnit: '/min',
     allowedOrigins: 'Allowed origins',
     embedCode: 'Embed code',
     widgetCode: 'Widget script',
     copyCode: 'Copy code',
-    rotateToken: 'Rotate token',
-    rotatePublishToken: 'Rotate publish token',
     channelKey: 'Channel key',
     channelKeyDesc: 'Long-lived secret for third-party site integration—store it safely',
     channelKeyHint: 'Failed to load the channel key. Close and reopen this channel, or refresh the page.',
@@ -2555,10 +1790,7 @@ export default {
     copyChannelKeyTitle: 'Copy channel key',
     revealKey: 'Reveal key',
     hideKey: 'Hide key',
-    delete: 'Delete',
-    edit: 'Edit',
     createTitle: 'New embed channel',
-    editTitle: 'Edit embed channel',
     name: 'Name',
     nameDesc: 'For admin lists and channel identification',
     namePlaceholder: 'e.g. Website support',
@@ -2570,20 +1802,16 @@ export default {
     welcomeMessageDesc: 'Shown in the embed chat before the visitor sends their first message; leave blank to hide',
     showSuggestedQuestions: 'Suggested questions',
     showSuggestedQuestionsDesc: 'Show starter prompts before the first visitor message, from agent config and linked knowledge bases',
-    originsLabel: 'Allowed origins (one per line, at least one required)',
     originsHint: 'One full origin per line (e.g. https://shop.example.com), at least one required; *.example.com subdomain wildcards supported',
     originsRequired: 'At least one allowed origin is required',
     originsInvalid: 'Invalid origin: {origin}',
-    originsWildcardProd: "Wildcard origin '*' is not allowed in production",
-    originsCount: '{n} origins',
+    originsWildcardProd: 'Wildcard origin \'*\' is not allowed in production',
     originsPlaceholder: 'https://shop.example.com',
     rateLimitLabel: 'Requests per minute',
     rateLimitDesc: 'Per visitor IP, max embed API requests per minute; excess requests are temporarily rejected. Default 30.',
     rateLimitDayLabel: 'Daily request cap',
     rateLimitDayDesc: 'Channel-wide total requests allowed per day (across all visitor IPs); bounds abuse cost if the publish token is copied. Default 10000.',
     publishTokenWarning: 'The publish token appears in plain text in the embed page source — anyone visiting the host site can read it. Treat it as a publishable key, not a secret: never embed an agent that exposes sensitive data, always configure the origin allowlist and request caps, and rotate the token immediately if it leaks.',
-    debug: 'Debug preview',
-    createdDebugHint: 'Embed channel created — use Debug preview to open it in a new tab',
     primaryColor: 'Primary color',
     pageTitle: 'Page title',
     pageTitleDesc: 'Shown to visitors in chat header and browser tab; takes priority over name',
@@ -2598,7 +1826,6 @@ export default {
     updated: 'Embed channel updated',
     saveFailed: 'Save failed',
     deleted: 'Deleted',
-    tokenRotated: 'Channel key reset',
     copied: 'Embed code copied',
     loadError: 'Failed to load',
     missingChannel: 'Missing embed channel or token',
@@ -2615,13 +1842,6 @@ export default {
     positionBottomLeft: 'Bottom left',
     positionTopRight: 'Top right',
     positionTopLeft: 'Top left',
-    publishToken: 'Channel key',
-    publishTokenHelp: 'The channel key (em_…) is a long-lived secret for this embed channel—like an API key. Open the channel details to view and copy it; resetting invalidates the previous key immediately.',
-    sessionTokenHelp: 'After a visitor opens chat, the iframe exchanges the channel key for a short-lived session credential (ems_…, ~30 min). Later API calls use the session credential so the channel key is not kept in the URL.',
-    rotateTokenHelp: 'Resetting invalidates the previous channel key. Every deployed embed snippet must be updated or third-party sites will lose access.',
-    revealToken: 'Reveal',
-    hideToken: 'Hide',
-    copyToken: 'Copy channel key',
     tokenCopied: 'Channel key copied',
     awaitingToken: 'Waiting for host page to provide token…',
     preview: 'Preview',
@@ -2632,7 +1852,6 @@ export default {
     previewUnavailable: 'Preview is unavailable. Ensure the channel is enabled and Redis is available.',
     defaultChatTitle: 'AI Assistant',
     newChat: 'New chat',
-    channelsPanelIntro: 'Create embed channels for this agent, configure appearance and security, then deploy to third-party sites.',
     sectionChannel: 'Channel info',
     sectionSecurity: 'Security & rate limit',
     sectionCapabilities: 'Chat capabilities',
@@ -2647,7 +1866,6 @@ export default {
     webhookSecretPlaceholder: 'HMAC-SHA256 secret (X-WeKnora-Signature header)',
     webhookSecretKeep: 'Leave blank to keep the saved secret',
     webhookSecretDesc: 'Optional. When set, request bodies are signed for verification on your server.',
-    secureModeDocHint: 'See docs/embed-secure-mode.md for the full integration guide',
     agentWebSearchDisabledHint: 'This agent does not have web search enabled. Visitors will not see the web search button until you enable it in agent settings.',
     agentImageUploadDisabledHint: 'This agent does not have image upload enabled. Visitors will not see the upload button until you enable it in agent settings.',
     sectionAppearance: 'Appearance',
@@ -2660,8 +1878,6 @@ export default {
     stepWebhook: 'Webhooks',
     stepDeploy: 'Deploy',
     deployIntro: 'Choose an embed style and copy the snippet below into your site. View or rotate the channel key at the bottom when you need credentials.',
-    deployStepToken: 'Channel key',
-    deployStepTokenDesc: 'Long-lived secret (em_…), like an API key. Shown on this page only when created or reset—store it safely.',
     deployStepEmbed: 'Copy embed code',
     deployStepEmbedDesc: 'Pick an embed style and paste the snippet into your site.',
     embedIframeDesc: 'Embed the full chat in a fixed page area.',
@@ -2671,52 +1887,114 @@ export default {
     widgetTokenNote: 'Widget scripts must include the channel key; iframe embeds exchange credentials automatically on load.',
     secureTokenNote: 'The page no longer carries the publish token; it points at a token endpoint on your backend (data-token-endpoint). Your backend exchanges the publish token for a 30-minute short-lived token and returns it to the page; the widget auto-refreshes before expiry.',
     secureServerLabel: 'Server-side token endpoint example (publish token stays on the server)',
-    secureServerCode: 'Server example',
     tabServerNode: 'Node.js',
     tabServerGo: 'Go',
-    sectionBasic: 'Basic settings',
-    sectionToken: 'Channel key',
-    sectionEmbed: 'Embed code',
     enabled: 'Enable channel',
     deleteConfirm: 'Delete this embed channel? Deployed snippets will stop working.',
-    rotateConfirmTitle: 'Reset channel key?',
-    rotateConfirmBody: 'The old channel key stops working immediately. Update every deployed embed snippet.',
     defaultLocale: 'Default language',
     defaultLocaleDesc: 'Visitor UI language when chat opens; empty follows the browser or host Widget setLocale().',
-    defaultLocaleBrowser: 'Browser / host default',
-    sessionCountLabel: '{n} sessions',
+    defaultLocaleBrowser: 'Browser / host default'
   },
   knowledgeEditor: {
     activity: {
       title: 'Activity',
       description: 'Important changes and background-task entry points for this knowledge base. Retention follows the audit-log policy.',
       allOutcomes: 'All outcomes',
-      allActions: 'All actions', refresh: 'Refresh', retry: 'Retry', empty: 'No activity yet', emptyFiltered: 'No matching activity records', clearFilters: 'Clear filters',
-      loadMore: 'Load more', loadingMore: 'Loading…', end: 'No earlier activity', loadFailed: 'Failed to load activity', viewDetails: 'View details',
-      columns: { time: 'Time', action: 'Action', target: 'Target', actor: 'Initiator', outcome: 'Outcome' },
-      expanded: { targetType: 'Target type', targetId: 'Target ID', actorId: 'Initiator ID', details: 'Details' },
-      drawer: { sectionSummary: 'Summary', sectionIdentifiers: 'Identifiers', sectionTask: 'Task information', targetChange: 'Change details' },
-      systemActor: 'System', knowledgeBase: 'Knowledge base', countItems: '{count} items', titleWithCount: '{title} and {count} more', importSummary: 'Success {success} / Failed {failed} / Skipped {skipped}',
-      targets: { knowledge_base: 'Knowledge base', knowledge: 'Knowledge', faq_entry: 'FAQ entry', knowledge_tag: 'Tag', data_source: 'Data source', knowledge_base_share: 'Share', knowledge_move: 'Knowledge move', wiki: 'Wiki' },
-      outcomes: { accepted: 'Accepted', success: 'Success', failed: 'Failed', partial: 'Partial', canceled: 'Canceled', denied: 'Denied' },
-      detailFields: { task_id: 'Task ID', trigger: 'Trigger', processing_status: 'Processing status', source_kb_id: 'Source knowledge base ID', target_kb_id: 'Target knowledge base ID', sync_log_id: 'Sync log ID', mode: 'Mode', attempt: 'Processing attempt', count: 'Item count', total: 'Total', processed: 'Processed', failed: 'Failed', skipped: 'Skipped', failure_stage: 'Failure stage' },
-      detailValues: { user: 'User initiated', manual: 'Manual', schedule: 'Scheduled', system: 'System', pending: 'Pending', completed: 'Completed', partial: 'Partially completed', canceled: 'Canceled', failed: 'Failed', enqueue: 'Task submission', reuse_vectors: 'Reuse vectors', reparse: 'Reparse', viewer: 'Read-only', editor: 'Can edit', admin: 'Manage', append: 'Append', replace: 'Replace' },
-      actions: {
-        'kb.created': 'Knowledge base created', 'kb.updated': 'Knowledge base updated', 'kb.deleted': 'Knowledge base deleted',
-        'kb.duplicated': 'Knowledge base duplicated', 'kb.clone_started': 'Clone started', 'kb.clone_completed': 'Clone completed',
-        'kb.clone_failed': 'Clone failed',
-        'knowledge.created': 'Knowledge added', 'knowledge.updated': 'Knowledge updated', 'knowledge.deleted': 'Knowledge deleted',
-        'knowledge.batch_deleted': 'Knowledge batch deleted', 'knowledge.reparse_started': 'Reparse started',
-        'knowledge.parse_canceled': 'Parsing canceled', 'knowledge.move_started': 'Knowledge move started',
-        'knowledge.move_completed': 'Knowledge move completed', 'knowledge.move_failed': 'Knowledge move failed',
-        'tag.created': 'Tag created', 'tag.updated': 'Tag updated', 'tag.deleted': 'Tag deleted',
-        'datasource.created': 'Data source created', 'datasource.updated': 'Data source updated', 'datasource.deleted': 'Data source deleted',
-        'datasource.sync_started': 'Data source sync started', 'datasource.sync_completed': 'Data source sync completed', 'datasource.sync_failed': 'Data source sync failed',
-        'datasource.paused': 'Data source paused', 'datasource.resumed': 'Data source resumed',
-        'kb.share_added': 'Share added', 'kb.share_permission_changed': 'Share permission changed', 'kb.share_removed': 'Share removed',
-        'wiki.content_changed': 'Wiki content changed',
-        'faq.import_started': 'FAQ import started', 'faq.import_completed': 'FAQ import completed', 'faq.import_failed': 'FAQ import failed',
+      allActions: 'All actions',
+      refresh: 'Refresh',
+      retry: 'Retry',
+      empty: 'No activity yet',
+      emptyFiltered: 'No matching activity records',
+      clearFilters: 'Clear filters',
+      loadingMore: 'Loading…',
+      end: 'No earlier activity',
+      loadFailed: 'Failed to load activity',
+      columns: {
+        time: 'Time',
+        action: 'Action',
+        target: 'Target',
+        actor: 'Initiator',
+        outcome: 'Outcome'
       },
+      expanded: {
+        targetType: 'Target type',
+        targetId: 'Target ID',
+        actorId: 'Initiator ID',
+        details: 'Details'
+      },
+      drawer: {
+        sectionSummary: 'Summary',
+        sectionIdentifiers: 'Identifiers',
+        sectionTask: 'Task information',
+        targetChange: 'Change details'
+      },
+      systemActor: 'System',
+      knowledgeBase: 'Knowledge base',
+      countItems: '{count} items',
+      titleWithCount: '{title} and {count} more',
+      importSummary: 'Success {success} / Failed {failed} / Skipped {skipped}',
+      targets: {
+        knowledge_base: 'Knowledge base',
+        knowledge: 'Knowledge',
+        faq_entry: 'FAQ entry',
+        knowledge_tag: 'Tag',
+        data_source: 'Data source',
+        knowledge_base_share: 'Share',
+        knowledge_move: 'Knowledge move',
+        wiki: 'Wiki'
+      },
+      detailFields: {
+        task_id: 'Task ID',
+        trigger: 'Trigger',
+        processing_status: 'Processing status',
+        source_kb_id: 'Source knowledge base ID',
+        target_kb_id: 'Target knowledge base ID',
+        sync_log_id: 'Sync log ID',
+        mode: 'Mode',
+        attempt: 'Processing attempt',
+        count: 'Item count',
+        total: 'Total',
+        processed: 'Processed',
+        failed: 'Failed',
+        skipped: 'Skipped',
+        failure_stage: 'Failure stage'
+      },
+      actions: {
+        'kb.created': 'Knowledge base created',
+        'kb.updated': 'Knowledge base updated',
+        'kb.deleted': 'Knowledge base deleted',
+        'kb.duplicated': 'Knowledge base duplicated',
+        'kb.clone_started': 'Clone started',
+        'kb.clone_completed': 'Clone completed',
+        'kb.clone_failed': 'Clone failed',
+        'knowledge.created': 'Knowledge added',
+        'knowledge.updated': 'Knowledge updated',
+        'knowledge.deleted': 'Knowledge deleted',
+        'knowledge.batch_deleted': 'Knowledge batch deleted',
+        'knowledge.reparse_started': 'Reparse started',
+        'knowledge.parse_canceled': 'Parsing canceled',
+        'knowledge.move_started': 'Knowledge move started',
+        'knowledge.move_completed': 'Knowledge move completed',
+        'knowledge.move_failed': 'Knowledge move failed',
+        'tag.created': 'Tag created',
+        'tag.updated': 'Tag updated',
+        'tag.deleted': 'Tag deleted',
+        'datasource.created': 'Data source created',
+        'datasource.updated': 'Data source updated',
+        'datasource.deleted': 'Data source deleted',
+        'datasource.sync_started': 'Data source sync started',
+        'datasource.sync_completed': 'Data source sync completed',
+        'datasource.sync_failed': 'Data source sync failed',
+        'datasource.paused': 'Data source paused',
+        'datasource.resumed': 'Data source resumed',
+        'kb.share_added': 'Share added',
+        'kb.share_permission_changed': 'Share permission changed',
+        'kb.share_removed': 'Share removed',
+        'wiki.content_changed': 'Wiki content changed',
+        'faq.import_started': 'FAQ import started',
+        'faq.import_completed': 'FAQ import completed',
+        'faq.import_failed': 'FAQ import failed'
+      }
     },
     titleCreate: 'Create Knowledge Base',
     titleEdit: 'Knowledge Base Settings',
@@ -2725,7 +2003,7 @@ export default {
       processing: 'Indexing & Parsing',
       data: 'Storage & Data',
       integration: 'Publishing',
-      management: 'Management & Audit',
+      management: 'Management & Audit'
     },
     sidebar: {
       basic: 'Basic Information',
@@ -2735,20 +2013,16 @@ export default {
       storage: 'Storage Engine',
       advanced: 'Advanced Settings',
       faq: 'FAQ Settings',
-      wiki: 'Wiki Settings',
       graph: 'Knowledge Graph',
       multimodal: 'Image Processing',
       asr: 'Audio',
       datasource: 'Data Sources',
       share: 'Sharing',
-      activity: 'Activity',
-      indexing: 'Indexing Strategy',
+      activity: 'Activity'
     },
     errors: {
-      vectorStoreBindingInvalid:
-        'The selected vector store cannot be used. Choose a different store or use the system default.',
-      vectorStoreUnavailable:
-        'The selected vector store is currently unavailable. Check its connection configuration in Settings → Vector Stores.',
+      vectorStoreBindingInvalid: 'The selected vector store cannot be used. Choose a different store or use the system default.',
+      vectorStoreUnavailable: 'The selected vector store is currently unavailable. Check its connection configuration in Settings → Vector Stores.'
     },
     feedback: {
       title: 'Knowledge Feedback',
@@ -2766,8 +2040,7 @@ export default {
       maxRate: 'Maximum positive rate',
       viewDetails: 'View',
       reset: 'Reset',
-      resetConfirm:
-        'Reset this chunk feedback and weight? Existing answer associations remain for traceability, but earlier ratings will no longer affect this chunk.',
+      resetConfirm: 'Reset this chunk feedback and weight? Existing answer associations remain for traceability, but earlier ratings will no longer affect this chunk.',
       chunkDetail: 'Chunk Detail',
       chunkId: 'Chunk ID',
       likeCount: 'Likes',
@@ -2791,7 +2064,7 @@ export default {
         trigger: 'Trigger',
         operator: 'Operator',
         weightChange: 'Weight Change',
-        createdAt: 'Time',
+        createdAt: 'Time'
       },
       status: {
         high_quality: 'High Quality',
@@ -2800,21 +2073,21 @@ export default {
         pending_optimization: 'Needs Optimization',
         needs_optimization: 'Needs Optimization',
         optimizing: 'Optimizing',
-        optimized: 'Optimized',
+        optimized: 'Optimized'
       },
       weightLogActions: {
         adjust_weight: 'Auto adjusted',
         increase: 'Weight increased',
         decrease: 'Weight decreased',
         reset: 'Reset',
-        manual_set: 'Manual set',
+        manual_set: 'Manual set'
       },
       weightLogTriggers: {
         user_feedback: 'User feedback',
         user_like: 'User like',
         user_dislike: 'User dislike',
         user_cancel: 'User cancel',
-        admin_reset: 'Admin reset',
+        admin_reset: 'Admin reset'
       },
       messages: {
         loadFailed: 'Failed to load feedback data',
@@ -2822,8 +2095,8 @@ export default {
         chunkStatsLoadFailed: 'Failed to load chunk statistics',
         weightLogsLoadFailed: 'Failed to load weight change logs',
         resetSuccess: 'Feedback stats reset',
-        resetFailed: 'Failed to reset feedback stats',
-      },
+        resetFailed: 'Failed to reset feedback stats'
+      }
     },
     basic: {
       title: 'Basic Information',
@@ -2841,13 +2114,9 @@ export default {
     },
     wiki: {
       title: 'Wiki Settings',
-      description: 'Configure Wiki auto-generation preferences',
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
       synthesisModelTip: 'Falls back to the summary model if not set',
-      languageLabel: 'Wiki Language',
-      maxPagesLabel: 'Max Pages Per Ingest',
-      maxPagesTip: 'Maximum number of pages to create/update per ingest (0 = no limit)',
       extractionGranularityLabel: 'Extraction Granularity',
       contentInstructionsLabel: 'Wiki Content Instructions',
       contentInstructionsTip: 'Control emphasis and tone for summaries, pages, and the index. Citation, merge, and factuality rules remain system-owned. Reprocess existing content to apply changes.',
@@ -2859,9 +2128,9 @@ export default {
       granularityFocused: 'Focused',
       granularityStandard: 'Standard',
       granularityExhaustive: 'Exhaustive',
-      granularityFocusedHint: 'Extract only the document\u2019s main subjects (e.g. a resume yields the person and their projects). Cleanest, may miss secondary entities.',
+      granularityFocusedHint: 'Extract only the document’s main subjects (e.g. a resume yields the person and their projects). Cleanest, may miss secondary entities.',
       granularityStandardHint: 'Main subjects plus secondary entities/concepts that receive substantial discussion. Skips name-dropped terms. Recommended default.',
-      granularityExhaustiveHint: 'Extract every named entity and concept, including passing mentions of stacks/tools. Use when the KB serves as a glossary.',
+      granularityExhaustiveHint: 'Extract every named entity and concept, including passing mentions of stacks/tools. Use when the KB serves as a glossary.'
     },
     indexing: {
       title: 'Indexing Strategy',
@@ -2874,15 +2143,13 @@ export default {
       graphDesc: 'Extract entities and relationships to build a knowledge graph for graph-based retrieval',
       atLeastOne: 'At least one indexing strategy must be enabled',
       embeddingRequired: 'RAG search requires an Embedding model',
-      wikiModelRequired: 'Wiki requires a synthesis model to be configured',
       lockedTip: 'The indexing strategy cannot be changed once the knowledge base contains content. Please clear the knowledge base first.',
       rebuildConfirmTitle: 'Rebuild Index',
       rebuildConfirmBody: 'Indexing strategy has changed. Re-process {count} existing documents? This may take some time.',
       rebuildSuccess: 'Rebuild task submitted for {count} documents',
-      rebuildSkip: 'You can manually trigger a rebuild later from Data Sources',
+      rebuildSkip: 'You can manually trigger a rebuild later from Data Sources'
     },
     wikiBrowser: {
-      // --- Manual editing & revision history ---
       editBtn: 'Edit',
       historyBtn: 'History',
       historyTitle: 'Revision history · {title}',
@@ -2928,7 +2195,6 @@ export default {
       revertFailed: 'Failed to revert',
       viewInGraph: 'View in Graph',
       tabDocuments: 'Documents',
-      tabWiki: 'Wiki',
       tabGraph: 'Graph',
       tabGraphTip: 'A graph of links between Wiki pages (page-link graph). This is NOT the same as the LLM-extracted entity-relationship Knowledge Graph configured under "KB Settings → Knowledge Graph".',
       searchPlaceholder: 'Search wiki pages...',
@@ -2936,9 +2202,6 @@ export default {
       viewModeToggle: 'Switch directory view',
       viewTree: 'Tree view',
       viewList: 'List view',
-      loadMore: 'Load more ({remaining} remaining)',
-      filterAll: 'All Types',
-      newFolder: 'New Folder',
       newRootFolder: 'New Folder',
       newSubfolder: 'New Subfolder',
       folderActions: 'Folder actions',
@@ -2961,25 +2224,19 @@ export default {
       moveConfirm: 'Move to "{target}"?',
       moveConfirmTitle: 'Confirm move',
       rootFolderLabel: 'Root',
-      dropToRoot: 'Drop here to move to root',
       filterSummary: 'Summaries',
       filterKnowledge: 'Knowledge',
       filterEntity: 'Entities',
       filterConcept: 'Concepts',
       filterSynthesis: 'Synthesis',
       filterComparison: 'Comparisons',
-      viewReader: 'Reader',
-      viewGraph: 'Graph',
-      stats: '{pages} pages · {links} links',
       emptyTitle: 'No wiki pages yet',
       emptyDesc: 'Upload documents with Wiki enabled to auto-generate knowledge pages',
       selectPageHint: 'Select a page from the left to view its content',
       version: 'v{ver}',
       aliases: 'Aliases',
-      linksTo: 'Links to',
       linkedFrom: 'Linked from',
       sources: 'Source documents',
-      recentActivity: 'Recent Activity',
       graphEmpty: 'Loading graph...',
       fitView: 'Fit to View',
       indexTitle: 'Index',
@@ -3022,7 +2279,6 @@ export default {
       neighborsCenterUnreachable: 'Showing {visible} of {total} neighbors ({hidden} unreachable: dead links, filtered, or deleted)',
       neighborsOverviewHidden: 'Showing {visible} of {total} neighbors ({hidden} outside the overview — click Expand to pivot here)',
       backToOverview: 'Back to overview',
-      healthCheck: 'Health Check',
       queueStatus: '{count} pending tasks in Wiki queue',
       issueTitle: 'This page has {count} pending knowledge conflicts or errors',
       issueFixBtn: 'AI Auto-Fix',
@@ -3043,8 +2299,7 @@ export default {
       issueFixSingle: 'Fix',
       fixStartError: 'Failed to start fix assistant',
       issueFixPromptSingle: 'Please fix the issue (ID: {id}) on page [[{slug}]].',
-      issueFixPromptAutoStart: 'Please fix the following issues on page [[{slug}]]:',
-      issueFixPromptAutoEnd: '',
+      issueFixPromptAutoStart: 'Please fix the following issues on page [[{slug}]]:'
     },
     buttons: {
       create: 'Create Knowledge Base',
@@ -3063,7 +2318,6 @@ export default {
       loadDataFailed: 'Failed to load knowledge base data',
       notFound: 'Knowledge base not found',
       nameRequired: 'Please enter the knowledge base name',
-      embeddingRequired: 'Please select an embedding model',
       summaryRequired: 'Please select a summary model',
       multimodalInvalid: 'Multimodal configuration validation failed',
       createSuccess: 'Knowledge base created successfully',
@@ -3076,7 +2330,7 @@ export default {
     },
     document: {
       title: 'Document Management',
-      subtitle: 'Click or drag-and-drop to upload documents; multiple formats are parsed automatically with intelligent chunking for a searchable knowledge base',
+      subtitle: 'Click or drag-and-drop to upload documents; multiple formats are parsed automatically with intelligent chunking for a searchable knowledge base'
     },
     faq: {
       title: 'FAQ Configuration',
@@ -3103,62 +2357,42 @@ export default {
       similarQuestionsDesc: 'Add questions with the same meaning but different phrasing to help the system better match user queries.',
       negativeQuestions: 'Negative Examples',
       negativeQuestionsDesc: 'Add questions that should not match this answer, to exclude false positives.',
-      categoryLabel: 'FAQ Tag',
-      categoryButton: 'Switch Tag',
       editorCreate: 'Create FAQ Entry',
       editorEdit: 'Edit FAQ Entry',
-      addAnswer: 'Add Answer',
       answerPlaceholder: 'Enter answer content, supports multi-line text, press Ctrl+Enter or click button to add',
       similarPlaceholder: 'Enter similar question and click plus icon to add',
       negativePlaceholder: 'Enter negative example and click plus icon to add',
       answerRequired: 'Please provide at least one answer',
-      noAnswer: 'No answers',
-      noSimilar: 'No similar questions',
-      noNegative: 'No negative examples',
       emptyTitle: 'No FAQ entries',
       emptyDesc: 'Click "Create FAQ Entry" above to get started',
       searchPlaceholder: 'Search standard questions...',
       searchTest: 'Search Test',
-      addFaq: 'Add FAQ',
-      manageFaq: 'FAQ Actions',
       createGroup: 'New',
       searchTestTitle: 'FAQ Search Test',
       queryLabel: 'Query',
       queryPlaceholder: 'Enter a question to search',
-      vectorThresholdLabel: 'Vector Similarity Threshold',
       vectorThresholdDesc: 'Range 0-1, default 0.7',
-      keywordThresholdLabel: 'Keyword Match Threshold',
-      keywordThresholdDesc: 'Range 0-1, default 0.5',
       matchCountLabel: 'Result Count',
       matchCountDesc: 'Range 1-50, default 10',
       searchButton: 'Search',
       searching: 'Searching...',
       searchResults: 'Search Results',
       noResults: 'No matching FAQ entries found',
-      score: 'Similarity',
-      matchType: 'Match Type',
       matchedQuestion: 'Matched',
       matchTypeEmbedding: 'Vector Match',
       matchTypeKeywords: 'Keyword Match',
       similarityThresholdLabel: 'Similarity Threshold',
       statusEnabled: 'Enabled',
       statusDisabled: 'Disabled',
-      statusEnableSuccess: 'FAQ entry enabled',
       statusDisableSuccess: 'FAQ entry disabled',
       statusUpdateFailed: 'Failed to update status',
       recommended: 'Recommend',
       recommendedEnabled: 'Recommendation enabled',
       recommendedDisabled: 'Recommendation disabled',
-      recommendedEnableSuccess: 'FAQ entry recommendation enabled',
       recommendedDisableSuccess: 'FAQ entry recommendation disabled',
       recommendedUpdateFailed: 'Failed to update recommendation status',
-      batchOperations: 'Batch Operations',
       batchUpdateTag: 'Batch Set Tags',
-      batchUpdateTagTip: 'Set tags for {count} selected entries',
-      batchEnable: 'Batch Enable',
-      batchDisable: 'Batch Disable',
-      batchEnableRecommended: 'Batch Enable Recommendation',
-      batchDisableRecommended: 'Batch Disable Recommendation',
+      batchUpdateTagTip: 'Set tags for {count} selected entries'
     },
     faqImport: {
       title: 'Batch Import FAQ',
@@ -3170,7 +2404,6 @@ export default {
       clickToUpload: 'Click to upload file',
       dragDropTip: 'or drag and drop file here',
       importButton: 'Import FAQ',
-      deleteSelected: 'Delete Selected',
       deleteSuccess: 'Selected entries deleted',
       previewCount: '{count} entries parsed',
       previewMore: '{count} more entries not shown',
@@ -3182,14 +2415,14 @@ export default {
       downloadExample: 'Download Example',
       downloadExampleJSON: 'Download JSON Example',
       downloadExampleCSV: 'Download CSV Example',
-      downloadExampleExcel: 'Download Excel Example',
+      downloadExampleExcel: 'Download Excel Example'
     },
     faqExport: {
       exportButton: 'Export',
       exportCSV: 'Export CSV',
       exportJSON: 'Export JSON',
       exportSuccess: 'Export successful',
-      exportFailed: 'Export failed',
+      exportFailed: 'Export failed'
     },
     models: {
       title: 'Model Configuration',
@@ -3202,10 +2435,7 @@ export default {
       embeddingPlaceholder: 'Select an embedding model',
       embeddingLocked: 'Knowledge base already has files. Embedding model cannot be modified',
       embeddingOptional: '(Optional)',
-      embeddingWikiOptionalDesc: 'Optional. When set, it powers similarity matching for Wiki directory classification so new pages reuse existing folders better; otherwise the full directory tree is used.',
-      rerankLabel: 'ReRank Model',
-      rerankDesc: 'Model for re-ranking search results (optional)',
-      rerankPlaceholder: 'Select a ReRank model (optional)'
+      embeddingWikiOptionalDesc: 'Optional. When set, it powers similarity matching for Wiki directory classification so new pages reuse existing folders better; otherwise the full directory tree is used.'
     },
     chunking: {
       title: 'Chunking Settings',
@@ -3219,11 +2449,8 @@ export default {
       separatorsDescription: 'Characters or strings the splitter prefers when cutting. Higher-priority separators are tried first; the default order favors paragraph → sentence → punctuation breaks.',
       separatorsPlaceholder: 'Select or customize separators',
       separators: {
-        doubleNewline: 'Double newline (\
-\
-)',
-        singleNewline: 'Single newline (\
-)',
+        doubleNewline: 'Double newline ()',
+        singleNewline: 'Single newline ()',
         periodCn: 'Chinese period (。)',
         exclamationCn: 'Exclamation mark (！)',
         questionCn: 'Question mark (？)',
@@ -3305,12 +2532,11 @@ export default {
     },
     multimodal: {
       title: 'Image Processing Configuration',
-      description: 'Configure image content understanding for parsing and retrieving non-text content like images',
+      description: 'Configure image content understanding for parsing and retrieving non-text content like images'
     },
     asr: {
       title: 'Audio Speech Recognition',
-      description:
-        'Configure ASR (speech-to-text). When enabled, you can upload audio files and transcribe them to text (e.g. mp3, wav, m4a, flac, ogg). Video upload is not supported.',
+      description: 'Configure ASR (speech-to-text). When enabled, you can upload audio files and transcribe them to text (e.g. mp3, wav, m4a, flac, ogg). Video upload is not supported.',
       label: 'Enable audio speech recognition',
       desc: 'When enabled, audio can be uploaded to the knowledge base; speech is transcribed to text for parsing and retrieval.',
       modelLabel: 'ASR Model',
@@ -3318,7 +2544,7 @@ export default {
       modelPlaceholder: 'Select an ASR model',
       languageLabel: 'Audio language hint',
       languageDescription: 'Optional. A primary language hint can improve some ASR models; leave empty for auto-detection.',
-      languagePlaceholder: 'For example zh or en; empty means auto-detect',
+      languagePlaceholder: 'For example zh or en; empty means auto-detect'
     },
     advanced: {
       title: 'Advanced Settings',
@@ -3330,12 +2556,12 @@ export default {
         countDescription: 'Number of questions to generate per document chunk (1-10)',
         instructionsLabel: 'Question Generation Instructions',
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
-        instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…',
+        instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'
       },
       tableMetadataInstructions: {
         label: 'Table Metadata Instructions',
         description: 'Add business context and field semantics to CSV/Excel summaries for better retrieval',
-        placeholder: 'For example: this is a sales-order table, amounts are in CNY, and status uses internal codes…',
+        placeholder: 'For example: this is a sales-order table, amounts are in CNY, and status uses internal codes…'
       },
       multimodal: {
         label: 'Multimodal Feature',
@@ -3348,87 +2574,16 @@ export default {
         descriptionLanguageAuto: 'Follow document language',
         customInstructionsLabel: 'Image Processing Instructions',
         customInstructionsDescription: 'Add visual priorities while OCR and Markdown output contracts remain fixed',
-        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…',
-        storageTitle: 'Storage Configuration',
-        storageTypeLabel: 'Storage Type',
-        storageTypeDescription: 'Choose the storage solution for multimodal files (MinIO or Tencent Cloud COS)',
-        storageTypeOptions: {
-          minio: 'MinIO',
-          cos: 'Tencent Cloud COS'
-        },
-        minioDisabledWarning: 'MinIO is not enabled. Automatically switched to Tencent Cloud COS. To use MinIO, please enable it in system configuration first.',
-        minio: {
-          bucketLabel: 'Bucket Name',
-          bucketDescription: 'Name of the MinIO bucket (required)',
-          bucketPlaceholder: 'Select or enter bucket name',
-          bucketHint: 'Select an existing bucket with public read access, or enter a new name to create automatically',
-          policyLabels: {
-            public: 'Public Read',
-            private: 'Private',
-            custom: 'Custom'
-          },
-          useSslLabel: 'Use SSL',
-          useSslDescription: 'Whether to use SSL connection',
-          pathPrefixLabel: 'Path Prefix',
-          pathPrefixDescription: 'Optional prefix for stored file paths',
-          pathPrefixPlaceholder: 'Enter path prefix'
-        },
-        cos: {
-          secretIdLabel: 'SecretId',
-          secretIdDescription: 'Tencent Cloud API secret ID (required)',
-          secretIdPlaceholder: 'Enter SecretId (required)',
-          secretKeyLabel: 'SecretKey',
-          secretKeyDescription: 'Tencent Cloud API secret key (required)',
-          secretKeyPlaceholder: 'Enter SecretKey (required)',
-          regionLabel: 'Region',
-          regionDescription: 'Region where the COS bucket is located (required)',
-          regionPlaceholder: 'e.g. ap-guangzhou (required)',
-          bucketLabel: 'Bucket Name',
-          bucketDescription: 'COS bucket name (required)',
-          bucketPlaceholder: 'Enter bucket name (required)',
-          appIdLabel: 'AppId',
-          appIdDescription: 'Tencent Cloud application ID (required)',
-          appIdPlaceholder: 'Enter AppId (required)',
-          pathPrefixLabel: 'Path Prefix',
-          pathPrefixDescription: 'Optional prefix for stored file paths',
-          pathPrefixPlaceholder: 'Enter path prefix'
-        }
+        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…'
       }
     }
   },
   chat: {
-    title: 'Chat',
-    newChat: 'New Chat',
     suggestedQuestions: 'You can ask me',
     followUpQuestions: 'Keep asking',
     followUpQuestionsLoading: 'Loading suggested questions',
-    suggestedQuestionsLoading: 'Loading...',
     refreshSuggestedQuestions: 'More',
-    inputPlaceholder: 'Enter your message...',
-    send: 'Send',
     thinking: 'Thinking...',
-    regenerate: 'Regenerate',
-    copy: 'Copy',
-    delete: 'Delete',
-    reference: 'Reference',
-    noMessages: 'No messages',
-    // Additional translations for chat components
-    waitingForAnswer: 'Waiting for answer...',
-    cannotAnswer: 'Sorry, I cannot answer this question.',
-    summarizingAnswer: 'Summarizing answer...',
-    loading: 'Loading...',
-    referencedContent: '{count} related materials used',
-    deepThinking: 'Deep thinking completed',
-    knowledgeBaseQandA: 'Knowledge Base Q&A',
-    askKnowledgeBase: 'Ask the knowledge base',
-    sourcesCount: '{count} sources',
-    pleaseEnterContent: 'Please enter content!',
-    pleaseUploadKnowledgeBase: 'Please upload knowledge base first!',
-    replyingPleaseWait: 'Replying, please try again later!',
-    createSessionFailed: 'Failed to create session',
-    createSessionError: 'Session creation error',
-    unableToGetKnowledgeBaseId: 'Unable to get knowledge base ID',
-    summaryInProgress: 'Summarizing answer…',
     thinkingAlt: 'Thinking in progress',
     deepThoughtCompleted: 'Deep thinking completed',
     deepThoughtAlt: 'Deep thinking finished',
@@ -3441,17 +2596,9 @@ export default {
     referencesDrawerTitleDocs: 'Document sources',
     referencesDrawerTitleTools: 'Tool results',
     referencesDrawerTitleMixed: 'Sources',
-    referencesDrawerChipWeb: '{count} web',
-    referencesDrawerChipDocs: '{count} docs',
-    referencesDrawerChipMixed: '{count} sources',
-    referencesDrawerOpenWeb: 'View {count} web',
-    referencesDrawerOpenDocs: 'View {count} docs',
-    referencesDrawerOpenMixed: 'View {count} sources',
     referencesDrawerWebSection: 'Web',
     referencesDrawerDocsSection: 'Documents',
     referencesDrawerToolsSection: 'Tools',
-    referencesDrawerDocument: 'Knowledge document',
-    referencesDrawerTool: 'Tool result',
     referencesDrawerEmpty: 'No sources available',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
@@ -3467,7 +2614,6 @@ export default {
     channelIm: 'IM',
     chunkLabel: 'Chunk {index}:',
     navigateToDocument: 'View document details',
-    referenceIconAlt: 'Reference materials icon',
     chunkIdLabel: 'Chunk ID:',
     documentIdLabel: 'Document ID:',
     faqIdLabel: 'FAQ ID:',
@@ -3511,28 +2657,14 @@ export default {
     lengthChars: '{value} characters',
     lengthThousands: '{value}k characters',
     lengthTenThousands: '{value} ten-thousand characters',
-    sqlQueryExecuted: 'Executed SQL query:',
-    sqlResultsLabel: 'Results:',
-    rowsLabel: 'rows',
-    columnsLabel: 'columns',
     noDatabaseRecords: 'No matching records found',
     nullValuePlaceholder: '<NULL>',
-    documentTitleLabel: 'Document title:',
-    chunkCountLabel: 'Chunk count:',
     chunkCountValue: '{count} chunks',
     documentDescriptionLabel: 'Description:',
-    documentStatusLabel: 'Status:',
     documentSourceLabel: 'Source:',
     documentFileLabel: 'File:',
     documentMetadataLabel: 'Metadata',
-    documentInfoSummaryLabel: 'Document info',
-    documentInfoCount: '{count} of {requested} documents retrieved',
-    documentInfoErrors: 'Errors',
     documentInfoEmpty: 'No document information available',
-    statusDescription: 'Status notes',
-    statusIndexed: 'Document is indexed and searchable',
-    statusSearchable: 'Search tools can locate document content',
-    statusChunkDetailAvailable: 'Use get_chunk_detail to view chunk details',
     positionLabel: 'Position:',
     chunkPositionValue: 'Chunk #{index}',
     contentLengthLabelSimple: 'Content length:',
@@ -3560,7 +2692,6 @@ export default {
     wikiFieldNewSlug: 'New slug',
     wikiFieldAffectedPages: 'Affected pages',
     wikiAffectedCount: '{count} page link(s) updated',
-    selectKnowledgeBaseWarning: 'Please select at least one knowledge base',
     processError: 'Processing error',
     sessionExcerpt: 'Session Excerpt',
     noAnswerContent: '(No answer content)',
@@ -3575,13 +2706,12 @@ export default {
     attachmentTotalTooMany: 'Images and attachments combined can be at most {max}',
     attachmentTooLarge: 'File {name} exceeds {max}MB limit',
     attachmentTypeNotSupported: 'Unsupported file type: {name}',
-	attachmentUploading: 'Uploading {progress}%',
-	attachmentParsing: 'Parsing',
-	attachmentReady: 'Ready',
-	attachmentUploadFailed: 'Attachment upload failed',
-	attachmentParseFailed: 'Attachment parsing failed',
-	attachmentStillProcessing: 'Attachment {name} is still being parsed',
-	attachmentParseTimeout: 'Attachment parsing timed out. Please try again later.',
+    attachmentUploading: 'Uploading {progress}%',
+    attachmentParsing: 'Parsing',
+    attachmentReady: 'Ready',
+    attachmentUploadFailed: 'Attachment upload failed',
+    attachmentParseFailed: 'Attachment parsing failed',
+    attachmentStillProcessing: 'Attachment {name} is still being parsed'
   },
   tenant: {
     title: 'Workspace Information',
@@ -3590,65 +2720,22 @@ export default {
     switcher: {
       menuLabel: 'Switch workspace',
       currentBadge: 'Current',
-      homeBadge: 'Home',
       homeTooltip: 'Your home workspace',
-      empty: 'You only belong to one workspace',
-    },
-    currentChip: {
-      home: 'Home workspace',
+      empty: 'You only belong to one workspace'
     },
     sectionDescription: 'View detailed configuration for the workspace',
-    apiDocument: 'API Document',
-    name: 'Workspace Name',
-    id: 'Workspace ID',
-    createdAt: 'Created At',
-    updatedAt: 'Updated At',
-    status: 'Status',
-    active: 'Active',
-    inactive: 'Inactive',
-    // Additional translations for TenantInfo.vue
-    systemInfo: 'System Information',
-    viewSystemInfo: 'View system version and user account configuration information',
-    version: 'Version',
-    buildTime: 'Build Time',
-    goVersion: 'Go Version',
-    userInfo: 'User Information',
-    userId: 'User ID',
-    username: 'Username',
-    email: 'Email',
-    tenantInfo: 'Workspace Information',
-    tenantId: 'Workspace ID',
-    tenantName: 'Workspace Name',
-    description: 'Description',
-    business: 'Business',
-    noDescription: 'No description',
-    noBusiness: 'None',
     statusActive: 'Active',
     statusInactive: 'Not activated',
     statusSuspended: 'Suspended',
     statusUnknown: 'Unknown',
-    apiKey: 'API Key',
-    keepApiKeySafe: 'Please keep your API Key safe, do not disclose it in public places or code repositories',
-    storageInfo: 'Storage Information',
-    storageQuota: 'Storage Quota',
-    used: 'Used',
-    usage: 'Usage',
-    apiDevDocs: 'API Developer Documentation',
-    useApiKey: 'Use your API Key to start development, view complete API documentation and code examples.',
-    viewApiDoc: 'View API Documentation',
-    loadingAccountInfo: 'Loading account information...',
     loadingInfo: 'Loading information...',
-    loadFailed: 'Load failed',
     retry: 'Retry',
-    apiKeyCopied: 'API Key copied to clipboard',
     unknown: 'Unknown',
     formatError: 'Format error',
     searchPlaceholder: 'Search by name or enter workspace ID...',
-    searchHint: 'Search by name or enter workspace ID directly',
     noMatch: 'No matching workspaces found',
     switchSuccessTitle: 'Workspace switched',
     switchSuccessContent: 'You are now in {name}',
-    switchSuccessContentWithRole: 'You are now in {name} · as {role}',
     loadTenantsFailed: 'Failed to load workspace list',
     loading: 'Loading...',
     loadMore: 'Load more',
@@ -3665,7 +2752,7 @@ export default {
       cancel: 'Cancel',
       success: 'Workspace created successfully',
       failed: 'Failed to create workspace',
-      disabled: 'This system only allows joining workspaces by invitation. You cannot create one yourself.',
+      disabled: 'This system only allows joining workspaces by invitation. You cannot create one yourself.'
     },
     details: {
       idLabel: 'Workspace ID',
@@ -3704,7 +2791,7 @@ export default {
     leaveDangerZone: {
       title: 'Leave this workspace',
       desc: 'Ends your membership in this workspace. You will lose access to its knowledge bases and agents. You can be invited again later.',
-      button: 'Leave workspace',
+      button: 'Leave workspace'
     },
     deleteDangerZone: {
       title: 'Delete this workspace',
@@ -3716,7 +2803,7 @@ export default {
       confirm: 'Delete workspace',
       nameMismatch: 'Workspace name does not match',
       success: 'Workspace deleted',
-      failed: 'Failed to delete workspace',
+      failed: 'Failed to delete workspace'
     },
     messages: {
       fetchFailed: 'Failed to fetch workspace information',
@@ -3724,25 +2811,9 @@ export default {
     },
     api: {
       title: 'API Information',
-      description: 'View and manage your API key',
-      keyLabel: 'API Key',
-      keyDescription: 'Secret used for API requests. Keep it safe.',
-      urlLabel: 'API URL',
-      urlDescription: 'Base path for REST API requests; append the specific endpoint when calling.',
-      copyUrlTitle: 'Copy API URL',
-      urlCopySuccess: 'API URL copied to clipboard',
-      copyTitle: 'Copy API Key',
-      resetTitle: 'Reset API Key',
-      resetConfirmTitle: 'Reset API Key?',
-      resetConfirmBody: 'After reset, the old API Key is revoked immediately. Every app, SDK, and script using the old key must switch to the new key to keep working. This action cannot be undone.',
-      resetConfirmOk: 'Reset',
-      resetConfirmCancel: 'Cancel',
-      resetSuccess: 'API Key reset; the new key is shown in the field above',
-      resetFailed: 'Failed to reset API Key',
       docLabel: 'API Documentation',
       docDescription: 'View complete API documentation and examples,',
       openDoc: 'Open documentation',
-      userSectionTitle: 'User Information',
       userIdLabel: 'User ID',
       userIdDescription: 'Your unique user identifier',
       usernameLabel: 'Username',
@@ -3751,28 +2822,20 @@ export default {
       emailDescription: 'Your registered email address',
       createdAtLabel: 'Registration Time',
       createdAtDescription: 'Time when the account was created',
-      noKey: 'No API Key available',
-      copySuccess: 'API Key copied to clipboard',
-      copyFailed: 'Copy failed, please copy manually',
       desktopPortLabel: 'Local API port (desktop)',
-      desktopPortDescription:
-        'Use a fixed port (e.g. 37841) so tools like the Chrome extension can keep the same API URL. 0 means a random port each launch. Restart the app after saving.',
+      desktopPortDescription: 'Use a fixed port (e.g. 37841) so tools like the Chrome extension can keep the same API URL. 0 means a random port each launch. Restart the app after saving.',
       desktopPortSave: 'Save',
       desktopPortSaved: 'Saved. Restart the app for it to take effect.',
       desktopPortSaveFailed: 'Save failed',
       desktopPortInvalid: 'Enter a port between 0 and 65535',
       desktopBindPublicLabel: 'Allow LAN access to the API',
-      desktopBindPublicDescription:
-        'When enabled, the embedded server listens on 0.0.0.0 so other devices on your LAN can reach the API via the address below. This increases exposure—use host firewalls and routing rules as needed. Restart the app after changing this.',
+      desktopBindPublicDescription: 'When enabled, the embedded server listens on 0.0.0.0 so other devices on your LAN can reach the API via the address below. This increases exposure—use host firewalls and routing rules as needed. Restart the app after changing this.',
       desktopBindPublicSaved: 'Saved. Restart the app for it to take effect.',
       desktopBindPublicSaveFailed: 'Save failed',
       lanUrlLabel: 'LAN API base URL',
-      lanUrlDescription:
-        'Shown after “Allow LAN access” is on and the app has restarted. If the IP is wrong, replace the host with your machine’s IPv4 from system network settings.',
+      lanUrlDescription: 'Shown after “Allow LAN access” is on and the app has restarted. If the IP is wrong, replace the host with your machine’s IPv4 from system network settings.',
       lanUrlCopyTitle: 'Copy LAN API URL',
-      lanUrlCopySuccess: 'LAN API URL copied',
-      lanUrlUnavailable:
-        'The API is listening on all interfaces, but no LAN IPv4 could be detected automatically. Find your IPv4 in network settings and build http://YOUR_IP:PORT/api/v1 manually.',
+      lanUrlUnavailable: 'The API is listening on all interfaces, but no LAN IPv4 could be detected automatically. Find your IPv4 in network settings and build http://YOUR_IP:PORT/api/v1 manually.'
     }
   },
   system: {
@@ -3803,7 +2866,7 @@ export default {
     dbMigrationFailedTitle: 'Database migration failed',
     dbMigrationFailedDesc: 'The startup database migration did not complete successfully. Some tables or indexes may be missing, which can break Wiki ingest, the knowledge graph, and other features. Check the troubleshooting guide below first; if the issue persists, report it via the link.',
     dbMigrationViewDocs: 'View troubleshooting guide',
-    dbMigrationReportIssue: "Can't fix it? Report an issue",
+    dbMigrationReportIssue: 'Can\'t fix it? Report an issue',
     keywordIndexEngineLabel: 'Keyword Index Engine',
     keywordIndexEngineDescription: 'Currently used keyword index engine',
     vectorStoreEngineLabel: 'Vector Store Engine',
@@ -3820,7 +2883,6 @@ export default {
       description: 'Platform-wide runtime configuration. Saves take effect immediately for every workspace. Visible and editable by system administrators only.',
       loading: 'Loading...',
       empty: 'No configurable system settings available',
-      autoSaveHint: 'Changes save automatically',
       saving: 'Saving',
       saved: 'Saved',
       saveAnnouncement: '{label} saved',
@@ -3832,255 +2894,202 @@ export default {
       modifiedAt: 'Last modified: {value}',
       tagInputPlaceholder: 'Press Enter to add an entry, e.g. example.com / *.foo.com / 10.0.0.0/8',
       priorityHint: {
-        title: 'About priority',
         disclosure: 'Configuration source and priority',
         tier1: 'Items saved on this page (marked "Overridden") always win — the environment variable is ignored for them.',
         tier2: 'Items not saved here fall back to the environment variable, or to the built-in default if no env var is set.',
-        tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.',
-      },
-      summary: {
-        overridden: '{count} overridden',
-        restart: '{count} require restart',
+        tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.'
       },
       sections: {
         access: {
           tab: 'Accounts & access {count}',
           title: 'Accounts & access',
-          description: 'Manage system administrators, public registration, and workspace-creation rules.',
+          description: 'Manage system administrators, public registration, and workspace-creation rules.'
         },
         tenant: {
           tab: 'Workspace defaults {count}',
           title: 'Workspace defaults',
-          description: 'Set initial quotas and compatibility behavior for new workspaces without rewriting existing workspaces.',
+          description: 'Set initial quotas and compatibility behavior for new workspaces without rewriting existing workspaces.'
         },
         runtime: {
           tab: 'Runtime & concurrency {count}',
           title: 'Runtime & concurrency',
           description: 'Configure concurrency capacity for background worker pools and model services.',
-          restartHint: 'Worker settings require restart',
+          restartHint: 'Worker settings require restart'
         },
         security: {
           tab: 'Network security {count}',
           title: 'Network security',
-          description: 'Manage trusted hosts, IPs, and networks that may bypass SSRF protection.',
+          description: 'Manage trusted hosts, IPs, and networks that may bypass SSRF protection.'
         },
         other: {
           tab: 'Other {count}',
           title: 'Other settings',
-          description: 'Settings in this deployment that are not part of a standard product group.',
-        },
+          description: 'Settings in this deployment that are not part of a standard product group.'
+        }
       },
       runtimeTable: {
         setting: 'Setting and purpose',
-        value: 'Current value',
+        value: 'Current value'
       },
       runtime: {
-        title: "Task Queue Runtime",
-        description: "Live background-queue load and per-process capacity for each isolated worker pool. Includes task details and safe controls; auto-refreshes every 5s.",
-        refresh: "Refresh",
-        autoRefresh: "Auto-refresh (every 5s)",
-        loading: "Loading...",
-        retry: "Retry",
-        unavailableTitle: "Task queues unavailable",
-        unavailable: "This deployment has no Redis / asynq queue (Lite mode) — nothing to display.",
-        paused: "Paused",
-        empty: "No queue data available",
-        detailsTitle: "Queue details",
-        detailsDescription: "Live load and wait time for every processing lane. “Failed (stopped)” means the task exceeded its retry limit and will not run automatically again.",
-        poolsTitle: "Worker pools",
-        poolsDescription: "Each stage has guaranteed capacity; core and enrichment may also borrow the shared elastic pool.",
-        perInstance: "Card value is cluster active/capacity",
-        poolConfigured: "Per-process {value}",
-        poolInstances: "{value} instances",
-        poolUtilization: "{value}% utilized",
-        queueCount: "{value} queues",
-        weight: "Pool weight {value}",
-        weightShort: "Weight {value}",
-        footnote: "Card values show cluster active/live capacity; per-process configuration requires restart. The shared elastic pool only consumes core and enrichment queues.",
-        updatedAt: "Updated at {value}",
+        title: 'Task Queue Runtime',
+        description: 'Live background-queue load and per-process capacity for each isolated worker pool. Includes task details and safe controls; auto-refreshes every 5s.',
+        refresh: 'Refresh',
+        autoRefresh: 'Auto-refresh (every 5s)',
+        loading: 'Loading...',
+        retry: 'Retry',
+        unavailableTitle: 'Task queues unavailable',
+        unavailable: 'This deployment has no Redis / asynq queue (Lite mode) — nothing to display.',
+        empty: 'No queue data available',
+        detailsTitle: 'Queue details',
+        detailsDescription: 'Live load and wait time for every processing lane. “Failed (stopped)” means the task exceeded its retry limit and will not run automatically again.',
+        poolsTitle: 'Worker pools',
+        poolsDescription: 'Each stage has guaranteed capacity; core and enrichment may also borrow the shared elastic pool.',
+        perInstance: 'Card value is cluster active/capacity',
+        poolConfigured: 'Per-process {value}',
+        poolInstances: '{value} instances',
+        poolUtilization: '{value}% utilized',
+        queueCount: '{value} queues',
+        weightShort: 'Weight {value}',
+        footnote: 'Card values show cluster active/live capacity; per-process configuration requires restart. The shared elastic pool only consumes core and enrichment queues.',
+        updatedAt: 'Updated at {value}',
         errors: {
-          generic: "Failed to load queue stats",
+          generic: 'Failed to load queue stats'
         },
         summary: {
-          title: "Runtime overview",
-          active: "Active",
-          pending: "Pending",
-          retry: "Retrying",
-          archived: "Failed (stopped)",
+          title: 'Runtime overview',
+          active: 'Active',
+          pending: 'Pending',
+          retry: 'Retrying',
+          archived: 'Failed (stopped)'
         },
         columns: {
-          queue: "Queue",
-          active: "Active",
-          pending: "Pending",
-          scheduled: "Scheduled",
-          retry: "Retry",
-          archived: "Failed",
-          completed: "Completed",
-          latency: "Oldest wait",
-          status: "Status",
+          queue: 'Queue',
+          active: 'Active',
+          pending: 'Pending',
+          scheduled: 'Scheduled',
+          retry: 'Retry',
+          archived: 'Failed',
+          completed: 'Completed',
+          latency: 'Oldest wait',
+          status: 'Status'
         },
         status: {
-          working: "Working",
-          waiting: "Waiting",
-          idle: "Idle",
-          attention: "Attention",
-          actionRequired: "Action needed",
-          retrying: "Retrying",
-          paused: "Paused",
+          working: 'Working',
+          waiting: 'Waiting',
+          idle: 'Idle',
+          actionRequired: 'Action needed',
+          retrying: 'Retrying',
+          paused: 'Paused'
         },
         failedNotice: {
-          title: "{count} failed tasks need attention",
-          description: "Open a red Failed count in the table below to inspect causes, then retry after fixing the root issue.",
+          title: '{count} failed tasks need attention',
+          description: 'Open a red Failed count in the table below to inspect causes, then retry after fixing the root issue.'
         },
         tasks: {
-          title: "Task details · {queue}",
-          description: "Inspect every task state. Scheduled and retry tasks show the next run first; other states show the newest tasks first.",
-          listTitle: "{state} tasks",
-          openAria: "View {count} {state} tasks in {queue}",
-          unavailable: "Task details are unavailable in this deployment",
-          empty: "This queue has no {state} tasks",
-          loadError: "Failed to load task details",
-          loadMore: "Load more",
-          loadedSummary: "{count} loaded — scroll or tap to load more",
-          loadedAll: "All {count} loaded",
-          loadingMore: "Loading more…",
-          attempts: "Attempt {current}/{max}",
-          unknownTarget: "No related object identified",
-          knowledgeBaseLabel: "Knowledge base ID",
-          knowledgeLabel: "Document ID",
-          taskIDLabel: "Business task ID",
-          tenantLabel: "Workspace ID",
-          sourceLabel: "Source ID",
-          targetLabel: "Target ID",
-          sourceKBLabel: "Source knowledge base",
-          targetKBLabel: "Target knowledge base",
-          dataSourceLabel: "Data source ID",
-          syncLogLabel: "Sync log ID",
-          knowledgeCountLabel: "Documents",
-          enqueuedAt: "Enqueued",
-          startedAt: "Started",
-          nextProcessAt: "Next run",
-          lastFailedAt: "Last failed",
-          completedAt: "Completed",
-          deadline: "Deadline",
-          worker: "Worker",
-          health: "Runtime health",
-          orphaned: "Worker heartbeat lost; waiting for recovery",
-          cancel: "Cancel task",
-          cancelConfirm: "This uses the business cancellation flow and also stops related tasks for the same document. Cancel it?",
-          runNow: "Run now",
-          runNowConfirm: "This task will move to pending immediately without resetting its retry count. Continue?",
-          deleteRecord: "Clear record",
-          deleteConfirm: "This only removes the record from this queue. It will not run or complete the original task, and historical logs remain. Clear it?",
-          purgeArchived: "Clear all failed tasks",
-          purgeArchivedConfirm: "Remove all {count} failed records from this queue at once. This only clears failed tasks in the queue — it does not affect running or pending tasks, nor does it roll back the business status of documents that already failed. Clear them?",
-          purgeArchivedSuccess: "Cleared {count} failed tasks",
-          purgeArchivedError: "Failed to clear failed tasks",
-          stateFilter: "Filter by task state",
+          title: 'Task details · {queue}',
+          description: 'Inspect every task state. Scheduled and retry tasks show the next run first; other states show the newest tasks first.',
+          listTitle: '{state} tasks',
+          openAria: 'View {count} {state} tasks in {queue}',
+          unavailable: 'Task details are unavailable in this deployment',
+          empty: 'This queue has no {state} tasks',
+          loadError: 'Failed to load task details',
+          loadMore: 'Load more',
+          loadedSummary: '{count} loaded — scroll or tap to load more',
+          loadedAll: 'All {count} loaded',
+          loadingMore: 'Loading more…',
+          attempts: 'Attempt {current}/{max}',
+          unknownTarget: 'No related object identified',
+          knowledgeBaseLabel: 'Knowledge base ID',
+          knowledgeLabel: 'Document ID',
+          taskIDLabel: 'Business task ID',
+          tenantLabel: 'Workspace ID',
+          sourceLabel: 'Source ID',
+          targetLabel: 'Target ID',
+          sourceKBLabel: 'Source knowledge base',
+          targetKBLabel: 'Target knowledge base',
+          dataSourceLabel: 'Data source ID',
+          syncLogLabel: 'Sync log ID',
+          knowledgeCountLabel: 'Documents',
+          enqueuedAt: 'Enqueued',
+          startedAt: 'Started',
+          nextProcessAt: 'Next run',
+          lastFailedAt: 'Last failed',
+          completedAt: 'Completed',
+          deadline: 'Deadline',
+          worker: 'Worker',
+          health: 'Runtime health',
+          orphaned: 'Worker heartbeat lost; waiting for recovery',
+          cancel: 'Cancel task',
+          cancelConfirm: 'This uses the business cancellation flow and also stops related tasks for the same document. Cancel it?',
+          runNow: 'Run now',
+          runNowConfirm: 'This task will move to pending immediately without resetting its retry count. Continue?',
+          deleteRecord: 'Clear record',
+          deleteConfirm: 'This only removes the record from this queue. It will not run or complete the original task, and historical logs remain. Clear it?',
+          purgeArchived: 'Clear all failed tasks',
+          purgeArchivedConfirm: 'Remove all {count} failed records from this queue at once. This only clears failed tasks in the queue — it does not affect running or pending tasks, nor does it roll back the business status of documents that already failed. Clear them?',
+          purgeArchivedSuccess: 'Cleared {count} failed tasks',
+          purgeArchivedError: 'Failed to clear failed tasks',
+          stateFilter: 'Filter by task state',
           states: {
-            active: "Active",
-            pending: "Pending",
-            scheduled: "Scheduled",
-            retry: "Retrying",
-            archived: "Failed",
-            completed: "Completed",
+            active: 'Active',
+            pending: 'Pending',
+            scheduled: 'Scheduled',
+            retry: 'Retrying',
+            archived: 'Failed',
+            completed: 'Completed'
           },
           guides: {
-            active: "Inspect the worker, start time, deadline, and orphan status. Cancel is offered only when the business state can be updated safely.",
-            pending: "Pending tasks have not been claimed. Cancellation updates business state instead of only removing Redis data.",
-            scheduled: "Scheduled tasks can run early; document pipeline tasks can also use safe business cancellation.",
-            retry: "Use the last error, attempt count, and next run time to decide whether to run now or cancel.",
-            archived: "Fix the root cause before running again. Clearing a record does not complete the original business task.",
-            completed: "Only recently completed tasks with result retention are shown. No management actions are available.",
+            active: 'Inspect the worker, start time, deadline, and orphan status. Cancel is offered only when the business state can be updated safely.',
+            pending: 'Pending tasks have not been claimed. Cancellation updates business state instead of only removing Redis data.',
+            scheduled: 'Scheduled tasks can run early; document pipeline tasks can also use safe business cancellation.',
+            retry: 'Use the last error, attempt count, and next run time to decide whether to run now or cancel.',
+            archived: 'Fix the root cause before running again. Clearing a record does not complete the original business task.',
+            completed: 'Only recently completed tasks with result retention are shown. No management actions are available.'
           },
-          actionSuccess: { cancel: "Task cancelled", run_now: "Task moved to pending", delete: "Failure record cleared" },
-          actionError: { cancel: "Failed to cancel task", run_now: "Failed to run task", delete: "Failed to clear record" },
-          taskTypes: {
-            documentProcess: "Document parsing",
-            manualProcess: "Manual reprocessing",
-			temporaryDocumentProcess: "Chat attachment parsing",
-            postProcess: "Document post-processing",
-            summary: "Summary generation",
-            tableSummary: "Table summary generation",
-            question: "Question generation",
-            multimodal: "Image multimodal processing",
-            graph: "Knowledge graph extraction",
-            sync: "Data-source sync",
-            faqImport: "FAQ import",
-            batchReparse: "Batch reparse",
-            batchDelete: "Batch delete",
-            move: "Document move",
-            indexDelete: "Index deletion",
-            kbClone: "Knowledge-base clone",
-            kbDelete: "Knowledge-base deletion",
-            wikiIngest: "Wiki content generation",
-            wikiFinalize: "Wiki finalization",
+          actionSuccess: {
+            cancel: 'Task cancelled',
+            run_now: 'Task moved to pending',
+            delete: 'Failure record cleared'
           },
+          actionError: {
+            cancel: 'Failed to cancel task',
+            run_now: 'Failed to run task',
+            delete: 'Failed to clear record'
+          }
         },
         models: {
-          title: "Model concurrency",
-          description: "Actual model-service concurrency from background tasks. The section above schedules tasks; this section shows the separate model-service throttle stage.",
-          scope: "Active is cluster-wide · waiting is local",
-          disabled: "Background model concurrency governance is disabled. Configure the default model concurrency limit in Global settings.",
-          empty: "No model activity yet. A model appears after its first background call.",
-          backgroundOnly: "Background tasks only; interactive chat is excluded",
-          columns: { model: "Model ID", active: "In flight", waiting: "Throttled", usage: "Concurrency" },
-          status: { queued: "Throttling", full: "At limit" },
-        },
-        pools: {
-          core: "Core parsing",
-          postprocess: "Post-process orchestration",
-          enrichment: "Enrichment",
-          maintenance: "Maintenance & sync",
-          shared: "Shared elastic",
-          wiki: "Wiki pool",
-        },
-        poolDescriptions: {
-          core: "Guaranteed document and manual parsing capacity",
-          postprocess: "Parse finalization and enrichment fan-out",
-          enrichment: "Summaries, images, graph, and question generation",
-          maintenance: "Source sync, batch work, and deletion cleanup",
-          shared: "Borrowed by core or enrichment according to backlog",
-          wiki: "Wiki content generation and global finalization",
-        },
-        queueNames: {
-          default: "Document parsing",
-          chat_attachment: "Chat attachments",
-          postprocess: "Post-process",
-          summary: "Summaries",
-          sync: "Source sync",
-          low: "Maintenance & batch",
-          multimodal: "Multimodal",
-          graph: "Graph extraction",
-          question: "Questions",
-          wiki: "Wiki pipeline",
-        },
-        queueDescriptions: {
-          default: "Document parse, manual reparse",
-          chat_attachment: "Session-scoped chat upload parsing",
-          postprocess: "Parse finalization, enrichment fan-out",
-          summary: "Document & table summaries",
-          sync: "Manual & scheduled sync",
-          low: "FAQ import, batch reparse, cleanup",
-          multimodal: "Image OCR, vision captions",
-          graph: "Chunk-level graph extraction",
-          question: "Chunk-level question generation",
-          wiki: "Content generation, index finalize",
-        },
+          title: 'Model concurrency',
+          description: 'Actual model-service concurrency from background tasks. The section above schedules tasks; this section shows the separate model-service throttle stage.',
+          scope: 'Active is cluster-wide · waiting is local',
+          disabled: 'Background model concurrency governance is disabled. Configure the default model concurrency limit in Global settings.',
+          empty: 'No model activity yet. A model appears after its first background call.',
+          backgroundOnly: 'Background tasks only; interactive chat is excluded',
+          columns: {
+            model: 'Model ID',
+            active: 'In flight',
+            waiting: 'Throttled',
+            usage: 'Concurrency'
+          },
+          status: {
+            queued: 'Throttling',
+            full: 'At limit'
+          }
+        }
       },
       keyLabels: {
         auth: {
           registration_mode: 'Self-service registration mode',
-          default_tenant_mode: 'Default workspace provisioning',
+          default_tenant_mode: 'Default workspace provisioning'
         },
         ssrf: {
-          whitelist: 'SSRF protection allowlist',
+          whitelist: 'SSRF protection allowlist'
         },
         tenant: {
           max_owned_per_user: 'Max workspaces owned per user',
           self_service_creation_enabled: 'Allow self-service workspace creation',
           default_storage_quota_gb: 'Default storage quota for new workspaces (GB)',
-          auto_create_api_key: 'Automatically create an API key for new workspaces',
+          auto_create_api_key: 'Automatically create an API key for new workspaces'
         },
         asynq: {
           core_concurrency: 'Guaranteed core parse concurrency',
@@ -4088,32 +3097,25 @@ export default {
           enrichment_concurrency: 'Guaranteed enrichment concurrency',
           maintenance_concurrency: 'Maintenance concurrency',
           shared_concurrency: 'Shared elastic concurrency',
-          wiki_concurrency: 'Wiki worker concurrency',
+          wiki_concurrency: 'Wiki worker concurrency'
         },
         model: {
-          max_concurrency: 'Default per-model concurrency limit',
-        },
+          max_concurrency: 'Default per-model concurrency limit'
+        }
       },
       keyDescriptions: {
         auth: {
-          registration_mode:
-            'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
-          default_tenant_mode:
-            'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
+          registration_mode: 'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
+          default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.'
         },
         ssrf: {
-          whitelist:
-            'SSRF protection allowlist. Accepts entries such as example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1. Takes effect immediately after saving. The SSRF_WHITELIST_EXTRA environment variable is still maintained by the deployer and is not overridden here.',
+          whitelist: 'SSRF protection allowlist. Accepts entries such as example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1. Takes effect immediately after saving. The SSRF_WHITELIST_EXTRA environment variable is still maintained by the deployer and is not overridden here.'
         },
         tenant: {
-          max_owned_per_user:
-            'Maximum number of workspaces a non-superuser may own via self-service creation. Read on every workspace creation and takes effect immediately after saving. 0 uses the built-in default of 10; a negative value disables the cap entirely (not recommended on public deployments).',
-          self_service_creation_enabled:
-            'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-workspace superusers remain exempt. Takes effect immediately.',
-          default_storage_quota_gb:
-            'Default storage quota (GB) assigned when a new workspace is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created workspaces only and do not retroactively update existing workspaces. 0 or a negative value uses the built-in default of 10 GB.',
-          auto_create_api_key:
-            'Automatically creates a full_access API key for a new workspace and returns its plaintext token in the create response. Use only for integrations that depend on the legacy behavior; it is disabled by default and explicit API-key creation is recommended.',
+          max_owned_per_user: 'Maximum number of workspaces a non-superuser may own via self-service creation. Read on every workspace creation and takes effect immediately after saving. 0 uses the built-in default of 10; a negative value disables the cap entirely (not recommended on public deployments).',
+          self_service_creation_enabled: 'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-workspace superusers remain exempt. Takes effect immediately.',
+          default_storage_quota_gb: 'Default storage quota (GB) assigned when a new workspace is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created workspaces only and do not retroactively update existing workspaces. 0 or a negative value uses the built-in default of 10 GB.',
+          auto_create_api_key: 'Automatically creates a full_access API key for a new workspace and returns its plaintext token in the create response. Use only for integrations that depend on the legacy behavior; it is disabled by default and explicit API-key creation is recommended.'
         },
         asynq: {
           core_concurrency: 'Guaranteed per-process concurrency for document and manual parsing. Core may also borrow the shared elastic pool. Minimum 1; requires a service restart.',
@@ -4121,33 +3123,29 @@ export default {
           enrichment_concurrency: 'Guaranteed per-process concurrency for summaries, images, graph, and question generation. Enrichment may also borrow the shared elastic pool. Minimum 1; requires a service restart.',
           maintenance_concurrency: 'Per-process concurrency for source sync, batch work, and cleanup, hard-isolated from the user-facing pipeline. Minimum 1; requires a service restart.',
           shared_concurrency: 'Per-process elastic concurrency shared by core parsing and enrichment; whichever side has backlog borrows it automatically. Minimum 1; requires a service restart.',
-          wiki_concurrency:
-            'Per-process concurrency for the dedicated Wiki worker pool, isolated from upstream tasks. Minimum 1; requires a service restart.',
+          wiki_concurrency: 'Per-process concurrency for the dedicated Wiki worker pool, isolated from upstream tasks. Minimum 1; requires a service restart.'
         },
         model: {
-          max_concurrency:
-            'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.',
-        },
+          max_concurrency: 'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.'
+        }
       },
       enumLabels: {
         auth: {
           registration_mode: {
             self_serve: 'Self-service (anyone can register)',
-            invite_only: 'Invite only (public registration disabled)',
+            invite_only: 'Invite only (public registration disabled)'
           },
           default_tenant_mode: {
             create_personal: 'Create personal workspace',
-            tenantless: 'Do not create a workspace',
-          },
-        },
+            tenantless: 'Do not create a workspace'
+          }
+        }
       },
       confirm: {
-        header: 'Confirm high-risk action',
         confirmBtn: 'Confirm save',
         cancelBtn: 'Cancel',
         emptyValue: '(empty)',
-        defaultBody: 'About to change "{label}" to: {value}',
-        bodyAuthRegistrationMode: 'About to change "{label}" to: {value}\n\nIf switched to self_serve, anyone on the public internet can register an account — please confirm this is intended.',
+        bodyAuthRegistrationMode: 'About to change "{label}" to: {value}\n\nIf switched to self_serve, anyone on the public internet can register an account — please confirm this is intended.'
       },
       listConfirm: {
         ssrf: {
@@ -4155,20 +3153,20 @@ export default {
             add: {
               header: 'Add SSRF allowlist entry',
               body: 'Add {entry} to the SSRF allowlist? Hosts / IPs / CIDRs that match this entry will bypass SSRF protection and may let agents reach internal services. Only add entries you fully trust.',
-              confirmBtn: 'Add',
+              confirmBtn: 'Add'
             },
             remove: {
               header: 'Remove SSRF allowlist entry',
               body: 'Remove {entry} from the SSRF allowlist? After removal this entry will be blocked by SSRF protection again.',
-              confirmBtn: 'Remove',
-            },
-          },
-        },
+              confirmBtn: 'Remove'
+            }
+          }
+        }
       },
       messages: {
         loadFailed: 'Failed to load system settings',
         saveSuccess: 'Saved',
-        saveFailed: 'Save failed',
+        saveFailed: 'Save failed'
       },
       reset: {
         label: 'Reset',
@@ -4176,7 +3174,7 @@ export default {
         confirmBtn: 'Confirm reset',
         confirmBody: 'Reset "{label}"? This deletes the database override and falls back to the environment variable or the built-in default.',
         success: 'Reset to default',
-        failed: 'Reset failed',
+        failed: 'Reset failed'
       },
       admins: {
         label: 'System administrators',
@@ -4189,14 +3187,14 @@ export default {
           promote: {
             header: 'Promote to system administrator',
             body: 'Promote {email} to system administrator? This user will gain platform-level privileges: access to every workspace, system settings, and the admin roster itself.',
-            confirmBtn: 'Promote',
+            confirmBtn: 'Promote'
           },
           revoke: {
             header: 'Revoke system administrator',
             body: 'Revoke system-administrator privileges from {email}? They will lose access to all system-level features.',
-            confirmBtn: 'Revoke',
-          },
-        },
+            confirmBtn: 'Revoke'
+          }
+        }
       },
       passwordReset: {
         label: 'Reset user password',
@@ -4221,8 +3219,8 @@ export default {
           passwordLetter: 'Password must contain a letter',
           passwordNumber: 'Password must contain a number',
           confirmRequired: 'Enter the new password again',
-          passwordMismatch: 'The passwords do not match',
-        },
+          passwordMismatch: 'The passwords do not match'
+        }
       },
       bulkApply: {
         label: 'Apply to all existing workspaces',
@@ -4230,12 +3228,11 @@ export default {
         confirmBtn: 'Confirm apply',
         confirmBody: 'Overwrite the storage quota of every existing workspace to {value} GB. Workspaces whose quota was tuned manually by operations will also be overwritten. Continue?',
         success: 'Updated storage quota for {count} workspaces to {gb} GB',
-        failed: 'Failed to apply to all workspaces',
+        failed: 'Failed to apply to all workspaces'
       },
       audit: {
         tabLabel: 'Audit log',
-        description:
-          'Platform-level events: system setting changes, system admin grants/revocations, bulk quota syncs. Newest first.',
+        description: 'Platform-level events: system setting changes, system admin grants/revocations, bulk quota syncs. Newest first.',
         refresh: 'Refresh',
         retry: 'Retry',
         loading: 'Loading…',
@@ -4244,10 +3241,10 @@ export default {
         forbidden: 'Not allowed to view the platform audit log.',
         systemActor: 'System',
         errors: {
-          generic: 'Failed to load audit log',
+          generic: 'Failed to load audit log'
         },
         actorRole: {
-          system_admin: 'System Admin',
+          system_admin: 'System Admin'
         },
         columns: {
           time: 'Time',
@@ -4255,7 +3252,7 @@ export default {
           action: 'Event',
           target: 'Target',
           path: 'Request',
-          outcome: 'Result',
+          outcome: 'Result'
         },
         action: {
           'system.setting_changed': 'System setting changed',
@@ -4268,11 +3265,11 @@ export default {
           'system.queue_task_deleted': 'Failed task record cleared',
           'system.queue_task_run_now': 'Queue task run now',
           'system.queue_task_cancelled': 'Queue task cancelled',
-          'system.queue_archived_purged': 'All failed tasks cleared',
+          'system.queue_archived_purged': 'All failed tasks cleared'
         },
         outcome: {
           success: 'Success',
-          denied: 'Denied',
+          denied: 'Denied'
         },
         target: {
           bulkQuota: 'Bulk sync: default storage quota',
@@ -4280,23 +3277,23 @@ export default {
           promoteIdempotent: 'Target was already a system admin (idempotent)',
           revokeNoop: 'Target was not a system admin (idempotent)',
           requiredRole: 'Required role: {role}',
-          valueNull: '(unset)',
+          valueNull: '(unset)'
         },
         expanded: {
           actorId: 'Actor ID',
           targetUserId: 'Target user ID',
           targetType: 'Target type',
           targetId: 'Target ID',
-          details: 'Raw details',
+          details: 'Raw details'
         },
         drawer: {
           sectionSummary: 'Event summary',
           sectionIdentifiers: 'Related IDs',
           sectionRequest: 'Request',
           targetChange: 'Change',
-          requestMethod: 'Method',
-        },
-      },
+          requestMethod: 'Method'
+        }
+      }
     }
   },
   mcp: {
@@ -4310,19 +3307,11 @@ export default {
       schemaLabel: 'Parameter schema',
       emptyDescription: 'This service did not provide tools or resources',
       requireApproval: 'Require human approval',
-      requireApprovalTip:
-        'When enabled, the agent pauses before calling this tool until you approve — use for DB writes, deletes, etc.',
+      requireApprovalTip: 'When enabled, the agent pauses before calling this tool until you approve — use for DB writes, deletes, etc.',
       approvalSaveFailed: 'Failed to save approval setting'
     }
   },
   error: {
-    network: 'Network error',
-    server: 'Server error',
-    notFound: 'Not found',
-    unauthorized: 'Unauthorized',
-    forbidden: 'Access forbidden',
-    unknown: 'Unknown error',
-    tryAgain: 'Please try again',
     networkError: 'Network error, please check your connection',
     invalidCredentials: 'Invalid username or password',
     tokenRefreshFailed: 'Token refresh failed',
@@ -4342,13 +3331,13 @@ export default {
       updatePreferencesFailed: 'Failed to update preferences',
       refreshTokenFailed: 'Token refresh failed',
       logoutFailed: 'Logout failed',
-      validateTokenFailed: 'Token validation failed',
+      validateTokenFailed: 'Token validation failed'
     },
     model: {
       createFailed: 'Failed to create model',
       getFailed: 'Failed to get model',
       updateFailed: 'Failed to update model',
-      deleteFailed: 'Failed to delete model',
+      deleteFailed: 'Failed to delete model'
     },
     tenant: {
       listFailed: 'Failed to list workspaces',
@@ -4357,32 +3346,15 @@ export default {
       updateApiPrincipalConfigFailed: 'Failed to update API principal config',
       createApiPrincipalTestTokenFailed: 'Failed to create API test token',
       updateFailed: 'Failed to update workspace information',
-      deleteFailed: 'Failed to delete workspace',
+      deleteFailed: 'Failed to delete workspace'
     },
     initialization: {
       checkFailed: 'Check failed',
-      testFailed: 'Test failed',
-    },
+      testFailed: 'Test failed'
+    }
   },
   model: {
-    llmModel: 'LLM Model',
-    embeddingModel: 'Embedding Model',
-    rerankModel: 'Rerank Model',
-    vlmModel: 'Multimodal Model',
     modelName: 'Model Name',
-    modelProvider: 'Model Provider',
-    modelUrl: 'Model URL',
-    apiKey: 'API Key',
-    testConnection: 'Test Connection',
-    connectionSuccess: 'Connection successful',
-    connectionFailed: 'Connection failed',
-    dimension: 'Dimension',
-    maxTokens: 'Max Tokens',
-    temperature: 'Temperature',
-    topP: 'Top P',
-    selectModel: 'Select Model',
-    customModel: 'Custom Model',
-    builtinModel: 'Built-in Model',
     defaultTag: 'Default',
     addModelInSettings: 'Go to global settings to add models',
     loadFailed: 'Failed to load model list',
@@ -4431,26 +3403,22 @@ export default {
         regionLabel: 'Region',
         regionPlaceholder: 'ap-guangzhou',
         regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
-        rerankCredentialHint:
-          'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.',
+        rerankCredentialHint: 'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',
         accessKeyPlaceholder: 'Volcengine Access Key ID',
         secretKeyLabel: 'Secret Access Key',
         secretKeyPlaceholder: 'Volcengine Secret Access Key',
-        rerankCredentialHint:
-          'Rerank uses VikingDB AK/SK signing, not an Ark API key. Recommended model: doubao-seed-rerank.',
+        rerankCredentialHint: 'Rerank uses VikingDB AK/SK signing, not an Ark API key. Recommended model: doubao-seed-rerank.'
       },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',
       customHeadersKeyPlaceholder: 'Header name',
       customHeadersValuePlaceholder: 'Header value',
-      connectionTest: 'Connection Test',
       testing: 'Testing...',
       testConnection: 'Test Connection',
-      searchPlaceholder: 'Search models...',
       downloadLabel: 'Download: {keyword}',
       refreshList: 'Refresh List',
       dimensionLabel: 'Vector Dimension',
@@ -4467,25 +3435,24 @@ export default {
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
       thinkingControlLabel: 'Thinking mode request format',
-      thinkingControlDesc:
-        'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
+      thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
       thinkingControl: {
         none: {
           label: 'Do not send thinking fields',
-          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests',
+          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests'
         },
         chatTemplateKwargs: {
           label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen',
+          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen'
         },
         enableThinking: {
           label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo',
+          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
         },
         thinkingType: {
           label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)',
-        },
+          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
+        }
       },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
@@ -4511,113 +3478,112 @@ export default {
         baseUrlEmpty: 'Base URL cannot be empty',
         baseUrlInvalid: 'Invalid Base URL, please enter a valid URL'
       },
-      // Provider related translations
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
       providers: {
         openai: {
           label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.',
+          description: 'gpt-5.2, gpt-5-mini, etc.'
         },
         anthropic: {
           label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API',
+          description: 'Claude models via native Anthropic Messages API'
         },
         azure_openai: {
           label: 'Azure OpenAI',
-          description: 'OpenAI service hosted on Microsoft Azure',
+          description: 'OpenAI service hosted on Microsoft Azure'
         },
         aliyun: {
           label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.',
+          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
         },
         zhipu: {
           label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.',
+          description: 'glm-4.7, embedding-3, rerank, etc.'
         },
         openrouter: {
           label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.',
+          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
         requesty: {
           label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.',
+          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
         },
         generic: {
           label: 'Custom (OpenAI-compatible)',
-          description: 'Generic API endpoint',
+          description: 'Generic API endpoint'
         },
         siliconflow: {
           label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.',
+          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
         },
         jina: {
           label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.',
+          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
         },
         volcengine: {
           label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.',
+          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
         },
         deepseek: {
           label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.',
+          description: 'deepseek-chat, deepseek-reasoner, etc.'
         },
         hunyuan: {
           label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.',
+          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
         },
         minimax: {
           label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.',
+          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.'
         },
         mimo: {
           label: 'MiMo',
-          description: 'mimo-v2-flash',
+          description: 'mimo-v2-flash'
         },
         gemini: {
           label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.',
+          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.'
         },
         gpustack: {
           label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack',
+          description: 'Choose your deployed model on GPUStack'
         },
         modelscope: {
           label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.',
+          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
         },
         qiniu: {
           label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.',
+          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
         },
         moonshot: {
           label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.',
+          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
         },
         qianfan: {
           label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.',
+          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
         },
         longcat: {
           label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.',
+          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
         },
         lkeap: {
           label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.',
+          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.'
         },
         nvidia: {
-          label: "NVIDIA",
-          description: "deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.",
+          label: 'NVIDIA',
+          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
         },
         novita: {
-          label: "Novita AI",
-          description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.",
-        },
-      },
+          label: 'Novita AI',
+          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.'
+        }
+      }
     },
-    builtinTag: 'Built-in',
+    builtinTag: 'Built-in'
   },
   language: {
     zhCN: '简体中文',
@@ -4644,7 +3610,7 @@ export default {
     light: 'Light',
     dark: 'Dark',
     system: 'Follow System',
-    selectTheme: 'Select theme',
+    selectTheme: 'Select theme'
   },
   font: {
     uiFont: 'Interface Font',
@@ -4653,42 +3619,34 @@ export default {
     monoFontDescription: 'Used for code blocks, terminal commands, API keys, file paths and other technical text. Every character has the same width so you can tell 0 from O and 1 from l.',
     selectFont: 'Select font',
     sansPreview: 'The quick brown fox jumps — Aa Gg Oo 0123',
-    monoPreview: "const msg = 'Hello'; // 0O1l",
+    monoPreview: 'const msg = \'Hello\'; // 0O1l',
     sans: {
       system: 'System Default',
-      // macOS
       pingfang: 'PingFang SC',
       georgia: 'Georgia (Serif)',
-      // Windows
       yahei: 'Microsoft YaHei',
       times: 'Times New Roman (Serif)',
-      // Linux
       'noto-cjk': 'Noto Sans CJK',
       'dejavu-serif': 'DejaVu Serif (Serif)',
-      // cross-platform
-      'sans-serif': 'Generic Sans-Serif',
+      'sans-serif': 'Generic Sans-Serif'
     },
     mono: {
       system: 'System Default',
-      // macOS
       menlo: 'Menlo',
       monaco: 'Monaco',
-      // Windows
       consolas: 'Consolas',
       cascadia: 'Cascadia Code',
-      // Linux
       'dejavu-mono': 'DejaVu Sans Mono',
       'liberation-mono': 'Liberation Mono',
-      // cross-platform
-      monospace: 'Generic Monospace',
+      monospace: 'Generic Monospace'
     },
     fontSize: 'Font Size',
     fontSizeDescription: 'Scales the entire interface (text, icons, spacing) and applies immediately',
     size: {
       small: 'Small',
       normal: 'Normal',
-      large: 'Large',
-    },
+      large: 'Large'
+    }
   },
   platform: {
     subtitle: 'LLM-Powered Enterprise Knowledge Framework',
@@ -4697,7 +3655,6 @@ export default {
     agent: 'ReAct Agent',
     wiki: 'Wiki Knowledge Base',
     hybridSearch: 'Hybrid Search',
-    localDeploy: 'Local Deployment',
     multimodalParsing: 'Multimodal Document Parsing',
     hybridSearchEngine: 'Hybrid Search + Knowledge Graph',
     ragQandA: 'ReAct Agent Q&A',
@@ -4722,7 +3679,7 @@ export default {
     last30Days: 'Last 30 Days',
     lastYear: 'Last Year',
     earlier: 'Earlier',
-    pinned: 'Pinned',
+    pinned: 'Pinned'
   },
   upload: {
     uploadDocument: 'Upload Document',
@@ -4731,257 +3688,96 @@ export default {
     deleteRecord: 'Delete Record'
   },
   agentSettings: {
-    title: 'Agent Settings',
-    description: 'Configure the default behavior and parameters for the AI Agent. These settings apply to all chats with Agent mode enabled.',
     modelRecommendation: {
-      title: 'Model Recommendation',
-      content: 'For better Agent experience, we recommend using large language models with FunctionCalling support and long context windows, such as deepseek-v3.1-terminus',
-    },
-    status: {
-      label: 'Agent Status',
-      ready: 'Ready',
-      notReady: 'Not Ready',
-      hint: 'Once configuration is complete, the status will change to "Ready". You can then enable Agent mode in the chat.',
-      missingThinkingModel: 'Thinking model',
-      missingSummaryModel: 'Chat model',
-      missingRerankModel: 'Rerank model',
-      missingAllowedTools: 'Allowed tools',
-      pleaseConfigure: 'Please configure {items}',
-      goToConfig: 'Go to configure chat model',
-      goConfigureModels: 'Configure models →'
+      title: 'Model Recommendation'
     },
     maxIterations: {
-      label: 'Max Iterations',
       desc: 'Maximum reasoning steps when the Agent executes tasks'
     },
     thinkingModel: {
-      label: 'Thinking Model',
-      desc: 'LLM used for Agent reasoning and planning',
-      hint: 'Requires a function-call-capable model'
+      desc: 'LLM used for Agent reasoning and planning'
     },
     rerankModel: {
-      label: 'Rerank Model',
       desc: 'Re-rank search results and normalize relevance scores'
     },
-    model: {
-      placeholder: 'Search models...',
-      addChat: 'Add a new chat model',
-      addRerank: 'Add a new Rerank model'
-    },
     temperature: {
-      label: 'Temperature',
       desc: 'Controls randomness in outputs. 0 is most deterministic; 1 is most random'
     },
     allowedTools: {
-      label: 'Allowed Tools',
-      desc: 'Tools currently enabled for the Agent',
-      placeholder: 'Select tools...',
-      empty: 'No tools configured'
+      desc: 'Tools currently enabled for the Agent'
     },
     systemPrompt: {
-      label: 'System Prompt',
-      desc: 'Configure the Agent’s system prompt with placeholders that are resolved at runtime.',
-      availablePlaceholders: 'Available placeholders:',
-      hintPrefix: 'Tip: typing',
-      hintSuffix: 'will show available placeholders automatically',
-      custom: 'Custom Prompt',
-      disabledHint: 'Currently using the default prompt. Enable custom to apply the content below.',
-      placeholder: 'Enter the system prompt, or leave blank to use the default...',
-      tabHint: "Unified system prompt using {'{{'}web_search_status{'}}'} placeholder for dynamic web search behavior",
-      tabHintDetail: "Unified system prompt (leave empty for system default, use {'{{'}web_search_status{'}}'} placeholder to dynamically control web search behavior)",
-    },
-    reset: {
-      header: 'Reset to Default Prompt',
-      body: 'Are you sure you want to reset to the default prompt? Your custom prompt will be overwritten.'
-    },
-    globalConfigNotice: 'These are global default settings. New agents will inherit these settings. You can also configure each agent individually in the agent list.',
-    loadConfigFailed: 'Failed to load Agent configuration',
-    loadModelsFailed: 'Failed to load model list',
-    errors: {
-      selectThinkingModel: 'Please select a thinking model before enabling Agent mode',
-      selectAtLeastOneTool: 'Please select at least one tool',
-      iterationsRange: 'Max iterations must be between 1 and 20',
-      temperatureRange: 'Temperature must be between 0 and 2',
-      validationFailed: 'Configuration validation failed'
-    },
-    toasts: {
-      iterationsSaved: 'Max iterations saved',
-      thinkingModelSaved: 'Thinking model saved',
-      rerankModelSaved: 'Rerank model saved',
-      temperatureSaved: 'Temperature saved',
-      toolsUpdated: 'Tools updated',
-      customPromptEnabled: 'Custom prompt enabled',
-      defaultPromptEnabled: 'Switched to default prompt',
-      resetToDefault: 'Reset to default prompt',
-      systemPromptSaved: 'System prompt saved',
-      autoDisabled: 'Agent configuration incomplete. Agent mode has been disabled automatically'
+      desc: 'Configure the Agent’s system prompt with placeholders that are resolved at runtime.'
     }
   },
   conversationSettings: {
-    description: 'Configure default behavior and parameters for conversation modes, including prompts for Agent and normal modes',
-    agentMode: 'Agent Mode',
-    normalMode: 'Normal Mode',
-    menus: {
-      modes: 'Mode Settings',
-      models: 'Model Mapping',
-      thresholds: 'Retrieval Thresholds',
-      advanced: 'Advanced Settings'
-    },
     models: {
-      description: 'Manage thinking/chat models and re-rank models for both Agent and normal modes',
-      chatGroupLabel: 'Thinking / Chat Models',
-      chatGroupDesc: 'Includes Agent reasoning/planning model and the default chat/summary model for normal mode',
-      chatModel: {
-        label: 'Default chat model (normal mode)',
-        desc: 'Used when a conversation does not specify its own model',
-        placeholder: 'Select default chat model'
-      },
-      rerankModel: {
-        label: 'Default ReRank model (normal mode)',
-        desc: 'Used for re-ranking when a session does not override it',
-        placeholder: 'Select default rerank model'
-      },
-      rerankGroupLabel: 'ReRank Models',
-      rerankGroupDesc: 'Includes Agent rerank model and the default rerank model for normal mode'
-    },
-    thresholds: {
-      description: 'Tune retrieval and re-ranking thresholds to balance accuracy and performance'
+      chatGroupLabel: 'Thinking / Chat Models'
     },
     maxRounds: {
-      label: 'History Rounds',
       desc: 'Number of rounds kept for context and query rewrite'
     },
     embeddingTopK: {
-      label: 'Embedding TopK',
       desc: 'Number of documents kept after vector retrieval'
     },
     keywordThreshold: {
-      label: 'Keyword Threshold',
       desc: 'Minimum score for keyword retrieval'
     },
     vectorThreshold: {
-      label: 'Vector Threshold',
       desc: 'Minimum similarity for vector retrieval'
     },
     rerankTopK: {
-      label: 'ReRank TopK',
       desc: 'Documents kept after re-ranking'
     },
     rerankThreshold: {
-      label: 'ReRank Threshold',
       desc: 'Minimum score required after re-ranking'
     },
     enableRewrite: {
-      label: 'Enable Query Rewrite',
       desc: 'Automatically rewrite multi-turn queries for better recall'
     },
     enableQueryExpansion: {
-      label: 'Enable LLM Query Expansion',
       desc: 'When recall is low, call a reasoning model to generate expansion queries (adds latency & cost)'
     },
     fallbackStrategy: {
-      label: 'Fallback Strategy',
-      desc: 'How to respond when no relevant documents are found',
-      fixed: 'Fixed response',
-      model: 'Let the model continue answering'
+      desc: 'How to respond when no relevant documents are found'
     },
     fallbackResponse: {
-      label: 'Fixed fallback response',
       desc: 'Text returned when using the fixed fallback strategy'
     },
     fallbackPrompt: {
-      label: 'Fallback Prompt',
       desc: 'Prompt used when fallback strategy is "model"'
     },
-    advanced: {
-      description: 'Configure query rewrite, fallback strategy and other advanced settings'
-    },
     rewritePrompt: {
-      system: 'Rewrite System Prompt',
-      user: 'Rewrite User Prompt',
-      desc: 'System prompt used during query rewrite',
-      userDesc: 'User prompt used during query rewrite'
+      desc: 'System prompt used during query rewrite'
     },
     chatModel: {
-      label: 'LLM Model',
       desc: 'Large language model used for summarization and abstract generation'
     },
     rerankModel: {
-      label: 'ReRank Model',
       desc: 'Model for re-ranking search results (optional)'
     },
     contextTemplate: {
-      label: 'Retrieval Result Summary Prompt',
-      desc: 'Prompt template for generating answers based on retrieval results in normal mode',
-      descWithDefault: 'Prompt template for generating answers based on retrieval results in normal mode (leave empty for system default)',
-      placeholder: 'Enter the prompt template for retrieval result summary...',
-      custom: 'Custom template',
-      disabledHint: 'Currently using the default summary prompt. Enable custom to edit below.',
+      desc: 'Prompt template for generating answers based on retrieval results in normal mode'
     },
     systemPrompt: {
-      label: 'System Prompt',
-      desc: 'System-level prompt for normal mode conversations',
-      descWithDefault: 'System-level prompt for normal mode conversations (leave empty for system default)',
-      placeholder: 'Enter the system prompt...',
-      custom: 'Custom prompt',
-      disabledHint: 'Currently using the default prompt. Enable custom to edit below.',
+      desc: 'System-level prompt for normal mode conversations'
     },
     temperature: {
-      label: 'Temperature',
       desc: 'Controls randomness in outputs. 0 is most deterministic; 1 is most random'
     },
     maxTokens: {
-      label: 'Max Tokens',
       desc: 'Maximum number of tokens to generate in the response'
-    },
-    resetSystemPrompt: {
-      header: 'Reset to Default System Prompt',
-      body: 'Are you sure you want to reset to the default system prompt?'
-    },
-    resetContextTemplate: {
-      header: 'Reset to Default Summary Prompt',
-      body: 'Are you sure you want to reset to the default summary prompt?'
-    },
-    toasts: {
-      chatModelSaved: 'LLM model saved',
-      rerankModelSaved: 'ReRank model saved',
-      contextTemplateSaved: 'Retrieval result summary prompt saved',
-      systemPromptSaved: 'System prompt saved',
-      temperatureSaved: 'Temperature saved',
-      maxTokensSaved: 'Max tokens saved',
-      maxRoundsSaved: 'History rounds saved',
-      embeddingSaved: 'Embedding TopK saved',
-      keywordThresholdSaved: 'Keyword threshold saved',
-      vectorThresholdSaved: 'Vector threshold saved',
-      rerankTopKSaved: 'ReRank TopK saved',
-      rerankThresholdSaved: 'ReRank threshold saved',
-      enableRewriteSaved: 'Query rewrite preference saved',
-      enableQueryExpansionSaved: 'Query expansion preference saved',
-      fallbackStrategySaved: 'Fallback strategy saved',
-      fallbackResponseSaved: 'Fallback response saved',
-      fallbackPromptSaved: 'Fallback prompt saved',
-      rewritePromptSystemSaved: 'Rewrite system prompt saved',
-      rewritePromptUserSaved: 'Rewrite user prompt saved',
-      customPromptEnabled: 'Custom prompt enabled',
-      defaultPromptEnabled: 'Using default prompt',
-      customContextTemplateEnabled: 'Custom summary prompt enabled',
-      defaultContextTemplateEnabled: 'Using default summary prompt',
-      resetSystemPromptSuccess: 'Reset to default system prompt',
-      resetContextTemplateSuccess: 'Reset to default summary prompt'
     }
   },
-  // New: MCP Settings
   mcpSettings: {
     title: 'MCP Services',
     description: 'Manage external MCP (Model Context Protocol) services for tools/resources in Agent mode',
-    // Drawer subtitle chip
     enabled: 'Enabled',
     disabled: 'Disabled',
     configuredServices: 'Configured Services',
     manageAndTest: 'Manage and test MCP service connections',
     addService: 'Add Service',
     empty: 'No MCP services',
-    addFirst: 'Add the first MCP service',
     actions: {
       test: 'Test Connection'
     },
@@ -5000,7 +3796,6 @@ export default {
     unnamed: 'Unnamed',
     builtin: 'Built-in'
   },
-  // New: Model Settings
   modelSettings: {
     title: 'Model Settings',
     description: 'Manage different types of AI models, including local Ollama and remote APIs',
@@ -5009,19 +3804,17 @@ export default {
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: 'Vision',
-      asr: 'Speech',
+      asr: 'Speech'
     },
     actions: {
       addModel: 'Add Model',
-      debugModel: 'Model Test',
-      setDefault: 'Set as Default'
+      debugModel: 'Model Test'
     },
     source: {
       remote: 'Remote',
       openaiCompatible: 'OpenAI-compatible',
-      custom: 'Custom',
+      custom: 'Custom'
     },
-    rawModelName: 'Model name',
     chat: {
       title: 'Chat Models',
       desc: 'Configure large language models for chatting',
@@ -5059,20 +3852,18 @@ export default {
       saveFailed: 'Failed to save model',
       deleted: 'Model deleted',
       deleteFailed: 'Failed to delete model',
-      setDefault: 'Set as default',
-      setDefaultFailed: 'Failed to set default model',
       builtinCannotEdit: 'Built-in models cannot be edited',
       builtinCannotDelete: 'Built-in models cannot be deleted',
       builtinCannotCopy: 'Built-in models cannot be copied',
       copied: 'Model copied',
-      copyFailed: 'Failed to copy model',
+      copyFailed: 'Failed to copy model'
     },
     copySuffix: ' Copy',
     builtinModels: {
       title: 'Built-in Models',
       description: 'Built-in models are visible to all workspaces. Sensitive information is hidden, and they cannot be edited or deleted.',
       descriptionAdmin: 'Built-in models are visible to all workspaces. System administrators can edit configuration and credentials; deletion remains deployment-managed.',
-      viewGuide: 'View Built-in Models Guide',
+      viewGuide: 'View Built-in Models Guide'
     },
     builtinTag: 'Built-in',
     confirmDelete: 'Delete model "{name}"?',
@@ -5121,11 +3912,10 @@ export default {
         reasoningChars: 'Reasoning chars',
         reasoningReturned: 'Reasoning returned',
         textChars: 'Transcript chars',
-        segmentCount: 'Segment count',
-      },
-    },
+        segmentCount: 'Segment count'
+      }
+    }
   },
-  // New: Ollama Settings
   ollamaSettings: {
     title: 'Ollama Settings',
     description: 'Manage local Ollama service and view/download models',
@@ -5164,18 +3954,12 @@ export default {
       downloadFailed: 'Download failed. Please try again later',
       downloadStarted: 'Started downloading model {name}',
       downloadCompleted: 'Model {name} downloaded successfully',
-      progressFailed: 'Failed to query download progress',
-    },
-    unknown: 'Unknown',
-    today: 'Today',
-    yesterday: 'Yesterday',
-    daysAgo: '{days} days ago',
+      progressFailed: 'Failed to query download progress'
+    }
   },
-  // New: MCP Service Dialog
   mcpServiceDialog: {
     addTitle: 'Add MCP Service',
     editTitle: 'Edit MCP Service',
-    // Section + drawer-only keys
     basicSection: 'Basic',
     connectionSection: 'Connection',
     enableServiceDesc: 'When off, this service will not be invoked',
@@ -5187,21 +3971,8 @@ export default {
     description: 'Description',
     descriptionPlaceholder: 'Enter service description',
     transportType: 'Transport Type',
-    transport: {
-      sse: 'SSE (Server-Sent Events)',
-      httpStreamable: 'HTTP Streamable',
-      stdio: 'Stdio'
-    },
     serviceUrl: 'Service URL',
     serviceUrlPlaceholder: 'https://example.com/mcp',
-    command: 'Command',
-    args: 'Arguments',
-    argPlaceholder: 'Argument {index}',
-    addArg: 'Add Argument',
-    envVars: 'Environment Variables',
-    envKeyPlaceholder: 'Key',
-    envValuePlaceholder: 'Value',
-    addEnvVar: 'Add Environment Variable',
     enableService: 'Enable Service',
     authConfig: 'Authentication',
     authType: 'Auth Method',
@@ -5213,8 +3984,6 @@ export default {
     apiKeyHeader: 'Header Name',
     apiKeyHeaderDesc: 'Defaults to X-API-Key. For Bearer, set Authorization and put "Bearer <token>" in the value below; for raw-token services use Authorization with the raw token.',
     credentialValue: 'Secret / Token',
-    apiKey: 'API Key',
-    bearerToken: 'Bearer Token',
     optional: 'Optional',
     advancedConfig: 'Advanced',
     timeoutSec: 'Timeout (s)',
@@ -5224,9 +3993,7 @@ export default {
       nameRequired: 'Please enter the service name',
       transportRequired: 'Please select a transport type',
       urlRequired: 'Please enter the service URL',
-      urlInvalid: 'Please enter a valid URL',
-      commandRequired: 'Please select a command (uvx or npx)',
-      argsRequired: 'Please enter at least one argument'
+      urlInvalid: 'Please enter a valid URL'
     },
     toasts: {
       created: 'MCP service created',
@@ -5267,15 +4034,13 @@ export default {
     resetDefault: 'Reset Default',
     default: 'Default',
     withKnowledgeBase: 'KB',
-    withWebSearch: 'Web Search',
+    withWebSearch: 'Web Search'
   },
   organization: {
     title: 'Shared Spaces',
     subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
     createOrg: 'Create Shared Space',
-    createOrgShort: 'New',
     joinOrg: 'Join Shared Space',
-    joinOrgShort: 'Join',
     name: 'Shared Space Name',
     namePlaceholder: 'Enter shared space name',
     nameRequired: 'Please enter shared space name',
@@ -5285,22 +4050,19 @@ export default {
     description: 'Shared Space Description',
     descriptionPlaceholder: 'Enter shared space description (optional)',
     noDescription: 'No description',
-
     memberCount: 'Member count',
     owner: 'Creator',
     inviteCode: 'Invite Code',
     inviteCodePlaceholder: 'Enter invite code',
     inviteCodeRequired: 'Please enter invite code',
-    inviteCodeTip: 'Share this invite code with others to let them join the shared space',
     refreshInviteCode: 'Refresh Invite Code',
     inviteCodeRefreshed: 'Invite code refreshed',
     inviteCodeRefreshFailed: 'Failed to refresh invite code',
     rbac: {
-      needTenantAdmin: 'Workspace admin role required',
       needTenantAdminTip: 'This action requires the admin role (or higher) in the current workspace. Please contact the workspace owner.',
       cannotCreate: 'Your workspace role is insufficient to create a shared space',
       cannotJoin: 'Your workspace role is insufficient to join or request to join a shared space',
-      cannotManage: 'Your workspace role is insufficient to manage this shared space',
+      cannotManage: 'Your workspace role is insufficient to manage this shared space'
     },
     join: {
       title: 'Join Shared Space',
@@ -5324,25 +4086,20 @@ export default {
       spaceId: 'Shared Space ID',
       noSearchResult: 'No matching shared spaces',
       noSearchableSpaces: 'No discoverable shared spaces yet, or try a search',
-      membersWithLimit: '{current}/{limit} members',
       memberLimitReached: 'Full',
-      backToSearch: 'Back to search',
+      backToSearch: 'Back to search'
     },
     invite: {
       loading: 'Loading...',
       previewTitle: 'Join Shared Space',
-      previewInfo: 'Shared Space Overview',
       inputDesc: 'Enter the invite code (or paste from an invite link) to view the shared space and join',
       previewAction: 'View',
       primaryJoin: 'Join',
-      invalidTitle: 'Invalid Invitation',
       invalidCode: 'Invite code is invalid or expired',
       previewFailed: 'Preview failed, please try again',
-      members: 'Members',
       knowledgeBases: 'Knowledge Bases',
       agents: 'Agents',
       alreadyMember: 'You are already a member of this shared space',
-      confirmJoin: 'Confirm Join',
       submitRequest: 'Request to Join',
       requireApprovalTip: 'This shared space requires admin approval to join',
       approvalLabel: 'Join method',
@@ -5357,15 +4114,13 @@ export default {
       joinFailed: 'Failed to join, please try again',
       requestSubmitted: 'Request submitted, please wait for admin approval',
       requestFailed: 'Failed to submit request, please try again',
-      viewOrganization: 'View Shared Space',
+      viewOrganization: 'View Shared Space'
     },
     leave: 'Leave Shared Space',
-    leaveConfirm: 'Are you sure you want to leave this shared space?',
     leaveConfirmTitle: 'Leave Shared Space',
     leaveConfirmMessage: 'Are you sure you want to leave shared space "{name}"? You will no longer have access to knowledge bases shared in this shared space.',
     leaveSuccess: 'Left shared space successfully',
     leaveFailed: 'Failed to leave shared space',
-    deleteConfirm: 'Are you sure you want to delete this shared space? This action cannot be undone.',
     deleteConfirmTitle: 'Delete Shared Space',
     deleteConfirmMessage: 'Are you sure you want to delete shared space "{name}"? All members will be removed. This action cannot be undone.',
     deleteSuccess: 'Shared space deleted',
@@ -5385,8 +4140,8 @@ export default {
         member: 'Member',
         role: 'Role',
         joinedAt: 'Joined',
-        operations: 'Actions',
-      },
+        operations: 'Actions'
+      }
     },
     joinRequests: {
       listTitle: 'Pending requests',
@@ -5403,8 +4158,8 @@ export default {
         type: 'Type',
         requestedRole: 'Requested role',
         message: 'Note',
-        appliedAt: 'Applied',
-      },
+        appliedAt: 'Applied'
+      }
     },
     sharedResources: {
       kbListTitle: 'Shared knowledge bases',
@@ -5414,8 +4169,8 @@ export default {
         name: 'Name',
         sharedBy: 'Shared by',
         sharedAt: 'Shared at',
-        permission: 'Permission',
-      },
+        permission: 'Permission'
+      }
     },
     roleUpdated: 'Role updated',
     roleUpdateFailed: 'Failed to update role',
@@ -5423,12 +4178,8 @@ export default {
     memberRemoveFailed: 'Failed to remove member',
     empty: 'You have not joined any shared space yet',
     emptyDesc: 'Create a shared space or join an existing one with an invite code',
-    all: 'All',
     createdByMe: 'Created by me',
     joinedByMe: 'Joined',
-    createdTag: 'Created',
-    joinedTag: 'Joined',
-    joinedLabel: 'Joined',
     emptyCreated: 'You have not created any shared space yet',
     emptyCreatedDesc: 'Click "Create Shared Space" to create a new one',
     emptyJoined: 'You have not joined any shared space yet',
@@ -5436,19 +4187,14 @@ export default {
     role: {
       admin: 'Admin',
       editor: 'Editor',
-      viewer: 'Viewer',
+      viewer: 'Viewer'
     },
     detail: {
-      myRole: 'My Role',
-      removeMemberTitle: 'Remove Member',
       removeMemberConfirm: 'Are you sure you want to remove "{name}"?',
-      removeMember: 'Remove Member',
-      shareKBTip: 'Go to knowledge base list, select a knowledge base and click share to share it to this shared space',
+      removeMember: 'Remove Member'
     },
     settings: {
       editTitle: 'Shared Space Settings',
-      detailTitle: 'Shared Space Details',
-      myRoleDesc: 'Your role in this shared space determines your permissions',
       membersDesc: 'View and manage shared space members and their roles. Each member represents a workspace — all users in the same workspace share access to this shared space.',
       permissionsIconHint: 'View role permissions',
       sharedDesc: 'View all knowledge bases shared to this shared space',
@@ -5499,12 +4245,12 @@ export default {
       reject: 'Reject',
       approveSuccess: 'Request approved',
       rejectSuccess: 'Request rejected',
-      reviewFailed: 'Operation failed, please try again',
+      reviewFailed: 'Operation failed, please try again'
     },
     navGroups: {
       basic: 'Basic',
       management: 'Members & Collaboration',
-      resources: 'Shared Resources',
+      resources: 'Shared Resources'
     },
     editor: {
       navBasic: 'Basic Info',
@@ -5540,7 +4286,7 @@ export default {
       howToGetCode: 'How to get an invite code?',
       step1: 'Contact the admin of the shared space you want to join',
       step2: 'Ask them to share the shared space invite code',
-      step3: 'Paste the invite code in the input field above',
+      step3: 'Paste the invite code in the input field above'
     },
     upgrade: {
       requestUpgrade: 'Request upgrade',
@@ -5553,29 +4299,19 @@ export default {
       reasonPlaceholder: 'Please briefly explain why you need higher permissions...',
       submitBtn: 'Submit Request',
       submitSuccess: 'Upgrade request submitted, waiting for admin approval',
-      submitFailed: 'Failed to submit request',
-      upgradeRequest: 'Permission Upgrade',
+      submitFailed: 'Failed to submit request'
     },
     addMember: {
       button: 'Add Member',
       dialogTitle: 'Add Member',
-      tip: 'Added users will immediately become shared space members and can access knowledge bases shared in this shared space.',
       tipTenant: 'Membership is at the workspace level: once a workspace joins, all of its users share access to this space. Results below are deduplicated by workspace.',
-      searchUser: 'Select User',
       searchTenant: 'Select Workspace',
-      searchPlaceholder: 'Search by username or email...',
       searchTenantPlaceholder: 'Search by workspace name...',
-      searchHint: 'Type at least 2 characters to search',
       searchTenantHint: 'Type at least 2 characters; results are deduplicated by workspace and exclude workspaces already in this space',
       selectRole: 'Assign Role',
       confirmBtn: 'Add',
       success: 'Member added successfully',
-      failed: 'Failed to add member',
-      roleHint: {
-        viewer: 'Can view and search',
-        editor: 'Can edit content',
-        admin: 'Full management access',
-      },
+      failed: 'Failed to add member'
     },
     share: {
       title: 'Share to Shared Space',
@@ -5598,22 +4334,14 @@ export default {
         space: 'Shared Space',
         permission: 'Permission',
         sharedAt: 'Shared',
-        operations: 'Actions',
+        operations: 'Actions'
       },
       sharedKnowledgeBase: 'Shared Knowledge Base',
-      shareToSpace: 'Share to shared space',
-      shareModelToSpace: 'Share "{name}" to shared space',
-      shareAgentToSpace: 'Share "{name}" to shared space',
-      modelShareDesc: 'Share this model to a shared space so members can use it',
       agentShareDesc: 'Share this agent to a shared space so members can use it',
-      spaceAgentShareCountTip: 'Number of agents shared to this shared space',
       sharedFrom: 'From',
-      sharedBadge: 'Shared',
       permissionReadonly: 'Read-only',
-      permissionEditable: 'Editable',
-      sharedKBs: ' knowledge bases',
-      sharedAgents: ' agents',
-    },
+      permissionEditable: 'Editable'
+    }
   },
   preview: {
     tab: 'Preview',
@@ -5625,17 +4353,16 @@ export default {
     fullscreen: 'Fullscreen',
     exitFullscreen: 'Exit Fullscreen',
     audioLoading: 'Loading audio…',
-    audioNotSupported: 'Your browser does not support audio playback',
+    audioNotSupported: 'Your browser does not support audio playback'
   },
   commandPalette: {
     placeholder: 'Search knowledge bases, files, conversations…',
-    searching: 'Searching…',
     clearRecent: 'Clear',
     retrieval: 'Retrieval settings',
     untitledSession: 'Untitled conversation',
     scope: {
       placeholder: 'Search within this knowledge base…',
-      remove: 'Remove scope (Backspace)',
+      remove: 'Remove scope (Backspace)'
     },
     group: {
       chunks: 'Files',
@@ -5645,11 +4372,11 @@ export default {
       sessionsByTitle: 'Chats (by title)',
       commands: 'Commands',
       recent: 'Recent',
-      quickActions: 'Quick actions',
+      quickActions: 'Quick actions'
     },
     match: {
       vector: 'Vector',
-      keyword: 'Keyword',
+      keyword: 'Keyword'
     },
     quick: {
       newChat: 'New conversation',
@@ -5657,53 +4384,21 @@ export default {
       agents: 'Open agents',
       organizations: 'Open shared spaces',
       settings: 'Open settings',
-      productTour: 'Product tour',
+      productTour: 'Product tour'
     },
     empty: {
       noResults: 'No matches found',
       askAi: 'Ask the AI directly',
-      adjustRetrieval: 'Adjust retrieval',
+      adjustRetrieval: 'Adjust retrieval'
     },
     hotkey: {
       select: 'Navigate',
       enter: 'Open',
       cmdNumber: 'Jump to',
       cmdEnter: 'Start chat',
-      esc: 'Close',
-    },
+      esc: 'Close'
+    }
   },
-  knowledgeSearch: {
-    title: 'Search',
-    subtitle: 'Semantic search across knowledge bases and chat history to find relevant content',
-    tabKnowledge: 'Knowledge',
-    tabMessages: 'Messages',
-    placeholder: 'Enter search query...',
-    messagePlaceholder: 'Search chat history...',
-    searchBtn: 'Search',
-    selectKb: 'Select Knowledge Base',
-    allKb: 'All Knowledge Bases',
-    noResults: 'No results found',
-    resultCount: '{count} results found',
-    score: 'Relevance',
-    matchType: 'Match Type',
-    matchTypeVector: 'Vector Match',
-    matchTypeKeyword: 'Keyword Match',
-    untitledSession: 'Untitled Session',
-    matchCount: 'matches',
-    emptyHint: 'Enter keywords to search for relevant content chunks in knowledge bases',
-    messageEmptyHint: 'Enter keywords to search chat history messages',
-    searching: 'Searching...',
-    source: 'Source',
-    chunk: 'chunks',
-    expand: 'Expand',
-    collapse: 'Collapse',
-    fileCount: 'files',
-    viewDetail: 'View Detail',
-    startChat: 'Start Chat',
-    chatWithFile: 'Chat',
-    newChatTitle: 'Search: {query}',
-  },
-  // ---- i18n keys for hardcoded Chinese extraction ----
   tools: {
     multiKbSearch: 'Cross-KB Search',
     knowledgeSearch: 'Knowledge Search',
@@ -5714,35 +4409,30 @@ export default {
     getDocumentInfo: 'Get Document Info',
     queryKnowledgeGraph: 'Query Knowledge Graph',
     think: 'Deep Thinking',
-    todoWrite: 'Make Plan',
+    todoWrite: 'Make Plan'
   },
   vectorStoreBadge: {
     systemDefault: 'System default',
     sharedFromOrg: 'Shared from another organization',
     unknownStore: 'Unknown store',
-    unavailable: 'Unavailable',
+    unavailable: 'Unavailable'
   },
   kbSettings: {
     vectorStore: {
       title: 'Vector Store',
-      description:
-        'Choose which vector store this knowledge base writes to. The binding is permanent — to move an existing KB to a different store, create a new KB and re-index.',
+      description: 'Choose which vector store this knowledge base writes to. The binding is permanent — to move an existing KB to a different store, create a new KB and re-index.',
       loading: 'Loading vector stores...',
       engineLabel: 'Vector store',
-      engineDesc:
-        'Pick a store from the global Vector Stores configuration, or leave as System default to use the workspace-wide RETRIEVE_DRIVER engine.',
+      engineDesc: 'Pick a store from the global Vector Stores configuration, or leave as System default to use the workspace-wide RETRIEVE_DRIVER engine.',
       boundLabel: 'Bound vector store',
       systemDefault: 'System default',
-      immutableHint:
-        'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
+      immutableHint: 'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
       immutableEdit: 'Vector store binding cannot be changed after creation.',
-      unavailableHint:
-        'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
-      goGlobalSettings: 'Go to Vector Store Settings',
+      unavailableHint: 'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
+      goGlobalSettings: 'Go to Vector Store Settings'
     },
     storage: {
       title: 'Storage Engine',
-      description: 'Select the file storage engine. This affects how uploaded documents and images within documents are stored. Parameters are configured in global settings.',
       selectDescription: 'Select the specific storage instance to bind this knowledge base to.',
       defaultTag: 'Default',
       instanceLabel: 'Storage instance',
@@ -5750,30 +4440,7 @@ export default {
       migrateHint: 'This knowledge base already contains files; use the storage migration flow to switch instances.',
       manageInstances: 'Manage storage instances',
       localStorage: 'Local storage',
-      loading: 'Loading...',
-      engineLabel: 'Storage Engine',
-      engineDesc: 'Select the storage engine for this knowledge base. The corresponding engine must be configured in global settings.',
-      selectPlaceholder: 'Select a storage engine',
-      notConfigured: 'Not Configured',
-      unavailable: 'Unavailable',
-      lockedHint: 'This knowledge base already has files. Cannot switch storage engine. To change, please clear all files first.',
-      changeWarning: 'Changing the storage engine only affects newly uploaded files. Existing files will still be read from the original storage engine, but some old files may become inaccessible if their paths cannot be automatically recognized.',
-      goGlobalSettings: 'Go to Global Settings',
-      engineLocal: 'Local Storage',
-      engineLocalDesc: 'For single-node deployment, simple and lightweight',
-      engineMinioDesc: 'S3 compatible, for private networks or private cloud',
-      engineCos: 'Tencent Cloud COS',
-      engineCosDesc: 'Public cloud deployment, supports CDN acceleration',
-      engineTos: 'Volcengine TOS',
-      engineTosDesc: 'Volcengine object storage, for public cloud deployment',
-      engineS3: 'AWS S3',
-      engineS3Desc: 'AWS S3 and compatible storage, for public cloud deployment',
-      engineOss: 'Alibaba Cloud OSS',
-      engineOssDesc: 'Alibaba Cloud Object Storage Service, for public cloud deployment',
-      engineKs3: 'Kingsoft Cloud KS3',
-      engineKs3Desc: 'Kingsoft Cloud Object Storage Service, for public cloud deployment',
-      engineObs: 'Huawei Cloud OBS',
-      engineObsDesc: 'Huawei Cloud Object Storage Service, for public cloud deployment',
+      loading: 'Loading...'
     },
     parser: {
       title: 'Parser Engine',
@@ -5781,8 +4448,6 @@ export default {
       loading: 'Loading...',
       noEngineAvailable: 'No parser engine available, or the document parsing service is not configured.',
       default: 'Default',
-      unavailable: 'Unavailable',
-      goSettings: 'Go to Settings →',
       goConfig: 'Go to Config →',
       noEngine: 'No available engine',
       fileTypePdf: 'PDF Documents',
@@ -5800,58 +4465,51 @@ export default {
       engines: {
         builtin: {
           name: 'Built-in',
-          desc: 'DocReader built-in parser engine (docx/pdf/xlsx and other complex formats)',
+          desc: 'DocReader built-in parser engine (docx/pdf/xlsx and other complex formats)'
         },
         simple: {
           name: 'Simple',
-          desc: 'Simple format & image parsing (no external service required)',
+          desc: 'Simple format & image parsing (no external service required)'
         },
         mineru: {
           name: 'MinerU',
-          desc: 'MinerU self-hosted service',
+          desc: 'MinerU self-hosted service'
         },
         mineru_cloud: {
           name: 'MinerU Cloud',
-          desc: 'MinerU Cloud API',
+          desc: 'MinerU Cloud API'
         },
         paddleocr_vl: {
           name: 'PaddleOCR-VL',
-          desc: 'PaddleOCR-VL self-hosted service',
+          desc: 'PaddleOCR-VL self-hosted service'
         },
         paddleocr_vl_cloud: {
           name: 'PaddleOCR-VL Cloud',
-          desc: 'PaddleOCR-VL Cloud API',
+          desc: 'PaddleOCR-VL Cloud API'
         },
         weknoracloud: {
           name: 'WeKnora Cloud',
-          desc: 'Document parsing via WeKnora Cloud',
+          desc: 'Document parsing via WeKnora Cloud'
         },
         markitdown: {
           name: 'MarkItDown',
-          desc: "Microsoft MarkItDown converter (PDF/Office/HTML and more)",
+          desc: 'Microsoft MarkItDown converter (PDF/Office/HTML and more)'
         },
         opendataloader: {
           name: 'OpenDataLoader',
-          desc: 'OpenDataLoader PDF parser (layout analysis; requires Java 11+ and opendataloader-pdf)',
-        },
-      },
-    },
-    supportedFormats: 'Supported formats',
+          desc: 'OpenDataLoader PDF parser (layout analysis; requires Java 11+ and opendataloader-pdf)'
+        }
+      }
+    }
   },
   agentStream: {
     toolApproval: {
-      banner: 'This MCP tool requires human approval. Review parameters before execution.',
       waiting: 'Awaiting review · {target}',
       waitingStatus: 'Awaiting review',
       targetWithTool: '{service} › {tool}',
       titleWithTarget: 'Review · {service} › {tool}',
-      resolvedApproved: 'Approved · {target}',
-      resolvedRejected: 'Rejected · {target}',
-      service: 'Service',
-      tool: 'Tool',
       argsLabel: 'Arguments',
       argsModified: 'Modified',
-      countdown: 'About {seconds}s remaining',
       countdownShort: '{seconds}s',
       approve: 'Approve & run',
       reject: 'Reject',
@@ -5860,22 +4518,17 @@ export default {
       invalidJson: 'Arguments must be valid JSON',
       submitted: 'Submitted',
       submitFailed: 'Submit failed',
-      userRejected: 'User rejected',
+      userRejected: 'User rejected'
     },
     mcpOAuth: {
-      banner: 'This MCP service requires OAuth authorization before it can be used',
       waiting: 'Awaiting authorization · {target}',
       waitingStatus: 'Awaiting authorization',
       targetWithTool: '{service} › {tool}',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',
-      resolvedAuthorized: 'Authorized · {target}',
-      resolvedTimedOut: 'Timed out · {target}',
-      resolvedCanceled: 'Skipped · {target}',
       desc: 'Authorizing opens a new window to sign in. The tool call resumes automatically once authorization succeeds.',
       authorize: 'Authorize',
       skip: 'Skip',
-      countdown: 'About {seconds}s remaining',
       countdownShort: '{seconds}s',
       authorizedTag: 'Authorized',
       timedOutTag: 'Authorization timed out',
@@ -5883,7 +4536,7 @@ export default {
       authorizedToast: 'Authorized. Resuming…',
       startFailed: 'Failed to start authorization',
       resumeFailed: 'Failed to resume. Please try again.',
-      skipFailed: 'Failed to skip. Please try again.',
+      skipFailed: 'Failed to skip. Please try again.'
     },
     tools: {
       searchKnowledge: 'Knowledge Search',
@@ -5906,35 +4559,24 @@ export default {
       executeSkillScript: 'Execute Skill Script',
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
-      databaseQuery: 'Database Query',
-    },
-    summary: {
-      searchKb: 'Searched knowledge base <strong>{count}</strong> time(s)',
-      thinking: 'Thought <strong>{count}</strong> time(s)',
-      callTool: 'Called {name}',
-      callTools: 'Called tools {names}',
-      intermediateSteps: '<strong>{count}</strong> intermediate step(s)',
-      separator: ', ',
-      comma: ', ',
+      databaseQuery: 'Database Query'
     },
     citation: {
-      loading: 'Loading...',
       notFound: 'Content not found',
       loadFailed: 'Failed to load',
-      chunkId: 'Chunk ID',
-      noKbForWiki: 'Unable to identify associated knowledge base. Cannot open Wiki.',
+      noKbForWiki: 'Unable to identify associated knowledge base. Cannot open Wiki.'
     },
     toolSummary: {
       getDocument: 'Get document: {title}',
       document: 'Document',
       listChunks: 'View {title}',
       listFaqEntry: 'View FAQ: {question}',
-      deepThinking: 'Deep Thinking',
+      deepThinking: 'Deep Thinking'
     },
     plan: {
       inProgress: 'In Progress',
       pending: 'Pending',
-      completed: 'Completed',
+      completed: 'Completed'
     },
     search: {
       noResults: 'No matching content found',
@@ -5942,37 +4584,31 @@ export default {
       foundResults: 'Found {count} result(s)',
       foundMixedResults: 'Found {count} result(s) ({docCount} documents, {webCount} web results)',
       webResults: 'Found {count} web result(s)',
-      grepSummary: 'Found {chunks} matching chunk(s) across {docs} document(s)',
+      grepSummary: 'Found {chunks} matching chunk(s) across {docs} document(s)'
     },
     grepResults: {
       chunkHits: '{count} chunks',
       keywordHits: '{count} hits',
       titleMatch: 'title',
-      faqEntry: 'FAQ entry',
+      faqEntry: 'FAQ entry'
     },
     knowledgeChunksList: {
       chunkRange: 'Loaded {fetched} / {total} chunks',
-      page: 'Page {page}, {pageSize} per page',
+      page: 'Page {page}, {pageSize} per page'
     },
     attachmentParsing: {
       parsedSummary: 'Parsed {count} attachment(s)',
       parsedWithSkipped: 'Parsed {parsed} attachment(s), {skipped} skipped (still processing)',
-      noneReady: 'No parsed attachments available',
+      noneReady: 'No parsed attachments available'
     },
     ragPipeline: {
-      understanding: 'Understanding query...',
-      understandDone: 'Query understood',
       searching: 'Searching knowledge base...',
       searchingWithQuery: 'Searching knowledge base: "{query}"',
       searchingWeb: 'Searching the web...',
       searchingWebWithQuery: 'Searching the web: "{query}"',
       searchingMixed: 'Searching knowledge base and web...',
       searchingMixedWithQuery: 'Searching knowledge base and web: "{query}"',
-      searchDone: 'Search complete',
-      searchDoneWithQuery: 'Searched knowledge base: "{query}"',
-      referencedDocs: 'Cited <strong>{count}</strong> documents',
-      referencedWebs: 'Cited <strong>{count}</strong> web results',
-      referencedDocAndWeb: 'Cited <strong>{docCount}</strong> documents and <strong>{webCount}</strong> web results',
+      searchDone: 'Search complete'
     },
     toolStatus: {
       calling: 'Calling {name}...',
@@ -6000,17 +4636,17 @@ export default {
       queryUnderstanding: 'Understanding query...',
       queryUnderstandDone: 'Query understood',
       called: 'Called {name}',
-      calledFailed: 'Failed to call {name}',
+      calledFailed: 'Failed to call {name}'
     },
     copy: {
       emptyContent: 'Current response is empty, cannot copy',
       success: 'Copied to clipboard',
-      failed: 'Copy failed, please copy manually',
+      failed: 'Copy failed, please copy manually'
     },
     saveToKb: {
       emptyContent: 'Current response is empty, cannot save to knowledge base',
-      editorOpened: 'Editor opened, please select a knowledge base and save',
-    },
+      editorOpened: 'Editor opened, please select a knowledge base and save'
+    }
   },
   agentEditor: {
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
@@ -6018,7 +4654,7 @@ export default {
       basic: 'Basics',
       knowledge: 'Knowledge & Retrieval',
       capability: 'Extensions',
-      integration: 'Publish & Integrations',
+      integration: 'Publish & Integrations'
     },
     questionSuggestions: {
       navLabel: 'Question suggestions',
@@ -6038,7 +4674,6 @@ export default {
       model: 'Generation model',
       modelDesc: 'Uses the model from the completed turn when empty.',
       advancedSettings: 'Advanced generation settings',
-      advancedSettingsDesc: 'Context, question types, instructions, and display rules',
       displayRules: 'Display and fallback rules',
       contextTurns: 'Context turns',
       categories: 'Question types',
@@ -6054,39 +4689,34 @@ export default {
       modeHybrid: 'Hybrid',
       categoryClarify: 'Clarify',
       categoryDeepen: 'Deepen',
-      categoryAction: 'Next step',
+      categoryAction: 'Next step'
     },
     placeholders: {
       available: 'Available variables: ',
       clickToInsert: '(click to insert)',
-      hint: "(click to insert, or type {'{{'} to show list)",
+      hint: '(click to insert, or type {\'{{\'} to show list)'
     },
     intentPrompts: {
       title: 'Intent Prompts',
       sectionDesc: 'Configure intent-specific system prompts; defaults apply when not customized',
       intentLabel: 'Intent',
-      intentDescription: 'Select the intent-specific system prompt to edit',
       promptPlaceholder: 'Enter a custom system prompt...',
       customized: 'Customized',
-      empty: 'No intent templates available',
+      empty: 'No intent templates available'
     },
     promptNav: {
       ariaLabel: 'Prompt outline',
-      itemCount: '{n} items',
-      groupCore: 'Core prompts',
-      groupConversation: 'Conversation understanding',
-      groupFallback: 'Retrieval fallback',
       system: 'System prompt',
       context: 'Context template',
       intent: 'Intent prompts',
       rewriteSystem: 'Rewrite · System',
       rewriteUser: 'Rewrite · User',
-      fallback: 'Retrieval fallback',
+      fallback: 'Retrieval fallback'
     },
     selection: {
       all: 'All',
       selected: 'Selected',
-      disabled: 'Disabled',
+      disabled: 'Disabled'
     },
     desc: {
       name: 'Set an easily identifiable name for the agent',
@@ -6122,7 +4752,7 @@ export default {
       rerankThreshold: 'Minimum relevance score for reranking',
       fallbackStrategy: 'How to handle when no relevant content is found in the knowledge base',
       fallbackResponse: 'Fixed text returned when unable to answer',
-      fallbackPrompt: 'Prompt to guide model response when no answer is found in knowledge base',
+      fallbackPrompt: 'Prompt to guide model response when no answer is found in knowledge base'
     },
     tools: {
       thinking: 'Thinking',
@@ -6148,7 +4778,6 @@ export default {
       requiresKb: '(requires knowledge base configuration)',
       requiresRagKb: '(requires a KB with vector/keyword indexing enabled)',
       requiresWikiKb: '(requires a Wiki-enabled knowledge base)',
-      // Wiki read tools
       wikiSearch: 'Search Wiki',
       wikiSearchDesc: 'Keyword / semantic search over Wiki pages',
       wikiReadPage: 'Read Wiki Page',
@@ -6157,7 +4786,6 @@ export default {
       wikiReadSourceDocDesc: 'Dive into the original documents that a Wiki page is built from',
       wikiFlagIssue: 'Flag Wiki Issue',
       wikiFlagIssueDesc: 'Flag factual errors or merge conflicts on a Wiki page',
-      // Wiki write tools (destructive)
       wikiWritePage: 'Create / Overwrite Wiki',
       wikiWritePageDesc: 'Create a new page or fully overwrite an existing one',
       wikiReplaceText: 'Replace Text in Wiki',
@@ -6166,15 +4794,12 @@ export default {
       wikiRenamePageDesc: 'Rename a Wiki page and auto-update cross-links',
       wikiDeletePage: 'Delete Wiki Page',
       wikiDeletePageDesc: 'Delete a Wiki page and clean up dead links',
-      // Wiki issue tools
       wikiReadIssue: 'View Wiki Issue',
       wikiReadIssueDesc: 'View details of a Wiki page issue',
       wikiUpdateIssue: 'Update Wiki Issue',
       wikiUpdateIssueDesc: 'Update the status of a Wiki page issue',
-      // Runtime system-injected tools (preview only)
       webSearch: 'Web Search',
       webFetch: 'Web Fetch',
-      // Groups
       groupBase: 'Basic',
       groupRag: 'Knowledge Retrieval (RAG)',
       groupWikiRead: 'Wiki Read',
@@ -6183,20 +4808,17 @@ export default {
       groupData: 'Data Analysis',
       writeWarning: 'Mutates Wiki content',
       dangerTag: 'Write',
-      // Status bar
       statusNoKb: 'No knowledge base is linked',
-      statusKb: 'In scope: {rag} RAG KBs · {wiki} Wiki KBs',
       kbMetricRag: 'RAG KBs',
       kbMetricWiki: 'Wiki KBs',
       statusInactive: '{count} ticked tool(s) cannot take effect with the current config',
-      // Effective tools preview
       effectiveLabel: 'Effective Tools',
       effectiveDesc: 'Computed from the current config — these are the tools the agent will actually be able to call',
-      effectiveEmpty: 'No tool available — the agent will fall back to plain model chat',
+      effectiveEmpty: 'No tool available — the agent will fall back to plain model chat'
     },
     embed: {
       title: 'Web Page Embed',
-      description: 'Embed this agent on your website so visitors can chat via an in-page window or floating launcher. Knowledge scope follows this agent.',
+      description: 'Embed this agent on your website so visitors can chat via an in-page window or floating launcher. Knowledge scope follows this agent.'
     },
     im: {
       title: 'IM Integration',
@@ -6261,8 +4883,7 @@ export default {
       yunzhijiaSendMsgUrlRequired: 'Enter the Send Message URL from Yunzhijia robot settings',
       mattermostModeHint: 'Mattermost only supports Webhook mode (outgoing webhook + bot token).',
       mattermostPostToMain: 'Post replies in channel timeline',
-      mattermostPostToMainHint:
-        'When on, bot replies are new top-level posts in the channel. When off (default), they stay in the thread and the main view only shows “N replies”.',
+      mattermostPostToMainHint: 'When on, bot replies are new top-level posts in the channel. When off (default), they stay in the thread and the main view only shows “N replies”.',
       modeHint: 'WebSocket is recommended for easier setup',
       consoleTip: 'to get credentials',
       wecomWSEndpointHint: 'Optional. For private WeCom deployments, enter a custom WebSocket address. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
@@ -6295,7 +4916,7 @@ export default {
       sectionSession: 'Session',
       sectionCallback: 'Callback URL',
       sectionKnowledge: 'File storage',
-      sectionStatus: 'Status',
+      sectionStatus: 'Status'
     },
     agentType: {
       label: 'Agent Type',
@@ -6307,9 +4928,9 @@ export default {
         hybridRagWiki: 'No retrieval surface enabled',
         dataAnalysis: 'Requires RAG (FAQ not supported)',
         quickAnswer: 'Quick Answer mode requires RAG retrieval',
-        generic: 'Not compatible with current type',
+        generic: 'Not compatible with current type'
       },
-      kbIncompatibleWarn: '{count} selected KB(s) are not compatible with this type, please adjust manually.',
+      kbIncompatibleWarn: '{count} selected KB(s) are not compatible with this type, please adjust manually.'
     },
     mcp: {
       label: 'MCP Services',
@@ -6320,13 +4941,13 @@ export default {
       authWaitTimeout: 'Authentication Wait Timeout (s)',
       authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
       authWaitTimeoutPlaceholder: 'Default 600 seconds',
-      unavailableService: 'Unavailable service',
+      unavailableService: 'Unavailable service'
     },
     llmCallTimeout: {
-      label: "LLM Call Timeout",
-      desc: "Maximum waiting time for a single LLM call (seconds). Call will be terminated if this time is exceeded",
-      hint: "Leave empty or 0 to use the default (120 seconds)",
-      placeholder: "Enter seconds, recommended range 60-1800",
+      label: 'LLM Call Timeout',
+      desc: 'Maximum waiting time for a single LLM call (seconds). Call will be terminated if this time is exceeded',
+      hint: 'Leave empty or 0 to use the default (120 seconds)',
+      placeholder: 'Enter seconds, recommended range 60-1800'
     },
     imageUpload: {
       navLabel: 'Attachment Upload',
@@ -6348,38 +4969,37 @@ export default {
       storageProviderPlaceholder: 'Select storage engine',
       storageDefault: 'System Default',
       notConfigured: 'Not Configured',
-      goStorageSettings: 'Go to Storage Settings',
+      goStorageSettings: 'Go to Storage Settings'
     },
     audioUpload: {
       label: 'Audio Upload',
       desc: 'When enabled, users can upload audio files in conversations. The system will automatically transcribe them using the ASR model.',
       asrModel: 'ASR Model',
       asrModelDesc: 'Speech recognition model for audio transcription. If not configured, audio files will be passed as placeholders.',
-      asrModelPlaceholder: 'Select ASR Model',
+      asrModelPlaceholder: 'Select ASR Model'
     },
     chatParser: {
       label: 'Chat Attachment Parsing Policy',
       desc: 'Choose a parser engine per file type for this agent\'s chat attachments.',
       waitTimeoutLabel: 'Attachment Parse Wait Timeout (s)',
-      waitTimeoutDesc: 'How long a chat turn waits for still-parsing attachments before proceeding with only the finished ones. Raise for large / scanned files. 0 uses the global default.',
+      waitTimeoutDesc: 'How long a chat turn waits for still-parsing attachments before proceeding with only the finished ones. Raise for large / scanned files. 0 uses the global default.'
     },
     faq: {
       title: 'FAQ Priority Strategy',
-      tooltip: 'When the knowledge base contains FAQ (Q&A pairs), enable this strategy to prioritize FAQ answers over regular documents',
       enableLabel: 'Enable FAQ Priority',
       enableDesc: 'FAQ answers will be prioritized over regular documents, improving response accuracy',
       thresholdLabel: 'Direct Answer Threshold',
       thresholdDesc: 'When the similarity between the question and FAQ exceeds this value, use the FAQ answer directly',
       boostLabel: 'FAQ Score Boost',
-      boostDesc: 'Multiply FAQ relevance scores by this factor to rank them higher',
+      boostDesc: 'Multiply FAQ relevance scores by this factor to rank them higher'
     },
     dataAnalysis: {
       enableLabel: 'Enable Tabular Data Analysis',
-      enableDesc: 'When the retrieved chunks come from a CSV/Excel file, ask the LLM to generate a DuckDB SQL query before answering. This adds one extra LLM call and several seconds of latency, so only enable it when you actually need SQL-style analysis.',
+      enableDesc: 'When the retrieved chunks come from a CSV/Excel file, ask the LLM to generate a DuckDB SQL query before answering. This adds one extra LLM call and several seconds of latency, so only enable it when you actually need SQL-style analysis.'
     },
     fallback: {
       fixed: 'Fixed Response',
-      model: 'Model Generated',
+      model: 'Model Generated'
     },
     fileTypes: {
       label: 'Supported File Types',
@@ -6393,8 +5013,8 @@ export default {
       csv: 'Comma-Separated Value Files',
       excel: 'Excel Spreadsheets (.xlsx/.xls)',
       imageLabel: 'Images',
-      image: 'Image Files (.jpg/.jpeg/.png)',
-    },
+      image: 'Image Files (.jpg/.jpeg/.png)'
+    }
   },
   faqManager: {
     import: {
@@ -6406,7 +5026,6 @@ export default {
       partialFailed: 'Partially Failed',
       failed: 'Failed',
       skipped: 'Skipped',
-      unit: 'record(s)',
       progressHint: 'Validating and importing FAQ data...',
       downloadReasons: 'Download Reasons',
       appendMode: 'Append Mode',
@@ -6416,9 +5035,8 @@ export default {
       importFailed: 'Import Failed',
       waiting: 'Waiting...',
       importInProgress: 'Import is in progress, please wait for it to complete',
-      noFailedRecords: 'No failed records available for download',
-    },
-    retry: 'Retry',
+      noFailedRecords: 'No failed records available for download'
+    }
   },
   mermaid: {
     diagram: 'Diagram',
@@ -6428,20 +5046,18 @@ export default {
     reset: 'Reset',
     download: 'Download Image',
     close: 'Close',
-    downloading: 'Downloading...',
+    downloading: 'Downloading...'
   },
   ollama: {
     unknown: 'Unknown',
     today: 'Today',
     yesterday: 'Yesterday',
-    daysAgo: '{days} days ago',
+    daysAgo: '{days} days ago'
   },
   datasource: {
     title: 'Data Sources',
     description: 'Configure external data sources to sync content into this knowledge base',
-    channelsTitle: 'Data sources',
     add: 'Add Data Source',
-    addFirst: 'Add your first data source',
     empty: 'No data sources configured',
     edit: 'Edit',
     delete: 'Delete',
@@ -6457,18 +5073,15 @@ export default {
     resumed: 'Resumed',
     pauseFailed: 'Failed to pause',
     logs: 'Logs',
-    lastSync: 'Last sync',
-    lastStatus: 'Result',
-    schedule: 'Schedule',
     syncModeLabel: 'Sync mode',
     syncMode: {
       incremental: 'Incremental',
-      full: 'Full',
+      full: 'Full'
     },
     status: {
       active: 'Connected',
       paused: 'Paused',
-      error: 'Error',
+      error: 'Error'
     },
     createTitle: 'Add Data Source',
     editTitle: 'Edit Data Source',
@@ -6486,7 +5099,7 @@ export default {
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
     noResources: 'No wiki spaces found',
-	noResourcesDesc: 'The app needs wiki access via a group chat to fetch content',
+    noResourcesDesc: 'The app needs wiki access via a group chat to fetch content',
     noResourcesDesc_notion: 'The app needs Notion page access permissions to fetch content',
     retryLoadResources: 'Retry',
     guideStep1: 'Create a group chat in Feishu, then add your app as a bot in the group settings',
@@ -6500,21 +5113,19 @@ export default {
     conflictLabel: 'Conflict strategy',
     conflict: {
       overwrite: 'Overwrite',
-      skip: 'Skip existing',
+      skip: 'Skip existing'
     },
     syncDeletions: 'Sync deletions (remove knowledge when deleted at source)',
     createAndSync: 'Create & Sync Now',
-    createSuccess: 'Data source created',
     createAndSyncSuccess: 'Data source created and sync task submitted',
     createButSyncFailed: 'Data source created, but failed to trigger sync',
-    updateSuccess: 'Data source updated',
     updateSuccessSyncHint: 'Data source updated. Editing does not start a sync automatically; click Sync to import changes.',
     saveFailed: 'Failed to save',
     step: {
       selectType: 'Select Type',
       credentials: 'Credentials',
       resources: 'Resources',
-      strategy: 'Strategy',
+      strategy: 'Strategy'
     },
     syncHistory: 'Sync History',
     refreshLogs: 'Refresh logs',
@@ -6524,54 +5135,39 @@ export default {
       success: 'Success',
       partial: 'Partial',
       failed: 'Failed',
-      canceled: 'Canceled',
+      canceled: 'Canceled'
     },
     logMetric: {
       total: 'Total',
-      created: 'created',
-      updated: 'updated',
-      deleted: 'deleted',
       skipped: 'skipped',
-      failed: 'failed',
+      failed: 'failed'
     },
     logSummary: {
       total: 'Runs',
       success: 'Success',
       failed: 'Failed',
-      items: 'Items',
+      items: 'Items'
     },
-    logLatest: 'Latest',
     logDetail: {
       startTime: 'Started',
       endTime: 'Finished',
-      duration: 'Duration',
       failedItems: 'Failed documents',
       failedItemsMore: '{n} more failed documents not shown',
-      docsFailedSummary: '{n} document(s) failed to sync',
-    },
-    syncError: {
-      feishu_auth_or_permission: 'Authentication or permission error; check credentials and app permissions',
-      feishu_rate_limited: 'Feishu API rate limited; will retry on the next sync',
-      feishu_timeout: 'Export or request timed out; will retry on the next sync',
-      feishu_server_unavailable: 'Feishu service temporarily unavailable; will retry on the next sync',
-      feishu_api_error: 'Feishu API error (code={code}); will retry on the next sync',
-      feishu_api_error_generic: 'Feishu API error; will retry on the next sync',
-      sync_failed: 'Sync failed; will retry on the next sync',
-      ingest_failed: 'Ingest failed; see server logs',
+      docsFailedSummary: '{n} document(s) failed to sync'
     },
     connector: {
       feishu: 'Feishu',
       lark: 'Lark',
       notion: 'Notion',
       yuque: 'Yuque',
-      rss: 'RSS / Atom Feed',
+      rss: 'RSS / Atom Feed'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
       lark: 'Sync documents, spreadsheets and files from Lark Wiki (Feishu international)',
       notion: 'Sync pages and databases from Notion',
       yuque: 'Sync documents from Yuque knowledge bases',
-      rss: 'Sync articles from RSS / Atom feeds',
+      rss: 'Sync articles from RSS / Atom feeds'
     },
     field: {
       appId: 'App ID',
@@ -6583,15 +5179,11 @@ export default {
       feedUrls: 'Feed URLs',
       feedUrlsHint: 'One RSS / Atom feed URL per line; multiple feeds are supported.',
       authHeaders: 'Custom headers (optional)',
-      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx',
+      authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
     },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
     openDoc: 'Open documentation',
-    copyUrl: 'Copy URL',
-    copied: 'Copied',
-    pleaseTestFirst: 'Please test connection first',
-    prereqTitle: 'Complete these steps before connecting (all required)',
     prereqBarText: 'First time? Click to see Feishu app setup guide',
     prereqBarText_yuque: 'First time? Click to see the Yuque token setup guide',
     prereqStep1Brief_yuque: 'Create a Yuque personal token',
@@ -6603,16 +5195,10 @@ export default {
     prereqOpenConsole_yuque: 'Open Yuque Token settings',
     prereqBotBrief: 'Add "Bot" capability to your app',
     prereqBotDesc: 'Open Platform > Add App Capability > Bot > create version and publish',
-    prereqBotLabel: '1. Add "Bot" capability to your app (otherwise the app won\'t appear in wiki member search):',
-    prereqBotStep1: 'Open your app in Feishu Open Platform, click "Add App Capability" in the left menu',
-    prereqBotStep2: 'Select "Bot" and confirm',
-    prereqBotStep3: 'Create a new version and publish (or test in your test organization)',
     prereqPermBrief: 'Grant API permissions',
-    prereqPermLabel: '2. Grant these API permissions:',
     prereqOpenConsole: 'Open Feishu Developer Console',
     prereqMemberBrief: 'Add app to wiki via group chat',
     prereqMemberDesc: 'Create group chat > add app as bot > add group chat as wiki member',
-    prereqMemberLabel: '3. Add the app to a wiki space via group chat (wiki cannot search for apps directly):',
     back: 'Back',
     next: 'Next',
     save: 'Save',
@@ -6626,34 +5212,27 @@ export default {
       '1h': 'Hourly',
       '6h': 'Every 6 hours',
       '12h': 'Every 12 hours',
-      '24h': 'Daily',
+      '24h': 'Daily'
     },
-    addCard: 'Add Data Source',
-    wikiSpace: 'Wiki Space',
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book',
+      book: 'Yuque Book'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
     minutesAgo: '{n}m ago',
     hoursAgo: '{n}h ago',
-    daysAgo: '{n}d ago',
-    syncResultCreated: '+{n}',
-    syncResultUpdated: '~{n}',
-    syncResultDeleted: '-{n}',
-    moreActions: 'More',
+    daysAgo: '{n}d ago'
   },
   integrations: {
     title: 'Publish & Integrations',
-    subtitle: 'Publish agents to IM platforms, websites, browsers, and AI assistants',
     tabs: {
       im: 'IM Integration',
       embed: 'Web Embed',
       api: 'API Integration',
       chrome: 'Chrome Extension',
-      claw: 'Claw Skill',
+      claw: 'Claw Skill'
     },
     api: {
       title: 'API Integration',
@@ -6662,11 +5241,8 @@ export default {
       retry: 'Retry',
       copy: 'Copy',
       copySuccess: 'Copied',
-      save: 'Save',
       baseUrl: 'API Base URL',
       baseUrlDesc: 'Use this base URL with REST API paths.',
-      apiKey: 'Workspace API Key',
-      apiKeyDesc: 'Create API keys with operation permissions and knowledge-base scope.',
       apiKeys: 'API Keys',
       apiKeysDesc: 'Create separate keys per integration and restrict operation permissions plus knowledge-base access.',
       createApiKey: 'Create API Key',
@@ -6676,72 +5252,57 @@ export default {
       apiKeyValue: 'API Key',
       apiKeyNamePlaceholder: 'Example: MCP read-only access',
       apiKeyNameRequired: 'Enter an API key name',
-      toggleApiKeyVisible: 'Show or hide API key',
       apiKeyAccessMode: 'Access mode',
       apiKeyScopedAccess: 'Scoped access',
-      apiKeyAccessRole: "Access role",
-      apiKeyAccessType: "Access type",
-      apiKeyAccessTypeHint: "\"Knowledge base\" operates within the KB scope at the permission level below; \"Workspace full\" additionally unlocks every workspace-level API such as models and data sources.",
-      accessTypeKnowledgeBase: "Knowledge base",
-      accessTypeTenantFull: "Workspace full",
-      apiKeyPermissionLevel: "Permission level",
-      apiKeyAccessRoleHint: "The first three roles are limited to knowledge-base operations; \"Workspace Full\" also unlocks workspace-level APIs such as models and data sources.",
-      accessRoleViewer: "KB Read",
-      accessRoleContributor: "KB Write",
-      accessRoleAdmin: "KB Admin",
-      accessRoleOwner: "Workspace Full",
-      accessRoleViewerDesc: "Query, search, and chat without modifying knowledge-base content.",
-      accessRoleContributorDesc: "Create, update, or delete knowledge-base content within the selected scope.",
-      accessRoleAdminDesc: "Manage knowledge bases, including destructive operations like clearing a KB, within the selected scope; no workspace-level configuration.",
-	      accessRoleOwnerDesc: "Full access, equivalent to a workspace owner: may call every workspace-level API (models, vector stores, data sources, channels, ...). Not limited by knowledge-base scope.",
-	      apiKeyCapabilities: 'Capabilities',
-	      apiKeyCapabilityGroupKnowledge: 'Knowledge-base data',
-	      apiKeyCapabilityGroupAutomation: 'Agents and integrations',
-	      apiKeyCapabilityGroupCollaboration: 'Members and spaces',
-	      apiKeyCapabilityGroupTenant: 'Workspace configuration',
-	      apiKeyCapabilitySelectGroup: 'Select all',
-	      apiKeyCapabilityClearGroup: 'Clear',
-	      capabilityTenantFull: 'Workspace full access',
-	      capabilityTenantFullHint: 'Allow every workspace-level API, including models, vector stores, data sources and channels. Knowledge-base scope does not apply.',
-	      capabilityRetrieve: 'Retrieve knowledge bases',
-	      capabilityRetrieveHint: 'Read, query, and search data inside the selected knowledge-base scope. Does not create sessions or modify content.',
-	      capabilityChat: 'Chat',
-	      capabilityChatHint: 'Let this key hold conversations and manage its own sessions. Does not modify knowledge-base content.',
-	      capabilityReadAgents: 'Read agents',
-	      capabilityReadAgentsHint: 'List agents, read agent details, presets, and suggested questions. Does not allow chat or agent edits.',
+      apiKeyAccessType: 'Access type',
+      apiKeyAccessTypeHint: '"Knowledge base" operates within the KB scope at the permission level below; "Workspace full" additionally unlocks every workspace-level API such as models and data sources.',
+      apiKeyCapabilities: 'Capabilities',
+      apiKeyCapabilityGroupKnowledge: 'Knowledge-base data',
+      apiKeyCapabilityGroupAutomation: 'Agents and integrations',
+      apiKeyCapabilityGroupCollaboration: 'Members and spaces',
+      apiKeyCapabilityGroupTenant: 'Workspace configuration',
+      apiKeyCapabilitySelectGroup: 'Select all',
+      apiKeyCapabilityClearGroup: 'Clear',
+      capabilityTenantFull: 'Workspace full access',
+      capabilityTenantFullHint: 'Allow every workspace-level API, including models, vector stores, data sources and channels. Knowledge-base scope does not apply.',
+      capabilityRetrieve: 'Retrieve knowledge bases',
+      capabilityRetrieveHint: 'Read, query, and search data inside the selected knowledge-base scope. Does not create sessions or modify content.',
+      capabilityChat: 'Chat',
+      capabilityChatHint: 'Let this key hold conversations and manage its own sessions. Does not modify knowledge-base content.',
+      capabilityReadAgents: 'Read agents',
+      capabilityReadAgentsHint: 'List agents, read agent details, presets, and suggested questions. Does not allow chat or agent edits.',
       capabilityIngest: 'Write KB content',
       capabilityIngestHint: 'Let this key write content into its allowed knowledge bases (upload documents, edit chunks/FAQ/tags/wiki). It cannot create knowledge bases or agents, cannot clear a knowledge base, and stays bounded to the selected knowledge bases.',
       capabilityManageKbs: 'Manage knowledge bases',
       capabilityManageKbsHint: 'Let this key manage the full knowledge-base lifecycle: create, copy, update, and delete knowledge bases and change their initialization/configuration. Operations on existing knowledge bases (copy/update/delete) stay bounded by the selected scope; creating a new knowledge base is unrestricted (the new KB belongs to this space).',
-	      capabilityManageAgents: 'Manage agents',
-	      capabilityManageAgentsHint: 'Let this key create, update, delete and copy agents. Agent config can carry sensitive model/MCP bindings, so this is off by default — enable only when needed.',
-	      capabilityMessageHistory: 'Message history',
-	      capabilityMessageHistoryHint: 'Let this key search workspace chat history and read chat-history stats. It does not grant workspace configuration access.',
-	      capabilityManageModels: 'Manage models',
-	      capabilityManageModelsHint: 'Manage model definitions, credentials, connectivity checks, and WeKnoraCloud credentials.',
-	      capabilityManageMcpServices: 'Manage MCP services',
-	      capabilityManageMcpServicesHint: 'Manage MCP services, credentials, tool approval policies, and OAuth state for this principal.',
-	      capabilityManageDatasources: 'Manage data sources',
-	      capabilityManageDatasourcesHint: 'Manage data-source connectors, credentials, resource selection, and sync jobs. Knowledge-base scope still applies when a source is bound to a KB.',
-	      capabilityManageChannels: 'Manage channels',
-	      capabilityManageChannelsHint: 'Manage agent embed channels, IM channels, and WeChat QR binding flows.',
-	      capabilityManageVectorStores: 'Manage retrieval infrastructure',
-	      capabilityManageVectorStoresHint: 'Manage vector-store configuration plus parser, document reader, and storage engine connectivity checks.',
-	      capabilityManageStorageBackends: 'Manage storage backends',
-	      capabilityManageStorageBackendsHint: 'Manage object/file storage backend instances (e.g. S3-compatible or local file storage): their CRUD lifecycle, connectivity tests, and the workspace default selection.',
-	      capabilityManageWebSearch: 'Manage web search',
-	      capabilityManageWebSearchHint: 'Manage web-search provider configurations, credentials, and connection tests.',
-	      capabilityRunEvaluations: 'Run evaluations',
-	      capabilityRunEvaluationsHint: 'Run evaluation jobs and read evaluation results.',
-	      capabilityManageMembers: 'Manage members',
-	      capabilityManageMembersHint: 'List and manage workspace members, roles, invitations, and invite links. Does not include API key management, workspace deletion, or ownership transfer.',
-	      capabilityManageSpaces: 'Manage spaces',
-	      capabilityManageSpacesHint: 'Manage organization spaces, join flows, space membership, invitations, and shared-space visibility. Does not grant KB or agent share management.',
-	      capabilityManageTenantSettings: 'Manage workspace settings',
-	      capabilityManageTenantSettingsHint: 'Read and update workspace-level integration settings such as API end-user identity mode, request header configuration, and workspace KV settings. Does not include API key management, member management, workspace deletion, or ownership transfer.',
-	      apiKeyKnowledgeScope: 'Knowledge bases',
+      capabilityManageAgents: 'Manage agents',
+      capabilityManageAgentsHint: 'Let this key create, update, delete and copy agents. Agent config can carry sensitive model/MCP bindings, so this is off by default — enable only when needed.',
+      capabilityMessageHistory: 'Message history',
+      capabilityMessageHistoryHint: 'Let this key search workspace chat history and read chat-history stats. It does not grant workspace configuration access.',
+      capabilityManageModels: 'Manage models',
+      capabilityManageModelsHint: 'Manage model definitions, credentials, connectivity checks, and WeKnoraCloud credentials.',
+      capabilityManageMcpServices: 'Manage MCP services',
+      capabilityManageMcpServicesHint: 'Manage MCP services, credentials, tool approval policies, and OAuth state for this principal.',
+      capabilityManageDatasources: 'Manage data sources',
+      capabilityManageDatasourcesHint: 'Manage data-source connectors, credentials, resource selection, and sync jobs. Knowledge-base scope still applies when a source is bound to a KB.',
+      capabilityManageChannels: 'Manage channels',
+      capabilityManageChannelsHint: 'Manage agent embed channels, IM channels, and WeChat QR binding flows.',
+      capabilityManageVectorStores: 'Manage retrieval infrastructure',
+      capabilityManageVectorStoresHint: 'Manage vector-store configuration plus parser, document reader, and storage engine connectivity checks.',
+      capabilityManageStorageBackends: 'Manage storage backends',
+      capabilityManageStorageBackendsHint: 'Manage object/file storage backend instances (e.g. S3-compatible or local file storage): their CRUD lifecycle, connectivity tests, and the workspace default selection.',
+      capabilityManageWebSearch: 'Manage web search',
+      capabilityManageWebSearchHint: 'Manage web-search provider configurations, credentials, and connection tests.',
+      capabilityRunEvaluations: 'Run evaluations',
+      capabilityRunEvaluationsHint: 'Run evaluation jobs and read evaluation results.',
+      capabilityManageMembers: 'Manage members',
+      capabilityManageMembersHint: 'List and manage workspace members, roles, invitations, and invite links. Does not include API key management, workspace deletion, or ownership transfer.',
+      capabilityManageSpaces: 'Manage spaces',
+      capabilityManageSpacesHint: 'Manage organization spaces, join flows, space membership, invitations, and shared-space visibility. Does not grant KB or agent share management.',
+      capabilityManageTenantSettings: 'Manage workspace settings',
+      capabilityManageTenantSettingsHint: 'Read and update workspace-level integration settings such as API end-user identity mode, request header configuration, and workspace KV settings. Does not include API key management, member management, workspace deletion, or ownership transfer.',
+      apiKeyKnowledgeScope: 'Knowledge bases',
       apiKeyKnowledgeScopePlaceholder: 'Leave empty to allow all knowledge bases',
-      apiKeyKnowledgeScopeOwnerHint: 'Full-access keys are not limited by knowledge-base scope.',
       allKnowledgeBases: 'All knowledge bases',
       createdAt: 'Created',
       actions: 'Actions',
@@ -6752,25 +5313,19 @@ export default {
       createApiKeyFailed: 'Failed to create API key',
       loadApiKeysFailed: 'Failed to load API keys',
       apiKeyCreated: 'API key created',
-      apiKeyCreatedDesc: 'The API key has been created and can be viewed or copied from the list.',
       principalMode: 'User identity mode',
-      principalModeDesc:
-        'Choose how API requests identify the end user. This identity scopes both conversation sessions and MCP tool authorization per user.',
-      principalScope:
-        'End-user identity isolates sessions and MCP OAuth. Operation permissions and knowledge-base scope are controlled by API Keys above.',
+      principalModeDesc: 'Choose how API requests identify the end user. This identity scopes both conversation sessions and MCP tool authorization per user.',
+      principalScope: 'End-user identity isolates sessions and MCP OAuth. Operation permissions and knowledge-base scope are controlled by API Keys above.',
       modeTenant: 'Workspace only',
       modeDirect: 'Direct user ID',
       modeSigned: 'Signed token',
       directWarning: 'Direct user ID trusts the caller-supplied header. Use only for trusted server-to-server calls.',
-      directWarningDetail:
-        'Anyone with the API key can change the user ID header to impersonate another external user and reuse or hijack that user\'s MCP OAuth authorization. Do not use this from browsers or untrusted clients; use Signed token for end-user apps.',
+      directWarningDetail: 'Anyone with the API key can change the user ID header to impersonate another external user and reuse or hijack that user\'s MCP OAuth authorization. Do not use this from browsers or untrusted clients; use Signed token for end-user apps.',
       signedRecommended: 'Recommended for user-facing apps: your backend signs a short-lived HS256 JWT for the external user.',
-      signedFlowDetail:
-        'Keep the HMAC secret only on WeKnora and your trusted backend—never put it in requests or ship it to browsers. The request header carries the JWT string signed with that secret (it changes on each issuance or after expiry), not the secret itself. JWT must include sub (external user ID), tenant_id, aud=weknora, and exp (max 24h lifetime).',
+      signedFlowDetail: 'Keep the HMAC secret only on WeKnora and your trusted backend—never put it in requests or ship it to browsers. The request header carries the JWT string signed with that secret (it changes on each issuance or after expiry), not the secret itself. JWT must include sub (external user ID), tenant_id, aud=weknora, and exp (max 24h lifetime).',
       directHeader: 'User ID header',
       requireDirectHeader: 'Require user ID header',
-      requireDirectHeaderDesc:
-        'When enabled, API Key requests without the user ID header are rejected; when disabled, all requests are treated as the whole workspace with no per-user distinction.',
+      requireDirectHeaderDesc: 'When enabled, API Key requests without the user ID header are rejected; when disabled, all requests are treated as the whole workspace with no per-user distinction.',
       tokenHeader: 'Token header',
       tokenHeaderDesc: 'Clients send the backend-signed JWT in this fixed header.',
       hmacSecret: 'HMAC secret',
@@ -6783,8 +5338,7 @@ export default {
       hmacSecretResetConfirmOk: 'Reset',
       hmacSecretResetConfirmCancel: 'Cancel',
       tokenSignExample: 'Backend JWT signing example (Go)',
-      signedRequestStep0:
-        '# 0. Sign JWT on your backend (HS256, aud=weknora, sub=user id, tenant_id={tenantId}, exp<=24h)',
+      signedRequestStep0: '# 0. Sign JWT on your backend (HS256, aud=weknora, sub=user id, tenant_id={tenantId}, exp<=24h)',
       signedRequestStep0Hint: '#    Put the JWT in {headerName} — not the HMAC secret',
       requestExampleCreateSession: '# 1. Create a session',
       requestExampleAgentChat: '# 2. Agent chat (SSE; replace <session_id> with the id from step 1)',
@@ -6794,7 +5348,6 @@ export default {
       playgroundDesc: 'Send real requests with the current API key and identity mode to verify session creation, agent chat, and SSE output.',
       playgroundOpen: 'Open Playground',
       playgroundDrawerDesc: 'Debug sessions, Agent Chat, and SSE output using the real API integration flow',
-      playgroundBadge: 'Real request',
       playgroundSectionRequest: 'Request setup',
       playgroundSectionPreview: 'Request preview',
       playgroundSectionResult: 'Run result',
@@ -6830,176 +5383,133 @@ export default {
       loadFailed: 'Failed to load API integration settings',
       saveFailed: 'Failed to save API integration settings',
       saveSuccess: 'API integration settings saved',
-      autoSaveNeedSecret: 'Signed-token mode needs an HMAC secret before auto-save can run.',
+      autoSaveNeedSecret: 'Signed-token mode needs an HMAC secret before auto-save can run.'
     },
-    manageSectionTitle: 'Channel configuration',
-    manageSectionDesc: 'Select an agent to create or edit integration channels for that agent',
-    selectAgent: 'Select agent',
-    selectAgentDesc: 'Each integration channel is bound to one agent. Choose the agent to configure.',
     selectAgentPlaceholder: 'Choose an agent',
     selectAgentHint: 'Please select an agent first',
     boundAgent: 'Bound agent',
     filterByAgent: 'Filter by agent',
     filterByAgentWithName: 'Filter by agent: {name}',
     filterAllAgents: 'All agents',
-    manageChannel: 'Manage channel',
-    goToCenter: 'Open Integrations',
     imOverview: {
-      title: 'Connected IM channels',
-      subtitle: 'All IM channels across agents in this workspace. Toggle quickly or configure details below.',
+      title: 'Connected IM channels'
     },
     embedOverview: {
-      title: 'Web embed channels',
-      subtitle: 'All web embed channels across agents in this workspace. Toggle quickly or configure details below.',
-      empty: 'No web embed channels configured yet',
-      loadFailed: 'Failed to load web embed channels',
+      title: 'Web embed channels'
     },
     agentEditor: {
       label: 'Publish channels',
-      desc: 'Publish this agent to IM platforms or websites. Manage in Integrations.',
-      manage: 'Manage',
+      desc: 'Publish this agent to IM platforms or websites. Manage in Integrations.'
     },
     chrome: {
       title: 'Knowledge Assistant',
-      subtitle:
-        'For self-hosted WeKnora: ask questions in a sidebar, clip web pages, and save Markdown notes into your knowledge bases while you browse.',
+      subtitle: 'For self-hosted WeKnora: ask questions in a sidebar, clip web pages, and save Markdown notes into your knowledge bases while you browse.',
       capabilitiesTitle: 'Core capabilities',
       capabilities: {
         qa: {
           title: 'Knowledge-base Q&A',
-          desc: 'Sidebar chat with multi-KB switching and fast/deep/precise answer modes—ask without leaving the page.',
+          desc: 'Sidebar chat with multi-KB switching and fast/deep/precise answer modes—ask without leaving the page.'
         },
         clip: {
           title: 'One-click web capture',
-          desc: 'Save page URLs, AI-extract main content, or manually select regions into a target knowledge base.',
+          desc: 'Save page URLs, AI-extract main content, or manually select regions into a target knowledge base.'
         },
         notes: {
           title: 'Markdown quick notes',
-          desc: 'Built-in Markdown editor for ideas and notes, saved to your knowledge base in one click.',
+          desc: 'Built-in Markdown editor for ideas and notes, saved to your knowledge base in one click.'
         },
         shortcuts: {
           title: 'Keyboard shortcuts',
-          desc: 'Customize shortcuts to ask questions, open the sidebar, and speed up daily workflows.',
-        },
+          desc: 'Customize shortcuts to ask questions, open the sidebar, and speed up daily workflows.'
+        }
       },
-      scenariosTitle: 'Use cases',
       scenarios: {
         research: 'Daily research',
         learning: 'Study notes',
         tech: 'Technical references',
-        work: 'Work knowledge',
+        work: 'Work knowledge'
       },
       stepsTitle: 'Setup steps',
       steps: {
         api: {
           title: 'Get API credentials',
-          desc: 'Copy your API Key and base URL from Settings → API Info.',
+          desc: 'Copy your API Key and base URL from Settings → API Info.'
         },
         port: {
           title: 'Desktop: fixed port (recommended)',
-          desc: 'On WeKnora Desktop, set a fixed API port (e.g. 37841) in API Info so the URL stays stable across restarts.',
+          desc: 'On WeKnora Desktop, set a fixed API port (e.g. 37841) in API Info so the URL stays stable across restarts.'
         },
         install: {
           title: 'Install the extension',
-          desc: 'Install “Knowledge Assistant” from the Chrome Web Store.',
+          desc: 'Install “Knowledge Assistant” from the Chrome Web Store.'
         },
         connect: {
           title: 'Connect in the extension',
-          desc: 'Open extension settings, choose enterprise/developer mode, and enter the service API URL and API Key. Your current API URL is shown below.',
-        },
+          desc: 'Open extension settings, choose enterprise/developer mode, and enter the service API URL and API Key. Your current API URL is shown below.'
+        }
       },
       openApiSettings: 'Open API Info',
       copy: 'Copy',
       copySuccess: 'API URL copied',
       installCta: 'Chrome Web Store',
       installCtaHint: 'Official extension · opens in a new tab',
-      storeMeta: 'Chrome Web Store · v1.0.0',
+      storeMeta: 'Chrome Web Store · v1.0.0'
     },
     claw: {
       title: 'WeKnora Skill',
-      subtitle:
-        'Import documents and run hybrid retrieval (vector + keyword) via the WeKnora REST API—for uploads, URL imports, Markdown entries, and cross-KB search.',
+      subtitle: 'Import documents and run hybrid retrieval (vector + keyword) via the WeKnora REST API—for uploads, URL imports, Markdown entries, and cross-KB search.',
       capabilitiesTitle: 'Skill capabilities',
       capabilities: {
         upload: {
           title: 'Upload files',
-          desc: 'Upload PDF, Word, Excel, and more; automatic parsing and vectorization.',
+          desc: 'Upload PDF, Word, Excel, and more; automatic parsing and vectorization.'
         },
         url: {
           title: 'Import URLs',
-          desc: 'Fetch web pages by URL into a knowledge base with parse-status polling.',
+          desc: 'Fetch web pages by URL into a knowledge base with parse-status polling.'
         },
         manual: {
           title: 'Write Markdown',
-          desc: 'Create or edit knowledge entries as Markdown—ideal for meeting notes.',
+          desc: 'Create or edit knowledge entries as Markdown—ideal for meeting notes.'
         },
         search: {
           title: 'Hybrid search',
-          desc: 'Per-KB hybrid-search and cross-KB knowledge-search combining vector and keyword recall.',
+          desc: 'Per-KB hybrid-search and cross-KB knowledge-search combining vector and keyword recall.'
         },
         browse: {
           title: 'Browse knowledge',
-          desc: 'List knowledge bases and entries, view details, and manage imported content.',
-        },
+          desc: 'List knowledge bases and entries, view details, and manage imported content.'
+        }
       },
       stepsTitle: 'Setup steps',
       steps: {
         api: {
           title: 'Get API credentials',
-          desc: 'Copy API Key and base URL from Settings → API Info.',
+          desc: 'Copy API Key and base URL from Settings → API Info.'
         },
         env: {
           title: 'Configure environment',
-          desc: 'Set WEKNORA_BASE_URL and WEKNORA_API_KEY in your shell or ~/.zshrc / ~/.bashrc. The example below uses your current API base URL—replace the API Key with your actual value.',
+          desc: 'Set WEKNORA_BASE_URL and WEKNORA_API_KEY in your shell or ~/.zshrc / ~/.bashrc. The example below uses your current API base URL—replace the API Key with your actual value.'
         },
         install: {
           title: 'Install the skill',
-          desc: 'Run the command below in an environment with the OpenClaw CLI installed, or follow the ClawHub page instructions.',
+          desc: 'Run the command below in an environment with the OpenClaw CLI installed, or follow the ClawHub page instructions.'
         },
         verify: {
           title: 'Verify connection',
-          desc: 'Ask the agent to list knowledge bases or run a search to confirm credentials and connectivity.',
-        },
+          desc: 'Ask the agent to list knowledge bases or run a search to confirm credentials and connectivity.'
+        }
       },
       openApiSettings: 'Open API Info',
       copy: 'Copy',
       copyEnvSuccess: 'Environment example copied',
       copyCmdSuccess: 'Install command copied',
-      ecosystemNote:
-        'Skill hosted on ClawHub ({\'@\'}lyingbug/weknora). See the ClawHub page for full API docs and version history.',
+      ecosystemNote: 'Skill hosted on ClawHub ({\'@\'}lyingbug/weknora). See the ClawHub page for full API docs and version history.',
       installCta: 'Open ClawHub',
       installCtaHint: 'Install WeKnora Skill · opens in a new tab',
-      hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0',
-    },
+      hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0'
+    }
   },
-  imOverview: {
-    menuTitle: 'Connected IMs',
-    pageTitle: 'Connected IMs',
-    subtitle: 'All IM channels connected to agents in this workspace — toggle state or jump to the owning agent',
-    totalCount: '{count} total',
-    empty: 'This workspace has no IM bots configured yet',
-    loadFailed: 'Failed to load IM bots',
-    builtinAgent: 'Built-in agent',
-    liveIndicator: 'IM channels are live',
-    detailsTitle: 'IM Bot Details',
-    gotoAgentEditor: 'Open in agent editor',
-    outputMode: 'Output mode',
-    sessionMode: 'Session mode',
-    updatedAt: 'Updated at',
-    channelId: 'Channel ID',
-    columns: {
-      platform: 'Platform',
-      name: 'Name',
-      agent: 'Agent',
-      mode: 'Mode',
-      enabled: 'Enabled',
-      botIdentity: 'Bot identity',
-      createdAt: 'Created at',
-    },
-  },
-  // Shared credential resource UI (CredentialResource.vue). Keep keys
-  // generic so the same component can drive MCP / Model / WebSearch /
-  // DataSource credential surfaces without per-resource overrides.
   credential: {
     configured: 'Configured',
     unconfigured: 'Not configured',
@@ -7012,22 +5522,17 @@ export default {
     removedToast: 'Credential removed',
     removeFailed: 'Failed to remove credential',
     confirmRemovePrompt: 'Remove this credential? This cannot be undone.',
-    confirmRemove: 'Confirm remove',
-    confirmRemoveTitle: 'Remove {field}?',
-    confirmRemoveBody:
-      'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
+    confirmRemove: 'Confirm remove'
   },
   userProfile: {
     title: 'User Profile',
-    description: 'View your account info (user ID, username, email, registration time).',
+    description: 'View your account info (user ID, username, email, registration time).'
   },
   tenantMember: {
     title: 'Members',
     sectionDescription: 'Invite teammates to the workspace and manage their roles. Only Owner can add or remove members.',
     learnRbacGuide: 'Learn about RBAC',
-    totalCount: '{n} members',
     listTitle: 'Workspace members',
-    filterMatched: '{n} matched',
     loading: 'Loading members…',
     retry: 'Retry',
     empty: 'No members yet. Invite a teammate to get started.',
@@ -7041,70 +5546,56 @@ export default {
       manageTenantConfig: 'Edit workspace settings',
       manageInfra: 'Configure models / vector stores / IM channels',
       createOwnKB: 'Create and edit own KBs and agents',
-      readAll: 'Read workspace content',
+      readAll: 'Read workspace content'
     },
     columns: {
       member: 'Name & email',
-      username: 'Name',
-      email: 'Email',
       role: 'Role',
       joinedAt: 'Joined',
-      operations: 'Actions',
+      operations: 'Actions'
     },
     role: {
       owner: 'Owner',
       admin: 'Admin',
       contributor: 'Contributor',
-      viewer: 'Viewer',
+      viewer: 'Viewer'
     },
     add: {
       button: 'Add Member',
       dialogTitle: 'Invite Member',
       emailLabel: 'Email',
-      emailPlaceholder: "invitee{'@'}example.com",
-      roleLabel: 'Role',
-      submit: 'Invite',
-      success: 'Member added',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      roleLabel: 'Role'
     },
     remove: {
       button: 'Remove',
-      confirmTitle: 'Remove member?',
       confirmBody: 'Are you sure you want to remove {name} from this workspace? They will lose access immediately.',
       confirm: 'Remove',
-      success: 'Member removed',
+      success: 'Member removed'
     },
     leave: {
-      button: 'Leave Workspace',
       confirmTitle: 'Leave this workspace?',
       confirmBody: 'You will lose access to all knowledge bases and agents in this workspace. You can be re-invited later.',
       confirm: 'Leave',
-      success: 'You have left the workspace',
+      success: 'You have left the workspace'
     },
     roleChange: {
-      success: 'Role updated',
+      success: 'Role updated'
     },
     errors: {
       emailRequired: 'Email is required',
       emailFormat: 'Invalid email address',
       roleRequired: 'Role is required',
       userNotFound: 'No registered user with this email. Ask them to sign up first.',
-      alreadyMember: 'This user is already a member of the workspace.',
       lastOwner: 'Cannot demote, remove, or leave as the last Owner. Promote another member to Owner first.',
       notFound: 'Membership not found.',
-      noTenant: 'No active workspace.',
       invalidRole: 'Role must be one of owner / admin / contributor / viewer.',
-      generic: 'Something went wrong. Please try again.',
-    },
-    tabs: {
-      members: 'Members',
-      audit: 'Audit log',
+      generic: 'Something went wrong. Please try again.'
     },
     audit: {
       tabLabel: 'Audit log',
-      description:
-        'Records every membership change and access denial in this workspace. Newest first. Repeated denials within a minute are deduplicated.',
+      description: 'Records every membership change and access denial in this workspace. Newest first. Repeated denials within a minute are deduplicated.',
       refresh: 'Refresh',
-      loadMore: 'Load older',
       end: 'End of log.',
       empty: 'No audit events yet.',
       forbidden: 'You do not have permission to view the audit log.',
@@ -7116,7 +5607,7 @@ export default {
         action: 'Action',
         target: 'Target',
         path: 'Request',
-        outcome: 'Outcome',
+        outcome: 'Outcome'
       },
       action: {
         'rbac.member_added': 'Member added',
@@ -7128,58 +5619,51 @@ export default {
         'rbac.invitation_accepted': 'Invitation accepted',
         'rbac.invitation_declined': 'Invitation declined',
         'rbac.invitation_revoked': 'Invitation revoked',
-        'rbac.invitation_expired': 'Invitation expired',
+        'rbac.invitation_expired': 'Invitation expired'
       },
       outcome: {
         success: 'Success',
-        denied: 'Denied',
+        denied: 'Denied'
       },
       expanded: {
         actorId: 'Actor ID',
         targetUserId: 'Target user ID',
         targetType: 'Target type',
         targetId: 'Target ID',
-        details: 'Raw details',
-      },
-    },
+        details: 'Raw details'
+      }
+    }
   },
   tenantInvitation: {
     inboxTooltip: 'View pending invitations',
     pendingSectionTitle: 'Pending invitations',
-    pendingSectionCount: '{n}',
-    pendingSectionDesc:
-      'Awaiting the invitee to accept in their inbox. Auto-expires after {days} days.',
+    pendingSectionDesc: 'Awaiting the invitee to accept in their inbox. Auto-expires after {days} days.',
     pendingEmpty: 'No pending invitations.',
     inviteSubmit: 'Send invitation',
     inviteSuccess: 'Invitation sent. Waiting for the invitee to accept.',
     confirmInviteTitle: 'Send invitation?',
-    confirmInviteBody:
-      'Send an invitation to {email} (role: {role}). They will join the workspace only after accepting.',
+    confirmInviteBody: 'Send an invitation to {email} (role: {role}). They will join the workspace only after accepting.',
     confirmSend: 'Send',
     copyLink: 'Copy invite link',
     copied: 'Copied to clipboard',
     copyFailed: 'Copy failed; please select the text manually',
     shareLink: {
       button: 'Generate share link',
-      label: 'Share link',
       cellTitle: 'Invite via link',
       cellAccepted: '{count} joined',
       cellEmpty: 'No one has joined yet',
       dialogTitle: 'Generate share invitation link',
-      description:
-        "Generate a multi-use registration link you can drop in a group chat. Anyone who opens it registers with their own email and joins this workspace. Expires in {days} days, or revoke it any time from the list.",
+      description: 'Generate a multi-use registration link you can drop in a group chat. Anyone who opens it registers with their own email and joins this workspace. Expires in {days} days, or revoke it any time from the list.',
       generate: 'Generate link',
       resultTitle: 'Invitation link ready',
-      resultBody: "Copy the link below and share it via any private channel. It's also saved in the list — you can re-copy or revoke it later.",
-      revokeConfirm: "Revoking will block anyone who hasn't registered yet from using this link. Generate a new one to re-share.",
+      resultBody: 'Copy the link below and share it via any private channel. It\'s also saved in the list — you can re-copy or revoke it later.',
+      revokeConfirm: 'Revoking will block anyone who hasn\'t registered yet from using this link. Generate a new one to re-share.'
     },
     revoke: {
       button: 'Revoke',
-      confirmTitle: 'Revoke invitation?',
-      confirmBody:
-        "After revoke, {email} can no longer accept this invitation. You can send a new one if needed.",
+      confirmBody: 'After revoke, {email} can no longer accept this invitation. You can send a new one if needed.',
       confirm: 'Revoke',
-      success: 'Invitation revoked.',
+      success: 'Invitation revoked.'
     },
     columns: {
       invitee: 'Invitee',
@@ -7187,7 +5671,7 @@ export default {
       inviter: 'Inviter',
       expiresAt: 'Expires',
       status: 'Status',
-      operations: 'Actions',
+      operations: 'Actions'
     },
     status: {
       pending: 'Pending',
@@ -7195,12 +5679,11 @@ export default {
       accepted: 'Accepted',
       declined: 'Declined',
       revoked: 'Revoked',
-      expired: 'Expired',
+      expired: 'Expired'
     },
     myInbox: {
       title: 'My invitations',
-      description:
-        'Invitations from other workspaces. Accept to join with the assigned role.',
+      description: 'Invitations from other workspaces. Accept to join with the assigned role.',
       empty: 'No pending invitations.',
       acceptButton: 'Accept',
       declineButton: 'Decline',
@@ -7209,18 +5692,16 @@ export default {
       from: 'From',
       tenantLabel: 'Workspace',
       expiresIn: 'Expires: {date}',
-      messageLabel: 'Message',
-      gotoLink: 'Open inbox',
+      messageLabel: 'Message'
     },
     errors: {
       pendingExists: 'A pending invitation for this user already exists.',
       alreadyMember: 'This user is already an active member of the workspace.',
       notPending: 'The invitation is no longer pending.',
-      expired: 'The invitation has expired.',
       forbidden: 'Only the invitee can accept or decline this invitation.',
       notFound: 'Invitation not found or already withdrawn.',
-      generic: 'Something went wrong. Please try again.',
-    },
+      generic: 'Something went wrong. Please try again.'
+    }
   },
   chunkFeedback: {
     like: 'Helpful',
@@ -7235,24 +5716,59 @@ export default {
       incomplete: 'Incomplete information',
       unclear: 'Unclear explanation',
       unrelated: 'Not related to the question',
-      other: 'Other',
+      other: 'Other'
     },
     submitReason: 'Submit',
-    cancel: 'Cancel',
+    cancel: 'Cancel'
   },
   platformApiKeys: {
     title: 'Platform API Keys',
     description: 'Create platform credentials for cross-workspace automation. Use X-Tenant-ID for workspace APIs.',
     securityNotice: 'Platform API keys can target any workspace. Grant only required capabilities; plaintext is shown once.',
-    create: 'Create platform API key', createDescription: 'Platform keys are not bound to a workspace; capabilities still limit every operation.',
-    loading: 'Loading…', empty: 'No platform API keys', name: 'Name', namePlaceholder: 'For example: central operations automation',
-    key: 'Key', capability: 'Capabilities', capabilityMore: '+{count}', viewAllCapabilities: 'View all capabilities', capabilityHint: 'Workspace capabilities apply to the X-Tenant-ID target; system capabilities apply to control-plane APIs.',
-    lastUsed: 'Last used', createdAt: 'Created', actions: 'Actions', never: 'Never', systemCapabilityGroup: 'Platform control plane',
-    capabilities: { tenantsRead: 'Read workspaces', tenantsManage: 'Manage workspaces', settingsRead: 'Read system settings', settingsManage: 'Manage system settings', runtimeRead: 'Read runtime', runtimeManage: 'Manage runtime', auditRead: 'Read system audit' },
-    capabilityHints: { tenantsRead: 'List, search, and inspect every workspace.', tenantsManage: 'Create, update, delete workspaces and apply global workspace settings.', settingsRead: 'Read platform runtime settings.', settingsManage: 'Update and reset platform runtime settings.', runtimeRead: 'Inspect task queues and task details.', runtimeManage: 'Retry, run, cancel, or delete runtime tasks.', auditRead: 'Read platform audit events.' },
-    createdTitle: 'Platform API key created', createdDescription: 'Copy and store this key now. The full value will not be shown again.',
-    copy: 'Copy key', copySuccess: 'Key copied',
-    deleteConfirm: 'Delete “{name}”? Automation using this key will stop immediately.', deleteSuccess: 'Platform API key deleted', deleteFailed: 'Failed to delete platform API key',
-    nameRequired: 'Enter a name', capabilityRequired: 'Select at least one capability', loadFailed: 'Failed to load platform API keys', createFailed: 'Failed to create platform API key',
-  },
+    create: 'Create platform API key',
+    createDescription: 'Platform keys are not bound to a workspace; capabilities still limit every operation.',
+    loading: 'Loading…',
+    empty: 'No platform API keys',
+    name: 'Name',
+    namePlaceholder: 'For example: central operations automation',
+    key: 'Key',
+    capability: 'Capabilities',
+    capabilityMore: '+{count}',
+    viewAllCapabilities: 'View all capabilities',
+    capabilityHint: 'Workspace capabilities apply to the X-Tenant-ID target; system capabilities apply to control-plane APIs.',
+    lastUsed: 'Last used',
+    createdAt: 'Created',
+    actions: 'Actions',
+    never: 'Never',
+    systemCapabilityGroup: 'Platform control plane',
+    capabilities: {
+      tenantsRead: 'Read workspaces',
+      tenantsManage: 'Manage workspaces',
+      settingsRead: 'Read system settings',
+      settingsManage: 'Manage system settings',
+      runtimeRead: 'Read runtime',
+      runtimeManage: 'Manage runtime',
+      auditRead: 'Read system audit'
+    },
+    capabilityHints: {
+      tenantsRead: 'List, search, and inspect every workspace.',
+      tenantsManage: 'Create, update, delete workspaces and apply global workspace settings.',
+      settingsRead: 'Read platform runtime settings.',
+      settingsManage: 'Update and reset platform runtime settings.',
+      runtimeRead: 'Inspect task queues and task details.',
+      runtimeManage: 'Retry, run, cancel, or delete runtime tasks.',
+      auditRead: 'Read platform audit events.'
+    },
+    createdTitle: 'Platform API key created',
+    createdDescription: 'Copy and store this key now. The full value will not be shown again.',
+    copy: 'Copy key',
+    copySuccess: 'Key copied',
+    deleteConfirm: 'Delete “{name}”? Automation using this key will stop immediately.',
+    deleteSuccess: 'Platform API key deleted',
+    deleteFailed: 'Failed to delete platform API key',
+    nameRequired: 'Enter a name',
+    capabilityRequired: 'Select at least one capability',
+    loadFailed: 'Failed to load platform API keys',
+    createFailed: 'Failed to create platform API key'
+  }
 }
