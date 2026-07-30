@@ -32,6 +32,25 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 	}
 }
 
+// RegisterFeedbackRoutes registers feedback (like/dislike) routes.
+func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.FeedbackHandler, g *rbacGuards) {
+	chatMessages := g.apiKeyGroup(r.Group("/messages"), apiKeyChat(apiKeyFullAccess()))
+	{
+		chatMessages.POST("/:session_id/:message_id/feedback", g.Viewer(), handler.SubmitFeedback)
+		chatMessages.GET("/:session_id/:message_id/feedback", g.Viewer(), handler.GetMessageFeedback)
+	}
+}
+
+// RegisterFeedbackAdminRoutes registers admin-only feedback management routes.
+func RegisterFeedbackAdminRoutes(r *gin.RouterGroup, handler *handler.FeedbackHandler, g *rbacGuards) {
+	admin := g.apiKeyGroup(r.Group("/admin/chunks"), apiKeyFullAccess())
+	{
+		admin.GET("/feedback-stats", g.Admin(), handler.ListChunkFeedbackStats)
+		admin.GET("/weight-logs", g.Admin(), handler.ListWeightLogs)
+		admin.POST("/:chunk_id/reset-feedback", g.Admin(), handler.ResetChunkFeedback)
+	}
+}
+
 // RegisterSessionRoutes 注册路由。
 //
 // Sessions are per-user resources; the handler enforces user ownership.

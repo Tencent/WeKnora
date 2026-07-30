@@ -53,6 +53,16 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <FeedbackButtons
+                    v-if="session.id"
+                    :session-id="sessionId"
+                    :message-id="session.id"
+                    :initial-feedback="session.feedback"
+                    :disabled="false"
+                    @feedback-change="(fb) => session.feedback = fb"
+                    @show-dislike-modal="openDislikeModal"
+                    ref="feedbackBtns"
+                />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                         aria-live="polite">
@@ -65,6 +75,11 @@
                 $t('common.loading') }}</span></div>
         </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
+        <DislikeReasonModal
+            v-model="dislikeModalVisible"
+            :message-id="currentDislikeMsgId"
+            @confirm="handleDislikeConfirm"
+        />
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
@@ -81,6 +96,8 @@ import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import FeedbackButtons from './FeedbackButtons.vue';
+import DislikeReasonModal from './DislikeReasonModal.vue';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -122,6 +139,22 @@ const mentionTagIcon = (item) => {
 const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
 const { t } = useI18n()
 const uiStore = useUIStore();
+
+const dislikeModalVisible = ref(false);
+const currentDislikeMsgId = ref('');
+const feedbackBtns = ref();
+
+const openDislikeModal = (messageId) => {
+    currentDislikeMsgId.value = messageId;
+    dislikeModalVisible.value = true;
+};
+
+const handleDislikeConfirm = (data) => {
+    if (feedbackBtns.value) {
+        feedbackBtns.value.submitDislike(data.reason);
+    }
+};
+
 let parentMd = ref()
 const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
     getKnowledgeReferences: () => props.session?.knowledge_references,

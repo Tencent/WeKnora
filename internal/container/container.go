@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -39,6 +40,7 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
@@ -54,6 +56,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
@@ -147,6 +150,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
+	must(container.Provide(repository.NewFeedbackRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
@@ -193,6 +197,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
+	must(container.Provide(service.NewFeedbackService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
@@ -348,6 +353,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(session.NewHandler))
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
+	must(container.Provide(handler.NewFeedbackHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
@@ -632,6 +638,25 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
+	case "mysql":
+		dbPassword := os.Getenv("DB_PASSWORD")
+		gormDSN := fmt.Sprintf(
+			"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC&multiStatements=true",
+			os.Getenv("DB_USER"), dbPassword,
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		dialector = mysql.Open(gormDSN)
+		encodedPassword := url.QueryEscape(dbPassword)
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&multiStatements=true",
+			os.Getenv("DB_USER"), encodedPassword,
+			os.Getenv("DB_HOST"), os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"), os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_NAME"),
+		)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
@@ -650,9 +675,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, sqlite or mysql "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
@@ -1059,6 +1084,16 @@ func initRetrieveEngineRegistry(
 			log.Errorf("Register sqlite retrieve engine failed: %v", err)
 		} else {
 			log.Infof("Register sqlite retrieve engine success")
+		}
+	}
+	if slices.Contains(retrieveDriver, "mysql") {
+		mySQLRepo := mysqlRepo.NewMySQLRetrieveEngineRepository(db)
+		if err := registry.Register(
+			retriever.NewKVHybridRetrieveEngine(mySQLRepo, types.PostgresRetrieverEngineType),
+		); err != nil {
+			log.Errorf("Register mysql retrieve engine failed: %v", err)
+		} else {
+			log.Infof("Register mysql retrieve engine success")
 		}
 	}
 	if slices.Contains(retrieveDriver, "elasticsearch_v8") {
@@ -1593,6 +1628,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(rssConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
+	}
+	if err := registry.Register(dingtalkConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register dingtalk connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

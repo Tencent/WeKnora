@@ -1,4 +1,4 @@
-export default {
+﻿export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
@@ -2528,6 +2528,19 @@ export default {
     referencesDrawerEmpty: 'No sources available',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    feedbackLike: 'Like',
+    feedbackDislike: 'Dislike',
+    feedbackCancelLike: 'Unlike',
+    feedbackDislikeReasonTitle: 'Reason for dislike',
+    feedbackSelectReason: 'Please select a reason:',
+    feedbackReasonNotAccurate: 'Inaccurate answer',
+    feedbackReasonNotRelevant: 'Irrelevant answer',
+    feedbackReasonOutdated: 'Outdated information',
+    feedbackReasonTooShort: 'Too brief',
+    feedbackReasonTooLong: 'Too verbose',
+    feedbackReasonHarmful: 'Harmful content',
+    feedbackReasonOther: 'Other',
+    feedbackOtherReasonPlaceholder: 'Please enter your reason...',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',

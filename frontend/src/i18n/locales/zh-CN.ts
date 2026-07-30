@@ -1,4 +1,4 @@
-export default {
+﻿export default {
   platformApiKeys: {
     title: '平台 API Key',
     description: '为跨空间自动化创建平台级凭据；调用空间接口时通过 X-Tenant-ID 指定目标空间。',
@@ -3067,6 +3067,19 @@ export default {
     referencesDrawerEmpty: '暂无参考来源',
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
+    feedbackLike: '点赞',
+    feedbackDislike: '点踩',
+    feedbackCancelLike: '取消点赞',
+    feedbackDislikeReasonTitle: '选择反馈原因',
+    feedbackSelectReason: '请选择您点踩的原因：',
+    feedbackReasonNotAccurate: '回答不准确',
+    feedbackReasonNotRelevant: '回答不相关',
+    feedbackReasonOutdated: '信息过时',
+    feedbackReasonTooShort: '回答太简短',
+    feedbackReasonTooLong: '回答太冗长',
+    feedbackReasonHarmful: '内容有害',
+    feedbackReasonOther: '其他原因',
+    feedbackOtherReasonPlaceholder: '请输入具体原因...',
     requestInfoTitle: '请求信息',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: '消息 ID',

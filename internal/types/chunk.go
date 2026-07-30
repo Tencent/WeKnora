@@ -175,6 +175,16 @@ type Chunk struct {
 	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
 	// It is persisted so a later content edit can rebuild the same index input.
 	ContextHeader string `json:"-" gorm:"type:text"`
+	// LikeCount is the number of likes (thumbs up) this chunk has received.
+	LikeCount int64 `json:"like_count" gorm:"default:0"`
+	// DislikeCount is the number of dislikes (thumbs down) this chunk has received.
+	DislikeCount int64 `json:"dislike_count" gorm:"default:0"`
+	// LikeRate is the computed approval rate.
+	LikeRate float64 `json:"like_rate" gorm:"default:0"`
+	// RecallWeight is the retrieval scoring weight multiplier (default 1.0).
+	RecallWeight float64 `json:"recall_weight" gorm:"default:1.0"`
+	// WeightUpdatedAt records the last time the recall weight was adjusted.
+	WeightUpdatedAt *time.Time `json:"weight_updated_at"`
 }
 
 // ChunkRevision is an immutable snapshot of a superseded chunk revision.

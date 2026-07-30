@@ -322,6 +322,16 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <FeedbackButtons
+                  v-if="sessionId"
+                  :session-id="sessionId"
+                  :message-id="(session as any).id"
+                  :initial-feedback="(session as any).feedback"
+                  :disabled="false"
+                  @feedback-change="(fb: any) => { if (session) (session as any).feedback = fb; }"
+                  @show-dislike-modal="openDislikeModal"
+                  ref="feedbackBtns"
+                />
                 <transition name="follow-up-toolbar-loading">
                   <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                     aria-live="polite">
@@ -479,6 +489,11 @@
       </div>
     </template>
   </t-drawer>
+  <DislikeReasonModal
+    v-model="dislikeModalVisible"
+    :message-id="currentDislikeMsgId"
+    @confirm="handleDislikeConfirm"
+  />
 </template>
 
 <script setup lang="ts">
@@ -492,6 +507,8 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import FeedbackButtons from './FeedbackButtons.vue';
+import DislikeReasonModal from './DislikeReasonModal.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
@@ -543,6 +560,21 @@ const uiStore = useUIStore();
 const settingsStore = useSettingsStore();
 const authStore = useAuthStore();
 const { t } = useI18n();
+
+const dislikeModalVisible = ref(false);
+const currentDislikeMsgId = ref('');
+const feedbackBtns = ref();
+
+const openDislikeModal = (messageId: string) => {
+    currentDislikeMsgId.value = messageId;
+    dislikeModalVisible.value = true;
+};
+
+const handleDislikeConfirm = (data: { messageId: string; reason: string }) => {
+    if (feedbackBtns.value) {
+        feedbackBtns.value.submitDislike(data.reason);
+    }
+};
 
 ensureMermaidInitialized();
 
