@@ -3328,8 +3328,12 @@ export default {
           hint: "智能体「思考模式」开关不生效，不会在请求中写入思考相关参数",
         },
         chatTemplateKwargs: {
-          label: "chat_template_kwargs",
-          hint: "自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署",
+          label: "chat_template_kwargs.enable_thinking",
+          hint: "在 chat_template_kwargs 中写入 enable_thinking，适用于本地 Qwen / 部分 vLLM 部署",
+        },
+        chatTemplateKwargsThinking: {
+          label: "chat_template_kwargs.thinking",
+          hint: "vLLM / NVIDIA NIM 部分模型使用 thinking 布尔键",
         },
         enableThinking: {
           label: "enable_thinking",
@@ -3338,6 +3342,14 @@ export default {
         thinkingType: {
           label: "thinking.type",
           hint: "火山引擎 Ark；腾讯云 LKEAP（DeepSeek V3 等，选 LKEAP 时默认此项；R1 请改「不写入」）",
+        },
+        reasoningEffort: {
+          label: "reasoning_effort",
+          hint: "OpenAI 兼容推理模型；开启时写入 medium，可通过 extra_config 覆盖强度",
+        },
+        openrouterReasoning: {
+          label: "reasoning 对象",
+          hint: "OpenRouter：reasoning.enabled / effort / max_tokens / exclude",
         },
       },
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',

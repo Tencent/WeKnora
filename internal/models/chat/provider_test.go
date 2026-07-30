@@ -85,6 +85,58 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		assert.Contains(t, mustJSON(t, body), "chat_template_kwargs")
 	})
 
+	t.Run("chat_template_kwargs thinking key", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "step-3.7-flash",
+			map[string]string{ExtraConfigThinkingControl: "chat_template_kwargs_thinking"})
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"chat_template_kwargs"`)
+		assert.Contains(t, js, `"thinking":false`)
+		assert.NotContains(t, js, `"enable_thinking"`)
+	})
+
+	t.Run("reasoning effort enabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderOpenAI), "gpt-5",
+			map[string]string{
+				ExtraConfigThinkingControl: "reasoning_effort",
+				"reasoning_effort":         "high",
+			})
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		require.NoError(t, err)
+		assert.False(t, useRaw)
+		assert.Contains(t, mustJSON(t, body), `"reasoning_effort":"high"`)
+	})
+
+	t.Run("reasoning effort disabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderOpenAI), "gpt-5",
+			map[string]string{ExtraConfigThinkingControl: "reasoning_effort"})
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		require.NoError(t, err)
+		assert.False(t, useRaw)
+		assert.Contains(t, mustJSON(t, body), `"reasoning_effort":"none"`)
+	})
+
+	t.Run("openrouter reasoning object", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderOpenRouter), "openai/gpt-oss-120b",
+			map[string]string{
+				ExtraConfigThinkingControl: "openrouter_reasoning",
+				"reasoning_effort":         "medium",
+				"reasoning_max_tokens":     "1024",
+				"reasoning_exclude":        "true",
+			})
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"reasoning"`)
+		assert.Contains(t, js, `"enabled":true`)
+		assert.Contains(t, js, `"effort":"medium"`)
+		assert.Contains(t, js, `"max_tokens":1024`)
+		assert.Contains(t, js, `"exclude":true`)
+	})
+
 	t.Run("none keeps the standard SDK request", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderGeneric), "x",
 			map[string]string{ExtraConfigThinkingControl: "none"})

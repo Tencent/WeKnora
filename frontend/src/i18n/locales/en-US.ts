@@ -4400,8 +4400,12 @@ export default {
           hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests',
         },
         chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen',
+          label: 'chat_template_kwargs.enable_thinking',
+          hint: 'Sends enable_thinking inside chat_template_kwargs for local Qwen / some vLLM deployments',
+        },
+        chatTemplateKwargsThinking: {
+          label: 'chat_template_kwargs.thinking',
+          hint: 'Some vLLM / NVIDIA NIM models use the thinking boolean key',
         },
         enableThinking: {
           label: 'enable_thinking',
@@ -4410,6 +4414,14 @@ export default {
         thinkingType: {
           label: 'thinking.type',
           hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)',
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'OpenAI-compatible reasoning models; sends medium when enabled unless extra_config overrides it',
+        },
+        openrouterReasoning: {
+          label: 'reasoning object',
+          hint: 'OpenRouter: reasoning.enabled / effort / max_tokens / exclude',
         },
       },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',

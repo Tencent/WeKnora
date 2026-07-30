@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -11,7 +12,8 @@ import (
 // selecting how ChatOptions.Thinking is translated to provider HTTP fields.
 // The accepted values mirror the strings the frontend writes (see
 // ModelEditorDialog.vue): "none", "enable_thinking", "thinking_type",
-// "chat_template_kwargs".
+// "chat_template_kwargs", "chat_template_kwargs_thinking",
+// "reasoning_effort", "openrouter_reasoning".
 const ExtraConfigThinkingControl = "thinking_control"
 
 // Wire-format request bodies used by providers that express extended-thinking
@@ -35,6 +37,20 @@ type ThinkingConfig struct {
 type ThinkingChatCompletionRequest struct {
 	openai.ChatCompletionRequest
 	Thinking *ThinkingConfig `json:"thinking,omitempty"`
+}
+
+// ReasoningConfig is OpenRouter's top-level `reasoning` block.
+type ReasoningConfig struct {
+	Enabled   *bool  `json:"enabled,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
+	Exclude   *bool  `json:"exclude,omitempty"`
+}
+
+// ReasoningChatCompletionRequest adds a provider-specific `reasoning` object.
+type ReasoningChatCompletionRequest struct {
+	openai.ChatCompletionRequest
+	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // ThinkingStrategy encodes how ChatOptions.Thinking is mapped onto a provider's
@@ -103,18 +119,67 @@ func (thinkingTypeField) Apply(req *openai.ChatCompletionRequest, opts *ChatOpti
 }
 
 // chatTemplateKwargs encodes thinking via the standard request's
-// `chat_template_kwargs.enable_thinking` (vLLM / NVIDIA / generic local
-// deployments). Emits nothing when opts.Thinking is unset.
-type chatTemplateKwargs struct{}
+// `chat_template_kwargs.<key>` (vLLM / NVIDIA / generic local deployments).
+// Emits nothing when opts.Thinking is unset.
+type chatTemplateKwargs struct {
+	key string
+}
 
-func (chatTemplateKwargs) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+func (s chatTemplateKwargs) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
 	if opts == nil || opts.Thinking == nil {
 		return nil, false
 	}
+	key := strings.TrimSpace(s.key)
+	if key == "" {
+		key = "enable_thinking"
+	}
 	req.ChatTemplateKwargs = map[string]interface{}{
-		"enable_thinking": *opts.Thinking,
+		key: *opts.Thinking,
 	}
 	return req, true
+}
+
+// reasoningEffort encodes thinking as top-level `reasoning_effort`. This is
+// useful for OpenAI-compatible providers that use effort values rather than an
+// explicit boolean toggle.
+type reasoningEffort struct {
+	enabledEffort  string
+	disabledEffort string
+}
+
+func (s reasoningEffort) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+	if opts == nil || opts.Thinking == nil {
+		return nil, false
+	}
+	if *opts.Thinking {
+		req.ReasoningEffort = defaultString(s.enabledEffort, "medium")
+	} else {
+		req.ReasoningEffort = defaultString(s.disabledEffort, "none")
+	}
+	return nil, false
+}
+
+// openRouterReasoning encodes thinking through OpenRouter's top-level
+// `reasoning` object.
+type openRouterReasoning struct {
+	effort    string
+	maxTokens int
+	exclude   *bool
+}
+
+func (s openRouterReasoning) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+	if opts == nil || opts.Thinking == nil {
+		return nil, false
+	}
+	enabled := *opts.Thinking
+	cfg := &ReasoningConfig{Enabled: &enabled}
+	if enabled {
+		cfg.Effort = strings.TrimSpace(s.effort)
+		cfg.MaxTokens = s.maxTokens
+		cfg.Exclude = s.exclude
+	}
+	r := ReasoningChatCompletionRequest{ChatCompletionRequest: *req, Reasoning: cfg}
+	return r, true
 }
 
 // parseThinkingOverride reads extra_config.thinking_control and returns the
@@ -134,6 +199,19 @@ func parseThinkingOverride(extraConfig map[string]string) ThinkingStrategy {
 		return enableThinking{}
 	case "thinking_type":
 		return thinkingTypeField{}
+	case "chat_template_kwargs_thinking":
+		return chatTemplateKwargs{key: "thinking"}
+	case "reasoning_effort":
+		return reasoningEffort{
+			enabledEffort:  extraConfigString(extraConfig, "reasoning_effort", "medium"),
+			disabledEffort: extraConfigString(extraConfig, "reasoning_effort_disabled", "none"),
+		}
+	case "openrouter_reasoning":
+		return openRouterReasoning{
+			effort:    extraConfigString(extraConfig, "reasoning_effort", ""),
+			maxTokens: extraConfigInt(extraConfig, "reasoning_max_tokens"),
+			exclude:   extraConfigBoolPtr(extraConfig, "reasoning_exclude"),
+		}
 	default:
 		// "chat_template_kwargs" and any unknown non-empty value.
 		return chatTemplateKwargs{}
@@ -159,14 +237,61 @@ func EffectiveThinkingControl(config *ChatConfig) string {
 }
 
 func thinkingStrategyName(strategy ThinkingStrategy) string {
-	switch strategy.(type) {
+	switch s := strategy.(type) {
 	case enableThinking:
 		return "enable_thinking"
 	case thinkingTypeField:
 		return "thinking_type"
 	case chatTemplateKwargs:
+		if s.key == "thinking" {
+			return "chat_template_kwargs_thinking"
+		}
 		return "chat_template_kwargs"
+	case reasoningEffort:
+		return "reasoning_effort"
+	case openRouterReasoning:
+		return "openrouter_reasoning"
 	default:
 		return "none"
 	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func extraConfigString(extraConfig map[string]string, key, fallback string) string {
+	if extraConfig == nil {
+		return fallback
+	}
+	return defaultString(extraConfig[key], fallback)
+}
+
+func extraConfigInt(extraConfig map[string]string, key string) int {
+	if extraConfig == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(extraConfig[key]))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+func extraConfigBoolPtr(extraConfig map[string]string, key string) *bool {
+	if extraConfig == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(extraConfig[key])
+	if raw == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil
+	}
+	return &b
 }

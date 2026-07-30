@@ -11,6 +11,13 @@ import (
 
 func ptrBool(b bool) *bool { return &b }
 
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	body, err := json.Marshal(v)
+	require.NoError(t, err)
+	return body
+}
+
 // TestThinkingStrategy_NilThinking verifies the strategies that defer to the
 // model default emit nothing when ChatOptions.Thinking is unset.
 func TestThinkingStrategy_NilThinking(t *testing.T) {
@@ -20,6 +27,9 @@ func TestThinkingStrategy_NilThinking(t *testing.T) {
 		enableThinking{}, // not alwaysSend
 		thinkingTypeField{},
 		chatTemplateKwargs{},
+		chatTemplateKwargs{key: "thinking"},
+		reasoningEffort{},
+		openRouterReasoning{},
 	}
 	for _, s := range strategies {
 		custom, raw := s.Apply(&req, nil, true)
@@ -108,13 +118,65 @@ func TestChatTemplateKwargs(t *testing.T) {
 	assert.Contains(t, string(body), "chat_template_kwargs")
 }
 
+func TestChatTemplateKwargsThinkingKey(t *testing.T) {
+	s := chatTemplateKwargs{key: "thinking"}
+	req := openai.ChatCompletionRequest{Model: "nim-step"}
+
+	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	require.True(t, raw)
+	out, ok := custom.(*openai.ChatCompletionRequest)
+	require.True(t, ok)
+	assert.Equal(t, false, out.ChatTemplateKwargs["thinking"])
+	assert.NotContains(t, out.ChatTemplateKwargs, "enable_thinking")
+}
+
+func TestReasoningEffort(t *testing.T) {
+	s := reasoningEffort{enabledEffort: "high", disabledEffort: "none"}
+	req := openai.ChatCompletionRequest{Model: "grok"}
+
+	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	assert.Nil(t, custom)
+	assert.False(t, raw)
+	assert.Equal(t, "high", req.ReasoningEffort)
+
+	req = openai.ChatCompletionRequest{Model: "grok"}
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	assert.Nil(t, custom)
+	assert.False(t, raw)
+	assert.Equal(t, "none", req.ReasoningEffort)
+}
+
+func TestOpenRouterReasoning(t *testing.T) {
+	s := openRouterReasoning{effort: "medium", maxTokens: 2048, exclude: ptrBool(true)}
+	req := openai.ChatCompletionRequest{Model: "openrouter/reasoner"}
+
+	custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	require.True(t, raw)
+	require.NotNil(t, custom)
+	js := string(mustMarshal(t, custom))
+	assert.Contains(t, js, `"reasoning"`)
+	assert.Contains(t, js, `"enabled":true`)
+	assert.Contains(t, js, `"effort":"medium"`)
+	assert.Contains(t, js, `"max_tokens":2048`)
+	assert.Contains(t, js, `"exclude":true`)
+
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	require.True(t, raw)
+	js = string(mustMarshal(t, custom))
+	assert.Contains(t, js, `"enabled":false`)
+	assert.NotContains(t, js, `"effort"`)
+}
+
 func TestParseThinkingOverride(t *testing.T) {
 	cases := map[string]ThinkingStrategy{
-		"none":                 noThinking{},
-		"enable_thinking":      enableThinking{},
-		"thinking_type":        thinkingTypeField{},
-		"chat_template_kwargs": chatTemplateKwargs{},
-		"something-unknown":    chatTemplateKwargs{}, // legacy default-mode fallback
+		"none":                          noThinking{},
+		"enable_thinking":               enableThinking{},
+		"thinking_type":                 thinkingTypeField{},
+		"chat_template_kwargs":          chatTemplateKwargs{},
+		"chat_template_kwargs_thinking": chatTemplateKwargs{},
+		"reasoning_effort":              reasoningEffort{},
+		"openrouter_reasoning":          openRouterReasoning{},
+		"something-unknown":             chatTemplateKwargs{}, // legacy default-mode fallback
 	}
 	for value, want := range cases {
 		got := parseThinkingOverride(map[string]string{ExtraConfigThinkingControl: value})
@@ -140,5 +202,20 @@ func TestEffectiveThinkingControl(t *testing.T) {
 		Provider:    "generic",
 		ModelName:   "qwen3",
 		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "none"},
+	}))
+	assert.Equal(t, "chat_template_kwargs_thinking", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "generic",
+		ModelName:   "step-3.7-flash",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "chat_template_kwargs_thinking"},
+	}))
+	assert.Equal(t, "reasoning_effort", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "openai",
+		ModelName:   "gpt-5",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "reasoning_effort"},
+	}))
+	assert.Equal(t, "openrouter_reasoning", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "openrouter",
+		ModelName:   "openai/gpt-oss-120b",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "openrouter_reasoning"},
 	}))
 }

@@ -2984,8 +2984,12 @@ export default {
           hint: 'Переключатель «Режим размышления» агента не действует; параметры размышления не отправляются в запросе',
         },
         chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen',
+          label: 'chat_template_kwargs.enable_thinking',
+          hint: 'Отправляет enable_thinking внутри chat_template_kwargs для локального Qwen / некоторых vLLM-развёртываний',
+        },
+        chatTemplateKwargsThinking: {
+          label: 'chat_template_kwargs.thinking',
+          hint: 'Некоторые модели vLLM / NVIDIA NIM используют булевый ключ thinking',
         },
         enableThinking: {
           label: 'enable_thinking',
@@ -2994,6 +2998,14 @@ export default {
         thinkingType: {
           label: 'thinking.type',
           hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 и др.; по умолчанию для LKEAP; для R1 — «Не отправлять»)',
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'OpenAI-совместимые reasoning-модели; при включении отправляет medium, если extra_config не переопределяет',
+        },
+        openrouterReasoning: {
+          label: 'объект reasoning',
+          hint: 'OpenRouter: reasoning.enabled / effort / max_tokens / exclude',
         },
       },
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',

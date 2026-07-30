@@ -3298,8 +3298,12 @@ export default {
           hint: "에이전트 「사고 모드」 스위치가 효과 없음, 요청에 사고 관련 매개변수를 보내지 않음",
         },
         chatTemplateKwargs: {
-          label: "chat_template_kwargs",
-          hint: "사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포",
+          label: "chat_template_kwargs.enable_thinking",
+          hint: "로컬 Qwen / 일부 vLLM 배포용으로 chat_template_kwargs 안에 enable_thinking을 보냅니다",
+        },
+        chatTemplateKwargsThinking: {
+          label: "chat_template_kwargs.thinking",
+          hint: "일부 vLLM / NVIDIA NIM 모델은 thinking 불리언 키를 사용합니다",
         },
         enableThinking: {
           label: "enable_thinking",
@@ -3308,6 +3312,14 @@ export default {
         thinkingType: {
           label: "thinking.type",
           hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 등, LKEAP 기본값; R1은 「전송 안 함」)',
+        },
+        reasoningEffort: {
+          label: "reasoning_effort",
+          hint: "OpenAI 호환 추론 모델; extra_config가 없으면 켤 때 medium을 보냅니다",
+        },
+        openrouterReasoning: {
+          label: "reasoning 객체",
+          hint: "OpenRouter: reasoning.enabled / effort / max_tokens / exclude",
         },
       },
       dimensionHint:
