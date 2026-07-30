@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,9 @@ type fakeDingTalk struct {
 	nodesByParent map[string][]WikiNode
 	blockStatus   map[string]int
 	blocksByNode  map[string][]docBlock
+	nodeMu        sync.Mutex
+	nodeRequests  map[string]int
+	blockRequests map[string]int
 }
 
 func newFakeDingTalk(t *testing.T) *fakeDingTalk {
@@ -56,6 +60,8 @@ func newFakeDingTalk(t *testing.T) *fakeDingTalk {
 		nodesByParent: make(map[string][]WikiNode),
 		blockStatus:   make(map[string]int),
 		blocksByNode:  make(map[string][]docBlock),
+		nodeRequests:  make(map[string]int),
+		blockRequests: make(map[string]int),
 	}
 	f.server = httptest.NewServer(f.mux)
 	f.handleToken()
@@ -118,6 +124,9 @@ func (f *fakeDingTalk) handleWorkspaces(workspaces []WikiWorkspace) {
 func (f *fakeDingTalk) handleNodes() {
 	f.mux.HandleFunc("/v2.0/wiki/nodes", func(w http.ResponseWriter, r *http.Request) {
 		parentID := r.URL.Query().Get("parentNodeId")
+		f.nodeMu.Lock()
+		f.nodeRequests[parentID]++
+		f.nodeMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if got := r.URL.Query().Get("operatorId"); got != "operator-1" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -128,10 +137,19 @@ func (f *fakeDingTalk) handleNodes() {
 	})
 }
 
+func (f *fakeDingTalk) nodeRequestCount(parentID string) int {
+	f.nodeMu.Lock()
+	defer f.nodeMu.Unlock()
+	return f.nodeRequests[parentID]
+}
+
 func (f *fakeDingTalk) handleBlocks() {
 	f.mux.HandleFunc("/v1.0/doc/suites/documents/", func(w http.ResponseWriter, r *http.Request) {
 		nodeID := strings.TrimPrefix(r.URL.Path, "/v1.0/doc/suites/documents/")
 		nodeID = strings.TrimSuffix(nodeID, "/blocks")
+		f.nodeMu.Lock()
+		f.blockRequests[nodeID]++
+		f.nodeMu.Unlock()
 		if status := f.blockStatus[nodeID]; status != 0 {
 			w.WriteHeader(status)
 			_ = json.NewEncoder(w).Encode(dingtalkErrorResponse{ErrCode: status, ErrMsg: "block failure"})
@@ -140,6 +158,12 @@ func (f *fakeDingTalk) handleBlocks() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(docBlocksResponse{Blocks: f.blocksByNode[nodeID]})
 	})
+}
+
+func (f *fakeDingTalk) blockRequestCount(nodeID string) int {
+	f.nodeMu.Lock()
+	defer f.nodeMu.Unlock()
+	return f.blockRequests[nodeID]
 }
 
 func TestConnectorType(t *testing.T) {
@@ -256,6 +280,79 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	want := []string{"ws-1", "ws-1:folder-1:folder"}
 	if strings.Join(ancestors, ",") != strings.Join(want, ",") {
 		t.Errorf("ancestors = %v, want %v", ancestors, want)
+	}
+}
+
+func TestConnectorResolveResourceAncestorsStopsOnNodeCycle(t *testing.T) {
+	f := newFakeDingTalk(t)
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "folder-a", Name: "A", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+	}
+	f.nodesByParent["folder-a"] = []WikiNode{
+		{NodeID: "folder-b", Name: "B", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+	}
+	f.nodesByParent["folder-b"] = []WikiNode{
+		{NodeID: "folder-a", Name: "A again", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	ancestors, err := newTestConnector().ResolveResourceAncestors(
+		ctx,
+		f.config(nil),
+		[]string{"ws-1:missing-doc:document"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors() error = %v, want cycle-safe completion", err)
+	}
+	if len(ancestors) != 1 || ancestors[0] != "ws-1" {
+		t.Fatalf("ancestors = %v, want workspace fallback for missing target", ancestors)
+	}
+	if got := f.nodeRequestCount("folder-a"); got != 1 {
+		t.Fatalf("folder-a requests = %d, want 1", got)
+	}
+	if got := f.nodeRequestCount("folder-b"); got != 1 {
+		t.Fatalf("folder-b requests = %d, want 1", got)
+	}
+}
+
+func TestCollectAncestorPathsRejectsExcessiveUniqueDepth(t *testing.T) {
+	f := newFakeDingTalk(t)
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{{
+		NodeID:      "child",
+		NodeType:    "FOLDER",
+		HasChildren: true,
+	}}
+
+	cli := &client{
+		baseURL:     f.URL(),
+		accessToken: "test-token",
+		tokenExpiry: time.Now().Add(time.Hour),
+		httpClient:  f.server.Client(),
+	}
+	err := NewConnector().collectAncestorPathsVisited(
+		context.Background(),
+		cli,
+		"ws-1",
+		"root-1",
+		"operator-1",
+		map[string]bool{},
+		nil,
+		map[string]bool{},
+		map[string]bool{},
+		newTraversalBudget("test ancestor traversal"),
+		maxTraversalDepth-1,
+	)
+	if err == nil || !strings.Contains(err.Error(), "traversal exceeded") {
+		t.Fatalf("collectAncestorPathsVisited() error = %v, want traversal depth error", err)
+	}
+	if got := f.nodeRequestCount("root-1"); got != 1 {
+		t.Fatalf("root requests = %d, want 1", got)
+	}
+	if got := f.nodeRequestCount("child"); got != 0 {
+		t.Fatalf("child requests = %d, want 0 after depth guard", got)
 	}
 }
 
@@ -415,6 +512,47 @@ func TestConnectorFetchAll_SyncsSingleDocumentSelection(t *testing.T) {
 	}
 }
 
+func TestConnectorFetchAll_ReusesWorkspaceTraversalForSelectedDocuments(t *testing.T) {
+	f := newFakeDingTalk(t)
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "doc-1", Name: "One", NodeType: "FILE", Category: "ALIDOC"},
+		{NodeID: "doc-2", Name: "Two", NodeType: "FILE", Category: "ALIDOC"},
+	}
+	f.blocksByNode["doc-1"] = []docBlock{{Text: "First"}}
+	f.blocksByNode["doc-2"] = []docBlock{{Text: "Second"}}
+
+	items, err := newTestConnector().FetchAll(
+		context.Background(),
+		f.config(nil),
+		[]string{"ws-1:doc-1:document", "ws-1:doc-2:document"},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2: %+v", len(items), items)
+	}
+	byResourceID := make(map[string]types.FetchedItem, len(items))
+	for _, item := range items {
+		if _, exists := byResourceID[item.SourceResourceID]; exists {
+			t.Fatalf("duplicate item for source resource %q: %+v", item.SourceResourceID, items)
+		}
+		byResourceID[item.SourceResourceID] = item
+	}
+	first := byResourceID["ws-1:doc-1:document"]
+	if first.ExternalID != "doc-1" || !strings.Contains(string(first.Content), "First") {
+		t.Fatalf("doc-1 selection returned unexpected item: %+v", first)
+	}
+	second := byResourceID["ws-1:doc-2:document"]
+	if second.ExternalID != "doc-2" || !strings.Contains(string(second.Content), "Second") {
+		t.Fatalf("doc-2 selection returned unexpected item: %+v", second)
+	}
+	if got := f.nodeRequestCount("root-1"); got != 1 {
+		t.Fatalf("workspace root requests = %d, want 1 shared traversal", got)
+	}
+}
+
 func TestConnectorFetchIncremental_SkipsUnchangedAndDetectsDeleted(t *testing.T) {
 	f := newFakeDingTalk(t)
 	defer f.Close()
@@ -457,6 +595,53 @@ func TestConnectorFetchIncremental_SkipsUnchangedAndDetectsDeleted(t *testing.T)
 	}
 	if !seenChanged || !seenDeleted {
 		t.Fatalf("seenChanged=%v seenDeleted=%v items=%+v", seenChanged, seenDeleted, items)
+	}
+}
+
+func TestConnectorFetchIncremental_SelectedDocumentDeleted(t *testing.T) {
+	f := newFakeDingTalk(t)
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{{
+		NodeID:       "still-present",
+		Name:         "Sibling",
+		NodeType:     "FILE",
+		Category:     "ALIDOC",
+		ModifiedTime: "2026-01-14T11:00:00Z",
+	}}
+
+	const resourceID = "ws-1:deleted-doc:document"
+	cursor := &types.SyncCursor{
+		ConnectorCursor: map[string]interface{}{
+			"workspace_node_times": map[string]interface{}{
+				resourceID: map[string]interface{}{
+					"deleted-doc": time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC),
+				},
+			},
+		},
+	}
+
+	items, _, err := newTestConnector().FetchIncremental(
+		context.Background(),
+		f.config([]string{resourceID}),
+		cursor,
+	)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalID != "deleted-doc" || !items[0].IsDeleted {
+		t.Fatalf("items = %+v, want one deleted item for selected document", items)
+	}
+	if items[0].SourceResourceID != resourceID {
+		t.Fatalf("SourceResourceID = %q, want %q", items[0].SourceResourceID, resourceID)
+	}
+	if got := f.nodeRequestCount("root-1"); got != 1 {
+		t.Fatalf("root requests = %d, want 1", got)
+	}
+	if got := f.blockRequestCount("deleted-doc"); got != 0 {
+		t.Fatalf("deleted document block requests = %d, want 0", got)
+	}
+	if got := f.blockRequestCount("still-present"); got != 0 {
+		t.Fatalf("unselected sibling block requests = %d, want 0", got)
 	}
 }
 

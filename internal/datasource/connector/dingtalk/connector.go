@@ -238,9 +238,13 @@ func (c *Connector) ListResources(
 func listDirectNodes(ctx context.Context, cli *client, parentNodeID, operatorID string) ([]WikiNode, error) {
 	var out []WikiNode
 	nextToken := ""
+	guard := newPaginationGuard("list direct DingTalk nodes")
 	for {
 		nodes, token, err := cli.listNodePage(ctx, parentNodeID, operatorID, nextToken)
 		if err != nil {
+			return nil, err
+		}
+		if err := guard.record(token); err != nil {
 			return nil, err
 		}
 		out = append(out, nodes...)
@@ -280,11 +284,49 @@ func (c *Connector) collectAncestorPaths(
 	path []string,
 	needed map[string]bool,
 ) error {
+	return c.collectAncestorPathsVisited(
+		ctx,
+		cli,
+		workspaceID,
+		parentNodeID,
+		operatorID,
+		targetNodes,
+		path,
+		needed,
+		make(map[string]bool),
+		newTraversalBudget("resolve DingTalk node ancestors"),
+		0,
+	)
+}
+
+func (c *Connector) collectAncestorPathsVisited(
+	ctx context.Context,
+	cli *client,
+	workspaceID, parentNodeID, operatorID string,
+	targetNodes map[string]bool,
+	path []string,
+	needed map[string]bool,
+	visited map[string]bool,
+	budget *traversalBudget,
+	depth int,
+) error {
+	if parentNodeID == "" || visited[parentNodeID] {
+		return nil
+	}
+	visited[parentNodeID] = true
+
 	nextToken := ""
+	guard := newPaginationGuard("resolve DingTalk node ancestors")
 	for {
+		if err := budget.record(depth); err != nil {
+			return err
+		}
 		nodes, token, err := cli.listNodePage(ctx, parentNodeID, operatorID, nextToken)
 		if err != nil {
 			return fmt.Errorf("list ancestor candidates for workspace %s: %w", workspaceID, err)
+		}
+		if err := guard.record(token); err != nil {
+			return err
 		}
 		for _, node := range nodes {
 			if targetNodes[node.NodeID] {
@@ -296,7 +338,19 @@ func (c *Connector) collectAncestorPaths(
 				continue
 			}
 			nodeID := makeNodeResourceID(workspaceID, node)
-			if err := c.collectAncestorPaths(ctx, cli, workspaceID, node.NodeID, operatorID, targetNodes, append(path, nodeID), needed); err != nil {
+			if err := c.collectAncestorPathsVisited(
+				ctx,
+				cli,
+				workspaceID,
+				node.NodeID,
+				operatorID,
+				targetNodes,
+				append(path, nodeID),
+				needed,
+				visited,
+				budget,
+				depth+1,
+			); err != nil {
 				return err
 			}
 		}
@@ -343,6 +397,7 @@ func (c *Connector) walk(
 	for _, w := range workspaces {
 		rootByWorkspace[w.WorkspaceID] = w.RootNodeID
 	}
+	workspaceNodeCache := make(map[string][]WikiNode)
 
 	for _, resourceID := range resourceIDs {
 		target := parseResourceTarget(resourceID)
@@ -358,7 +413,7 @@ func (c *Connector) walk(
 			continue
 		}
 
-		allNodes, err := c.nodesForTarget(ctx, cli, rootNodeID, operatorID, target)
+		allNodes, err := c.nodesForTarget(ctx, cli, rootNodeID, operatorID, target, workspaceNodeCache)
 		if err != nil {
 			return nil, nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
 		}
@@ -486,21 +541,32 @@ func (c *Connector) walk(
 	return out, newCursor, nil
 }
 
-func (c *Connector) nodesForTarget(ctx context.Context, cli *client, rootNodeID, operatorID string, target resourceTarget) ([]WikiNode, error) {
-	if target.nodeID == "" {
-		return cli.ListAllNodes(ctx, rootNodeID, operatorID)
-	}
-	if target.kind == dingtalkResourceDocument {
-		allNodes, err := cli.ListAllNodes(ctx, rootNodeID, operatorID)
-		if err != nil {
-			return nil, err
+func (c *Connector) nodesForTarget(
+	ctx context.Context,
+	cli *client,
+	rootNodeID, operatorID string,
+	target resourceTarget,
+	workspaceNodeCache map[string][]WikiNode,
+) ([]WikiNode, error) {
+	if target.nodeID == "" || target.kind == dingtalkResourceDocument {
+		allNodes, ok := workspaceNodeCache[target.workspaceID]
+		if !ok {
+			var err error
+			allNodes, err = cli.ListAllNodes(ctx, rootNodeID, operatorID)
+			if err != nil {
+				return nil, err
+			}
+			workspaceNodeCache[target.workspaceID] = allNodes
+		}
+		if target.nodeID == "" {
+			return allNodes, nil
 		}
 		for _, node := range allNodes {
 			if node.NodeID == target.nodeID {
 				return []WikiNode{node}, nil
 			}
 		}
-		return []WikiNode{{NodeID: target.nodeID, Name: target.nodeID, NodeType: "FILE", Category: "ALIDOC"}}, nil
+		return nil, nil
 	}
 	return cli.ListAllNodes(ctx, target.nodeID, operatorID)
 }
