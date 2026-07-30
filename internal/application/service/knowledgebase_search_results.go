@@ -240,7 +240,9 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			searchResults = append(searchResults, s.buildSearchResult(
+				chunk, knowledge, score, chunk.RecallWeight, matchType, matchedContent,
+			))
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -274,7 +276,9 @@ func (s *knowledgeBaseService) assembleSearchResults(
 					continue
 				}
 				matchedContent := idx.matchedContents[chunkID]
-				searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+				searchResults = append(searchResults, s.buildSearchResult(
+					chunk, knowledge, score, chunk.RecallWeight, matchType, matchedContent,
+				))
 			}
 		}
 	}
@@ -303,6 +307,7 @@ func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, proces
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
+	recallWeight float64,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
@@ -316,6 +321,8 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		EndAt:                   chunk.EndAt,
 		Seq:                     chunk.ChunkIndex,
 		Score:                   score,
+		StoredRecallWeight:      recallWeight,
+		EffectiveRecallWeight:   1,
 		MatchType:               matchType,
 		Metadata:                knowledge.GetMetadata(),
 		ChunkType:               string(chunk.ChunkType),

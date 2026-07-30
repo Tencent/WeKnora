@@ -103,6 +103,7 @@ type agentService struct {
 	tenantService         interfaces.TenantService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	feedbackRepo          interfaces.FeedbackRepository
 }
 
 // NewAgentService creates a new agent service
@@ -124,6 +125,7 @@ func NewAgentService(
 	tenantService interfaces.TenantService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
+	feedbackRepo interfaces.FeedbackRepository,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -143,6 +145,7 @@ func NewAgentService(
 		tenantService:         tenantService,
 		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
+		feedbackRepo:          feedbackRepo,
 	}
 }
 
@@ -602,9 +605,10 @@ func (s *agentService) registerTools(
 				rerankModel,
 				chatModel,
 				s.cfg,
+				s.feedbackRepo,
 			)
 		case tools.ToolGrepChunks:
-			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets)
+			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets, s.cfg, s.feedbackRepo)
 			logger.Infof(ctx, "Registered grep_chunks tool with searchTargets: %d targets", len(config.SearchTargets))
 		case tools.ToolListKnowledgeChunks:
 			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)

@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/feedbackweight"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -130,6 +132,7 @@ type KnowledgeSearchTool struct {
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
+	feedbackRepo         interfaces.FeedbackRepository
 
 	seenMu     sync.Mutex
 	seenChunks map[string]bool
@@ -144,6 +147,7 @@ func NewKnowledgeSearchTool(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	cfg *config.Config,
+	feedbackRepo interfaces.FeedbackRepository,
 ) *KnowledgeSearchTool {
 	return &KnowledgeSearchTool{
 		BaseTool:             knowledgeSearchTool,
@@ -154,6 +158,7 @@ func NewKnowledgeSearchTool(
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
+		feedbackRepo:         feedbackRepo,
 		seenChunks:           make(map[string]bool),
 	}
 }
@@ -278,8 +283,12 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		len(searchTargets))
 	kbTypeMap := t.getKnowledgeBaseTypes(ctx, kbIDs)
 
+	candidateTopK := topK
+	if t.feedbackWeightingEnabled() && topK > 0 && topK <= int(^uint(0)>>1)/3 {
+		candidateTopK = topK * 3
+	}
 	allResults := t.concurrentSearchByTargets(ctx, queries, searchTargets,
-		topK, vectorThreshold, keywordThreshold, kbTypeMap)
+		candidateTopK, vectorThreshold, keywordThreshold, kbTypeMap)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
 
 	// Note: HybridSearch now uses RRF (Reciprocal Rank Fusion) which produces normalized scores
@@ -321,6 +330,11 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		filteredResults = deduplicatedBeforeRerank
 	}
 
+	// Apply the shared runtime policy after rerank and before MMR/final top-k.
+	// A larger candidate pool above lets feedback promotion compete for the
+	// final result set without weakening the disabled path.
+	filteredResults = t.applyFeedbackWeights(ctx, filteredResults, topK)
+
 	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
 	// Note: composite scoring is already applied inside rerankResults
 	if len(filteredResults) > 0 {
@@ -359,12 +373,13 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		len(deduplicatedResults), len(filteredResults))
 
 	// Sort results by score (descending)
-	sort.Slice(deduplicatedResults, func(i, j int) bool {
-		if deduplicatedResults[i].Score != deduplicatedResults[j].Score {
-			return deduplicatedResults[i].Score > deduplicatedResults[j].Score
+	sort.SliceStable(deduplicatedResults, func(i, j int) bool {
+		leftScore := feedbackAdjustedSearchScore(deduplicatedResults[i].SearchResult)
+		rightScore := feedbackAdjustedSearchScore(deduplicatedResults[j].SearchResult)
+		if leftScore != rightScore {
+			return leftScore > rightScore
 		}
-		// If scores are equal, sort by knowledge ID for consistency
-		return deduplicatedResults[i].KnowledgeID < deduplicatedResults[j].KnowledgeID
+		return false
 	})
 
 	// Log all ranked results (including lower ranks for rerank debugging)
@@ -400,6 +415,78 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Output: %s", result.Output)
 	return result, nil
+}
+
+func (t *KnowledgeSearchTool) feedbackWeightingEnabled() bool {
+	if t == nil || t.config == nil {
+		return false
+	}
+	for _, target := range t.searchTargets {
+		if target != nil && feedbackweight.EffectiveEnabled(
+			t.config.Feedback,
+			target.FeedbackRetrievalWeightEnabled,
+		) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *KnowledgeSearchTool) applyFeedbackWeights(
+	ctx context.Context,
+	results []*searchResultWithMeta,
+	topK int,
+) []*searchResultWithMeta {
+	candidates := make([]feedbackweight.Candidate, len(results))
+	for i, result := range results {
+		if result == nil || result.SearchResult == nil {
+			return results
+		}
+		tenantID, optIn := feedbackScopeForKB(t.searchTargets, result.SearchResult.KnowledgeBaseID)
+		candidates[i] = feedbackweight.Candidate{
+			TenantID: tenantID, KnowledgeBaseID: result.SearchResult.KnowledgeBaseID,
+			ChunkID: result.ID, Score: result.Score,
+			OriginalIndex: i, WorkspaceOptIn: optIn,
+			AlreadyApplied: result.FeedbackWeightApplied,
+		}
+	}
+	var feedbackConfig *config.FeedbackConfig
+	if t.config != nil {
+		feedbackConfig = t.config.Feedback
+	}
+	started := time.Now()
+	outcome := feedbackweight.Apply(ctx, feedbackConfig, t.feedbackRepo, candidates, topK)
+	summary := outcome.LogSummary(feedbackConfig)
+	const feedbackPolicyLogFormat = "[Tool][KnowledgeSearch] feedback policy candidates=%d reason=%s " +
+		"changed_order=%t topk_changed=%t duration_ms=%d policy=%s minimum_samples=%d " +
+		"thresholds=%.4f/%.4f weights=%.4f/%.4f/%.4f stored_range=%.4f..%.4f " +
+		"effective_range=%.4f..%.4f tiers=%d/%d/%d/%d"
+	logger.Infof(
+		ctx,
+		feedbackPolicyLogFormat,
+		len(candidates), outcome.Reason, outcome.ChangedOrder, outcome.TopKChanged,
+		time.Since(started).Milliseconds(), feedbackConfig.PolicyFingerprint(),
+		summary.MinimumSampleCount, summary.LowThreshold, summary.HighThreshold,
+		summary.LowWeight, summary.NormalWeight, summary.HighWeight,
+		summary.StoredWeightMin, summary.StoredWeightMax,
+		summary.EffectiveWeightMin, summary.EffectiveWeightMax,
+		summary.LowCandidates, summary.NormalCandidates, summary.HighCandidates, summary.NeutralCandidates,
+	)
+	if !outcome.Applied {
+		return results
+	}
+	weighted := make([]*searchResultWithMeta, 0, len(results))
+	for _, candidate := range outcome.Candidates {
+		if candidate.OriginalIndex < 0 || candidate.OriginalIndex >= len(results) {
+			return results
+		}
+		result := results[candidate.OriginalIndex]
+		result.StoredRecallWeight = candidate.StoredRecallWeight
+		result.EffectiveRecallWeight = candidate.EffectiveRecallWeight
+		result.FeedbackWeightApplied = true
+		weighted = append(weighted, result)
+	}
+	return weighted
 }
 
 // getKnowledgeBaseTypes fetches knowledge base types for the given IDs
@@ -1546,7 +1633,7 @@ func (t *KnowledgeSearchTool) applyMMR(
 		bestScore := -1.0
 
 		for i, r := range candidates {
-			relevance := r.Score
+			relevance := feedbackAdjustedSearchScore(r.SearchResult)
 			redundancy := 0.0
 
 			// Calculate maximum redundancy with already selected results

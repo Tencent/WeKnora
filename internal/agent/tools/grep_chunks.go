@@ -9,10 +9,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/feedbackweight"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
 )
 
@@ -65,20 +69,33 @@ type GrepChunksInput struct {
 // the snippet, mirroring the UX of wiki_search.
 type GrepChunksTool struct {
 	BaseTool
-	db            *gorm.DB
-	searchTargets types.SearchTargets
+	db             *gorm.DB
+	searchTargets  types.SearchTargets
+	feedbackConfig *config.FeedbackConfig
+	feedbackRepo   interfaces.FeedbackRepository
 
 	mu         sync.Mutex
 	seenChunks map[string]bool
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
-func NewGrepChunksTool(db *gorm.DB, searchTargets types.SearchTargets) *GrepChunksTool {
+func NewGrepChunksTool(
+	db *gorm.DB,
+	searchTargets types.SearchTargets,
+	cfg *config.Config,
+	feedbackRepo interfaces.FeedbackRepository,
+) *GrepChunksTool {
+	var feedbackConfig *config.FeedbackConfig
+	if cfg != nil {
+		feedbackConfig = cfg.Feedback
+	}
 	return &GrepChunksTool{
-		BaseTool:      grepChunksTool,
-		db:            db,
-		searchTargets: searchTargets,
-		seenChunks:    make(map[string]bool),
+		BaseTool:       grepChunksTool,
+		db:             db,
+		searchTargets:  searchTargets,
+		feedbackConfig: feedbackConfig,
+		feedbackRepo:   feedbackRepo,
+		seenChunks:     make(map[string]bool),
 	}
 }
 
@@ -153,6 +170,7 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 
 	// Score chunks using compiled regex (counts + earliest-position boost).
 	scoredResults := t.scoreChunks(ctx, deduplicatedResults, compiled)
+	scoredResults = t.applyFeedbackWeights(ctx, scoredResults, limit)
 
 	finalResults := scoredResults
 	if len(scoredResults) > 10 {
@@ -169,7 +187,7 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}
 	}
 
-	sort.Slice(finalResults, func(i, j int) bool {
+	sort.SliceStable(finalResults, func(i, j int) bool {
 		// Title matches rank above everything else (see chunkWithTitle.TitleMatch).
 		if finalResults[i].TitleMatch != finalResults[j].TitleMatch {
 			return finalResults[i].TitleMatch
@@ -177,10 +195,12 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		if finalResults[i].MatchedPatterns != finalResults[j].MatchedPatterns {
 			return finalResults[i].MatchedPatterns > finalResults[j].MatchedPatterns
 		}
-		if finalResults[i].MatchScore != finalResults[j].MatchScore {
-			return finalResults[i].MatchScore > finalResults[j].MatchScore
+		leftScore := feedbackAdjustedChunkScore(&finalResults[i].Chunk, finalResults[i].MatchScore)
+		rightScore := feedbackAdjustedChunkScore(&finalResults[j].Chunk, finalResults[j].MatchScore)
+		if leftScore != rightScore {
+			return leftScore > rightScore
 		}
-		return finalResults[i].ChunkIndex < finalResults[j].ChunkIndex
+		return false
 	})
 
 	if len(finalResults) > limit {
@@ -220,6 +240,55 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"display_type":       "grep_results",
 		},
 	}, nil
+}
+
+func (t *GrepChunksTool) applyFeedbackWeights(
+	ctx context.Context,
+	results []chunkWithTitle,
+	topK int,
+) []chunkWithTitle {
+	candidates := make([]feedbackweight.Candidate, len(results))
+	for i := range results {
+		tenantID, optIn := feedbackScopeForKB(t.searchTargets, results[i].KnowledgeBaseID)
+		candidates[i] = feedbackweight.Candidate{
+			TenantID: tenantID, KnowledgeBaseID: results[i].KnowledgeBaseID, ChunkID: results[i].ID,
+			Score: results[i].MatchScore, OriginalIndex: i, WorkspaceOptIn: optIn,
+			AlreadyApplied: results[i].FeedbackWeightApplied,
+		}
+	}
+	started := time.Now()
+	outcome := feedbackweight.Apply(ctx, t.feedbackConfig, t.feedbackRepo, candidates, topK)
+	summary := outcome.LogSummary(t.feedbackConfig)
+	const feedbackPolicyLogFormat = "[Tool][GrepChunks] feedback policy candidates=%d reason=%s " +
+		"changed_order=%t topk_changed=%t duration_ms=%d policy=%s minimum_samples=%d " +
+		"thresholds=%.4f/%.4f weights=%.4f/%.4f/%.4f stored_range=%.4f..%.4f " +
+		"effective_range=%.4f..%.4f tiers=%d/%d/%d/%d"
+	logger.Infof(
+		ctx,
+		feedbackPolicyLogFormat,
+		len(candidates), outcome.Reason, outcome.ChangedOrder, outcome.TopKChanged,
+		time.Since(started).Milliseconds(), t.feedbackConfig.PolicyFingerprint(),
+		summary.MinimumSampleCount, summary.LowThreshold, summary.HighThreshold,
+		summary.LowWeight, summary.NormalWeight, summary.HighWeight,
+		summary.StoredWeightMin, summary.StoredWeightMax,
+		summary.EffectiveWeightMin, summary.EffectiveWeightMax,
+		summary.LowCandidates, summary.NormalCandidates, summary.HighCandidates, summary.NeutralCandidates,
+	)
+	if !outcome.Applied {
+		return results
+	}
+	weighted := make([]chunkWithTitle, 0, len(results))
+	for _, candidate := range outcome.Candidates {
+		if candidate.OriginalIndex < 0 || candidate.OriginalIndex >= len(results) {
+			return results
+		}
+		result := results[candidate.OriginalIndex]
+		result.StoredRecallWeight = candidate.StoredRecallWeight
+		result.EffectiveRecallWeight = candidate.EffectiveRecallWeight
+		result.FeedbackWeightApplied = true
+		weighted = append(weighted, result)
+	}
+	return weighted
 }
 
 type chunkWithTitle struct {
@@ -985,7 +1054,7 @@ func (t *GrepChunksTool) applyMMR(
 		bestScore := -1.0
 
 		for i, r := range candidates {
-			relevance := r.MatchScore
+			relevance := feedbackAdjustedChunkScore(&r.Chunk, r.MatchScore)
 			redundancy := 0.0
 			for _, selectedTS := range selectedTokenSets {
 				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTS))

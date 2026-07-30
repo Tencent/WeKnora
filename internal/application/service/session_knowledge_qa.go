@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -595,6 +596,36 @@ func (s *sessionService) buildSearchTargets(
 			target.DisableRecallThresholds = true
 		}
 		targets = append(targets, target)
+	}
+
+	// Carry each owning workspace's explicit opt-in with the immutable search
+	// scope. Lookup failures intentionally leave the flag false, so retrieval
+	// remains unchanged and no feedback-stat query is attempted for that scope.
+	workspaceOptIn := make(map[uint64]bool)
+	tenantIDs := make([]uint64, 0)
+	for _, target := range targets {
+		if target == nil || target.TenantID == 0 {
+			continue
+		}
+		if _, seen := workspaceOptIn[target.TenantID]; !seen {
+			workspaceOptIn[target.TenantID] = false
+			tenantIDs = append(tenantIDs, target.TenantID)
+		}
+	}
+	sort.Slice(tenantIDs, func(i, j int) bool { return tenantIDs[i] < tenantIDs[j] })
+	if s.tenantService != nil {
+		for _, targetTenantID := range tenantIDs {
+			tenant, err := s.tenantService.GetTenantByID(ctx, targetTenantID)
+			if err != nil || tenant == nil || tenant.RetrievalConfig == nil {
+				continue
+			}
+			workspaceOptIn[targetTenantID] = tenant.RetrievalConfig.FeedbackRetrievalWeightEnabled
+		}
+	}
+	for _, target := range targets {
+		if target != nil {
+			target.FeedbackRetrievalWeightEnabled = workspaceOptIn[target.TenantID]
+		}
 	}
 
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",

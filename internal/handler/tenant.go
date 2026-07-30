@@ -1659,9 +1659,20 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 	if data == nil {
 		data = &types.RetrievalConfig{}
 	}
+	feedbackEnabled := h.config == nil || config.FeedbackCollectionEnabled(h.config.Feedback)
+	feedbackRetrievalEnabled := h.config != nil && h.config.Feedback != nil &&
+		h.config.Feedback.Enabled && h.config.Feedback.RetrievalWeightEnabled
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    data,
+		"data": struct {
+			*types.RetrievalConfig
+			FeedbackEnabled                        bool `json:"feedback_enabled"`
+			FeedbackRetrievalWeightGloballyEnabled bool `json:"feedback_retrieval_weight_globally_enabled"`
+		}{
+			RetrievalConfig:                        data,
+			FeedbackEnabled:                        feedbackEnabled,
+			FeedbackRetrievalWeightGloballyEnabled: feedbackRetrievalEnabled,
+		},
 	})
 }
 
@@ -1695,6 +1706,14 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	}
 	if cfg.RerankTopK < 0 || cfg.RerankTopK > 200 {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
+		return
+	}
+	globalFeedbackWeightingEnabled := h.config != nil && h.config.Feedback != nil &&
+		h.config.Feedback.Enabled && h.config.Feedback.RetrievalWeightEnabled
+	if cfg.FeedbackRetrievalWeightEnabled && !globalFeedbackWeightingEnabled {
+		_ = c.Error(errors.NewBadRequestError(
+			"feedback retrieval weighting is disabled by the server configuration",
+		))
 		return
 	}
 
