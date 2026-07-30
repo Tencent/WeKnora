@@ -109,7 +109,7 @@ type stubAgentShareForGuard struct {
 	kbsViaSomeAgent map[string]bool
 }
 
-func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string) (*types.CustomAgent, error) {
+func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string, _ ...uint64) (*types.CustomAgent, error) {
 	return s.agents[agentID], nil
 }
 

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	stderrors "errors"
+	"strconv"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -399,7 +400,8 @@ func resolveSharedAgentAccess(
 ) *KBAccess {
 	agentID := c.Query("agent_id")
 	if agentID != "" {
-		agent, err := agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID)
+		sourceTenantID, _ := strconv.ParseUint(c.Query("agent_source_tenant_id"), 10, 64)
+		agent, err := agentShareService.GetSharedAgentForTenant(ctx, tenantID, callerTenantRole, agentID, sourceTenantID)
 		if err != nil || agent == nil {
 			return nil
 		}

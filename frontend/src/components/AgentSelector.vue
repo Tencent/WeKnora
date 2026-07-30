@@ -228,7 +228,7 @@ const emit = defineEmits<{
 type AgentDetailTarget = {
   agent: CustomAgent;
   sourceTenantId?: string;
-  sharedMeta?: { org_name?: string; shared_by_username?: string };
+  sharedMeta?: { org_name?: string; shared_by_username?: string; web_search_ready?: boolean };
 };
 
 type SharedAgentSelection = Omit<SharedAgentInfo, 'agent'> & {
@@ -322,7 +322,11 @@ const isWebSearchEnabledForAgent = (agent: CustomAgent): boolean => {
 };
 
 const isWebSearchReadyForAgent = (agent: CustomAgent): boolean => {
-  return isAgentWebSearchReady(agent.config, webSearchProviders.value);
+  return isAgentWebSearchReady(
+    agent.config,
+    webSearchProviders.value,
+    activeDetail.value?.sourceTenantId ? activeDetail.value.sharedMeta?.web_search_ready : undefined,
+  );
 };
 
 const isImageUploadEnabledForAgent = (agent: CustomAgent): boolean => {
@@ -475,6 +479,7 @@ const onSharedOptionEnter = (shared: SharedAgentSelection, event: MouseEvent) =>
   onOptionEnter(shared.agent, event, String(shared.source_tenant_id), {
     org_name: shared.org_name,
     shared_by_username: shared.shared_by_username,
+    web_search_ready: shared.web_search_ready,
   });
 };
 
