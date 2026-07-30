@@ -223,7 +223,7 @@ func TestImageMultimodalObservation_RecordsOCRAndCaptionRequests(
 	)
 }
 
-func TestImageMultimodal_PreCacheBaseline_RecomputesOCRAndCaption(
+func TestImageMultimodalArtifactCache_RebuildReusesOCRAndCaption(
 	t *testing.T,
 ) {
 	imageBytes := []byte("fixed-image-bytes")
@@ -243,6 +243,8 @@ func TestImageMultimodal_PreCacheBaseline_RecomputesOCRAndCaption(
 		countingVLM,
 		chunkService,
 	)
+	artifactService, _ := newMultimodalArtifactTestService(t)
+	service.artifactRepo = artifactService.artifactRepo
 
 	firstTask := newImageMultimodalObservationTask(
 		t,
@@ -274,25 +276,59 @@ func TestImageMultimodal_PreCacheBaseline_RecomputesOCRAndCaption(
 
 	secondSnapshot := countingVLM.Snapshot()
 
-	// PR1 intentionally does not implement caching. Processing the same image
-	// again must therefore enter both VLM operations again. Later cache PRs
-	// will change the second-run deltas from one to zero.
-	require.Equal(t, 4, secondSnapshot.PredictRequestCount)
-	require.Equal(t, 2, secondSnapshot.OCRRequestCount)
-	require.Equal(t, 2, secondSnapshot.CaptionRequestCount)
-	require.Equal(t, 4, secondSnapshot.InputImageCount)
-	require.Equal(t, int64(len(imageBytes)*4), secondSnapshot.InputBytes)
+	require.Equal(t, 2, secondSnapshot.PredictRequestCount)
+	require.Equal(t, 1, secondSnapshot.OCRRequestCount)
+	require.Equal(t, 1, secondSnapshot.CaptionRequestCount)
+	require.Equal(t, 2, secondSnapshot.InputImageCount)
+	require.Equal(t, int64(len(imageBytes)*2), secondSnapshot.InputBytes)
 
 	require.Equal(
 		t,
-		1,
+		0,
 		secondSnapshot.OCRRequestCount-firstSnapshot.OCRRequestCount,
 	)
 	require.Equal(
 		t,
-		1,
+		0,
 		secondSnapshot.CaptionRequestCount-firstSnapshot.CaptionRequestCount,
 	)
+}
+
+func TestImageMultimodalArtifactCache_HitObservationHasZeroRequests(t *testing.T) {
+	ctx := context.Background()
+	tracker, db := setupSpanTrackerTest(t)
+	imagePath := writeMultimodalObservationImage(t, []byte("observation-cache-image"))
+	model := modelcount.NewCountingVLM(modelcount.CountingVLMOptions{ModelID: "vlm-test", OCRResponse: "ocr", CaptionResponse: "caption"})
+	service := newImageMultimodalObservationService(model, newMultimodalObservationChunkService())
+	artifactService, _ := newMultimodalArtifactTestService(t)
+	service.artifactRepo = artifactService.artifactRepo
+	service.spanTracker = tracker
+
+	run := func() types.KnowledgeProcessingSpan {
+		_, attempt, err := tracker.OpenAttempt(ctx, "knowledge-test", "")
+		require.NoError(t, err)
+		require.NotNil(t, tracker.BeginStage(ctx, "knowledge-test", attempt, types.StageMultimodal, nil))
+		require.NoError(t, service.Handle(ctx, newImageMultimodalObservationTaskWithOptions(t, imagePath, attempt, true, true)))
+		return loadMultimodalObservationSpan(t, db, attempt)
+	}
+	miss := run()
+	hit := run()
+	require.Equal(t, string(types.IngestionCacheStatusMiss), miss.Output["ocr_cache_status"])
+	require.Equal(t, string(types.ArtifactCacheComputed), miss.Output["ocr_artifact_cache_event"])
+	require.EqualValues(t, 1, miss.Output["ocr_request_count"])
+	require.EqualValues(t, 1, miss.Output["ocr_computed_items"])
+	require.EqualValues(t, 0, miss.Output["ocr_reused_items"])
+	require.Equal(t, string(types.IngestionCacheStatusHit), hit.Output["ocr_cache_status"])
+	require.Equal(t, string(types.IngestionCacheStatusHit), hit.Output["caption_cache_status"])
+	require.Equal(t, string(types.ArtifactCacheHit), hit.Output["ocr_artifact_cache_event"])
+	require.Equal(t, string(types.ArtifactCacheHit), hit.Output["caption_artifact_cache_event"])
+	require.EqualValues(t, 0, hit.Output["ocr_request_count"])
+	require.EqualValues(t, 0, hit.Output["caption_request_count"])
+	require.EqualValues(t, 1, hit.Output["ocr_reused_items"])
+	require.EqualValues(t, 1, hit.Output["caption_reused_items"])
+	require.EqualValues(t, 0, hit.Output["ocr_computed_items"])
+	require.EqualValues(t, 0, hit.Output["caption_computed_items"])
+	require.Equal(t, 2, model.Snapshot().PredictRequestCount)
 }
 
 func newImageMultimodalObservationService(
@@ -435,6 +471,8 @@ func TestImageMultimodalObservation_SpanMatchesCountingVLM(
 		chunkService,
 	)
 	service.spanTracker = tracker
+	artifactService, _ := newMultimodalArtifactTestService(t)
+	service.artifactRepo = artifactService.artifactRepo
 
 	payload, err := json.Marshal(types.ImageMultimodalPayload{
 		TenantID:        1,
@@ -494,11 +532,15 @@ func TestImageMultimodalObservation_SpanMatchesCountingVLM(
 		string(types.IngestionOperationMultimodalCaption),
 		imageSpan.Output["caption_operation"],
 	)
-	require.Equal(
-		t,
-		string(types.IngestionCacheStatusNotSupported),
-		imageSpan.Output["cache_status"],
-	)
+	require.NotContains(t, imageSpan.Output, "cache_status")
+	require.Equal(t, string(types.IngestionCacheStatusMiss), imageSpan.Output["ocr_cache_status"])
+	require.Equal(t, string(types.IngestionCacheStatusMiss), imageSpan.Output["caption_cache_status"])
+	require.EqualValues(t, 1, imageSpan.Output["ocr_computed_items"])
+	require.EqualValues(t, 1, imageSpan.Output["caption_computed_items"])
+	require.EqualValues(t, 0, imageSpan.Output["ocr_reused_items"])
+	require.EqualValues(t, 0, imageSpan.Output["caption_reused_items"])
+	require.Equal(t, string(types.ArtifactCacheComputed), imageSpan.Output["ocr_artifact_cache_event"])
+	require.Equal(t, string(types.ArtifactCacheComputed), imageSpan.Output["caption_artifact_cache_event"])
 
 	require.EqualValues(
 		t,
@@ -621,6 +663,11 @@ func TestImageMultimodalObservation_OCRFailureStillCountsRequest(
 		expectedError.Error(),
 		imageSpan.Output["ocr_error"],
 	)
+	require.Equal(t, string(types.IngestionCacheStatusError), imageSpan.Output["ocr_cache_status"])
+	require.Equal(t, string(types.ArtifactCacheFailed), imageSpan.Output["ocr_artifact_cache_event"])
+	require.Equal(t, false, imageSpan.Output["ocr_success"])
+	require.EqualValues(t, 1, imageSpan.Output["ocr_computed_items"])
+	require.EqualValues(t, 0, imageSpan.Output["ocr_reused_items"])
 	require.EqualValues(
 		t,
 		1,

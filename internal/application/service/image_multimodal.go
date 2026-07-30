@@ -84,6 +84,8 @@ type ImageMultimodalService struct {
 	// backend so multimodal reads target the resource's real backend instead of
 	// the knowledge base's currently configured one.
 	resourceCatalog interfaces.ResourceCatalog
+	artifactRepo    interfaces.DerivedArtifactRepository
+	artifactTiming  multimodalArtifactTiming
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
@@ -104,8 +106,12 @@ func NewImageMultimodalService(
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	artifactRepo interfaces.DerivedArtifactRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
+	if artifactRepo == nil {
+		panic("ImageMultimodalService requires DerivedArtifactRepository")
+	}
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
 		modelService:    modelService,
@@ -120,6 +126,7 @@ func NewImageMultimodalService(
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
+		artifactRepo:    artifactRepo,
 		spanTracker:     spanTracker,
 	}
 }
@@ -200,7 +207,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		"caption_operation":     string(types.IngestionOperationMultimodalCaption),
 		"caption_request_count": 0,
 		"caption_input_images":  0,
-		"cache_status":          string(types.IngestionCacheStatusNotSupported),
 	}
 
 	// finalize-once semantics: on success we always decrement the parent's
@@ -261,6 +267,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imgOut["image_digest_prefix"] = multimodalImageDigestPrefix(imgBytes)
+	imgOut["artifact_schema_version"] = multimodalArtifactSchemaVersion
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -268,6 +276,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if payload.EnableOCR {
+		imgOut["ocr_artifact_kind"] = "multimodal.ocr"
 		prompt := vlmOCRPrompt
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
@@ -283,19 +292,49 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			types.IngestionOperationMultimodalOCR,
 		)
 
-		ocrText, ocrErr := vlmModel.Predict(
-			ocrCtx,
-			[][]byte{imgBytes},
-			prompt,
-		)
-		imgOut["ocr_request_count"] = 1
+		ocrText, ocrHit, ocrErr := s.cachedMultimodalPredict(ocrCtx, payload.TenantID, vlmModel,
+			resolvedVLMModelID(vlmModel, vlmCfg), imgBytes, multimodalCacheSpec{
+				Kind: "multimodal.ocr", Operation: types.IngestionOperationMultimodalOCR,
+				Prompt: prompt, Normalize: sanitizeOCRText,
+			})
+		if isMultimodalCacheInfrastructureError(ocrErr) {
+			imgOut["ocr_request_count"] = 0
+			imgOut["ocr_cache_status"] = "error"
+			imgOut["ocr_reused_items"] = 0
+			imgOut["ocr_computed_items"] = 0
+			imgOut["ocr_artifact_cache_event"] = "failed"
+			imgOut["ocr_success"] = false
+		} else if ocrHit {
+			imgOut["ocr_request_count"] = 0
+			imgOut["ocr_cache_status"] = "hit"
+			imgOut["ocr_reused_items"] = 1
+			imgOut["ocr_computed_items"] = 0
+			imgOut["ocr_artifact_cache_event"] = "hit"
+			imgOut["ocr_success"] = true
+		} else {
+			imgOut["ocr_request_count"] = 1
+			imgOut["ocr_cache_status"] = "miss"
+			imgOut["ocr_reused_items"] = 0
+			imgOut["ocr_computed_items"] = 1
+			if ocrErr != nil {
+				imgOut["ocr_artifact_cache_event"] = "failed"
+				imgOut["ocr_cache_status"] = "error"
+				imgOut["ocr_success"] = false
+			} else {
+				imgOut["ocr_artifact_cache_event"] = "computed"
+				imgOut["ocr_success"] = true
+			}
+		}
 		imgOut["ocr_input_images"] = 1
 
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
+			if isMultimodalCacheInfrastructureError(ocrErr) {
+				handleErr = fmt.Errorf("compute canonical OCR artifact: %w", ocrErr)
+				return handleErr
+			}
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -309,21 +348,53 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	imgOut["caption_artifact_kind"] = "multimodal.caption"
 	captionCtx := types.WithIngestionOperation(
 		ctx,
 		types.IngestionOperationMultimodalCaption,
 	)
 
-	caption, capErr := vlmModel.Predict(
-		captionCtx,
-		[][]byte{imgBytes},
-		captionPrompt,
-	)
-	imgOut["caption_request_count"] = 1
+	caption, captionHit, capErr := s.cachedMultimodalPredict(captionCtx, payload.TenantID, vlmModel,
+		resolvedVLMModelID(vlmModel, vlmCfg), imgBytes, multimodalCacheSpec{
+			Kind: "multimodal.caption", Operation: types.IngestionOperationMultimodalCaption,
+			Prompt: captionPrompt, Normalize: canonicalCaption,
+		})
+	if isMultimodalCacheInfrastructureError(capErr) {
+		imgOut["caption_request_count"] = 0
+		imgOut["caption_cache_status"] = "error"
+		imgOut["caption_reused_items"] = 0
+		imgOut["caption_computed_items"] = 0
+		imgOut["caption_artifact_cache_event"] = "failed"
+		imgOut["caption_success"] = false
+	} else if captionHit {
+		imgOut["caption_request_count"] = 0
+		imgOut["caption_cache_status"] = "hit"
+		imgOut["caption_reused_items"] = 1
+		imgOut["caption_computed_items"] = 0
+		imgOut["caption_artifact_cache_event"] = "hit"
+		imgOut["caption_success"] = true
+	} else {
+		imgOut["caption_request_count"] = 1
+		imgOut["caption_cache_status"] = "miss"
+		imgOut["caption_reused_items"] = 0
+		imgOut["caption_computed_items"] = 1
+		if capErr != nil {
+			imgOut["caption_artifact_cache_event"] = "failed"
+			imgOut["caption_cache_status"] = "error"
+			imgOut["caption_success"] = false
+		} else {
+			imgOut["caption_artifact_cache_event"] = "computed"
+			imgOut["caption_success"] = true
+		}
+	}
 	imgOut["caption_input_images"] = 1
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
+		if isMultimodalCacheInfrastructureError(capErr) {
+			handleErr = fmt.Errorf("compute canonical caption artifact: %w", capErr)
+			return handleErr
+		}
 	} else if caption != "" {
 		imageInfo.Caption = caption
 		imgOut["caption_chars"] = len([]rune(caption))
@@ -577,6 +648,19 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
 	return model, vlmCfg, err
+}
+
+func resolvedVLMModelID(model vlm.VLM, cfg types.VLMConfig) string {
+	if id := strings.TrimSpace(model.GetModelID()); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(cfg.ModelID); id != "" {
+		return id
+	}
+	if name := strings.TrimSpace(model.GetModelName()); name != "" {
+		return name
+	}
+	return "legacy_inline"
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
