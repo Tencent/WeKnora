@@ -6,24 +6,11 @@ on:
     paths:
       - "frontend/**"
       - "scripts/build_frontend_dist.sh"
-      # The frontend terminology regression test also scans these public docs.
-      - ".env.example"
-      - "README_CN.md"
-      - "client/**"
-      - "docker-compose.yml"
-      - "docs/**"
-      - "mcp-server/**"
       - ".github/workflows/frontend.yml"
   pull_request:
     paths:
       - "frontend/**"
       - "scripts/build_frontend_dist.sh"
-      - ".env.example"
-      - "README_CN.md"
-      - "client/**"
-      - "docker-compose.yml"
-      - "docs/**"
-      - "mcp-server/**"
       - ".github/workflows/frontend.yml"
   workflow_dispatch:
 
